@@ -47,7 +47,6 @@ func (Query) testMultiple() {
 		{
 			name: "automation with != nil in query step",
 			source: `
-@enabled
 @schedule(cron="0 */15 * * * *")
 func (Automation) testAutomation(_ any) {
   step1 := query {

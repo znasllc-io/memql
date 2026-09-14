@@ -29,13 +29,11 @@ import (
 func sameDomainAmbiguousTree() fstest.MapFS {
 	return fstest.MapFS{
 		"alpha/concepts.memql": file(`@version("1.0.0")
-@namespace("alpha")
 @description("Alpha's widget.")
 concept widget {
   name  string  @required @description("Name.")
 }`),
 		"beta/concepts.memql": file(`@version("1.0.0")
-@namespace("beta")
 @description("Beta's widget -- same short name, different domain.")
 concept widget {
   label  string  @required @description("Label.")
@@ -104,7 +102,6 @@ query widget gammaWidgets {
 func TestLane2_DuplicateInOwnDomainStillReported(t *testing.T) {
 	root := sameDomainAmbiguousTree()
 	root["alpha/more.memql"] = file(`@version("1.0.0")
-@namespace("alpha")
 @description("A SECOND widget in alpha -- ambiguous within the domain itself.")
 concept widget {
   other  string  @required @description("Other.")

@@ -37,7 +37,6 @@ func TestSandboxCompileBundle_CandidateConceptCompiles(t *testing.T) {
 // candidateWidgetConcept is the candidate concept reused by the
 // overlay-binding tests below.
 const candidateWidgetConcept = `@version("1.0.0")
-@namespace("sandboxns")
 @description("Candidate widget concept")
 concept sandboxWidget {
   ownerUserId  string  @required
@@ -148,7 +147,6 @@ func TestSandboxCompileBundle_ConceptNameMismatchFails(t *testing.T) {
 			Kind: "concept",
 			Name: "claimedConcept",
 			Source: `@version("1.0.0")
-@namespace("sandboxns")
 concept actualConcept {
   label  string
 }`,
@@ -173,7 +171,6 @@ func TestSandboxCompileBundle_BrokenCandidateConceptFails(t *testing.T) {
 			Name: "sandboxBroken",
 			// Missing closing brace -> no parseable concept decl.
 			Source: `@version("1.0.0")
-@namespace("sandboxns")
 concept sandboxBroken {
   label  string`,
 		},

@@ -16,13 +16,11 @@ import (
 func fyloWorkspace() fstest.MapFS {
 	return fstest.MapFS{
 		"fylo/concepts.memql": &fstest.MapFile{Data: []byte(`@version("1.0.0")
-@namespace("fylo")
 concept order {
   id  string  @required
 }`)},
 		"fylo/queries.memql": &fstest.MapFile{Data: []byte(`use fylo.concepts.{ order }
 
-@enabled
 query order listOrders {
   args { id  string  @required }
   filter  id == args.id
@@ -106,7 +104,6 @@ func TestBuildWorkspaceGraph_SurvivesBrokenReference(t *testing.T) {
 func TestBuildOfflineSense_GraphSurvivesInitFailure(t *testing.T) {
 	root := fstest.MapFS{
 		"demo/concepts.memql": &fstest.MapFile{Data: []byte(`@version("1.0.0")
-@namespace("demo")
 concept item {
   id  string  @required
 }`)},
@@ -138,7 +135,6 @@ mutation ghostConcept touchGhost {
 func TestBuildOfflineSense_ImportDiagnosticsEndToEnd(t *testing.T) {
 	root := fstest.MapFS{
 		"demo/concepts.memql": &fstest.MapFile{Data: []byte(`@version("1.0.0")
-@namespace("demo")
 concept item {
   id  string  @required
 }`)},
@@ -184,7 +180,6 @@ concept item {
 func TestBuildOfflineSense_SignatureConceptEndToEnd(t *testing.T) {
 	root := fstest.MapFS{
 		"demo/concepts.memql": &fstest.MapFile{Data: []byte(`@version("1.0.0")
-@namespace("demo")
 concept item {
   id  string  @required
 }`)},
@@ -226,7 +221,6 @@ concept item {
 func TestBuildOfflineSense_UseCompletionEndToEnd(t *testing.T) {
 	root := fstest.MapFS{
 		"demo/concepts.memql": &fstest.MapFile{Data: []byte(`@version("1.0.0")
-@namespace("demo")
 concept item {
   id  string  @required
 }`)},

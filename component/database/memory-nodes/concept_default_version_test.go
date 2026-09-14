@@ -43,7 +43,6 @@ concept probeParticipant {
 	}
 
 	explicit := parse(`@version("2.5.7")
-@namespace("cognition")
 @description("probe")
 concept probeParticipant {
   displayName string @required

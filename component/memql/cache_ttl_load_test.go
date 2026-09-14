@@ -26,7 +26,7 @@ func cacheLoadRegistry() memoryNodes.Registry {
 func loadCachedQueryHints(t *testing.T, cacheAnnotation string) map[string]int64 {
 	t.Helper()
 	src := "use agents.concepts.{ agentRole }\n\n" +
-		"@enabled\n" +
+		"" +
 		cacheAnnotation + "\n" +
 		"query agentRole queryRolesCached {\n" +
 		"  filter  payload.active == true\n" +

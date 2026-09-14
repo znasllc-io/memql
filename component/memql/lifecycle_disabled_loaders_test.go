@@ -30,7 +30,6 @@ tool retiredProbeTool {
   name string @required @description("function name")
 }
 
-@enabled
 @handler(type="query", query="builtin help(name: \"$args.name\")")
 @description("live probe tool")
 tool liveProbeTool {
@@ -113,7 +112,6 @@ prompt retiredProbePrompt {
   subject string @required @description("subject")
 }
 
-@enabled
 @templateFile("live.tmpl")
 @description("live probe prompt")
 prompt liveProbePrompt {
@@ -155,7 +153,6 @@ seed role retiredProbeRole {
   name: "Retired Probe Role"
 }
 
-@enabled
 seed role liveProbeRole {
   slug: "live-probe-role"
   name: "Live Probe Role"

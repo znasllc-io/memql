@@ -77,7 +77,7 @@ func TestStrictBoot_FixtureWithBadConstruct(t *testing.T) {
 	// it trips ONLY the strict-boot gate, not the dependency-tree or CQS
 	// validators that run earlier.
 	fixture := fstest.MapFS{
-		"specs.memql": {Data: []byte("@enabled\n@description(\"bad\")\nspec activeRowTrait fixtureBadSpec {\n  return status ==== \"x\" &&&& true\n}\n")},
+		"specs.memql": {Data: []byte("@description(\"bad\")\nspec activeRowTrait fixtureBadSpec {\n  return status ==== \"x\" &&&& true\n}\n")},
 	}
 	memqldsl.RegisterTree(domain, fixture)
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })

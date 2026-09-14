@@ -43,7 +43,6 @@ func diagFor(t *testing.T, bundle, name string) memql.SandboxDiagnostic {
 // A valid prior construct offsets the erroring construct deep into the bundle so
 // BundleLine is a real >1 anchor -- an identity mapping would fail these.
 const priorConcept = `@version("1.0.0")
-@namespace("probe")
 @description("probe widget")
 concept probeWidget {
   ownerUserId string @required

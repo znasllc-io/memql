@@ -31,7 +31,6 @@ import (
 // contrast with the shared trainedWidget fixture from
 // authoring_promote_concept_test.go.
 const retiredGadgetSrc = `@version("1.0.0")
-@namespace("trainingns")
 @description("A second concept taught to a running cluster")
 concept trainedGadget {
   ownerUserId  string  @required

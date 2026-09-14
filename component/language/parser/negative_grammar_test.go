@@ -85,9 +85,9 @@ func TestNegative_MalformedDeclBody(t *testing.T) {
 			func(s string) error { _, e := ParseProviderDecl(s); return e }},
 		{"policy", "@primary(\"x\")\npolicy p {\n", // unterminated brace
 			func(s string) error { _, e := ParsePolicyDecl(s); return e }},
-		{"spec", "@enabled\nspec activeRowTrait s {\n  return status ==== \"x\" &&&& true\n}\n",
+		{"spec", "spec activeRowTrait s {\n  return status ==== \"x\" &&&& true\n}\n",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
-		{"trait", "@enabled\ntrait t {\n  return active ==== true\n}\n",
+		{"trait", "trait t {\n  return active ==== true\n}\n",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
 		{"seed", "seed agent sd {\n  name: @@@ broken !!!\n}\n",
 			func(s string) error { _, e := ParseSeedDecl(s); return e }},
@@ -129,7 +129,7 @@ func TestNegative_BodyRule(t *testing.T) {
 	})
 	t.Run("spec-with-body", func(t *testing.T) {
 		// Direct decl-parser site (spec): a body{} block is forbidden.
-		_, err := ParseSpecDecl("@enabled\nspec activeRowTrait s {\n  body { return active == true }\n}\n")
+		_, err := ParseSpecDecl("spec activeRowTrait s {\n  body { return active == true }\n}\n")
 		assertParseErr(t, "spec with body{}", err,
 			"must not declare a `body { }` block")
 	})
@@ -274,7 +274,7 @@ func TestNegative_WordLogicalOperators(t *testing.T) {
 		assertParseErr(t, "`or` infix", err)
 	})
 	t.Run("or-in-spec-body", func(t *testing.T) {
-		_, err := ParseSpecDecl("@enabled\nspec activeRowTrait s {\n  return a == 1 or b == 2\n}\n")
+		_, err := ParseSpecDecl("spec activeRowTrait s {\n  return a == 1 or b == 2\n}\n")
 		assertParseErr(t, "`or` in spec body", err)
 	})
 }
@@ -294,9 +294,9 @@ func TestNegative_ErrorsCarryPosition(t *testing.T) {
 			_, e := NewParser(toks).Parse()
 			return e
 		},
-		"typo-top-level-keyword": func() error { _, e := ParseFile("@enabled\nconept foo { }"); return e },
+		"typo-top-level-keyword": func() error { _, e := ParseFile("conept foo { }"); return e },
 		"spec-body-block": func() error {
-			_, e := ParseSpecDecl("@enabled\nspec activeRowTrait s {\n  body { return active == true }\n}\n")
+			_, e := ParseSpecDecl("spec activeRowTrait s {\n  body { return active == true }\n}\n")
 			return e
 		},
 	}
@@ -363,9 +363,9 @@ func TestHOLE_UnknownAnnotationSilentlyAccepted(t *testing.T) {
 			func(s string) error { _, e := ParseBuiltinDecl(s); return e }},
 		{"prompt", "@bogusAnno\n@templateFile(\"x.tmpl\")\nprompt pr {\n  a string\n}\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParsePromptDecl(s); return e }},
-		{"spec", "@bogusAnno\n@enabled\nspec someShape sp {\n  return active == true\n}\n", "unknown annotation @bogusAnno",
+		{"spec", "@bogusAnno\nspec someShape sp {\n  return active == true\n}\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
-		{"trait", "@bogusAnno\n@enabled\ntrait tr {\n  return active == true\n}\n", "unknown annotation @bogusAnno",
+		{"trait", "@bogusAnno\ntrait tr {\n  return active == true\n}\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
 		{"policy", "@bogusAnno\n@primary(\"x\")\npolicy p { }\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParsePolicyDecl(s); return e }},

@@ -15,19 +15,16 @@ func TestResolveConceptId_SameAndCrossNamespace(t *testing.T) {
 	// Concept definitions: one plain, one sub-namespaced.
 	writeFixture(t, root, "cognition/concepts.memql", `
 @version("1.0.0")
-@namespace("cognition")
 concept space {
   ownerUserId string @required
 }
 
 @version("1.0.0")
-@namespace("cognition")
 concept participant {
   spaceId string @required
 }
 
 @version("1.0.0")
-@namespace("cognition:turn")
 concept state {
   turnId string @required
 }
@@ -133,7 +130,6 @@ func TestEmitConcepts_ShapeAndTopics(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "cognition/concepts.memql", `
 @version("1.0.0")
-@namespace("cognition")
 concept participant {
   spaceId string @required
 }
@@ -195,15 +191,12 @@ func TestEmitConcepts_DeterministicEmission(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "cognition/concepts.memql", `
 @version("1.0.0")
-@namespace("cognition")
 concept participant { spaceId string @required }
 
 @version("1.0.0")
-@namespace("cognition")
 concept space { ownerUserId string @required }
 
 @version("1.0.0")
-@namespace("agents")
 concept agent { ownerUserId string @required }
 `)
 	writeFixture(t, root, "cognition/queries.memql", `
@@ -255,7 +248,6 @@ func TestEmitOutput_NoCanonicalCallerInstructions(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "cognition/concepts.memql", `
 @version("1.0.0")
-@namespace("cognition")
 concept participant { spaceId string @required }
 `)
 	writeFixture(t, root, "cognition/queries.memql", `

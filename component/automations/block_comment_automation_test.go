@@ -232,7 +232,6 @@ automation commentMarkerInString {
 // opening a nested comment -- would silently disable a live automation.
 func TestBlockCommentDoesNotNest(t *testing.T) {
 	src := `/* outer /* inner */
-@enabled
 @description("live again after the first close")
 @trigger(event="node.created", concept="v1:cluster:node")
 automation afterFirstClose {
@@ -462,7 +461,7 @@ func TestBlockCommentAboveAutomationDoesNotDisturbTheLoad(t *testing.T) {
 		{"contains a retired annotation", "/*\n@useConcept(node)\n*/"},
 		{"contains a direct mutation call", "/*\n  x := mutation(concept: \"v1:cluster:node\")\n*/"},
 		{"has two blank lines", "/* para one\n\n\npara two\n*/"},
-		{"is a parked copy of the automation", "/*\n@enabled\n@trigger(event=\"node.created\", concept=\"v1:cluster:node\")\nautomation parkedCopy {\n  step s { logic x { v: $steps.prev.result } }\n}\n*/"},
+		{"is a parked copy of the automation", "/*\n@trigger(event=\"node.created\", concept=\"v1:cluster:node\")\nautomation parkedCopy {\n  step s { logic x { v: $steps.prev.result } }\n}\n*/"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := tc.comment + "\n" + liveAutomation
@@ -490,7 +489,6 @@ func TestBlockCommentAboveAutomationDoesNotDisturbTheLoad(t *testing.T) {
 // re-opening the gap #2712 closed.
 func TestAnnotationGateStillSeesTheLiveAutomation(t *testing.T) {
 	src := `/*
-@enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation parkedOne {
   step persist {
@@ -499,7 +497,6 @@ automation parkedOne {
 }
 */
 @public
-@enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation gatedAutomation {
   step persist {

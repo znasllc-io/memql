@@ -246,8 +246,8 @@ func TestLoad_NonProceduralFileParsesNatively(t *testing.T) {
 	cases := map[string]string{
 		// annotation-led (the dominant authoring shape)
 		"shapes.memql": "@row\n@description(\"ok\")\nshape spaceCard {\n  row.id\n}\n",
-		"specs.memql":  "@enabled\n@description(\"ok\")\nspec activeRowTrait specIsActive {\n  return active==true\n}\n",
-		"traits.memql": "@enabled\n@description(\"ok\")\ntrait isActiveRecord {\n  return active==true\n}\n",
+		"specs.memql":  "@description(\"ok\")\nspec activeRowTrait specIsActive {\n  return active==true\n}\n",
+		"traits.memql": "@description(\"ok\")\ntrait isActiveRecord {\n  return active==true\n}\n",
 		// import-led, annotation-free construct
 		"traitsCB.memql": "use common.traits.{ activeRowTrait }\n\ntrait isActiveRecord {\n  return active==true\n}\n",
 	}
@@ -272,10 +272,10 @@ func TestLoad_NonProceduralFileParsesNatively(t *testing.T) {
 func TestLoad_MalformedNonProceduralBodySurfaces(t *testing.T) {
 	cases := map[string]string{
 		// The exact garbage-spec body from the epic #2351 audit.
-		"specs.memql":    "@enabled\n@description(\"bad\")\nspec activeRowTrait specBad {\n  return status ==== \"x\" &&&& true\n}\n",
-		"traits.memql":   "@enabled\n@description(\"bad\")\ntrait badTrait {\n  return active ==== true\n}\n",
+		"specs.memql":    "@description(\"bad\")\nspec activeRowTrait specBad {\n  return status ==== \"x\" &&&& true\n}\n",
+		"traits.memql":   "@description(\"bad\")\ntrait badTrait {\n  return active ==== true\n}\n",
 		"shapes.memql":   "@row\n@description(\"bad\")\nshape shapeBad {\n  row.id\n  this is not @@@ valid {{{\n}\n",
-		"builtins.memql": "@enabled\n@executor(\"integration.x.y\")\nbuiltin badBuiltin {\n  arg string @@@ !!! broken\n}\n",
+		"builtins.memql": "@executor(\"integration.x.y\")\nbuiltin badBuiltin {\n  arg string @@@ !!! broken\n}\n",
 	}
 	for filename, body := range cases {
 		t.Run(filename, func(t *testing.T) {

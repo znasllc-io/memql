@@ -53,7 +53,6 @@ import (
 // preceding step, therefore no local in scope.
 func loadCondBarePredicateProbe(pred string) error {
 	src := strings.Join([]string{
-		"@enabled",
 		"@actor",
 		"@description(\"cond bare-identifier predicate probe\")",
 		"logic condBarePredProbe {",
@@ -110,7 +109,6 @@ func TestLogicCondBareIdentifierPredicate_LeavesLegitimateShapesAlone(t *testing
 	// bind the ambient value to a local and compare the local. Rejecting this
 	// breaks boot on every node.
 	localBound := strings.Join([]string{
-		"@enabled",
 		"@actor",
 		"@description(\"local-bound probe\")",
 		"logic condLocalBoundProbe {",
@@ -181,7 +179,6 @@ func TestLogicCondBareIdentifier_LiveTreeStillLoads(t *testing.T) {
 // `pred`, for the evaluation tests below.
 func condAmbientProbeSource(name, pred string) string {
 	return strings.Join([]string{
-		"@enabled",
 		"@actor",
 		"@description(\"memql#3024 ambient predicate probe\")",
 		"logic " + name + " {",

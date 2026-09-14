@@ -56,7 +56,6 @@ builtin workbenchTeardownDirectory {
   planId string @required
 }
 
-@enabled
 @executor("integration.auth.resolveUser")
 builtin resolveUser {
   token string @required

@@ -41,7 +41,6 @@ func forEachIDs(t *testing.T, src string) []string {
 }
 
 const forEachFixture = `
-@enabled
 func (Automation) sweepThings(_ any) {
   q := query { concept==v1:test }
   for item := range q.result {
@@ -91,7 +90,6 @@ func replacementFor(src string) string {
 // construct so one construct's loops never depend on another's.
 func TestForEachStepIDsAreDistinctAndPerConstruct(t *testing.T) {
 	two := `
-@enabled
 func (Automation) twoLoops(_ any) {
   q := query { concept==v1:test }
   for item := range q.result {

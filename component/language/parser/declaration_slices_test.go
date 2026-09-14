@@ -218,7 +218,6 @@ shape broken {
 func TestExtractTerseAutomationSlicesCutsTheAuthoredLine(t *testing.T) {
 	const src = `
 /// Nightly consolidation.
-@enabled
 automation consolidateMemory @trigger(schedule="0 45 2 * * *") => logic consolidateMemory
 `
 	slices := ExtractTerseAutomationSlices(src)

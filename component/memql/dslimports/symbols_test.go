@@ -12,7 +12,6 @@ import (
 func TestResolveSymbol_CrossFileConcept(t *testing.T) {
 	root := fstest.MapFS{
 		"cognition/participant.memql": {Data: []byte(`@version("1.0.0")
-@namespace("cognition")
 @description("a participant")
 concept participant {
   partitionId string
@@ -207,7 +206,7 @@ func (Query) a(_ any) (any, error) { return nil, nil }`)},
 // is the unified loader).
 func TestResolveSymbol_PinnedDivergenceKeepsExplicitId(t *testing.T) {
 	root := fstest.MapFS{
-		"deployment/concepts.memql": {Data: []byte("@namespace(\"cluster\")\nconcept deployment {\n  name string\n}\n")},
+		"deployment/concepts.memql": {Data: []byte("concept deployment {\n  name string\n}\n")},
 		"caller.memql":              {Data: []byte("import (\n\t\"./deployment/concepts\" as dep\n)\nquery deployment queryX {\n}\n")},
 	}
 	tree, err := Load(root)

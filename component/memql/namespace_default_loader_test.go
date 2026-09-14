@@ -25,7 +25,7 @@ func TestLoadUnifiedConcepts_NamespaceDefault(t *testing.T) {
 	})
 	t.Run("mismatch-is-a-load-error", func(t *testing.T) {
 		memqldsl.RegisterTree("nsprobe", fstest.MapFS{
-			"concepts.memql": {Data: []byte("@namespace(\"identity\")\nconcept probeThing {\n  ownerUserId string!\n}\n")},
+			"concepts.memql": {Data: []byte("concept probeThing {\n  ownerUserId string!\n}\n")},
 		})
 		defer memqldsl.UnregisterTree("nsprobe")
 		_, err := LoadUnifiedConcepts(nil)
@@ -36,7 +36,7 @@ func TestLoadUnifiedConcepts_NamespaceDefault(t *testing.T) {
 	t.Run("pin-allows-divergence", func(t *testing.T) {
 		memqldsl.RegisterTree("nsprobe", fstest.MapFS{
 			"namespace.pin":  {Data: []byte("identity\n")},
-			"concepts.memql": {Data: []byte("@namespace(\"identity\")\nconcept probeThing {\n  ownerUserId string!\n}\n")},
+			"concepts.memql": {Data: []byte("concept probeThing {\n  ownerUserId string!\n}\n")},
 		})
 		defer memqldsl.UnregisterTree("nsprobe")
 		if _, err := LoadUnifiedConcepts(nil); err != nil {
@@ -45,7 +45,7 @@ func TestLoadUnifiedConcepts_NamespaceDefault(t *testing.T) {
 	})
 	t.Run("colon-extension-allowed", func(t *testing.T) {
 		memqldsl.RegisterTree("nsprobe", fstest.MapFS{
-			"concepts.memql": {Data: []byte("@namespace(\"nsprobe:sub\")\nconcept probeThing {\n  ownerUserId string!\n}\n")},
+			"concepts.memql": {Data: []byte("concept probeThing {\n  ownerUserId string!\n}\n")},
 		})
 		defer memqldsl.UnregisterTree("nsprobe")
 		if _, err := LoadUnifiedConcepts(nil); err != nil {

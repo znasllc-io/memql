@@ -86,7 +86,6 @@ logic rankGateProbeLogic {
 
 const grantProbeQuerySource = `use rbac.concepts.{ role }
 
-@enabled
 @description("memql#5296 grant gate probe -- the plan-expansion path")
 @requiresCapability("execute", "app:grant-test")
 query role grantGateProbeQuery {

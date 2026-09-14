@@ -52,7 +52,6 @@ func writeTree(t *testing.T, files map[string]string) string {
 }
 
 const testConcepts = `@version("1.0.0")
-@namespace("demo")
 @description("A demo item.")
 concept item {
   name    string  @required @description("Item name.")
@@ -64,7 +63,6 @@ func TestRun_CleanTreeExitsZero(t *testing.T) {
 		"demo/concepts.memql": testConcepts,
 		"demo/queries.memql": `use demo.concepts.{ item }
 
-@enabled
 @description("A clean query.")
 query item queryItems {
   args {
@@ -90,7 +88,6 @@ func TestRun_ReferentialIntegrityFindingsExitOne(t *testing.T) {
 				"demo/concepts.memql": testConcepts,
 				"demo/queries.memql": `use demo.nonexistentfile.{ ghost }
 
-@enabled
 @description("Ghost module; ghost referenced here: ghost.")
 query item queryItems {
   args {
@@ -106,7 +103,6 @@ query item queryItems {
 				"demo/concepts.memql": testConcepts,
 				"demo/queries.memql": `use demo.concepts.{ item, deletedConcept }
 
-@enabled
 @description("deletedConcept was removed from the module; referenced here: deletedConcept.")
 query item queryItems {
   args {
@@ -122,7 +118,6 @@ query item queryItems {
 				"demo/concepts.memql": testConcepts,
 				"demo/mutations.memql": `use demo.concepts.{ item }
 
-@enabled
 @description("Writes an undeclared field.")
 mutation item createItem {
   args {
@@ -151,7 +146,6 @@ logic decideThing {
 }`,
 				"demo/automations.memql": `use demo.logic.{ decideThing }
 
-@enabled
 @trigger(event="graph.node.created.v1:demo:item")
 @description("Step call renamed away from the import.")
 automation onItemCreated {
@@ -185,14 +179,12 @@ func TestRun_EngineParityFindings(t *testing.T) {
 	t.Run("non-canonical relationship type", func(t *testing.T) {
 		root := writeTree(t, map[string]string{
 			"warehouse/concepts.memql": `@version("1.0.0")
-@namespace("warehouse")
 @description("A hub other rows point at.")
 concept hub {
   name  string  @required  @description("Hub name.")
 }
 
 @version("1.0.0")
-@namespace("warehouse")
 @description("A gadget pointing at a hub via a NON-canonical relationship type.")
 concept gadget {
   hubId  string  @required  @description("FK to the owning hub.")
@@ -214,14 +206,12 @@ concept gadget {
 	t.Run("declared but unused mutation arg", func(t *testing.T) {
 		root := writeTree(t, map[string]string{
 			"warehouse/concepts.memql": `@version("1.0.0")
-@namespace("warehouse")
 @description("A widget.")
 concept widget {
   label  string  @required  @description("Widget label.")
 }`,
 			"warehouse/mutations.memql": `use warehouse.concepts.{ widget }
 
-@enabled
 @description("Create a widget; declares an arg the body never references.")
 mutation widget createWidget {
   args {
@@ -248,14 +238,12 @@ mutation widget createWidget {
 	t.Run("clean pack exits zero", func(t *testing.T) {
 		root := writeTree(t, map[string]string{
 			"warehouse/concepts.memql": `@version("1.0.0")
-@namespace("warehouse")
 @description("A gizmo.")
 concept gizmo {
   label  string  @required  @description("Gizmo label.")
 }`,
 			"warehouse/mutations.memql": `use warehouse.concepts.{ gizmo }
 
-@enabled
 @description("Create a gizmo.")
 mutation gizmo createGizmo {
   args {
@@ -294,7 +282,6 @@ func TestRun_ReportsParitySkippedDomains(t *testing.T) {
 	// a skip is information, not a diagnostic.
 	coreNamed := map[string]string{
 		"cluster/concepts.memql": `@version("1.0.0")
-@namespace("cluster")
 @description("A bundle-supplied row under a core domain name.")
 concept shadowed {
   name  string  @required  @description("Row name.")
@@ -346,7 +333,6 @@ func TestRun_OrphanedPreambleFindingExitsOne(t *testing.T) {
 @public
 @description("intentionally caller-scope-free")
 /*
-@enabled
 query item queryParked {
   args {
     name  string  @required
@@ -354,7 +340,6 @@ query item queryParked {
   filter  name == args.name
 }
 */
-@enabled
 query item queryItems {
   args {
     name  string  @required
@@ -398,7 +383,6 @@ func TestRun_UnregisteredConnectorRefusesTheMountedBundle(t *testing.T) {
 	t.Run("an origin naming a connector nobody serves", func(t *testing.T) {
 		root := writeTree(t, map[string]string{
 			"storefront/concepts.memql": `@version("1.0.0")
-@namespace("storefront")
 @description("A mirror of a system this build has never heard of.")
 @origin("nowhere")
 concept phantom {
@@ -421,7 +405,6 @@ concept phantom {
 	t.Run("a mirror target nobody drains", func(t *testing.T) {
 		root := writeTree(t, map[string]string{
 			"storefront/concepts.memql": `@version("1.0.0")
-@namespace("storefront")
 @description("MemQL-origin data pushed to a system nothing drains.")
 @mirroredTo("nowhere")
 concept ledger {
@@ -443,7 +426,6 @@ concept ledger {
 	t.Run("a REGISTERED connector name loads", func(t *testing.T) {
 		root := writeTree(t, map[string]string{
 			"storefront/concepts.memql": `@version("1.0.0")
-@namespace("storefront")
 @description("A mirror of a system this build does serve.")
 @origin("shopify")
 concept mirrored {

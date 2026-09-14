@@ -82,7 +82,6 @@ func propertySchemas(t *testing.T, src string) map[string]map[string]any {
 }
 
 const declaredMetadataFixture = `@version("1.0.0")
-@namespace("ref")
 @description("d")
 concept probe {
   label      string  @required @description("l")
@@ -472,7 +471,6 @@ func buildConceptErr(t *testing.T, src string) error {
 // A unit test on a helper nothing calls proves nothing (memql#3248).
 func TestBadDefaultRefusesToLoad(t *testing.T) {
 	const tmpl = `@version("1.0.0")
-@namespace("ref")
 @description("d")
 concept probe {
   probeField %s @default(%q) @description("p")
@@ -535,7 +533,6 @@ concept probe {
 // bug produced no error to notice.
 func TestBareDefaultLiteralIsRead(t *testing.T) {
 	const src = `@version("1.0.0")
-@namespace("ref")
 @description("d")
 concept probe {
   bareBool    bool  @default(false)    @description("b")

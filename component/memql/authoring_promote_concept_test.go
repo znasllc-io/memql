@@ -30,7 +30,6 @@ import (
 // --- fixtures -------------------------------------------------------------
 
 const trainedWidgetSrc = `@version("1.0.0")
-@namespace("trainingns")
 @description("A concept taught to a running cluster")
 concept trainedWidget {
   ownerUserId  string  @required
@@ -435,7 +434,6 @@ func TestPromoteConcept_CannotShadowACoreConcept(t *testing.T) {
 	}
 
 	shadow := `@version("1.0.0")
-@namespace("identity")
 @description("An impostor")
 concept user {
   label  string
@@ -464,7 +462,6 @@ func TestPromoteConcept_RepromoteReplacesItsOwnPromotion(t *testing.T) {
 	}
 
 	revised := `@version("1.0.0")
-@namespace("trainingns")
 @description("A concept taught to a running cluster, revised")
 concept trainedWidget {
   ownerUserId  string  @required
@@ -507,7 +504,7 @@ func TestPromoteConcept_RefusesReservedPayloadField(t *testing.T) {
 	for _, field := range []string{"provenance", "actor", "args", "row", "config", "id", "createdAt"} {
 		t.Run(field, func(t *testing.T) {
 			e := promoteConceptEngine(t)
-			src := "@version(\"1.0.0\")\n@namespace(\"trainingns\")\nconcept trainedReserved {\n  " +
+			src := "@version(\"1.0.0\")\nconcept trainedReserved {\n  " +
 				field + "  object\n  label  string\n}"
 
 			err := promoteConceptSource(t, e, src, "trainedReserved")
@@ -559,7 +556,6 @@ func TestPromoteConcept_RelationshipToACoreConceptIsDerived(t *testing.T) {
 	e := promoteConceptEngine(t)
 
 	src := `@version("1.0.0")
-@namespace("trainingns")
 @description("A trained concept pointing at a core one")
 concept trainedNote {
   ownerUserId  string  @required
@@ -597,7 +593,6 @@ func TestPromoteConcept_RefusesUnresolvableRelationshipTarget(t *testing.T) {
 	e := promoteConceptEngine(t)
 
 	src := `@version("1.0.0")
-@namespace("trainingns")
 concept trainedDangling {
   ownerUserId  string  @required
 
@@ -630,7 +625,6 @@ func TestPromoteConcept_RefusesRelationshipFieldNotDeclared(t *testing.T) {
 	e := promoteConceptEngine(t)
 
 	src := `@version("1.0.0")
-@namespace("trainingns")
 concept trainedTypo {
   ownerUserId  string  @required
 
@@ -660,7 +654,6 @@ func TestPromoteConcept_NodeTypeInvariantsApply(t *testing.T) {
 		{
 			name: "collection without contains",
 			source: `@version("1.0.0")
-@namespace("trainingns")
 @type("collection")
 concept trainedBadBasket {
   ownerUserId  string  @required
@@ -670,7 +663,6 @@ concept trainedBadBasket {
 		{
 			name: "reference without alias or equals",
 			source: `@version("1.0.0")
-@namespace("trainingns")
 @type("reference")
 concept trainedBadPointer {
   ownerUserId  string  @required
@@ -680,7 +672,6 @@ concept trainedBadPointer {
 		{
 			name: "contains on a non-collection",
 			source: `@version("1.0.0")
-@namespace("trainingns")
 concept trainedBadContainer {
   ownerUserId  string  @required
   itemId       string
@@ -717,13 +708,11 @@ func TestPromoteConcept_CollectionWithContainsLands(t *testing.T) {
 	e := promoteConceptEngine(t)
 
 	item := `@version("1.0.0")
-@namespace("trainingns")
 concept trainedItem {
   ownerUserId  string  @required
   label        string
 }`
 	basket := `@version("1.0.0")
-@namespace("trainingns")
 @type("collection")
 concept trainedBasket {
   ownerUserId  string  @required

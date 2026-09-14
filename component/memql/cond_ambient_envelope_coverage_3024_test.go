@@ -150,7 +150,6 @@ func TestLogicCondBareIdentifierPredicate_RejectsUnresolvableAmbientPaths(t *tes
 // directions of a distinction the rule has to get exactly right.
 func TestLogicCondBareIdentifier_MultiStepDeclaredArgIsNotRejected(t *testing.T) {
 	multiStep := strings.Join([]string{
-		"@enabled",
 		"@actor",
 		"@description(\"multi-step declared-arg probe\")",
 		"logic condMultiStepArgProbe {",

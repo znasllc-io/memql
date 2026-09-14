@@ -27,7 +27,6 @@ import (
 // distinctly from the promote tests' fixtures so a staged assertion can never
 // accidentally read a promoted one's row.
 const stagedSpecSrc = `
-@enabled
 @description("A staged spec")
 trait stagedOnlyTrait {
   return active == true
@@ -144,7 +143,6 @@ func TestStageBundleDurable_RefusesConceptByName(t *testing.T) {
 	store := &fakePromoteStore{}
 
 	bundle := `
-@namespace("acme")
 concept order {
   ownerUserId string!
 }

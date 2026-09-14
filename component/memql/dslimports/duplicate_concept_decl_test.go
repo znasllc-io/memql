@@ -23,20 +23,17 @@ func duplicateAcrossDirectoriesTree(consumerField string) fstest.MapFS {
 	return fstest.MapFS{
 		"deploy/namespace.pin": file("cluster\n"),
 		"deploy/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("Declared under deploy/, pinned to cluster.")
 concept widget {
   fromDeploy  string  @required @description("Only on the deploy declaration.")
 }`),
 		"cluster/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("Declared under cluster/, the real directory.")
 concept widget {
   fromCluster  string  @required @description("Only on the cluster declaration.")
 }`),
 		"consumer/queries.memql": file(`use cluster.concepts.{ widget }
 
-@enabled
 @description("Filters on a field one declaration has.")
 query widget consumerWidgets {
   args {
@@ -112,13 +109,11 @@ func TestDuplicateConceptAcrossDirectoriesIsReportedNotResolved(t *testing.T) {
 func TestDistinctNamespacesStillReportAmbiguityNotDuplication(t *testing.T) {
 	tree := loadTree(t, fstest.MapFS{
 		"alpha/concepts.memql": file(`@version("1.0.0")
-@namespace("alpha")
 @description("alpha widget.")
 concept widget {
   a  string  @required @description("A.")
 }`),
 		"beta/concepts.memql": file(`@version("1.0.0")
-@namespace("beta")
 @description("beta widget.")
 concept widget {
   b  string  @required @description("B.")

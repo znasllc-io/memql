@@ -37,7 +37,6 @@ query thing zzLive {
 `
 
 const probeConceptSource = `@version("1.0.0")
-@namespace("probe")
 @description("d")
 concept thing {
   label string @required @description("l")

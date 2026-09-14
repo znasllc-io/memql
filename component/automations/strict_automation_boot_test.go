@@ -172,7 +172,7 @@ func TestStrictAutomationBoot_MalformedAutomationRefusesBoot(t *testing.T) {
 	// be swallowed, which is what this pins.
 	fixture := fstest.MapFS{
 		"automations.memql": {Data: []byte(
-			"@enabled\n" +
+			"" +
 				"@description(\"bad\")\n" +
 				"@trigger(event=\"node.created\", concept=\"v1:cluster:node\")\n" +
 				"automation fixtureBadAutomation {\n" +

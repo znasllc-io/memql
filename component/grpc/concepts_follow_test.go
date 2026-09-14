@@ -23,7 +23,6 @@ import (
 // followTestConceptSrc is a standalone trainable concept (no cross-concept
 // binding, so it compiles against the core registry Gate-1 clones).
 const followTestConceptSrc = `@version("1.0.0")
-@namespace("followns")
 @description("A concept trained into a running cluster, for the follow stream")
 concept followWidget {
   ownerUserId  string  @required
@@ -281,7 +280,6 @@ func TestConceptsFollow_GenerationIncrementsAndStaleReSnapshots(t *testing.T) {
 }
 
 const followTestConceptTwoSrc = `@version("1.0.0")
-@namespace("followns")
 @description("A second trained concept")
 concept followWidgetTwo {
   ownerUserId  string  @required

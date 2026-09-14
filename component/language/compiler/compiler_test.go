@@ -34,7 +34,6 @@ func (Query) activeUsers(role any) {
 
 func TestCompileSource_Automation(t *testing.T) {
 	source := `
-@enabled
 @schedule("*/30 * * * *")
 func (Automation) leadProcessor(_ any) {
 	fetchLeads := query {
@@ -65,7 +64,6 @@ func (Automation) leadProcessor(_ any) {
 
 func TestTranspileAutomation(t *testing.T) {
 	source := `
-@enabled
 func (Automation) testAuto(_ any) {
 	step1 := query {
 		concept==v1:test
@@ -95,7 +93,6 @@ func (Automation) testAuto(_ any) {
 
 func TestTranspileAutomation_ForEachBareVarReferencesNotQuoted(t *testing.T) {
 	source := `
-@enabled
 func (Automation) autoJoinAIExample(_ any) {
   getAgents := query {
     concept==v1:agents:agent;
@@ -229,7 +226,6 @@ func (Query) activeUsers(args any) {
 
 func TestCompileSource_EmitsInlineDeprecationWarnings(t *testing.T) {
 	source := `
-@enabled
 func (Automation) testAuto(_ any) {
 	step1 := query {
 		concept==v1:test
@@ -256,7 +252,6 @@ func (Automation) testAuto(_ any) {
 
 func TestCompileSource_FunctionCallStepInAutomation(t *testing.T) {
 	source := `
-@enabled
 func (Automation) testAuto(_ any) {
 	checkUser := userById(userId=event.payload.userId)
 	return checkUser
@@ -295,7 +290,6 @@ func TestCompileFile_StrictWarnings(t *testing.T) {
 	// (The naming-prefix lint that used to drive this test is retired
 	// in C2/#2042; the strict-warnings path is unchanged.)
 	source := `
-@enabled
 func (Automation) testAuto(_ any) {
 	step1 := query {
 		concept==v1:test
@@ -927,7 +921,6 @@ func TestCompileStepHelperValue_ArgsShorthandRawString(t *testing.T) {
 func TestCompiler_LogicCoalesceInFunctionStepResolvesArgRefs(t *testing.T) {
 	source := `
 use common.builtins.{ ensureDailySpaceForUser }
-@enabled
 logic logicEnsureDailySpaceOnAuthSession {
   args { event object @required }
   body {

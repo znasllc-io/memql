@@ -23,7 +23,6 @@ func graphSliceHas(xs []string, s string) bool {
 func TestIndex_ModuleAndSymbolResolution(t *testing.T) {
 	tree := loadTree(t, fstest.MapFS{
 		"fylo/concepts.memql": file(`@version("1.0.0")
-@namespace("fylo")
 concept order {
   id  string  @required
 }
@@ -33,13 +32,11 @@ concept scanEvent {
 }`),
 		"fylo/queries.memql": file(`use fylo.concepts.{ order }
 
-@enabled
 query order listOrders {
   args { id  string  @required }
   filter  id == args.id
 }`),
 		"other/concepts.memql": file(`@version("1.0.0")
-@namespace("other")
 concept widget {
   id  string  @required
 }`),
@@ -89,18 +86,15 @@ concept widget {
 func TestIndex_ConceptDeclared(t *testing.T) {
 	tree := loadTree(t, fstest.MapFS{
 		"fylo/concepts.memql": file(`@version("1.0.0")
-@namespace("fylo")
 concept order {
   id  string  @required
 }`),
 		// gadget is declared in TWO namespaces -- an ambiguous bare name.
 		"alpha/concepts.memql": file(`@version("1.0.0")
-@namespace("alpha")
 concept gadget {
   id  string  @required
 }`),
 		"beta/concepts.memql": file(`@version("1.0.0")
-@namespace("beta")
 concept gadget {
   id  string  @required
 }`),

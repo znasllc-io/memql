@@ -10,7 +10,6 @@ import (
 )
 
 const sessionConceptSrc = `@version("1.0.0")
-@namespace("mcpsess")
 @description("Session test widget")
 concept mcpWidget {
   ownerUserId  string  @required

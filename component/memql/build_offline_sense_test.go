@@ -17,7 +17,6 @@ import (
 // version enters the prefix).
 var gadgetOverlay = fstest.MapFS{
 	"gadgets/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("gadgets")
 @description("A gadget for offline-sense overlay testing.")
 concept gadget {
   label  string  @required  @description("Gadget label.")
@@ -130,14 +129,12 @@ func TestBuildOfflineSense_OverlayVisibleToServiceButRestoredGlobally(t *testing
 var repoShapedOverlay = fstest.MapFS{
 	"dsl/test.memql": {Data: []byte("// a scratch file an author left in the tree\n")},
 	"dsl/gadgets/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("gadgets")
 @description("A gadget for offline-sense overlay testing.")
 concept gadget {
   label  string  @required  @description("Gadget label.")
 }
 `)},
 	"dsl/widgets/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("widgets")
 @description("A widget for offline-sense overlay testing.")
 concept widget {
   label  string  @required  @description("Widget label.")

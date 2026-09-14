@@ -10,7 +10,6 @@ import (
 // decision #11).
 func TestParser_VersionAttribute_OnConcept(t *testing.T) {
 	source := `@version(1)
-@namespace("cognition")
 @description("test")
 concept participant {
   name string
@@ -59,7 +58,6 @@ func TestParser_VersionAttribute_HigherVersions(t *testing.T) {
 	cases := []int64{1, 2, 5, 10, 42, 100}
 	for _, want := range cases {
 		source := `@version(` + fmtInt(want) + `)
-@namespace("foo")
 concept bar { x string }`
 		file, err := ParseFile(source)
 		if err != nil {

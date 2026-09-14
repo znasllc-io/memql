@@ -39,7 +39,6 @@ concept widget {
   label  string  @required @description("Label.")
 }`),
 		"gamma/concepts.memql": file(`@version("1.0.0")
-@namespace("gamma")
 @description("Gamma's widget -- same short name, different namespace.")
 concept widget {
   name  string  @required @description("Name.")
@@ -100,7 +99,6 @@ concept widget {
   label  string  @required @description("Label.")
 }`),
 		"gamma/concepts.memql": file(`@version("1.0.0")
-@namespace("gamma")
 @description("Gamma's widget.")
 concept widget {
   name  string  @required @description("Name.")
@@ -182,13 +180,11 @@ func pinnedNamespaceTree() fstest.MapFS {
 	return fstest.MapFS{
 		"deployment/namespace.pin": file("cluster\n"),
 		"deployment/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("Declared under deployment/, namespaced to cluster.")
 concept widget {
   label  string  @required @description("Label.")
 }`),
 		"other/concepts.memql": file(`@version("1.0.0")
-@namespace("other")
 @description("A second widget so the name is ambiguous.")
 concept widget {
   name  string  @required @description("Name.")
@@ -309,7 +305,6 @@ func TestLane2_PinnedDomainImportRemedyHoldsWhenThePinDirectoryExists(t *testing
 	// #2945 this alone flipped the remedy from "add one import line" to
 	// "re-key every canonical id in the domain".
 	root["cluster/concepts.memql"] = file(`@version("1.0.0")
-@namespace("cluster")
 @description("The pin target exists but declares no widget.")
 concept gadget {
   label  string  @required @description("Label.")
@@ -343,7 +338,6 @@ concept gadget {
 	// wording.
 	root["deployment/queries.memql"] = file(`use cluster.concepts.{ widget }
 
-@enabled
 @description("Binds widget by its PINNED namespace, as the diagnostic advises.")
 query widget deploymentWidgets {
   args {
@@ -381,7 +375,6 @@ func TestLane2_PinnedDomainWithTwoOwnCandidatesReportsTheSameIdCollision(t *test
 	root := pinnedNamespaceTree()
 	// A SECOND widget inside the pinned domain, in its own file.
 	root["deployment/more.memql"] = file(`@version("1.0.0")
-@namespace("cluster")
 @description("A second widget inside the pinned domain.")
 concept widget {
   other  string  @required @description("Other.")

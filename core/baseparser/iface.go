@@ -56,29 +56,29 @@ var retiredConstructAnnotations = map[string]string{
 	// (memql#5375). No allow-list could populate any of them, so the only
 	// reachable value was the zero value -- and the render made a field that
 	// could not be set look like one that was.
-	"deprecated": "retired (memql#5375): it was rendered by help() and editor hover and read by nothing that changes behaviour -- delete it, or say so in the construct's @description; " + AttributeRewriteHint,
-	"timeout":    "retired (memql#5375): FunctionDef.Timeout had no reader, so the value never bounded anything -- delete it; a real deadline belongs on the caller's context; " + AttributeRewriteHint,
-	"retry":      "retired (memql#5375): FunctionDef.Retry had no reader, so nothing ever retried -- delete it; " + AttributeRewriteHint,
-	"idempotent": "retired (memql#5375): declared metadata with no check behind it -- delete it; " + AttributeRewriteHint,
-	"audit":      "retired (memql#5375): declared metadata with no writer behind it; auditing is v1:identity:auditEvent, written from Go -- delete it; " + AttributeRewriteHint,
+	"deprecated": "memql#5375: it was rendered by help() and editor hover and read by nothing that changes behaviour -- delete it, or say so in the construct's @description; " + AttributeRewriteHint,
+	"timeout":    "memql#5375: FunctionDef.Timeout had no reader, so the value never bounded anything -- delete it; a real deadline belongs on the caller's context; " + AttributeRewriteHint,
+	"retry":      "memql#5375: FunctionDef.Retry had no reader, so nothing ever retried -- delete it; " + AttributeRewriteHint,
+	"idempotent": "memql#5375: declared metadata with no check behind it -- delete it; " + AttributeRewriteHint,
+	"audit":      "memql#5375: declared metadata with no writer behind it; auditing is v1:identity:auditEvent, written from Go -- delete it; " + AttributeRewriteHint,
 
 	// Restatements of something the engine already derives, which is worse
 	// than absence: a restatement can disagree with what it restates.
-	"latestMode": "retired (memql#5375): the engine derives time-dependence from `asOf latest` in the body, so the annotation restated it and could contradict it -- delete it; " + AttributeRewriteHint,
-	"enabled":    "retired (memql#5375): constructs are enabled by default, so @enabled was an explicit no-op that read like a switch -- delete it, and use @disabled to deactivate; " + AttributeRewriteHint,
+	"latestMode": "memql#5375: the engine derives time-dependence from `asOf latest` in the body, so the annotation restated it and could contradict it -- delete it; " + AttributeRewriteHint,
+	"enabled":    "memql#5375: constructs are enabled by default, so @enabled was an explicit no-op that read like a switch -- delete it, and use @disabled to deactivate; " + AttributeRewriteHint,
 
 	// The losing spelling of a pair (D17, one spelling each).
-	"nocache":  "retired (memql#5375): write @cache(0) -- one annotation for the cache TTL, with 0 meaning never; " + AttributeRewriteHint,
-	"schedule": "retired (memql#5375): write @trigger(schedule=\"0 0 * * * *\") -- one annotation declares how an automation is reached, which is what lets @template be refused beside it coherently; " + AttributeRewriteHint,
+	"nocache":  "memql#5375: write @cache(0) -- one annotation for the cache TTL, with 0 meaning never; " + AttributeRewriteHint,
+	"schedule": "memql#5375: write @trigger(schedule=\"0 0 * * * *\") -- one annotation declares how an automation is reached, which is what lets @template be refused beside it coherently; " + AttributeRewriteHint,
 
 	// Stored on the tool and enforced nowhere, so each read as a ceiling or
 	// a gate while being neither.
-	"rateLimit": "retired (memql#5375): Tool.RateLimit was cloned and copied into a Function field nothing reads, so the declared ceiling did not exist -- delete it; the live ceilings are the provider chokepoint in ai_guard.go and the run budget in component/work; " + AttributeRewriteHint,
-	"scopes":    "retired (memql#5375): Tool.Scopes was advertised on the gRPC tool descriptor and checked nowhere, so it read as an authorization gate while gating nothing -- delete it; use @requiresCapability for a real one; " + AttributeRewriteHint,
+	"rateLimit": "memql#5375: Tool.RateLimit was cloned and copied into a Function field nothing reads, so the declared ceiling did not exist -- delete it; the live ceilings are the provider chokepoint in ai_guard.go and the run budget in component/work; " + AttributeRewriteHint,
+	"scopes":    "memql#5375: Tool.Scopes was advertised on the gRPC tool descriptor and checked nowhere, so it read as an authorization gate while gating nothing -- delete it; use @requiresCapability for a real one; " + AttributeRewriteHint,
 
 	// Id-bearing only by redundancy: the namespace comes from the domain
 	// directory, or from that directory's one-line namespace.pin.
-	"namespace": "retired (memql#5375): a concept's namespace is its domain directory, or that directory's one-line namespace.pin -- the annotation could only restate one of those or silently disagree with it; delete it, and pin a deliberate divergence with a namespace.pin file (#2614); " + AttributeRewriteHint,
+	"namespace": "memql#5375: a concept's namespace is its domain directory, or that directory's one-line namespace.pin -- the annotation could only restate one of those or silently disagree with it; delete it, and pin a deliberate divergence with a namespace.pin file (#2614); " + AttributeRewriteHint,
 }
 
 // retiredFieldAnnotations is the same ledger for FIELD annotations -- the
@@ -91,8 +91,8 @@ var retiredConstructAnnotations = map[string]string{
 // concept's @version is the "v1" of every canonical id it declares, while a
 // function's @version was read by nothing.
 var retiredFieldAnnotations = map[string]string{
-	"unique":    "retired (memql#5375): declared metadata with no uniqueness check behind it (memql#2960), so it read as a constraint while constraining nothing -- delete it; " + AttributeRewriteHint,
-	"immutable": "retired (memql#5375): declared metadata with no write guard behind it -- delete it; a field that must not change is enforced by the mutation that writes it; " + AttributeRewriteHint,
+	"unique":    "memql#5375: declared metadata with no uniqueness check behind it (memql#2960), so it read as a constraint while constraining nothing -- delete it; " + AttributeRewriteHint,
+	"immutable": "memql#5375: declared metadata with no write guard behind it -- delete it; a field that must not change is enforced by the mutation that writes it; " + AttributeRewriteHint,
 }
 
 // RetiredFieldAnnotation reports whether a FIELD-level annotation name is

@@ -19,7 +19,6 @@ func collectionLoadRegistry() memoryNodes.Registry {
 // converter) into a CollectionMethodExpression fn.Expr.
 func TestLogicCollectionMethodLoads(t *testing.T) {
 	src := strings.Join([]string{
-		"@enabled",
 		"@description(\"count active members\")",
 		"logic logicCountActiveMembers {",
 		"  args {",
@@ -51,7 +50,6 @@ func TestQueryFilterCollectionMethodRejected(t *testing.T) {
 	src := strings.Join([]string{
 		"use common.concepts.{ thing }",
 		"",
-		"@enabled",
 		"@description(\"bad query\")",
 		"query thing queryBadCollection {",
 		// `members` is declared so the SCOPE rule is what this fixture

@@ -20,7 +20,6 @@ import (
 // a reason that has nothing to do with caller arguments.
 const probeArgLhsSrc = `use accounts.concepts.{ account }
 
-@enabled
 @description("probe")
 query account probeAccountsIncludeArchived {
   args {

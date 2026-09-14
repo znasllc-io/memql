@@ -317,13 +317,16 @@ func TestErrorf(t *testing.T) {
 }
 
 func TestValidateConstructAnnotations(t *testing.T) {
-	// Plain happy-path: only allow-listed annotations present.
-	src := `@enabled
-@description("x")
+	// Plain happy-path: only allow-listed annotations present. @enabled was
+	// the first annotation here until memql#5375 retired it -- and the
+	// retirement ledger is consulted BEFORE the allow-list, so listing it in
+	// `allowed` no longer makes it pass. That ordering is the point of the
+	// ledger: a name a caller still allow-lists by mistake refuses anyway.
+	src := `@description("x")
 spec activeRowTrait foo {
   return x == 1
 }`
-	allowed := map[string]bool{"description": true, "enabled": true, "shape": true}
+	allowed := map[string]bool{"description": true, "shape": true}
 	if err := ValidateConstructAnnotations(src, "spec", allowed); err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}

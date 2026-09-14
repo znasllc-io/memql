@@ -48,7 +48,6 @@ import (
 // v2 differs from it in exactly ONE way, so a classification can only be
 // explained by the change it is named for.
 const diffWidgetV1 = `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -123,7 +122,6 @@ func TestClassifyConceptSchemaChange_AdditiveLands(t *testing.T) {
 		{
 			name: "a new optional field",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -137,7 +135,6 @@ concept diffWidget {
 		{
 			name: "a new @relationship",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -152,7 +149,6 @@ concept diffWidget {
 		{
 			name: "an edited @description",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget with a better sentence about it")
 concept diffWidget {
   ownerUserId  string  @required
@@ -165,7 +161,6 @@ concept diffWidget {
 		{
 			name: "a widened @enum",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -205,7 +200,6 @@ func TestClassifyConceptSchemaChange_BreakingIsRefused(t *testing.T) {
 		{
 			name: "a removed field",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -218,7 +212,6 @@ concept diffWidget {
 		{
 			name: "a changed field type",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -232,7 +225,6 @@ concept diffWidget {
 		{
 			name: "a new required field",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -247,7 +239,6 @@ concept diffWidget {
 		{
 			name: "an existing optional field made required",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -261,7 +252,6 @@ concept diffWidget {
 		{
 			name: "a narrowed @enum",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -313,13 +303,11 @@ func TestClassifyConceptSchemaChange_IdenticalSchemaIsNoChange(t *testing.T) {
 // type half is a lie, because the author changed no type. One change, not two.
 func TestClassifyConceptSchemaChange_OptionalDatetimeMadeRequiredIsOneChange(t *testing.T) {
 	prior := `@version("1.0.0")
-@namespace("diffns")
 concept diffWidget {
   ownerUserId  string  @required
   expiresAt    datetime
 }`
 	candidate := `@version("1.0.0")
-@namespace("diffns")
 concept diffWidget {
   ownerUserId  string  @required
   expiresAt    datetime  @required
@@ -340,7 +328,6 @@ concept diffWidget {
 // top-level one and removing it is as breaking.
 func TestClassifyConceptSchemaChange_NestedFieldRemovalIsBreaking(t *testing.T) {
 	prior := `@version("1.0.0")
-@namespace("diffns")
 concept diffWidget {
   ownerUserId  string  @required
   preferences {
@@ -349,7 +336,6 @@ concept diffWidget {
   }
 }`
 	candidate := `@version("1.0.0")
-@namespace("diffns")
 concept diffWidget {
   ownerUserId  string  @required
   preferences {
@@ -445,7 +431,6 @@ func promoteDiffConcept(t *testing.T, e *MemQLEngine, source string, gate *conce
 }
 
 const diffWidgetV2FieldRemoved = `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -534,7 +519,6 @@ func TestPromoteConcept_AdditiveChangeLandsAndIsReported(t *testing.T) {
 	}
 
 	widened := `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -653,7 +637,6 @@ func TestPromoteConcept_AdditiveChangeIsNotAudited(t *testing.T) {
 		t.Fatalf("first promote: %v", err)
 	}
 	additive := `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required

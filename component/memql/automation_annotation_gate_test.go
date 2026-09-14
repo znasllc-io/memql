@@ -17,7 +17,7 @@ func TestValidateAutomationAnnotations(t *testing.T) {
 	accept := []string{
 		"@trigger(event=\"x\", concept=\"v1:a:b\")\n",
 		"@filter(a == 1)\n",
-		"@enabled\n",
+		"",
 		"@description(\"d\")\n",
 		"@schedule(cron=\"0 5 9 * * *\")\n", // LIVE -- must stay accepted
 	}

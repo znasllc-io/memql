@@ -87,8 +87,12 @@ var constructSkeletons = []struct {
 	},
 	{
 		keyword: "concept", label: "concept <name> { ... }",
-		doc:  "A schema declaration. The namespace comes from the containing domain directory.",
-		body: "@namespace(\"${1:domain}\")\nconcept ${2:name} {\n\t${3:field} string!\n\t$0\n}",
+		doc: "A schema declaration. The namespace comes from the containing domain directory.",
+		// No @namespace line (memql#5375): the annotation is retired, and the
+		// namespace comes from the domain directory or its namespace.pin.
+		// Offering it here would complete an author straight into a load
+		// refusal, which reads as the editor being right and the engine broken.
+		body: "concept ${1:name} {\n\t${2:field} string!\n\t$0\n}",
 	},
 }
 

@@ -505,7 +505,9 @@ func namespaceKeysForPin(pin, dir string) []string {
 //
 // Directory membership (domainsForNamespace) is decided by the pin FILE alone,
 // which is not the same question. A namespace.pin only PERMITS an explicit
-// @namespace; it never APPLIES one -- ast.AssembleConceptIdFromDeclInDir gives
+// @namespace -- which memql#5375 retired outright; the namespace now comes
+// from the domain directory or its namespace.pin, and
+// ast.AssembleConceptIdFromDeclInDir gives
 // an un-annotated decl the DIRECTORY as its namespace. So a pinned directory
 // routinely holds both: decls that assemble under the pin, and decls that
 // assemble under the directory. Only the former belong to ns.

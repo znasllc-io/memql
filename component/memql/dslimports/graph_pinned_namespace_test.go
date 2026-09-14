@@ -25,21 +25,18 @@ import (
 func twoPinnedDomainsTree() fstest.MapFS {
 	return fstest.MapFS{
 		"cluster/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("The literal directory, declaring its own concept.")
 concept gadget {
   label  string  @required @description("Label.")
 }`),
 		"alpha/namespace.pin": file("cluster\n"),
 		"alpha/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("Pinned into cluster.")
 concept widget {
   label  string  @required @description("Label.")
 }`),
 		"beta/namespace.pin": file("cluster\n"),
 		"beta/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("Also pinned into cluster.")
 concept sprocket {
   label  string  @required @description("Label.")

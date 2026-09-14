@@ -130,7 +130,6 @@ func TestSlicePreambleStopsAtRealCode(t *testing.T) {
 @trigger(event="node.created", concept="v1:cluster:node")
 automation first ` + bodyStub + `
 
-@enabled
 @trigger(event="node.updated", concept="v1:cluster:node")
 automation second ` + bodyStub
 
@@ -171,7 +170,6 @@ func TestOrdinaryCommentContentDoesNotRefuseBoot(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := tc.comment + `
-@enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation ok ` + bodyStub
 
@@ -243,7 +241,6 @@ automation bad ` + bodyStub,
 func TestCommentedOutHeaderDoesNotShadowTheAnnotationGate(t *testing.T) {
 	l := &Loader{}
 	src := `/*
-@enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation parkedOldVersion {
   step s {
@@ -251,7 +248,6 @@ automation parkedOldVersion {
   }
 }
 */
-@enabled
 @public
 @trigger(event="node.created", concept="v1:cluster:node")
 automation live ` + bodyStub
@@ -291,7 +287,6 @@ func TestSliceNeverStartsInsideAComment(t *testing.T) {
 @trigger(event="node.created", concept="v1:cluster:node")
 automation firstOne ` + bodyStub + ` /* parked 2026-07-01, see #123
      second line of the note */
-@enabled
 @trigger(event="node.updated", concept="v1:cluster:node")
 automation secondOne ` + bodyStub,
 		},
@@ -302,7 +297,6 @@ automation secondOne ` + bodyStub,
 automation firstOne ` + bodyStub + ` /* one
    two
    three */
-@enabled
 @trigger(event="node.updated", concept="v1:cluster:node")
 automation secondOne ` + bodyStub,
 		},
@@ -353,7 +347,6 @@ precondition envIsStaging {
   description: "Only drive the staging deploy spine in staging."
 }
 */
-@enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation live ` + bodyStub
 
@@ -452,7 +445,6 @@ func TestRegexGatesStillFireOnRealCode(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// With a comment present, so the blanked path is the one exercised.
 			src := `/* an ordinary note */
-@enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation bad {
 ` + tc.body + `

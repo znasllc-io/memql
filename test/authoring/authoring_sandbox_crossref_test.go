@@ -60,7 +60,6 @@ func TestCrossRef_SelfConsistentBundlePasses(t *testing.T) {
 			Kind: "concept",
 			Name: "crossWidget",
 			Source: `@version("1.0.0")
-@namespace("crossns")
 @description("widget")
 concept crossWidget {
   label  string
@@ -123,7 +122,6 @@ func TestCrossRef_BundleSiblingImportResolves(t *testing.T) {
 			Kind: "concept",
 			Name: "crossThing",
 			Source: `@version("1.0.0")
-@namespace("crossns")
 concept crossThing {
   name  string
 }`,
@@ -169,7 +167,6 @@ func TestCrossRef_FieldExistenceFails(t *testing.T) {
 			Kind: "concept",
 			Name: "crossFieldThing",
 			Source: `@version("1.0.0")
-@namespace("crossns")
 concept crossFieldThing {
   label  string
 }`,
@@ -293,7 +290,6 @@ func TestCrossRef_AutomationTriggerOnBundleConcept(t *testing.T) {
 			Kind: "concept",
 			Name: "crossEvented",
 			Source: `@version("1.0.0")
-@namespace("crossns")
 concept crossEvented {
   name  string
 }`,
@@ -325,7 +321,6 @@ func TestCrossRef_NoMutationOfConceptRegistry(t *testing.T) {
 			Kind: "concept",
 			Name: "crossEphemeral",
 			Source: `@version("1.0.0")
-@namespace("crossns")
 concept crossEphemeral {
   name  string
 }`,

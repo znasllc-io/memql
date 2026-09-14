@@ -459,7 +459,7 @@ func TestRunLogic_CompileRoundTrip_CondAndProjection(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			src := "@enabled\nlogic probe {\n  args {\n    members []object @required\n    scans []object @required\n  }\n  body {\n    " + tc.body + "\n  }\n}\n"
+			src := "logic probe {\n  args {\n    members []object @required\n    scans []object @required\n  }\n  body {\n    " + tc.body + "\n  }\n}\n"
 			body := parseLogicBody(t, src)
 			r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
 			auto, err := r.compileBodyToAutomation("probe", body)

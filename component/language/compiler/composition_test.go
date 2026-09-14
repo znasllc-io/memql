@@ -10,17 +10,14 @@ import (
 func TestValidateFileComposition_MultipleQueries(t *testing.T) {
 	// Valid: Multiple queries
 	source := `
-@enabled
 func (Query) getUsers() {
   concept==v1:user
 }
 
-@enabled
 func (Query) getUserById() {
   concept==v1:user;id==args.id
 }
 
-@enabled
 func (Query) getUsersByRole() {
   concept==v1:user;payload.role==args.role
 }
@@ -45,7 +42,6 @@ func (Query) getUsersByRole() {
 func TestValidateFileComposition_AutomationWithQueries(t *testing.T) {
 	// Valid: 1 automation + helper queries
 	source := `
-@enabled
 @trigger(event="session.opened")
 func (Automation) bootstrapUser(_ any) {
   check := query { concept==v1:user }
@@ -79,7 +75,6 @@ func (Query) helperQuery() {
 func TestValidateFileComposition_MutationWithQueries(t *testing.T) {
 	// Valid: 1 mutation + validation queries
 	source := `
-@enabled
 @audit
 func (Mutation) createUser() {
   insert("v1:user", payload={"name": args.name})
@@ -116,13 +111,11 @@ func (Query) checkDuplicate() {
 func TestValidateFileComposition_MultipleAutomations(t *testing.T) {
 	// Invalid: 2 automations
 	source := `
-@enabled
 func (Automation) first(_ any) {
   step1 := query { concept==v1:a }
   return step1
 }
 
-@enabled
 func (Automation) second(_ any) {
   step1 := query { concept==v1:b }
   return step1
@@ -146,12 +139,10 @@ func (Automation) second(_ any) {
 func TestValidateFileComposition_MultipleMutations(t *testing.T) {
 	// Invalid: 2 mutations
 	source := `
-@enabled
 func (Mutation) createA() {
   insert("v1:a", payload={})
 }
 
-@enabled
 func (Mutation) createB() {
   insert("v1:b", payload={})
 }
@@ -174,13 +165,11 @@ func (Mutation) createB() {
 func TestValidateFileComposition_MixedAutomationMutation(t *testing.T) {
 	// Invalid: automation + mutation in same file
 	source := `
-@enabled
 func (Automation) workflow(_ any) {
   step1 := query { concept==v1:a }
   return step1
 }
 
-@enabled
 func (Mutation) createRecord() {
   insert("v1:b", payload={})
 }
@@ -209,7 +198,6 @@ func TestGetPrimaryType(t *testing.T) {
 		{
 			name: "automation primary",
 			source: `
-@enabled
 func (Automation) test(_ any) {
 	step1 := query { concept==v1:a }
 	return step1
@@ -221,7 +209,6 @@ func (Query) helper() { concept==v1:b }
 		{
 			name: "mutation primary",
 			source: `
-@enabled
 func (Mutation) test() { insert("v1:a", payload={}) }
 func (Query) helper() { concept==v1:b }
 `,
@@ -230,7 +217,6 @@ func (Query) helper() { concept==v1:b }
 		{
 			name: "query only",
 			source: `
-@enabled
 func (Query) test() { concept==v1:a }
 `,
 			expected: "query",
@@ -294,7 +280,6 @@ func TestCompositionSummary(t *testing.T) {
 func TestValidateFileComposition_ArgsWithoutBlock(t *testing.T) {
 	// Invalid: Function with args parameter but no `args { ... }` block.
 	source := `
-@enabled
 @description("Search users")
 func (Query) searchUsers(args any) {
   concept==v1:user; ?.payload.role==args.role
@@ -318,7 +303,6 @@ func (Query) searchUsers(args any) {
 func TestValidateFileComposition_ArgsWithBlock(t *testing.T) {
 	// Valid: Function with args parameter AND file-top args block.
 	source := `
-@enabled
 @description("Search users")
 args {
   role    string
@@ -343,7 +327,6 @@ func (Query) searchUsers(args any) {
 func TestValidateFileComposition_NoArgsNoBlock(t *testing.T) {
 	// Valid: Function without args parameter (no args block needed).
 	source := `
-@enabled
 @description("Get all users")
 func (Query) getAllUsers() {
   concept==v1:user
@@ -364,7 +347,6 @@ func (Query) getAllUsers() {
 func TestValidateFileComposition_MutationArgsWithBlock(t *testing.T) {
 	// Valid: Mutation with args parameter AND file-top args block.
 	source := `
-@enabled
 @audit
 args {
   email  string  @required

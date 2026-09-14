@@ -174,7 +174,7 @@ func TestParseDefinition_UnknownKeyword_ListsRewriterHandledKinds(t *testing.T) 
 	// A file that reaches parseDefinition (leading annotation) with a typo'd
 	// construct keyword. The previously-omitted rewriter-handled keywords
 	// (query/mutate/logic/automation) must now appear in the hint.
-	_, err := ParseFile("@enabled\nconept foo { }")
+	_, err := ParseFile("conept foo { }")
 	if err == nil {
 		t.Fatal("expected an error for the typo'd `conept` keyword, got nil")
 	}
@@ -196,7 +196,7 @@ func TestParseDefinition_UnknownKeyword_SuggestsNearest(t *testing.T) {
 	}{
 		{"@description(\"x\")\nquer participant qFoo { }", "did you mean 'query'?"},
 		{"use cognition.concepts.{ space }\n\nshaep space s { row.id }", "did you mean 'shape'?"},
-		{"@enabled\nmutaton space createSpace { }", "did you mean 'mutate'?"},
+		{"mutaton space createSpace { }", "did you mean 'mutate'?"},
 	}
 	for _, tc := range cases {
 		_, err := ParseFile(tc.src)

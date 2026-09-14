@@ -36,20 +36,17 @@ concept widget {
   label  string  @required @description("Label.")
 }`),
 		"cluster/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("The pin target exists but declares no widget.")
 concept gadget {
   label  string  @required @description("Label.")
 }`),
 		"other/concepts.memql": file(`@version("1.0.0")
-@namespace("other")
 @description("A second widget, so the bare name is ambiguous at boot.")
 concept widget {
   name  string  @required @description("Name.")
 }`),
 		"deploy/queries.memql": file(`use cluster.concepts.{ widget }
 
-@enabled
 @description("Imports a namespace this decl does NOT assemble under.")
 query widget deployWidgets {
   args {
@@ -104,7 +101,6 @@ func TestLane1_NamespaceDoesNotReachAnUnrelatedDirectory(t *testing.T) {
 	root := pinnedNamespaceWithRealDirTree()
 	root["deploy/queries.memql"] = file(`use cluster.concepts.{ widget, sprocket }
 
-@enabled
 @description("sprocket is declared only in other/, which is not in the cluster namespace.")
 query widget deployWidgets {
   args {
@@ -113,7 +109,6 @@ query widget deployWidgets {
   filter  label == args.label
 }`)
 	root["other/concepts.memql"] = file(`@version("1.0.0")
-@namespace("other")
 @description("Declares sprocket, in a namespace the import does not name.")
 concept widget {
   name  string  @required @description("Name.")
@@ -147,7 +142,6 @@ func TestLane1_ColonScopedPinAgreesWithBoot(t *testing.T) {
 	root := pinnedNamespaceWithRealDirTree()
 	root["deploy/namespace.pin"] = file("cluster:rollout\n")
 	root["deploy/concepts.memql"] = file(`@version("1.0.0")
-@namespace("cluster:rollout")
 @description("Colon-scoped pin: assembles v1:cluster:rollout:widget.")
 concept widget {
   label  string  @required @description("Label.")
@@ -167,7 +161,6 @@ concept widget {
 	scoped["deploy/concepts.memql"] = root["deploy/concepts.memql"]
 	scoped["deploy/queries.memql"] = file(`use cluster:rollout.concepts.{ widget }
 
-@enabled
 @description("Imports by the full pinned namespace.")
 query widget deployWidgets {
   args {
@@ -236,14 +229,12 @@ concept widget {
   label  string  @required @description("Label.")
 }`),
 		"cluster/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("The pin target exists but declares no widget.")
 concept gadget {
   label  string  @required @description("Label.")
 }`),
 		"deploy/queries.memql": file(`use cluster.concepts.{ widget }
 
-@enabled
 @description("Boot binds this: widget is unique, so the hint is not consulted.")
 query widget deployWidgets {
   args {

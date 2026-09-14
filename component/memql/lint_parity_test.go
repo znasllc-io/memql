@@ -46,7 +46,6 @@ func lint(t *testing.T, root fstest.MapFS) []LintDiagnostic {
 func TestLintParity_CleanPackHasNoDiagnostics(t *testing.T) {
 	root := fstest.MapFS{
 		"lintclean/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("lintclean")
 @description("A clean gizmo.")
 concept gizmo {
   label  string  @required  @description("Gizmo label.")
@@ -54,7 +53,6 @@ concept gizmo {
 `)},
 		"lintclean/mutations.memql": {Data: []byte(`use lintclean.concepts.{ gizmo }
 
-@enabled
 @description("Create a gizmo.")
 mutation gizmo createGizmo {
   args {
@@ -81,14 +79,12 @@ mutation gizmo createGizmo {
 func TestLintParity_NonCanonicalRelationshipType(t *testing.T) {
 	root := fstest.MapFS{
 		"lintrel/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("lintrel")
 @description("A hub other rows point at.")
 concept hub {
   name  string  @required  @description("Hub name.")
 }
 
 @version("1.0.0")
-@namespace("lintrel")
 @description("A gadget pointing at a hub via a NON-canonical relationship type.")
 concept gadget {
   hubId  string  @required  @description("FK to the owning hub.")
@@ -110,7 +106,6 @@ concept gadget {
 func TestLintParity_DeclaredButUnusedMutationArg(t *testing.T) {
 	root := fstest.MapFS{
 		"lintarg/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("lintarg")
 @description("A widget.")
 concept widget {
   label  string  @required  @description("Widget label.")
@@ -118,7 +113,6 @@ concept widget {
 `)},
 		"lintarg/mutations.memql": {Data: []byte(`use lintarg.concepts.{ widget }
 
-@enabled
 @description("Create a widget; declares an arg the body never references.")
 mutation widget createWidget {
   args {
@@ -155,7 +149,6 @@ mutation widget createWidget {
 func TestLintParity_LogicReadsEventWithoutDeclaringIt(t *testing.T) {
 	root := fstest.MapFS{
 		"lintlogic/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("lintlogic")
 @description("A marker concept so the domain carries a concept.")
 concept marker {
   label  string  @required  @description("Marker label.")
@@ -187,7 +180,6 @@ logic decideThing {
 func TestLintParity_LogicArithmeticOverComparison(t *testing.T) {
 	root := fstest.MapFS{
 		"lintarith/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("lintarith")
 @description("A marker concept so the domain carries a concept.")
 concept marker {
   label  string  @required  @description("Marker label.")
@@ -218,7 +210,6 @@ logic ratioGate {
 func TestLintParity_LogicParenthesizedComparisonIsClean(t *testing.T) {
 	root := fstest.MapFS{
 		"lintarithok/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("lintarithok")
 @description("A marker concept so the domain carries a concept.")
 concept marker {
   label  string  @required  @description("Marker label.")
@@ -251,7 +242,6 @@ logic ratioGateOK {
 func TestLintParity_DuplicateConstruct(t *testing.T) {
 	root := fstest.MapFS{
 		"lintdup/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("lintdup")
 @description("A widget.")
 concept widget {
   label  string  @required  @description("Widget label.")
@@ -259,7 +249,6 @@ concept widget {
 `)},
 		"lintdup/mutations.memql": {Data: []byte(`use lintdup.concepts.{ widget }
 
-@enabled
 @description("Create a widget.")
 mutation widget createWidget {
   args {
@@ -277,7 +266,6 @@ mutation widget createWidget {
 		// flags (same-file re-declarations collapse to one origin).
 		"lintdup/mutations_extra.memql": {Data: []byte(`use lintdup.concepts.{ widget }
 
-@enabled
 @description("Create a widget -- a duplicate name in a second file.")
 mutation widget createWidget {
   args {
@@ -320,7 +308,6 @@ mutation widget createWidget {
 func TestLintParity_ShapeBarePayloadFieldIsNotTheRemovedPrefixForm(t *testing.T) {
 	root := fstest.MapFS{
 		"lintpayload/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("lintpayload")
 @description("A record.")
 concept record {
   label    string  @required  @description("A field.")
@@ -355,7 +342,6 @@ shape record recordView {
 func TestLintParity_ShapeRemovedPayloadPrefixRejected(t *testing.T) {
 	root := fstest.MapFS{
 		"lintpayloadbad/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("lintpayloadbad")
 @description("A record.")
 concept record {
   label  string  @required  @description("A field.")

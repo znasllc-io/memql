@@ -20,7 +20,6 @@ import (
 )
 
 const authConceptSrc = `@version("1.0.0")
-@namespace("c1grpc")
 @description("C1 grpc test widget")
 concept c1Widget {
   ownerUserId  string  @required

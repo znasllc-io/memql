@@ -270,7 +270,6 @@ builtin buildReport {
   columns   array
 }
 
-@enabled
 @executor("integration.auth.checkPermission")
 @description("Internal permission check -- not client-facing.")
 builtin authCheckPermission {

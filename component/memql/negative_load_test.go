@@ -46,10 +46,10 @@ func loadMemFS(name, body string) error {
 
 func TestNegativeLoad_MalformedBodyPerKind(t *testing.T) {
 	cases := []struct{ kind, file, body string }{
-		{"concept", "x/concepts.memql", "@version(\"1.0.0\")\n@namespace(\"v1:x:y\")\nconcept c {\n  name string @@@ !!! broken\n}\n"},
+		{"concept", "x/concepts.memql", "@version(\"1.0.0\")\nconcept c {\n  name string @@@ !!! broken\n}\n"},
 		{"shape", "x/shapes.memql", "@row\nshape s {\n  row.id\n  123 456 789\n}\n"},
-		{"spec", "x/specs.memql", "@enabled\nspec activeRowTrait s {\n  return status ==== \"x\" &&&& true\n}\n"},
-		{"trait", "x/traits.memql", "@enabled\ntrait t {\n  return active ==== true\n}\n"},
+		{"spec", "x/specs.memql", "spec activeRowTrait s {\n  return status ==== \"x\" &&&& true\n}\n"},
+		{"trait", "x/traits.memql", "trait t {\n  return active ==== true\n}\n"},
 		{"mutation", "x/mutations.memql", "use cognition.concepts.{ space }\nmutation space m {\n  ?? !! garbage\n}\n"},
 		{"query", "x/queries.memql", "use cognition.concepts.{ space }\nquery space q {\n  filter @@@ !!! broken\n  shape spaceFull\n}\n"},
 		{"logic", "x/logic.memql", "logic l {\n  args { event object @required }\n  return 1\n}\n"}, // missing body{}
@@ -102,7 +102,7 @@ func TestNegativeLoad_UnbalancedBraces(t *testing.T) {
 // 2b. A typo'd top-level construct keyword surfaces a Load diagnostic carrying
 // the S3 did-you-mean hint.
 func TestNegativeLoad_TypoTopLevelKeyword(t *testing.T) {
-	err := loadMemFS("x/concepts.memql", "@enabled\nconept foo { }\n")
+	err := loadMemFS("x/concepts.memql", "conept foo { }\n")
 	if err == nil {
 		t.Fatal("Load accepted a typo'd top-level keyword `conept`")
 	}
@@ -128,8 +128,8 @@ func TestNegativeLoad_ConstructNestedAtWrongDepth(t *testing.T) {
 // closure and asserts (a) only one construct registers and (b) the drop is
 // surfaced as a WARN the load-clean gate (skipLike) catches.
 func TestNegativeLoad_DuplicateNamesWarnSkip(t *testing.T) {
-	const dup = "@enabled\nspec activeRowTrait sA {\n  return active == true\n}\n" +
-		"@enabled\nspec activeRowTrait sA {\n  return active == false\n}\n"
+	const dup = "spec activeRowTrait sA {\n  return active == true\n}\n" +
+		"spec activeRowTrait sA {\n  return active == false\n}\n"
 	capture := newCaptureHandler()
 	logger := slog.New(capture)
 	files := []baseloader.RawFile{{Path: "x/specs.memql", Content: dup}}

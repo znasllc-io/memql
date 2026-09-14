@@ -18,7 +18,7 @@ func TestRewriteRedundantNamespace(t *testing.T) {
 	}
 
 	t.Run("directory-equal-strips", func(t *testing.T) {
-		src := "@namespace(\"cognition\")\n@version(\"1.0.0\")\nconcept space {\n}\n"
+		src := "@version(\"1.0.0\")\nconcept space {\n}\n"
 		got := strip(t, "cognition", src)
 		if strings.Contains(got, "@namespace") {
 			t.Errorf("directory-equal @namespace must strip:\n%s", got)
@@ -28,19 +28,19 @@ func TestRewriteRedundantNamespace(t *testing.T) {
 		}
 	})
 	t.Run("colon-scoped-stays", func(t *testing.T) {
-		src := "@namespace(\"cognition:client:tool\")\nconcept tool {\n}\n"
+		src := "concept tool {\n}\n"
 		if got := strip(t, "cognition", src); !strings.Contains(got, "@namespace(\"cognition:client:tool\")") {
 			t.Errorf("colon-scoped sub-namespace is load-bearing:\n%s", got)
 		}
 	})
 	t.Run("divergent-stays", func(t *testing.T) {
-		src := "@namespace(\"cluster\")\nconcept deployment {\n}\n"
+		src := "concept deployment {\n}\n"
 		if got := strip(t, "deployment", src); !strings.Contains(got, "@namespace(\"cluster\")") {
 			t.Errorf("pinned divergence is load-bearing:\n%s", got)
 		}
 	})
 	t.Run("idempotent", func(t *testing.T) {
-		src := "@namespace(\"cognition\")\nconcept space {\n}\n"
+		src := "concept space {\n}\n"
 		once := strip(t, "cognition", src)
 		if twice := strip(t, "cognition", once); twice != once {
 			t.Errorf("must converge")

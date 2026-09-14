@@ -208,7 +208,6 @@ func dotAccessLoadRegistry() memoryNodes.Registry {
 // (load), not defer to a runtime failure inside engine.executeWith.
 func TestLogicDotAccess_CallResultObjectRejectedAtLoad(t *testing.T) {
 	src := strings.Join([]string{
-		"@enabled",
 		"@useQuery(getUser)",
 		"@description(\"call-result field access must fail at load\")",
 		"logic logicCallResultPluck {",
@@ -238,7 +237,6 @@ func TestLogicDotAccess_CallResultObjectRejectedAtLoad(t *testing.T) {
 // *ast.DotAccessExpr".
 func TestLogicDotAccessLoads(t *testing.T) {
 	src := strings.Join([]string{
-		"@enabled",
 		"@description(\"pluck the newest row's createdAt\")",
 		"logic logicNewestCreatedAt {",
 		"  args {",
@@ -269,7 +267,6 @@ func TestLogicDotAccessLoads(t *testing.T) {
 // failure); the body is stashed on fn.LogicSteps for the LogicRunner.
 func TestLogicDotAccessLoads_MultiStep(t *testing.T) {
 	src := strings.Join([]string{
-		"@enabled",
 		"@useQuery(queryThing)",
 		"@description(\"pluck a field off a step result\")",
 		"logic logicPluckStepField {",

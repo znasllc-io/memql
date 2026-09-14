@@ -60,7 +60,7 @@ func TestDefinition_JumpsToDeclarationInAnotherFile(t *testing.T) {
 	if err := os.MkdirAll(domain, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	concepts := "@version(\"1.0.0\")\n@namespace(\"actions\")\nconcept candidate {\n  id  string  @required\n}\n"
+	concepts := "@version(\"1.0.0\")\nconcept candidate {\n  id  string  @required\n}\n"
 	shapes := "@row\nshape candidate candidateFull {\n  id\n}\n"
 	if err := os.WriteFile(filepath.Join(domain, "concepts.memql"), []byte(concepts), 0o644); err != nil {
 		t.Fatal(err)

@@ -32,7 +32,6 @@ func parseForTest(t *testing.T, src string) *parser.File {
 
 func TestDirectivesInBodyRule_FlagsSortCall(t *testing.T) {
 	src := `
-@enabled
 @description("bad")
 func (Query) bad(args any) (any, error) {
   return sort(concept==v1:platform:partition, "payload.name", "asc"), nil
@@ -53,7 +52,6 @@ func (Query) bad(args any) (any, error) {
 
 func TestDirectivesInBodyRule_IgnoresAllowedCall(t *testing.T) {
 	src := `
-@enabled
 @description("ok")
 func (Query) queryListPartitions(args any) (any, error) {
   return concept==v1:platform:partition, nil
@@ -69,7 +67,6 @@ func (Query) queryListPartitions(args any) (any, error) {
 func TestNameShapeRule_FlagsLongName(t *testing.T) {
 	longName := strings.Repeat("a", 55)
 	src := `
-@enabled
 @description("too long")
 func (Query) ` + longName + `(args any) (any, error) {
   return concept==v1:foo:bar, nil
@@ -87,7 +84,6 @@ func (Query) ` + longName + `(args any) (any, error) {
 
 func TestNameShapeRule_IgnoresShortCamelCase(t *testing.T) {
 	src := `
-@enabled
 @description("fine")
 func (Query) queryListPartitions(args any) (any, error) {
   return concept==v1:platform:partition, nil
@@ -150,7 +146,7 @@ func (Prompt) foo(args any) {}
 // #2610: construct-attached @enabled gets the soft-deprecation hint; a
 // stripped construct and prose mentions do not.
 func TestRedundantEnabledRule(t *testing.T) {
-	withAnnotation := "@enabled\n@description(\"probe\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n"
+	withAnnotation := "@description(\"probe\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n"
 	diags := redundantEnabledRule(withAnnotation)
 	if len(diags) != 1 {
 		t.Fatalf("want 1 hint on a construct-attached @enabled, got %d", len(diags))
@@ -161,7 +157,7 @@ func TestRedundantEnabledRule(t *testing.T) {
 	if diags[0].Range.Start.Line != 1 {
 		t.Errorf("hint anchored at line %d, want 1", diags[0].Range.Start.Line)
 	}
-	indented := "\t@enabled\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n"
+	indented := "\tquery Space probeQuery {\n  filter { payload.active == true }\n}\n"
 	ind := redundantEnabledRule(indented)
 	if len(ind) != 1 || ind[0].Range.Start.Column != 2 {
 		t.Fatalf("indented @enabled must anchor on the token (col 2), got %+v", ind)
@@ -176,7 +172,7 @@ func TestRedundantEnabledRule(t *testing.T) {
 		}
 	}
 
-	clean := "@description(\"probe mentions @enabled in prose\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n// historical note: this construct once carried @enabled\n"
+	clean := "@description(\"probe mentions @enabled in prose\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n// historical note: this construct once carried "
 	if got := redundantEnabledRule(clean); len(got) != 0 {
 		t.Fatalf("prose/comment mentions must not hint, got %d", len(got))
 	}

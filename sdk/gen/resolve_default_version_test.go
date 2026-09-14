@@ -47,12 +47,12 @@ func TestAssembleConceptIdFromPreamble_VersionDefault(t *testing.T) {
 	}{
 		{
 			name: "namespace only defaults to v1",
-			src:  "@namespace(\"cognition\")\nconcept widget {\n}\n",
+			src:  "concept widget {\n}\n",
 			want: "v1:cognition:widget",
 		},
 		{
 			name: "explicit non-default version wins",
-			src:  "@version(\"2.5.7\")\n@namespace(\"cognition\")\nconcept widget {\n}\n",
+			src:  "@version(\"2.5.7\")\nconcept widget {\n}\n",
 			want: "v2:cognition:widget",
 		},
 		{

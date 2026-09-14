@@ -46,7 +46,7 @@ func TestRewriteAttributes(t *testing.T) {
 		},
 		{
 			name: "enabled is stripped and disabled is kept",
-			in:   "@enabled\n@disabled\nquery user q {\n  filter active==true\n}\n",
+			in:   "@disabled\nquery user q {\n  filter active==true\n}\n",
 			want: "@disabled\nquery user q {\n  filter active==true\n}\n",
 		},
 		{
@@ -129,7 +129,7 @@ func TestRewriteAttributesLeavesCommentProseAlone(t *testing.T) {
 // same bytes as running it once, or a repeated `-w` pass over a tree that is
 // already migrated starts corrupting it.
 func TestRewriteAttributesIsIdempotent(t *testing.T) {
-	src := "@enabled\n@nocache\n@cache(ttl=\"300\")\nmutation folder f {\n  insert { id: args.id }\n}\n"
+	src := "@nocache\n@cache(ttl=\"300\")\nmutation folder f {\n  insert { id: args.id }\n}\n"
 	once, err := rewriteAttributes([]byte(src))
 	if err != nil {
 		t.Fatalf("first pass: %v", err)

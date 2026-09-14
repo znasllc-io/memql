@@ -32,7 +32,7 @@ func loadTemporalQuery(t *testing.T, name, asOfClause string) *Function {
 		argsBlock = "  args {\n    asOf  datetime\n  }\n"
 	}
 	src := "use cluster.concepts.{ node }\n\n" +
-		"@enabled\n" +
+		"" +
 		"query node " + name + " {\n" +
 		argsBlock +
 		"  " + asOfClause + "\n" +
@@ -63,7 +63,7 @@ func TestQueryAsOfTimestampNotMarked(t *testing.T) {
 // time-dependent.
 func TestQueryNoAsOfNotMarked(t *testing.T) {
 	src := "use cluster.concepts.{ node }\n\n" +
-		"@enabled\n" +
+		"" +
 		"query node queryPlainNodes {\n" +
 		"  filter  payload.active == true\n" +
 		"  shape   nodeCard\n" +

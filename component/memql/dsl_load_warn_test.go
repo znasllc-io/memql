@@ -24,7 +24,7 @@ import (
 // and (c) the CI lint gate (strip removed the body before parsing).
 func TestMalformedConstructWarnsAtLoad(t *testing.T) {
 	// The exact garbage-spec body called out in the epic #2351 audit.
-	const garbageSpec = "@enabled\n@description(\"bad\")\nspec activeRowTrait specBad {\n" +
+	const garbageSpec = "@description(\"bad\")\nspec activeRowTrait specBad {\n" +
 		"  return status ==== \"x\" &&&& true\n}\n"
 	// Balanced braces (so slice extraction still finds the block) but a
 	// body the shape parser rejects: numeric tokens where field paths

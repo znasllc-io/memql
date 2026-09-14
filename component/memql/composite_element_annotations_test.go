@@ -37,7 +37,7 @@ import (
 // given type-and-annotation text, and returns f's JSON-Schema subtree.
 func buildCompositeField(t *testing.T, decl string) (map[string]any, error) {
 	t.Helper()
-	src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+	src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 		"concept probe {\n  label string @required @description(\"l\")\n  f " + decl + "\n}\n"
 	decls := ExtractConceptDecls(src)
 	if len(decls) == 0 {

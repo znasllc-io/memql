@@ -16,7 +16,6 @@ import (
 func TestDeclarationSites_PositionOfDeclaredName(t *testing.T) {
 	tree := loadTree(t, fstest.MapFS{
 		"actions/concepts.memql": file(`@version("1.0.0")
-@namespace("actions")
 /// A captured trace.
 concept candidate {
   id  string  @required
@@ -66,12 +65,10 @@ shape candidate candidateFull {
 func TestDeclarationSites_ReturnsEveryCollidingDeclaration(t *testing.T) {
 	tree := loadTree(t, fstest.MapFS{
 		"planner/concepts.memql": file(`@version("1.0.0")
-@namespace("planner")
 concept plan {
   id  string  @required
 }`),
 		"harness/concepts.memql": file(`@version("1.0.0")
-@namespace("harness")
 concept plan {
   id  string  @required
 }`),
@@ -96,7 +93,6 @@ concept plan {
 func TestDeclarationSites_UnknownName(t *testing.T) {
 	tree := loadTree(t, fstest.MapFS{
 		"actions/concepts.memql": file(`@version("1.0.0")
-@namespace("actions")
 concept candidate {
   id  string  @required
 }`),

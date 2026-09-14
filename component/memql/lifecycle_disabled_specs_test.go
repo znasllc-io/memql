@@ -27,7 +27,6 @@ spec actorEnvelope retiredProbeSpec {
   return role == "admin"
 }
 
-@enabled
 spec actorEnvelope liveProbeSpec {
   return role == "admin"
 }
@@ -89,7 +88,6 @@ trait retiredProbeTrait {
   return effect == "allow"
 }
 
-@enabled
 trait liveProbeTrait {
   return effect == "allow"
 }
@@ -122,7 +120,6 @@ capability integration.probe.retiredVerb {
   }
 }
 
-@enabled
 capability integration.probe.liveVerb {
   args {
     subject string @required

@@ -23,7 +23,6 @@ func TestDetectsUnmarkedListQuery(t *testing.T) {
 	src := `use cognition.concepts.{ widget }
 use cognition.shapes.{ widgetFull }
 
-@enabled
 @description("Brand-new unmarked list read -- no paginate, no sort, no @unbounded.")
 query widget queryAllWidgetsUnmarked {
   args {

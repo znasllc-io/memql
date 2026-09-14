@@ -90,7 +90,6 @@ concept==v1:test
 
 func TestParser_ForRange_EnforcesItemVarName(t *testing.T) {
 	input := `
-@enabled
 func (Automation) testAuto(_ any) {
   q := query { concept==v1:test }
   for agent := range q.result {
@@ -114,7 +113,6 @@ func (Automation) testAuto(_ any) {
 
 func TestParser_ForRange_GeneratesUniqueForEachStepIds(t *testing.T) {
 	input := `
-@enabled
 func (Automation) testAuto(_ any) {
   q := query { concept==v1:test }
   for item := range q.result {
@@ -447,7 +445,6 @@ func TestParser_RegularFunctionCall(t *testing.T) {
 
 func TestParser_AutomationStep_FunctionCall(t *testing.T) {
 	input := `
-@enabled
 func (Automation) testAuto(_ any) {
   checkUser := userById(userId=event.payload.userId)
   return checkUser
@@ -503,7 +500,6 @@ func (Automation) testAuto(_ any) {
 
 func TestParser_AutomationStep_ConditionalFunctionCall(t *testing.T) {
 	input := `
-@enabled
 func (Automation) testAuto(_ any) {
   createSession := if first(checkExisting).id==nil {
     mutationCreateSession(partitionId=event.payload.partitionId, participantId=event.payload.id)
@@ -545,7 +541,6 @@ func (Automation) testAuto(_ any) {
 
 func TestParser_AutomationDefinition(t *testing.T) {
 	input := `
-@enabled
 func (Automation) testAutomation(_ any) {
 	step1 := query {
 		concept==v1:test
@@ -1205,7 +1200,6 @@ func (Automation) bootstrap(ctx any) {
 
 func TestParser_AttributeSimple(t *testing.T) {
 	input := `
-@enabled
 func (Automation) myAutomation(_ any) {
   checkUser := query {
     concept==v1:user
@@ -1259,7 +1253,6 @@ func (Automation) myAutomation(_ any) {
 
 func TestParser_AttributeWithArgs(t *testing.T) {
 	input := `
-@enabled
 @trigger(event="session.opened")
 @description("Auto-provision user")
 func (Automation) bootstrapUser(_ any) {
@@ -1321,7 +1314,6 @@ func (Automation) bootstrapUser(_ any) {
 
 func TestParser_GoStyleQuery(t *testing.T) {
 	input := `
-@enabled
 @description("Returns active users")
 func (Query) activeUsers(args any) (any, error) {
   return concept==v1:user; payload.active==true, nil
@@ -1376,7 +1368,6 @@ func (Query) activeUsers(args any) (any, error) {
 
 func TestParser_GoStyleSchedule(t *testing.T) {
 	input := `
-@enabled
 @schedule(cron="*/30 * * * *")
 func (Automation) scheduledTask(_ any) {
   doWork := query {
@@ -1495,7 +1486,6 @@ func (Automation) myAutomation(_ any) {
 
 func TestParser_ArgsAttribute(t *testing.T) {
 	input := `
-@enabled
 @args({ "userId": { "type": "string", "required": true }, "limit": { "type": "number", "default": 10 } })
 func (Query) searchUsers(args any) (any, error) {
   return concept==v1:user; ?.payload.userId==args.userId, nil
@@ -1620,7 +1610,6 @@ func TestParser_ErrorFunctionEmpty(t *testing.T) {
 
 func TestParser_SpecDefinition(t *testing.T) {
 	input := `
-@enabled
 @description("Node includes both email and phone number fields.")
 func (Spec) hasUserContact() bool {
   return payload.email!=nil;payload.phoneNumber!=nil
@@ -1682,7 +1671,6 @@ func (Spec) hasUserContact() bool {
 
 func TestParser_SpecWithOrCondition(t *testing.T) {
 	input := `
-@enabled
 @description("Node has at least one contact method")
 func (Spec) hasContactMethod() bool {
   return payload.email!=nil,payload.phone!=nil
@@ -1727,7 +1715,6 @@ func (Spec) hasContactMethod() bool {
 
 func TestParser_SpecWithRelationship(t *testing.T) {
 	input := `
-@enabled
 @description("Node's parent has status active")
 func (Spec) hasActiveParent() bool {
   return parentOf(payload.status=="active")
@@ -1775,7 +1762,6 @@ func (Spec) hasActiveParent() bool {
 // 2. ConditionalFilterExpr.ArgPath is correctly extracted from the comparison value
 func TestParser_ConditionalFilterWithArgsFieldName(t *testing.T) {
 	input := `
-@enabled
 args {
   partitionId  string
   status   string
@@ -1882,7 +1868,6 @@ func collectConditionalFilters(expr ExpressionNode, filters *[]*ConditionalFilte
 
 func TestParser_MutationBody_PreservesIdTemplate_ArgAccessor(t *testing.T) {
 	input := `
-@enabled
 func (Mutation) createThing(args any) error {
   return insert("v1:thing",
     id=args.partitionId,
@@ -1926,7 +1911,6 @@ func (Mutation) createThing(args any) error {
 
 func TestParser_MutationBody_PreservesIdTemplate_Concat(t *testing.T) {
 	input := `
-@enabled
 func (Mutation) createThing(args any) error {
   return insert("v1:thing",
     id=concat("thing-", hash(concat(args.partitionId, ":", args.userId))),
@@ -1966,7 +1950,6 @@ func (Mutation) createThing(args any) error {
 
 func TestParser_MutationBody_PreservesCreatedAtTemplate_ArgAccessor(t *testing.T) {
 	input := `
-@enabled
 func (Mutation) createThing(args any) error {
   return insert("v1:thing",
     createdAt=args.createdAt,
@@ -2020,7 +2003,6 @@ func TestParser_MutationBody_KindInsertVsUpdate(t *testing.T) {
 		{
 			name: "insert keyword stamps Kind=insert",
 			input: `
-@enabled
 func (Mutation) createThing(args any) error {
   return insert("v1:thing", id=args.id, payload={ name: args.name })
 }`,
@@ -2029,7 +2011,6 @@ func (Mutation) createThing(args any) error {
 		{
 			name: "update keyword stamps Kind=update",
 			input: `
-@enabled
 func (Mutation) editThing(args any) error {
   return update("v1:thing", id=args.id, payload={ status: args.status })
 }`,

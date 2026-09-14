@@ -19,8 +19,8 @@ const (
 func repoShapedFS() fstest.MapFS {
 	return fstest.MapFS{
 		"dsl/test.memql":              &fstest.MapFile{Data: []byte("// scratch\n")},
-		"dsl/calendar/concepts.memql": &fstest.MapFile{Data: []byte("@version(\"1.0.0\")\n@namespace(\"calendar\")\nconcept calendarEvent {\n  id  string  @required\n}")},
-		"dsl/agents/concepts.memql":   &fstest.MapFile{Data: []byte("@version(\"1.0.0\")\n@namespace(\"agents\")\nconcept agent {\n  id  string  @required\n}")},
+		"dsl/calendar/concepts.memql": &fstest.MapFile{Data: []byte("@version(\"1.0.0\")\nconcept calendarEvent {\n  id  string  @required\n}")},
+		"dsl/agents/concepts.memql":   &fstest.MapFile{Data: []byte("@version(\"1.0.0\")\nconcept agent {\n  id  string  @required\n}")},
 		"component/memql/engine.go":   &fstest.MapFile{Data: []byte("package memql\n")},
 		"docs/readme.md":              &fstest.MapFile{Data: []byte("# docs\n")},
 	}
