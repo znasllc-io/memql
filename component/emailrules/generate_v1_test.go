@@ -217,8 +217,8 @@ func TestConditionRefusals(t *testing.T) {
 	}
 }
 
-// TestGeneratedAutomationIsV1: the construct parses with the edition-2026
-// grammar on and compiles as a v1 automation -- the trigger filter a lambda,
+// TestGeneratedAutomationIsV1: the construct parses in edition 2026 and
+// compiles as a v1 automation -- the trigger filter a lambda,
 // the step's arguments expression leaves the run's scope resolves -- which the
 // automations runtime prepares without refusal.
 func TestGeneratedAutomationIsV1(t *testing.T) {
@@ -247,8 +247,8 @@ func TestGeneratedAutomationIsV1(t *testing.T) {
 		t.Fatalf("compile: %v", err)
 	}
 	compiled := res.Automations[0].JSON
-	if compiled["expressions"] != "v1" {
-		t.Fatalf(`compiled "expressions" = %#v, want "v1"`, compiled["expressions"])
+	if _, marked := compiled["expressions"]; marked {
+		t.Fatalf(`the retired "expressions" marker is written: %#v`, compiled["expressions"])
 	}
 	b, err := json.Marshal(compiled)
 	if err != nil {
