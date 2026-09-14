@@ -282,7 +282,8 @@
       "file": "tags-count.memql",
       "verdict": "lower",
       "concept": "ticket",
-      "sql": "COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(payload->'tags') = 'array' THEN payload->'tags' END), 0) > ?"
+      "sql": "(CASE jsonb_typeof(payload->'tags') WHEN 'array' THEN jsonb_array_length(payload->'tags') WHEN 'string' THEN char_length(payload #>> '{tags}') ELSE 0 END) > ?",
+      "note": "count() dispatches on what is stored: an array's length, a string's characters, zero for anything else."
     },
     {
       "file": "tags-count.memql",
@@ -295,6 +296,27 @@
         ]
       },
       "expect": true
+    },
+    {
+      "file": "tags-count.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": "abc"
+      },
+      "expect": true,
+      "note": "count() counts what is stored, whatever the field declares: a list field holding a corrupt string counts its characters, in SQL and in process alike."
+    },
+    {
+      "file": "tags-count.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": {
+          "k": "a"
+        }
+      },
+      "expect": false
     },
     {
       "file": "parenthesised-or.memql",

@@ -43,12 +43,11 @@ import (
 // evaluates on both paths), so it keeps EvalExpr's refusals: `in` over a
 // number an author passed is a mistake to name, not a row to skip.
 //
-// count() over a stored STRING stays the character count (string.count): the
-// catalog gives count() to strings, and a refine clause is where Lower sends a
-// string's count (`.count()` on a string has no pushdown form). The pushdown's
-// count of a non-array is 0, so over a list-or-untyped field holding a string
-// the two still differ; which reading wins is recorded as an open question in
-// expr_lower_agreement_db_test.go (irEvalDivergentRows), not decided here.
+// count() over a stored STRING is its character count (string.count, code
+// points): count() counts what is stored, whatever the field declares, and the
+// pushdown's count dispatches on jsonb_typeof the same way -- an array its
+// length, a string its characters (char_length), anything else 0 -- so a
+// declared list holding a corrupt string counts its characters on both paths.
 //
 // # What counts as stored
 //

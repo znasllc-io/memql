@@ -68,13 +68,14 @@ func TestEvalExprStoredMismatchIsNoMatch(t *testing.T) {
 		}
 	}
 
-	// count() of a stored value that is not a list is zero -- an object is no
-	// longer a one-element list -- while a string keeps its character count
-	// (the open question named in irEvalDivergentRows).
-	for name, want := range map[string]bool{"an object": true, "a number": true, "a boolean": true, "a scalar string": false} {
-		got, err := storedCase(t, `row => row.tags.count() == 0`, MapScope{"row": rows[name]}, EvalOptions{})
-		if err != nil || got != want {
-			t.Errorf("row.tags.count() == 0 over a stored %s = %v, %v; want %v", name, got, err, want)
+	// count() counts what is stored: an object is no longer a one-element
+	// list, anything that is neither a list nor a string counts 0, and a
+	// string counts its characters -- the pushdown's count dispatches on
+	// jsonb_typeof the same way.
+	for name, want := range map[string]int{"an object": 0, "a number": 0, "a boolean": 0, "a scalar string": 1} {
+		got, err := EvalExpr(context.Background(), xmeth(xpath("row", "tags"), "count"), MapScope{"row": rows[name]}, EvalOptions{})
+		if err != nil || got != int64(want) {
+			t.Errorf("row.tags.count() over a stored %s = %#v, %v; want %d", name, got, err, want)
 		}
 	}
 

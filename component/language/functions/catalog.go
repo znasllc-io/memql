@@ -484,14 +484,17 @@ func entries() []Function {
 
 		// ---- Methods on a list ----
 		//
-		// count, any and all are P: over a row array field they lower to SQL
-		// (jsonb_array_length, EXISTS over jsonb_array_elements). Over any
+		// count, any and all are P: over a row field they lower to SQL
+		// (a CASE on jsonb_typeof, EXISTS over jsonb_array_elements). Over any
 		// other list -- an arg, a step result -- they run in process like the
-		// M methods; the tier names what the method CAN push down.
+		// M methods; the tier names what the method CAN push down. Over a row
+		// field, count() counts what is stored, whatever the field declares --
+		// a string's characters included -- as EvalExpr's dispatch on the
+		// value does, so the two agree on a corrupt row.
 		{
 			Name:     "count",
 			Receiver: TypeList,
-			Doc:      "Returns the number of elements in the list. An absent list counts as zero.",
+			Doc:      "Returns the number of elements in the list. An absent list counts as zero. Over a row field it counts what is stored: an array's elements, a string's characters, and zero for anything else.",
 			Returns:  TypeNumber,
 			Tier:     TierP,
 			Retired:  []string{"len(x)", "count(x)"},

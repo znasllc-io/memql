@@ -23,11 +23,10 @@ package conformance
 // a refine clause over the same rows would fail the read. Each is named with
 // the case file (or the generated expression), the row and both answers.
 //
-// Two disagreements are known and recorded as open questions of the language
+// One disagreement is known and recorded as an open question of the language
 // (component/memql/expr_lower_agreement_db_test.go, irEvalDivergentRows): a
 // bare condition over a stored non-boolean, which D8 refuses in process and
-// the SQL reads as "not true", and count() of a stored string, the string's
-// characters in process and 0 in the pushdown. The lane logs both.
+// the SQL reads as "not true". The lane logs it.
 //
 // ADVISORY until the freeze epic (dsl-v1-freeze): a disagreement is logged on
 // a line starting `DIFFERENTIAL:` and the test passes, unless
@@ -184,6 +183,9 @@ func laneMatrix() []string {
 		`row => row.flag != false`,
 		`row => row.flag`,
 		`row => !row.flag`,
+		// count() counts what the field stores.
+		`row => row.value.count() == 1`,
+		`row => row.value.count() == 0`,
 	)
 	return out
 }

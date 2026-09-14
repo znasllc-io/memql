@@ -996,6 +996,36 @@
       "expect": false
     },
     {
+      "file": "tags-count-zero.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": "a"
+      },
+      "expect": false,
+      "note": "count() counts what is stored: a string its characters, so a list field holding a corrupt \"a\" counts one."
+    },
+    {
+      "file": "tags-count-zero.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": {
+          "k": "a"
+        }
+      },
+      "expect": true
+    },
+    {
+      "file": "tags-count-zero.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": 7
+      },
+      "expect": true
+    },
+    {
       "file": "value-one-character.memql",
       "verdict": "evaluate",
       "concept": "ticket",
