@@ -2067,7 +2067,7 @@ type automationStep struct {
 	// statement (e.g. a `for item := range ... { ... }` loop) that must be
 	// emitted verbatim into the automation body rather than as a
 	// `<name> := <call>` assignment. The forEach step (memql#2246) is the
-	// only producer today; the for-range statement is not an assignment
+	// only producer; the for-range statement is not an assignment
 	// expression, so parseGoStyleStep cannot consume it after `:=`.
 	raw bool
 }
@@ -2179,9 +2179,11 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 		}
 		// A `forEach`/`for` step body lowers to a top-level for-range loop
 		// statement (StepTypeForEach), not a `<name> := <call>` assignment
-		// (memql#2246). A `switch` step body lowers to a top-level switch
-		// statement (StepTypeSwitch), likewise emitted raw (epic #2212, I10
-		// #2224). Everything else is a single call expression.
+		// (memql#2246). A `switch` step body lowers to `<name> := switch ...`
+		// (StepTypeSwitch, epic #2212, I10 #2224), so the step's id is the
+		// author's name: emitted as a bare statement it took an id made from
+		// its subject, and two switch steps on one subject shared it
+		// (memql#5367). Everything else is a single call expression.
 		lead, _ := splitLeadingIdent(stepBody)
 		if lead == "forEach" || lead == "for" {
 			stmt, err := translateForEachStepCall(stepName, stepBody)
@@ -2197,7 +2199,7 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 			if err != nil {
 				return nil, refuseStep(err)
 			}
-			out = append(out, automationStep{name: stepName, call: stmt, raw: true})
+			out = append(out, automationStep{name: stepName, call: stmt})
 			pos = closeIdx + 1
 			continue
 		}

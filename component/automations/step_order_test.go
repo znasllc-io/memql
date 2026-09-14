@@ -24,25 +24,38 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
+	"github.com/znasllc-io/memql/core/repowalk"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
-// treeAutomationSlices is every automation slice the unified loader compiles,
-// keyed by the origin it stamps: the same walk, the same per-file front end
-// and terse lowering (LoadFromUnifiedTree).
-func treeAutomationSlices(t *testing.T) map[string]automationSlice {
+// treeSlice is one automation slice of a DSL tree, with the file it was cut
+// from as the author wrote it (for compileUnifiedSlice's positions).
+type treeSlice struct {
+	automationSlice
+	path     string
+	authored string
+}
+
+// treeAutomationSlices is every automation slice in tree's `<domain>/...`
+// files, keyed by the origin the unified loader stamps: the same walk, the
+// same per-file front end and terse lowering (loadFromTree). allFiles reads
+// every .memql file; otherwise only the `automations.memql` files the loader
+// reads.
+func treeAutomationSlices(t *testing.T, tree fs.FS, allFiles bool) map[string]treeSlice {
 	t.Helper()
-	tree := memqldsl.Tree()
 	lines, _ := memql.ResolveLanguageLines(tree)
-	out := map[string]automationSlice{}
+	out := map[string]treeSlice{}
 	err := fs.WalkDir(tree, ".", func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -53,7 +66,8 @@ func treeAutomationSlices(t *testing.T) map[string]automationSlice {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, "/automations.memql") || memqldsl.SkipsBehavioralLoad(path) {
+		wanted := strings.HasSuffix(path, "/automations.memql") || (allFiles && strings.HasSuffix(path, ".memql"))
+		if !wanted || memqldsl.SkipsBehavioralLoad(path) {
 			return nil
 		}
 		data, err := fs.ReadFile(tree, path)
@@ -72,7 +86,7 @@ func treeAutomationSlices(t *testing.T) map[string]automationSlice {
 			return fmt.Errorf("%s: %w", path, err)
 		}
 		for _, slice := range extractAutomationSlices(lowered) {
-			out["unified:"+path+":"+slice.Name] = slice
+			out["unified:"+path+":"+slice.Name] = treeSlice{automationSlice: slice, path: path, authored: string(data)}
 		}
 		return nil
 	})
@@ -80,6 +94,66 @@ func treeAutomationSlices(t *testing.T) map[string]automationSlice {
 		t.Fatalf("walk the tree: %v", err)
 	}
 	return out
+}
+
+// bundleTrees is every DSL bundle the repository ships beside the engine
+// tree, each as the tree the engine mounts it as: deploy/fleet/dsl, whose
+// subdirectories are its domains, and every examples/**/dsl, a pack's tree
+// mounted as one domain named for the pack. Nothing else compiles their
+// automations -- memqllint does not, and the fleet's bundle test checks
+// structure only -- which is how every fleet automation came to fail to
+// compile unnoticed (memql#5367).
+func bundleTrees(t *testing.T) map[string]fs.FS {
+	t.Helper()
+	root := filepath.Join("..", "..")
+	trees := map[string]fs.FS{"deploy/fleet/dsl": os.DirFS(filepath.Join(root, "deploy", "fleet", "dsl"))}
+	examples := os.DirFS(filepath.Join(root, "examples"))
+	err := fs.WalkDir(examples, ".", func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !d.IsDir() || path == "." {
+			return nil
+		}
+		if base := d.Name(); strings.HasPrefix(base, "_") || strings.HasPrefix(base, ".") || repowalk.SkipDir(base) {
+			return fs.SkipDir
+		}
+		if d.Name() != "dsl" {
+			return nil
+		}
+		sub, err := fs.Sub(examples, path)
+		if err != nil {
+			return err
+		}
+		pack := filepath.Base(filepath.Dir(path))
+		trees["examples/"+path] = mountedAs(pack, sub)
+		return fs.SkipDir
+	})
+	if err != nil {
+		t.Fatalf("walk examples: %v", err)
+	}
+	return trees
+}
+
+// mountedAs is fsys as the single domain `domain/` of a tree.
+type mountedFS struct {
+	domain string
+	fsys   fs.FS
+}
+
+func mountedAs(domain string, fsys fs.FS) fs.FS { return mountedFS{domain, fsys} }
+
+func (m mountedFS) Open(name string) (fs.File, error) {
+	if name == "." {
+		return fs.FS(fstest.MapFS{m.domain: &fstest.MapFile{Mode: fs.ModeDir}}).Open(".")
+	}
+	if name == m.domain {
+		return m.fsys.Open(".")
+	}
+	if rest, ok := strings.CutPrefix(name, m.domain+"/"); ok {
+		return m.fsys.Open(rest)
+	}
+	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
 }
 
 // sourceStepOrder is the order the steps of an automation slice are written
@@ -317,24 +391,23 @@ func stepOrderProblems(a *Automation, source []string) (problems []string, forwa
 	return problems, forward
 }
 
-// TestAutomationStepsRunInSourceOrder is the gate over the whole tree: every
-// automation's steps run after the steps they read, and in source order
-// whenever no step reads a later one. forge's routeRequest is named
-// specifically: its `advance` switch runs before `persistRouted`.
+// TestAutomationStepsRunInSourceOrder is the gate over the whole tree and the
+// bundles shipped beside it: every automation compiles, and its steps run
+// after the steps they read, and in source order whenever no step reads a
+// later one. forge's routeRequest is named specifically: its `advance` switch
+// runs before `persistRouted`. So is the fleet's provisionInstanceOnCreate:
+// its two switch steps on one subject, `render` and `settle`, carry their
+// authors' names and run in the order written.
 func TestAutomationStepsRunInSourceOrder(t *testing.T) {
-	loaded, err := NewLoader(LoaderOptions{}).LoadFromUnifiedTree()
+	loader := NewLoader(LoaderOptions{})
+	loaded, err := loader.LoadFromUnifiedTree()
 	if err != nil {
 		t.Fatalf("load the tree: %v", err)
 	}
-	slices := treeAutomationSlices(t)
+	slices := treeAutomationSlices(t, memqldsl.Tree(), false)
 	var problems, forwardRefs []string
 	multiStep := 0
-	var routeRequest *Automation
-	for _, a := range loaded {
-		slice, ok := slices[a.Origin]
-		if !ok {
-			t.Fatalf("%s: the loader compiled an automation the walk here does not see -- the two walks differ", a.Origin)
-		}
+	check := func(a *Automation, slice treeSlice) {
 		p, forward := stepOrderProblems(a, sourceStepOrder(t, slice.Source))
 		problems = append(problems, p...)
 		if forward {
@@ -343,9 +416,15 @@ func TestAutomationStepsRunInSourceOrder(t *testing.T) {
 		if len(a.Steps) > 1 {
 			multiStep++
 		}
-		if strings.HasSuffix(a.Origin, "forge/automations.memql:routeRequest") {
-			routeRequest = a
+	}
+	byName := map[string]*Automation{}
+	for _, a := range loaded {
+		slice, ok := slices[a.Origin]
+		if !ok {
+			t.Fatalf("%s: the loader compiled an automation the walk here does not see -- the two walks differ", a.Origin)
 		}
+		check(a, slice)
+		byName[a.Name] = a
 	}
 	// The tree ships 58 automations, 18 of them more than one step long; a
 	// count far below that means the walk went blind, and a clean result
@@ -353,34 +432,67 @@ func TestAutomationStepsRunInSourceOrder(t *testing.T) {
 	if len(loaded) < 40 || multiStep < 12 {
 		t.Fatalf("checked %d automations (%d with more than one step) -- the tree walk is broken, not the tree", len(loaded), multiStep)
 	}
+
+	// The bundles: the loader's own walk over each (every automations.memql
+	// file, strictly), and then every automation any of their files
+	// declares, compiled one by one.
+	bundles := 0
+	for name, tree := range bundleTrees(t) {
+		if _, err := loader.LoadFromTree(tree); err != nil {
+			t.Errorf("%s: load: %v", name, err)
+		}
+		for origin, slice := range treeAutomationSlices(t, tree, true) {
+			a, err := loader.compileUnifiedSlice(slice.authored, slice.automationSlice, origin)
+			if err != nil {
+				t.Errorf("%s: compile: %v", origin, err)
+				continue
+			}
+			check(a, slice)
+			byName[a.Name] = a
+			bundles++
+		}
+	}
+	// deploy/fleet/dsl declares 16 automations and the example packs 2; the
+	// fleet's are the ones that broke.
+	if bundles < 12 {
+		t.Fatalf("compiled %d bundle automations -- the bundle walk went blind", bundles)
+	}
 	if len(problems) > 0 {
 		t.Errorf("%d step-order problem(s):\n  %s", len(problems), strings.Join(problems, "\n  "))
 	}
-	t.Logf("%d automations checked, %d with more than one step; steps reading a later step (so reordered): %v", len(loaded), multiStep, forwardRefs)
+	t.Logf("%d tree and %d bundle automations checked, %d with more than one step; steps reading a later step (so reordered): %v", len(loaded), bundles, multiStep, forwardRefs)
 
+	routeRequest := byName["routeRequest"]
 	if routeRequest == nil {
 		t.Fatal("forge's routeRequest is not in the tree")
 	}
-	at := map[string]int{}
-	advance := ""
-	for i, s := range routeRequest.Steps {
-		at[s.ID] = i
-		if s.Type == StepTypeSwitch {
-			advance = s.ID // `step advance { switch ... }`
-		}
+	if got := stepIDs(routeRequest); got != "decide,advance,persistRouted" {
+		t.Errorf("routeRequest runs %s, want decide,advance,persistRouted: the `advance` switch carries its author's name and runs before persistRouted, as written", got)
 	}
-	if advance == "" {
-		t.Fatalf("routeRequest has no switch step: %v", routeRequest.Steps)
+
+	provision := byName["provisionInstanceOnCreate"]
+	if provision == nil {
+		t.Fatal("the fleet's provisionInstanceOnCreate was not compiled")
 	}
-	if at[advance] > at["persistRouted"] {
-		t.Errorf("routeRequest runs persistRouted before advance (%q): the two writes are in the reverse of source order", advance)
+	if got := stepIDs(provision); got != "command,render,settle" {
+		t.Errorf("provisionInstanceOnCreate runs %s, want command,render,settle: two switch steps on one subject, each with its author's name, in the order written", got)
 	}
 }
 
+// stepIDs is an automation's step ids in the order they run.
+func stepIDs(a *Automation) string {
+	ids := make([]string, 0, len(a.Steps))
+	for _, s := range a.Steps {
+		ids = append(ids, s.ID)
+	}
+	return strings.Join(ids, ",")
+}
+
 // TestLogicBodyStepsRunInSourceOrder is the same gate over every logic body of
-// the tree that runs on the LogicRunner: a logic body is compiled to an
-// automation and ordered by the same sort, and its `name := call` statements
-// are the statement form whose meaning is the order they are written in.
+// the tree and of the bundles beside it that runs on the LogicRunner: a logic
+// body is compiled to an automation and ordered by the same sort, and its
+// `name := call` statements are the statement form whose meaning is the order
+// they are written in.
 func TestLogicBodyStepsRunInSourceOrder(t *testing.T) {
 	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("load concepts: %v", err)
@@ -430,10 +542,70 @@ func TestLogicBodyStepsRunInSourceOrder(t *testing.T) {
 	if checked < 25 || multiStep < 5 {
 		t.Fatalf("checked %d logic bodies (%d with more than one statement) -- the walk went blind", checked, multiStep)
 	}
+
+	// The bundles' logic bodies, read the way the tree's are.
+	bundleBodies := 0
+	for name, tree := range bundleTrees(t) {
+		lines, _ := memql.ResolveLanguageLines(tree)
+		err := fs.WalkDir(tree, ".", func(path string, d fs.DirEntry, walkErr error) error {
+			if walkErr != nil || d.IsDir() || !strings.HasSuffix(path, ".memql") {
+				return walkErr
+			}
+			data, err := fs.ReadFile(tree, path)
+			if err != nil {
+				return err
+			}
+			if data, err = lines.Prepare(path, data); err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+			for _, slice := range memql.ExtractFunctionSlices(string(data)) {
+				if slice.Kind != languageParser.FunctionTypeLogic {
+					continue
+				}
+				fn, err := memql.BuildFunctionConstruct(string(data), slice.Name, "unified:"+path, memorynodes.DefaultRegistry())
+				if err != nil {
+					t.Errorf("%s: %s %s: %v", name, path, slice.Name, err)
+					continue
+				}
+				if fn.LogicSteps == nil {
+					continue
+				}
+				a, err := runner.compileBodyToAutomation(slice.Name, fn.LogicSteps)
+				if err != nil {
+					t.Errorf("%s: %s %s: compile: %v", name, path, slice.Name, err)
+					continue
+				}
+				var source []string
+				for i := range fn.LogicSteps.Steps {
+					if id := fn.LogicSteps.Steps[i].ID; id != "_return" {
+						source = append(source, id)
+					}
+				}
+				b := *a
+				b.Steps = nil
+				for _, st := range a.Steps {
+					if st.ID != "_return" {
+						b.Steps = append(b.Steps, st)
+					}
+				}
+				p, _ := stepOrderProblems(&b, source)
+				problems = append(problems, p...)
+				bundleBodies++
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	// deploy/fleet/dsl and the example packs ship 9 that run on the runner.
+	if bundleBodies < 5 {
+		t.Fatalf("checked %d bundle logic bodies -- the bundle walk went blind", bundleBodies)
+	}
 	if len(problems) > 0 {
 		t.Errorf("%d step-order problem(s) in logic bodies:\n  %s", len(problems), strings.Join(problems, "\n  "))
 	}
-	t.Logf("%d logic bodies checked, %d with more than one statement", checked, multiStep)
+	t.Logf("%d tree and %d bundle logic bodies checked, %d tree bodies with more than one statement", checked, bundleBodies, multiStep)
 }
 
 // TestStepOrderProblemsCatchesAMisorder is the gate's negative control: the
@@ -552,5 +724,72 @@ automation forwardProbe {
 	}
 	if fwd.Steps[0].ID != "second" {
 		t.Errorf("the provider of a forward reference runs first: %v", []string{fwd.Steps[0].ID, fwd.Steps[1].ID})
+	}
+}
+
+// TestTwoSwitchStepsOnOneSubject is the fleet's shape: two switch steps on one
+// subject. Each step's id is its author's name, and the steps run in the
+// order written. The parser used to give a bare switch statement an id made
+// from its subject, so both were `switch_steps.command.result`; the sort,
+// keyed by id, emitted one and counted both, and every fleet automation
+// failed to compile with "dependency cycle among steps []" (memql#5367).
+//
+// Two steps that do share a name are refused, naming both and their lines: an
+// id names a step's result and its journal record, so the second would
+// overwrite the first.
+func TestTwoSwitchStepsOnOneSubject(t *testing.T) {
+	const src = `@trigger(event="node.created", concept="v1:forge:request", partition="*")
+automation twoSwitches {
+  args {
+    id any
+    submitterRole any
+  }
+
+  step command {
+    logic requestRouteStatus ( submitterRole )
+  }
+  step render {
+    switch steps.command.result {
+      case "queued" {
+        mutation advanceRequest ( requestId: id, status: "queued" )
+      }
+      default { }
+    }
+  }
+  step settle {
+    switch steps.command.result {
+      case "queued" {
+        mutation recordRequestEvent ( requestId: id, kind: "routed" )
+      }
+      default { }
+    }
+  }
+}`
+	a, err := NewLoader(LoaderOptions{}).CompileSource(src, "test:twoSwitches")
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	if got := stepIDs(a); got != "command,render,settle" {
+		t.Fatalf("ran %s, want command,render,settle: each switch step carries its author's name, in the order written", got)
+	}
+	for _, s := range a.Steps[1:] {
+		if s.Type != StepTypeSwitch || s.Switch == nil {
+			t.Errorf("step %q is a %q step, want a switch", s.ID, s.Type)
+		}
+	}
+	if problems, forward := stepOrderProblems(a, sourceStepOrder(t, src)); len(problems) != 0 || forward {
+		t.Errorf("problems %v, forward=%v; want none", problems, forward)
+	}
+
+	// The same automation with both switch steps named `render`.
+	dup := strings.Replace(src, "step settle {", "step render {", 1)
+	_, err = NewLoader(LoaderOptions{}).CompileSource(dup, "test:twoSwitches")
+	if err == nil {
+		t.Fatal("two steps named render compiled")
+	}
+	for _, want := range []string{`two steps have the id "render"`, "the switch step at line 11", "the switch step at line 19"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q: %v", want, err)
+		}
 	}
 }

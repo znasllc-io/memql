@@ -1365,6 +1365,12 @@ type StepDef struct {
 	// ConditionExpr is Condition parsed; Condition holds its canonical
 	// source. Nil when the step has no condition.
 	ConditionExpr ExpressionNode
+
+	// Line is the author's line the step is written on: its name, or the
+	// keyword of a statement that is a step. Zero for a step no source
+	// produced. The compiler names it when it refuses a step (two steps
+	// with one id, memql#5367).
+	Line int
 }
 
 // StepType identifies the kind of step.

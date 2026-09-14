@@ -61,12 +61,11 @@ func stepIDs(a *automations.Automation) []string {
 func TestInstallInstanceGatesTheWholeInstall(t *testing.T) {
 	a := loadInstallAutomation(t, "installInstance")
 
-	// The third id is "switch_<expression>", not the authored step name: the
-	// compiler derives a switch step's id from what it keys on. That is the
-	// shape being asserted -- an authored name here would mean the step is no
-	// longer a switch.
+	// The third step is the `install` switch; that it is still a switch is
+	// asserted below. A switch step's id is its author's name, as every
+	// other step's is (memql#5367).
 	ids := stepIDs(a)
-	want := []string{"gate", "verdict", "switch_steps.verdict.result"}
+	want := []string{"gate", "verdict", "install"}
 	if len(ids) != len(want) {
 		t.Fatalf("installInstance has steps %v, want exactly %v.\n"+
 			"A NEW SIBLING STEP IS THE REGRESSION THIS CATCHES: a sibling that reads only the "+
@@ -157,7 +156,7 @@ func TestRepairInstanceChecksBeforeItSyncs(t *testing.T) {
 	a := loadInstallAutomation(t, "repairInstance")
 
 	ids := stepIDs(a)
-	want := []string{"version", "verify", "verdict", "switch_steps.verdict.result"}
+	want := []string{"version", "verify", "verdict", "resync"}
 	if len(ids) != len(want) {
 		t.Fatalf("repairInstance steps = %v, want %v", ids, want)
 	}
@@ -171,7 +170,7 @@ func TestRepairInstanceChecksBeforeItSyncs(t *testing.T) {
 	// The relation the step list exists to protect, asserted directly so it
 	// survives any future re-ordering of the list above.
 	verifyAt, verdictAt := indexOfStep(ids, "verify"), indexOfStep(ids, "verdict")
-	resyncAt := indexOfStep(ids, "switch_steps.verdict.result")
+	resyncAt := indexOfStep(ids, "resync")
 	if verifyAt < 0 || verdictAt < 0 || resyncAt < 0 {
 		t.Fatalf("repairInstance lost one of verify/verdict/the conditional resync: %v", ids)
 	}

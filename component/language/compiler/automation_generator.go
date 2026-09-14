@@ -325,8 +325,16 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	// compile-time error.
 	//
 	// Unknown references (typos) still surface as compile-time errors.
+	// Two steps with one id are refused before anything is keyed by id: an
+	// id names a step's result and its journal record, so the second step
+	// would overwrite the first in both, and every map below would hold one
+	// of them (memql#5367).
+	if err := refuseDuplicateStepIDs(def.Name, automation.Steps); err != nil {
+		return nil, err
+	}
+
 	stepIds := make(map[string]struct{}, len(automation.Steps))
-	stepsById := make(map[string]*parser.StepDef, len(automation.Steps))
+	var ordered []*parser.StepDef
 	var orderedIds []string
 	var returnStep *parser.StepDef
 
@@ -337,32 +345,30 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 			continue
 		}
 		stepIds[step.ID] = struct{}{}
-		stepsById[step.ID] = step
+		ordered = append(ordered, step)
 		orderedIds = append(orderedIds, step.ID)
 	}
 
-	// Build dependency graph: step -> set of step IDs it depends on (the
-	// free names of its expressions that are step ids).
-	deps := make(map[string]map[string]struct{}, len(orderedIds))
-	for _, id := range orderedIds {
-		refs, err := collectStepReferencesV1(stepsById[id], stepIds)
+	// Build dependency graph: per step, in source order, the step ids its
+	// expressions read (their free names that are step ids).
+	deps := make([]map[string]struct{}, len(ordered))
+	for i, step := range ordered {
+		refs, err := collectStepReferencesV1(step, stepIds)
 		if err != nil {
 			return nil, fmt.Errorf("automation %q: %w", def.Name, err)
 		}
-		deps[id] = refs
+		deps[i] = refs
 	}
 
-	// Topological sort (Kahn's algorithm). Preserves source order among
-	// steps with equal depth so the output is deterministic.
+	// Stable topological sort: dependency order, and source order otherwise.
 	sorted, err := topoSortSteps(def.Name, orderedIds, deps)
 	if err != nil {
 		return nil, err
 	}
 
 	steps := make([]map[string]any, 0, len(sorted))
-	for _, id := range sorted {
-		step := stepsById[id]
-		compiledStep, err := c.compileStepV1(step)
+	for _, i := range sorted {
+		compiledStep, err := c.compileStepV1(ordered[i])
 		if err != nil {
 			return nil, err
 		}
@@ -422,12 +428,13 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	}, nil
 }
 
-// topoSortSteps orders step IDs so every step runs after the steps it depends
-// on (deps[A] holds the steps A reads), and is otherwise in SOURCE order: of
-// the steps ready to run, the one written first runs first -- a stable
-// topological sort. When the source is already in dependency order the result
-// is the source order exactly, which is what the statement form of a body
-// means (D12) and what the legacy runtime did. A step that reads a step
+// topoSortSteps orders an automation's steps so every step runs after the
+// steps it depends on, and is otherwise in SOURCE order: of the steps ready to
+// run, the one written first runs first -- a stable topological sort. ids are
+// the steps' ids in source order and deps[i] the ids step i reads; the result
+// is positions into ids. When the source is already in dependency order the
+// result is the source order exactly, which is what the statement form of a
+// body means (D12) and what the legacy runtime did. A step that reads a step
 // written after it is the one thing that moves: its provider is pulled ahead
 // of it, and nothing else changes place.
 //
@@ -438,55 +445,68 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 // forge's routeRequest that put `persistRouted` (independent) ahead of
 // `advance` (reads `steps.decide`), the reverse of source order (memql#5367).
 //
+// It tracks steps by POSITION, never by id, so it cannot depend on the ids
+// being unique. Keyed by id, emitting the first of two steps with one id
+// marked both done: the second was never emitted, and the sort reported a
+// dependency cycle among no steps. The compiler refuses two steps with one id
+// before it sorts (refuseDuplicateStepIDs); a read of an id two steps carry
+// waits for both.
+//
 // Returns an error if a cycle is detected or if a step references an unknown
 // step ID (typo detection).
-func topoSortSteps(automationName string, sourceOrder []string, deps map[string]map[string]struct{}) ([]string, error) {
-	allSteps := make(map[string]struct{}, len(sourceOrder))
-	for _, id := range sourceOrder {
-		allSteps[id] = struct{}{}
+func topoSortSteps(automationName string, ids []string, deps []map[string]struct{}) ([]int, error) {
+	at := make(map[string][]int, len(ids))
+	for i, id := range ids {
+		at[id] = append(at[id], i)
 	}
 
-	// Check for unknown references (typos), in source order so the error
-	// names the same reference every time.
-	for _, id := range sourceOrder {
-		names := make([]string, 0, len(deps[id]))
-		for dep := range deps[id] {
-			names = append(names, dep)
+	// Resolve each step's reads to the positions of the steps it reads, in
+	// source order so an unknown reference is reported the same every time.
+	providers := make([][]int, len(ids))
+	for i, id := range ids {
+		var names []string
+		if i < len(deps) {
+			names = make([]string, 0, len(deps[i]))
+			for dep := range deps[i] {
+				names = append(names, dep)
+			}
 		}
 		sort.Strings(names)
 		for _, dep := range names {
-			if _, ok := allSteps[dep]; !ok {
+			pos, ok := at[dep]
+			if !ok {
 				return nil, fmt.Errorf(
 					"automation %q: step %q references unknown step %q -- check for a typo, or add the step",
 					automationName, id, dep)
 			}
+			providers[i] = append(providers[i], pos...)
 		}
 	}
 
-	emitted := make(map[string]bool, len(sourceOrder))
-	ready := func(id string) bool {
-		for dep := range deps[id] {
-			if !emitted[dep] {
+	emitted := make([]bool, len(ids))
+	ready := func(i int) bool {
+		for _, p := range providers[i] {
+			if !emitted[p] {
 				return false
 			}
 		}
 		return true
 	}
-	sorted := make([]string, 0, len(sourceOrder))
-	for len(sorted) < len(sourceOrder) {
+	sorted := make([]int, 0, len(ids))
+	for len(sorted) < len(ids) {
 		// The first step in source order whose dependencies have all run.
-		next := ""
-		for _, id := range sourceOrder {
-			if !emitted[id] && ready(id) {
-				next = id
+		next := -1
+		for i := range ids {
+			if !emitted[i] && ready(i) {
+				next = i
 				break
 			}
 		}
-		if next == "" {
+		if next < 0 {
 			// Cycle detected -- name the participating steps.
 			var cycle []string
-			for _, id := range sourceOrder {
-				if !emitted[id] {
+			for i, id := range ids {
+				if !emitted[i] {
 					cycle = append(cycle, id)
 				}
 			}
@@ -498,6 +518,86 @@ func topoSortSteps(automationName string, sourceOrder []string, deps map[string]
 		sorted = append(sorted, next)
 	}
 	return sorted, nil
+}
+
+// refuseDuplicateStepIDs refuses an automation in which two steps carry one
+// id, naming both and the lines they are written on. The steps a switch case,
+// a forEach body or a parallel branch runs are counted with the top-level
+// ones: a step's result is recorded under its id wherever it runs, so a
+// nested step with a top-level step's id overwrites it too.
+func refuseDuplicateStepIDs(automationName string, steps []parser.StepDef) error {
+	seen := map[string]*parser.StepDef{}
+	var walk func(steps []parser.StepDef) error
+	visit := func(s *parser.StepDef) error {
+		if s.ID == "" || s.ID == "_return" {
+			return nil
+		}
+		if first, ok := seen[s.ID]; ok {
+			return fmt.Errorf(
+				"automation %q: two steps have the id %q -- %s and %s. A step's id names its result and its journal record, so the second would overwrite the first: give each step its own name",
+				automationName, s.ID, describeStepAt(first), describeStepAt(s))
+		}
+		seen[s.ID] = s
+		return nil
+	}
+	walk = func(steps []parser.StepDef) error {
+		for i := range steps {
+			s := &steps[i]
+			if err := visit(s); err != nil {
+				return err
+			}
+			for _, nested := range nestedStepLists(s) {
+				if err := walk(nested); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	return walk(steps)
+}
+
+// nestedStepLists is the steps a step runs as part of itself: a forEach body,
+// parallel branches, and a switch's cases, in source order.
+func nestedStepLists(s *parser.StepDef) [][]parser.StepDef {
+	switch cfg := s.Config.(type) {
+	case *parser.ForEachStepConfig:
+		return [][]parser.StepDef{cfg.Do}
+	case *parser.ParallelStepConfig:
+		return [][]parser.StepDef{cfg.Branches}
+	case *parser.SwitchStepConfig:
+		var out [][]parser.StepDef
+		keys := make([]string, 0, len(cfg.Cases))
+		for k := range cfg.Cases {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if c := cfg.Cases[k]; c != nil {
+				out = append(out, c.Steps)
+			}
+		}
+		if cfg.Default != nil {
+			out = append(out, cfg.Default.Steps)
+		}
+		return out
+	}
+	return nil
+}
+
+// describeStepAt names a step for a refusal: its kind, and the line it is
+// written on when the parser recorded one.
+func describeStepAt(s *parser.StepDef) string {
+	kind := string(s.Type)
+	if kind == "" {
+		kind = "step"
+	} else {
+		kind += " step"
+	}
+	if s.Line > 0 {
+		return fmt.Sprintf("the %s at line %d", kind, s.Line)
+	}
+	return "the " + kind + " (no source line)"
 }
 
 // compileInputExpression converts an input expression to JSON format.

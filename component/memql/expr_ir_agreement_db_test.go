@@ -496,12 +496,16 @@ var irLocaleCollations = []string{"en-US-x-icu", "und-x-icu", "en_US.utf8", "en_
 // order strings differently from the in-process half.
 //
 // The uncollated fragment -- what the pushdown emitted before -- inherits the
-// database's DEFAULT collation. Where that default is itself byte order (a
-// "C" database, like the throwaway one this lane runs against), the
-// uncollated SQL cannot show the hazard, so the control spells the locale
+// database's DEFAULT collation. Where that default itself orders by byte, the
+// uncollated SQL cannot show the hazard, so the control spells a locale
 // explicitly: it is then asking what the old fragment did on a database
 // initialised under that locale, which is the database the collation clause
-// protects. It skips only when no locale collation is installed at all.
+// protects. It skips only when no collation installed orders by locale.
+//
+// Whether a collation orders by byte is MEASURED, never read off its name: a
+// musl-based Postgres (CI's db-tests image) reports its default as
+// "en_US.utf8" and still compares bytewise, because musl's strcoll is strcmp.
+// A name check took that database for a locale one and failed the control.
 func TestIRStringOrderingWithoutCollationWouldDisagree(t *testing.T) {
 	_, db, _ := sharedReadMergeEngine(t)
 	ctx := context.Background()
@@ -519,21 +523,19 @@ func TestIRStringOrderingWithoutCollationWouldDisagree(t *testing.T) {
 	require.Contains(t, compiled.sql, ` COLLATE "C"`)
 	fragment := strings.Replace(compiled.sql, ` COLLATE "C"`, "", 1)
 	under := fmt.Sprintf("the database default %q", defaultCollation)
-	switch strings.ToUpper(strings.TrimSpace(defaultCollation)) {
-	case "C", "POSIX", "C.UTF-8", "C.UTF8", "UCS_BASIC":
-		var available []string
-		require.NoError(t, db.NewRaw(`SELECT collname FROM pg_collation WHERE collname IN (?)`, bun.In(irLocaleCollations)).Scan(ctx, &available))
+	if irOrdersByByte(t, ctx, db, "") {
 		chosen := ""
 		for _, candidate := range irLocaleCollations {
-			for _, name := range available {
-				if name == candidate && chosen == "" {
-					chosen = candidate
-				}
+			var installed bool
+			require.NoError(t, db.NewRaw(`SELECT EXISTS (SELECT 1 FROM pg_collation WHERE collname = ?)`, candidate).Scan(ctx, &installed))
+			if installed && !irOrdersByByte(t, ctx, db, candidate) {
+				chosen = candidate
+				break
 			}
 		}
 		if chosen == "" {
-			t.Skipf("the database orders by byte by default (%q) and has none of %v installed, so no locale "+
-				"ordering is available to disagree with (the agreement matrix still ran)", defaultCollation, irLocaleCollations)
+			t.Skipf("the database default (%q) orders by byte and none of %v is installed with a locale ordering, "+
+				"so no ordering is available to disagree with (the agreement matrix still ran)", defaultCollation, irLocaleCollations)
 		}
 		fragment = strings.Replace(compiled.sql, ` COLLATE "C"`, fmt.Sprintf(" COLLATE %q", chosen), 1)
 		under = fmt.Sprintf("the locale collation %q", chosen)
@@ -548,4 +550,19 @@ func TestIRStringOrderingWithoutCollationWouldDisagree(t *testing.T) {
 		under, irNamed(irDifference(sqlIDs, inProcess), names), irNamed(irDifference(inProcess, sqlIDs), names))
 	t.Logf("under %s: only SQL %v, only in process %v", under,
 		irNamed(irDifference(sqlIDs, inProcess), names), irNamed(irDifference(inProcess, sqlIDs), names))
+}
+
+// irOrdersByByte reports whether collation -- empty for the database default
+// -- orders by byte, by asking it to order 'a' against 'E': a locale puts the
+// lowercase a first, byte order puts the uppercase E (0x45) before a (0x61).
+// collation is always a constant from irLocaleCollations.
+func irOrdersByByte(t *testing.T, ctx context.Context, db *bun.DB, collation string) bool {
+	t.Helper()
+	query := `SELECT 'a' < 'E'`
+	if collation != "" {
+		query = fmt.Sprintf(`SELECT 'a' COLLATE %q < 'E' COLLATE %q`, collation, collation)
+	}
+	var localeFirst bool
+	require.NoError(t, db.NewRaw(query).Scan(ctx, &localeFirst))
+	return !localeFirst
 }
