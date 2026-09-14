@@ -435,13 +435,27 @@ func statementValue(step *Step, result *StepResult) any {
 }
 
 // actionStatementValue is what an action statement binds: the capability's
-// own result. A capability-script envelope (`{ok, changed, result, ...}`)
-// unwraps to its `result`; the envelope's other fields stay on the step's
-// metadata, which is what retires the `.result.result.result` climb.
+// own result, which the retired `.result.result.result` climb reached. An
+// authored action's step result is its record of the call -- `{authored, ref,
+// capability, result, resultFingerprint}` (steps/action.go executeAuthored) --
+// whose `result` is the capability's output, and a capability script's output
+// is an envelope (`{ok, changed, result, ...}`) whose `result` is the
+// script's own: both unwrap. The record and the envelope stay on the step's
+// result, which the journal keeps. A replayed action's record, `{replayed, ref,
+// results}`, holds no single result and binds as it is.
 func actionStatementValue(raw any) any {
 	m, ok := raw.(map[string]any)
 	if !ok {
 		return raw
+	}
+	if authored, _ := m["authored"].(bool); authored {
+		inner, has := m["result"]
+		if !has {
+			return m
+		}
+		if m, ok = inner.(map[string]any); !ok {
+			return inner
+		}
 	}
 	if inner, has := m["result"]; has {
 		if _, env := m["ok"]; env {

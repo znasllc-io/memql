@@ -291,3 +291,45 @@ automation keyed {
 		t.Fatalf("keys %v, want %v", got, want)
 	}
 }
+
+// envelopeDispatcher answers every capability with a capability script's
+// envelope around out.
+type envelopeDispatcher struct{ out map[string]any }
+
+func (d envelopeDispatcher) Invoke(context.Context, string, map[string]any) (any, error) {
+	return map[string]any{"ok": true, "changed": true, "result": d.out, "summary": "done"}, nil
+}
+
+// TestStatementActionBindsItsCapabilityResult: an action statement's name is
+// the capability's own result, read off the step result the real
+// ActionExecutor returns -- an authored action's record around a capability
+// script's envelope -- so `gate.passed` reads what the retired climb
+// `steps.gate.result.result.result.passed` read. The deployment automations
+// gate on exactly that read; reading the record instead leaves `passed` absent
+// and every gate blocked.
+func TestStatementActionBindsItsCapabilityResult(t *testing.T) {
+	a, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(`@trigger(event="probe.fired")
+automation gated {
+  gate := action cloneRepoAtVersion(workdir: "w", ref: "r")
+  builtin report(passed: gate.passed, version: gate.version)
+}`, "test.memql")
+	if err != nil || !a.IsStatementBody() {
+		t.Fatalf("compile: %v", err)
+	}
+	probe := &callProbe{answers: map[string]any{}}
+	reg := NewRegistry()
+	reg.Register(automations.StepTypeFunction, probe)
+	reg.Register(automations.StepTypeAction, &ActionExecutor{
+		Registry:   authoredRegistry(t, authoredCloneSrc),
+		Dispatcher: envelopeDispatcher{out: map[string]any{"passed": true, "version": "1.2.3"}},
+	})
+	ev := events.NewEvent("probe.fired", events.KindMessage, nil)
+	exec, err := automations.NewExecutor(automations.ExecutorOptions{StepRegistry: reg}).ExecuteWithEvent(context.Background(), a, "test", &ev)
+	if err != nil {
+		t.Fatalf("run: %v (%s)", err, exec.Error)
+	}
+	got := probe.argsOf("report")
+	if len(got) != 1 || got[0]["passed"] != true || got[0]["version"] != "1.2.3" {
+		t.Fatalf("report got %v: an action's name is its capability's result, not the step's record of it", got)
+	}
+}

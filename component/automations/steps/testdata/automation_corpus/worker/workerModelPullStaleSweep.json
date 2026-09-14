@@ -1,0 +1,99 @@
+{
+  "automation": "worker/automations.memql workerModelPullStaleSweep",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "MEMQL_MODEL_PULL_CLAIM_GRACE_SECONDS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "name": "MEMQL_MODEL_PULL_STALL_GRACE_SECONDS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "requestedBefore": "<ts>",
+              "updatedBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "openModelPulls"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "MEMQL_MODEL_PULL_CLAIM_GRACE_SECONDS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "name": "MEMQL_MODEL_PULL_STALL_GRACE_SECONDS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "requestedBefore": "<ts>",
+              "updatedBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "openModelPulls"
+          },
+          {
+            "args": {
+              "endedAt": "<ts>",
+              "errorMessage": "No agent replica is driving this pull -- either the node holding the machine's connection stopped before it began, or it went away mid-download. Whatever was already fetched stays on the machine, so starting the pull again resumes rather than restarts.",
+              "pullId": "v1:probe:row:openModelPulls-1",
+              "readvertised": false,
+              "status": "failed",
+              "statusLine": ""
+            },
+            "kind": "mutation",
+            "name": "finishModelPull"
+          },
+          {
+            "args": {
+              "endedAt": "<ts>",
+              "errorMessage": "No agent replica is driving this pull -- either the node holding the machine's connection stopped before it began, or it went away mid-download. Whatever was already fetched stays on the machine, so starting the pull again resumes rather than restarts.",
+              "pullId": "v1:probe:row:openModelPulls-2",
+              "readvertised": false,
+              "status": "failed",
+              "statusLine": ""
+            },
+            "kind": "mutation",
+            "name": "finishModelPull"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

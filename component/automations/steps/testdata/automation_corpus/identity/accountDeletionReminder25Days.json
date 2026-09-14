@@ -1,0 +1,50 @@
+{
+  "automation": "identity/automations.memql accountDeletionReminder25Days",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": {
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "legacyDefect": "the 25-day window condition compiles to one the string evaluator reads as false, so no reminder is published (and the payload's `now` compiles to the text `timestamp()`)",
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          },
+          {
+            "args": {
+              "deletionScheduledAt": "<ts>",
+              "email": "person2@example.test",
+              "milestoneDays": 25,
+              "subject": "Final notice: your <BRAND_NAME> account will be deleted in 5 days",
+              "timestamp": "<ts>",
+              "userId": "v1:probe:row:usersInDeletionCooldown-2"
+            },
+            "kind": "event",
+            "name": "identity.deletion.reminder"
+          }
+        ],
+        "result": {
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

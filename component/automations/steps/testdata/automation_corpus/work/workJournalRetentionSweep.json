@@ -1,0 +1,45 @@
+{
+  "automation": "work/automations.memql workJournalRetentionSweep",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "dryRun": false
+            },
+            "kind": "builtin",
+            "name": "workRetentionSweep"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "dryRun": false
+            },
+            "kind": "builtin",
+            "name": "workRetentionSweep"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

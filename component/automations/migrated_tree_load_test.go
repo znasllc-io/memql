@@ -5,7 +5,7 @@ package automations
 //
 // The tree as the two edition-2026 rewrites carry it -- `memqlmigrate
 // --rewrite=expressions`, then `--rewrite=bodies` -- goes through the boot
-// walk itself (loadFromTree): the edition front end, extraction, compile, the
+// walk itself (LoadFromTree): the edition front end, extraction, compile, the
 // trigger-wiring refusal and strict load. cmd/memqlmigrate's
 // TestBodiesRewriteOfTheTreeIsTheLanguage checks that the same migration
 // parses and passes the scope rules; this checks that the loader takes it,
@@ -110,7 +110,7 @@ func TestMigratedTreeAutomationsLoad(t *testing.T) {
 	languageParser.DefaultOptions = languageParser.Options{ExpressionsV1: true}
 	t.Cleanup(func() { languageParser.DefaultOptions = saved })
 
-	migrated, err := NewLoader(LoaderOptions{Logger: logger}).loadFromTree(tree)
+	migrated, err := NewLoader(LoaderOptions{Logger: logger}).LoadFromTree(tree)
 	require.NoError(t, err, "the migrated tree does not load")
 
 	names := func(as []*Automation) []string {

@@ -1,0 +1,45 @@
+{
+  "automation": "work/automations.memql sweepWaitingWorkRuns",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "olderThanSeconds": 60
+            },
+            "kind": "builtin",
+            "name": "workSweepWaiting"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "olderThanSeconds": 60
+            },
+            "kind": "builtin",
+            "name": "workSweepWaiting"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

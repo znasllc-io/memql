@@ -1,0 +1,225 @@
+{
+  "automation": "identity/automations.memql onDelegationCreated",
+  "runs": {
+    "event agent | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "graph.node.created.v1:identity:delegation"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`now` in the event payload compiles to the text `timestamp()`, which the event step publishes as text",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "delegationId": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "timestamp": "<ts>"
+            },
+            "kind": "event",
+            "name": "delegation.created"
+          }
+        ],
+        "result": {
+          "status": "completed"
+        }
+      }
+    },
+    "event agent | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "graph.node.created.v1:identity:delegation"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`now` in the event payload compiles to the text `timestamp()`, which the event step publishes as text",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "delegationId": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "timestamp": "<ts>"
+            },
+            "kind": "event",
+            "name": "delegation.created"
+          }
+        ],
+        "result": {
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "graph.node.created.v1:identity:delegation"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`now` in the event payload compiles to the text `timestamp()`, which the event step publishes as text",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "delegationId": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "timestamp": "<ts>"
+            },
+            "kind": "event",
+            "name": "delegation.created"
+          }
+        ],
+        "result": {
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "graph.node.created.v1:identity:delegation"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`now` in the event payload compiles to the text `timestamp()`, which the event step publishes as text",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "delegationId": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "timestamp": "<ts>"
+            },
+            "kind": "event",
+            "name": "delegation.created"
+          }
+        ],
+        "result": {
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

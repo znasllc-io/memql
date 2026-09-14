@@ -1,0 +1,77 @@
+{
+  "automation": "cluster/automations.memql pruneStaleClusterNodes",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "MEMQL_NODE_STALE_PRUNE_MINUTES"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "olderThan": "<ts>"
+            },
+            "kind": "query",
+            "name": "staleClusterNodes"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "MEMQL_NODE_STALE_PRUNE_MINUTES"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "olderThan": "<ts>"
+            },
+            "kind": "query",
+            "name": "staleClusterNodes"
+          },
+          {
+            "args": {
+              "health": "stopped",
+              "id": "v1:probe:row:staleClusterNodes-1",
+              "lastSeen": "<ts>"
+            },
+            "kind": "mutation",
+            "name": "updateNodeHealth"
+          },
+          {
+            "args": {
+              "health": "stopped",
+              "id": "v1:probe:row:staleClusterNodes-2",
+              "lastSeen": "<ts>"
+            },
+            "kind": "mutation",
+            "name": "updateNodeHealth"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}
