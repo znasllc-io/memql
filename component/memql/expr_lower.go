@@ -1310,6 +1310,16 @@ func (l *lowerer) callPred(e *ast.CallExpr) (ExpressionNode, error) {
 	if fn, catalogued := functions.Lookup(e.Name); catalogued {
 		return nil, l.inProcessFunctionRefusal(e, fn, nil, nil)
 	}
+	if e.Name == "asOf" {
+		// `asOf` is the QUERY CLAUSE that reads rows as they stood at a time
+		// (`asOf latest`, `asOf args.at`); as a call in a condition it is the
+		// retired runtime form `asOf(<filter>, <time>)`. Left to
+		// predicateApplication it would be refused as a predicate of the
+		// wrong arity, with `asOf(row)` as the fix -- a spelling that names
+		// no spec and reads no past.
+		return nil, l.refuse(e, "`asOf` is a query clause, not a function: a condition decides a row as it stands, and cannot read it at another time",
+			"Read the past with the query's own clause, `asOf args.at`, beside its filter")
+	}
 	return l.predicateApplication(e)
 }
 

@@ -6,7 +6,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // temporal_access_test.go proves the temporal-access (`asOf`) visibility
@@ -16,9 +15,15 @@ import (
 //     is deterministic and is NOT marked;
 //   - `asOf` used outside a query (a spec body here) is a load error.
 
-func temporalLoadRegistry() memoryNodes.Registry {
+// temporalLoadRegistry holds the one concept the fixture queries bind. It is
+// built from a declaration rather than as a bare {Name} stub: the filter is an
+// edition-2026 lambda, lowered at load against the bound concept's declared
+// fields (memql#5366), and a stub has none to read -- the load would refuse
+// for that, not for anything temporal.
+func temporalLoadRegistry(t *testing.T) memoryNodes.Registry {
+	t.Helper()
 	return newMemoryRegistry(map[string]*memoryNodes.Concept{
-		"v1:cluster:node": {Name: "v1:cluster:node"},
+		"v1:cluster:node": declaredConcept(t, "v1:cluster:node", "  active  bool"),
 	})
 }
 
@@ -37,10 +42,10 @@ func loadTemporalQuery(t *testing.T, name, asOfClause string) *Function {
 		"query node " + name + " {\n" +
 		argsBlock +
 		"  " + asOfClause + "\n" +
-		"  filter  payload.active == true\n" +
+		"  filter  row => row.active == true\n" +
 		"  shape   nodeCard\n" +
 		"}"
-	fn, err := tryParseNewFunctionSyntax(name, "query", src, "cluster.queries.memql", temporalLoadRegistry())
+	fn, err := tryParseNewFunctionSyntax(name, "query", src, "cluster.queries.memql", temporalLoadRegistry(t))
 	require.NoError(t, err)
 	require.NotNil(t, fn)
 	return fn
@@ -66,36 +71,41 @@ func TestQueryNoAsOfNotMarked(t *testing.T) {
 	src := "use cluster.concepts.{ node }\n\n" +
 		"@enabled\n" +
 		"query node queryPlainNodes {\n" +
-		"  filter  payload.active == true\n" +
+		"  filter  row => row.active == true\n" +
 		"  shape   nodeCard\n" +
 		"}"
-	fn, err := tryParseNewFunctionSyntax("queryPlainNodes", "query", src, "cluster.queries.memql", temporalLoadRegistry())
+	fn, err := tryParseNewFunctionSyntax("queryPlainNodes", "query", src, "cluster.queries.memql", temporalLoadRegistry(t))
 	require.NoError(t, err)
 	require.False(t, fn.LatestMode)
 }
 
 // TestSpecRejectsAsOf: a spec body is an atomic boolean predicate, not a
-// temporal read -- `asOf` is a load error. Driven through the struct-form
-// path every spec loads through (the shared parser, then specDeclToSpec);
-// the hand-rolled spec parser this test used to call was unreferenced from
-// production and is deleted (memql#5359).
+// temporal read -- `asOf` is a load error. Driven through the path every spec
+// loads through, which for an edition-2026 body ends in the lowering at Init
+// (memql#5366): the parser takes `asOf(...)` as a call like any other, and it
+// is Lower that knows the name is a query clause. The refusal says so, rather
+// than calling it a predicate of the wrong arity and suggesting `asOf(row)`.
 func TestSpecRejectsAsOf(t *testing.T) {
-	src := `@description("Boom: asOf in a spec body.")
-spec thing specReadsAsOf {
-  return asOf(active == true, latest)
-}`
-	decl, err := languageParser.ParseSpecDecl(src)
+	eng, err := bootLowerTree(t, map[string]string{
+		"concepts.memql": lowerInitConcepts,
+		"specs.memql": `use lowerinit.concepts.{ ticket }
+
+/// Boom: asOf in a spec body.
+spec ticket specReadsAsOf = row => asOf(row.status == "open", latest)
+`,
+	})
 	if err == nil {
-		_, err = specDeclToSpec(decl, "test.memql")
+		t.Fatal("expected a load error for asOf in a spec body, got a clean boot")
 	}
-	if err == nil {
-		t.Fatal("expected a load error for asOf in a spec body, got nil")
-	}
-	// The live path refuses the temporal node when it validates the body as
-	// a boolean predicate; the retired hand-rolled parser worded it as
-	// "query-only".
-	if !strings.Contains(err.Error(), "not allowed inside a spec") {
-		t.Fatalf("expected the spec body refusal, got: %v", err)
+	skips := strings.Join(lowerInitSkips(eng), "\n")
+	for _, want := range []string{
+		"specReadsAsOf",
+		"does not lower in a spec or trait body: `asOf` is a query clause, not a function",
+		"`asOf args.at`",
+	} {
+		if !strings.Contains(skips, want) {
+			t.Fatalf("expected the spec body refusal naming %q, got:\n%s", want, skips)
+		}
 	}
 }
 
