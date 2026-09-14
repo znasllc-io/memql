@@ -187,7 +187,7 @@ func specLowerEnv(spec *Spec, shapes *ShapeRegistry, concepts memoryNodes.Regist
 	case spec.BoundName == "":
 		return env, fmt.Errorf("non-trait spec has no signature binding -- declare `spec <boundName> %s = row => ...`", spec.Name)
 	default:
-		if shape, ok := shapeLookup(shapes, spec.BoundName); ok {
+		if shape, ok := specBindingShape(shapes, spec); ok {
 			keys := make(map[string]string, len(shape.Template))
 			for key, raw := range shape.Template {
 				if s, isString := raw.(string); isString {
@@ -195,7 +195,7 @@ func specLowerEnv(spec *Spec, shapes *ShapeRegistry, concepts memoryNodes.Regist
 				}
 			}
 			env.ShapeKeys = keys
-		} else if concept, err := resolveConceptByTrailingSegment(concepts, spec.BoundName); err == nil && concept != nil {
+		} else if concept, err := specBindingConcept(concepts, spec); err == nil && concept != nil {
 			env.Concept = concept
 		} else {
 			return env, fmt.Errorf("binding %q resolves to neither an imported shape nor a concept", spec.BoundName)
