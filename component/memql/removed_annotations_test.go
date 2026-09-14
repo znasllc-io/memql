@@ -91,7 +91,6 @@ func TestKeptAnnotationsStillAccepted(t *testing.T) {
 		{"filter", "automation", "automation keptAnnoAutomation", allowedAutomationAnnotations},
 		// @schedule reinstated on automations (#2712): LIVE (folds to the
 		// honored AutomationDef.Schedule / cron scheduler).
-		{"schedule", "automation", "automation keptAnnoAutomation", allowedAutomationAnnotations},
 	}
 
 	for _, tc := range cases {

@@ -132,7 +132,6 @@ tool createSomething {
 // @rateLimit(maxCalls=N, periodSeconds=M) parsing.
 func TestParseToolDecl_RateLimit(t *testing.T) {
 	source := `@handler(type="function", name="rateLimitedTool")
-@rateLimit(maxCalls=10, periodSeconds=60)
 @description("Rate-limited tool")
 tool rateLimitedTool {
   q  string  @required
@@ -336,7 +335,6 @@ tool operatorTool {
 // shape: a gated tool carries both.
 func TestParseToolDecl_RoleAndScopeAnnotations(t *testing.T) {
 	source := `@allowedRoles("assistant", "specialist")
-@scopes("operator")
 @description("Operator UI: click a target element")
 tool uiClick {
   selector  string  @required

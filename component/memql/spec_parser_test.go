@@ -56,7 +56,7 @@ spec requiresAdmin {
 // controls spec lifecycle. @enabled / @disabled on a spec is an
 // error; the same annotations are no-op on traits.
 func TestParseSpecMemQL_RejectsLifecycleOnSpec(t *testing.T) {
-	src := []byte(`
+	src := []byte(`@enabled
 spec specBoom {
   payload.active == true
 }`)

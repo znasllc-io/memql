@@ -200,11 +200,11 @@ concept item {
 	body := " setThing {\n  args {\n    id  string!\n  }\n  update {\n    id: args.id\n  }\n}\n"
 
 	// Bound to a nonexistent concept, buffer imports demo-only (provable): flagged.
-	if got := sigErrs("use demo.concepts.{ item }\n\nmutate full" + body); got != 1 {
+	if got := sigErrs("use demo.concepts.{ item }\n\nmutation full" + body); got != 1 {
 		t.Errorf("nonexistent signature concept: got %d unknown-signature-concept, want 1", got)
 	}
 	// Bound to the real, imported concept: silent.
-	if got := sigErrs("use demo.concepts.{ item }\n\nmutate item" + body); got != 0 {
+	if got := sigErrs("use demo.concepts.{ item }\n\nmutation item" + body); got != 0 {
 		t.Errorf("valid signature concept flagged: got %d", got)
 	}
 	// Bound to a real ENGINE concept WITHOUT an import: the global registry
