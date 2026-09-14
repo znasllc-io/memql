@@ -408,7 +408,7 @@ func TestPromoteBundleDurable_ConceptAndItsMutationInOneBundle(t *testing.T) {
 	e := promoteConceptEngineOnTheDefaultRegistry(t)
 
 	bundle := trainedWidgetSrc + "\n\n" + trainedWidgetMutationSrc
-	res, err := e.promoteBundleDurableWithStore(context.Background(), &fakePromoteStore{}, "owner-1", bundle, "", false)
+	res, err := e.promoteBundleDurableWithStore(context.Background(), &fakePromoteStore{}, "owner-1", bundle, "trainingns/concepts.memql", false)
 	if err != nil {
 		t.Fatalf("promote bundle: %v (diagnostics %+v)", err, res.Diagnostics)
 	}

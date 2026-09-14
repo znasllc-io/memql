@@ -31,7 +31,7 @@ var representativeRuntimeQueries = []struct {
 	query string
 }{
 	{"concept-only filter", `concept==v1:cluster:node`},
-	{"compound filter joined by ;", `concept==v1:cluster:node; payload.name=="bff"`},
+	{"compound filter joined by &&", `concept==v1:cluster:node && payload.name=="bff"`},
 	{"compound filter joined by &&", `concept==v1:cluster:node && payload.name=="bff"`},
 	{"actor accessor in RHS", `id==actor.userId`},
 	{"args accessor in RHS", `payload.partitionId==args.partitionId`},
@@ -102,7 +102,7 @@ var shapeFallsBackToMemqlQueries = []struct {
 	query string
 }{
 	{"shape inline template", `shape(concept==v1:cognition:space&&payload.active==true, {"id": node("id")})`},
-	{"shape composite paginate + sort", `shape(paginate(sort(concept==v1:cognition:space:context; payload.partitionId=="spc1", "createdAt", "desc"), 1), {"snapshot": node("payload.snapshot")})`},
+	{"shape composite paginate + sort", `shape(paginate(sort(concept==v1:cognition:space:context && payload.partitionId=="spc1", "createdAt", "desc"), 1), {"snapshot": node("payload.snapshot")})`},
 	// Array-form template (the parse-error failure mode):
 	{"shape array template", `shape(concept==v1:conversation&&id=="conv-1",[node("id"),children(node("id")),"done"])`},
 	// Nested-object template with relationships (the
@@ -190,7 +190,7 @@ func TestLangparserPathFallsBackOnMemqlVersionCompat(t *testing.T) {
 	for _, tc := range memqlVersionCompatFallsBackQueries {
 		t.Run(tc.name, func(t *testing.T) {
 			if unsupportedQueryShape(tc.query, false) == nil {
-				t.Errorf("langparserPathUnsupported(%q) returned false; concept==memql:version compat should short-circuit", tc.query)
+				t.Errorf("langparserPathUnsupported(%q) returned false && concept==memql:version compat should short-circuit", tc.query)
 			}
 			_, err := parseViaLangparser(tc.query, false)
 			if !errors.Is(err, ErrUnsupportedQueryShape) {

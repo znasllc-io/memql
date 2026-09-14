@@ -671,6 +671,10 @@ func TestPromoteConcept_ReplayDoesNotReclassify(t *testing.T) {
 	row := AuthoringConstructRow{
 		Id: "c1", BundleId: "b1", OwnerUserId: "owner-1",
 		Kind: "concept", Name: "diffWidget", Source: diffWidgetV2FieldRemoved, Status: "active",
+		// The replay reads the namespace off the row's origin (epic
+		// memql#5375); a row with none cannot place its concept at all,
+		// which is the state persisted rows predating the field are in.
+		Origin: "diffns/concepts.memql",
 	}
 	if err := e.recompileAndPromoteRow(context.Background(), row); err != nil {
 		t.Fatalf("a REPLAY of a breaking change was refused: %v\n\n"+

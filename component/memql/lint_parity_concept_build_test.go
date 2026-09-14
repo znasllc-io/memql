@@ -925,10 +925,15 @@ concept widget {
   enabled  boolean             @description("Mistyped.")
 }
 `)},
-		// @namespace disagreeing with the directory is a hard load ERROR
-		// (the moved-file guard, #2614), not a warn-skip.
+		// A RETIRED annotation is a hard load ERROR (epic memql#5375), not a
+		// warn-skip. It used to be @namespace DISAGREEING with the directory
+		// -- the moved-file guard, #2614 -- and the annotation itself is the
+		// refusal now, which is a hard error in the same position and keeps
+		// this fixture measuring what it measures: that skips gathered BEFORE
+		// a hard error survive it.
 		"zzzzz/concepts.memql": {Data: []byte(`@version("1.0.0")
-@description("A gadget in the wrong place.")
+@namespace("cluster")
+@description("A gadget carrying a retired annotation.")
 concept gadget {
   label string @required @description("Gadget label.")
 }

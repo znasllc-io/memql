@@ -437,7 +437,7 @@ func TestDemoteBundleDurable_ReportsPerConstructOutcomes(t *testing.T) {
 	persist := &fakePromoteStore{}
 	// allowBreaking=false is the ordinary promote (memql#3757); this bundle has
 	// no prior version to break against.
-	if _, err := e.promoteBundleDurableWithStore(context.Background(), persist, "owner-1", bundle, "", false); err != nil {
+	if _, err := e.promoteBundleDurableWithStore(context.Background(), persist, "owner-1", bundle, "trainingns/concepts.memql", false); err != nil {
 		t.Fatalf("promote bundle: %v", err)
 	}
 	store := &fakeDemoteStore{constructs: map[string][]AuthoringConstructRow{}}

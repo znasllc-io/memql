@@ -14,7 +14,7 @@ func TestSandboxCompileBundle_CandidateConceptCompiles(t *testing.T) {
 	before := len(memoryNodes.List())
 
 	rep := SandboxCompileBundle([]SandboxConstruct{
-		{Kind: "concept", Name: "sandboxWidget", Source: candidateWidgetConcept},
+		{Kind: "concept", Name: "sandboxWidget", Source: candidateWidgetConcept, Origin: "sandboxns/concepts.memql"},
 	})
 
 	if !rep.OK {
@@ -64,7 +64,7 @@ mutation sandboxWidget mutationCreateSandboxWidget {
 // overlaid onto the clone before the mutation parses + resolves.
 func TestSandboxCompileBundle_ConstructBindsCandidateConcept(t *testing.T) {
 	rep := SandboxCompileBundle([]SandboxConstruct{
-		{Kind: "concept", Name: "sandboxWidget", Source: candidateWidgetConcept},
+		{Kind: "concept", Name: "sandboxWidget", Source: candidateWidgetConcept, Origin: "sandboxns/concepts.memql"},
 		{Kind: "mutation", Name: "mutationCreateSandboxWidget", Source: candidateWidgetMutation},
 	})
 
@@ -125,10 +125,10 @@ concept sandboxNoNamespace {
 
 	rep = SandboxCompileBundle([]SandboxConstruct{
 		{
-			Kind: "concept",
-			Name: "sandboxDefaultVersion",
-			Source: `@namespace("sandboxns")
-@description("No @version: the 1.0.0 default applies")
+			Kind:   "concept",
+			Name:   "sandboxDefaultVersion",
+			Origin: "sandboxns/concepts.memql",
+			Source: `@description("No @version: the 1.0.0 default applies")
 concept sandboxDefaultVersion {
   label  string
 }`,

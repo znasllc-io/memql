@@ -31,7 +31,7 @@ func TestParseBasicComparison(t *testing.T) {
 }
 
 func TestParseLogicalExpressions(t *testing.T) {
-	plan := mustParse(t, "concept==v1:conversation&&payload.active==true,concept==v1:message")
+	plan := mustParse(t, "concept==v1:conversation&&payload.active==true||concept==v1:message")
 
 	orNode := assertLogical(t, plan.Root, LogicalOr)
 	andNode := assertLogical(t, orNode.Left, LogicalAnd)
@@ -50,7 +50,7 @@ func TestParseLogicalExpressions(t *testing.T) {
 }
 
 func TestParseParenthesizedPrecedence(t *testing.T) {
-	plan := mustParse(t, "(concept==v1:conversation,concept==v1:message)&&payload.active==true")
+	plan := mustParse(t, "(concept==v1:conversation||concept==v1:message)&&payload.active==true")
 	andNode := assertLogical(t, plan.Root, LogicalAnd)
 	orNode := assertLogical(t, andNode.Left, LogicalOr)
 

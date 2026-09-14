@@ -265,9 +265,21 @@ func AssembleConceptIdFromDeclInDir(decl *ConceptDecl, dir, pinned string) (stri
 		} else {
 			namespace = dir
 		}
-	} else if namespace != dir && !strings.HasPrefix(namespace, dir+":") && namespace != pinned {
-		return "", fmt.Errorf("concept %q: @namespace(%q) does not match its domain directory %q (nor extend it as %q, nor match a namespace.pin): a moved file silently changes canonical ids -- move the file back, fix the annotation, or pin the deliberate divergence with a one-line %s/namespace.pin file (#2614)",
-			decl.Name, namespace, dir, dir+":...", dir)
+	} else {
+		// @namespace is RETIRED (epic memql#5375), so a PRESENT one is a
+		// refusal whatever it says -- and the refusal has to be the
+		// retirement rather than the #2614 moved-file guard.
+		//
+		// The guard ran here first and compared the annotation against the
+		// directory, so an author who moved a file was told to "fix the
+		// annotation" -- advice pointing at something that no longer exists,
+		// and a second refusal waiting behind the first. The guard's own
+		// purpose is served differently now: it reconciled TWO sources of
+		// truth for a namespace, and there is one, so a moved file's ids
+		// follow the move by construction and a domain that must keep its
+		// ids pins them.
+		return "", fmt.Errorf("concept %q: @namespace(%q) is retired -- a concept's namespace is its domain directory (%q here), or that directory's one-line namespace.pin. Delete the annotation; pin a deliberate id-preserving divergence with a %s/namespace.pin file (#2614). Run `memqlmigrate --rewrite=attributes`",
+			decl.Name, namespace, dir, dir)
 	}
 	if err := ValidateAssemblyInputs(version, namespace, decl.Name); err != nil {
 		return "", fmt.Errorf("concept %q: %w", decl.Name, err)

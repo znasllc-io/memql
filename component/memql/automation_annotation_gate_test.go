@@ -19,7 +19,11 @@ func TestValidateAutomationAnnotations(t *testing.T) {
 		"@filter(a == 1)\n",
 		"",
 		"@description(\"d\")\n",
-		"@schedule(cron=\"0 5 9 * * *\")\n", // LIVE -- must stay accepted
+		// @schedule(cron=...) was LIVE here until epic memql#5375 collapsed it
+		// into @trigger(schedule=...): one annotation declares how an
+		// automation is reached, which is what lets the @template gate refuse
+		// "triggered AND called" without checking two synonyms.
+		"@trigger(schedule=\"0 5 9 * * *\")\n",
 	}
 	for _, p := range accept {
 		if err := ValidateAutomationAnnotations(body(p)); err != nil {
