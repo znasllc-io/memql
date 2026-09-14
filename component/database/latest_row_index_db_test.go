@@ -405,6 +405,51 @@ func TestEnsureLatestRowIndexReplacesANonEquivalentIndexOnItsName(t *testing.T) 
 	}
 }
 
+// A COMPRESSED chunk without the index is reported, not failed: 2.29 builds the
+// index on compressed chunks too, but a Timescale that skipped them would
+// otherwise leave the migration unable ever to succeed. The same chunk
+// uncompressed is a rebuild -- which the case above already pins.
+func TestEnsureLatestRowIndexToleratesACompressedChunkWithoutIt(t *testing.T) {
+	db := conceptIndexDB(t)
+	requireTimescale(t, db)
+	ctx := context.Background()
+	tbl := newLatestRowTable(t, db, true)
+	seedAcrossDays(t, db, tbl, 4, 30)
+	mustEnsure(t, db, tbl, string(database.LatestRowIndexBuilt))
+
+	lriExec(t, db, `ALTER TABLE `+tbl.quoted()+` SET (timescaledb.compress,
+		timescaledb.compress_segmentby = 'concept', timescaledb.compress_orderby = '"createdAt" DESC')`)
+	lriExec(t, db, `SELECT compress_chunk(c) FROM (SELECT c FROM show_chunks('`+tbl.quoted()+`') c ORDER BY 1 LIMIT 2) s`)
+
+	var schema, name string
+	if err := db.QueryRowContext(ctx, `
+		SELECT n.nspname, ic.relname
+		  FROM timescaledb_information.chunks ch
+		  JOIN pg_namespace cn ON cn.nspname = ch.chunk_schema
+		  JOIN pg_class cc ON cc.relname = ch.chunk_name AND cc.relnamespace = cn.oid
+		  JOIN pg_index i ON i.indrelid = cc.oid
+		  JOIN pg_class ic ON ic.oid = i.indexrelid
+		  JOIN pg_namespace n ON n.oid = ic.relnamespace
+		 WHERE ch.hypertable_name = ? AND ch.is_compressed
+		   AND pg_get_indexdef(i.indexrelid) LIKE '%(concept, id, "createdAt" DESC)%'
+		 ORDER BY ic.relname LIMIT 1`, tbl.name).Scan(&schema, &name); err != nil {
+		t.Fatalf("finding a compressed chunk's index: %v", err)
+	}
+	lriExec(t, db, `DROP INDEX "`+schema+`"."`+name+`"`)
+
+	r, err := database.EnsureLatestRowIndex(ctx, db, nil, tbl.name, tbl.index)
+	if err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if r.Outcome != database.LatestRowIndexValid || len(r.ExemptWithoutIndex) != 1 ||
+		!strings.Contains(r.ExemptWithoutIndex[0], "compressed") {
+		t.Fatalf("report = %+v, want valid with the one compressed chunk reported as carrying no index", r)
+	}
+	if o := readOracle(t, db, tbl, tbl.index); !o.rootUsable || len(o.uncovered) != 1 {
+		t.Fatalf("the simulation did not leave exactly the compressed chunk uncovered: %+v", o)
+	}
+}
+
 // Two nodes migrating at once must not race a build: the second waits on the
 // build lock, and one that cannot get it in time names who holds it rather
 // than proceeding.
