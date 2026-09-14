@@ -106,6 +106,41 @@ func TestRunScopeResolution(t *testing.T) {
 	})
 }
 
+// TestRunScopeEmptyRead: a query step that read no rows stands for the empty
+// row list, not for its envelope -- an empty bundle's JSON omits `nodes`, so
+// GetStepNodes finds none -- in both the engine's result and its decoded
+// map. The string evaluator's accessors read it as zero rows; so must an
+// expression, or `rows.empty()` over an empty read is false and
+// `rows.nodes()` is a list holding the envelope. Found by the logic-body
+// equivalence corpus (component/automations/steps).
+func TestRunScopeEmptyRead(t *testing.T) {
+	for name, empty := range map[string]any{
+		"an ExecuteResult":        &memql.ExecuteResult{},
+		"a decoded envelope":      map[string]any{"Bundle": map[string]any{}},
+		"an envelope with no key": map[string]any{"Bundle": nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e := NewEvaluator()
+			e.SetStepResult("rows", &StepResult{StepId: "rows", Status: "success", Result: empty})
+			for src, want := range map[string]any{
+				"rows.empty()":             true,
+				"rows.nodes()":             []any{},
+				"rows.count()":             int64(0),
+				"rows.first() ?? \"none\"": "none",
+				"rows":                     []any{},
+			} {
+				got, err := evalV1Src(t, e, src)
+				if err != nil {
+					t.Fatalf("%s: %v", src, err)
+				}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("%s = %#v (%T), want %#v", src, got, got, want)
+				}
+			}
+		})
+	}
+}
+
 // TestEncodeValueLeafRoundTrip: decoding compiler.EncodeValueLeaf(e) -- the
 // compiled value-leaf encoding, through the JSON a load reads and the
 // preparation and resolution a v1 step runs -- yields what EvalExpr(e)
