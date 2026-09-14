@@ -679,6 +679,26 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 			fn.ExprSource = extractExpressionFromContent(content)
 
 		case languageParser.FunctionTypeLogic:
+			// An edition-2026 statement body (epic memql#5370) compiles HERE,
+			// at load, never at call: CompileBody refuses a read of a later
+			// name, the scope rules and D14's construct rules (a logic may not
+			// publish, nor call an automation or an action, and ends with a
+			// return), all of them at once.
+			if auto, ok := funcDef.Body.(*languageParser.AutomationDef); ok && auto.Body != nil {
+				var argNames []string
+				if funcDef.ArgsSchema != nil {
+					for _, f := range funcDef.ArgsSchema.Fields {
+						argNames = append(argNames, f.Name)
+					}
+				}
+				steps, problems := compiler.CompileBody("logic", expectedName, argNames, auto.Body)
+				if len(problems) > 0 {
+					return nil, fmt.Errorf("function %q: %w", expectedName, compiler.BodyProblems(problems))
+				}
+				fn.LogicBody = steps
+				fn.ExprSource = extractExpressionFromContent(content)
+				break
+			}
 			// Logic functions: the parser produces an *AutomationDef body
 			// (a sequence of `name := <call>` steps plus a synthetic
 			// `_return` step). For single-statement bodies (`body { return
