@@ -32,7 +32,9 @@ func TestCompileMemQL_LifecycleDefaults(t *testing.T) {
 		wantEnabled bool
 	}{
 		{"absent", "", true}, // the ruling; compiled to disabled pre-#2604
-		{"explicit-enabled", true},
+		// {"explicit-enabled", "@enabled", true} stood here until epic
+		// memql#5375 retired @enabled: an explicit no-op that read like a
+		// switch. "absent" above is the on state now, and it always was.
 		{"explicit-disabled", "@disabled", false},
 	}
 	for _, tc := range cases {

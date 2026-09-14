@@ -142,8 +142,12 @@ automation second ` + bodyStub
 	if strings.Contains(second, "automation first") {
 		t.Errorf("the second slice absorbed the first automation entirely:\n%s", second)
 	}
-	if !strings.Contains(second, "@enabled") {
-		t.Errorf("the second slice lost its own @enabled:\n%s", second)
+	// The second slice must keep its OWN preamble. That was @enabled until
+	// epic memql#5375 retired it; @trigger is the annotation the fixture has
+	// and it tests the same property -- a slice that stops at the construct
+	// boundary above it still starts at its own annotations.
+	if !strings.Contains(second, `@trigger(event="node.updated"`) {
+		t.Errorf("the second slice lost its own annotation preamble:\n%s", second)
 	}
 }
 
