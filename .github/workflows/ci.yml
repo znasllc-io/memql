@@ -457,6 +457,13 @@ jobs:
               # test. Routed here rather than to `gates` because `go` is the
               # bucket db-tests consults.
               - 'component/memql/readiness/testdata/**'
+              # The DSL conformance corpus (epic memql#5356): data the verdict
+              # runner in test/conformance reads, so a change to a case file or
+              # an expect.json with no Go beside it must still run the runner.
+              # `go` is the bucket that reaches it -- go-tests runs the package
+              # and mcp-conformance runs `./test/conformance/...` -- and the
+              # gate-inputs step does not.
+              - 'test/conformance/**'
             # The embedded DSL tree.
             dsl:
               - 'dsl/**'
