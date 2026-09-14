@@ -87,7 +87,7 @@ func nextRules() []NextRule {
 		{
 			Context: "inFunctionBody",
 			Expect:  []string{"keyword", "builtin", "operator"},
-			Doc:     "Inside a logic/automation body: control-flow keywords, builtin calls, and expressions. Query-level directives (sort/paginate/asOf/select/withDepth/shape) are rejected here.",
+			Doc:     "Inside a logic/automation body: one statement per line -- `<name> := <expr or call>`, a construct call by its kind (`query`, `mutation`, `logic`, `builtin`; in an automation also `automation` and `action`), `if`/`else`, `for <x> in <source> [if <cond>]`, `switch`, `parallel { branch ... }`, `publish` (automation only) or `return`, with the trailing clauses `on surface(...)`, `retry(n)`, `on error continue` in that order. Query-level directives (sort/paginate/asOf/select/withDepth/shape) are rejected here.",
 		},
 		{
 			Context: "afterAtSign",

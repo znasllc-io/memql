@@ -55,9 +55,9 @@ var clauseDocs = map[string]string{
 	"update":       "Mutation block: partial read-merge-write of an existing row (keyed by id).",
 	"accept":       "Write-block sugar: `accept { name, ... }` lists the public fields the mutation accepts -- each auto-binds to its same-named arg (`name` -> `name: args.name`). Every name must be a declared arg. Nested inside insert{}/update{} (or top-level, which means insert). Never mixed with loose fields.",
 	"stamp":        "Write-block sugar: `stamp { key: value, ... }` carries the server-set fields beside an accept{} list. Nested inside insert{}/update{} (or top-level with accept, which means insert).",
-	"body":         "Logic block: named statements ending in `return <expr>`. An automation has no body block -- its body is step blocks.",
-	"step":         "Automation block: `step <name> { <call> }`, one unit of the automation's work; steps run in order, and each result is readable by name.",
-	"precondition": "Automation block: `precondition <name> { ... }`, a deterministic check that must hold before the steps run (Epic 4, memql#2139).",
+	"body":         "Retired in edition 2026: a logic's and an automation's statements follow the args block directly, with no `body { }` wrapper. memqlmigrate --rewrite=bodies rewrites it.",
+	"step":         "Retired in edition 2026: an automation's statements follow its args block directly, and `step <name> { <call> }` is the statement `<name> := <call>`. memqlmigrate --rewrite=bodies rewrites it.",
+	"precondition": "Automation block: `precondition <name> { ... }`, a deterministic check that must hold before the statements run (Epic 4, memql#2139).",
 	"params":       "Provider block: model/window/cost parameters.",
 	"auth":         "Provider block: vendor auth (e.g. apiKey env(\"...\")).",
 }
@@ -65,12 +65,25 @@ var clauseDocs = map[string]string{
 // controlKeywords are the control-flow words of logic / automation bodies.
 func controlKeywords() []Keyword {
 	return []Keyword{
-		// Control flow (logic / automation bodies).
-		{Name: "if", Doc: "Conditional control flow: if cond { ... } else { ... }. For a conditional VALUE write the expression `p ? a : b`.", Kind: "control"},
-		{Name: "else", Doc: "Alternative branch of an if statement.", Kind: "control"},
-		{Name: "for", Doc: "Iterate a collection: for item := range collection { ... }.", Kind: "control"},
-		{Name: "range", Doc: "Iteration source in a for statement.", Kind: "control"},
-		{Name: "return", Doc: "Return the trailing value from a logic body.", Kind: "control"},
+		// Statements (logic / automation bodies, edition 2026, epic memql#5370).
+		// One statement per line, run in the order written; a name is bound once
+		// and read by the statements after it. Their trailing clauses (retry,
+		// wait, on) are control words too: "clause" is a body clause of the
+		// parser's clause tables (bodyClauseKeywords).
+		{Name: "if", Doc: "Conditional statement: `if <cond> { ... } else if <cond> { ... } else { ... }`. A name bound in a branch is readable after the chain -- absent if the branch that binds it did not run -- and the branches of one chain may bind the same name. For a conditional VALUE write the expression `p ? a : b`.", Kind: "control"},
+		{Name: "else", Doc: "Alternative branch of an if statement, on the closing brace's line: `} else {`.", Kind: "control"},
+		{Name: "for", Doc: "Loop statement: `for item in <source> [if <cond>] { ... }` -- the loop variable and every name bound in the body exist in each iteration only. A return inside ends the body the loop is in. Trailing clause: `on error continue`.", Kind: "control"},
+		{Name: "range", Doc: "Retired in edition 2026: `for x := range <source>` is written `for x in <source>`. memqlmigrate --rewrite=bodies rewrites it.", Kind: "control"},
+		{Name: "switch", Doc: "Switch statement: `switch <value> { case <literal>[, <literal>] { ... } default { ... } }` -- the first case whose label equals the value runs, else the default. Its names share the switch's scope, as an if chain's do.", Kind: "control"},
+		{Name: "case", Doc: "A switch branch: `case <literal>[, <literal>] { ... }`. A label is a literal, written once per switch.", Kind: "control"},
+		{Name: "default", Doc: "The switch branch that runs when no case matches.", Kind: "control"},
+		{Name: "parallel", Doc: "Parallel statement: `parallel { branch <label> { ... } ... } [wait any]` -- the branches run at once, each a list of its own whose names stay inside it; a failed branch stops the others. A branch cannot return. Trailing clause: `on error continue`.", Kind: "control"},
+		{Name: "branch", Doc: "One list of a parallel statement: `branch <label> { ... }`.", Kind: "control"},
+		{Name: "publish", Doc: "Publish statement, in an automation: `publish \"<topic>\" { key: value, ... }` puts an event on the bus. A logic may not publish (D14): publish from the automation that calls it.", Kind: "control"},
+		{Name: "return", Doc: "End the body with a value: `return <expr>`, or `return <call>` for what the call returns. A logic's last statement is its return; an automation's return is its run's outcome.", Kind: "control"},
+		{Name: "retry", Doc: "Trailing clause of a construct call: `<call> retry(n)` runs a failed call up to n more times. Written after `on surface(...)` and before `on error continue`.", Kind: "control"},
+		{Name: "wait", Doc: "Trailing clause of a parallel: `wait any` ends it when one branch ends. `wait all` is the default and is not written.", Kind: "control"},
+		{Name: "on", Doc: "Trailing clauses: `on surface(\"<name>\")` names where an action runs; `on error continue` records a failed call, for or parallel and goes on, its name left absent (`on error stop` is the default and is not written).", Kind: "control"},
 		{Name: "when", Doc: "Retired in edition 2026: the arg-conditional guard `when(args.x) { <predicate> }` is written `args.x == nil || <predicate>`, which lowers the same way. memqlmigrate --rewrite=expressions rewrites it.", Kind: "control"},
 		{Name: "in", Doc: "Membership test: `args.tag in row.tags`, or `row.kind in [\"a\", \"b\"]`. The single membership operator (`has` and the `.contains(v)` collection method are retired).", Kind: "control"},
 		{Name: "startsWith", Doc: "String-prefix test: `row.name startsWith \"lit\"`, a list of prefixes (ANY of), or an arg. An empty list and a blank prefix match nothing (memql#4208).", Kind: "control"},

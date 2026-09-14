@@ -98,7 +98,7 @@
     },
     "control-keywords": {
       "name": "keyword.control.memql",
-      "match": "\\b(?:accept|args|asOf|auth|body|count|else|filter|for|if|in|insert|paginate|params|precondition|range|refine|return|shape|sort|stamp|startsWith|step|update|when)\\b"
+      "match": "\\b(?:accept|args|asOf|auth|body|branch|case|count|default|else|filter|for|if|in|insert|on|paginate|parallel|params|precondition|publish|range|refine|retry|return|shape|sort|stamp|startsWith|step|switch|update|wait|when)\\b"
     },
     "function-calls": {
       "match": "\\b(addDuration|aliasOf|canonicalId|childOf|contains|createdBy|daysBetween|equals|error|hash|ids|lower|owns|parentOf|references|secret|shortId|systemSecret|systemVar|toString|trim|upper|var)\\s*(\\()",
