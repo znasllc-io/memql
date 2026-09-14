@@ -202,13 +202,22 @@ func TestPlanConstant_PredicatePositionMustBeBoolean(t *testing.T) {
 	}{
 		{"yes", "string"},
 		{int64(1), "number"},
-		{nil, "nil"},
 		{[]any{true}, "list"},
 	} {
 		_, err := v.expandExpressionWithArgs(pcLiteral(tc.value), map[string]any{})
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "a plan constant in a condition must be boolean, got "+tc.kind)
 	}
+
+	// ABSENT is false, not a type error: D8's condition rule, which
+	// EvalCondition applies in process. An omitted optional flag in
+	// `args.flag ? p : q` must take the else branch on both evaluators.
+	got, err := v.expandExpressionWithArgs(pcLiteral(nil), map[string]any{})
+	require.NoError(t, err)
+	c, ok := got.(*constantBoolExpression)
+	require.True(t, ok, "an absent plan constant in a condition becomes a constant, got %T", got)
+	require.False(t, c.value)
+	require.True(t, c.planConstant)
 }
 
 func TestPlanConstant_ValuePositionBecomesTheComparisonValue(t *testing.T) {

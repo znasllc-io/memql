@@ -305,6 +305,11 @@ func unwrapToFilter(expr ExpressionNode) ExpressionNode {
 			expr = n.Target
 		case *PaginateExpression:
 			expr = n.Target
+		case *RefineExpression:
+			// A refine only NARROWS the page the filter selected, in
+			// process; which rows the query can reach is the filter's
+			// answer, so the filter is what is classified.
+			expr = n.Target
 		case *SortExpression:
 			expr = n.Target
 		case *SelectExpression:

@@ -148,10 +148,22 @@ func errPlanConstantUnevaluated(pc *PlanConstExpression) error {
 }
 
 // planConstantPredicate is the predicate-position replacement rule: a bool
-// becomes a constant, anything else refuses. No truthiness (D8): a string, a
-// number or nil in a condition is a type error, and folding it to a boolean by
-// some rule would make `args.status && row.x == 1` mean something nobody wrote.
+// becomes a constant, ABSENT becomes false, and anything else refuses. No
+// truthiness (D8): a string, a number or a list in a condition is a type
+// error, and folding it to a boolean by some rule would make `args.status &&
+// row.x == 1` mean something nobody wrote.
+//
+// Absent is not a type error, and that is D8's own rule rather than an
+// exception to it: "a condition is a bool, or absent (false)". EvalCondition
+// reads an absent condition as false, so `args.flag ? p : q` with the flag
+// omitted takes the else branch in process -- and must take it here too, or
+// the one expression would mean two things by where it was evaluated (the
+// lowering spells that ternary `(args.flag && p) || (!args.flag && q)`, whose
+// plan constants land here).
 func planConstantPredicate(pc *PlanConstExpression, value any) (ExpressionNode, error) {
+	if IsAbsent(value) {
+		return &constantBoolExpression{value: false, planConstant: true}, nil
+	}
 	b, ok := value.(bool)
 	if !ok {
 		return nil, fmt.Errorf("a plan constant in a condition must be boolean, got %s (%s)",
@@ -524,6 +536,10 @@ func treeHasPlanConstant(expr ExpressionNode) bool {
 	case *CountExpression:
 		return treeHasPlanConstant(n.Target)
 	case *ShapeExpression:
+		return treeHasPlanConstant(n.Target)
+	case *RefineExpression:
+		// The target: the refine lambda is evaluated in process with its own
+		// bindings, never folded.
 		return treeHasPlanConstant(n.Target)
 	default:
 		return false

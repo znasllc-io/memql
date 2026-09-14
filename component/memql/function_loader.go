@@ -178,7 +178,22 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// The signature concepts were captured from the PRE-rewrite
 	// source above; we apply the translation against the post-rewrite
 	// content here.
+	//
+	// NOT for a query with an edition-2026 lambda (memql#5366). The
+	// translation is textual, and a v1 filter names every row read through
+	// its parameter -- `row => row.<concept>.x == 1` would become
+	// `row.payload.x`, and a parameter the author named after the concept
+	// (`registration => registration.revoked`) would become a read of an
+	// undefined `payload`. A query never needs the translation in the first
+	// place: its filter reads payload fields bare (legacy) or through the
+	// parameter (v1), and the conformance gate refuses `<concept>.<field>` in
+	// a filter. `=>` appears in a query only as a v1 lambda: a legacy filter
+	// refuses lambdas, and collection-method lambdas live in logic bodies.
+	v1Query := strings.Contains(content, "func (Query)") && strings.Contains(content, "=>")
 	for _, name := range signatureConcepts {
+		if v1Query {
+			break
+		}
 		content = translateSignatureConceptPathsToPayload(content, name)
 	}
 
@@ -729,7 +744,30 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		default:
 			// Query functions: convert the expression AST to executable engine AST.
 			if parserExpr, ok := funcDef.Body.(languageParser.ExpressionNode); ok {
-				converter := NewASTConverter()
+				// An edition-2026 filter -- the lambda the struct-form
+				// rewriter joins onto the concept binding -- lowers through
+				// Lower, against the bound concept's declared fields and the
+				// query's declared arguments (memql#5366). The spec registry
+				// is not loaded yet, so a predicate application's kind is
+				// checked later, by the Init pass, from fn.V1Filter.
+				var lowerOpts []ASTConverterOption
+				if funcDef.Type == languageParser.FunctionTypeQuery {
+					var bound *memoryNodes.Concept
+					if registry != nil && boundConcept != "" {
+						if c, err := registry.Get(boundConcept); err == nil {
+							bound = c
+						}
+					}
+					argTypes := argTypesFromSchema(fn.ArgsSchema)
+					lowerOpts = append(lowerOpts, WithPredicateLowering(func(lam *languageParser.LambdaExpr) (ExpressionNode, error) {
+						if fn.V1Filter != nil {
+							return nil, fmt.Errorf("a query has one filter, and %q has a second lambda where a condition goes", expectedName)
+						}
+						fn.V1Filter = lam
+						return lowerQueryFilter(lam, bound, argTypes, nil)
+					}))
+				}
+				converter := NewASTConverter(lowerOpts...)
 				engineExpr, err := converter.ConvertExpression(parserExpr)
 				if err != nil {
 					return nil, fmt.Errorf("convert function %q body: %w", expectedName, err)
@@ -927,6 +965,8 @@ func stampConceptCacheHint(expr ExpressionNode, seconds int) bool {
 		return stampConceptCacheHint(n.Target, seconds)
 	case *ShapeExpression:
 		return stampConceptCacheHint(n.Target, seconds)
+	case *RefineExpression:
+		return stampConceptCacheHint(n.Target, seconds)
 	default:
 		return false
 	}
@@ -941,6 +981,9 @@ func ensureBoundConceptFilter(expr ExpressionNode, boundConcept string) Expressi
 		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
 		return n
 	case *PaginateExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	case *RefineExpression:
 		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
 		return n
 	case *SelectExpression:
@@ -1045,6 +1088,12 @@ func resolveBareConcept(expr ExpressionNode, boundConcept string) ExpressionNode
 		return &PaginateExpression{
 			Limit:  n.Limit,
 			Target: resolveBareConcept(n.Target, boundConcept),
+		}
+	case *RefineExpression:
+		return &RefineExpression{
+			Target:   resolveBareConcept(n.Target, boundConcept),
+			Lambda:   n.Lambda,
+			Bindings: n.Bindings,
 		}
 	case *ShapeExpression:
 		return &ShapeExpression{
@@ -1299,6 +1348,11 @@ func collectFunctionRefsRecursive(expr ExpressionNode, refs *[]string) {
 		collectFunctionRefsRecursive(node.Target, refs)
 	case *PaginateExpression:
 		collectFunctionRefsRecursive(node.Target, refs)
+	case *RefineExpression:
+		// The target: the refine lambda is a v1 AST whose calls are catalog
+		// functions and predicates, never constructs (validateRefine refuses
+		// a construct call in it).
+		collectFunctionRefsRecursive(node.Target, refs)
 	case *SelectExpression:
 		collectFunctionRefsRecursive(node.Target, refs)
 	case *TimestampExpression:
@@ -1393,6 +1447,11 @@ func walkForImpureLambda(expr ExpressionNode, functions map[string]*Function) er
 	case *CountExpression:
 		return walkForImpureLambda(node.Target, functions)
 	case *ShapeExpression:
+		return walkForImpureLambda(node.Target, functions)
+	case *RefineExpression:
+		// The target. The refine lambda cannot call a construct at all
+		// (validateRefine refuses one), so there is no impure call in it
+		// for this walk to find.
 		return walkForImpureLambda(node.Target, functions)
 	}
 	return nil

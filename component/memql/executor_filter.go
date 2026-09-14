@@ -79,6 +79,11 @@ func nodeMatchesExpressionIn(node memorynodes.MemoryNode, expr ExpressionNode, e
 		// so the SQL-compile path and the in-process post-filter agree.
 		return literalTruthy(n.Value), nil
 	case *ComparisonExpression:
+		// The twin of the field-comparison SQL; either side may be the
+		// element in scope, so it is decided here where elem is known.
+		if fo, ok := n.Value.(*FieldOperand); ok {
+			return fieldOperandMatches(node, n, fo, elem, payloadCache)
+		}
 		if isArrayElementField(n.Field) {
 			return elementMatchesComparison(elem, n)
 		}
@@ -168,6 +173,16 @@ func (e *MemQLEngine) tryCompileCombinedFilterIn(ctx context.Context, expr Expre
 		return compiledExpression{sql: combinedSQL, args: combinedArgs}, true
 
 	case *ComparisonExpression:
+		// A comparison between two fields (expr_field_operand.go). Checked
+		// before the element arm because either side may be the element in
+		// scope, and the compile needs that scope.
+		if fo, ok := node.Value.(*FieldOperand); ok {
+			filter, err := compileFieldOperandComparison(node, fo, scope)
+			if err != nil {
+				return compiledExpression{}, false
+			}
+			return filter, true
+		}
 		// A comparison on the collection element in scope (expr_collection_sql.go).
 		// Outside a collection predicate there is no element to read, and the
 		// compile refuses rather than reading one.
@@ -716,6 +731,14 @@ func (e *MemQLEngine) compileComparisonExpressionWithContext(expr *ComparisonExp
 		return compiledExpression{}, fmt.Errorf("comparison field is missing")
 	}
 
+	// A comparison between two row fields (expr_field_operand.go). At this
+	// entry there is no collection element in scope, so both sides must be
+	// payload paths; an element-side operand compiles through
+	// tryCompileCombinedFilterIn, which has the scope.
+	if fo, ok := expr.Value.(*FieldOperand); ok {
+		return compileFieldOperandComparison(expr, fo, nil)
+	}
+
 	field := strings.TrimSpace(expr.Field.Parts[0])
 
 	if info, ok := resolveIntrinsicField(field); ok && len(expr.Field.Parts) == 1 {
@@ -1199,6 +1222,11 @@ func extractConceptFromExpression(expr ExpressionNode) string {
 		}
 		return extractConceptFromExpression(node.Target)
 	case *PaginateExpression:
+		if node == nil {
+			return ""
+		}
+		return extractConceptFromExpression(node.Target)
+	case *RefineExpression:
 		if node == nil {
 			return ""
 		}
@@ -1820,6 +1848,30 @@ func compileJSONValueComparison(textExpr, jsonbExpr string, op ComparisonOperato
 			sql:  fmt.Sprintf("(jsonb_typeof(%s) = 'string' AND (%s) ^@ ANY(?::text[]))", jsonbExpr, textExpr),
 			args: []any{pq.Array(prefixes)},
 		}, nil
+	case OpIncludes:
+		// `<field>.includes(<sub>)` (memql#5366): the substring test. strpos
+		// is a plain substring search with no pattern language, so a `%` or
+		// `_` in the needle is literal and nothing here needs escaping, and it
+		// is case-sensitive exactly as strings.Contains is. Typed like every
+		// other comparison here: a stored number is not searched by its
+		// digits, and an absent field is never a match.
+		//
+		// A BLANK needle (empty or whitespace-only) and an absent one match
+		// nothing -- the constant is emitted, as for an empty prefix set. ""
+		// occurs in every string, so the literal reading would let a caller
+		// who sends an empty search widen the selection to every row: the
+		// fail-open shape authoring rule 32 refuses for startsWith.
+		needle, ok, err := includesNeedle(value)
+		if err != nil {
+			return compiledExpression{}, err
+		}
+		if !ok {
+			return compiledExpression{sql: "FALSE"}, nil
+		}
+		return compiledExpression{
+			sql:  fmt.Sprintf("(jsonb_typeof(%s) = 'string' AND strpos(%s, ?) > 0)", jsonbExpr, textExpr),
+			args: []any{needle},
+		}, nil
 	case OpHas:
 		// has checks if a JSONB array field contains a scalar value.
 		// Uses the @> containment operator: payload->'field' @> to_jsonb('value'::text)
@@ -2211,6 +2263,26 @@ func startsWithAny(s string, prefixes []string) bool {
 	return false
 }
 
+// includesNeedle reads the needle of an `includes` comparison, the one reading
+// both halves share. ok=false is a needle that matches nothing: absent (nil),
+// or a string that is empty or whitespace-only (the blank rule, as for a
+// startsWith prefix -- see OpIncludes). A needle that is not a string is an
+// error on both halves rather than a silent false, so a mistyped argument
+// surfaces instead of reading as "no row contains it".
+func includesNeedle(value any) (string, bool, error) {
+	switch v := value.(type) {
+	case nil:
+		return "", false, nil
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return "", false, nil
+		}
+		return v, true, nil
+	default:
+		return "", false, fmt.Errorf("includes() takes a string, got %T", value)
+	}
+}
+
 func normalizeCollectionValues(value any) (*normalizedCollection, error) {
 	raw, ok := value.([]any)
 	if !ok {
@@ -2268,6 +2340,11 @@ func nodeMatchesComparison(node memorynodes.MemoryNode, cmp *ComparisonExpressio
 	}
 	if len(cmp.Field.Parts) == 0 {
 		return false, fmt.Errorf("comparison field is missing")
+	}
+	// A field comparison reached here directly (the split evaluator's
+	// single-comparison path) is a row-level one: no element in scope.
+	if fo, ok := cmp.Value.(*FieldOperand); ok {
+		return fieldOperandMatches(node, cmp, fo, nil, payloadCache)
 	}
 
 	field := strings.TrimSpace(cmp.Field.Parts[0])
@@ -2527,6 +2604,19 @@ func compareScalarValues(actual any, op ComparisonOperator, expected any) (bool,
 			return false, nil
 		}
 		return startsWithAny(actualStr, prefixes), nil
+	case OpIncludes:
+		// The in-process mirror of the typed strpos SQL: a substring test is a
+		// question about a STRING, a blank or absent needle matches nothing,
+		// and a subject that is not a string (absent included) is not a match.
+		needle, ok, err := includesNeedle(expected)
+		if err != nil {
+			return false, err
+		}
+		actualStr, isString := actual.(string)
+		if !ok || !isString {
+			return false, nil
+		}
+		return strings.Contains(actualStr, needle), nil
 	case OpHas:
 		// OpHas tests array containment: does the array field `actual`
 		// contain the scalar `expected`. The parser desugars the

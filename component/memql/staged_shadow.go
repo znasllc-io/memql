@@ -541,6 +541,8 @@ func StagedDataTraverses(expr ExpressionNode) bool {
 		return StagedDataTraverses(n.Target)
 	case *PaginateExpression:
 		return StagedDataTraverses(n.Target)
+	case *RefineExpression:
+		return StagedDataTraverses(n.Target)
 	case *SortExpression:
 		return StagedDataTraverses(n.Target)
 	case *SelectExpression:
