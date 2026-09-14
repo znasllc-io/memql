@@ -38,7 +38,7 @@ edition = "2026"
 ```
 
 - `memql` is the **language line**, written `<major>.<minor>`. It is what later versions of the language key meaning on: when a behaviour changes between two lines, a tree is read with the meaning of the line it declares, the way a Go module is read under its `go` line.
-- `edition` is the coarse label that names the parser front end the tree is written for. Every file is read through the front end of the edition its own domain declares before anything parses it, so domains written in two editions load in one engine. An edition never forks the parser: a front end is a thin source step in front of the one core, and the current edition's step changes nothing. An engine refuses an edition it has no front end for, and a file a front end refuses is refused at boot by path.
+- `edition` is the coarse label that names the parser front end the tree is written for. Every file is read through the front end of the edition its own domain declares before anything parses it, so domains written in two editions load in one engine. An edition never forks the parser: a front end is a thin source step in front of the one core, and the current edition's step changes nothing. An engine refuses an edition it has no front end for, and a file a front end refuses is refused at boot by path. A top-level statement that opens with a word no construct is spelled with -- a typo, or a keyword only another edition knows -- is refused too, naming the word and the construct keywords (`construct_unknown`).
 
 The file is a strict subset of TOML: blank lines, `#` comments, and exactly those two `key = "value"` lines. A table, a third key, an unquoted value or a key written twice is refused with its line number.
 

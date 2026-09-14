@@ -28,6 +28,7 @@ package actions
 // leaf-registry it reconciles against -- never the engine.
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"regexp"
@@ -216,7 +217,8 @@ func LoadCatalogFromFS(tree fs.FS) (*CapabilityCatalog, error) {
 		return cat, nil
 	}
 	// Each file through the front end of its domain's edition (memql#5358);
-	// see LoadFromFS for why a refused file is left out without a word here.
+	// see LoadFromFS for why a refused domain is skipped silently and a file
+	// its front end refuses is warned about rather than refused.
 	lines, _ := languageParser.ResolveLanguageLines(tree, memqldsl.EmbeddedTree{})
 	err := fs.WalkDir(tree, ".", func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -236,7 +238,11 @@ func LoadCatalogFromFS(tree fs.FS) (*CapabilityCatalog, error) {
 			return fmt.Errorf("capability catalog: read %s: %w", p, rerr)
 		}
 		raw, prepErr := lines.Prepare(p, raw)
+		if errors.Is(prepErr, languageParser.ErrLanguageLineRefused) {
+			return nil
+		}
 		if prepErr != nil {
+			warnEditionRefused("actions.catalog", p, prepErr)
 			return nil
 		}
 		for _, slice := range extractCapabilityDeclSlices(string(raw)) {

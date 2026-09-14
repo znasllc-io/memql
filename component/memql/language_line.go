@@ -38,6 +38,7 @@ package memql
 import (
 	"errors"
 	"io/fs"
+	"log/slog"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
@@ -122,6 +123,15 @@ func (e *MemQLEngine) resolveLanguageLines(report *LoadReport) {
 				"detail", s.Err)
 		}
 	}
+}
+
+// warnEditionRefused is the one word a walker with no problem list of its own
+// says about a file its edition's front end refused (memql#5358), through the
+// process default logger: the walkers in question (the capability-name loader,
+// the dependency validator) take none.
+func warnEditionRefused(component, path string, err error) {
+	slog.Default().Warn("file not read: its edition's front end refused it (engine Init refuses the tree naming it)",
+		"component", component, "file", path, "error", err)
 }
 
 // editionRefusals is every file of tree its edition's front end refuses

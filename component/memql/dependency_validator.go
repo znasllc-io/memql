@@ -27,6 +27,7 @@ package memql
 // fs.FS-driven so it unit-tests against synthetic trees.
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -34,6 +35,7 @@ import (
 	"sort"
 	"strings"
 
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/baseparser"
 	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
@@ -114,10 +116,16 @@ func validateDependencyTree(tree fs.FS) error {
 			return fmt.Errorf("dependency validator: read %s: %w", p, rErr)
 		}
 		// The scan below reads the core grammar, so it reads the file
-		// through its domain's edition (memql#5358). A file the front end
-		// refuses is left out; engine Init refuses the tree naming it.
+		// through its domain's edition (memql#5358). A refused domain is
+		// skipped without a word (Init reports it once); a file its front
+		// end refuses is warned about and left out, and Init refuses the
+		// tree naming it.
 		prepared, prepErr := lines.Prepare(p, []byte(raw))
+		if errors.Is(prepErr, languageParser.ErrLanguageLineRefused) {
+			continue
+		}
 		if prepErr != nil {
+			warnEditionRefused("memql.dependencyValidator", p, prepErr)
 			continue
 		}
 		raw = string(prepared)
