@@ -57,6 +57,9 @@ func (p *Parser) tryParseV1LambdaOperand() (ExpressionNode, bool, error) {
 		if err != nil {
 			return nil, true, err
 		}
+		if err := p.refuseCommaAfterLambda(); err != nil {
+			return nil, true, err
+		}
 		if !p.check(TokenParenClose) {
 			return nil, true, p.v1Expected("`)` to close the lambda opened at line " + strconv.Itoa(open.Line) + ", column " + strconv.Itoa(open.Column))
 		}
@@ -123,10 +126,28 @@ func (p *Parser) parseRefineFunction() (ExpressionNode, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := p.refuseCommaAfterLambda(); err != nil {
+		return nil, err
+	}
 	if err := p.expect(TokenParenClose); err != nil {
 		return nil, err
 	}
 	return &RefineExpr{Target: target, Lambda: lam}, nil
+}
+
+// refuseCommaAfterLambda refuses a `,` directly after the lambda of a
+// predicate clause -- a filter, a refine clause, a spec or trait, @filter.
+// The lambda is the whole clause, so a comma there can only be the retired
+// `,` connective (`filter row => a, b`), and it gets that refusal, naming
+// `||` and the migrator, rather than the "expected )" the enclosing construct
+// would otherwise report. @trigger(filter=...) is the one place a comma
+// legitimately follows the lambda -- it separates the annotation's
+// arguments -- and does not call this.
+func (p *Parser) refuseCommaAfterLambda() error {
+	if p.check(TokenComma) {
+		return v1Retired(p.current, ruleCommaConnective)
+	}
+	return nil
 }
 
 // v1FilterLambdaAhead reports whether the cursor opens a lambda: `x =>`, or a

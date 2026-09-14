@@ -770,6 +770,9 @@ func (p *Parser) parseAttribute() (*Attribute, error) {
 					return nil, err
 				}
 				attr.Value = lam
+				if err := p.refuseCommaAfterLambda(); err != nil {
+					return nil, err
+				}
 				if err := p.expect(TokenParenClose); err != nil {
 					return nil, err
 				}

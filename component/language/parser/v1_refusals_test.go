@@ -31,6 +31,13 @@ var v1RetiredSamples = []struct {
 	{"retired_comma_connective", `row.a == 1, row.b == 2`, false},
 	{"retired_comma_connective", `(a == 1, b == 2)`, false},
 	{"retired_comma_connective", `x => x.a, x.b`, false},
+	// A comma after a predicate clause's lambda is the connective too, at each
+	// of the four clauses whose lambda the construct parser reads mid-stream
+	// (memql#5369: each used to report "expected )" and name no fix).
+	{"retired_comma_connective", "query thing probe {\n  filter row => row.a == 1, row.b == 2\n}", true},
+	{"retired_comma_connective", "query thing probe {\n  filter row => row.a == 1\n  paginate 5\n  refine row => row.a == 1, row.b == 2\n}", true},
+	{"retired_comma_connective", "spec thing isX = row => row.a == 1, row.b == 2", true},
+	{"retired_comma_connective", "@filter(row => row.a == 1, row.b == 2)\n@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  step s {\n    logic f(x: 1)\n  }\n}", true},
 	{"retired_has", `row.tags has "x"`, false},
 	{"retired_has", `has x`, false},
 	{"retired_has", `xs.any(x => x has 1)`, false},
