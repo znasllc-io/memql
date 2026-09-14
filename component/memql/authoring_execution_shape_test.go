@@ -34,7 +34,7 @@ query todo executionTodos {
   paginate 10
   shape %s
 }`, tc.body, tc.reference)
-			defined, err := AuthorSessionBundle(reg, owner, source, "")
+			defined, err := AuthorSessionBundle(reg, owner, source, "shapecheck/concepts.memql")
 			require.NoError(t, err, "bundle validation: %+v", defined.Diagnostics)
 			runCtx := ContextWithAuthoredExecution(ctx, owner, reg)
 			result, err := e.Execute(runCtx, fmt.Sprintf("query executionTodos(todoId: %s)", langparser.QuoteString(todoID)))

@@ -667,7 +667,11 @@ func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedD
 // canonical id via the concept registry.
 func buildPerUserDedupQuery(def *SeedDefinition, userId, conceptId string) string {
 	return fmt.Sprintf(
-		`concept==%s; payload.ownerUserId==%s; provenance.name==%s`,
+		// `&&`, not `;` (memql#5375). This string is PARSED -- the dedup
+		// lookup runs it -- so the retired connective would fail every
+		// per-user seed's dedup guard and spam the fallback WARN this
+		// function's own comment above describes (#1608).
+		`concept==%s && payload.ownerUserId==%s && provenance.name==%s`,
 		dslStringLiteral(conceptId), dslStringLiteral(userId), dslStringLiteral(def.Name),
 	)
 }

@@ -107,7 +107,7 @@ func (s *engineImpactStore) ConstructsAsSandbox(ctx context.Context, bundleId st
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, SandboxConstruct{Kind: row.Kind, Name: row.Name, Source: row.Source})
+		out = append(out, SandboxConstruct{Kind: row.Kind, Name: row.Name, Source: row.Source, Origin: row.Origin})
 	}
 	return out, nil
 }

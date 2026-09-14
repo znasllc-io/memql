@@ -12,7 +12,7 @@ func TestRunScopedAuthoredFunctionsReachOrdinaryExecute(t *testing.T) {
 	e, _, _ := sharedReadMergeEngine(t)
 	var err error
 	reg := NewAuthoredRuntimeRegistry()
-	_, err = AuthorSessionBundle(reg, "alice", `logic executionAnswer { body { return 42 } }`, "")
+	_, err = AuthorSessionBundle(reg, "alice", `logic executionAnswer { body { return 42 } }`, "authoring/concepts.memql")
 	if err != nil {
 		t.Fatal(err)
 	}

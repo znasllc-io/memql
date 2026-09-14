@@ -232,7 +232,7 @@ func (e *MemQLEngine) stageConstructDurableWithStore(ctx context.Context, store 
 	if err := store.CreatePromoteBundle(persistCtx, bundleId, stagedBundleTitle, summary); err != nil {
 		return fmt.Errorf("authoring: persist staged bundle: %w", err)
 	}
-	if err := store.CreatePromoteConstruct(persistCtx, constructId, bundleId, c.Kind, c.Name, promoteTargetNamespace(c), c.Source, ConstructStaged); err != nil {
+	if err := store.CreatePromoteConstruct(persistCtx, constructId, bundleId, c.Kind, c.Name, promoteTargetNamespace(c), c.Source, c.Origin, ConstructStaged); err != nil {
 		return fmt.Errorf("authoring: persist staged construct: %w", err)
 	}
 
@@ -356,13 +356,14 @@ func (e *MemQLEngine) recompileAndStageRow(_ context.Context, row AuthoringConst
 		return fmt.Errorf("re-hydration of a staged %s is not supported (function-family + spec only)", row.Kind)
 	}
 
-	sc := SandboxConstruct{Name: row.Name, Kind: row.Kind, Source: row.Source}
+	sc := SandboxConstruct{Name: row.Name, Kind: row.Kind, Source: row.Source, Origin: row.Origin}
 	c := &AuthoredConstruct{
 		OwnerUserId: row.OwnerUserId,
 		Kind:        row.Kind,
 		Name:        row.Name,
 		BundleId:    row.BundleId,
 		Source:      row.Source,
+		Origin:      row.Origin,
 		Status:      AuthoredActive,
 	}
 	switch row.Kind {

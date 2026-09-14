@@ -318,7 +318,7 @@ func TestDemoteConcept_ResolvesTheDeclarationNameToItsCanonicalId(t *testing.T) 
 func seedPromotedConcept(t *testing.T, e *MemQLEngine, owner, source, name string) *fakeDemoteStore {
 	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, owner, source, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, owner, source, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, ok := reg.Lookup(owner, "concept", name)

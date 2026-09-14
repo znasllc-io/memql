@@ -79,7 +79,7 @@ func followTestSession(t *testing.T, eng *memqlengine.MemQLEngine) (*streamSessi
 func promoteFollowConcept(t *testing.T, eng *memqlengine.MemQLEngine) {
 	t.Helper()
 	reg := memqlengine.NewAuthoredRuntimeRegistry()
-	if _, err := memqlengine.AuthorSessionBundle(reg, "v1:identity:user:follow", followTestConceptSrc, ""); err != nil {
+	if _, err := memqlengine.AuthorSessionBundle(reg, "v1:identity:user:follow", followTestConceptSrc, "followns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, ok := reg.Lookup("v1:identity:user:follow", "concept", "followWidget")
@@ -289,7 +289,7 @@ concept followWidgetTwo {
 func promoteSecondFollowConcept(t *testing.T, eng *memqlengine.MemQLEngine) {
 	t.Helper()
 	reg := memqlengine.NewAuthoredRuntimeRegistry()
-	if _, err := memqlengine.AuthorSessionBundle(reg, "v1:identity:user:follow", followTestConceptTwoSrc, ""); err != nil {
+	if _, err := memqlengine.AuthorSessionBundle(reg, "v1:identity:user:follow", followTestConceptTwoSrc, "followns/concepts.memql"); err != nil {
 		t.Fatalf("author second concept: %v", err)
 	}
 	c, ok := reg.Lookup("v1:identity:user:follow", "concept", "followWidgetTwo")

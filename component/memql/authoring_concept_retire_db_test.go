@@ -123,7 +123,7 @@ func retireDBEngine(t *testing.T) (*MemQLEngine, context.Context) {
 func promoteBundleIntoEngine(t *testing.T, e *MemQLEngine, owner, source string) {
 	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	res, err := AuthorSessionBundle(reg, owner, source, "")
+	res, err := AuthorSessionBundle(reg, owner, source, "trainingns/concepts.memql")
 	if err != nil {
 		var detail []string
 		for _, d := range res.Diagnostics {

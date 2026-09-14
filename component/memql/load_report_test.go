@@ -122,6 +122,7 @@ func TestRehydrationQuarantine(t *testing.T) {
 		BundleId:    "authoring:bundle:rot1",
 		OwnerUserId: "u-owner",
 		Source:      "spec activeRowTrait rottedSpec {\n  return status ==== \"x\" &&&& true\n}\n",
+		Origin:      "trainingns/concepts.memql",
 		Status:      "active",
 	}
 

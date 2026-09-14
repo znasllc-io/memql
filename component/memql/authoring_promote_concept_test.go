@@ -140,7 +140,7 @@ func promoteConceptSource(t *testing.T, e *MemQLEngine, source, name string) err
 func promoteBundleAndLookup(t *testing.T, e *MemQLEngine, source, kind, name string) error {
 	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	res, err := AuthorSessionBundle(reg, "owner-1", source, "")
+	res, err := AuthorSessionBundle(reg, "owner-1", source, "trainingns/concepts.memql")
 	if err != nil {
 		var detail []string
 		for _, d := range res.Diagnostics {
@@ -212,7 +212,7 @@ func TestDeriveConceptRegistryState_IsIdempotent(t *testing.T) {
 // nothing to register and refused the kind outright.
 func TestAuthorSessionBundle_CompilesConceptOntoCompiled(t *testing.T) {
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, ok := reg.Lookup("owner-1", "concept", "trainedWidget")
@@ -239,7 +239,7 @@ func TestAuthorSessionBundle_ConceptDoesNotTouchAnyLiveRegistry(t *testing.T) {
 	before := len(memoryNodes.List())
 
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 
@@ -264,7 +264,7 @@ func TestPromoteConcept_MergesIntoLiveRegistryAndPersists(t *testing.T) {
 	}
 
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, _ := reg.Lookup("owner-1", "concept", "trainedWidget")
@@ -801,7 +801,7 @@ func TestPromoteConcept_RefusesAnImmutableRegistry(t *testing.T) {
 func TestRehydratePromotedConcept_SurvivesARestart(t *testing.T) {
 	old := promoteConceptEngine(t)
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, _ := reg.Lookup("owner-1", "concept", "trainedWidget")
@@ -852,7 +852,7 @@ func TestRehydratePromotedConcept_SurvivesARestart(t *testing.T) {
 func TestRehydratePromotedConcept_PropagatesAcrossNodes(t *testing.T) {
 	nodeA := promoteConceptEngine(t)
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, _ := reg.Lookup("owner-1", "concept", "trainedWidget")

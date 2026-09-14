@@ -74,6 +74,7 @@ func TestStampGuard_ValidStoredConstructSurvivesABump(t *testing.T) {
 		BundleId:    "authoring:bundle:stamp1",
 		OwnerUserId: "u-owner",
 		Source:      validStoredSpecSource,
+		Origin:      "trainingns/concepts.memql",
 		Status:      "active",
 		// Deliberately a PRIOR epoch: this is the state every durable row in a
 		// running deployment is in the moment the engine's constant moves.
@@ -105,6 +106,7 @@ func TestStampGuard_FiresOnAStaleStampWithRottedSource(t *testing.T) {
 		BundleId:       "authoring:bundle:stamp2",
 		OwnerUserId:    "u-owner",
 		Source:         rottedStoredSpecSource,
+		Origin:         "trainingns/concepts.memql",
 		Status:         "active",
 		GrammarVersion: "2026.07-some-earlier-epoch",
 	}
@@ -157,6 +159,7 @@ func TestStampGuard_CurrentStampKeepsItsOwnError(t *testing.T) {
 		BundleId:       "authoring:bundle:stamp3",
 		OwnerUserId:    "u-owner",
 		Source:         rottedStoredSpecSource,
+		Origin:         "trainingns/concepts.memql",
 		Status:         "active",
 		GrammarVersion: languageParser.GrammarVersion,
 	})
@@ -183,6 +186,7 @@ func TestStampGuard_UnstampedLegacyRowIsNotBlamed(t *testing.T) {
 		BundleId:    "authoring:bundle:stamp4",
 		OwnerUserId: "u-owner",
 		Source:      rottedStoredSpecSource,
+		Origin:      "trainingns/concepts.memql",
 		Status:      "active",
 		// No GrammarVersion: a legacy row.
 	})
@@ -201,6 +205,7 @@ func TestStampGuard_UnstampedLegacyRowIsNotBlamed(t *testing.T) {
 		BundleId:    "authoring:bundle:stamp5",
 		OwnerUserId: "u-owner",
 		Source:      validStoredSpecSource,
+		Origin:      "trainingns/concepts.memql",
 		Status:      "active",
 	}); err != nil {
 		t.Fatalf("an unstamped legacy row with valid source must register: %v", err)

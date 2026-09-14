@@ -519,7 +519,7 @@ func (e *MemQLEngine) resolveConceptDataStagingFromStore(ctx context.Context, st
 			if row.Kind != "concept" || isRetiredConstructStatus(row.Status) || isStagedConstructStatus(row.Status) {
 				continue
 			}
-			concept, cerr := compileAuthoredConcept(SandboxConstruct{Name: row.Name, Kind: row.Kind, Source: row.Source})
+			concept, cerr := compileAuthoredConcept(SandboxConstruct{Name: row.Name, Kind: row.Kind, Source: row.Source, Origin: row.Origin})
 			if cerr != nil || concept == nil || strings.TrimSpace(concept.Name) == "" {
 				// The walk's quarantine posture, and here it is also the honest
 				// answer: a row whose source no longer compiles did not

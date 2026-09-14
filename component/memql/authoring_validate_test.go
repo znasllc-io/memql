@@ -83,7 +83,7 @@ func TestSessionDefine_CallableAndNeverShadowsCore(t *testing.T) {
 
 	// Session-define a net-new construct (callable) and one that collides with
 	// the seeded core name (must be dropped from the overlay).
-	res, err := AuthorSessionBundle(reg, "owner-1", sessionConceptSrc+"\n\n"+sessionMutationSrc, "")
+	res, err := AuthorSessionBundle(reg, "owner-1", sessionConceptSrc+"\n\n"+sessionMutationSrc, "authoring/concepts.memql")
 	if err != nil {
 		t.Fatalf("session-define net-new: %v (diags %+v)", err, res.Diagnostics)
 	}

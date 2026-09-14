@@ -71,9 +71,9 @@ func (s *recordingPromoteStore) CreatePromoteBundle(ctx context.Context, bundleI
 	return s.enginePromoteStore.CreatePromoteBundle(ctx, bundleId, title, summary)
 }
 
-func (s *recordingPromoteStore) CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, status string) error {
+func (s *recordingPromoteStore) CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, origin, status string) error {
 	s.constructId = constructId
-	return s.enginePromoteStore.CreatePromoteConstruct(ctx, constructId, bundleId, kind, name, targetNamespace, source, status)
+	return s.enginePromoteStore.CreatePromoteConstruct(ctx, constructId, bundleId, kind, name, targetNamespace, source, origin, status)
 }
 
 // stagedDataDBConceptSrc builds a uniquely-namespaced concept source so two runs
@@ -94,7 +94,7 @@ concept stagedWidget {
 func promoteConceptThroughTheRealStore(t *testing.T, eng *MemQLEngine, ctx context.Context, owner, source string, opts ...PromoteDurableOption) *recordingPromoteStore {
 	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	res, err := AuthorSessionBundle(reg, owner, source, "")
+	res, err := AuthorSessionBundle(reg, owner, source, "trainingns/concepts.memql")
 	if err != nil {
 		var detail []string
 		for _, d := range res.Diagnostics {

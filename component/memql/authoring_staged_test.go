@@ -191,6 +191,7 @@ func TestStageAuthoredConstruct_RefusesATrainedNameDifferently(t *testing.T) {
 	e := &MemQLEngine{functions: newFunctionRegistry()}
 	trained := &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "query", Name: "alreadyTrained", Status: AuthoredActive,
 		Source:   `query alreadyTrained { }`,
+		Origin:   "trainingns/concepts.memql",
 		Compiled: &Function{Name: "alreadyTrained", FunctionKind: "query", Enabled: true}}
 	if err := e.PromoteAuthoredConstruct(context.Background(), trained); err != nil {
 		t.Fatalf("seed trained: %v", err)
