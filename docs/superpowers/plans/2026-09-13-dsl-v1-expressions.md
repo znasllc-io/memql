@@ -39,7 +39,7 @@
 | Collection method | `row.tags.any(t => t == "urgent")`, `args.members.where(m => m.active)` |
 | Conditional value | `p ? a : b` (was `cond(p, a, b)`) |
 | String join | `a + b` (was `concat(a, b)`) |
-| Presence | `x != nil` (was `exists(x)`, which also treated a blank string as absent: the codemod writes `(x != nil && x != "")` for those two call sites) |
+| Presence | `x != nil` (was `exists(x)`; unset includes the empty string, so `x != nil` keeps exists()'s blank rule) |
 | Length | `x.count()` (was `len(x)`, `count(x)`) |
 | Substring test | `s.includes(sub)` (was `contains(s, sub)`; `contains(<lambda>)` stays the graph traversal) |
 | Collection membership | `v in list` (the `.contains(v)` collection method is retired) |
