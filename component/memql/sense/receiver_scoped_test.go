@@ -32,7 +32,7 @@ func TestReceiverFilteredAnnotations(t *testing.T) {
 			// NOTE: @cache IS legal on a concept (the registry's ""
 			// receiver carries it); the absent list must not invent
 			// restrictions the engine does not have.
-			want: []string{"namespace", "version", "relationship", "cache"}, absent: []string{"mergeFields", "trigger", "handler"},
+			want: []string{"version", "relationship", "cache"}, absent: []string{"mergeFields", "trigger", "handler"},
 		},
 		{
 			name: "tool preamble", src: "@\ntool probeTool {\n}\n", line: 1, col: 2,

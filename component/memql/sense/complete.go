@@ -648,15 +648,20 @@ func allAnnotationNames() []string {
 // annotationTakesArgs returns true if the annotation expects arguments.
 func annotationTakesArgs(name string) bool {
 	switch name {
-	case "description", "version", "trigger", "filter", "schedule",
-		// rateLimit + relationship were MISSING from this
-		// hand-maintained switch, so completion inserted them without
-		// the opening paren (#2627's in-sync test is what caught it).
-		// schedule joined the automation surface in #2712.
-		"rateLimit", "relationship",
+	case "description", "version", "trigger", "filter",
+		// relationship was MISSING from this hand-maintained switch, so
+		// completion inserted it without the opening paren (#2627's
+		// in-sync test is what caught it). @schedule and @rateLimit stood
+		// beside it here until memql#5375 retired both.
+		"relationship",
 		"handler", "executionTime", "executor", "args",
-		"defaultProvider", "templateFile", "type", "model", "extends",
+		"defaultProvider", "templateFile", "type", "vendor", "model", "extends",
 		"cache", "defaultFilter", "concepts", "default",
+		// The two concept annotations memql#5378 verified are read. Both
+		// take keyword arguments and are declared in
+		// annotations.KeywordArgs, so the in-sync test fires on them by
+		// name -- which is how this omission surfaced immediately.
+		"displayCard", "composable",
 		// The whole field-list family was missing here (memql#4951): every
 		// one takes `("a", "b")` and completion offered them bare. The
 		// in-sync test only fires for annotations declared in
