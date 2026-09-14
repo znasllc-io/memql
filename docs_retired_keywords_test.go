@@ -250,18 +250,28 @@ func TestDocsDoNotTeachRetiredDeclarationKeywords(t *testing.T) {
 
 // retiredDeclGateExempt reports whether a path is outside the sweep.
 //
-// ONE FILE, and it should stay that way. component/memql/callgraph/keyword_test.go
-// asserts that the RETIRED spelling splits to nothing -- it has to write
-// `mutation node twoWrites {` to assert that the checker ignores it, exactly as
-// the sibling gate's two entries have to write the retired names to say what
-// they forbid. Exempting it is not a carve-out for drift; it is the only way
-// that assertion can exist.
+// TWO ENTRIES, and each has to write a retired spelling to say what it is
+// about. component/memql/callgraph/keyword_test.go asserts that the RETIRED
+// spelling splits to nothing -- it has to write `mutation node twoWrites {` to
+// assert that the checker ignores it, exactly as the sibling gate's two entries
+// have to write the retired names to say what they forbid. Exempting it is not
+// a carve-out for drift; it is the only way that assertion can exist.
+//
+// cmd/memqlmigrate/testdata/bodies/ holds the golden trees of
+// `memqlmigrate --rewrite=bodies` (epic memql#5370): each case is a tree as the
+// retired forms wrote it (`in/*.in`) beside the tree the rewrite produces
+// (`out/*.golden`). A migration's fixture states a conversion, so it writes
+// BOTH spellings of the declaration keyword by construction -- `mutate` in the
+// inputs and edition 2026's `mutation` in the goldens -- and one of the two is
+// always the retired one: `mutation` until the edition flips, `mutate` after.
+// The files carry `.in` / `.golden` suffixes so no .memql walker loads them.
 //
 // What does NOT belong here: a file that merely happens to contain a violation.
 // The escape hatch for a legitimate mention is the one in this gate's header --
 // keep the line out of declaration shape.
 func retiredDeclGateExempt(rel string) bool {
-	return rel == "component/memql/callgraph/keyword_test.go"
+	return rel == "component/memql/callgraph/keyword_test.go" ||
+		strings.HasPrefix(rel, "cmd/memqlmigrate/testdata/bodies/")
 }
 
 // retiredDeclarationKeywords is one entry per retired declaration keyword, with

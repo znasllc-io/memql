@@ -1,0 +1,585 @@
+// automations.memql
+//
+// Deployment-namespace ORCHESTRATION -- the keystone of the DevOps deployment
+// bundle (epic #2212, I10 #2224). Per the behavioral-constructs ADR §2: logic
+// decides, mutations persist, actions touch the world, AUTOMATIONS ORCHESTRATE.
+// This file authors the one automation that ties the bundle together:
+// deployEngineCluster sequences the I8 deploy actions (actions.memql) with the
+// I9 deploy decisions (logic.memql) and the persisted deployment lifecycle
+// (createDeployment / updateDeploymentStatus, dsl/deployment/mutations.memql), one
+// write per step. It is the single construct allowed to compose all the layers
+// (branch / loop / call logic+query+mutation+action), and it stays
+// contract-clean: the logics it calls are pure, each mutation step is one
+// write, each action step is one external capability on the cockpit/runner
+// surface (I13). It therefore PASSES the call-graph validator
+// (test/dslconformance/callgraph_contract_test.go) rather than being baselined.
+//
+// =============================================================================
+//   Deploy event taxonomy
+// =============================================================================
+//
+// One event drives the whole bundle:
+//
+//   topic    : deploy.requested
+//   concept  : v1:cluster:deployment
+//   payload  : validated against the automation's `args { }` block below --
+//              THE machine-checked emitter/consumer contract (G5, #2367).
+//              A missing @required field or an @enum violation makes the
+//              automation REFUSE to fire loudly (G1 fire-time validation);
+//              field semantics are documented as @description annotations
+//              on the args fields themselves.
+//
+// WHO EMITS IT -- NOBODY, AS OF memql#4550. Read this before concluding
+// either that the topic is live or that it is safe to delete.
+//
+// The primary emitter was the cockpit's `deploy --env=<env>` (I15): `make
+// deploy` shelled into it, and its embedded engine runtime loaded the pinned
+// deployment bundle, emitted deploy.requested, and ran THIS automation. That
+// whole family -- the subcommand, the embedded runtime, scripts/deploy/
+// cockpit.sh and the make target -- was removed with the Cockpit's TUI. The
+// two other emitters this comment used to name were always prospective: a CI
+// release pipeline "can" emit it, and a cron emitter was "future". Neither
+// exists.
+//
+// So this subscriber currently has NO emitter, in this repo or out of it.
+// That is a change from what this comment said before, and the change is why
+// it is restated rather than trimmed: memql#3614's orphan-topic audit landed
+// on this line and was answered with in-repo proof that the topic was live --
+// scripts/deploy/cockpit.sh chief among it. Deleting that file made the
+// answer false, and a stale "it is not dead, here is why" is worse for the
+// next audit than no comment at all.
+//
+// WHAT IS STILL TRUE. The automation is emitter-agnostic and its phase model
+// (authorize / record / clone / build / place / gate / outcome / finalize /
+// rollback) is how a deploy is modelled in the graph; the
+// `v1:cluster:deployment` timeline is still the record of evidence, and
+// component/automations/args_binding.go's []string accommodation -- made FOR
+// the cockpit's engineNodeTypes default during the first live deploy
+// (memql#2380) -- is still load-bearing for anything that emits this. The DSL
+// lifecycle automations (memql#4490) are what decide this bundle's fate; until
+// they do, treat it as retained-on-purpose rather than orphaned-by-accident.
+// docs/public/operate/deploy-bundle-runbook.md carries the same note, at
+// `status: historical`.
+//
+// TOPIC SHAPE. `deploy.requested` is a RAW application topic, not graph CDC, so
+// it carries no concept segment. This trigger used to read
+// `@trigger(event="deploy.requested", concept="v1:cluster:deployment",
+// partition="*")`; those two kwargs are consumed only by the structured
+// node.created/updated/deleted rewrite, so on an unrecognised event kind they
+// were silently discarded and the compiled topic was the bare
+// `deploy.requested` all along (memql#3614 item 1). The kwargs are gone; the
+// compiled topic is byte-identical to what shipped. The concept the payload
+// concerns is stated by the writes themselves (createDeployment /
+// updateDeploymentStatus on v1:cluster:deployment).
+//
+// AUTHORIZATION. `authorize` records the pure forward-deploy role decision
+// (logic deploymentForwardAllowed, mirroring spec requiresDeveloperOrAbove,
+// #1876). The HARD gate is upstream + at the writes: createDeployment /
+// updateDeploymentStatus are only ever reached through the Go-gated deploy RPCs
+// (deploycontrol.authorize), so the deploy-start write and every transition
+// inherit that authorization (specs.memql). The step keeps the decision visible
+// + greppable in the run record.
+//
+// =============================================================================
+//   deployEngineCluster -- the one orchestration
+// =============================================================================
+//
+// Sequence (decide -> record -> clone -> build -> place -> gate -> finish):
+//
+//   authorize       logic deploymentForwardAllowed       (decide: role gate)
+//   record          createDeployment                     (persist: one write)
+//   clone           action cloneRepoAtVersion            (act: checkout the ref)
+//   build           forEach nt: action buildEngineImage  (act: one image / node)
+//   importDevImages forEach nt where env==development:    (act: dev placement --
+//                     action importImageToK3d              per-node k3d import)
+//   place           switch env { development {} default { (act: staging/prod
+//                     pinOverlayDigests + argoSync } }     placement -- GitOps)
+//   gate            action runDeployGate                 (act: post-deploy gate)
+//   outcome         logic deployOutcomeLabel             (decide: succeeded/failed)
+//   finalize        switch steps.outcome.result {              (persist + act + persist)
+//                     succeeded { updateDeploymentStatus succeeded; notifyDeploy }
+//                     default   { revertOverlay; updateDeploymentStatus failed;
+//                                 notifyDeploy } }
+//
+// EXECUTION ORDER. The automation scheduler runs steps in the compiler's
+// dependency topo-sort order (a step executes after every step it references).
+// The deploy is an ORDERED side-effect pipeline whose phases mostly do NOT pass
+// data to each other, so each phase reads only the EVENT payload (a reserved
+// root, not a step) and carries no inter-step reference -- which keeps every
+// phase at the same dependency depth, where the sort preserves the authored
+// source order (clone -> build -> place -> gate). The only data edges are the
+// two at the tail: outcome reads gate.result, finalize switches on
+// outcome.result, so they sort last exactly where the sequence wants them. A
+// forEach/switch step's result is NOT addressable by name, so a later phase
+// could not depend on it even if we wanted -- reading from the payload is what
+// makes the pipeline order deterministic.
+//
+// PLACEMENT shape (the env split). `place` is the single env `switch`: the
+// development case takes no GitOps action (overlays/ArgoCD are not the dev
+// path); staging/production pin the overlay to the resolved digests and ask
+// ArgoCD to sync (deploys = merges). The per-NODE development k3d import is the
+// adjacent `importDevImages` forEach gated `where env=="development"` -- the
+// procedural switch-case grammar hosts single steps, not loops, so a per-node
+// loop rides a top-level where-filtered forEach instead of living inside the
+// case. Both stay in THIS one automation; there are no per-env automations.
+//
+// THE SWITCH IS ON `provider`, NOT ON AN ENVIRONMENT (epic memql#3943).
+// There is ONE cloud installation and ONE ArgoCD Application, `memql`, so
+// there is nothing for an environment to select between. What DOES still
+// branch is the deploy TARGET -- a local k3d cluster takes its images by
+// import and places nothing, a cloud cluster pins digests and syncs ArgoCD --
+// and that distinction has its own field: `provider` (docker-local | azure),
+// which `MEMQL_DEPLOY_PROVIDER` sets and `v1:cluster:deployment.provider`
+// records. It was always outside the environment gate for exactly this reason.
+//
+// The alternative -- a logic step mapping provider -> app name -- was rejected
+// for a mechanical reason worth recording: every phase here reads ONLY the
+// event payload, which is what keeps them all at the same dependency depth
+// where the topo-sort preserves authored source order (see EXECUTION ORDER
+// above). Making `place` depend on a logic step would give it a data edge the
+// other phases do not have, and reorder the pipeline.
+//
+// The `importImageToK3d(cluster: "memql")` above is NOT the Application name
+// wearing the same clothes: that is the k3d CLUSTER name on a developer's
+// laptop.
+//
+// LIFECYCLE record. record -> finalize is the deployment timeline the bundle
+// persists: createDeployment (in_progress) at start, updateDeploymentStatus
+// (succeeded | failed) at finish -- reconstructable asOf any time off the one
+// v1:cluster:deployment concept-id timeline (#1872).
+//
+// DRY-RUN. The action backends are dry-run-capable capability scripts (I8/I14):
+// a docker-local deploy runs end-to-end through the bundle against
+// no-op/dry-run backends and records the full lifecycle; the azure path is
+// authored + dry-runnable and goes live once the build-server + ArgoCD wiring
+// is exercised.
+
+/// Deploy the MemQL ENGINE cluster on the cockpit/runner surface. Sequences clone -> build ->
+/// place (provider switch) -> gate -> success/failure finish, recording the deployment lifecycle.
+/// Engine mesh ONLY -- no bff or product-carrier nodes.
+@trigger(event="deploy.requested")
+automation deployEngineCluster {
+  args {
+    deploymentId         string!
+    provider             enum("docker-local", "azure")!
+    engineNodeTypes      []string!
+    ref                  string!
+    version              string!
+    workdir              string!
+    overlayPath          string
+    digests              object
+    previousDeploymentId string
+    triggeredBy          string
+    dryRun               boolean
+  }
+
+  authorize := logic deploymentForwardAllowed(event: event)
+  record := mutation createDeployment(
+    deploymentId: args.deploymentId,
+    provider:     args.provider,
+    version:      args.version,
+    triggeredBy:  args.triggeredBy,
+    status:       "in_progress",
+    previousDeploymentId: args.previousDeploymentId
+  )
+  clone := action cloneRepoAtVersion(workdir: args.workdir, ref: args.ref, dryRun: args.dryRun)
+  for nt in args.engineNodeTypes {
+    action buildEngineImage(nodeType: nt, version: args.version, workdir: args.workdir, dryRun: args.dryRun)
+  }
+  for nt in args.engineNodeTypes if args.provider == "docker-local" {
+    action importImageToK3d(nodeType: nt, cluster: "memql", version: args.version, dryRun: args.dryRun)
+  }
+  switch args.provider {
+    case "docker-local" { }
+    default {
+      action pinOverlayDigests(overlayPath: args.overlayPath, digests: args.digests, dryRun: args.dryRun)
+      action argoSync(app: "memql", revision: args.ref, dryRun: args.dryRun)
+    }
+  }
+  gate := action runDeployGate(provider: args.provider, workdir: args.workdir, dryRun: args.dryRun)
+  outcome := logic deployOutcomeLabel(passed: gate.passed)
+  switch outcome {
+    case "succeeded" {
+      mutation updateDeploymentStatus(deploymentId: args.deploymentId, status: "succeeded")
+      action notifyDeploy(status: "succeeded", deploymentId: args.deploymentId, dryRun: args.dryRun)
+    }
+    default {
+      mutation updateDeploymentStatus(deploymentId: args.deploymentId, status: "failed")
+      action notifyDeploy(status: "failed", deploymentId: args.deploymentId, dryRun: args.dryRun)
+    }
+  }
+  rollbackTarget := logic deployRollbackTarget(passed: gate.passed, previousDeploymentId: args.previousDeploymentId)
+  switch rollbackTarget {
+    case "" { }
+    default {
+      action revertOverlay(overlayPath: args.overlayPath, toDeploymentId: rollbackTarget, dryRun: args.dryRun)
+    }
+  }
+}
+
+// =============================================================================
+//   Instance lifecycle -- provision / install / update / repair / deprovision
+// =============================================================================
+//
+// deployEngineCluster above rolls a VERSION onto a cluster that already exists.
+// The automations below own the cluster itself, across its whole life
+// (epic memql#4463).
+//
+// WHY THIS IS A SEPARATE SET OF VERBS. The first cloud instance was created by
+// hand, so nothing in this tree could recreate it. Its ArgoCD Application then
+// pinned a git revision that later vanished from the repository, and at that
+// point the running cluster was the ONLY surviving record of the installation:
+// unreproducible, and un-auditable. A lifecycle you can only perform by hand is
+// a lifecycle nobody can review, test, or repeat -- so each verb below is an
+// automation, driven by an event, recorded on the graph.
+//
+// COMPOSITION. `bringUpInstance` calls `provisionInstance` and then
+// `installInstance` as SUB-AUTOMATIONS -- the `automation <name>( ... )` step
+// form, the same kind-prefixed invocation shape as `logic <name>( ... )`. That
+// keeps each verb independently runnable (an operator repairing an instance
+// must not have to run provisioning to get there) while the common path stays
+// one event.
+//
+// WHERE THEY RUN. The cockpit/runner surface, OUTSIDE the target cluster --
+// inherited from dsl/deployment/ with no per-action annotation (I13). That is
+// not incidental here: a cluster cannot provision itself, and an instance must
+// not drive the roll that replaces its own pods. For the FIRST instance the
+// runner is a local k3d MemQL (`make up`) or CI; afterwards any instance other
+// than the target can drive it.
+
+@trigger(event="instance.provisionRequested")
+automation provisionInstance {
+  args {
+    instanceId     string!
+    subscriptionId string!
+    resourceGroup  string!
+    clusterName    string!
+    registryName   string!
+    keyVaultName   string!
+    location       string
+    dryRun         boolean
+  }
+
+  provision := action provisionAzureInfrastructure(
+    subscriptionId: args.subscriptionId,
+    resourceGroup: args.resourceGroup,
+    clusterName: args.clusterName,
+    registryName: args.registryName,
+    keyVaultName: args.keyVaultName,
+    location: args.location,
+    dryRun: args.dryRun
+  )
+}
+
+// installInstance OWNS THE ELEVEN STEPS between a provisioned substrate and an
+// argoSync that means something (memql#4472). It used to be a one-step alias
+// for argoSync -- and argoSync against a freshly provisioned cluster syncs
+// NOTHING, because on that cluster there is no ArgoCD, no cert-manager, no
+// CNPG, no External Secrets, no ingress controller, no ClusterIssuer, no
+// namespace, no credentials and no repository registration.
+//
+//   1  kubeconfig                       )
+//   2  cert-manager                     )
+//   3  CNPG operator + Barman plugin    )  installClusterOperators
+//   4  ESO CRDs                         )
+//   5  External Secrets                 )
+//   6  ingress-nginx + IngressClass     )
+//   7  letsencrypt-prod ClusterIssuer   )
+//   8  namespace + the memql-secrets shell  )  seedInstanceSecrets
+//   9  Key Vault secret GENERATION          )
+//  10  SecretStore + ExternalSecrets, on THIS instance's identity  ) wireExternalSecrets
+//  11  ArgoCD repo credential + AppProject sourceRepos             ) registerGitOpsRepo
+//
+// and only THEN argoSync, followed by the settle the first sync needs.
+//
+// THE ORDER IS EXPRESSED AS ONE SWITCH CASE, not as sibling steps, and that is
+// deliberate. The scheduler runs steps in dependency topo-sort order, and
+// sibling steps that all read only the event payload sit at the same depth
+// where the sort preserves authored order -- which is how deployEngineCluster's
+// phases stay in sequence. Here the render-diff gate MUST run first and the
+// install MUST depend on its verdict, and that data edge would reorder any
+// sibling step that lacked one. Putting the whole install inside the gated
+// case makes the sequence structural instead of incidental: there is one
+// ordering, and it is the one written down.
+//
+// THE GATE IS THE HIGHEST-VALUE ITEM HERE (memql#4483). `revision` is not a
+// scalar to swap. One ?ref= line has cost three retired workarounds, a new
+// object needing a host patch, and a new certificate regime needing real Azure
+// substrate -- none of it discoverable from the release notes, all of it
+// discoverable in about fifteen minutes by rendering both refs. It is OFF for
+// a first install (there is no previous ref to diff against) and ON for an
+// update, which is what `requireRenderDiff` states.
+//
+// THE ESO CLIENT ID AND TENANT ARE ARGS, not read out of provisioning's step
+// result, because provisionInstance is a SEPARATE VERB by design: an operator
+// installing onto substrate that already exists must not have to re-run
+// provisioning to obtain them. provisionAzureInfrastructure reports both in its
+// result envelope; whoever raises the event carries them across.
+@trigger(event="instance.installRequested")
+automation installInstance {
+  args {
+    instanceId        string!
+    subscriptionId    string!
+    clusterName       string!
+    resourceGroup     string!
+    overlayPath       string!
+    revision          string!
+    keyVaultName      string
+    tenantId          string
+    esoClientId       string
+    repoUrl           string
+    repoTransport     string
+    repoTokenFile     string
+    repoProject       string
+    acmeEmail         string
+    namespace         string
+    repoRoot          string
+    fromRevision      string
+    acceptKinds       string
+    requireRenderDiff boolean
+    dryRun            boolean
+  }
+
+  // BEFORE anything is applied.
+  gate := action renderDiff(
+    overlayPath: args.overlayPath,
+    toRef:   args.revision,
+    fromRef: args.fromRevision,
+    acceptKinds: args.acceptKinds
+  )
+  verdict := logic renderDiffVerdict(
+    passed:   gate.passed,
+    required: args.requireRenderDiff
+  )
+  switch verdict {
+    // The gate was required and did not pass. Nothing is applied, and the
+    // run record carries the diff -- which is the whole product of this
+    // step, since what it found is not discoverable any other way.
+    case "blocked" { }
+    default {
+      action installClusterOperators(
+        subscriptionId: args.subscriptionId,
+        resourceGroup: args.resourceGroup,
+        clusterName: args.clusterName,
+        repoRoot: args.repoRoot,
+        acmeEmail: args.acmeEmail,
+        dryRun: args.dryRun
+      )
+      action seedInstanceSecrets(
+        keyVaultName: args.keyVaultName,
+        subscriptionId: args.subscriptionId,
+        namespace: args.namespace,
+        dryRun: args.dryRun
+      )
+      action wireExternalSecrets(
+        keyVaultName: args.keyVaultName,
+        tenantId: args.tenantId,
+        esoClientId: args.esoClientId,
+        namespace: args.namespace,
+        repoRoot: args.repoRoot,
+        dryRun: args.dryRun
+      )
+      action registerGitOpsRepo(
+        repoUrl:   args.repoUrl,
+        transport: args.repoTransport,
+        project:   args.repoProject,
+        tokenFile: args.repoTokenFile,
+        dryRun:    args.dryRun
+      )
+      action argoSync(app: "memql", revision: args.revision, dryRun: args.dryRun)
+      // The first sync legitimately fails while the database initialises,
+      // and the mesh then needs a RESTART rather than a retry (memql#4475).
+      action settleAfterSync(
+        namespace: args.namespace,
+        app: "memql",
+        dryRun: args.dryRun
+      )
+      // Existence, not health. The whole undeclared-dependency class is
+      // invisible to a health check, because the objects were never created.
+      action verifyInstallDependencies(namespace: args.namespace)
+    }
+  }
+}
+
+// repairInstance is a CHECK and then a re-sync (memql#4473).
+//
+// The re-sync is still right for DRIFT: ArgoCD reconciling git IS the
+// desired-state engine, so "make the cluster match source again" is the whole
+// verb, and anything more -- editing live objects to match an expectation held
+// somewhere else -- would reintroduce the second source of truth this epic
+// exists to remove.
+//
+// But an entire class of failure is INVISIBLE to that. The six undeclared
+// dependencies were never created, so nothing is unhealthy; Argo reports what
+// it applied and has no opinion at all about a CRD nobody installed. A repair
+// that only re-syncs therefore DECLARES SUCCESS on a cluster that cannot work,
+// which is worse than failing.
+//
+// So the check comes first, by EXISTENCE, and a missing dependency does NOT
+// proceed to the sync. That refusal is the point: syncing cannot create a CRD
+// nobody installed, so a sync here would change nothing and report Healthy.
+// The run record names what is absent, and installInstance -- which is
+// idempotent and safe to re-run -- is what installs it.
+@trigger(event="instance.repairRequested")
+automation repairInstance {
+  args {
+    instanceId    string!
+    revision      string!
+    namespace     string
+    ingressClass  string
+    clusterIssuer string
+    requireIssuer boolean
+    overlayPath   string
+    productEnv    string
+    declaredRef   string
+    dryRun        boolean
+  }
+
+  // WHAT IS RUNNING, before anything is said about whether it is healthy
+  // (memql#4486).
+  //
+  // A repair report that names one version answers a question nobody asked. The
+  // three refs an instance carries are ALLOWED to differ: a tag's image pins are
+  // written before that tag's own images exist, so an instance declaring
+  // ENGINE_REF=v0.19.6 legitimately runs 0.19.5 binaries. "We are on v0.19.6" is
+  // then a statement about MANIFESTS that every reader hears as a statement
+  // about CODE -- and during an incident that is the difference between reading
+  // the right diff and the wrong one.
+  //
+  // IT IS A SIBLING OF THE GATE, NOT NESTED UNDER IT, and that is the whole
+  // point. The dependency verdict below refuses to sync when something is
+  // absent, and a refused repair is EXACTLY when an operator needs to know what
+  // is executing. Nesting this under the verdict would withhold the report
+  // precisely on the runs that motivate reading one.
+  //
+  // It reports and never refuses. Divergence here is usually correct, so a step
+  // that failed on difference would fail on almost every healthy instance --
+  // the same mistake memql#4475 names about reading the first Degraded as
+  // failure.
+  version := action reportInstanceVersion(
+    namespace: args.namespace,
+    overlayPath: args.overlayPath,
+    productEnv: args.productEnv,
+    declaredRef: args.declaredRef,
+    dryRun: args.dryRun
+  )
+  verify := action verifyInstallDependencies(
+    namespace: args.namespace,
+    ingressClass: args.ingressClass,
+    clusterIssuer: args.clusterIssuer,
+    requireIssuer: args.requireIssuer
+  )
+  verdict := logic installDependencyVerdict(passed: verify.passed)
+  switch verdict {
+    // Deliberately empty. See the header: a sync cannot create what was
+    // never installed, and running one anyway is how a broken cluster comes
+    // back Healthy.
+    case "missing" { }
+    default {
+      action argoSync(app: "memql", revision: args.revision, dryRun: args.dryRun)
+    }
+  }
+}
+
+// bringUpInstance is provisionInstance then installInstance, and now that
+// installInstance means something it is genuinely end to end rather than
+// substrate-plus-a-wish (memql#4472).
+//
+// THE HANDOFF VALUES RIDE THROUGH AS ARGS. tenantId and esoClientId are what
+// the instance overlay binds its service accounts to;
+// provisionAzureInfrastructure reports esoClientId in its result envelope. They
+// are threaded as arguments rather than read out of the substrate step's result
+// because each verb has to stay independently runnable -- an operator
+// installing onto substrate that already exists must not have to re-run
+// provisioning to obtain a value they can read off the vault.
+//
+// requireRenderDiff is deliberately absent from the pass-through and defaults
+// off: a bring-up is a FIRST install, and there is no previous ref to diff
+// against. A version bump raises instance.installRequested directly, with the
+// gate on.
+@trigger(event="instance.bringUpRequested")
+automation bringUpInstance {
+  args {
+    instanceId     string!
+    subscriptionId string!
+    resourceGroup  string!
+    clusterName    string!
+    registryName   string!
+    keyVaultName   string!
+    overlayPath    string!
+    revision       string!
+    tenantId       string
+    esoClientId    string
+    repoUrl        string
+    repoTransport  string
+    repoTokenFile  string
+    repoProject    string
+    acmeEmail      string
+    namespace      string
+    repoRoot       string
+    location       string
+    dryRun         boolean
+  }
+
+  substrate := automation provisionInstance(
+    instanceId: args.instanceId,
+    subscriptionId: args.subscriptionId,
+    resourceGroup: args.resourceGroup,
+    clusterName: args.clusterName,
+    registryName: args.registryName,
+    keyVaultName: args.keyVaultName,
+    location: args.location,
+    dryRun: args.dryRun
+  )
+  workloads := automation installInstance(
+    instanceId: args.instanceId,
+    subscriptionId: args.subscriptionId,
+    clusterName: args.clusterName,
+    resourceGroup: args.resourceGroup,
+    overlayPath: args.overlayPath,
+    revision: args.revision,
+    keyVaultName: args.keyVaultName,
+    tenantId: args.tenantId,
+    esoClientId: args.esoClientId,
+    repoUrl: args.repoUrl,
+    repoTransport: args.repoTransport,
+    repoTokenFile: args.repoTokenFile,
+    repoProject: args.repoProject,
+    acmeEmail: args.acmeEmail,
+    namespace: args.namespace,
+    repoRoot: args.repoRoot,
+    dryRun: args.dryRun
+  )
+}
+
+@trigger(event="instance.deprovisionRequested")
+automation deprovisionInstance {
+  args {
+    instanceId           string!
+    subscriptionId       string!
+    resourceGroup        string!
+    confirm              string!
+    clusterName          string
+    keyVaultName         string
+    backupStorageAccount string
+    deleteStores         boolean
+    purgeKeyVault        boolean
+    dryRun               boolean
+  }
+
+  // The confirmation rides all the way through as a value rather than being
+  // reconstructed here. An orchestrator that could derive its own confirmation
+  // from the resource group would be confirming to itself, which is not a
+  // safety interlock -- it is a comment.
+  teardown := action deprovisionAzureInfrastructure(
+    subscriptionId: args.subscriptionId,
+    resourceGroup: args.resourceGroup,
+    confirm: args.confirm,
+    clusterName: args.clusterName,
+    keyVaultName: args.keyVaultName,
+    backupStorageAccount: args.backupStorageAccount,
+    deleteStores: args.deleteStores,
+    purgeKeyVault: args.purgeKeyVault,
+    dryRun: args.dryRun
+  )
+}

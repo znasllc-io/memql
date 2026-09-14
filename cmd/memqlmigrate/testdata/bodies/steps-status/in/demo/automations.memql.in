@@ -1,0 +1,11 @@
+@trigger(event="demo.status")
+automation demoStatus {
+  step first {
+    builtin routingEvidenceFold ( )
+  }
+  step second {
+    if steps.first.status == "skipped" {
+      builtin routingEvidenceFold ( )
+    }
+  }
+}

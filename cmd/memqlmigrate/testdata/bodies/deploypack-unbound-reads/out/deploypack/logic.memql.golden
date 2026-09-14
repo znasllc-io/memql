@@ -1,0 +1,89 @@
+// logic.memql -- the deploy pack (examples/deploypack), Epic 2 / #2096 (E2.3).
+//
+// Imperative bodies for the deploy-lifecycle automations. Read the
+// deployment's new state off the CDC event, and for the azure provider in the
+// in_progress state, OBSERVE ArgoCD's reconciled state. The
+// TERMINAL TRANSITION is persisted by the automation's gated mutation steps
+// (decide -> act -> persist), not in here -- logic performs no graph writes
+// (behavioral-constructs ADR section 2.1). Rewritten for #2400 after strict
+// boot (#2357) surfaced that the original bodies never parsed.
+//
+// Grammar note (#2400, updated #2407/#2410): every `:=` step RHS is a CALL,
+// an `if cond { call }`, or a collection chain -- the only forms the
+// logic-step grammar accepts. The original bodies used bare scalar/boolean
+// expression assignments and were silently skipped at load for their entire
+// life; branching values are built with cond(...) calls instead. Since
+// #2410, cond() predicates accept a single infix comparison (`x == "y"`,
+// `!=`) and COMPARISON/CONNECTIVE predicates evaluate through the full
+// condition evaluator at runtime; the expression-arg parser still rejects
+// connectives with a hint (nest cond() or move the compound condition to an
+// `if` step). Prefer the intermediate-step form (`ok := coalesce(...)` then
+// `cond(ok == true, ...)`) -- call-LHS comparisons inside cond() are not
+// parseable in expression contexts. Collection-chain reads
+// (result.First().payload.x) are still extracted into their own coalesce()
+// steps first.
+//
+// No environment is read off the event (epic memql#3943). The pack drives ONE
+// installation, so there is no environment to map and no promote to aim: the
+// forward-deploy effect this logic used to fire (deployRunPromote) pinned one
+// environment's overlay from another's, and both halves of that are gone. What
+// remains is the honest question -- did ArgoCD reconcile what the merge pinned
+// -- which observeReconciledState already answers.
+
+use deploypack.builtins.{ deployObserveReconciledState, deployRecordBack }
+
+@description("On every v1:cluster:deployment update: when the new status is in_progress AND the provider is azure (or empty -> azure default) AND a version + deploymentId are present, observe ArgoCD's reconciled state and return { deploymentId, outcome } where outcome is succeeded (forward deploy, ArgoCD synced AND healthy), rolled_back (rollback record -- one carrying previousDeploymentId -- likewise reconciled, matching deploy.go's RollbackDeployment terminal, #2115 parity), failed (observed and NOT reconciled), or empty (not our edge; nothing observed). The automation persists the transition. Epic 2 / #2096; the promote effect it used to fire went with the environment concept, epic memql#3943.")
+logic driveDeploymentInProgress {
+  args {
+    event object @required
+  }
+  status := coalesce(args.event.payload.status, "")
+  provider := coalesce(args.event.payload.provider, "")
+  deploymentId := coalesce(args.event.payload.deploymentId, "")
+  version := coalesce(args.event.payload.version, "")
+  previousDeploymentId := coalesce(args.event.payload.previousDeploymentId, "")
+  isAzure := cond(provider == "azure", true, cond(provider == "", true, false))
+  if status == "in_progress" && isAzure == true && version != "" && deploymentId != "" {
+    result := builtin deployObserveReconciledState(app: "")
+  }
+  observedProbe := coalesce(result.first().effect, "")
+  syncedVal := coalesce(result.first().synced, false)
+  healthyVal := coalesce(result.first().healthy, false)
+  // memqlmigrate: the engine used to run this before observedProbe, which it reads, so it read nothing; it now runs after it, where it is written (memql#5373)
+  observed := cond(observedProbe == "", false, true)
+  // memqlmigrate: the engine used to run this before syncedVal and healthyVal, which it read, so it read nothing; it now runs after them, where it is written (memql#5373)
+  reconciled := cond(syncedVal == true, cond(healthyVal == true, true, false), false)
+  isRollback := cond(previousDeploymentId == "", false, true)
+  outcome := cond(reconciled == true, cond(isRollback == true, "rolled_back", "succeeded"), cond(observed == true, "failed", ""))
+  return { deploymentId: deploymentId, outcome: outcome }
+}
+
+// ---- logic/deploypack/recordReconciledState ----
+
+@description("Model A record-back loop (#2097): when a v1:cluster:deployment reaches succeeded (the promote completed), observe the ArgoCD-reconciled state. On a clean reconciliation (synced && healthy) append the observed per-node spec via deployRecordBack (createDeploymentNodeSpec -- a DIFFERENT concept, so it does NOT re-trigger the v1:cluster:deployment automations) and return verdict=recorded. When ArgoCD reports NOT synced/healthy, return verdict=correct so the automation appends the corrective failed transition (which moves status off succeeded, self-terminating). The committed overlay stays the source of truth; the data layer mirrors observed state. Epic 2 / #2097; rewritten for #2400.")
+logic recordReconciledState {
+  args {
+    event object @required
+  }
+  status := coalesce(args.event.payload.status, "")
+  provider := coalesce(args.event.payload.provider, "")
+  deploymentId := coalesce(args.event.payload.deploymentId, "")
+  version := coalesce(args.event.payload.version, "")
+  imageDigest := coalesce(args.event.payload.imageDigest, "")
+  isAzure := cond(provider == "azure", true, cond(provider == "", true, false))
+  if status == "succeeded" && isAzure == true && deploymentId != "" {
+    observation := builtin deployObserveReconciledState(app: "")
+  }
+  obsProbe := coalesce(observation.first().effect, "")
+  syncedVal := coalesce(observation.first().synced, false)
+  healthyVal := coalesce(observation.first().healthy, false)
+  // memqlmigrate: the engine used to run this before obsProbe, which it reads, so it read nothing; it now runs after it, where it is written (memql#5373)
+  observed := cond(obsProbe == "", false, true)
+  // memqlmigrate: the engine used to run this before syncedVal and healthyVal, which it read, so it read nothing; it now runs after them, where it is written (memql#5373)
+  reconciled := cond(syncedVal == true, cond(healthyVal == true, true, false), false)
+  if reconciled == true {
+    recorded := builtin deployRecordBack(deploymentId: deploymentId, nodeType: "bff", version: version, replicas: 2, imageDigest: imageDigest)
+  }
+  verdict := cond(reconciled == true, "recorded", cond(observed == true, "correct", ""))
+  return { deploymentId: deploymentId, verdict: verdict }
+}

@@ -1,0 +1,8 @@
+mutate note dupName {
+  args {
+    x string!
+  }
+  insert {
+    title: args.x
+  }
+}

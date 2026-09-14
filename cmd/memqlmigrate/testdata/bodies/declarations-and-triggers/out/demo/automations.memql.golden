@@ -1,0 +1,14 @@
+@trigger(event="node.created", concept="v1:notes:note")
+automation demoFirst {
+  go := builtin routingEvidenceFold()
+}
+
+@trigger(event="node.updated", concept="v1:notes:note")
+automation demoMiddle {
+  go := builtin routingEvidenceFold()
+}
+
+@trigger(schedule="0 */5 * * * *")
+automation demoSchedule {
+  go := builtin routingEvidenceFold()
+}

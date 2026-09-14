@@ -1,0 +1,1 @@
+dupName is declared as builtin and mutation; write the kind by hand

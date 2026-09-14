@@ -1,0 +1,9 @@
+logic demoPublisher {
+  args {
+    event object!
+  }
+  body {
+    sent := publishEvent( topic: "demo.sent", payload: { at: now } )
+    return 1
+  }
+}

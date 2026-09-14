@@ -1,0 +1,20 @@
+@trigger(event="node.created", concept="v1:notes:note", partition="*")
+automation demoFirst {
+  step go {
+    builtin routingEvidenceFold ( )
+  }
+}
+
+@trigger(partition="*", event="node.updated", concept="v1:notes:note")
+automation demoMiddle {
+  step go {
+    builtin routingEvidenceFold ( )
+  }
+}
+
+@schedule(cron="0 */5 * * * *")
+automation demoSchedule {
+  step go {
+    builtin routingEvidenceFold ( )
+  }
+}

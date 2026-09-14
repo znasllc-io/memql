@@ -1,0 +1,17 @@
+// Bare calls take the kind their name resolved to at run time: a builtin, a
+// mutation, and a builtin that a @template automation of the same name wraps.
+
+@trigger(schedule="0 30 3 * * *")
+automation demoBareCalls {
+  fold := builtin routingEvidenceFold()
+  train := builtin trainSpecialist(
+    domainId: "d1",
+    mode: "initial"
+  )
+  decide := logic accessRequestExpirySweep(event: event)
+  legacyVerb := mutation expireAccessRequest(requestId: "r1")
+  // memqlmigrate: moved below legacyVerb -- the engine ran this after it, ordering steps by the references it could see rather than by source (memql#5373)
+  for item in decide {
+    mutation expireAccessRequest(requestId: item.id)
+  }
+}
