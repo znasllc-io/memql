@@ -8,7 +8,7 @@ import (
 )
 
 // #2613: absent @version means 1.0.0 on the LIVE unified-loader path --
-// AssembleConceptIdFromDecl selects the annotated assembly on @namespace
+// AssembleConceptIdFromDeclInDir derives the namespace from the directory
 // alone and defaults the version. Before the default, a version-less
 // concept fell to the "legacy loader handles it" skip (a path the flat
 // tree does not have) and silently never registered: the codemod strip
@@ -29,12 +29,17 @@ func TestConceptVersionDefault_UnifiedAssembly(t *testing.T) {
 		return nil
 	}
 
-	absent := parse(`@namespace("cognition")
-@description("probe")
+	// The directory-AWARE assembler throughout. @namespace was retired in
+	// epic memql#5375, so AssembleConceptIdFromDecl (the directory-less form)
+	// can no longer produce an id for any input -- the namespace comes from
+	// the domain directory, which is what the "cognition" argument is. The
+	// subject of this test is @version's 1.0.0 default (#2613), and that is
+	// unchanged either way.
+	absent := parse(`@description("probe")
 concept probeParticipant {
   displayName string @required
 }`)
-	id, err := languageAst.AssembleConceptIdFromDecl(absent)
+	id, err := languageAst.AssembleConceptIdFromDeclInDir(absent, "cognition", "")
 	if err != nil {
 		t.Fatalf("assemble id without @version: %v", err)
 	}
@@ -47,7 +52,7 @@ concept probeParticipant {
 concept probeParticipant {
   displayName string @required
 }`)
-	id2, err := languageAst.AssembleConceptIdFromDecl(explicit)
+	id2, err := languageAst.AssembleConceptIdFromDeclInDir(explicit, "cognition", "")
 	if err != nil {
 		t.Fatalf("assemble id with explicit @version: %v", err)
 	}
@@ -55,14 +60,19 @@ concept probeParticipant {
 		t.Errorf("explicit @version: id = %q, want v2:cognition:probeParticipant (explicit wins)", id2)
 	}
 
-	// No @namespace: still the transitional silent skip, unchanged.
+	// The directory-LESS assembler now returns the empty id for EVERY input,
+	// because @namespace was its only source (epic memql#5375). That is not
+	// the old transitional skip wearing a new hat: it is the one caller of
+	// this form -- the authoring sandbox's untitled-buffer path -- losing its
+	// second way to place a concept, so a bundle with no origin path is now
+	// refused rather than silently unplaced.
 	bare := parse(`@description("probe")
 concept probeParticipant {
   displayName string @required
 }`)
 	id3, err := languageAst.AssembleConceptIdFromDecl(bare)
 	if err != nil || id3 != "" {
-		t.Errorf("no @namespace: want the transitional empty id, got %q err=%v", id3, err)
+		t.Errorf("directory-less assembly: want the empty id, got %q err=%v", id3, err)
 	}
 
 	// The metadata sink defaults too. Concept.Version stores the

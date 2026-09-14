@@ -47,13 +47,24 @@ func TestRemovedAnnotationsRejected(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected @%s on a %s to be rejected, but it was accepted", tc.annotation, tc.kindLabel)
 			}
-			// @role (#2709) and @permission (#2713) graduated from the
-			// generic unknown-annotation error to the pointed BURY
-			// message -- the load rejection this test locks in is
-			// preserved, sharper.
-			if buried := map[string]string{"role": "#2709", "permission": "#2713"}; buried[tc.annotation] != "" {
-				if !strings.Contains(err.Error(), buried[tc.annotation]) {
-					t.Fatalf("expected the @%s bury message (%s), got: %v", tc.annotation, buried[tc.annotation], err)
+			// Some of these have GRADUATED from the generic
+			// unknown-annotation error to a pointed message, and the
+			// rejection this test locks in is preserved either way --
+			// sharper, not weaker. Two waves so far: @role (#2709) and
+			// @permission (#2713) were BURIED, and epic memql#5375 RETIRED
+			// @deprecated / @timeout / @retry / @idempotent / @audit /
+			// @rateLimit and their siblings.
+			//
+			// The retirement branch asks the LEDGER rather than a literal
+			// list, so the next retirement needs no edit here: whatever
+			// core/baseparser says is retired must refuse with its hint and
+			// name the rewrite.
+			if hint, retired := baseparser.RetiredConstructAnnotation(tc.annotation); retired {
+				if !strings.Contains(err.Error(), "is retired") {
+					t.Fatalf("expected the @%s retirement message, got: %v", tc.annotation, err)
+				}
+				if !strings.Contains(err.Error(), hint) {
+					t.Fatalf("expected @%s to refuse with its ledger hint (%q), got: %v", tc.annotation, hint, err)
 				}
 				return
 			}

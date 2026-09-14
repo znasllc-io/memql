@@ -329,9 +329,14 @@ func buildCandidateConcept(c SandboxConstruct) (string, *memoryNodes.Concept, er
 	// domain's namespace is -- dsl/deployment pins "cluster", and a second
 	// definition here is the copy that drifts.
 	//
-	// WITHOUT ONE the explicit-@namespace requirement stands. An untitled
-	// buffer has no directory to derive from, so a concept in it genuinely has
-	// to say which namespace it belongs to.
+	// WITHOUT ONE there is no longer any way to name the namespace, so the
+	// path REQUIRES an origin. An untitled buffer used to be able to say
+	// which namespace it belonged to with an explicit @namespace; epic
+	// memql#5375 retired the annotation, so that arm is gone and the origin
+	// path is the only mechanism left. AssembleConceptIdFromDecl now returns
+	// "" for every input, which the id == "" check below turns into the
+	// refusal -- and the refusal had to stop offering the annotation, since
+	// an author who took that advice would meet a second refusal.
 	var id string
 	var err error
 	if dir := NamespaceFromFilePath(c.Origin); dir != "" {
@@ -343,7 +348,7 @@ func buildCandidateConcept(c SandboxConstruct) (string, *memoryNodes.Concept, er
 		return "", nil, fmt.Errorf("%s: %v", origin, err)
 	}
 	if id == "" {
-		return "", nil, fmt.Errorf("%s: concept %q is missing @namespace and the bundle carries no origin path to derive one from -- either annotate it or send the document's tree-relative path", origin, c.Name)
+		return "", nil, fmt.Errorf("%s: concept %q cannot be placed -- the bundle carries no origin path, and a concept's namespace comes from its domain directory (or that directory's namespace.pin) since @namespace was retired in epic memql#5375. Send the document's tree-relative path", origin, c.Name)
 	}
 
 	// BuildConceptFromDecl is where the reserved-property refusal lives
