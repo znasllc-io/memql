@@ -39,7 +39,14 @@ import (
 // stands); a construct that compiled cleanly but carries a dangling
 // reference is flipped to a hard failure.
 func SandboxCompileBundleWithEngine(constructs []SandboxConstruct, engine *MemQLEngine) SandboxReport {
-	rep, overlay := compileBundle(constructs)
+	// The per-construct compile, then the lowering of the bundle's queries,
+	// specs and traits in the engine's registries (authoring_lower.go): a
+	// construct that does not lower fails here, before any reference check.
+	lowering := engineFreeLowering
+	if engine != nil {
+		lowering = &authoringLowering{engine: engine}
+	}
+	rep, overlay, _ := compileBundleWith(constructs, lowering)
 
 	// Index the bundle's own construct names by kind so a reference to a
 	// sibling construct in the same bundle resolves even though it is not

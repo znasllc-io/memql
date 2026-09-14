@@ -55,6 +55,11 @@ type Engine interface {
 	// is callable by its author and by nobody else. The one step it omits is the
 	// cross-node broadcast, and that omission IS the tier.
 	StageConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error
+	// DefineSessionBundle is the session define with the engine's registries
+	// in the lowering scope (memql#5366): a query, spec or trait that does not
+	// lower is refused at define, with its diagnostic, rather than at its
+	// first call.
+	DefineSessionBundle(reg *memql.AuthoredRuntimeRegistry, owner, bundle, origin string) (memql.SessionDefineResult, error)
 	// ExecuteInline runs ad-hoc inline MemQL text with the inline-shape
 	// restrictions lifted (MCP Tier-3 #1535), resolving session-authored
 	// constructs core-first. The server gates it to inline tier + owner/developer.
@@ -607,7 +612,16 @@ func handleDefine(ctx context.Context, eng Engine, role string, tier Tier, args 
 	// signature-concept resolution (memql#3800). Optional: a bundle composed in
 	// a chat has no file, and the dir=="" degrade is correct for it.
 	origin, _ := args["origin"].(string)
-	res, err := memql.AuthorSessionBundle(s.registry, s.owner, bundle, origin)
+	// Through the engine, whose define lowers the bundle's queries, specs and
+	// traits in its registries (memql#5366): what does not lower is refused
+	// here, with its diagnostic, not at the construct's first call.
+	var res memql.SessionDefineResult
+	var err error
+	if eng != nil {
+		res, err = eng.DefineSessionBundle(s.registry, s.owner, bundle, origin)
+	} else {
+		res, err = memql.AuthorSessionBundle(s.registry, s.owner, bundle, origin)
+	}
 	if err != nil {
 		// A validation failure carries per-construct diagnostics; surface them.
 		payload, _ := json.Marshal(res)
@@ -748,6 +762,7 @@ type concreteEngine interface {
 	PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error
 	PromoteConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error
 	StageConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error
+	DefineSessionBundle(reg *memql.AuthoredRuntimeRegistry, owner, bundle, origin string) (memql.SessionDefineResult, error)
 	MCPPromotedFunctionTools() []map[string]any
 	MCPPromotedFunctionKind(name string) (string, bool)
 }
@@ -773,6 +788,9 @@ func (a engineAdapter) PromoteConstructDurable(ctx context.Context, owner string
 }
 func (a engineAdapter) StageConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error {
 	return a.c.StageConstructDurable(ctx, owner, c)
+}
+func (a engineAdapter) DefineSessionBundle(reg *memql.AuthoredRuntimeRegistry, owner, bundle, origin string) (memql.SessionDefineResult, error) {
+	return a.c.DefineSessionBundle(reg, owner, bundle, origin)
 }
 func (a engineAdapter) MCPPromotedFunctionTools() []map[string]any {
 	return a.c.MCPPromotedFunctionTools()

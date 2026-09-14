@@ -176,7 +176,18 @@ func ValidateBundle(bundleSource, origin string) SandboxReport {
 // the session.
 // origin carries the bundle's tree-relative path for ambient domain resolution
 // (memql#3800); empty is an untitled buffer.
+//
+// It takes no engine, so it lowers a v1 query, spec or trait against the
+// bundle alone and defers what only an engine's registries can decide (a spec
+// bound to a core shape, a predicate's kind) to the lowering at registration
+// and at execution (authoring_lower.go). A caller holding the engine defines
+// through MemQLEngine.DefineSessionBundle, which refuses all of it here.
 func AuthorSessionBundle(reg *AuthoredRuntimeRegistry, owner, bundleSource, origin string) (SessionDefineResult, error) {
+	return authorSessionBundle(engineFreeLowering, reg, owner, bundleSource, origin)
+}
+
+// authorSessionBundle is the session define under one lowering scope.
+func authorSessionBundle(al *authoringLowering, reg *AuthoredRuntimeRegistry, owner, bundleSource, origin string) (SessionDefineResult, error) {
 	if reg == nil {
 		return SessionDefineResult{}, fmt.Errorf("authoring: session define requires a runtime registry")
 	}
@@ -193,8 +204,10 @@ func AuthorSessionBundle(reg *AuthoredRuntimeRegistry, owner, bundleSource, orig
 	// Gate 1: isolated compile + bind against a clone of the live concept
 	// registry. compileBundle returns the overlay concept registry so the
 	// executable-compile step below binds against exactly the same concept set
-	// (core + any bundle-defined concepts).
-	report, concepts := compileBundle(constructs)
+	// (core + any bundle-defined concepts). The queries, specs and traits come
+	// back compiled AND lowered (compileBundleWith), and those forms are the
+	// ones registered below, so what a session calls is what Gate 1 checked.
+	report, concepts, lowered := compileBundleWith(constructs, al)
 	res := SessionDefineResult{OK: report.OK, Diagnostics: report.Diagnostics}
 	if !report.OK {
 		return res, fmt.Errorf("authoring: bundle failed validation (%d of %d constructs did not compile)",
@@ -203,14 +216,23 @@ func AuthorSessionBundle(reg *AuthoredRuntimeRegistry, owner, bundleSource, orig
 
 	for _, c := range constructs {
 		var compiled any
+		if form, ok := lowered[c.Kind+"/"+c.Name]; ok {
+			compiled = form
+		}
 		switch c.Kind {
 		case "query", "mutation", "logic":
+			if compiled != nil {
+				break
+			}
 			fn, err := compileAuthoredFunction(c, concepts)
 			if err != nil {
 				return res, fmt.Errorf("authoring: compile %s %q: %w", c.Kind, c.Name, err)
 			}
 			compiled = fn
 		case "spec", "trait":
+			if compiled != nil {
+				break
+			}
 			spec, err := compileAuthoredSpec(c)
 			if err != nil {
 				return res, fmt.Errorf("authoring: compile %s %q: %w", c.Kind, c.Name, err)
@@ -415,6 +437,20 @@ func (e *MemQLEngine) buildAuthoredSpecOverlay(owner string, staged, reg *Author
 					continue
 				}
 			}
+			if spec.Lambda != nil && spec.Expr == nil {
+				// An edition-2026 body defined with no engine behind the
+				// define (AuthorSessionBundle) may have been left unlowered --
+				// its binding was a shape only the engine holds. Lower it now,
+				// on a clone, in the scope this owner's execution reads; one
+				// that still does not lower stays without a body, and the
+				// expansion refuses it by name (memql#5366). A define through
+				// the engine never reaches here: it lowered at define time.
+				if lowered, err := e.lowerAuthoredForRegistry(c, owner, []*AuthoredRuntimeRegistry{staged, reg}, false); err == nil {
+					if ls, isSpec := lowered.(*Spec); isSpec && ls != nil {
+						spec = ls
+					}
+				}
+			}
 			overlay[spec.Name] = spec
 		}
 	}
@@ -447,6 +483,12 @@ func expandSpecReferencesWithOverlay(expr ExpressionNode, overlay map[string]*Sp
 		}
 		if _, cycle := resolving[name]; cycle {
 			return nil, fmt.Errorf("circular spec reference detected for %q", name)
+		}
+		if spec.Expr == nil {
+			// An edition-2026 body that never lowered. Refused by name: an
+			// absent body inlined as nothing would change what the filter
+			// selects, silently (memql#5366).
+			return nil, fmt.Errorf("spec reference %q: %s %q has no lowered body -- it did not lower when it was defined; define it again to see why", node.Name, specKeyword(spec), name)
 		}
 		resolving[name] = struct{}{}
 		resolved, err := expandSpecReferencesWithOverlay(spec.Expr, overlay, resolving)
@@ -623,6 +665,12 @@ func (e *MemQLEngine) promoteAuthoredConstructWithGate(ctx context.Context, gate
 				return fmt.Errorf("authoring: promote %s %q: a core construct already owns that name (promotion cannot redefine core)", c.Kind, c.Name)
 			}
 		}
+		// Lowered against the SHARED registries before it enters them
+		// (memql#5366): a promoted query may apply only what every session can
+		// resolve. A replay defers its predicate checks (authoring_lower.go).
+		if _, err := e.lowerAuthoredForRegistry(c, "", nil, gate != nil && gate.replay); err != nil {
+			return fmt.Errorf("authoring: promote %s %q: %w", c.Kind, c.Name, err)
+		}
 		if err := e.functions.Upsert(fn); err != nil {
 			return err
 		}
@@ -644,19 +692,36 @@ func (e *MemQLEngine) promoteAuthoredConstructWithGate(ctx context.Context, gate
 			return fmt.Errorf("authoring: promote %s %q: spec registry is not initialized", c.Kind, c.Name)
 		}
 		key := "spec:" + spec.Name
+		liftReservation := false
 		if e.specs.IsDisabled(spec.Name) {
 			if _, authored := e.promotedAuthored.Load(key); !authored {
 				return fmt.Errorf("authoring: promote %s %q: a @disabled core construct owns that name (re-enable or rename; promotion cannot claim a retired core name)", c.Kind, c.Name)
 			}
 			// The reservation came from a stored @disabled AUTHORED row
 			// (recompileAndPromoteRow): promoting the corrected (enabled)
-			// source is the re-enable path -- lift it (memql#2643).
-			e.specs.UnmarkDisabled(spec.Name)
+			// source is the re-enable path -- lifted below, once the new
+			// source has lowered, so a refused promote leaves it reserved
+			// (memql#2643).
+			liftReservation = true
 		}
 		if _, ok := e.specs.Lookup(spec.Name); ok {
 			if _, promoted := e.promotedAuthored.Load(key); !promoted {
 				return fmt.Errorf("authoring: promote %s %q: a core construct already owns that name (promotion cannot redefine core)", c.Kind, c.Name)
 			}
+		}
+		// An edition-2026 body is re-bound and lowered against the SHARED
+		// registries (memql#5366) -- on a clone, so the session's own entry is
+		// untouched -- and that lowered form is what registers. A replay defers
+		// its predicate checks (authoring_lower.go).
+		lowered, err := e.lowerAuthoredForRegistry(c, "", nil, gate != nil && gate.replay)
+		if err != nil {
+			return fmt.Errorf("authoring: promote %s %q: %w", c.Kind, c.Name, err)
+		}
+		if liftReservation {
+			e.specs.UnmarkDisabled(spec.Name)
+		}
+		if lowered, isSpec := lowered.(*Spec); isSpec && lowered != nil {
+			spec = lowered
 		}
 		if err := e.specs.Upsert(spec.Name, spec); err != nil {
 			return err

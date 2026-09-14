@@ -84,6 +84,12 @@ type pushdownFailure struct {
 // are only checked: their IR was built when they were compiled, and that first
 // lowering is the one registered.
 func lowerPushdownSet(specs []*Spec, queries []*Function, scope pushdownScope) []pushdownFailure {
+	if scope.concepts == nil {
+		// An engine without a concept registry (a bare test engine): bindings
+		// and fields then resolve against nothing, rather than panicking on a
+		// nil registry.
+		scope.concepts = memoryNodes.NewRegistry(nil)
+	}
 	var failures []pushdownFailure
 	fail := func(f pushdownFailure) { failures = append(failures, f) }
 	lowered := map[*Spec]bool{}

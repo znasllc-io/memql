@@ -153,14 +153,21 @@ func (e *MemQLEngine) stageBundleDurableWithStore(ctx context.Context, store pro
 	// throwaway owner-scoped registry holds the compiled forms; it is not the
 	// staged registry, and nothing about it is durable -- it exists only to carry
 	// the *Function / *Spec into the per-construct stage below.
+	//
+	// Validated with this engine's registries in the lowering scope, plus the
+	// owner's staged tier the bundle joins: a construct that does not lower is
+	// refused here, with its diagnostic, and nothing is staged.
 	reg := NewAuthoredRuntimeRegistry()
-	defineRes, err := AuthorSessionBundle(reg, owner, bundleSource, origin)
+	lowering := &authoringLowering{engine: e, owner: owner, layers: []*AuthoredRuntimeRegistry{e.stagedAuthored}}
+	defineRes, err := authorSessionBundle(lowering, reg, owner, bundleSource, origin)
 	result := StageBundleResult{OK: defineRes.OK, Diagnostics: defineRes.Diagnostics}
 	if err != nil {
 		return result, err
 	}
 
-	for _, c := range sliced {
+	// Specs and traits before the queries that apply them: each stage lowers
+	// its construct against the staged tier as it stands (promoteOrder).
+	for _, c := range promoteOrder(sliced) {
 		if !isStageableKind(c.Kind) {
 			// The kinds the promote path also leaves alone (shape registers as
 			// session metadata; automation / action / capability are the Gate-3
@@ -255,6 +262,14 @@ func (e *MemQLEngine) stageConstructDurableWithStore(ctx context.Context, store 
 // separately because the answer differs: a CORE name can never be claimed, while
 // an ALREADY-TRAINED name is claimable again after a demote.
 func (e *MemQLEngine) stageAuthoredConstruct(owner string, c *AuthoredConstruct) error {
+	return e.stageAuthoredConstructAs(owner, c, false)
+}
+
+// stageAuthoredConstructAs is stageAuthoredConstruct with the replay posture
+// explicit: the boot and propagation walks re-apply a stage somebody already
+// took, one row at a time, so their predicate checks wait for the whole walk
+// (lowerAuthoredForRegistry).
+func (e *MemQLEngine) stageAuthoredConstructAs(owner string, c *AuthoredConstruct, replay bool) error {
 	switch c.Kind {
 	case "query", "mutation", "logic":
 		fn, ok := c.Compiled.(*Function)
@@ -288,8 +303,17 @@ func (e *MemQLEngine) stageAuthoredConstruct(owner string, c *AuthoredConstruct)
 		return fmt.Errorf("authoring: staging of %s constructs is not supported (function-family + spec only)", c.Kind)
 	}
 
+	// Lowered against the registries it will resolve in (memql#5366): the
+	// shared ones plus this owner's staged tier, the scope an execution by
+	// its author reads it in. A spec registers the lowered clone.
+	lowered, err := e.lowerAuthoredForRegistry(c, owner, []*AuthoredRuntimeRegistry{e.stagedAuthored}, replay)
+	if err != nil {
+		return fmt.Errorf("authoring: stage %s %q: %w", c.Kind, c.Name, err)
+	}
+
 	staged := c.clone()
 	staged.OwnerUserId = owner
+	staged.Compiled = lowered
 	// SUPERSEDE THE ENTRY ALREADY THERE. AuthoredRuntimeRegistry.Register treats
 	// a repeat key as a version replacement and REFUSES one whose version does
 	// not strictly exceed the existing entry's -- a stale re-activation must not
@@ -393,7 +417,7 @@ func (e *MemQLEngine) recompileAndStageRow(_ context.Context, row AuthoringConst
 		}
 		c.Compiled = spec
 	}
-	return e.stageAuthoredConstruct(row.OwnerUserId, c)
+	return e.stageAuthoredConstructAs(row.OwnerUserId, c, true)
 }
 
 // --- the transitions out of staged ------------------------------------------
