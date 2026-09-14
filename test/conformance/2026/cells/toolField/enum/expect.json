@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "file": "a-list-of-strings.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-unquoted-values.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@enum on a tool field takes one or more strings"
+    }
+  ]
+}

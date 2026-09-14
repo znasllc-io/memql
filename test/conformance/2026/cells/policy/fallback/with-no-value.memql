@@ -1,0 +1,4 @@
+/// The strongest local model first, then any signed-in app.
+@primary("fleet:strongest")
+@fallback
+policy localThenAppFallback { }

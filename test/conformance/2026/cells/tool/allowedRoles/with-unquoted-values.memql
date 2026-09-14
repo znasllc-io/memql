@@ -1,0 +1,6 @@
+/// Open a support ticket; offered to assistant and specialist agents only.
+@handler(type="function", name="openTicketAllowedRoles")
+@allowedRoles(assistant, specialist)
+tool openSupportTicketAllowedRoles {
+  title  string!  @description("The ticket's one-line title.")
+}

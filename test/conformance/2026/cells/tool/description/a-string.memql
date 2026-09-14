@@ -1,0 +1,5 @@
+@handler(type="function", name="openTicketDescription")
+@description("Open a support ticket for the caller.")
+tool openSupportTicketDescription {
+  title  string!  @description("The ticket's one-line title.")
+}

@@ -1,0 +1,7 @@
+/// Summarise a ticket in one sentence, from a template that also reads the ticket's priority --
+/// an input the prompt does not declare.
+@level("fast")
+@templateFile("summariseTicketWithPriority.tmpl")
+prompt summariseTicketWithPriority {
+  title  string!  @description("The ticket's title.")
+}

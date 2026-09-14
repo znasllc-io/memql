@@ -1,0 +1,11 @@
+/// A support ticket, the row the tool here lists.
+concept ticket {
+  title   string
+  status  string
+}
+
+/// The open tickets, newest first. It sorts and does not paginate: the tool's handler pages it.
+query ticket openTicketsForTool {
+  filter status == "open"
+  sort "row.createdAt", "desc"
+}

@@ -1,0 +1,6 @@
+/// Background calls resolve through the local-first chain; an exhausted chain degrades a level.
+@when(tag="background")
+@policy("localFirst")
+@precedence(17)
+@onUnavailable(degrade)
+rule backgroundLocalOnUnavailable { }

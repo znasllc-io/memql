@@ -1,0 +1,6 @@
+/// A support ticket whose owned tier names a field the concept does not declare.
+@rowAuthz(owner="assigneeId")
+concept ticket {
+  ownerUserId  string
+  title        string
+}

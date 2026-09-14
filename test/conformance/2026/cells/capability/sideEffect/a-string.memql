@@ -1,0 +1,7 @@
+/// Create a directory on the runner's workspace: a write, and the class says so.
+@sideEffect("write")
+capability fs.mkdir {
+  args {
+    path  string!
+  }
+}

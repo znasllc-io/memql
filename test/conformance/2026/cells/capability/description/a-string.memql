@@ -1,0 +1,7 @@
+@sideEffect("read")
+@description("List the entries of a directory on the runner's workspace.")
+capability fs.list {
+  args {
+    path  string!
+  }
+}

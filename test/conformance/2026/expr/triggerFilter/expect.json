@@ -1,0 +1,15 @@
+{
+  "cases": [
+    {
+      "file": "payload-comparison.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "empty-parentheses.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@filter on an automation takes one string or an expression",
+      "note": "The only refusal a trigger filter has today is its form. The expression inside is captured verbatim and never parsed at load -- a trailing `||`, `and`, a single `=`, a field without its payload. prefix and the retired year() all load, and are decided by the runtime string evaluator when the event fires, which the expression epic (dsl-v1-expressions) retires."
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "cases": [
+    {
+      "file": "bare-fields.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "urgent-and-open.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open",
+        "priority": 5
+      },
+      "expect": true
+    },
+    {
+      "file": "urgent-and-open.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open",
+        "priority": 2
+      },
+      "expect": false
+    },
+    {
+      "file": "reads-the-row-namespace.memql",
+      "verdict": "refuse_load",
+      "message": "a spec body may not read row.* directly"
+    },
+    {
+      "file": "reads-the-actor.memql",
+      "verdict": "refuse_load",
+      "message": "a spec body may not read actor.* directly",
+      "note": "Refused with the actor on the left of the comparison only: the same read on the right -- `ownerUserId == actor.userId` -- loads today, because the check walks field references and a right-hand actor.* is a value."
+    }
+  ]
+}

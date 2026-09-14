@@ -1,0 +1,5 @@
+/// Matches the tickets that are still open. @enabled restates the default.
+@enabled
+spec ticket isOpenTicketEnabled {
+  return status == "open"
+}

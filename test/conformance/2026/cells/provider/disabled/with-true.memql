@@ -1,0 +1,5 @@
+/// OpenAI GPT-5.4 Nano under a bundle's own name. Switched off: not registered while @disabled stays.
+@extends("openai")
+@model("gpt-5.4-nano")
+@disabled(true)
+provider bundleNanoDisabled { }

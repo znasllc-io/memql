@@ -1,0 +1,5 @@
+/// Matches the tickets that are still open. Switched off: not loaded while @disabled stays.
+@disabled
+spec ticket isOpenTicketDisabled {
+  return status == "open"
+}

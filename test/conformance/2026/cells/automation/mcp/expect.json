@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "file": "written-bare.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-true.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@mcp on an automation takes no arguments"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+@description("Matches the tickets that are still open.")
+spec ticket isOpenTicketDescription {
+  return status == "open"
+}

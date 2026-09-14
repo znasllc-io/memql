@@ -1,0 +1,4 @@
+@extends("openai")
+@model("gpt-5.4-nano")
+@description
+provider bundleNanoDescription { }

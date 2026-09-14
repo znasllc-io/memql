@@ -1,0 +1,6 @@
+@level("fast")
+@templateFile("summariseTicket.tmpl")
+@description
+prompt summariseTicketDescription {
+  title  string!  @description("The ticket's title.")
+}

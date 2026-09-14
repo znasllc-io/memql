@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "file": "coalesce.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "comparison-as-the-value.memql",
+      "verdict": "refuse_load",
+      "message": "an identifier-led comparison `args.status == ...` in a VALUE position",
+      "note": "Today a comparison in a value position returns its own source text rather than a boolean (#2655, #2693), so the loader refuses it and names the cond(...) rewrite."
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+/// Open a support ticket; the runtime records which agent opened it.
+@handler(type="function", name="openTicketAutoInjected")
+tool openSupportTicketAutoInjected {
+  title    string!  @description("The ticket's one-line title.")
+  agentId  string   @autoInjected  @description("The agent opening the ticket; stamped by the runtime, never by the model.")
+}

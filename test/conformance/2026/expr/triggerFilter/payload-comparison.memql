@@ -1,0 +1,8 @@
+/// When an agent node joins the cluster, raise a ticket to welcome it.
+@trigger(event="node.created", concept="v1:cluster:node", partition="*")
+@filter(payload.nodeType == "agent")
+automation welcomeAgentNode {
+  step raise {
+    mutation raiseFilteredTicket (title: "An agent node joined the cluster")
+  }
+}

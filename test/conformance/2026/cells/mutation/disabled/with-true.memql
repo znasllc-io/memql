@@ -1,0 +1,12 @@
+/// Retitle one ticket. Switched off: not loaded while @disabled stays.
+@disabled(true)
+mutate ticket retitleTicketDisabled {
+  args {
+    ticketId  string!
+    title     string!
+  }
+  update {
+    id: args.ticketId
+    title: args.title
+  }
+}

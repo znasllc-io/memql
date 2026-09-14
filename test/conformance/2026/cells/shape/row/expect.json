@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "file": "written-bare.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-true.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@row on a shape takes no arguments"
+    },
+    {
+      "file": "a-field-the-concept-does-not-declare.memql",
+      "verdict": "refuse_load",
+      "message": "projects payload property \"headline\", which concept"
+    },
+    {
+      "file": "actor-fields-without-actor.memql",
+      "verdict": "refuse_load",
+      "message": "projects \"actor.userId\" but does not declare @actor -- the auth envelope is a declared source, not an ambient one"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+@description("The headline a ticket shows: its title, or a placeholder when it has none.")
+logic ticketHeadlineDescription {
+  args {
+    title  string
+  }
+  body {
+    return args.title ?? "(untitled)"
+  }
+}

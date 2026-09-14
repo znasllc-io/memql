@@ -1,0 +1,6 @@
+/// The open tickets, newest first, sorted by the intrinsic written bare.
+query ticket newestOpenTicketsBare {
+  filter status == "open"
+  sort "createdAt", "desc"
+  paginate 20
+}

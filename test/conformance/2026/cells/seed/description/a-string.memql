@@ -1,0 +1,4 @@
+@description("The billing category every cluster starts with.")
+seed ticketCategory billingCategory {
+  name: "Billing"
+}

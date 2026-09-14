@@ -1,0 +1,5 @@
+/// Open a support ticket -- through a function nothing declares.
+@handler(type="function", name="openTicketNobodyWrote")
+tool openSupportTicketNowhere {
+  title  string!  @description("The ticket's one-line title.")
+}

@@ -1,0 +1,17 @@
+/// A support ticket: the row this cell's cases read and write.
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}
+
+/// Open a ticket with a title.
+mutate ticket openTicketAllowedRoles {
+  args {
+    title  string!
+  }
+  insert {
+    title: args.title
+    status: "open"
+  }
+}

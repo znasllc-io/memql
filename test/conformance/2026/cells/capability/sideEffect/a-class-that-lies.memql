@@ -1,0 +1,7 @@
+/// Create a directory on the runner's workspace, declared as a read.
+@sideEffect("read")
+capability fs.mkdir {
+  args {
+    path  string!
+  }
+}

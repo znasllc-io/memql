@@ -1,0 +1,6 @@
+/// The caller's own open tickets, reading the actor without declaring it.
+query ticket openTicketsActorUndeclared {
+  filter ownerUserId == actor.userId && status == "open"
+  sort "row.createdAt", "desc"
+  paginate 20
+}

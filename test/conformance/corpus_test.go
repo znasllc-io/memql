@@ -17,7 +17,9 @@ package conformance
 //   - load_ok / refuse_load: the file parses, and the engine's own boot-time
 //     validation -- MemQLEngine.Init over the embedded tree with the case
 //     mounted as an overlay domain, via memql.LintUnifiedTree, plus the
-//     automations loader for an automation -- accepts it, or refuses it.
+//     automations loader for an automation and the capability catalog and
+//     action loader for a capability or an action (corpusActionProblems) --
+//     accepts it, or refuses it.
 //   - lower / evaluate: the expression lowers to SQL containing the expected
 //     text, or evaluates against a row to the expected value, through the
 //     adapter in engine_adapter_test.go.
@@ -27,12 +29,26 @@ package conformance
 // annotation_unknown). The wording is part of the contract: a refusal is how
 // the language tells an author, or a model, what to write instead.
 //
-// Cases are loaded in batches -- one engine boot for every load case, one for
-// every expression case -- because a boot costs over a second and the corpus
-// holds hundreds of cases. Each case gets its own overlay domain, so a problem
-// is attributed to the case by the domain it names. A boot error no domain
-// claims (a whole-tree failure) makes the runner fall back to one boot per case
-// for that batch, so attribution never guesses.
+// Cases are loaded in batches -- boots for the cases that must load, boots for
+// the cases that must be refused at load, one for every expression case --
+// because a boot costs over a second and the corpus holds hundreds of cases.
+// Each case gets its own overlay domain, and no two cases of one directory
+// share a boot, since each mounts the directory's fixture (corpusRounds).
+//
+// A diagnostic is claimed by the one case it names: by the case file it was
+// filed under, else by the one case domain its message names, else by the one
+// case whose construct it quotes by name (corpusDomainOf, corpusRunNamed). A
+// diagnostic that names no case, or names two, is claimed by nobody, and the
+// runner falls back to one boot per case for that batch -- slower, and never a
+// guess.
+//
+// Some refusals STOP Init where they are found (an invalid @relationship
+// type, an unresolvable connector, a CQS violation), and every check Init
+// would have run after that point then runs for nobody in the boot. So a case
+// that must load never shares a boot with a case that must be refused, and a
+// case that drew no diagnostic from a boot in which another case was refused
+// is loaded again without that case (corpusLoadUntilSettled): a case judged
+// quiet was quiet in a boot where every case was.
 
 import (
 	"bytes"
@@ -49,6 +65,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/znasllc-io/memql/component/actions"
 	"github.com/znasllc-io/memql/component/automations"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/compiler"
@@ -121,8 +138,11 @@ type corpusRun struct {
 	c       corpusCase
 	src     string
 	fixture string // the directory's fixture.memql, "" when it has none
-	domain  string // the overlay domain the case loads in
-	line    dslfs.Manifest
+	// sidecars are the directory's other files -- a prompt's or a seed's
+	// @templateFile -- mounted beside the case under the same names.
+	sidecars map[string][]byte
+	domain   string // the overlay domain the case loads in
+	line     dslfs.Manifest
 
 	parseErr  error
 	loadDiags []string
@@ -338,6 +358,22 @@ func readCorpusDir(t *testing.T, root fs.FS, edition, dir string, line dslfs.Man
 	if b, err := fs.ReadFile(root, dir+"/fixture.memql"); err == nil {
 		fixture = string(b)
 	}
+	entries, _ := fs.ReadDir(root, dir)
+	var sidecars map[string][]byte
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || name == "expect.json" || strings.HasSuffix(name, ".memql") {
+			continue
+		}
+		b, err := fs.ReadFile(root, dir+"/"+name)
+		if err != nil {
+			t.Fatalf("read %s/%s: %v", dir, name, err)
+		}
+		if sidecars == nil {
+			sidecars = map[string][]byte{}
+		}
+		sidecars[name] = b
+	}
 	base := corpusDomainName(strings.TrimPrefix(dir, edition+"/"))
 	if prev, taken := domains[base]; taken && prev != dir {
 		t.Fatalf("%s and %s map to the same overlay domain %q; rename one", prev, dir, base)
@@ -361,11 +397,10 @@ func readCorpusDir(t *testing.T, root fs.FS, edition, dir string, line dslfs.Man
 		}
 		runs = append(runs, &corpusRun{
 			rel: dir + "/" + c.File, dir: dir, index: i, edition: edition,
-			c: c, src: string(src), fixture: fixture, line: line,
+			c: c, src: string(src), fixture: fixture, sidecars: sidecars, line: line,
 			domain: fmt.Sprintf("%s_%d", base, i+1),
 		})
 	}
-	entries, _ := fs.ReadDir(root, dir)
 	for _, e := range entries {
 		if !e.IsDir() && strings.HasSuffix(e.Name(), ".memql") && !named[e.Name()] {
 			t.Fatalf("%s/%s is in the corpus but no case in expect.json names it", dir, e.Name())
@@ -457,6 +492,9 @@ func corpusTree(runs []*corpusRun) fstest.MapFS {
 		if r.fixture != "" {
 			tree[r.domain+"/fixture.memql"] = &fstest.MapFile{Data: []byte(r.fixture)}
 		}
+		for name, data := range r.sidecars {
+			tree[r.domain+"/"+name] = &fstest.MapFile{Data: data}
+		}
 		name := "case.memql"
 		if corpusAutomationDecl.MatchString(r.src) {
 			name = "automations.memql"
@@ -466,10 +504,82 @@ func corpusTree(runs []*corpusRun) fstest.MapFS {
 	return tree
 }
 
-// corpusLoad runs every load case through the engine in one boot, falling
-// back to one boot per case when a problem no domain claims makes the batch
-// unattributable.
+// corpusLoad runs every load case through the engine: the cases that must load
+// in boots of their own, the cases that must be refused in another (see the
+// file comment for why they never share one).
 func corpusLoad(t *testing.T, runs []*corpusRun) {
+	t.Helper()
+	var accepting, refusing []*corpusRun
+	for _, r := range runs {
+		if r.c.Verdict == verdictLoadOK {
+			accepting = append(accepting, r)
+		} else {
+			refusing = append(refusing, r)
+		}
+	}
+
+	for _, round := range corpusRounds(accepting) {
+		corpusLoadUntilSettled(t, round)
+	}
+	for _, round := range corpusRounds(refusing) {
+		corpusLoadUntilSettled(t, round)
+	}
+}
+
+// corpusRounds splits runs so that no two cases of one directory share a
+// boot. A directory's fixture is mounted beside each of its cases, so two of
+// them in one boot declare every construct in the fixture twice, and a bare
+// name two domains declare is ambiguous to every lookup by bare name -- the
+// boot would refuse the fixture rather than the case.
+func corpusRounds(runs []*corpusRun) [][]*corpusRun {
+	seen := map[string]int{}
+	var rounds [][]*corpusRun
+	for _, r := range runs {
+		i := seen[r.dir]
+		seen[r.dir]++
+		for len(rounds) <= i {
+			rounds = append(rounds, nil)
+		}
+		rounds[i] = append(rounds[i], r)
+	}
+	return rounds
+}
+
+// corpusLoadUntilSettled loads a group, then loads the cases that drew no
+// diagnostic again in a boot without the ones that did, until a boot holds
+// only quiet cases or only refused ones.
+//
+// What it guarantees is about the QUIET: a boot in which any case was refused
+// may have stopped at that refusal, so "no diagnostic" is taken as evidence
+// only from a boot in which every case was quiet -- a case that must load
+// never passes on less than a whole Init, and a case that must be refused is
+// never judged quiet because another case's refusal stopped Init first.
+//
+// A case that DID draw a diagnostic keeps the list from the boot it drew it in,
+// and that boot may have stopped early, so the list can be short of what a
+// whole Init would add. That can fail a refusal whose expected diagnostic comes
+// after another case's stopping refusal; it cannot pass one.
+func corpusLoadUntilSettled(t *testing.T, group []*corpusRun) {
+	t.Helper()
+	for pending := group; len(pending) > 0; {
+		corpusLoadGroup(t, pending)
+		var quiet []*corpusRun
+		for _, r := range pending {
+			if len(r.loadDiags) == 0 {
+				quiet = append(quiet, r)
+			}
+		}
+		if len(quiet) == len(pending) || len(quiet) == 0 {
+			return
+		}
+		pending = quiet
+	}
+}
+
+// corpusLoadGroup runs a group of load cases through the engine in one boot,
+// falling back to one boot per case when a diagnostic no single case claims
+// makes the group unattributable.
+func corpusLoadGroup(t *testing.T, runs []*corpusRun) {
 	t.Helper()
 	if len(runs) == 0 {
 		return
@@ -482,6 +592,10 @@ func corpusLoad(t *testing.T, runs []*corpusRun) {
 		runs[0].loadDiags = append(runs[0].loadDiags, unclaimed...)
 		return
 	}
+	// One boot per case is slow, so say what forced it: a diagnostic that
+	// names no case, or names two, is a problem this batch cannot attribute.
+	t.Logf("%d diagnostic(s) name no single case; loading these %d cases one boot each:\n    %s",
+		len(unclaimed), len(runs), strings.Join(unclaimed, "\n    "))
 	for _, r := range runs {
 		r.loadDiags, r.loadRan = nil, false
 		if rest := corpusLoadBatch(t, []*corpusRun{r}); len(rest) > 0 {
@@ -491,7 +605,8 @@ func corpusLoad(t *testing.T, runs []*corpusRun) {
 }
 
 // corpusLoadBatch loads runs together and attributes every diagnostic to the
-// run whose domain it names. It returns the diagnostics no run claims.
+// one run it names (see the file comment). It returns the diagnostics no
+// single run claims.
 func corpusLoadBatch(t *testing.T, runs []*corpusRun) []string {
 	t.Helper()
 	tree := corpusTree(runs)
@@ -501,9 +616,14 @@ func corpusLoadBatch(t *testing.T, runs []*corpusRun) []string {
 		r.loadRan = true
 	}
 
+	byName := corpusDeclaredNames(runs)
 	var unclaimed []string
 	claim := func(file, msg string) {
 		if r, ok := byDomain[corpusDomainOf(file, msg, byDomain)]; ok {
+			r.loadDiags = append(r.loadDiags, msg)
+			return
+		}
+		if r, ok := corpusRunNamed(msg, byName); ok {
 			r.loadDiags = append(r.loadDiags, msg)
 			return
 		}
@@ -512,7 +632,10 @@ func corpusLoadBatch(t *testing.T, runs []*corpusRun) []string {
 
 	diags, _, err := memql.LintUnifiedTree(corpusQuiet, tree)
 	if err != nil {
-		unclaimed = append(unclaimed, err.Error())
+		// The concept build stopped (an id error, a refused @namespace). The
+		// error names the file it stopped in when it can, and is claimed by
+		// that case like any other diagnostic.
+		claim("", err.Error())
 	}
 	for _, d := range diags {
 		claim(d.File, d.Message)
@@ -525,27 +648,175 @@ func corpusLoadBatch(t *testing.T, runs []*corpusRun) []string {
 			claim("", line)
 		}
 	}
+	if corpusAnyActionConstruct(runs) {
+		for _, line := range corpusActionProblems(tree) {
+			claim("", line)
+		}
+	}
 	return unclaimed
 }
 
-// corpusDomainOf finds the run a diagnostic belongs to: by its file when it
-// names one, else by the first domain the message mentions.
+// corpusActionDecl matches a top-level `action` or `capability` declaration.
+var corpusActionDecl = regexp.MustCompile(`(?m)^(action|capability)\s`)
+
+func corpusAnyActionConstruct(runs []*corpusRun) bool {
+	for _, r := range runs {
+		if corpusActionDecl.MatchString(r.src) || corpusActionDecl.MatchString(r.fixture) {
+			return true
+		}
+	}
+	return false
+}
+
+// corpusPinProcessActions loads component/actions' process-wide capability
+// catalog and action registry from the embedded tree, before any test in the
+// binary runs -- so before any case, or any other test's overlay, is mounted.
+//
+// Init validates capabilities and authored actions through those two, and
+// each loads ONCE per process (a sync.Once over dsl.Tree()), from whatever
+// tree is mounted the first time anything asks. A node boots once per process,
+// so there it is the node's own tree. A test binary boots many engines: which
+// tree the singletons hold would depend on which test asked first -- a case's
+// overlay if the corpus asked first (and then a refused case's error would
+// answer every later boot in the binary), the embedded tree otherwise (and
+// then no case's action was checked at all). Pinning them at init makes the
+// answer the same in every run and every test order, and
+// corpusActionProblems checks each batch's own capabilities and actions with
+// the same loaders, uncached.
+func corpusPinProcessActions() {
+	actions.DefaultCatalog()
+	actions.Default()
+}
+
+// An init rather than a line in TestCorpusVerdicts: a test that runs earlier
+// in the binary and mounts a tree of its own could otherwise fix the
+// singletons from that tree first.
+func init() { corpusPinProcessActions() }
+
+// corpusActionProblems mounts the tree and loads its capability catalog and
+// its authored actions the way Init does (reconciliation against the Go
+// vocabulary, then strict capability arg-typing), without the process-wide
+// cache, and returns one line per problem. Each loader stops at its first
+// problem; corpusLoadUntilSettled reloads the rest without the case it names.
+//
+// One reach this does not have: an action's arguments are typed against the
+// process catalog (component/actions reads DefaultCatalog there), so an action
+// calling a capability a case itself declares is held to the capability's
+// namespace, not to its declared arguments.
+func corpusActionProblems(tree fs.FS) []string {
+	_, _, unmount := memqldsl.MountOverlayDomains(corpusQuiet, tree)
+	defer unmount()
+	var out []string
+	if _, err := actions.LoadCatalogFromFS(memqldsl.Tree()); err != nil {
+		out = append(out, "capability catalog reconciliation failed: "+err.Error())
+	}
+	if _, err := actions.NewRegistry().LoadFromFS(memqldsl.Tree()); err != nil {
+		out = append(out, "authored action load (strict capability arg-typing) failed: "+err.Error())
+	}
+	return out
+}
+
+// corpusDomainOf finds the one run a diagnostic belongs to: the case file it
+// was filed under, when that is a case's, else the one case domain its message
+// names. A message names a domain as a path (`<domain>/case.memql`), inside a
+// canonical id (`v1:<domain>:ticket`), or as the qualifier of a construct name
+// (`<domain>.openTickets`, the form the @requiresRank and @requiresCapability
+// gates print) -- always as a whole word, so a domain whose name ends another
+// one's is not read into it (corpusNamesDomain).
+//
+// A message that names two case domains belongs to neither: the answer is ""
+// rather than a pick between them, whatever order the map yields, and the
+// batch falls back to one boot per case. A file that is not a case's (the
+// rule loader files an order problem under dsl/rules/rules.memql) is looked
+// past, to the message.
 func corpusDomainOf(file, msg string, byDomain map[string]*corpusRun) string {
 	if file != "" {
 		f := strings.TrimPrefix(file, "unified:")
 		if i := strings.IndexByte(f, '/'); i > 0 {
-			return f[:i]
-		}
-	}
-	best := ""
-	for d := range byDomain {
-		if strings.Contains(msg, d+"/") || strings.Contains(msg, ":"+d+":") {
-			if len(d) > len(best) {
-				best = d
+			if _, ok := byDomain[f[:i]]; ok {
+				return f[:i]
 			}
 		}
 	}
-	return best
+	found := ""
+	for d := range byDomain {
+		if !corpusNamesDomain(msg, d) {
+			continue
+		}
+		if found != "" {
+			return "" // two cases named: not a choice the runner makes
+		}
+		found = d
+	}
+	return found
+}
+
+// corpusNamesDomain reports whether msg names domain as a whole word followed
+// by `/`, `:` or `.`: the path, canonical-id and qualified-name forms.
+func corpusNamesDomain(msg, domain string) bool {
+	for from := 0; ; {
+		i := strings.Index(msg[from:], domain)
+		if i < 0 {
+			return false
+		}
+		i += from
+		end := i + len(domain)
+		startsWord := i == 0 || !corpusIdentByte(msg[i-1])
+		if startsWord && end < len(msg) && strings.IndexByte("/:.", msg[end]) >= 0 {
+			return true
+		}
+		from = i + 1
+	}
+}
+
+// corpusConstructHeader matches a construct declaration and captures its name:
+// `query ticket openTickets {`, `capability fs.list {`, `seed skill a-b {`.
+var corpusConstructHeader = regexp.MustCompile(`(?m)^[ \t]*(?:query|mutate|logic|automation|action|capability|spec|trait|tool|builtin|prompt|provider|shape|policy|rule|seed|concept)[ \t]+(?:[A-Za-z_][\w]*[ \t]+)?([A-Za-z_][\w.-]*)[ \t]*\{`)
+
+// corpusDeclaredNames maps every construct name the runs declare, in their
+// cases and fixtures, to the one run that declares it. A name more than one
+// run declares maps to nil: it cannot say whose a diagnostic is.
+func corpusDeclaredNames(runs []*corpusRun) map[string]*corpusRun {
+	out := map[string]*corpusRun{}
+	for _, r := range runs {
+		for _, src := range []string{r.src, r.fixture} {
+			for _, m := range corpusConstructHeader.FindAllStringSubmatch(src, -1) {
+				if prev, seen := out[m[1]]; seen && prev != r {
+					out[m[1]] = nil
+					continue
+				}
+				out[m[1]] = r
+			}
+		}
+	}
+	return out
+}
+
+var corpusQuoted = regexp.MustCompile(`"([A-Za-z_][\w.-]*)"`)
+
+// corpusRunNamed claims a diagnostic that names no domain -- a whole-tree
+// refusal such as a policy entry that does not expand -- for the one run whose
+// construct it quotes by name. The construct names the corpus looks up by bare
+// name are unique across it (README), so a quoted name has one owner; a
+// diagnostic quoting the constructs of two runs (an aggregated refusal that
+// lists several prompts) is claimed by neither, and the batch falls back.
+func corpusRunNamed(msg string, byName map[string]*corpusRun) (*corpusRun, bool) {
+	var found *corpusRun
+	for _, m := range corpusQuoted.FindAllStringSubmatch(msg, -1) {
+		r := byName[m[1]]
+		if r == nil {
+			continue
+		}
+		if found != nil && found != r {
+			return nil, false
+		}
+		found = r
+	}
+	return found, found != nil
+}
+
+func corpusIdentByte(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 func corpusAnyAutomation(runs []*corpusRun) bool {
@@ -652,4 +923,42 @@ func corpusProbeEngine(tree fs.FS) (*memql.MemQLEngine, func(), error) {
 		return nil, nil, err
 	}
 	return eng, stop, nil
+}
+
+// TestCorpusAttributionNamesOneCase pins the claim rules: a diagnostic goes to
+// the one case it names, and to nobody when it names none or two -- whatever
+// order the domain map yields.
+func TestCorpusAttributionNamesOneCase(t *testing.T) {
+	a := &corpusRun{domain: "cells_query_cache_1"}
+	b := &corpusRun{domain: "cells_query_cache_10"}
+	c := &corpusRun{domain: "cells_mutation_actor_1"}
+	byDomain := map[string]*corpusRun{a.domain: a, b.domain: b, c.domain: c}
+	for _, tc := range []struct {
+		file, msg, want string
+	}{
+		{"cells_query_cache_10/case.memql", "anything", "cells_query_cache_10"},
+		{"dsl/rules/rules.memql", "rule order: cells_mutation_actor_1/case.memql ties", "cells_mutation_actor_1"},
+		{"", "concept \"v1:cells_query_cache_1:ticket\" DROPPED", "cells_query_cache_1"},
+		{"", "cells_query_cache_10.openTickets declares @requiresRank(\"x\")", "cells_query_cache_10"},
+		{"", "read cells_query_cache_10/x.tmpl: no such file", "cells_query_cache_10"}, // not read into _1
+		{"", "cells_query_cache_1/case.memql and cells_mutation_actor_1/case.memql", ""},
+		{"", "a whole-tree refusal naming no case", ""},
+	} {
+		for i := 0; i < 20; i++ { // map order varies run to run; the answer may not
+			if got := corpusDomainOf(tc.file, tc.msg, byDomain); got != tc.want {
+				t.Fatalf("corpusDomainOf(%q, %q) = %q, want %q", tc.file, tc.msg, got, tc.want)
+			}
+		}
+	}
+
+	x := &corpusRun{src: "policy anyLocalModel { }", domain: "d1"}
+	y := &corpusRun{src: "prompt summariseA {\n}\n", domain: "d2"}
+	z := &corpusRun{src: "prompt summariseB {\n}\n", domain: "d3"}
+	byName := corpusDeclaredNames([]*corpusRun{x, y, z})
+	if r, ok := corpusRunNamed(`policy "anyLocalModel": policy entry "fleet:*" is retired`, byName); !ok || r != x {
+		t.Errorf("a refusal quoting one case's construct is that case's")
+	}
+	if _, ok := corpusRunNamed(`2 prompt(s): prompt "summariseA": ...; prompt "summariseB": ...`, byName); ok {
+		t.Errorf("an aggregated refusal quoting two cases' constructs was claimed by one of them")
+	}
 }

@@ -1,0 +1,10 @@
+/// Retitle a ticket, reading an argument the args block does not declare.
+mutate ticket retitleFromName {
+  args {
+    ticketId  string!
+  }
+  update {
+    id: args.ticketId
+    title: args.name
+  }
+}

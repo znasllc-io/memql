@@ -15,8 +15,8 @@ examples a model is shown, so a case that loads is a form an author may copy.
 | Directory | Holds |
 |---|---|
 | `manifest.json` | The edition and language line every case here is written in, and the corpus status (`draft` until the freeze). |
-| `cells/<receiver>/<annotation>/` | One directory per place an annotation can be written, from the annotation registry. Each holds at least one case that loads and one that is refused. |
-| `expr/<position>/` | One directory per expression position, from `component/language/tiers`. Each holds at least one case that loads and one that is refused. |
+| `cells/<receiver>/<annotation>/` | One directory per place an annotation can be written, from the annotation registry (`annotations.Placements()`): the receiver lower-camel-cased (`query`, `conceptField`), the annotation as written (`createOnly`). Each holds at least one case that loads and one that is refused. |
+| `expr/<position>/` | One directory per expression position, from `component/language/tiers`. Each holds at least one case that loads and one that is refused at that position. |
 | `negative/<construct>/` | One fault per file, the file named after the fault. |
 | `scenarios/<domain>/` | Whole automations as the product ships them, loaded together. |
 | `fuzz/` | Inputs that once broke the parser. |
@@ -27,17 +27,32 @@ A directory that holds cases has one `expect.json`, the case files it names,
 and optionally a `fixture.memql` holding what the cases lean on (a concept a
 query reads, a spec a filter names). The fixture is loaded beside every case in
 the directory. Every `.memql` file in the directory is either the fixture or
-named by a case; the runner refuses a file nothing names.
+named by a case; the runner refuses a file nothing names. Any other file in the
+directory -- a prompt's or a seed's `@templateFile`, a `namespace.pin` -- is
+mounted beside every case in it under the same name, as it would sit beside a
+domain's `.memql` files.
+
+Each case loads as its own domain, and the load cases share boots. A concept
+is qualified by its domain (`v1:<domain>:ticket`), so a concept's name may
+repeat -- most cells declare a `ticket`. Every other construct is found by its
+bare name somewhere: a tool's handler, an automation's step, a seed's
+`create<Concept>`, the tool the engine registers for every function, the rule
+and policy registries. Those names must be unique across the corpus, because a
+bare name two domains declare is ambiguous to every such lookup. A cell's
+constructs carry the annotation's name for that reason (`openTicketsCache`,
+`retitleTicketServerOnly`).
+
+`cells/query/cache/expect.json`:
 
 ```json
 {
   "cases": [
-    { "file": "cache-seconds.memql", "verdict": "load_ok" },
+    { "file": "a-number.memql", "verdict": "load_ok" },
     {
-      "file": "cache-with-a-string.memql",
+      "file": "with-a-quoted-number.memql",
       "verdict": "refuse_parse",
       "code": "annotation_form",
-      "message": "@cache on a query takes"
+      "message": "@cache on a query takes one number or keyword arguments"
     }
   ]
 }
@@ -78,3 +93,39 @@ go test -count=1 -run TestCorpusVerdicts ./test/conformance/
 A failure names the file, the verdict it expected and what the engine did
 instead. A bug in the language is not fixed until the case that shows it is
 here.
+
+## The completeness gates
+
+Two gates (`test/conformance/corpus_gates_test.go`) hold the corpus to the
+language, each reading only its own subtree through the runner's own reader
+(a malformed file elsewhere fails the runner, once):
+
+- `TestCorpusCoversEveryRegistryCell`: every placement in the annotation
+  registry has its cell, with a case that loads (`load_ok`, `lower` or
+  `evaluate`) and one that is refused (`refuse_parse` or `refuse_load`); a
+  directory under `cells/` that no placement names fails too.
+- `TestCorpusCoversEveryTierPosition`: every `tiers.Position` has a case that
+  loads and one that is refused under `expr/<position>/`.
+
+Each fails once, listing every gap. A new placement or position is therefore a
+new cell or seed in the same change. To start one:
+
+```bash
+go test ./test/conformance -run TestScaffoldCorpusCells -scaffold
+```
+
+writes a skeleton for every placement with no cell -- a fixture, the
+placement's accepted form, a form the registry refuses, and the refusal's code
+and opening words. It never touches a cell that exists, and a capability, rule
+or seed placement its tables do not name is an error naming the table to
+extend rather than a skeleton with a hole in it. A skeleton that loads
+is not yet a case: read what it wrote as an author would, and give the cell
+the refusals that show what the annotation means as well as how it is spelled.
+
+A cell's first refusal is its FORM (an annotation written with arguments it
+does not take). Where the engine has a load-time rule for what the annotation
+MEANS, the cell pins that too: `@actor` on a body that reads the actor,
+`@eventField` against the fields a logic reads, `@template` beside a trigger,
+`@type("collection")` with nothing it contains. A cell whose accepted form
+cannot load as a mounted domain carries the nearest honest case and a `note`
+saying why (`cells/rule/locked`).
