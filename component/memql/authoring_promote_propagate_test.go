@@ -135,7 +135,7 @@ func TestAuthoringPromotePropagation_CrossNode(t *testing.T) {
 	}
 
 	// Promote on engine A (fake persist store, real bus broadcast).
-	res, err := engA.promoteBundleDurableWithStore(ctx, &fakePromoteStore{}, "owner-1", sessionSpecSrc, "", false)
+	res, err := engA.promoteBundleDurableWithStore(ctx, &fakePromoteStore{}, "owner-1", sessionSpecSrc, "trainingns/concepts.memql", false)
 	if err != nil {
 		t.Fatalf("promote on engine A: %v", err)
 	}

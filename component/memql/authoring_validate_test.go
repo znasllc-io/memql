@@ -13,7 +13,7 @@ import (
 // clean per-construct diagnostic for each construct, and mutates NOTHING (it is
 // the pure Gate-1 sandbox).
 func TestValidateBundle_OK(t *testing.T) {
-	report := ValidateBundle(sessionConceptSrc+"\n\n"+sessionMutationSrc, "")
+	report := ValidateBundle(sessionConceptSrc+"\n\n"+sessionMutationSrc, "trainingns/concepts.memql")
 	if !report.OK {
 		t.Fatalf("expected OK, got %+v", report)
 	}
@@ -32,7 +32,7 @@ func TestValidateBundle_OK(t *testing.T) {
 // The validate-fail path: a syntactically broken construct comes back OK=false
 // with a populated, non-skipped diagnostic explaining the failure.
 func TestValidateBundle_FailCarriesDiagnostics(t *testing.T) {
-	report := ValidateBundle(`spec actorEnvelope broken { return role == }`, "")
+	report := ValidateBundle(`spec actorEnvelope broken { return role == }`, "trainingns/concepts.memql")
 	if report.OK {
 		t.Fatal("expected OK=false for a broken bundle")
 	}
@@ -57,7 +57,7 @@ func TestValidateBundle_FailCarriesDiagnostics(t *testing.T) {
 // panicking or returning a bare nil -- so the gRPC surface always has something
 // to send back.
 func TestValidateBundle_EmptyReportsTyped(t *testing.T) {
-	report := ValidateBundle("   \n  ", "")
+	report := ValidateBundle("   \n  ", "trainingns/concepts.memql")
 	if report.OK {
 		t.Error("empty bundle should not be OK")
 	}
