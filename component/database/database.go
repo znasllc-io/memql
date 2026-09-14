@@ -1675,9 +1675,18 @@ func sessionConnParams() map[string]any {
 }
 
 // migrationConnParams is sessionConnParams without the statement timeout: the
-// migration runner gets its own single-connection pool built from these, so a
-// long index build or backfill is never cut off at the request deadline while
-// every request-serving backend still is.
+// migration runner gets its own single-connection pool built from these, so
+// the SERVER never cancels a long index build or backfill at the request
+// deadline while every request-serving backend still is.
+//
+// The CLIENT still stops waiting. pgdriver's read deadline (10 s, nothing here
+// overrides it) and the migration run's own context (MIGRATION_TIMEOUT_MS)
+// both end a statement's read with an i/o timeout and send no cancel, so the
+// backend carries on server-side while the migration reports a failure and is
+// retried on the next run (measured, memql#5252). A statement that is meant to
+// outlive them has to be written for that: the latest-row index build takes a
+// session lock its orphan keeps holding and verifies the catalog after waiting
+// for it (latest_row_index.go).
 func migrationConnParams() map[string]any {
 	params := sessionConnParams()
 	delete(params, "statement_timeout")

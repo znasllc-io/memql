@@ -510,14 +510,18 @@ func TestEnsureLatestRowIndexWaitsForTheBuildLock(t *testing.T) {
 }
 
 // THE BUILD THE DRIVER GAVE UP ON. pgdriver's read deadline (10 s by default;
-// 300 ms here) cuts a long CREATE INDEX off on the client while the backend
+// 1 s here) cuts a long CREATE INDEX off on the client while the backend
 // keeps building. The ensurer must wait for that orphan -- which still holds
 // the build lock -- and then judge the index by inspecting it, rather than
 // failing, or finding the index invalid mid-build and dropping it.
 //
 // A writer holding ROW EXCLUSIVE in an open transaction makes the build wait
 // on its ShareLock past the deadline, deterministically; the writer commits
-// after 1.5 s and the orphaned build then finishes.
+// after 3 s and the orphaned build then finishes. The deadline is a whole
+// second rather than a few hundred milliseconds because EVERY statement of the
+// ensure runs under it, catalog reads included, and on a shared CI database a
+// catalog read that loses a few hundred milliseconds to a neighbour would fail
+// the case for a reason that has nothing to do with the orphan.
 func TestEnsureLatestRowIndexWaitsOutABuildTheReadDeadlineCutOff(t *testing.T) {
 	db := conceptIndexDB(t)
 	ctx := context.Background()
@@ -526,7 +530,7 @@ func TestEnsureLatestRowIndexWaitsOutABuildTheReadDeadlineCutOff(t *testing.T) {
 
 	shortDB := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(
 		pgdriver.WithDSN(dbtest.DSN()),
-		pgdriver.WithReadTimeout(300*time.Millisecond),
+		pgdriver.WithReadTimeout(time.Second),
 	)), pgdialect.New())
 	defer func() { _ = shortDB.Close() }()
 
@@ -539,19 +543,19 @@ func TestEnsureLatestRowIndexWaitsOutABuildTheReadDeadlineCutOff(t *testing.T) {
 	committed := make(chan struct{})
 	go func() {
 		defer close(committed)
-		time.Sleep(1500 * time.Millisecond)
+		time.Sleep(3 * time.Second)
 		_ = writer.Commit()
 	}()
 
 	started := time.Now()
-	long, cancel := context.WithTimeout(ctx, 20*time.Second)
+	long, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	r, err := database.EnsureLatestRowIndex(long, shortDB, nil, tbl.name, tbl.index)
 	<-committed
 	if err != nil {
 		t.Fatalf("the ensurer failed a build that finished server-side after the read deadline: %v", err)
 	}
-	if took := time.Since(started); took < 1400*time.Millisecond {
+	if took := time.Since(started); took < 2800*time.Millisecond {
 		t.Fatalf("the ensurer returned after %s, before the writer released the table -- it cannot have seen "+
 			"the finished index", took)
 	}
