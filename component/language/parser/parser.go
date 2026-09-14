@@ -81,6 +81,10 @@ type Parser struct {
 	// thousand `(` -- is a parse error, not a goroutine stack overflow, which
 	// Go cannot recover and which would take the whole engine down.
 	v1Depth int
+
+	// opts selects the grammar of the in-process expression positions
+	// (options.go). The zero value is today's grammar.
+	opts Options
 }
 
 // NewParser creates a new parser for the given tokens.
@@ -200,15 +204,7 @@ func (p *Parser) Parse() (Node, error) {
 // returns an ExpressionNode when the input lacks a top-level
 // definition.
 func ParseFile(source string) (*File, error) {
-	lexer := NewLexer(source)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		return nil, err
-	}
-	parser := NewParser(tokens)
-	parser.SetSource(source)
-	parser.SetDocComments(lexer.DocComments())
-	return parser.parseFile()
+	return ParseFileWithOptions(source, DefaultOptions)
 }
 
 // ParseShapeDecl tokenises the given source and parses it as a
@@ -395,6 +391,9 @@ func (p *Parser) parseFile() (*File, error) {
 		}
 		if def != nil {
 			attachDocComment(def, p.takeDocFor(defFirstLine))
+			if p.opts.ExpressionsV1 {
+				markExpressionsV1(def)
+			}
 			file.Definitions = append(file.Definitions, def)
 		}
 	}

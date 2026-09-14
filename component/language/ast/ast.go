@@ -1171,6 +1171,13 @@ type FunctionDef struct {
 	// ArgsSchema is the function's input schema, populated from the
 	// file-top `args { ... }` block.
 	ArgsSchema *ArgsSchema
+
+	// ExpressionsV1 records that the definition was parsed with the
+	// edition-2026 expression grammar in its in-process positions
+	// (parser.Options.ExpressionsV1, memql#5364), so its expression strings
+	// hold canonical v1 source and its expression fields hold v1 nodes.
+	// Consumers key their v1 path on it until the tree flips as one unit.
+	ExpressionsV1 bool
 }
 
 // RateLimitConfig holds rate limiting configuration.
@@ -1231,6 +1238,14 @@ type AutomationDef struct {
 	// automation runtime (audited in #2712) and are load-rejected on
 	// automations by the #2712 gate; the dead fields were removed in #2724.
 	Enabled bool // from @enabled
+
+	// ExpressionsV1 records that the automation (or logic) body was parsed
+	// with the edition-2026 expression grammar (parser.Options.ExpressionsV1,
+	// memql#5364): step conditions, forEach sources and filters, switch
+	// subjects, step arguments and the trigger filter hold canonical v1
+	// source, and their *Expr fields hold the parsed nodes. The compiler and
+	// the automation runtime key their v1 path on it.
+	ExpressionsV1 bool
 }
 
 func (*AutomationDef) node() {}
