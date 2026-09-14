@@ -1579,7 +1579,10 @@ func (ev *exprEvaluator) listSelect(e *ast.CallExpr, coll []any, scope ExprScope
 
 // listAggregate is sum / min / max / avg through collection_method.go's
 // aggregateNumeric: sum of nothing is 0, min / max / avg of nothing is nil,
-// and every lambda result must be a number.
+// and every lambda result must be a number. A sum (and so a mean) that leaves
+// the finite range is arithmetic_overflow, as `+` is: JSON cannot carry an
+// infinity, and every value this evaluator returns is handed on as JSON
+// (found by FuzzEvalExpr, memql#5369).
 func (ev *exprEvaluator) listAggregate(e *ast.CallExpr, coll []any, scope ExprScope) (any, error) {
 	lam := ev.bind(e, 0, scope)
 	var lambdaErr error
@@ -1601,6 +1604,9 @@ func (ev *exprEvaluator) listAggregate(e *ast.CallExpr, coll []any, scope ExprSc
 			return nil, lambdaErr
 		}
 		return nil, exprErr(e, "operand_type", "%v", err)
+	}
+	if f, ok := v.(float64); ok && (math.IsInf(f, 0) || math.IsNaN(f)) {
+		return nil, exprErr(e, "arithmetic_overflow", "`%s` leaves the range of a finite number", ast.FormatExpr(e))
 	}
 	return v, nil
 }
