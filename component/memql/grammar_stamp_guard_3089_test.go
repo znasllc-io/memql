@@ -51,12 +51,17 @@ func stampTestEngine(t *testing.T) *MemQLEngine {
 	return eng
 }
 
-// A stored spec whose source is VALID under the current grammar.
-const validStoredSpecSource = "spec activeRowTrait storedValidSpec = row => row.status == \"active\"\n"
+// A stored trait whose source is VALID under the current grammar. A trait
+// binds nothing, so the recompile depends on no shape or concept the harness
+// would have to register.
+const validStoredSpecSource = "trait storedValidSpec = row => row.status == \"active\"\n"
 
-// A stored spec whose source does NOT compile under the current grammar -- the
-// "row predates a grammar move" rot case.
-const rottedStoredSpecSource = "spec activeRowTrait storedRottedSpec {\n  return status ==== \"x\" &&&& true\n}\n"
+// A stored trait whose source does NOT compile under the current grammar --
+// the "row predates a grammar move" rot case. It is written in the current
+// grammar's own spelling with a broken body, so the compile error is the
+// body's and names no migration of its own: the migration command in a
+// quarantine reason is the stamp guard's diagnosis, never the parser's.
+const rottedStoredSpecSource = "trait storedRottedSpec = row => row.status ==== \"x\" &&&& true\n"
 
 // TestStampGuard_ValidStoredConstructSurvivesABump is the destructive-bump
 // regression, and it is the reason the ordering was inverted rather than worked
@@ -69,7 +74,7 @@ func TestStampGuard_ValidStoredConstructSurvivesABump(t *testing.T) {
 	eng := stampTestEngine(t)
 
 	row := AuthoringConstructRow{
-		Kind:        "spec",
+		Kind:        "trait",
 		Name:        "storedValidSpec",
 		BundleId:    "authoring:bundle:stamp1",
 		OwnerUserId: "u-owner",
@@ -100,7 +105,7 @@ func TestStampGuard_FiresOnAStaleStampWithRottedSource(t *testing.T) {
 	eng := stampTestEngine(t)
 
 	row := AuthoringConstructRow{
-		Kind:           "spec",
+		Kind:           "trait",
 		Name:           "storedRottedSpec",
 		BundleId:       "authoring:bundle:stamp2",
 		OwnerUserId:    "u-owner",
@@ -152,7 +157,7 @@ func TestStampGuard_CurrentStampKeepsItsOwnError(t *testing.T) {
 	eng := stampTestEngine(t)
 
 	err := eng.recompileAndPromoteRow(context.Background(), AuthoringConstructRow{
-		Kind:           "spec",
+		Kind:           "trait",
 		Name:           "storedRottedSpec",
 		BundleId:       "authoring:bundle:stamp3",
 		OwnerUserId:    "u-owner",
@@ -178,7 +183,7 @@ func TestStampGuard_UnstampedLegacyRowIsNotBlamed(t *testing.T) {
 	eng := stampTestEngine(t)
 
 	err := eng.recompileAndPromoteRow(context.Background(), AuthoringConstructRow{
-		Kind:        "spec",
+		Kind:        "trait",
 		Name:        "storedRottedSpec",
 		BundleId:    "authoring:bundle:stamp4",
 		OwnerUserId: "u-owner",
@@ -196,7 +201,7 @@ func TestStampGuard_UnstampedLegacyRowIsNotBlamed(t *testing.T) {
 	// And an unstamped row whose source is VALID must register, unchanged.
 	eng2 := stampTestEngine(t)
 	if err := eng2.recompileAndPromoteRow(context.Background(), AuthoringConstructRow{
-		Kind:        "spec",
+		Kind:        "trait",
 		Name:        "storedValidSpec",
 		BundleId:    "authoring:bundle:stamp5",
 		OwnerUserId: "u-owner",
