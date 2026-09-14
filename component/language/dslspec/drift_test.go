@@ -157,7 +157,9 @@ func TestAnnotationsProjectRegistryFromRegistrySide(t *testing.T) {
 	for receiverKey := range annotations.ByReceiver {
 		mapped := receiverKeyToConstructKeywords(receiverKey)
 		if len(mapped) == 0 {
-			t.Errorf("DRIFT: annotations.ByReceiver receiver key %q maps to no construct keywords", receiverKey)
+			t.Errorf("DRIFT: annotations.ByReceiver receiver key %q maps to no construct keywords -- "+
+				"name it as a construct's AnnotationReceiver, or give fieldReceiverFor "+
+				"(component/language/dslspec/constructs.go) the construct whose fields it checks", receiverKey)
 			continue
 		}
 		for _, kw := range mapped {
@@ -199,10 +201,10 @@ func TestAnnotationsProjectRegistryFromRegistrySide(t *testing.T) {
 			t.Errorf("DRIFT: annotation %q doc diverges -- spec=%q registry=%q "+
 				"(dslspec must project annotations.Docs verbatim)", n, a.Doc, annotations.Docs[n])
 		}
-		if len(a.Receivers) == 0 {
-			t.Errorf("annotation %q projects with no receivers", n)
+		if len(a.Receivers) == 0 && len(a.Fields) == 0 {
+			t.Errorf("annotation %q projects with no receivers and no fields", n)
 		}
-		for _, r := range a.Receivers {
+		for _, r := range append(append([]string(nil), a.Receivers...), a.Fields...) {
 			if !specConstructs[r] {
 				t.Errorf("DRIFT: annotation %q lists receiver %q which is not a dslspec construct keyword", n, r)
 			}

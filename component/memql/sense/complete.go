@@ -90,13 +90,14 @@ func (s *Service) completeTopLevel(prefix string) []CompletionItem {
 func (s *Service) completeAnnotation(ctx CursorContext) []CompletionItem {
 	validAnnotations := annotationsForConstruct(ctx.Enclosing)
 
+	receiver := receiverOfConstruct(ctx.Enclosing)
 	var items []CompletionItem
 	for _, name := range validAnnotations {
 		if strings.HasPrefix(name, ctx.Prefix) {
 			doc := AnnotationDocs[name]
 			insertText := name
 			// Annotations with args get parens.
-			if annotationTakesArgs(name) {
+			if annotationTakesArgs(receiver, name) {
 				insertText = name + "("
 			}
 			items = append(items, CompletionItem{
@@ -618,8 +619,9 @@ func (s *Service) completeConceptDef(prefix string) []CompletionItem {
 			})
 		}
 	}
-	// Field-level annotations.
-	for _, ann := range []string{"required", "default", "description"} {
+	// Field-level annotations: the registry's concept-field receiver, the
+	// set the concept translator checks a field against (memql#5359).
+	for _, ann := range annotations.ByReceiver[string(annotations.ConceptField)] {
 		items = append(items, CompletionItem{
 			Label: "@" + ann, Kind: "annotation", Detail: "field annotation",
 			Documentation: AnnotationDocs[ann], InsertText: "@" + ann,
@@ -629,12 +631,16 @@ func (s *Service) completeConceptDef(prefix string) []CompletionItem {
 	return items
 }
 
-// allAnnotationNames returns all known annotation names.
+// allAnnotationNames returns every annotation a construct may carry in its
+// leading position -- the union fallback. Field-only annotations (@pii,
+// @minimum, ...) are left out: they are written after a field's type, never
+// before a declaration, so offering them at an `@` above one would offer an
+// annotation every construct refuses.
 func allAnnotationNames() []string {
 	seen := make(map[string]bool)
 	var names []string
-	for _, annotations := range AnnotationsByReceiver {
-		for _, name := range annotations {
+	for _, c := range dslSpec.Constructs {
+		for _, name := range AnnotationsByReceiver[c.AnnotationReceiver] {
 			if !seen[name] {
 				seen[name] = true
 				names = append(names, name)
@@ -645,36 +651,34 @@ func allAnnotationNames() []string {
 	return names
 }
 
-// annotationTakesArgs returns true if the annotation expects arguments.
-func annotationTakesArgs(name string) bool {
-	switch name {
-	case "description", "version", "trigger", "filter", "schedule",
-		// rateLimit + relationship were MISSING from this
-		// hand-maintained switch, so completion inserted them without
-		// the opening paren (#2627's in-sync test is what caught it).
-		// schedule joined the automation surface in #2712.
-		"rateLimit", "relationship",
-		"handler", "executionTime", "executor", "args",
-		"defaultProvider", "templateFile", "type", "model", "extends",
-		"cache", "defaultFilter", "concepts", "default",
-		// The whole field-list family was missing here (memql#4951): every
-		// one takes `("a", "b")` and completion offered them bare. The
-		// in-sync test only fires for annotations declared in
-		// annotations.KeywordArgs, and these take POSITIONAL strings, so it
-		// could not see them. Added together rather than one at a time,
-		// because the next one added would inherit the same gap.
-		"mergeFields", "appendFields", "addToSet", "removeFromSet",
-		"createOnly", "noUnset", "requiresRank", "visibility", "alias",
-		// The rule surface (epic memql#5127). @when takes keyword arguments
-		// and is declared in annotations.KeywordArgs, so the in-sync test
-		// fires on it by name; the other four take a positional value, which
-		// that test cannot see -- they are added together for the reason the
-		// field-list family above was.
-		"when", "policy", "level", "precedence", "onUnavailable", "exclude":
-		return true
-	default:
-		return false
+// annotationTakesArgs reports whether completion should insert `@name(` --
+// the placement takes arguments and cannot be written bare -- read off the
+// registry's argument forms rather than a hand list (the hand switch this
+// replaced missed rateLimit, relationship and the whole field-list family
+// before it was noticed, memql#4951). On an unknown receiver (the union
+// fallback) the name takes arguments when any placement of it must.
+func annotationTakesArgs(receiver, name string) bool {
+	if p, ok := annotations.Lookup(annotations.Receiver(receiver), name); ok {
+		return p.Forms&annotations.FormFlag == 0
 	}
+	for _, p := range annotations.Placements() {
+		if p.Name == name && p.Forms&annotations.FormFlag == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// receiverOfConstruct is the registry receiver of the detected construct's
+// leading annotations, or "" when none was detected.
+func receiverOfConstruct(enc EnclosingConstruct) string {
+	if enc.Keyword == "" {
+		return ""
+	}
+	if c := dslSpec.ConstructByKeyword(enc.Keyword); c != nil {
+		return c.AnnotationReceiver
+	}
+	return ""
 }
 
 // enclosingConstructArgsFields returns the declared args-field names of
@@ -893,9 +897,9 @@ func eventMemberCompletions(prefix string) []CompletionItem {
 // annotationsForConstruct maps a detected construct to the annotations
 // legal on it (#2627), handling the three documented edges:
 //
-//   - the CONCEPT construct's receiver key is "" -- a real registry key,
-//     not "unresolved", so an empty Keyword (detection abstained) and an
-//     empty Receiver (concept) must not be conflated;
+//   - the CONCEPT construct's receiver key is "Concept" (it was "" before
+//     memql#5359, which is why an empty Keyword -- detection abstained -- is
+//     tested for rather than an empty receiver);
 //   - an unbacked construct (today exactly `use`, pinned by the dslspec
 //     drift test's knownUnbacked set) falls back to the union rather
 //     than offering nothing;

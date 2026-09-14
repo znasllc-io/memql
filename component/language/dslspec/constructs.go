@@ -1,5 +1,7 @@
 package dslspec
 
+import "github.com/znasllc-io/memql/component/language/annotations"
+
 // constructs returns the author-facing top-level construct table -- the SoT
 // for "what can a .memql declaration start with". It corrects the staleness
 // that accumulated in sense/builtins.go (which still modelled the retired
@@ -20,12 +22,47 @@ package dslspec
 // in #2151); only `use` stays RegistryBacked=false, because it is the file-top
 // import statement and carries no annotations at all.
 func constructs() []Construct {
+	out := constructTable()
+	for i := range out {
+		if r := fieldReceiverFor(out[i]); r != "" {
+			out[i].FieldAnnotations = annotations.ByReceiver[string(r)]
+		}
+	}
+	return out
+}
+
+// fieldReceiverFor names the registry receiver that checks the construct's
+// fields: the concept's fields, the field list that is a tool / prompt /
+// builtin body, or -- for every construct with an `args` block -- the args
+// field. Empty for a construct with no field list.
+func fieldReceiverFor(c Construct) annotations.Receiver {
+	switch c.Keyword {
+	case "concept":
+		return annotations.ConceptField
+	case "tool":
+		return annotations.ToolField
+	case "prompt":
+		return annotations.PromptField
+	case "builtin":
+		return annotations.BuiltinField
+	}
+	for _, b := range c.BodyBlocks {
+		if b == "args" {
+			return annotations.ArgsField
+		}
+	}
+	return ""
+}
+
+// constructTable is the hand-authored part of the construct table: the
+// keyword, category, doc and signature shape of each construct.
+func constructTable() []Construct {
 	return []Construct{
 		{
 			Keyword:            "concept",
 			Category:           CategorySchema,
 			Doc:                "Define a node schema (the base of the dependency tree). Body is a field list; cross-concept links via @relationship.",
-			AnnotationReceiver: "",
+			AnnotationReceiver: string(annotations.Concept),
 			RegistryBacked:     true,
 			ConceptInSignature: false,
 		},
