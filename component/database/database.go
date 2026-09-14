@@ -1634,8 +1634,10 @@ func pgSQLOpener(params func() map[string]any) SQLOpener {
 		}
 
 		// Wrap the connector so Connect() retries transient Postgres
-		// connection-slot exhaustion (SQLSTATE 53300) with jittered
-		// backoff instead of failing the query outright (memql#1076).
+		// failures -- connection-slot exhaustion (SQLSTATE 53300) and a
+		// dial i/o timeout -- with jittered backoff inside a ~15 s budget,
+		// instead of failing the query outright (memql#1076; D7 of the
+		// 2026-09-14 readiness-convergence record).
 		db := sql.OpenDB(newRetryingConnector(connector, slog.Default()))
 
 		// Configure connection pool limits to prevent exhaustion.
