@@ -9,6 +9,15 @@ it in the epic's merge (plan Task 16 step 3). Update it each time you stop.
 - **Worktree:** `/home/znas/memql-projects/epic-dsl-v1-bodies`, branch
   `epic/dsl-v1-bodies`. It is local only and has never been pushed; other
   sessions on this machine share its refs.
+- **The flip (plan Task 13) is being built on a throwaway branch,**
+  `tmp/dsl-v1-bodies-flip2` (local, shared refs), in the worktree
+  `/tmp/claude-1000/-home-znas-memql-projects-memql/c91c208e-2a3e-4341-a81b-e3333bcfd158/scratchpad/wt-flip`.
+  The branch is the record; the worktree is a scratch directory and may be
+  gone. If it is: `git -C /home/znas/memql-projects/epic-dsl-v1-bodies worktree prune`,
+  then `git -C /home/znas/memql-projects/epic-dsl-v1-bodies worktree add <dir> tmp/dsl-v1-bodies-flip2`.
+  Its steps and their state are under "The flip" below. When it is done, land
+  it on `epic/dsl-v1-bodies` (a fast-forward if this branch has not moved, a
+  merge if only this checkpoint has) and delete the branch.
 - **Base:** epic 2's flip is MERGED in: `b7a1afa30` merges memql-10's
   `epic/dsl-v1-expressions` at `c6c52144c` (the flip `f507402bb` plus its plan's
   deletion). The branches are local and not on origin. Take later epic-2 work
@@ -69,6 +78,84 @@ Negative controls were run on each new check and restored.
 - `bodymigrate` `TestLegacyOrderMatchesTheCompiler`, on the fleet bundle only:
   epic 2's compiler refuses those automations (step 1 below).
 
+## The flip (plan Task 13), step by step
+
+The plan's Task 13 is one commit; it is built here as seven, F1-F7, on
+`tmp/dsl-v1-bodies-flip2`. `9da8ce6c3` merges epic 2's fleet fix
+(`epic/dsl-v1-expressions` at `7a6b89767`: a switch step's id is its author's
+name, duplicate ids refused, position-based sort) onto `2caaa3953`.
+
+- **F1, `d9238ddce`: the tree is written in statements.** The rewrite over
+  `dsl/`, `examples/`, `deploy/fleet/dsl`, `mutation` headers put back to
+  `mutate` until F6; the seven publishing logic moved and deleted with
+  `dsl/data/logic.memql`, `dsl/safety/logic.memql`; the two deletion reminders
+  decide through the new pure `usersDueDeletionReminder(from, to)` (callgraph
+  P4 forbids date math in an automation condition); the legacy-order tests
+  deleted; the tests of the retired shapes ported; both corpora on one arm
+  (goldens: the seven moved logic's deleted, the new logic's written, seven
+  automation goldens gain the `output` the moved-logic rule left out and
+  nothing else changes).
+- **F2, uncommitted in the worktree when this was written: the corpus.**
+  `test/conformance/2026` through the rewrite (62 files, `mutation` headers
+  put back), three refused cells by hand (`keyless-map-entry` returns its map,
+  a logic may not publish; the two object-literal cells keep their refused
+  argument). Five verdicts moved, each answered:
+  - `cells/logic/actor/reads-the-actor-undeclared` and
+    `cells/logic/eventField/reads-an-undeclared-field` LOADED: a real gap.
+    The loader's text validators find a body with `extractFunctionBody`, which
+    knew only the rewriter's `func (Receiver)` header; a statement-body logic
+    is left as written, so the `@actor` (#2621), undeclared-`args.x`
+    (memql#3626), event-binding (memql#1706) and `@eventField` (memql#1743)
+    checks all read "no body" and skipped. Fixed: `extractStatementLogicBody`
+    (the statements after the args block), pinned by
+    `component/memql/logic_statement_validators_test.go` with a negative
+    control. The event-binding check reads only `args.event` in a statement
+    body, leaving a bare `event` to CheckBody's `body_unknown_name`.
+  - `expr/automationCondition/event-payload-read`: the rewrite migrated its
+    defect away; written by hand with the dotted read, which G5 refuses.
+  - `expr/automationCondition/no-condition`: `if {` read `{` as a map literal.
+    New parser refusal `body_missing_expression` for an if/else-if condition,
+    a for source or filter and a switch subject.
+  - `cells/automation/schedule/*` stay in their legacy text: D15 retires
+    `@schedule` on an automation in every form, so in F4 the registry's
+    `schedule` placement on Automation goes and the family with it (the
+    completeness gate says so), `an-invalid-cron` moving to the trigger cell.
+  - Also in F2: `embed_inventory_test.go`'s `dsl` count 424 -> 422 (F1's two
+    deleted files).
+- **F3: Go fixtures.** `memqlmigrate --rewrite=bodies --go-fixtures` finds 315
+  literals to change in 112 files, 82 refused and 65 fragments (measured
+  after F2). Run it with the keyword rename left out, since that is F6: build
+  a scratch binary with `go build -overlay` replacing
+  `component/language/bodymigrate/inline.go` by a copy whose
+  `rewriteDeclarationsAndTriggers` skips the `mutate` loop (validated: on the
+  corpus it reproduces the rewrite minus the renames exactly). Read every
+  changed literal: fixtures that exist to be refused (the parser's
+  `v1_body_refusals_test.go` cases, negative grammar) take a
+  `memqlmigrate:keep` marker, and tests of the rewriter's logic/automation/
+  terse stages, the legacy compiler and the legacy runtime are not migrated
+  but deleted with their code in F4/F5.
+- **F4:** the parser refuses the retired forms (delete the transitional
+  dispatch and the rewriter's logic/automation/terse stages; empty
+  `statementRetiredAtTheFlip` and add the three retired cells; the `schedule`
+  placement above; dslgate `TestStatementBodiesPassOverARetiredForm`).
+- **F5:** the legacy compiler and runtime halves the plan lists.
+- **F6:** `mutation` as the declaration keyword, `mutate_keyword_retired`,
+  every `mutate` site and doc, `retiredDeclarationKeywords` inverted, the
+  bodymigrate exemptions; rerun the standard rewrite (only renames remain).
+- **F7:** `GrammarVersion`, grammar-surface corpus, `make vscode-grammar`, the
+  extension pins and CHANGELOG (D25).
+
+Verified at `2caaa3953` on the database: every db-gated tree, 51 packages
+green; `component/node` `TestSelfStatusWriterProtectsSteadyHealthyNodeFromThirtyMinutePrune`
+failed once on a database read timeout and passes alone.
+
+**To raise with the owner, not this epic's to fix:** automations were never
+held to the `@actor` binding rule or memql#3626's undeclared-`args.x` rule at
+load, in either body form (probed with the boot walk over legacy and
+statement bodies; the corpus pins `@actor` for query, mutation and logic
+only). `validateArgsReferencesAreDeclared`'s comment says the rule covers
+automations.
+
 ## Peers
 
 - **memql-b1** owns epic 1 (`epic/dsl-v1-foundations`, complete at `a919fa86f`)
@@ -103,7 +190,8 @@ Negative controls were run on each new check and restored.
    sort index-based. Until it lands, `TestLegacyOrderMatchesTheCompiler`
    (bodymigrate) fails on the fleet automations and nothing else. Merge it
    as the flip was merged, then rerun the parity test.
-2. **Task 13, the flip.** Unblocked, since epic 2's grammar is the only one.
+2. **Task 13, the flip.** In progress: see "The flip" above, whose steps
+   supersede this item's list. Unblocked, since epic 2's grammar is the only one.
    Steps 1-9 are in the plan, with its "As built, before the flip" bullets.
    `memqlmigrate --rewrite=bodies` alone now carries the tree (it is v1
    already), and it leaves 7 comments, the inlined publishing logic, and no
