@@ -2,7 +2,6 @@ package memql
 
 import (
 	"context"
-	"sort"
 	"strings"
 	"testing"
 
@@ -22,27 +21,19 @@ import (
 //  3. EvalExpr over the same row (NewExprRow) -- the evaluator a refine clause,
 //     an automation condition and every other in-process position run.
 //
-// The first two must agree on EVERY row: the executor intersects them, so a
-// disagreement drops rows silently. EvalExpr must agree on every row whose
-// field holds a value of the type the body reads -- which is every row of a
-// concept whose schema declared the field, since the write path validates
-// against it. The rows on which it still departs from the SQL are named below
-// (irEvalDivergentRows) so the allowance cannot grow silently: each must be
-// exercised, and no other row may diverge.
+// All three must agree on EVERY row, the mistyped and malformed fixture rows
+// included, and no row is allowed to depart. The first two are intersected by
+// the executor, so a disagreement between them drops rows silently; the third
+// is the same expression in an in-process position, so a disagreement there
+// is one predicate selecting different rows depending on where it is written.
 //
-// A stored value that is present and not a list, where the body expects one --
-// the right side of `in`, the receiver of any(), all() or count() -- used to
-// be refused (in_requires_list, operand_type) or read as a one-element list
-// when an object; it now answers as the pushdown does: not a member, and no
-// element passes (expr_stored.go, memql#5369). count() counts what is stored
-// on both sides: an array's elements, a string's characters, zero for
-// anything else. One departure remains, a question of the language rather
-// than a bug in one side:
-//
-//   - A BOOLEAN POSITION holding a string ("true", "maybe"): D8 refuses a
-//     non-boolean condition at run time (condition_not_boolean), and a refine
-//     clause fails the read naming the row (refine_test.go); the SQL cannot
-//     refuse one row, so it reads "not true".
+// A stored value of the wrong type for an operation is where the evaluators
+// once parted (memql#5369): EvalExpr refused it (in_requires_list,
+// operand_type, condition_not_boolean) or read an object as a one-element
+// list, while the SQL, which can only answer about a row, answered. Now every
+// evaluator reads it as data (expr_stored.go): not equal, not ordered, not a
+// member, not true, and counted by what it holds -- an array's elements, a
+// string's characters, zero for anything else.
 //
 // Every body runs bare and negated, the negation lowered from source.
 
@@ -75,17 +66,12 @@ func irV1Bodies() []string {
 		// Compositions and ternaries.
 		`row.irS == "a" || row.irN > 0`, `row.irS != "" && !(row.irS < "b")`,
 		`row.irB ? row.irN > 0 : row.irS == "a"`, `row.irS == "a" ? true : row.irN == 1`,
+		// A bare field as an operand and as a ternary branch: a condition in
+		// both evaluators, so a stored non-boolean there is not true.
+		`row.irB || row.irS == "a"`, `row.irS == nil ? row.irB : false`,
 		// Two fields of one row.
 		`row.irA == row.irZ`, `row.irA != row.irZ`, `row.irA < row.irZ`, `row.irA >= row.irZ`,
 	}
-}
-
-// irEvalDivergentRows are the mistyped fixture rows on which EvalExpr departs
-// from the SQL (see the file header), and how: "refuses" -- it errors where
-// the SQL answers -- and/or "answers" -- it returns the other boolean.
-var irEvalDivergentRows = map[string][]string{
-	"irB a string true": {"refuses"}, // row.irB as a condition: D8's run-time refusal
-	"irB malformed":     {"refuses"}, // the same, over "maybe"
 }
 
 func TestV1LoweredBodiesAgreeAcrossBothEvaluators(t *testing.T) {
@@ -97,7 +83,6 @@ func TestV1LoweredBodiesAgreeAcrossBothEvaluators(t *testing.T) {
 	bodies := irV1Bodies()
 	require.GreaterOrEqual(t, len(bodies), 50, "the v1 matrix shrank to %d bodies", len(bodies))
 
-	diverged := map[string]map[string]bool{}
 	checked := 0
 	for _, body := range bodies {
 		for _, src := range []string{"row => " + body, "row => !(" + body + ")"} {
@@ -138,21 +123,6 @@ func TestV1LoweredBodiesAgreeAcrossBothEvaluators(t *testing.T) {
 				if evalErr == nil && verdict == inSQL[row.ID] {
 					continue
 				}
-				how := "answers"
-				if evalErr != nil {
-					how = "refuses"
-				}
-				allowed := false
-				for _, a := range irEvalDivergentRows[name] {
-					allowed = allowed || a == how
-				}
-				if allowed {
-					if diverged[name] == nil {
-						diverged[name] = map[string]bool{}
-					}
-					diverged[name][how] = true
-					continue
-				}
 				if evalErr != nil {
 					t.Errorf("%s: EvalExpr refuses row %q (%v) where the SQL answers %v", src, name, evalErr, inSQL[row.ID])
 				} else {
@@ -166,16 +136,5 @@ func TestV1LoweredBodiesAgreeAcrossBothEvaluators(t *testing.T) {
 		return
 	}
 	require.Equal(t, 2*len(bodies), checked)
-	var unexercised []string
-	for name, kinds := range irEvalDivergentRows {
-		for _, how := range kinds {
-			if !diverged[name][how] {
-				unexercised = append(unexercised, name+" ("+how+")")
-			}
-		}
-	}
-	sort.Strings(unexercised)
-	require.Empty(t, unexercised, "every allowed divergence must actually occur, or the allowance is stale")
-	t.Logf("three-way agreement held for %d lowered forms over %d fixture rows; EvalExpr departed only on the %d named mistyped rows",
-		checked, len(rows), len(diverged))
+	t.Logf("three-way agreement held for %d lowered forms over %d fixture rows, with no row allowed to depart", checked, len(rows))
 }

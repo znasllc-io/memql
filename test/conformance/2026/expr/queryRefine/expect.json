@@ -897,6 +897,51 @@
       "expect": false
     },
     {
+      "file": "not-urgent.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": "true"
+      },
+      "expect": true,
+      "note": "A stored value that is not a boolean is not true, so its negation is -- as the pushdown reads it."
+    },
+    {
+      "file": "not-urgent.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": "maybe"
+      },
+      "expect": true
+    },
+    {
+      "file": "urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": true
+      },
+      "expect": true
+    },
+    {
+      "file": "urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": "true"
+      },
+      "expect": false,
+      "note": "A stored value that is not a boolean is not true: the refine drops the row rather than failing the read."
+    },
+    {
+      "file": "urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false
+    },
+    {
       "file": "value-or-default.memql",
       "verdict": "evaluate",
       "concept": "ticket",
