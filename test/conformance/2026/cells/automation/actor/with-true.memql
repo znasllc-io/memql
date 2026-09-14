@@ -1,0 +1,8 @@
+/// When a node joins the cluster, open a ticket owned by the user the automation runs as.
+@trigger(event="node.created", concept="v1:cluster:node", partition="*")
+@actor(true)
+automation welcomeNodeActor {
+  step raise {
+    mutation raiseTicketActor (title: "A node joined the cluster", ownerUserId: actor.userId)
+  }
+}

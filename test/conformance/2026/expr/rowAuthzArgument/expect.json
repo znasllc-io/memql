@@ -25,6 +25,15 @@
       "verdict": "refuse_parse",
       "message": "expected ')'",
       "note": "arithmetic"
+    },
+    {
+      "file": "owner-field-on-a-ticket.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "owner-the-concept-does-not-declare.memql",
+      "verdict": "refuse_load",
+      "message": "references a field the concept does not declare (declared: ownerUserId, title)"
     }
   ]
 }

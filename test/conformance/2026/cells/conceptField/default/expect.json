@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-an-unquoted-value.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_form",
+      "message": "@default on a concept field takes one string, one number or true or false"
+    }
+  ]
+}

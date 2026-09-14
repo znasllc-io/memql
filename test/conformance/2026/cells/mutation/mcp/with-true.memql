@@ -1,0 +1,12 @@
+/// Retitle one ticket, exposed as its own MCP tool.
+@mcp(true)
+mutate ticket retitleTicketMcp {
+  args {
+    ticketId  string!
+    title     string!
+  }
+  update {
+    id: args.ticketId
+    title: args.title
+  }
+}

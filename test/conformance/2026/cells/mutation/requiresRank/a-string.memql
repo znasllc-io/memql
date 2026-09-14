@@ -1,0 +1,12 @@
+/// Retitle one ticket, for admins and anyone ranked above them.
+@requiresRank("admin")
+mutate ticket retitleTicketRequiresRank {
+  args {
+    ticketId  string!
+    title     string!
+  }
+  update {
+    id: args.ticketId
+    title: args.title
+  }
+}

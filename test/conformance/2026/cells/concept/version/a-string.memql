@@ -1,0 +1,7 @@
+/// A support ticket raised by a customer.
+@version("1.0.0")
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}

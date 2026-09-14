@@ -136,6 +136,27 @@
         "c": true
       },
       "expect": true
+    },
+    {
+      "file": "an-args-reference.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "a-retired-function.memql",
+      "verdict": "refuse_parse",
+      "message": "year() is retired under the 2026.08 grammar epoch",
+      "note": "A retired function is refused where the parser reads a step argument."
+    },
+    {
+      "file": "a-comparison.memql",
+      "verdict": "load_ok",
+      "note": "A step argument is an expression, so a comparison is a boolean value there. Before edition 2026 the parser stopped at the operator."
+    },
+    {
+      "file": "a-reserved-name.memql",
+      "verdict": "refuse_parse",
+      "message": "\"now\" is a reserved engine name (now / actor / partition / config / trace) and cannot be an argument name",
+      "note": "Refuses the argument's NAME rather than its value: kept because a call site is where the reserved names are refused (memql#3626)."
     }
   ]
 }

@@ -1,0 +1,9 @@
+use capabilities.fs.{ readFile }
+
+@description
+action readTicketAttachmentDescription {
+  args {
+    path  string!
+  }
+  capability readFile(path: args.path)
+}

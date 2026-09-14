@@ -1,0 +1,12 @@
+/// A work-spine template that raises the yearly review ticket, titled with the year it is due.
+@template
+automation raiseYearlyReviewTicket {
+  args {
+    /// When the review is due.
+    dueAt  datetime!
+  }
+
+  step raise {
+    mutation raiseTicketFromStep (title: year(args.dueAt))
+  }
+}

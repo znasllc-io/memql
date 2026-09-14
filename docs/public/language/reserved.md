@@ -302,8 +302,16 @@ is rejected at parse time. The canonical post-migration shape:
   `query <Concept> <name> { ... }`, `mutate <Concept> <name> { ... }`,
   `shape <Concept> <name> { ... }`, `seed <Concept> <name> { ... }`.
 
-The legacy `@input` wrapper and `@template` body annotation are also
-retired -- the parser rejects them with a migration hint.
+Inside a prompt's body, two legacy forms are refused with a migration hint:
+the `@input { ... }` wrapper (declare the fields directly in the body) and an
+inline `@template(...)` (use `@templateFile("...")` with a `.tmpl` file beside
+the prompt). They are forms of the prompt body, not annotations, so the
+attribute matrix does not list them. `@template` written before an
+automation is a live annotation: it marks a work-spine template.
+
+The [attribute matrix](attribute-matrix.md), generated from the registry,
+lists every annotation, the constructs and fields that accept it, the form it
+is written in, and every retired annotation with what to write instead.
 
 ---
 
@@ -317,8 +325,8 @@ several Go files. When the list below changes, update this doc:
 | Top-level engine names | `component/memql/keyword_slices.go` |
 | Row intrinsics | `component/memql/intrinsic_fields.go` |
 | Caller envelope | `component/memql/sense/builtins.go` + `runtime_evaluator.go` |
-| Construct keywords | per-construct parser allow-lists in `component/memql/` |
-| Annotations | the registry in `component/language/annotations` |
+| Construct keywords | `parser.TopLevelDeclKeywords` and `parser.StructFormKeywords` in `component/language/parser`, projected by `component/language/dslspec` |
+| Annotations | the registry in `component/language/annotations`; the [attribute matrix](attribute-matrix.md) is generated from it (`make docs-matrix`) |
 | Imported names (`use`) | `component/memql/dslimports/dslimports.go` |
 
 ---

@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "file": "keyword-arguments.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@args on a builtin takes keyword arguments"
+    }
+  ]
+}

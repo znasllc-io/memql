@@ -1,0 +1,7 @@
+/// The open tickets, newest first, exposed as their own MCP tool.
+@mcp(true)
+query ticket openTicketsMcp {
+  filter row => row.status == "open"
+  sort "row.createdAt", "desc"
+  paginate 20
+}

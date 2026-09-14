@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "file": "a-number.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-quoted-number.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@maxLength on an args field takes one number"
+    }
+  ]
+}

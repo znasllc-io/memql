@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "file": "an-expression.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-empty-parentheses.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@filter on an automation takes one string or an expression"
+    }
+  ]
+}

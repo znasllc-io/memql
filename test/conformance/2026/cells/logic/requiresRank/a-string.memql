@@ -1,0 +1,10 @@
+/// The headline a ticket shows, for admins and anyone ranked above them.
+@requiresRank("admin")
+logic ticketHeadlineRequiresRank {
+  args {
+    title  string
+  }
+  body {
+    return args.title ?? "(untitled)"
+  }
+}

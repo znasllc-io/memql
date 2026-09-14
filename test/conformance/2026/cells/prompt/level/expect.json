@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-an-unquoted-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@level on a prompt takes one string"
+    },
+    {
+      "file": "an-unknown-level.memql",
+      "verdict": "refuse_parse",
+      "message": "unknown level \"medium\": a level is one of fast, strong, reasoning, embeddings"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+/// A support queue, its row kind written without quotes.
+@type(collection)
+concept queue {
+  name       string
+  ticketIds  []string
+
+  @relationship(type="contains", field="ticketIds", target=ticket, direction="outgoing")
+}

@@ -1,0 +1,5 @@
+/// List the open tickets, as many as the caller asks for -- twenty unless it says.
+@handler(type="query", query="paginate(query openTicketsForTool(), args.limit)")
+tool listOpenTicketsWithLimit {
+  limit  integer  @default("20")  @description("The most tickets to return.")
+}

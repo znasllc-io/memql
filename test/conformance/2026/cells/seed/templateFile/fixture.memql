@@ -1,0 +1,19 @@
+/// The row this cell's seed writes.
+concept supportAssistant {
+  name          string
+  systemPrompt  string
+}
+
+/// The mutation the seed materializer writes this concept's rows through: create<Concept>.
+mutate supportAssistant createSupportAssistant {
+  args {
+    supportAssistantId  string!
+    name                string!
+    systemPrompt        string
+  }
+  insert {
+    id: args.supportAssistantId
+    name: args.name
+    systemPrompt: args.systemPrompt
+  }
+}

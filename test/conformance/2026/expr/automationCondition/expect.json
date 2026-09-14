@@ -210,6 +210,21 @@
         "flag": true
       },
       "expect": true
+    },
+    {
+      "file": "step-result-comparison.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "a-retired-function.memql",
+      "verdict": "refuse_parse",
+      "message": "year() is retired under the 2026.08 grammar epoch",
+      "note": "A retired expression function is refused wherever the parser reads a condition."
+    },
+    {
+      "file": "no-condition.memql",
+      "verdict": "refuse_parse",
+      "message": "conditional step: missing condition between `if` and `{`"
     }
   ]
 }

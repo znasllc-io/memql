@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "file": "written-bare.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-true.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@enabled on an action takes no arguments"
+    },
+    {
+      "file": "written-twice.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_repeated",
+      "message": "@enabled is written more than once on an action -- it is not repeatable"
+    }
+  ]
+}

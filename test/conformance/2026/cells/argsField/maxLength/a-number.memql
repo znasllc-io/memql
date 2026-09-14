@@ -1,0 +1,9 @@
+/// The tickets that match, newest first.
+query ticket matchingTicketsMaxLength {
+  args {
+    title  string  @maxLength(120)
+  }
+  filter row => row.title == args.title
+  sort "row.createdAt", "desc"
+  paginate 20
+}

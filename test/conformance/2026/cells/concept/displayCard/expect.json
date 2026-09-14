@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "keyword-arguments.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_form",
+      "message": "@displayCard on a concept takes keyword arguments"
+    },
+    {
+      "file": "a-field-the-concept-does-not-declare.memql",
+      "verdict": "refuse_load",
+      "message": "primary=\"headline\" references unknown field"
+    }
+  ]
+}

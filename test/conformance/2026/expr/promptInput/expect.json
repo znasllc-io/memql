@@ -102,6 +102,17 @@
       "verdict": "evaluate",
       "concept": "ticket",
       "expect": null
+    },
+    {
+      "file": "declared-inputs.memql",
+      "verdict": "load_ok",
+      "note": "The template's load gate -- every variable a prompt's template reads is declared (E6 of the record, kept by D7) -- is where a prompt's input meets its values at load; the position's expressions are the evaluate cases here."
+    },
+    {
+      "file": "an-undeclared-input.memql",
+      "verdict": "refuse_load",
+      "message": "template reads 1 undeclared input(s): priority",
+      "note": "The input schema refuses a key it does not declare before the template renders, so a hole the prompt does not declare could never be filled."
     }
   ]
 }

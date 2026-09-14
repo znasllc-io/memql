@@ -1,0 +1,10 @@
+/// The status the ticket in the triggering event moved to.
+@eventField(id, status)
+logic ticketEventStatusEventField {
+  args {
+    event  object!
+  }
+  body {
+    return args.event.payload.status
+  }
+}

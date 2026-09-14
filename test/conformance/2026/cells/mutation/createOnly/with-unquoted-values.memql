@@ -1,0 +1,14 @@
+/// Open a ticket. Staging the same id again keeps the status and attempt count another writer moved on.
+@createOnly(status, attempts)
+mutate ticket openTicketCreateOnly {
+  args {
+    ticketId  string!
+    title     string!
+  }
+  insert {
+    id: args.ticketId
+    title: args.title
+    status: "open"
+    attempts: 0
+  }
+}

@@ -1,0 +1,10 @@
+use capabilities.fs.{ readFile }
+
+/// Read a ticket's attachment -- passing the path under a name the capability does not take, so
+/// the one argument fs.readFile requires is missing.
+action readTicketAttachmentMisnamed {
+  args {
+    path  string!
+  }
+  capability readFile(file: args.path)
+}

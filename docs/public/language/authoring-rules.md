@@ -2858,7 +2858,10 @@ naming complaint would be the larger defect.
 sending blank, that is `@noUnset("field")` on the mutation (memql#3415)
 — the targeted opt-out. It drops a named field from the delta when the
 incoming value is empty and the stored one is not, which is exactly the
-"do not let a blank overwrite this" rule that `??` does not express.
+"do not let a blank overwrite this" rule that `??` does not express. Empty
+means nil, a blank or whitespace-only string, or an empty array or object;
+a numeric or boolean zero is a value, so `0` and `false` still write (see
+[`@noUnset`](attribute-matrix.md#nounset)).
 
 **One rule, one implementation.** Every evaluator of `??` resolves
 through `coalesceSelect` in `component/memql/mutation_templates.go`,

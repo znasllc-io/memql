@@ -1,0 +1,10 @@
+use capabilities.fs.{ readFile }
+
+/// Read a ticket's attachment from the runner's workspace. @enabled restates the default.
+@enabled
+action readTicketAttachmentEnabled {
+  args {
+    path  string!
+  }
+  capability readFile(path: args.path)
+}
