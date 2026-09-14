@@ -148,6 +148,50 @@ func TestRun_BundleWithoutLanguageLineExitsOne(t *testing.T) {
 	}
 }
 
+// TestRun_RefusedLineOutsideTheParityMountIsStillReported: boot mounts every
+// domain directory, but the parity pass mounts only one that directly holds a
+// .memql file (MountOverlayDomains) -- so a domain holding only a
+// sub-namespace refuses boot without its line and is Load's alone to report.
+// memqllint drops Load's copy of a refusal only when the parity pass carries
+// the same one, never merely because the parity pass ran: here it reports
+// demo's (mounted, refused by both passes, printed once) and beta's (Load's
+// alone), and a dedupe that dropped every Load refusal would lose beta's.
+func TestRun_RefusedLineOutsideTheParityMountIsStillReported(t *testing.T) {
+	files := map[string]string{
+		"demo/concepts.memql":     testConcepts,
+		"beta/sub/concepts.memql": "/// A widget.\nconcept widget {\n  label  string\n}\n",
+	}
+	code, out := captureRun(t, []string{"--json", writeTreeAsIs(t, files)})
+	if code != 1 {
+		t.Fatalf("two domains with no memql.toml: run() = %d, want 1\n%s", code, out)
+	}
+	var report Report
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("the --json report does not parse: %v\n%s", err, out)
+	}
+	if len(report.Errors) != 2 {
+		t.Fatalf("want exactly two diagnostics, the missing line of demo and of beta, got:\n%s", out)
+	}
+	for _, domain := range []string{"demo", "beta"} {
+		n := 0
+		for _, e := range report.Errors {
+			if strings.Contains(e.Message, "[language_line_missing]") && strings.Contains(e.Message, `domain "`+domain+`" declares no language line`) {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("want the missing line of domain %s exactly once, got %d:\n%s", domain, n, out)
+		}
+	}
+
+	// Positive control: declaring both lines leaves nothing to report.
+	line := dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render()
+	files["demo/memql.toml"], files["beta/memql.toml"] = line, line
+	if code, out := captureRun(t, []string{writeTreeAsIs(t, files)}); code != 0 {
+		t.Errorf("the same domains declaring their lines: run() = %d, want 0\n%s", code, out)
+	}
+}
+
 // TestRun_UnreadRootManifestIsReported: a memql.toml at the root of the
 // linted tree is never read -- each domain carries its own -- so memqllint
 // prints it rather than letting an author believe it governs the bundle.

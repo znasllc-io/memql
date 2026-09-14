@@ -96,14 +96,23 @@ func Load(root fs.FS) (*Tree, error) {
 	// declares (memql#5358), exactly as the engine reads it at boot, so a
 	// tree written in another edition lints as it loads.
 	//
-	// A domain whose language line the engine refuses is read by no loader
-	// at boot, so it is not parsed here either: its files enter the tree
-	// OPAQUE -- present, importing nothing, defining nothing, marked
-	// ImportsOnly -- with no diagnostic of their own. The refusal is the
-	// engine-parity pass's to report, once (memqllint runs both), and an
-	// importer in another domain still resolves the module rather than
-	// cascading a "does not exist" off a file that is merely unread.
-	lines, _ := languageParser.ResolveLanguageLines(root, memqldsl.EmbeddedTree{})
+	// A domain whose language line the engine refuses refuses boot, so Load
+	// reports it: one LanguageLineError per problem the resolver found,
+	// carrying the resolver's message and code. A caller that runs Load alone
+	// -- memql-cockpit's `memql lint` -- would otherwise be told a tree that
+	// refuses boot is clean. (memqllint also runs the engine-parity pass,
+	// which reports the same refusal, and prints it once.)
+	//
+	// The refused domain is read by no loader at boot, so it is not parsed
+	// here either: its files enter the tree OPAQUE -- present, importing
+	// nothing, defining nothing, marked ImportsOnly -- with no diagnostic of
+	// their own. An importer in another domain still resolves the module
+	// rather than cascading a "does not exist" off a file that is merely
+	// unread.
+	lines, lineProblems := languageParser.ResolveLanguageLines(root, memqldsl.EmbeddedTree{})
+	for _, p := range lineProblems {
+		diagnostics = append(diagnostics, &LanguageLineError{Problem: p})
+	}
 
 	for _, p := range paths {
 		if line, ok := lines.For(p); ok && line.Refused {
@@ -239,6 +248,18 @@ func Load(root fs.FS) (*Tree, error) {
 	}
 	return tree, nil
 }
+
+// LanguageLineError is one refusal of a domain's language line
+// (memql#5357): the domain declares none, a malformed one, one newer or
+// older than this engine speaks, or an edition it has no front end for. Its
+// text is the resolver's message, which names the file to fix and ends with
+// the stable code ("[language_line_missing]"); Problem carries the domain,
+// the file and the code for a caller that wants them without reading text.
+type LanguageLineError struct {
+	Problem languageParser.LanguageLineProblem
+}
+
+func (e *LanguageLineError) Error() string { return e.Problem.Message }
 
 // LoadError aggregates every per-file diagnostic from a single Load
 // pass. The validator CLI prints these to the user; the engine

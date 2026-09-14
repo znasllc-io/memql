@@ -55,6 +55,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -155,6 +156,7 @@ func run(args []string) int {
 
 	root := os.DirFS(rootDir)
 	tree, loadErr := dslimports.Load(root)
+	loadDiags := flattenDiagnostics(loadErr)
 
 	// Referential-integrity passes (#2509): Form B use-decl module +
 	// symbol resolution, signature-concept existence, insert/update
@@ -198,9 +200,11 @@ func run(args []string) int {
 				integrityErrs = append(integrityErrs, fmt.Errorf("%s", d.Message))
 			}
 		}
+		// A refusal both passes make prints once, from the parity pass.
+		loadDiags = withoutParityEchoes(loadDiags, parityDiags)
 	}
 
-	report := buildReport(tree, loadErr, integrityErrs, target)
+	report := buildReport(tree, loadErr, append(loadDiags, integrityErrs...), target)
 	report.Root = rootDir
 	report.ParitySkippedDomains = paritySkipped
 
@@ -233,7 +237,11 @@ type Diagnostic struct {
 	Message string `json:"message"`
 }
 
-func buildReport(tree *dslimports.Tree, loadErr error, integrityErrs []error, target string) *Report {
+// buildReport renders the run: diags is every diagnostic to print -- Load's,
+// flattened and without the parity pass's echoes, then the integrity lanes'
+// and the parity pass's -- and loadErr only decides whether the load order
+// is shown.
+func buildReport(tree *dslimports.Tree, loadErr error, diags []error, target string) *Report {
 	r := &Report{}
 	if tree != nil {
 		r.Files = len(tree.Files)
@@ -244,8 +252,6 @@ func buildReport(tree *dslimports.Tree, loadErr error, integrityErrs []error, ta
 			r.Order = tree.Order
 		}
 	}
-	diags := flattenDiagnostics(loadErr)
-	diags = append(diags, integrityErrs...)
 	if len(diags) > 0 {
 		for _, d := range diags {
 			if target != "" && !errorMentionsFile(d, target) {
@@ -282,6 +288,52 @@ func flattenDiagnostics(err error) []error {
 		return out
 	}
 	return []error{err}
+}
+
+// withoutParityEchoes drops each Load diagnostic the engine-parity pass
+// reports too, so an author reads one refusal once (memql#5356).
+//
+// Both passes refuse a domain whose language line the engine will not read:
+// Load because a caller that runs it alone -- memql-cockpit's `memql lint` --
+// must see what boot refuses, the parity pass because it IS boot. The parity
+// pass's copy is kept: it is the engine's own answer, worded as boot words
+// it. A Load diagnostic is an echo only when a parity diagnostic about the
+// SAME file carries the same refusal, never merely because the parity pass
+// ran: that pass mounts only the domains MountOverlayDomains takes, so a
+// refusal in a domain it left out is Load's alone to report.
+func withoutParityEchoes(load []error, parity []memql.LintDiagnostic) []error {
+	if len(parity) == 0 {
+		return load
+	}
+	out := make([]error, 0, len(load))
+	for _, d := range load {
+		if file, text, ok := refusalOf(d); ok && parityCarries(parity, file, text) {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
+// refusalOf returns the file and the text of a Load diagnostic that the
+// parity pass also makes: a domain's language line the engine will not read.
+// ok is false for every other diagnostic.
+func refusalOf(d error) (file, text string, ok bool) {
+	var line *dslimports.LanguageLineError
+	if errors.As(d, &line) {
+		return line.Problem.Source, line.Problem.Message, true
+	}
+	return "", "", false
+}
+
+// parityCarries reports whether a parity diagnostic about file carries text.
+func parityCarries(parity []memql.LintDiagnostic, file, text string) bool {
+	for _, p := range parity {
+		if p.File == file && strings.Contains(p.Message, text) {
+			return true
+		}
+	}
+	return false
 }
 
 // errorMentionsFile returns true if the diagnostic's text mentions

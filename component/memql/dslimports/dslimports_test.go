@@ -7,6 +7,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/dslfs"
 )
 
@@ -288,6 +289,49 @@ func TestLoad_MalformedNonProceduralBodySurfaces(t *testing.T) {
 				t.Errorf("Load(%s) diagnostic did not mention the offending file: %v", filename, err)
 			}
 		})
+	}
+}
+
+// TestLoad_ReportsARefusedLanguageLine: a mounted domain with no memql.toml
+// refuses boot (memql#5357), so Load reports it -- memql-cockpit's `memql
+// lint` runs Load alone, and a nil error there would call a tree that refuses
+// boot clean. The refusal is the domain's ONE diagnostic: its files stay
+// opaque, so the query bound to its concept cascades nothing.
+func TestLoad_ReportsARefusedLanguageLine(t *testing.T) {
+	root := fstest.MapFS{
+		"shop/concepts.memql": {Data: []byte("@description(\"an order\")\nconcept order {\n  total int\n}\n")},
+		"shop/queries.memql": {Data: []byte("use shop.concepts.{ order }\n\n@description(\"orders\")\n" +
+			"query order ordersOver {\n  args {\n    min int @required\n  }\n  filter total > args.min\n  paginate\n}\n")},
+	}
+	tree, err := Load(root)
+	if err == nil {
+		t.Fatal("Load returned no error for a domain with no language line, which refuses boot")
+	}
+	for _, want := range []string{"[language_line_missing]", `domain "shop"`, "add shop/memql.toml containing"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error must carry %q, got:\n%v", want, err)
+		}
+	}
+	var le *LoadError
+	if !errors.As(err, &le) || len(le.Diagnostics) != 1 {
+		t.Fatalf("want exactly one diagnostic, the refused line, got: %v", err)
+	}
+	var lle *LanguageLineError
+	if !errors.As(err, &lle) || lle.Problem.Domain != "shop" || lle.Problem.Source != "shop/memql.toml" ||
+		lle.Problem.Code != languageParser.CodeLanguageLineMissing || lle.Error() != lle.Problem.Message {
+		t.Errorf("the diagnostic must be a *LanguageLineError carrying the resolver's problem, got %#v", lle)
+	}
+	for _, p := range []string{"shop/concepts.memql", "shop/queries.memql"} {
+		if !tree.ImportsOnly[p] || len(tree.Files[p].Definitions) != 0 {
+			t.Errorf("%s of the refused domain must be in the tree opaque (read by no loader), got %+v", p, tree.Files[p])
+		}
+	}
+
+	// Positive control: the same tree declaring shop's line loads clean, so
+	// the query is one that parses and its silence above is the refused
+	// domain being unread.
+	if _, err := Load(withLanguageLines(root)); err != nil {
+		t.Errorf("the tree declaring every line must load clean: %v", err)
 	}
 }
 
