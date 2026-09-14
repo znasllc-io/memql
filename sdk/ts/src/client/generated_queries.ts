@@ -51,7 +51,7 @@ QueryClient.prototype.accessRequestById = function (this: QueryClient, args: Acc
   return this.executeNamed("accessRequestById", buildAccessRequestById(args), opts);
 };
 
-/** Fetch a single account by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so an operator can never read another operator's customer even holding its id. Backs the account detail read and the pre-write existence check. */
+/** Fetch a single account by id, gated to the caller. Owned: `row.ownerUserId == actor.userId` is the load-bearing guard, so an operator can never read another operator's customer even holding its id. Backs the account detail read and the pre-write existence check. */
 // Bound concept: v1:identity:account (machine-readable: BoundConcepts["accountById"] in generated_concepts.ts).
 export interface AccountByIdArgs {
   accountId: string;
@@ -206,7 +206,7 @@ QueryClient.prototype.accountFrontDoorsToReconcile = function (this: QueryClient
   return this.executeNamed("accountFrontDoorsToReconcile", buildAccountFrontDoorsToReconcile(args), opts);
 };
 
-/** Fetch one account-token identity by id, gated to the calling user. Owned: userId==actor.userId, so an operator can never read (or, via the revoke handler that calls this, revoke) a credential another operator issued. Backs the pre-revoke ownership check. */
+/** Fetch one account-token identity by id, gated to the calling user. Owned: `row.userId == actor.userId`, so an operator can never read (or, via the revoke handler that calls this, revoke) a credential another operator issued. Backs the pre-revoke ownership check. */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["accountTokenById"] in generated_concepts.ts).
 export interface AccountTokenByIdArgs {
   identityId: string;
@@ -228,7 +228,7 @@ QueryClient.prototype.accountTokenById = function (this: QueryClient, args: Acco
   return this.executeNamed("accountTokenById", buildAccountTokenById(args), opts);
 };
 
-/** List the account tokens the CALLING user has issued for one account, newest first. Owned: userId==actor.userId is the gate (the credential's subject is the operator, never the account); the accountId conjunct narrows an already-authorized set rather than deciding access. Includes revoked rows so a revocation can be seen to have taken effect. Carries no keyHash -- the shape names the credential's non-secret leaves by path. */
+/** List the account tokens the CALLING user has issued for one account, newest first. Owned: `row.userId == actor.userId` is the gate (the credential's subject is the operator, never the account); the accountId conjunct narrows an already-authorized set rather than deciding access. Includes revoked rows so a revocation can be seen to have taken effect. Carries no keyHash -- the shape names the credential's non-secret leaves by path. */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["accountTokensForAccount"] in generated_concepts.ts).
 export interface AccountTokensForAccountArgs {
   accountId: string;
@@ -250,7 +250,7 @@ QueryClient.prototype.accountTokensForAccount = function (this: QueryClient, arg
   return this.executeNamed("accountTokensForAccount", buildAccountTokensForAccount(args), opts);
 };
 
-/** List the caller's accounts, newest first, optionally narrowed to one lifecycle status. Owned: ownerUserId==actor.userId gates the row set server-side, so an operator can never see another operator's customers. Omit status to get every account including archived ones. */
+/** List the caller's accounts, newest first, optionally narrowed to one lifecycle status. Owned: `row.ownerUserId == actor.userId` gates the row set server-side, so an operator can never see another operator's customers. Omit status to get every account including archived ones. */
 // Bound concept: v1:identity:account (machine-readable: BoundConcepts["accounts"] in generated_concepts.ts).
 export interface AccountsArgs {
   // Enum: active | suspended | archived
@@ -381,7 +381,7 @@ QueryClient.prototype.activeAgents = function (this: QueryClient, args: ActiveAg
   return this.executeNamed("activeAgents", buildActiveAgents(args), opts);
 };
 
-/** Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check before proposing a new agent. Platform-infrastructure agents (payload.kind=='system' -- MemQL Planner, MemQL Trainer) are returned by this query and filtered out structurally by loadExistingAgents in integrations/agents/factory.go before they enter the dedupe candidate pool; the filter lives one layer up rather than in the query so the same query can serve other callers that legitimately need system rows. */
+/** Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check before proposing a new agent. Platform-infrastructure agents (`row.kind == "system"` -- MemQL Planner, MemQL Trainer) are returned by this query and filtered out structurally by loadExistingAgents in integrations/agents/factory.go before they enter the dedupe candidate pool; the filter lives one layer up rather than in the query so the same query can serve other callers that legitimately need system rows. */
 // Bound concept: v1:agents:agent (machine-readable: BoundConcepts["activeAgentsForUser"] in generated_concepts.ts).
 export interface ActiveAgentsForUserArgs {
   ownerUserId: string;
@@ -550,7 +550,7 @@ QueryClient.prototype.activeProjects = function (this: QueryClient, args: Active
   return this.executeNamed("activeProjects", buildActiveProjects(args), opts);
 };
 
-/** The caller's active + enabled responsibilities -- the live working set. Owned tier (ownerUserId == actor.userId). status filtered via statusIsActive; enabled==true drops soft-disabled rows. */
+/** The caller's active + enabled responsibilities -- the live working set. Owned tier (`row.ownerUserId == actor.userId`). status filtered via statusIsActive; `row.enabled == true` drops soft-disabled rows. */
 // Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["activeResponsibilities"] in generated_concepts.ts).
 export interface ActiveResponsibilitiesArgs {
 }
@@ -1055,7 +1055,7 @@ QueryClient.prototype.approvalRequestById = function (this: QueryClient, args: A
   return this.executeNamed("approvalRequestById", buildApprovalRequestById(args), opts);
 };
 
-/** The Library artifacts one goal produced -- index rows whose producedByRunId names the plan. Owned: ownerUserId==actor.userId gates the row set server-side and the plan id narrows it. Backs the Nexus map's artifact lane (memql#4371) and the completion card's "artifacts produced" count (memql#4376). Reads the Library INDEX rows, not the backing generatedOutput rows that generatedOutputsForRun returns. */
+/** The Library artifacts one goal produced -- index rows whose producedByRunId names the plan. Owned: `row.ownerUserId == actor.userId` gates the row set server-side and the plan id narrows it. Backs the Nexus map's artifact lane (memql#4371) and the completion card's "artifacts produced" count (memql#4376). Reads the Library INDEX rows, not the backing generatedOutput rows that generatedOutputsForRun returns. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["artifactsForRun"] in generated_concepts.ts).
 export interface ArtifactsForRunArgs {
   runId: string;
@@ -1688,7 +1688,7 @@ QueryClient.prototype.bookingHours = function (this: QueryClient, args: BookingH
   return this.executeNamed("bookingHours", buildBookingHours(args), opts);
 };
 
-/** Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view. */
+/** Get a single calendar event by node id. Self-scoped: the `row.ownerUserId == actor.userId` predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view. */
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["calendarEventById"] in generated_concepts.ts).
 export interface CalendarEventByIdArgs {
   eventId: string;
@@ -1710,7 +1710,7 @@ QueryClient.prototype.calendarEventById = function (this: QueryClient, args: Cal
   return this.executeNamed("calendarEventById", buildCalendarEventById(args), opts);
 };
 
-/** One campaign by id, gated to its owner. Backs the campaign editor. Owned: (ownerUserId==actor.userId || actor.isClusterOwner==true) is the load-bearing guard, so a caller cannot read another operator's campaign even with its id. */
+/** One campaign by id, gated to its owner. Backs the campaign editor. Owned: `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` is the load-bearing guard, so a caller cannot read another operator's campaign even with its id. */
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaignById"] in generated_concepts.ts).
 export interface CampaignByIdArgs {
   campaignId: string;
@@ -1852,7 +1852,7 @@ QueryClient.prototype.campaignSkipCountByReason = function (this: QueryClient, a
   return this.executeNamed("campaignSkipCountByReason", buildCampaignSkipCountByReason(args), opts);
 };
 
-/** The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by (ownerUserId==actor.userId || actor.isClusterOwner==true) server-side, so cross-operator reads are impossible. Optional status filter narrows to one lifecycle bucket; omit it to see everything. */
+/** The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` server-side, so cross-operator reads are impossible. Optional status filter narrows to one lifecycle bucket; omit it to see everything. */
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["campaigns"] in generated_concepts.ts).
 export interface CampaignsArgs {
   status?: string;
@@ -2505,7 +2505,7 @@ QueryClient.prototype.compositionsForRecipe = function (this: QueryClient, args:
   return this.executeNamed("compositionsForRecipe", buildCompositionsForRecipe(args), opts);
 };
 
-/** Consent event stream for one subscriber, newest first. Export answers status/date/source from these rows: current status is the latest kind. Owned: (ownerUserId==actor.userId || actor.isClusterOwner==true) is a top-level conjunct. */
+/** Consent event stream for one subscriber, newest first. Export answers status/date/source from these rows: current status is the latest kind. Owned: `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` is a top-level conjunct. */
 // Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["consentEventsBySubscriber"] in generated_concepts.ts).
 export interface ConsentEventsBySubscriberArgs {
   emailDigest: string;
@@ -3046,7 +3046,7 @@ QueryClient.prototype.documentChunksForDomain = function (this: QueryClient, arg
   return this.executeNamed("documentChunksForDomain", buildDocumentChunksForDomain(args), opts);
 };
 
-/** Fetch a single document version's FULL content (immutable body / attachment + provenance) by its version row id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. Backs the 'open this version' viewer and the restore-source read (memql#1230). */
+/** Fetch a single document version's FULL content (immutable body / attachment + provenance) by its version row id, gated to the caller. Owned: `row.ownerUserId == actor.userId` is the load-bearing guard. Backs the 'open this version' viewer and the restore-source read (memql#1230). */
 // Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["documentVersionById"] in generated_concepts.ts).
 export interface DocumentVersionByIdArgs {
   versionId: string;
@@ -3068,7 +3068,7 @@ QueryClient.prototype.documentVersionById = function (this: QueryClient, args: D
   return this.executeNamed("documentVersionById", buildDocumentVersionById(args), opts);
 };
 
-/** List the append-only version history of a logical document (every retained version, summary projection -- versionNumber, authorKind, author, note, createdAt -- WITHOUT the full body). Owned: ownerUserId==actor.userId gates the row set; payload.documentId narrows to the one document. Backs the Library history drawer (memql#1230); the frontend orders by versionNumber. Each version is a distinct retained row, so no version is ever lost. */
+/** List the append-only version history of a logical document (every retained version, summary projection -- versionNumber, authorKind, author, note, createdAt -- WITHOUT the full body). Owned: `row.ownerUserId == actor.userId` gates the row set; `row.documentId` narrows to the one document. Backs the Library history drawer (memql#1230); the frontend orders by versionNumber. Each version is a distinct retained row, so no version is ever lost. */
 // Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["documentVersions"] in generated_concepts.ts).
 export interface DocumentVersionsArgs {
   documentId: string;
@@ -3090,7 +3090,7 @@ QueryClient.prototype.documentVersions = function (this: QueryClient, args: Docu
   return this.executeNamed("documentVersions", buildDocumentVersions(args), opts);
 };
 
-/** Internal read for the edit/restore handlers: the full version history of a document (full projection) so the handler can compute the next versionNumber + the parentVersionId from the current latest. Owned: ownerUserId==actor.userId; the handler runs under a threaded owner actor. Mirrors documentVersions' filter with the full content shape. */
+/** Internal read for the edit/restore handlers: the full version history of a document (full projection) so the handler can compute the next versionNumber + the parentVersionId from the current latest. Owned: `row.ownerUserId == actor.userId`; the handler runs under a threaded owner actor. Mirrors documentVersions' filter with the full content shape. */
 // Bound concept: v1:library:documentVersion (machine-readable: BoundConcepts["documentVersionsForOwner"] in generated_concepts.ts).
 export interface DocumentVersionsForOwnerArgs {
   documentId: string;
@@ -3157,7 +3157,7 @@ QueryClient.prototype.drainableSendJobs = function (this: QueryClient, args: Dra
   return this.executeNamed("drainableSendJobs", buildDrainableSendJobs(args), opts);
 };
 
-/** The caller's active + enabled responsibilities of a given trigger archetype (recurring or reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness. Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side (no OR operator + no cron arithmetic in the filter), mirroring queryDueRefreshDomains. */
+/** The caller's active + enabled responsibilities of a given trigger archetype (recurring or reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness. Owned tier (`row.ownerUserId == actor.userId`). Cron-due / condition-match filtering happens Go-side (no OR operator + no cron arithmetic in the filter), mirroring queryDueRefreshDomains. */
 // Bound concept: v1:planner:responsibility (machine-readable: BoundConcepts["dueResponsibilities"] in generated_concepts.ts).
 export interface DueResponsibilitiesArgs {
   // Enum: reactive | recurring
@@ -3445,7 +3445,7 @@ QueryClient.prototype.findEvents = function (this: QueryClient, args: FindEvents
   return this.executeNamed("findEvents", buildFindEvents(args), opts);
 };
 
-/** Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library viewer when opening a generated_output artifact resolved from its sourceConceptRef. */
+/** Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id, gated to the caller. Owned: `row.ownerUserId == actor.userId`. Called by the Library viewer when opening a generated_output artifact resolved from its sourceConceptRef. */
 // Bound concept: v1:library:generatedOutput (machine-readable: BoundConcepts["generatedOutputById"] in generated_concepts.ts).
 export interface GeneratedOutputByIdArgs {
   outputId: string;
@@ -3467,7 +3467,7 @@ QueryClient.prototype.generatedOutputById = function (this: QueryClient, args: G
   return this.executeNamed("generatedOutputById", buildGeneratedOutputById(args), opts);
 };
 
-/** List the generated-output rows a Plan produced. Owned: ownerUserId==actor.userId. The planner reads this as the authoritative 'did the deliverable actually get written?' signal for a produceArtifact plan -- promoteWorkbenchOutput stamps producedByRunId on the row when a workbench fs_write is promoted. The planner stamps the plan's owner as actor before calling, so the read stays inside the owned-row authz model. (memql#939) */
+/** List the generated-output rows a Plan produced. Owned: `row.ownerUserId == actor.userId`. The planner reads this as the authoritative 'did the deliverable actually get written?' signal for a produceArtifact plan -- promoteWorkbenchOutput stamps producedByRunId on the row when a workbench fs_write is promoted. The planner stamps the plan's owner as actor before calling, so the read stays inside the owned-row authz model. (memql#939) */
 // Bound concept: v1:library:generatedOutput (machine-readable: BoundConcepts["generatedOutputsForRun"] in generated_concepts.ts).
 export interface GeneratedOutputsForRunArgs {
   runId: string;
@@ -3829,7 +3829,7 @@ QueryClient.prototype.invitationsForAccount = function (this: QueryClient, args:
 };
 
 /** List the CALLER'S worker invocations belonging to a Plan.
-The `ownerUserId==actor.userId` conjunct is the caller scope v1:worker:invocation's composite tier now injects anyway (memql#4406); stating it is what makes the read's scope checkable (TestRowAuthzEnforcementLandGate) instead of implicit. There is deliberately no operator counterpart: the pair shape exists where an operator surface needs it (invocationsForWorker / invocationsForWorkerAsOperator, for /fleet/machines), and adding an unused second variant here would be surface nothing reads. */
+The `row.ownerUserId == actor.userId` conjunct is the caller scope v1:worker:invocation's composite tier now injects anyway (memql#4406); stating it is what makes the read's scope checkable (TestRowAuthzEnforcementLandGate) instead of implicit. There is deliberately no operator counterpart: the pair shape exists where an operator surface needs it (invocationsForWorker / invocationsForWorkerAsOperator, for /fleet/machines), and adding an unused second variant here would be surface nothing reads. */
 // Bound concept: v1:worker:invocation (machine-readable: BoundConcepts["invocationsForRun"] in generated_concepts.ts).
 export interface InvocationsForRunArgs {
   runId: string;
@@ -3940,7 +3940,7 @@ QueryClient.prototype.knowledgeDomainsAll = function (this: QueryClient, args: K
 };
 
 /** The Bin's population: the caller's ARCHIVED artifact index rows, newest first (memql#4784).
-`archived == true` rather than the `!= true` spelling its siblings use, and the asymmetry is not a slip. Every artifact promoted before memql#4340 has no `archived` member at all, so `!= true` is the null-safe way to ask "not archived" and returns them; asking "IS archived" is a positive test, and a row with no member genuinely is not archived. The two are inverses of each other in meaning but not in spelling, and `== false` -- which looks like the third member of the family -- is the one that silently excludes every pre-field row and belongs to neither.
+`row.archived == true` rather than the `!= true` spelling its siblings use, and the asymmetry is not a slip. Every artifact promoted before memql#4340 has no `archived` member at all, so `!= true` is the null-safe way to ask "not archived" and returns them; asking "IS archived" is a positive test, and a row with no member genuinely is not archived. The two are inverses of each other in meaning but not in spelling, and `== false` -- which looks like the third member of the family -- is the one that silently excludes every pre-field row and belongs to neither.
 A DEDICATED READ rather than a client-side fold over libraryArtifactsByLens, which is what the Files app browse does. The reasoning inverts here: Files needs the whole population because its archived TOGGLE has to answer from a set that does not depend on when you looked, while the Bin IS the archived set and nothing in the window ever shows anything else. Seeding it from the whole Library would pull every row the person owns to render the few they threw away. The live feed still works, because a subscription is scoped by CONCEPT rather than by query: an archive arrives as an update, the fold admits it, and the row rises in the Bin at the moment it leaves Files. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArchivedArtifacts"] in generated_concepts.ts).
 export interface LibraryArchivedArtifactsArgs {
@@ -3961,8 +3961,8 @@ QueryClient.prototype.libraryArchivedArtifacts = function (this: QueryClient, ar
   return this.executeNamed("libraryArchivedArtifacts", buildLibraryArchivedArtifacts(args), opts);
 };
 
-/** The folders in the Bin (memql#4784). libraryFolders carries `archived != true`, so the default tree read cannot see these at all -- an archived folder is invisible to every other surface in the product, which is exactly why the Bin needs its own read rather than a filter over one.
-isNotDeleted rides alongside `archived == true`, and the pairing is not belt-and-braces. The two dispositions are independent fields on one row, so a folder that took the empty-branch disposition must not surface here just because something later stamped it archived as well -- the Bin is where a person goes to get things back, and a folder that held no file has nothing there to offer them.
+/** The folders in the Bin (memql#4784). libraryFolders carries `row.archived != true`, so the default tree read cannot see these at all -- an archived folder is invisible to every other surface in the product, which is exactly why the Bin needs its own read rather than a filter over one.
+isNotDeleted rides alongside `row.archived == true`, and the pairing is not belt-and-braces. The two dispositions are independent fields on one row, so a folder that took the empty-branch disposition must not surface here just because something later stamped it archived as well -- the Bin is where a person goes to get things back, and a folder that held no file has nothing there to offer them.
 Unbounded for the same reason libraryFolders is, and it matters more here: the Bin renders each archived item under the folder it was filed in, so a truncated page would file rows under a parent that did not arrive and show them at the root as orphans -- indistinguishable from items that really were at the root. */
 // Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryArchivedFolders"] in generated_concepts.ts).
 export interface LibraryArchivedFoldersArgs {
@@ -3983,7 +3983,7 @@ QueryClient.prototype.libraryArchivedFolders = function (this: QueryClient, args
   return this.executeNamed("libraryArchivedFolders", buildLibraryArchivedFolders(args), opts);
 };
 
-/** Fetch a single Library artifact index row by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content. */
+/** Fetch a single Library artifact index row by id, gated to the caller. Owned: `row.ownerUserId == actor.userId` is the load-bearing guard, so a caller can never read another user's row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef before drilling into backing content. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactById"] in generated_concepts.ts).
 export interface LibraryArtifactByIdArgs {
   artifactId: string;
@@ -4005,7 +4005,7 @@ QueryClient.prototype.libraryArtifactById = function (this: QueryClient, args: L
   return this.executeNamed("libraryArtifactById", buildLibraryArtifactById(args), opts);
 };
 
-/** Internal read backing touchArtifact / the label-write capabilities (integrations/library/): resolve the CURRENT Library artifact index row for a backing source ref, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. sourceConceptRef is the idempotency key createArtifact derives the row's id from (one index row per source ref), so this is bounded to at most one row without needing to re-derive that id in Go -- the coupling a Go-side re-implementation of createArtifact's hash expression would otherwise create. */
+/** Internal read backing touchArtifact / the label-write capabilities (integrations/library/): resolve the CURRENT Library artifact index row for a backing source ref, gated to the caller. Owned: `row.ownerUserId == actor.userId` is the load-bearing guard. sourceConceptRef is the idempotency key createArtifact derives the row's id from (one index row per source ref), so this is bounded to at most one row without needing to re-derive that id in Go -- the coupling a Go-side re-implementation of createArtifact's hash expression would otherwise create. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactBySourceConceptRef"] in generated_concepts.ts).
 export interface LibraryArtifactBySourceConceptRefArgs {
   sourceConceptRef: string;
@@ -4027,7 +4027,7 @@ QueryClient.prototype.libraryArtifactBySourceConceptRef = function (this: QueryC
   return this.executeNamed("libraryArtifactBySourceConceptRef", buildLibraryArtifactBySourceConceptRef(args), opts);
 };
 
-/** List the caller's entire Library (artifacts + records). Owned: the row set is gated by ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates. */
+/** List the caller's entire Library (artifacts + records). Owned: the row set is gated by `row.ownerUserId == actor.userId` server-side. The default Library read; the panel filters by lens / kind and searches client-side over this set, or calls the narrower facet queries below when a single facet dominates. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifacts"] in generated_concepts.ts).
 export interface LibraryArtifactsArgs {
 }
@@ -4047,7 +4047,7 @@ QueryClient.prototype.libraryArtifacts = function (this: QueryClient, args: Libr
   return this.executeNamed("libraryArtifacts", buildLibraryArtifacts(args), opts);
 };
 
-/** List the caller's Library rows of one kind (document / generated_output / note / todo / calendar_event / memory / live_source) -- backs the kind facet filter. Owned: ownerUserId==actor.userId gates the row set; payload.kind narrows to the selected kind. */
+/** List the caller's Library rows of one kind (document / generated_output / note / todo / calendar_event / memory / live_source) -- backs the kind facet filter. Owned: `row.ownerUserId == actor.userId` gates the row set; `row.kind` narrows to the selected kind. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsByKind"] in generated_concepts.ts).
 export interface LibraryArtifactsByKindArgs {
   kind: string;
@@ -4091,7 +4091,7 @@ QueryClient.prototype.libraryArtifactsByLabel = function (this: QueryClient, arg
   return this.executeNamed("libraryArtifactsByLabel", buildLibraryArtifactsByLabel(args), opts);
 };
 
-/** List the caller's Library rows for one lens (artifact | record) -- backs the Artifacts | Records toggle. Owned: ownerUserId==actor.userId gates the row set; payload.lens narrows to the selected lens. */
+/** List the caller's Library rows for one lens (artifact | record) -- backs the Artifacts | Records toggle. Owned: `row.ownerUserId == actor.userId` gates the row set; `row.lens` narrows to the selected lens. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsByLens"] in generated_concepts.ts).
 export interface LibraryArtifactsByLensArgs {
   lens: string;
@@ -4113,7 +4113,7 @@ QueryClient.prototype.libraryArtifactsByLens = function (this: QueryClient, args
   return this.executeNamed("libraryArtifactsByLens", buildLibraryArtifactsByLens(args), opts);
 };
 
-/** Fetch one Library file by id, gated to the caller: ownerUserId==actor.userId, over a concept declaring the composite tier. Backs the artifact detail view and the download / export route, which needs name, mimeType, size and blobUrl together to stream the bytes with correct headers. */
+/** Fetch one Library file by id, gated to the caller: `row.ownerUserId == actor.userId`, over a concept declaring the composite tier. Backs the artifact detail view and the download / export route, which needs name, mimeType, size and blobUrl together to stream the bytes with correct headers. */
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFileById"] in generated_concepts.ts).
 export interface LibraryFileByIdArgs {
   fileId: string;
@@ -4162,7 +4162,7 @@ QueryClient.prototype.libraryFileByUploadedFrom = function (this: QueryClient, a
   return this.executeNamed("libraryFileByUploadedFrom", buildLibraryFileByUploadedFrom(args), opts);
 };
 
-/** List the chunks of one Library file, for the analysis pass to confirm what it wrote and for a similarity hit to resolve back to its file. Gated by ownerUserId==actor.userId; payload.fileId narrows to the one file. The frontend orders by seq, which is monotonic in file order. */
+/** List the chunks of one Library file, for the analysis pass to confirm what it wrote and for a similarity hit to resolve back to its file. Gated by `row.ownerUserId == actor.userId`; `row.fileId` narrows to the one file. The frontend orders by seq, which is monotonic in file order. */
 // Bound concept: v1:library:fileChunk (machine-readable: BoundConcepts["libraryFileChunksForFile"] in generated_concepts.ts).
 export interface LibraryFileChunksForFileArgs {
   fileId: string;
@@ -4249,7 +4249,7 @@ QueryClient.prototype.libraryFileVersionSizesForOwner = function (this: QueryCli
   return this.executeNamed("libraryFileVersionSizesForOwner", buildLibraryFileVersionSizesForOwner(args), opts);
 };
 
-/** The superseded versions of one Library file, newest first -- the Files inspector's history panel (design D1). The HEAD IS NOT HERE: the newest version is the v1:library:file row itself, which the caller already holds, and the panel folds the two together. Owned: ownerUserId==actor.userId gates the row set and payload.fileId narrows it to the one file, so a version of somebody else's file is a version that does not exist.
+/** The superseded versions of one Library file, newest first -- the Files inspector's history panel (design D1). The HEAD IS NOT HERE: the newest version is the v1:library:file row itself, which the caller already holds, and the panel folds the two together. Owned: `row.ownerUserId == actor.userId` gates the row set and `row.fileId` narrows it to the one file, so a version of somebody else's file is a version that does not exist.
 PAGED AT 200 RATHER THAN UNBOUNDED, and the panel is told which it got. The head's own versionNumber says how many versions exist, so a caller comparing that number against the rows it received can state the boundary out loud instead of quietly showing a prefix -- which is what an unbounded read would do the day the watched-folder epic (#4783) starts pushing a version per save. */
 // Bound concept: v1:library:fileVersion (machine-readable: BoundConcepts["libraryFileVersionsForFile"] in generated_concepts.ts).
 export interface LibraryFileVersionsForFileArgs {
@@ -4272,7 +4272,7 @@ QueryClient.prototype.libraryFileVersionsForFile = function (this: QueryClient, 
   return this.executeNamed("libraryFileVersionsForFile", buildLibraryFileVersionsForFile(args), opts);
 };
 
-/** List the caller's Library files, newest first, gated by ownerUserId==actor.userId. The file-level read behind the Artifacts page's upload and training surfaces -- the artifact index is what the list renders, and this is what answers questions the index does not carry (analysis status, embedding coverage, which domains a file was trained into). Optional run and status filters also provide an immediate owned file receipt for work turns. */
+/** List the caller's Library files, newest first, gated by `row.ownerUserId == actor.userId`. The file-level read behind the Artifacts page's upload and training surfaces -- the artifact index is what the list renders, and this is what answers questions the index does not carry (analysis status, embedding coverage, which domains a file was trained into). Optional run and status filters also provide an immediate owned file receipt for work turns. */
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["libraryFilesForOwner"] in generated_concepts.ts).
 export interface LibraryFilesForOwnerArgs {
   runId?: string;
@@ -4298,7 +4298,7 @@ QueryClient.prototype.libraryFilesForOwner = function (this: QueryClient, args: 
   return this.executeNamed("libraryFilesForOwner", buildLibraryFilesForOwner(args), opts);
 };
 
-/** Fetch one folder by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard. Backs the desk-folder popover's name refresh and the Files app's breadcrumb resolve; archived rows ARE returned here -- a caller asking about a specific id deserves the honest answer, and the archived field says which kind it got.
+/** Fetch one folder by id, gated to the caller. Owned: `row.ownerUserId == actor.userId` is the load-bearing guard. Backs the desk-folder popover's name refresh and the Files app's breadcrumb resolve; archived rows ARE returned here -- a caller asking about a specific id deserves the honest answer, and the archived field says which kind it got.
 DELETED rows are not, and the asymmetry with archived is the whole point of the second disposition. An archived folder is somewhere a person can still go and look, so naming its id deserves a row back; a folder deleted for holding no file is meant to be absent from every surface, and a by-id read that answered would be the one place it reappeared -- a stale desk shortcut or breadcrumb resolving to a folder nothing else can show. */
 // Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryFolderById"] in generated_concepts.ts).
 export interface LibraryFolderByIdArgs {
@@ -4321,7 +4321,7 @@ QueryClient.prototype.libraryFolderById = function (this: QueryClient, args: Lib
   return this.executeNamed("libraryFolderById", buildLibraryFolderById(args), opts);
 };
 
-/** The caller's whole folder tree, live (memql#4781, design B1). Owned: ownerUserId==actor.userId gates the row set; `archived != true` is the null-safe soft-delete filter, for the reason libraryArtifacts spells out at length, and isNotDeleted is the same null-safe spelling of the second disposition (the trait is mandatory where one covers the predicate, rule 22). The two are not redundant: an archived folder is one somebody can still find in the Bin, a deleted one held no file at all and is meant to be gone from every surface at once. UNBOUNDED ON PURPOSE: the OS folds (folders, artifacts) snapshots into a tree client-side, and a truncated page would silently re-parent every folder whose ancestor fell off the edge -- the fold is orphan-tolerant, so nothing would LOOK broken, which is exactly why the truncation must not happen. The set is small by construction: folders are hand-made organizational rows, bounded by one person's patience, not by data volume. */
+/** The caller's whole folder tree, live (memql#4781, design B1). Owned: `row.ownerUserId == actor.userId` gates the row set; `row.archived != true` is the null-safe soft-delete filter, for the reason libraryArtifacts spells out at length, and isNotDeleted is the same null-safe spelling of the second disposition (the trait is mandatory where one covers the predicate, rule 22). The two are not redundant: an archived folder is one somebody can still find in the Bin, a deleted one held no file at all and is meant to be gone from every surface at once. UNBOUNDED ON PURPOSE: the OS folds (folders, artifacts) snapshots into a tree client-side, and a truncated page would silently re-parent every folder whose ancestor fell off the edge -- the fold is orphan-tolerant, so nothing would LOOK broken, which is exactly why the truncation must not happen. The set is small by construction: folders are hand-made organizational rows, bounded by one person's patience, not by data volume. */
 // Bound concept: v1:library:folder (machine-readable: BoundConcepts["libraryFolders"] in generated_concepts.ts).
 export interface LibraryFoldersArgs {
 }
@@ -4343,7 +4343,7 @@ QueryClient.prototype.libraryFolders = function (this: QueryClient, args: Librar
 
 /** The Library items labelled with one account.
 `accountIds` is a LIST (D5 -- "one or two accounts" is the owner's own framing), so the tie term is membership rather than equality.
-ARCHIVED ROWS ARE EXCLUDED, matching `libraryArtifacts` rather than this file's own `clientAccountsAll`: the account filter above is a view over the registry a person is administering, while this is a count of what is currently filed for a client. `archived!=true` rather than `==false`, because a row promoted before the field existed carries no key at all and `==false` would silently exclude it. */
+ARCHIVED ROWS ARE EXCLUDED, matching `libraryArtifacts` rather than this file's own `clientAccountsAll`: the account filter above is a view over the registry a person is administering, while this is a count of what is currently filed for a client. `row.archived != true` rather than `row.archived == false`, because a row promoted before the field existed carries no key at all and `row.archived == false` would silently exclude it. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryItemsForAccount"] in generated_concepts.ts).
 export interface LibraryItemsForAccountArgs {
   accountId: string;
@@ -4366,7 +4366,7 @@ QueryClient.prototype.libraryItemsForAccount = function (this: QueryClient, args
 };
 
 /** The caller's watched folders, live (epic memql#4783, the cockpit half memql#4841).
-ONE READ SERVES BOTH CONSUMERS, and that is deliberate. The Files app wants every watch the person has; a cockpit wants the watches for the one machine it is. Those are the same question with a guard on it, and a second query would be a second place for the owner filter and the soft-delete spelling to drift -- the `archived != true` / `== true` asymmetry two constructs up is exactly the kind of drift a duplicate read acquires.
+ONE READ SERVES BOTH CONSUMERS, and that is deliberate. The Files app wants every watch the person has; a cockpit wants the watches for the one machine it is. Those are the same question with a guard on it, and a second query would be a second place for the owner filter and the soft-delete spelling to drift -- the `row.archived != true` / `== true` asymmetry two constructs up is exactly the kind of drift a duplicate read acquires.
 `workerId` is GUARDED, so an absent argument is the whole list rather than a match on the empty string. There is no half-supplied-key hazard here the way there is on libraryFileByUploadedFrom, because there is only one part to supply.
 UNBOUNDED for libraryFolders' reason, one step stronger: a watch is a thing a person sets up by hand, one per folder they care about, so the set is bounded by their patience rather than by data volume -- and a truncated page would silently stop a machine sweeping the folders that fell off the edge, which looks exactly like a backup that is working. */
 // Bound concept: v1:library:watchedFolder (machine-readable: BoundConcepts["libraryWatchedFolders"] in generated_concepts.ts).
@@ -4391,7 +4391,7 @@ QueryClient.prototype.libraryWatchedFolders = function (this: QueryClient, args:
   return this.executeNamed("libraryWatchedFolders", buildLibraryWatchedFolders(args), opts);
 };
 
-/** List workspace-scoped live sources for the Library Records lens. Gated by ownerUserId==actor.userId -- NOT the un-gated partition-shared read it was before memql#4340, because v1:library:artifact now declares an owner tier and an ownerless row is unreachable on every path. See the note above (#723 for the original shape, D8 for the tier). */
+/** List workspace-scoped live sources for the Library Records lens. Gated by `row.ownerUserId == actor.userId` -- NOT the un-gated partition-shared read it was before memql#4340, because v1:library:artifact now declares an owner tier and an ownerless row is unreachable on every path. See the note above (#723 for the original shape, D8 for the tier). */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryWorkspaceLiveSources"] in generated_concepts.ts).
 export interface LibraryWorkspaceLiveSourcesArgs {
 }
@@ -4437,7 +4437,7 @@ QueryClient.prototype.lineItemsForOrder = function (this: QueryClient, args: Lin
 
 /** One LIVE front door by the name it serves beneath -- the edge's third and last resolution step.
 TAKES THE RESERVED NAME, NOT THE HOST, and that split is deliberate. A row stores `memql.acme.com`; the host the edge was asked for is `app.memql.acme.com`. A filter compiles to SQL over stored fields and cannot prepend a label, so one side has to compose -- and doing it in Go (frontdoor.AccountReservedNameFromAppHost, the pinned inverse of AccountRoleHost) keeps the label spelled once. A denormalized appHost column would be a second spelling that drifts the first time the label changes, and the symptom would be every client's door resolving to nothing.
-`status=="live"` carries the whole security property, liveCustomDomainByHostname's reasoning one domain over: a door reaches `live` only after all three of its hosts pointed at this cluster AND its certificate came back Ready. Every other status resolves to nothing, so a teardown takes effect at the speed of a row write rather than at the speed of an Ingress deletion. */
+`row.status == "live"` carries the whole security property, liveCustomDomainByHostname's reasoning one domain over: a door reaches `live` only after all three of its hosts pointed at this cluster AND its certificate came back Ready. Every other status resolves to nothing, so a teardown takes effect at the speed of a row write rather than at the speed of an Ingress deletion. */
 // Bound concept: v1:platform:accountFrontDoor (machine-readable: BoundConcepts["liveAccountFrontDoorByReservedName"] in generated_concepts.ts).
 export interface LiveAccountFrontDoorByReservedNameArgs {
   reservedName: string;
@@ -4480,7 +4480,7 @@ QueryClient.prototype.liveAppSessionsForUser = function (this: QueryClient, args
 };
 
 /** Resolve a request Host to the site a LIVE custom domain binds it to (design D8). The edge's one extra resolution step, asked only after siteByHostname misses.
-`status=="live"` is the whole security property of this read. A row reaches `live` only after both DNS checks passed AND the certificate came back Ready, so a hostname answering here is one whose owner proved control of the name and whose traffic this cluster can actually terminate TLS for. Every other status resolves to nothing, which is why a removal takes effect at the speed of a row write rather than at the speed of an Ingress deletion. */
+`row.status == "live"` is the whole security property of this read. A row reaches `live` only after both DNS checks passed AND the certificate came back Ready, so a hostname answering here is one whose owner proved control of the name and whose traffic this cluster can actually terminate TLS for. Every other status resolves to nothing, which is why a removal takes effect at the speed of a row write rather than at the speed of an Ingress deletion. */
 // Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["liveCustomDomainByHostname"] in generated_concepts.ts).
 export interface LiveCustomDomainByHostnameArgs {
   hostname: string;
@@ -4616,7 +4616,7 @@ QueryClient.prototype.membersOfGroup = function (this: QueryClient, args: Member
   return this.executeNamed("membersOfGroup", buildMembersOfGroup(args), opts);
 };
 
-/** Drill-in read: fetch a memory's full content by id, gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library Records lens when opening a memory artifact resolved from its sourceConceptRef. */
+/** Drill-in read: fetch a memory's full content by id, gated to the caller. Owned: `row.ownerUserId == actor.userId`. Called by the Library Records lens when opening a memory artifact resolved from its sourceConceptRef. */
 // Bound concept: v1:library:memory (machine-readable: BoundConcepts["memoryById"] in generated_concepts.ts).
 export interface MemoryByIdArgs {
   memoryId: string;
@@ -4978,7 +4978,7 @@ QueryClient.prototype.nodeSpecsForDeployment = function (this: QueryClient, args
 };
 
 /** Every node_token identity across the cluster (active + revoked), in the credential-free nodeTokenSummary shape. Owner or admin only. Backs Settings -> Tokens (memql#3324; the portal's Tokens surface until epic memql#4984).
-Why actor.userId scoping is not the alternative: a node_token row's `userId` is the synthetic bootstrap user rather than any reader, so `userId==actor.userId` returns nothing for the admin who consumes this. The gate that fits is the role, and it is stated here rather than left to a route. */
+Why actor.userId scoping is not the alternative: a node_token row's `userId` is the synthetic bootstrap user rather than any reader, so `row.userId == actor.userId` returns nothing for the admin who consumes this. The gate that fits is the role, and it is stated here rather than left to a route. */
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["nodeTokenIdentitiesAdmin"] in generated_concepts.ts).
 export interface NodeTokenIdentitiesAdminArgs {
 }
@@ -5020,7 +5020,7 @@ QueryClient.prototype.nodesForDeployment = function (this: QueryClient, args: No
   return this.executeNamed("nodesForDeployment", buildNodesForDeployment(args), opts);
 };
 
-/** Latest-per-id cluster nodes whose deploymentId != the supplied current deployment -- orphans from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight). #1873. */
+/** Latest-per-id cluster nodes outside the supplied current deployment (`row.deploymentId != args.deploymentId`) -- orphans from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight). #1873. */
 // Bound concept: v1:cluster:node (machine-readable: BoundConcepts["nodesNotInDeployment"] in generated_concepts.ts).
 export interface NodesNotInDeploymentArgs {
   deploymentId: string;
@@ -5042,7 +5042,7 @@ QueryClient.prototype.nodesNotInDeployment = function (this: QueryClient, args: 
   return this.executeNamed("nodesNotInDeployment", buildNodesNotInDeployment(args), opts);
 };
 
-/** Fetch a single note by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's note even with its id. Used by the update tool to confirm the row exists before re-inserting a new version. */
+/** Fetch a single note by id, gated to the caller. Owned: `row.ownerUserId == actor.userId` is the load-bearing guard, so a caller can never read another user's note even with its id. Used by the update tool to confirm the row exists before re-inserting a new version. */
 // Bound concept: v1:notes:note (machine-readable: BoundConcepts["noteById"] in generated_concepts.ts).
 export interface NoteByIdArgs {
   noteId: string;
@@ -5064,7 +5064,7 @@ QueryClient.prototype.noteById = function (this: QueryClient, args: NoteByIdArgs
   return this.executeNamed("noteById", buildNoteById(args), opts);
 };
 
-/** List the caller's notes. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible. */
+/** List the caller's notes. Owned: the row set is gated by `row.ownerUserId == actor.userId` server-side, so cross-user reads are impossible. */
 // Bound concept: v1:notes:note (machine-readable: BoundConcepts["notes"] in generated_concepts.ts).
 export interface NotesArgs {
 }
@@ -5084,7 +5084,7 @@ QueryClient.prototype.notes = function (this: QueryClient, args: NotesArgs = {} 
   return this.executeNamed("notes", buildNotes(args), opts);
 };
 
-/** Search the caller's notes by tag. Owned: ownerUserId==actor.userId gates the row set server-side; the tag predicate narrows to notes carrying the given tag. Body substring matching is done client-side over this caller-scoped result so the search never leaks across users. */
+/** Search the caller's notes by tag. Owned: `row.ownerUserId == actor.userId` gates the row set server-side; the tag predicate narrows to notes carrying the given tag. Body substring matching is done client-side over this caller-scoped result so the search never leaks across users. */
 // Bound concept: v1:notes:note (machine-readable: BoundConcepts["notesByTag"] in generated_concepts.ts).
 export interface NotesByTagArgs {
   tag: string;
@@ -5393,7 +5393,7 @@ QueryClient.prototype.outboxPending = function (this: QueryClient, args: OutboxP
   return this.executeNamed("outboxPending", buildOutboxPending(args), opts);
 };
 
-/** Fetch a single healed override by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's override even with its id. Used by the validation flow (E4.5) to confirm the row before capturing the next version. */
+/** Fetch a single healed override by id, gated to the caller. Owned: `row.ownerUserId == actor.userId` is the load-bearing guard, so a caller can never read another user's override even with its id. Used by the validation flow (E4.5) to confirm the row before capturing the next version. */
 // Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["overrideById"] in generated_concepts.ts).
 export interface OverrideByIdArgs {
   overrideId: string;
@@ -5415,7 +5415,7 @@ QueryClient.prototype.overrideById = function (this: QueryClient, args: Override
   return this.executeNamed("overrideById", buildOverrideById(args), opts);
 };
 
-/** List the caller's healed overrides for a base construct -- the full override history (every tier, valid + invalid, active + retired) for audit + the cockpit healed-pack view (E4.6). Owned: gated by ownerUserId==actor.userId. Newest version first. */
+/** List the caller's healed overrides for a base construct -- the full override history (every tier, valid + invalid, active + retired) for audit + the cockpit healed-pack view (E4.6). Owned: gated by `row.ownerUserId == actor.userId`. Newest version first. */
 // Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["overridesForConstruct"] in generated_concepts.ts).
 export interface OverridesForConstructArgs {
   baseConstructId: string;
@@ -5804,7 +5804,7 @@ QueryClient.prototype.pendingAccessRequests = function (this: QueryClient, args:
 
 /** Every pending user invitation on this cluster -- who was invited, by whom, and until when.
 The console's "who is still outstanding" read, and the list a revoke acts on. Developer and above: an invitation names an address somebody chose to invite, which is not a fact every authenticated reader is owed -- but it is one every caller who can ISSUE an invitation needs, and developer can (auth.CanAdmitPeople). A FLOOR rather than a grant (epic memql#5166): the three roles that can issue are a contiguous top of the ladder, which is what `@requiresRank` says and what the deleted `requiresDeveloperOrAbove` spec was approximating with a three-value list that no custom role could ever match. A caller able to send invitations and unable to see the outstanding ones cannot revoke a link sent to the wrong address, which is the one repair this list exists for.
-kind=="user" is load-bearing rather than decorative: guest invitations live in the same concept, belong to a space rather than to the cluster, and have their own product-side surface. */
+`row.kind == "user"` is load-bearing rather than decorative: guest invitations live in the same concept, belong to a space rather than to the cluster, and have their own product-side surface. */
 // Bound concept: v1:identity:invitation (machine-readable: BoundConcepts["pendingUserInvitations"] in generated_concepts.ts).
 export interface PendingUserInvitationsArgs {
 }
@@ -6315,7 +6315,7 @@ QueryClient.prototype.refundRate = function (this: QueryClient, args: RefundRate
 
 /** Every release this cluster cut, newest first. Backs the Releases card on the portal's Deployments page.
 TWO TERMS FOR ONE PREDICATE, and both earn their place -- deleting either is the mistake this note exists to prevent.
-`requiresOwner` is the DECISION, named. The owner ask was "only the owners (role) may cut a new version", and this spec (`role == "owner"`) is the same predicate the builtin's Go wall applies as `AccessContext.IsClusterOwner`. Naming it here is what makes the double wall legible: the read and the write visibly agree about who may do this.
+`requiresOwner` is the DECISION, named. The owner ask was "only the owners (role) may cut a new version", and this spec (`actor.role == "owner"`) is the same predicate the builtin's Go wall applies as `AccessContext.IsClusterOwner`. Naming it here is what makes the double wall legible: the read and the write visibly agree about who may do this.
 `actor.isClusterOwner==true` is what the CONCEPT'S TIER already ANDs into every read of it, written out so the enforcement land gate (memql#3172) can decide implication. That gate cannot expand a spec, so with `requiresOwner` alone it reports the read as UNDECIDABLE -- it cannot prove the filter already implies the conjunct, and an undecidable read is one whose result set might silently change when enforcement lands. Spelling the conjunct out settles it, and it narrows nothing: the two terms are the same predicate, since `IsClusterOwner()` IS `Role == RoleOwner`.
 This is HISTORY, not the answer to "what is the newest version" -- see the concept's own note. A release cut by hand appears here not at all. One release cut, by version. The version IS the row id (createReleaseCut stamps `id: args.version`), so this is a single-row read on the primary key's leading column rather than a payload probe -- the distinction row_id_mirror_test.go enforces across the tree, and the reason the filter names `row.id` even though a `version` payload field exists beside it.
 SEPARATE FROM releaseCuts, and not a convenience. releaseCuts paginates 50, which is the right bound for a portal list and the wrong one for a lookup: an installation past its fiftieth release would have releaseCutStatus miss every older version and answer `version_not_cut` -- whose meaning is "cut by hand, or on another installation". A confident wrong answer, arrived at by a page boundary nobody could see from the message.
@@ -6478,7 +6478,7 @@ QueryClient.prototype.requestEvents = function (this: QueryClient, args: Request
   return this.executeNamed("requestEvents", buildRequestEvents(args), opts);
 };
 
-/** Resolve the winning VALID overlay override for a base construct -- the read half of the two-tier resolution (E4.2 / memql#2140). Returns the caller's newest valid, active overlay override for the given baseConstructId (highest version first, newest createdAt on a tie). An empty result means no valid override exists and the Go resolver falls back to the embedded base. Owned: gated by ownerUserId==actor.userId, and tier=overlay + valid + active so a base-tier or unvalidated or retired row can never win resolution. */
+/** Resolve the winning VALID overlay override for a base construct -- the read half of the two-tier resolution (E4.2 / memql#2140). Returns the caller's newest valid, active overlay override for the given baseConstructId (highest version first, newest createdAt on a tie). An empty result means no valid override exists and the Go resolver falls back to the embedded base. Owned: gated by `row.ownerUserId == actor.userId`, and tier=overlay + valid + active so a base-tier or unvalidated or retired row can never win resolution. */
 // Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["resolveValidOverride"] in generated_concepts.ts).
 export interface ResolveValidOverrideArgs {
   baseConstructId: string;
@@ -6614,7 +6614,7 @@ QueryClient.prototype.routerCallsInWindow = function (this: QueryClient, args: R
 };
 
 /** Every call served by ONE machine in a window, for that machine's sharing ledger.
-SCOPED BY SURFACE, NOT BY OWNER, and the difference is a wrong answer rather than a style choice. `machineOwnerUserId` is deliberately EMPTY for a call a person ran on their own machine -- it names whose machine served a call when that machine was somebody ELSE's -- so `machineOwnerUserId==actor.userId` would return only the calls OTHER people ran on your hardware and none of your own. The fold counts the owner's own calls alongside everybody else's, because the figure answers "how busy has this machine been" rather than "how much have I lent it out", so that filter would show near-zero on a machine its owner uses constantly.
+SCOPED BY SURFACE, NOT BY OWNER, and the difference is a wrong answer rather than a style choice. `machineOwnerUserId` is deliberately EMPTY for a call a person ran on their own machine -- it names whose machine served a call when that machine was somebody ELSE's -- so `row.machineOwnerUserId == actor.userId` would return only the calls OTHER people ran on your hardware and none of your own. The fold counts the owner's own calls alongside everybody else's, because the figure answers "how busy has this machine been" rather than "how much have I lent it out", so that filter would show near-zero on a machine its owner uses constantly.
 AUTHORIZATION IS THE CALLER'S OWNERSHIP OF THE MACHINE, checked in the builtin before this runs: `fleetSharingLedger` resolves the registration through the caller's own machines and refuses one that is not theirs, which is the same gate the pull and the probe use. The surface argument is then derived from a registration id the caller has already been proven to own, so it cannot be pointed at somebody else's machine by passing a different string.
 It is a SEPARATE query from routerCallsInWindow for that reason: the fold's read is gated on `actor.isClusterOwner`, which is right for a maintenance sweep and returns zero rows for the machine owner this one serves. */
 // Bound concept: v1:router:call (machine-readable: BoundConcepts["routerCallsOnMachine"] in generated_concepts.ts).
@@ -6729,7 +6729,7 @@ QueryClient.prototype.salesRepsForStore = function (this: QueryClient, args: Sal
   return this.executeNamed("salesRepsForStore", buildSalesRepsForStore(args), opts);
 };
 
-/** ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due" is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned tier injects (ownerUserId==actor.userId || actor.isClusterOwner==true) into every read with no cluster-owner bypass. That is why the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
+/** ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due" is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned tier injects `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` into every read with no cluster-owner bypass. That is why the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
 It deliberately does NOT filter on the due time. The authority on when a send fires is the CAMPAIGN's scheduledAt, which an operator can move with updateCampaign without the job row hearing about it -- so the worker reads every scheduled job and asks the campaign. The set is small by nature (one row per pending scheduled campaign), which is what makes that affordable. */
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["scheduledSendJobs"] in generated_concepts.ts).
 export interface ScheduledSendJobsArgs {
@@ -6755,7 +6755,7 @@ memql#2883: the `args.active == nil || ...` guard folds away when the arg is uns
 A ROLE GATE rather than @serverOnly, because unlike its three siblings this one has a genuine client caller: the MCP tool. Gating by origin would delete the tool; gating by role keeps it working for the administrators it was built for.
 WIDENED FROM owner-or-admin to developer-and-above (memql#4917), which restores what the capability catalog already said: dsl/rbac/seeds.memql grants developer `read` on `principal`, described as "see the user list; no management". The narrower gate contradicted that seed -- and once developers could invite people (auth.CanAdmitPeople) they would have been inviting them into a cluster whose roster they could not see.
 A FLOOR RATHER THAN A GRANT (epic memql#5166). This is `@requiresRank("developer")` and not `@requiresCapability("read", "principal")`, and the two are genuinely different questions here: the read is bounded by "who works on this cluster", which is a rung, rather than by a permission a role was given. The three credential-adjacent siblings below go the other way, because what excludes a developer from those is a GRANT it does not hold.
-It replaced the `requiresDeveloperOrAbove` spec, which could not see a custom role at all -- `role == "developer" || role == "admin" || role == "owner"` is false for a rank-350 role a cluster authored for itself, whatever that role holds.
+It replaced the `requiresDeveloperOrAbove` spec, which could not see a custom role at all -- `actor.role == "developer" || actor.role == "admin" || actor.role == "owner"` is false for a rank-350 role a cluster authored for itself, whatever that role holds.
 The MANAGEMENT verbs are untouched: a developer reading this list still cannot edit, re-role, suspend or delete anybody on it. */
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["searchUsers"] in generated_concepts.ts).
 export interface SearchUsersArgs {
@@ -10096,9 +10096,9 @@ QueryClient.prototype.siteById = function (this: QueryClient, args: SiteByIdArgs
 };
 
 /** The deployables this caller may see: their OWN sites, or every site in the cluster when the caller is a cluster owner. The Deployables app's primary screen.
-ARCHIVED ROWS ARE EXCLUDED HERE and listed by sitesArchived instead (epic memql#4794, D10). The exclusion is written out rather than folded into a trait, because it is the one conjunct whose counterpart query deliberately inverts it -- and a reader comparing the two needs to see the same term in both -- here `isNotArchived`, there `statusIsArchived`. The trait is `status != "archived"` rather than an allow-list of the other three: status is required, so every row carries one, and != is null-safe against a non-empty literal (memql#1685) -- while an allow-list would silently drop a row the day a fifth value is added.
+ARCHIVED ROWS ARE EXCLUDED HERE and listed by sitesArchived instead (epic memql#4794, D10). The exclusion is written out rather than folded into a trait, because it is the one conjunct whose counterpart query deliberately inverts it -- and a reader comparing the two needs to see the same term in both -- here `isNotArchived`, there `statusIsArchived`. The trait is `row.status != "archived"` rather than an allow-list of the other three: status is required, so every row carries one, and != is null-safe against a non-empty literal (memql#1685) -- while an allow-list would silently drop a row the day a fifth value is added.
 The name predates self-serve deployables and is kept: it is the same read, and the concept's tier is what decides how far "all" reaches for a given actor.
-NO CALLER TERM, DELIBERATELY (memql#5303, design 2026-09-11-app-access-grants D4 / D12). The tier `@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")` is the whole answer for every caller -- their own rows, every row for a cluster owner, and the rows tied to an account whose group they are in. This read used to restate the tier's first two arms as `(ownerUserId==actor.userId || actor.isClusterOwner==true)`, and an AND with that conjunct can never be widened by the third: a member of Acme's group was admitted to Acme's sites by the tier and then filtered back out by the query, so the list showed the tie to nobody. The engine ANDs the tier in from the declaration; tierDecidesTheRead (component/memql) records this construct as one the tier decides, and TestAPackageTiedToTheSelfAccountIsReadableByItsGroupAndByStaff reads it against a real database for a member, a developer and a stranger. */
+NO CALLER TERM, DELIBERATELY (memql#5303, design 2026-09-11-app-access-grants D4 / D12). The tier `@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")` is the whole answer for every caller -- their own rows, every row for a cluster owner, and the rows tied to an account whose group they are in. This read used to restate the tier's first two arms as `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)`, and an AND with that conjunct can never be widened by the third: a member of Acme's group was admitted to Acme's sites by the tier and then filtered back out by the query, so the list showed the tie to nobody. The engine ANDs the tier in from the declaration; tierDecidesTheRead (component/memql) records this construct as one the tier decides, and TestAPackageTiedToTheSelfAccountIsReadableByItsGroupAndByStaff reads it against a real database for a member, a developer and a stranger. */
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesAll"] in generated_concepts.ts).
 export interface SitesAllArgs {
 }
@@ -10695,7 +10695,7 @@ QueryClient.prototype.territoriesForStore = function (this: QueryClient, args: T
   return this.executeNamed("territoriesForStore", buildTerritoriesForStore(args), opts);
 };
 
-/** Fetch a single to-do by id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's to-do even with its id. Used by the complete / update tools to confirm the row exists before re-inserting a new version. */
+/** Fetch a single to-do by id, gated to the caller. Owned: `row.ownerUserId == actor.userId` is the load-bearing guard, so a caller can never read another user's to-do even with its id. Used by the complete / update tools to confirm the row exists before re-inserting a new version. */
 // Bound concept: v1:todos:todo (machine-readable: BoundConcepts["todoById"] in generated_concepts.ts).
 export interface TodoByIdArgs {
   todoId: string;
@@ -10717,7 +10717,7 @@ QueryClient.prototype.todoById = function (this: QueryClient, args: TodoByIdArgs
   return this.executeNamed("todoById", buildTodoById(args), opts);
 };
 
-/** List the caller's to-dos. Owned: the row set is gated by ownerUserId==actor.userId server-side, so cross-user reads are impossible. Optional done filter narrows to open (done=false) or completed (done=true) items; omit it to return everything. */
+/** List the caller's to-dos. Owned: the row set is gated by `row.ownerUserId == actor.userId` server-side, so cross-user reads are impossible. Optional done filter narrows to open (done=false) or completed (done=true) items; omit it to return everything. */
 // Bound concept: v1:todos:todo (machine-readable: BoundConcepts["todos"] in generated_concepts.ts).
 export interface TodosArgs {
   done?: boolean;
@@ -10763,7 +10763,7 @@ QueryClient.prototype.upcomingEvents = function (this: QueryClient, args: Upcomi
   return this.executeNamed("upcomingEvents", buildUpcomingEvents(args), opts);
 };
 
-/** Fetch one chunked upload session by id, gated to the caller -- THE per-chunk authorization read (design C2): every chunk PUT, the inventory and the complete resolve the session through this under the caller's own actor, so a session that is not theirs is a session that is not there. Owned: ownerUserId==actor.userId is the load-bearing guard. */
+/** Fetch one chunked upload session by id, gated to the caller -- THE per-chunk authorization read (design C2): every chunk PUT, the inventory and the complete resolve the session through this under the caller's own actor, so a session that is not theirs is a session that is not there. Owned: `row.ownerUserId == actor.userId` is the load-bearing guard. */
 // Bound concept: v1:library:uploadSession (machine-readable: BoundConcepts["uploadSessionById"] in generated_concepts.ts).
 export interface UploadSessionByIdArgs {
   uploadId: string;
@@ -10987,7 +10987,7 @@ QueryClient.prototype.warmupStateForIdentity = function (this: QueryClient, args
   return this.executeNamed("warmupStateForIdentity", buildWarmupStateForIdentity(args), opts);
 };
 
-/** The caller's pending approvals, newest first. Owned. decision=="" is the pending state, and it matches because createWorkApproval STAMPS the empty string rather than leaving the key absent. */
+/** The caller's pending approvals, newest first. Owned. `row.decision == ""` is the pending state, and it matches because createWorkApproval STAMPS the empty string rather than leaving the key absent. */
 // Bound concept: v1:work:approval (machine-readable: BoundConcepts["workApprovalsForOwner"] in generated_concepts.ts).
 export interface WorkApprovalsForOwnerArgs {
 }
@@ -11029,7 +11029,7 @@ QueryClient.prototype.workGoalForOwner = function (this: QueryClient, args: Work
   return this.executeNamed("workGoalForOwner", buildWorkGoalForOwner(args), opts);
 };
 
-/** The caller's goals, newest first. Owned: ownerUserId==actor.userId binds server-side. */
+/** The caller's goals, newest first. Owned: `row.ownerUserId == actor.userId` binds server-side. */
 // Bound concept: v1:work:goal (machine-readable: BoundConcepts["workGoalsForOwner"] in generated_concepts.ts).
 export interface WorkGoalsForOwnerArgs {
 }
@@ -11138,7 +11138,7 @@ QueryClient.prototype.workRunForOwner = function (this: QueryClient, args: WorkR
   return this.executeNamed("workRunForOwner", buildWorkRunForOwner(args), opts);
 };
 
-/** The caller's runs that are executing right now. Owned: ownerUserId==actor.userId binds server-side, so this answers for whoever the actor is and nobody else.
+/** The caller's runs that are executing right now. Owned: `row.ownerUserId == actor.userId` binds server-side, so this answers for whoever the actor is and nobody else.
 SEPARATE FROM workRunsForOwner rather than a narrowing of it, for the reason that one states in its own comment: it is deliberately un-narrowed because two surfaces read it. This is a third question -- "what is in flight for this person" -- asked by the computer-use kill switch (memql#5066), where paging an active person's whole run history to find the few running ones is the wrong read for a control that has to act promptly.
 BOUNDED AT 500, which is a real limit and not a formality: a person with more than 500 runs executing at once would have some missed. Nothing in the product produces that state -- runs are opened per goal and per analysis -- and an unbounded scan on the path a kill switch takes is the worse failure. The pre-dispatch gate is refusing every new call meanwhile, so a missed run's next worker call is denied regardless. */
 // Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunningRunsForOwner"] in generated_concepts.ts).
@@ -11182,7 +11182,7 @@ QueryClient.prototype.workRunsForGoal = function (this: QueryClient, args: WorkR
   return this.executeNamed("workRunsForGoal", buildWorkRunsForGoal(args), opts);
 };
 
-/** The caller's runs, newest first. Owned: ownerUserId==actor.userId binds server-side, and the concept's tier admits the same rows on the SUBSCRIPTION, so a browser watching this feed is not handed anybody else's work the way an undeclared concept would.
+/** The caller's runs, newest first. Owned: `row.ownerUserId == actor.userId` binds server-side, and the concept's tier admits the same rows on the SUBSCRIPTION, so a browser watching this feed is not handed anybody else's work the way an undeclared concept would.
 DELIBERATELY NOT NARROWED BY TEMPLATE. A caller that wants one kind of run filters `automationName` itself: the MemQL OS Training app shows analyses and reads `libraryAnalyzeFile`, and Nexus (sub-project B) wants every run of a goal. Narrowing here would make this query one surface's, and the second surface would add a second query that drifts. */
 // Bound concept: v1:work:run (machine-readable: BoundConcepts["workRunsForOwner"] in generated_concepts.ts).
 export interface WorkRunsForOwnerArgs {
@@ -11226,7 +11226,7 @@ QueryClient.prototype.workStepsForOwnerRun = function (this: QueryClient, args: 
 };
 
 /** Look up the worker registration owned by an identity row.
-The `ownerUserId==actor.userId` conjunct is not redundant with the concept's tier -- it is what makes this read's result set the SAME before and after enforcement, which TestRowAuthzEnforcementLandGate is the gate for. It is satisfied at runtime because the only caller, component/worker's register handshake, runs under auth.ContextWithUserActor for the owner the worker_token's identity row named. A worker authenticates as worker:<id>, so without that stamp this read returns nothing at all -- which is the failure that reads as "this machine has never registered" and silently creates a duplicate row on every reconnect. */
+The `row.ownerUserId == actor.userId` conjunct is not redundant with the concept's tier -- it is what makes this read's result set the SAME before and after enforcement, which TestRowAuthzEnforcementLandGate is the gate for. It is satisfied at runtime because the only caller, component/worker's register handshake, runs under auth.ContextWithUserActor for the owner the worker_token's identity row named. A worker authenticates as worker:<id>, so without that stamp this read returns nothing at all -- which is the failure that reads as "this machine has never registered" and silently creates a duplicate row on every reconnect. */
 // Bound concept: v1:worker:registration (machine-readable: BoundConcepts["workerByIdentityId"] in generated_concepts.ts).
 export interface WorkerByIdentityIdArgs {
   identityId: string;
@@ -11315,7 +11315,7 @@ QueryClient.prototype.workersForUser = function (this: QueryClient, args: Worker
 };
 
 /** Look up the workbench workspace row for a Plan. Returns empty when no workspace has been provisioned yet -- the integration uses this to decide whether to call provisionWorkspace on the first workbenchHost dispatch.
-The `ownerUserId==actor.userId` conjunct keeps this read's result set the SAME before and after the concept's tier is enforced (TestRowAuthzEnforcementLandGate). It is satisfied at runtime because the integration runs under auth.ContextWithUserActor for the parent plan's requestedBy -- which it has already resolved in order to know whose plan it is executing. Without that stamp this returns nothing, and "no workspace row" is indistinguishable from "not provisioned yet", so the integration would provision a second directory on every call. */
+The `row.ownerUserId == actor.userId` conjunct keeps this read's result set the SAME before and after the concept's tier is enforced (TestRowAuthzEnforcementLandGate). It is satisfied at runtime because the integration runs under auth.ContextWithUserActor for the parent plan's requestedBy -- which it has already resolved in order to know whose plan it is executing. Without that stamp this returns nothing, and "no workspace row" is indistinguishable from "not provisioned yet", so the integration would provision a second directory on every call. */
 // Bound concept: v1:workbench:workspace (machine-readable: BoundConcepts["workspaceForRun"] in generated_concepts.ts).
 export interface WorkspaceForRunArgs {
   runId: string;

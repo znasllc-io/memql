@@ -21,7 +21,7 @@
 // actor's role STRING against one or three literals, and that shape has three
 // faults the annotations do not:
 //
-//   - it cannot see a custom role AT ALL. `role == "admin"` is false for a
+//   - it cannot see a custom role AT ALL. `actor.role == "admin"` is false for a
 //     rank-250 role holding every principal verb, so every role a cluster
 //     authored for itself was refused every surface these gated, whatever it
 //     held. That is the defect epic memql#5166 exists to end.

@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-/// Matches records with active==true field
+/// Matches records whose active field is true.
 trait isActiveRecord = row => row.active == true
 
 // ---- specs/v1/common/isCancelled.memql ----
@@ -14,8 +14,8 @@ trait isActiveRecord = row => row.active == true
 // Reusable filter that matches records with cancelled status.
 // Cancelled records were scheduled but did not complete.
 //
-// Usage in queries:
-//   concept==v1:hr:checkin;isCancelled()
+// Usage in a query filter:
+//   filter row => isCancelled(row)
 //
 /// Matches records with cancelled status
 trait isCancelled = row => row.status == "cancelled"
@@ -29,8 +29,8 @@ trait isCancelled = row => row.status == "cancelled"
 // Checked records have been synthetically validated but not yet confirmed
 // by a human identity. May be usable if the concept's policy allows it.
 //
-// Usage in queries:
-//   concept==v1:data:record;isChecked()
+// Usage in a query filter:
+//   filter row => isChecked(row)
 //
 /// Matches active data records in checked validation state
 trait isChecked = row => row.active == true && row.validationState == "checked"
@@ -44,9 +44,8 @@ trait isChecked = row => row.active == true && row.validationState == "checked"
 // Completed check-ins have survey responses submitted.
 // Completed flags/cases have been resolved.
 //
-// Usage in queries:
-//   concept==v1:hr:checkin;isCompleted()
-//   concept==v1:hr:flag;isCompleted()
+// Usage in a query filter:
+//   filter row => isCompleted(row)
 //
 /// Matches records with completed status
 trait isCompleted = row => row.status == "completed"
@@ -60,8 +59,8 @@ trait isCompleted = row => row.status == "completed"
 // Confirmed records have been validated by a human identity and are always
 // considered usable.
 //
-// Usage in queries:
-//   concept==v1:data:record;isConfirmed()
+// Usage in a query filter:
+//   filter row => isConfirmed(row)
 //
 /// Matches active data records in confirmed validation state
 trait isConfirmed = row => row.active == true && row.validationState == "confirmed"
@@ -74,8 +73,8 @@ trait isConfirmed = row => row.active == true && row.validationState == "confirm
 // Reusable filter that matches data records in draft validation state.
 // Draft records are being worked on and are not yet usable.
 //
-// Usage in queries:
-//   concept==v1:data:record;isDraft()
+// Usage in a query filter:
+//   filter row => isDraft(row)
 //
 /// Matches active data records in draft validation state
 trait isDraft = row => row.active == true && row.validationState == "draft"
@@ -88,8 +87,8 @@ trait isDraft = row => row.active == true && row.validationState == "draft"
 // Reusable filter that matches records with inProgress status.
 // InProgress records are actively being worked on or executed.
 //
-// Usage in queries:
-//   concept==v1:hr:checkin;isInProgress()
+// Usage in a query filter:
+//   filter row => isInProgress(row)
 //
 /// Matches records with inProgress status
 trait isInProgress = row => row.status == "inProgress"
@@ -102,8 +101,8 @@ trait isInProgress = row => row.status == "inProgress"
 // Reusable filter that matches records that are NOT archived.
 // Used to exclude archived items from active queries.
 //
-// Usage in queries:
-//   concept==v1:library:artifact;isNotArchived()
+// Usage in a query filter:
+//   filter row => isNotArchived(row)
 //
 /// Matches records that are not archived
 trait isNotArchived = row => row.status != "archived"
@@ -113,16 +112,16 @@ trait isNotArchived = row => row.status != "archived"
 // isNotDeleted - Not Deleted Record Spec
 // ============================================
 //
-// Reusable filter that excludes records with deleted==true field.
+// Reusable filter that excludes records whose deleted field is true.
 // Deleted records have been permanently removed by the user and
 // should not appear in any listing. This is distinct from
-// isActiveRecord() which checks active status -- an agent can
+// isActiveRecord, which checks active status -- an agent can
 // be inactive (deactivated) but still visible in management views.
 //
-// Usage in queries:
-//   concept==v1:agents:agent;isNotDeleted()
+// Usage in a query filter:
+//   filter row => isNotDeleted(row)
 //
-/// Excludes records with deleted==true field
+/// Excludes records whose deleted field is true.
 trait isNotDeleted = row => row.deleted != true
 
 // ---- specs/v1/common/isOpen.memql ----
@@ -134,9 +133,8 @@ trait isNotDeleted = row => row.deleted != true
 // Open records require action and haven't been resolved yet.
 // Applicable to flags, cases, and other actionable items.
 //
-// Usage in queries:
-//   concept==v1:hr:flag;isOpen()
-//   concept==v1:hr:case;isOpen()
+// Usage in a query filter:
+//   filter row => isOpen(row)
 //
 /// Matches records with open status requiring action
 trait isOpen = row => row.status == "open"
@@ -149,9 +147,8 @@ trait isOpen = row => row.status == "open"
 // Reusable filter that matches records with scheduled status.
 // Scheduled records are pending execution at a future time.
 //
-// Usage in queries:
-//   concept==v1:hr:checkin;isScheduled()
-//   concept==v1:calendar:event;isScheduled()
+// Usage in a query filter:
+//   filter row => isScheduled(row)
 //
 /// Matches records with scheduled status
 trait isScheduled = row => row.status == "scheduled"
@@ -166,13 +163,13 @@ trait isScheduled = row => row.status == "scheduled"
 // are actually usable depends on the concept's policy (checkedDataUsable).
 // Policy-aware filtering happens at the query level.
 //
-// Implementation note: Because the MemQL lexer does not yet support the
-// || (logical OR) operator, this spec uses a negation approach. A record
-// is usable if it is active AND its validation state is NOT "draft".
-// This effectively matches "checked" and "confirmed" states.
+// Implementation note: the body is a negation because the lexer once had
+// no || operator. A record is usable if it is active AND its validation
+// state is not "draft", which matches "checked" and "confirmed" -- and,
+// since `!=` is null-safe, a row with no validation state at all.
 //
-// Usage in queries:
-//   concept==v1:data:record;isUsable()
+// Usage in a query filter:
+//   filter row => isUsable(row)
 //
 /// Matches active data records in checked or confirmed validation state
 trait isUsable = row => row.active == true && row.validationState != "draft"
@@ -194,9 +191,8 @@ trait isUsable = row => row.active == true && row.validationState != "draft"
 // Active employees are currently employed and receiving check-ins.
 // Active advocates are available for assignment.
 //
-// Usage in queries:
-//   concept==v1:hr:employee;statusIsActive()
-//   concept==v1:hr:advocate;statusIsActive()
+// Usage in a query filter:
+//   filter row => statusIsActive(row)
 //
 /// Matches records with active status
 trait statusIsActive = row => row.status == "active"
@@ -206,7 +202,7 @@ trait statusIsActive = row => row.status == "active"
 // statusIsArchived - Archived Status Spec
 // ============================================
 //
-// Reusable filter that matches records whose payload.status == "archived".
+// Reusable filter that matches records whose status is "archived".
 // Archived spaces are hidden from the active list and on a retention
 // countdown to hard-delete (see purgeExpiredArchivedSpaces automation +
 // User.preferences.archiveRetentionDays).
@@ -215,10 +211,10 @@ trait statusIsActive = row => row.status == "active"
 // active lists). Used by queryArchivedSpaces to populate the Archived
 // tab in the SpacesListPanel.
 //
-// Usage in queries:
-//   concept==v1:library:artifact;statusIsArchived()
+// Usage in a query filter:
+//   filter row => statusIsArchived(row)
 //
-/// Matches records with payload.status == 'archived'.
+/// Matches records whose status is "archived".
 trait statusIsArchived = row => row.status == "archived"
 
 // ---- specs/v1/common/statusIsSaved.memql ----
@@ -226,33 +222,33 @@ trait statusIsArchived = row => row.status == "archived"
 // statusIsSaved - Saved Status Spec
 // ======================================
 //
-// Reusable filter that matches records whose payload.status == "saved".
+// Reusable filter that matches records whose status is "saved".
 // Saved spaces are user-preserved -- they never auto-delete, regardless
 // of the archive retention policy. Used by querySavedSpaces to populate
 // the Saved tab in the SpacesListPanel.
 //
-// Usage in queries:
-//   concept==v1:library:artifact;statusIsSaved()
+// Usage in a query filter:
+//   filter row => statusIsSaved(row)
 //
-/// Matches records with payload.status == 'saved'.
+/// Matches records whose status is "saved".
 trait statusIsSaved = row => row.status == "saved"
 
 // ---- statusIsPending ----
 //
-// Reusable filter that matches records with payload.status == 'pending'.
+// Reusable filter that matches records whose status is "pending".
 // Used by identity flows (access requests, invitations) where pending
 // rows are queued for action by an admin or the original requester.
 
-/// Matches records with payload.status == 'pending'.
+/// Matches records whose status is "pending".
 trait statusIsPending = row => row.status == "pending"
 
 // ---- statusIsRunning ----
 //
-// Reusable filter that matches records with payload.status == 'running'.
+// Reusable filter that matches records whose status is "running".
 // Used by planner Plans / Tasks and by worker invocations that are
 // actively executing right now.
 
-/// Matches records with payload.status == 'running'.
+/// Matches records whose status is "running".
 trait statusIsRunning = row => row.status == "running"
 
 // ---- identityIsApiKey ----
@@ -262,7 +258,7 @@ trait statusIsRunning = row => row.status == "running"
 // (identityIsWorkerToken) so callers can scope per-credential-class
 // queries explicitly.
 
-/// Matches v1:identity:identity rows with identityType=='api_key'.
+/// Matches v1:identity:identity rows whose identityType is "api_key".
 trait identityIsApiKey = row => row.identityType == "api_key"
 
 // ---- identityIsWorkerToken ----
@@ -272,7 +268,7 @@ trait identityIsApiKey = row => row.identityType == "api_key"
 // only on the WorkerService gRPC path; this trait scopes per-worker
 // credential lookups.
 
-/// Matches v1:identity:identity rows with identityType=='worker_token'.
+/// Matches v1:identity:identity rows whose identityType is "worker_token".
 trait identityIsWorkerToken = row => row.identityType == "worker_token"
 
 // ---- identityIsNodeToken ----
@@ -283,7 +279,7 @@ trait identityIsWorkerToken = row => row.identityType == "worker_token"
 // trait scopes per-node credential lookups used by the bootstrap-
 // minted identity-row persistence path (memql#343).
 
-/// Matches v1:identity:identity rows with identityType=='node_token'.
+/// Matches v1:identity:identity rows whose identityType is "node_token".
 trait identityIsNodeToken = row => row.identityType == "node_token"
 
 // ---- identityIsBadge ----
@@ -295,7 +291,7 @@ trait identityIsNodeToken = row => row.identityType == "node_token"
 // credentials.keyHash to mint a short-lived class="badge" grant
 // token for the owning user.
 
-/// Matches v1:identity:identity rows with identityType=='badge'.
+/// Matches v1:identity:identity rows whose identityType is "badge".
 trait identityIsBadge = row => row.identityType == "badge"
 
 // ---- identityIsMagicLink ----
@@ -311,7 +307,7 @@ trait identityIsBadge = row => row.identityType == "badge"
 // revocation that would leave no sign-in route is warned about
 // rather than silently performed.
 
-/// Matches v1:identity:identity rows with identityType=='magic_link'.
+/// Matches v1:identity:identity rows whose identityType is "magic_link".
 trait identityIsMagicLink = row => row.identityType == "magic_link"
 
 // ---- identityIsPasskey ----
@@ -323,7 +319,7 @@ trait identityIsMagicLink = row => row.identityType == "magic_link"
 // enrolment, and the login ceremony (memql#3407) resolves a
 // usernameless assertion through the same key.
 
-/// Matches v1:identity:identity rows with identityType=='passkey'.
+/// Matches v1:identity:identity rows whose identityType is "passkey".
 trait identityIsPasskey = row => row.identityType == "passkey"
 
 // ---- identityIsOidc ----
@@ -335,7 +331,7 @@ trait identityIsPasskey = row => row.identityType == "passkey"
 // provider asserted, which is what lands a returning person on their
 // existing user row rather than a duplicate.
 
-/// Matches v1:identity:identity rows with identityType=='oidc'.
+/// Matches v1:identity:identity rows whose identityType is "oidc".
 trait identityIsOidc = row => row.identityType == "oidc"
 
 // ---- identityIsRecoveryKey ----
@@ -357,7 +353,7 @@ trait identityIsOidc = row => row.identityType == "oidc"
 // it is written down in three places: here, on the concept's
 // identityType description, and on the query itself.
 
-/// Matches v1:identity:identity rows with identityType=='recovery_key'.
+/// Matches v1:identity:identity rows whose identityType is "recovery_key".
 trait identityIsRecoveryKey = row => row.identityType == "recovery_key"
 
 // ---- isDeletionScheduled ----

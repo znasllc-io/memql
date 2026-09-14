@@ -1,7 +1,7 @@
 // queries.memql
 //
 // Authoring-namespace read surface (epic memql#954, issue #955).
-// Every query is caller-scoped (filter on payload.ownerUserId ==
+// Every query is caller-scoped (filter on row.ownerUserId ==
 // actor.userId) -- authored bundles + constructs are owned data, only
 // the author reads them. Backs the management UI, the gate runners
 // (#956/#958), the authored runtime loader (#959), and the compose-first
@@ -48,7 +48,7 @@ query bundle activeAuthoringBundles {
 
 // SYSTEM-SCOPED active-bundle query (#1039). Unlike the owner-scoped
 // queries above, this returns EVERY active bundle across ALL owners --
-// there is NO payload.ownerUserId==actor.userId filter. It exists for one
+// there is NO `row.ownerUserId == actor.userId` filter. It exists for one
 // caller: the boot-time authored-runtime re-arm (wireAuthoredRuntime),
 // which must enumerate other owners' active bundles to re-register their
 // constructs after a restart. A normal user never reads through it.

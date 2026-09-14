@@ -198,9 +198,9 @@ query site sitesForAccount {
 /// ARCHIVED ROWS ARE EXCLUDED, matching `libraryArtifacts` rather than this
 /// file's own `clientAccountsAll`: the account filter above is a view over the
 /// registry a person is administering, while this is a count of what is
-/// currently filed for a client. `archived!=true` rather than `==false`,
-/// because a row promoted before the field existed carries no key at all and
-/// `==false` would silently exclude it.
+/// currently filed for a client. `row.archived != true` rather than
+/// `row.archived == false`, because a row promoted before the field existed
+/// carries no key at all and `row.archived == false` would silently exclude it.
 @actor
 query artifact libraryItemsForAccount {
   args {
@@ -364,7 +364,7 @@ query account accountsWithAReservedName {
 /// The account, if any, that has PROVEN this domain and switched joining on.
 ///
 /// ALL THREE CONDITIONS ARE HERE rather than in the Go that calls it (epic
-/// memql#5165, D9): active, `domainStatus == "verified"`, and joinOnDomain. A
+/// memql#5165, D9): active, `row.domainStatus == "verified"`, and joinOnDomain. A
 /// condition checked in Go after a broader read is one somebody can drop while
 /// the read keeps working -- and each of these is the difference between a
 /// client's group and a stranger's.

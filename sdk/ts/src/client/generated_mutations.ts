@@ -480,7 +480,7 @@ QueryClient.prototype.archiveLibraryFile = function (this: QueryClient, args: Ar
   return this.executeNamed("archiveLibraryFile", buildArchiveLibraryFile(args), opts);
 };
 
-/** Archive a folder -- the soft delete, same shape as archiveArtifact. The row survives with its name and its place in the tree; libraryFolders' `archived != true` filter drops it from the default read. The CLIENT drives the recursive walk (design B5/D11): contents first via archiveArtifact (whose automation archives backing files), then folders children-first, so this write is always the LAST touch on an emptied branch -- and re-running an interrupted walk archives the remainder idempotently. Artifacts still pointing here render at root with an orphan marker rather than vanishing: the fold is tolerant, and a row is never lost to a dangling pointer. */
+/** Archive a folder -- the soft delete, same shape as archiveArtifact. The row survives with its name and its place in the tree; libraryFolders' `row.archived != true` filter drops it from the default read. The CLIENT drives the recursive walk (design B5/D11): contents first via archiveArtifact (whose automation archives backing files), then folders children-first, so this write is always the LAST touch on an emptied branch -- and re-running an interrupted walk archives the remainder idempotently. Artifacts still pointing here render at root with an orphan marker rather than vanishing: the fold is tolerant, and a row is never lost to a dangling pointer. */
 // Bound concept: v1:library:folder (machine-readable: BoundConcepts["archiveLibraryFolder"] in generated_concepts.ts).
 export interface ArchiveLibraryFolderArgs {
   folderId: string;
@@ -2334,7 +2334,7 @@ QueryClient.prototype.createIdentityProvider = function (this: QueryClient, args
   return this.executeNamed("createIdentityProvider", buildCreateIdentityProvider(args), opts);
 };
 
-/** Create a Library file row for bytes already written to blob storage. Owner-acted: ownerUserId is stamped from actor.userId, so a file can only ever be created for the person the call runs as. format is the caller's MIME-derived classification, defaulting to 'other' (the metadata-only card) for a type nothing recognises. status starts at 'stored' -- the bytes are durable and nothing has looked at them yet; the analysis pass moves it on through setLibraryFileStatus. That status is STAMPED rather than accepted is load-bearing beyond this mutation: indexFileOnCreate filters on status=="stored" so it promotes exactly once, because graph.node.created fires on every write and a second promotion would wipe the artifact's labels -- a caller-supplied status would let a later write re-enter that state. indexFileOnCreate folds the new row into the Library index automatically. */
+/** Create a Library file row for bytes already written to blob storage. Owner-acted: ownerUserId is stamped from actor.userId, so a file can only ever be created for the person the call runs as. format is the caller's MIME-derived classification, defaulting to 'other' (the metadata-only card) for a type nothing recognises. status starts at 'stored' -- the bytes are durable and nothing has looked at them yet; the analysis pass moves it on through setLibraryFileStatus. That status is STAMPED rather than accepted is load-bearing beyond this mutation: indexFileOnCreate filters on `row.status == "stored"` so it promotes exactly once, because graph.node.created fires on every write and a second promotion would wipe the artifact's labels -- a caller-supplied status would let a later write re-enter that state. indexFileOnCreate folds the new row into the Library index automatically. */
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["createLibraryFile"] in generated_concepts.ts).
 export interface CreateLibraryFileArgs {
   producedByRunId?: string;
@@ -4564,7 +4564,7 @@ QueryClient.prototype.provisionWorkspace = function (this: QueryClient, args: Pr
   return this.executeNamed("provisionWorkspace", buildProvisionWorkspace(args), opts);
 };
 
-/** Prune a decayed v1:memory:belief: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier). */
+/** Prune a decayed v1:memory:belief: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter `row.status == "active"`, so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier). */
 // Bound concept: v1:memory:belief (machine-readable: BoundConcepts["pruneMemoryBelief"] in generated_concepts.ts).
 export interface PruneMemoryBeliefArgs {
   memoryId: string;
@@ -5469,7 +5469,7 @@ QueryClient.prototype.rejectAccessRequest = function (this: QueryClient, args: R
   return this.executeNamed("rejectAccessRequest", buildRejectAccessRequest(args), opts);
 };
 
-/** Reject a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and sets validationStatus=rejected (valid stays false, so the override is never resolution-eligible), stamping validatedBy=actor.userId + validatedAt + the rejectionReason. A rejected proposal is RECORDED for audit, not silently dropped. Owned: gated by ownerUserId==actor.userId in the update read-merge. */
+/** Reject a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and sets validationStatus=rejected (valid stays false, so the override is never resolution-eligible), stamping validatedBy=actor.userId + validatedAt + the rejectionReason. A rejected proposal is RECORDED for audit, not silently dropped. Owned: gated by `row.ownerUserId == actor.userId` in the update read-merge. */
 // Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["rejectOverride"] in generated_concepts.ts).
 export interface RejectOverrideArgs {
   overrideId: string;
@@ -5519,7 +5519,7 @@ QueryClient.prototype.releaseWorkspace = function (this: QueryClient, args: Rele
 };
 
 /** Ask for a binding to come down. The row walks to `removing`; the sweep dispatches the unbind script, and `markCustomDomainRemoved` closes the walk.
-THE HOSTNAME STOPS RESOLVING AT THIS WRITE, not at the Ingress deletion: `liveCustomDomainByHostname` filters `status=="live"`, so the edge stops answering the moment this lands. That ordering is the point -- an operator removing a binding because it is being abused should not have to wait for kubectl. */
+THE HOSTNAME STOPS RESOLVING AT THIS WRITE, not at the Ingress deletion: `liveCustomDomainByHostname` filters `row.status == "live"`, so the edge stops answering the moment this lands. That ordering is the point -- an operator removing a binding because it is being abused should not have to wait for kubectl. */
 // Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["removeCustomDomain"] in generated_concepts.ts).
 export interface RemoveCustomDomainArgs {
   domainId: string;
@@ -5723,7 +5723,7 @@ QueryClient.prototype.resolveApprovalRequest = function (this: QueryClient, args
 };
 
 /** Bring a Library artifact index row back out of the Bin (memql#4784) -- the exact inverse of archiveArtifact, and the write that makes archiving a door rather than a one-way door. Nothing was destroyed by the archive, so nothing has to be reconstructed here: the row keeps its labels, its folder, its provenance and its sourceConceptRef throughout, and this write only flips the flag back. updatedAt advances because a restore IS a change a person made.
-THE BACKING FILE IS NOT RESTORED BY AN AUTOMATION, and that asymmetry with the archive path is deliberate. archiveFileOnArtifactArchive rides `node.updated` on v1:library:artifact filtered on `archived == true`; a mirror of it filtered on `archived == false` would fire on essentially EVERY artifact update, since almost no artifact is archived -- and, with the archive automation already in place, the two together close the cycle that automation's own header warns about (each write publishes an event the other subscribes to, and both being idempotent does not stop the events). So restore is a CLIENT-DRIVEN PAIR, exactly as the recursive archive walk is: the Bin calls this and restoreLibraryFile together, and a re-run of an interrupted restore simply finds the half that already landed absent from its next plan. */
+THE BACKING FILE IS NOT RESTORED BY AN AUTOMATION, and that asymmetry with the archive path is deliberate. archiveFileOnArtifactArchive rides `node.updated` on v1:library:artifact filtered on `row.archived == true`; a mirror of it filtered on `row.archived == false` would fire on essentially EVERY artifact update, since almost no artifact is archived -- and, with the archive automation already in place, the two together close the cycle that automation's own header warns about (each write publishes an event the other subscribes to, and both being idempotent does not stop the events). So restore is a CLIENT-DRIVEN PAIR, exactly as the recursive archive walk is: the Bin calls this and restoreLibraryFile together, and a re-run of an interrupted restore simply finds the half that already landed absent from its next plan. */
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["restoreArtifact"] in generated_concepts.ts).
 export interface RestoreArtifactArgs {
   artifactId: string;
@@ -9067,7 +9067,7 @@ QueryClient.prototype.upsertTerritory = function (this: QueryClient, args: Upser
   return this.executeNamed("upsertTerritory", buildUpsertTerritory(args), opts);
 };
 
-/** Validate (ACCEPT) a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and flips valid=false->true + validationStatus=proposed->validated, stamping validatedBy=actor.userId + validatedAt, and bumps version (capture-as-version). Blast-radius-scaled by role: the validateHealingValidationRankBound Go guard rejects the write unless the actor's role rank meets the override's blastRadius-required rank (personal->user, shared->admin, spine_adjacent->developer; owner always allowed). Once validated the override becomes resolution-eligible -- the two-tier resolver prefers it over base. Owned: gated by ownerUserId==actor.userId in the update read-merge. */
+/** Validate (ACCEPT) a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and flips valid=false->true + validationStatus=proposed->validated, stamping validatedBy=actor.userId + validatedAt, and bumps version (capture-as-version). Blast-radius-scaled by role: the validateHealingValidationRankBound Go guard rejects the write unless the actor's role rank meets the override's blastRadius-required rank (personal->user, shared->admin, spine_adjacent->developer; owner always allowed). Once validated the override becomes resolution-eligible -- the two-tier resolver prefers it over base. Owned: gated by `row.ownerUserId == actor.userId` in the update read-merge. */
 // Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["validateOverride"] in generated_concepts.ts).
 export interface ValidateOverrideArgs {
   overrideId: string;

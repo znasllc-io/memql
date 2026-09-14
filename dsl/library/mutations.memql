@@ -60,10 +60,10 @@ mutate artifact createArtifact {
     args.folderId
     // Written explicitly rather than left to the concept's @default, which
     // never fires on insert. NOT because the default list needs it: a row with
-    // no `archived` member is still returned by `archived != true` (measured,
+    // no `archived` member is still returned by `row.archived != true` (measured,
     // TestArchivedFilterKeepsRowsWrittenBeforeTheFieldExisted). It is written
     // so every row states its own answer -- which is what keeps the next
-    // author from "simplifying" the filter to `archived == false`, the one
+    // author from "simplifying" the filter to `row.archived == false`, the one
     // spelling a missing key WOULD silently exclude.
     archived: args.archived ?? false
     args.partitionId
@@ -249,7 +249,7 @@ mutate generatedOutput updateGeneratedOutputContent {
 /// card) for a type nothing recognises. status starts at 'stored' -- the bytes are durable and
 /// nothing has looked at them yet; the analysis pass moves it on through setLibraryFileStatus.
 /// That status is STAMPED rather than accepted is load-bearing beyond this mutation:
-/// indexFileOnCreate filters on status=="stored" so it promotes exactly once, because
+/// indexFileOnCreate filters on `row.status == "stored"` so it promotes exactly once, because
 /// graph.node.created fires on every write and a second promotion would wipe the artifact's
 /// labels -- a caller-supplied status would let a later write re-enter that state.
 /// indexFileOnCreate folds the new row into the Library index automatically.
@@ -381,7 +381,7 @@ mutate artifact archiveArtifact {
 ///
 /// THE BACKING FILE IS NOT RESTORED BY AN AUTOMATION, and that asymmetry with the archive path is
 /// deliberate. archiveFileOnArtifactArchive rides `node.updated` on v1:library:artifact filtered on
-/// `archived == true`; a mirror of it filtered on `archived == false` would fire on essentially
+/// `row.archived == true`; a mirror of it filtered on `row.archived == false` would fire on essentially
 /// EVERY artifact update, since almost no artifact is archived -- and, with the archive automation
 /// already in place, the two together close the cycle that automation's own header warns about
 /// (each write publishes an event the other subscribes to, and both being idempotent does not stop
@@ -556,7 +556,7 @@ mutate folder moveLibraryFolder {
 }
 
 /// Archive a folder -- the soft delete, same shape as archiveArtifact. The row survives with its
-/// name and its place in the tree; libraryFolders' `archived != true` filter drops it from the
+/// name and its place in the tree; libraryFolders' `row.archived != true` filter drops it from the
 /// default read. The CLIENT drives the recursive walk (design B5/D11): contents first via
 /// archiveArtifact (whose automation archives backing files), then folders children-first, so this
 /// write is always the LAST touch on an emptied branch -- and re-running an interrupted walk
@@ -780,7 +780,7 @@ mutate fileVersion createLibraryFileVersion {
 /// shows ONE row.
 ///
 /// status is stamped 'analyzing', NEVER 'stored', and that is load-bearing (design D4):
-/// indexFileOnCreate filters on status=="stored" and graph.node.created fires on every write, so a
+/// indexFileOnCreate filters on `row.status == "stored"` and graph.node.created fires on every write, so a
 /// head that re-entered 'stored' would re-run promotion through createArtifact's bare insert{} --
 /// wiping the artifact's labels and re-filing it at the file row's stale initial folderId. That is
 /// the memql#4288 hazard arriving through the promotion path, as a side effect of uploading a new
