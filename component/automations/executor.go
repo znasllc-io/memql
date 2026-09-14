@@ -734,6 +734,12 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		ChainTrackingEnabled: e.chainTrackingEnabled,
 	}
 
+	// A statement body runs through runSequence (sequence.go), the one loop
+	// for its lists; the loop below is every other automation's.
+	if automation.IsStatementBody() {
+		return e.runStatementAutomation(ctx, automation, exec, triggeringEvent, journal, stepCtx, chainHead)
+	}
+
 	// The graph-level stop. See cancel.go: the zero value asks at the FIRST
 	// boundary, so a run cancelled while it was queued runs no step at all.
 	cancelPoll := newCancelPoller(e.cancelPollInterval)

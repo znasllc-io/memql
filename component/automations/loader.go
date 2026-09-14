@@ -965,6 +965,22 @@ func (l *Loader) validateSteps(steps []*Step) error {
 			if step.Automation == nil {
 				return fmt.Errorf("step %q: automation configuration required for type 'automation'", step.ID)
 			}
+		// A statement body's own step types (epic memql#5370).
+		case StepTypeExpression:
+			if strings.TrimSpace(step.Expression) == "" {
+				return fmt.Errorf("step %q: an expression step requires its expression", step.ID)
+			}
+		case StepTypeReturn:
+			if step.Return == nil {
+				return fmt.Errorf("step %q: return configuration required for type 'return'", step.ID)
+			}
+		case StepTypeBlock:
+			if step.Block == nil {
+				return fmt.Errorf("step %q: block configuration required for type 'block'", step.ID)
+			}
+			if err := l.validateSteps(step.Block.Steps); err != nil {
+				return fmt.Errorf("step %q block: %w", step.ID, err)
+			}
 		default:
 			return fmt.Errorf("step %q: unknown type %q", step.ID, step.Type)
 		}

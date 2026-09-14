@@ -469,13 +469,19 @@ func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, c
 	if finished.IsZero() {
 		finished = time.Now()
 	}
+	outcome := map[string]any{"executorStatus": exec.Status}
+	if exec.Returned {
+		// The value a statement body's `return` ended the run with (epic
+		// memql#5370).
+		outcome["returned"] = exec.Output
+	}
 	args := map[string]any{
 		"runId":      exec.ID,
 		"status":     status,
 		"finishedAt": rfc3339(finished),
 		"chainHead":  chainHead,
 		"stepOrder":  exec.StepOrder,
-		"outcome":    map[string]any{"executorStatus": exec.Status},
+		"outcome":    outcome,
 	}
 	if exec.Error != "" {
 		args["errorMessage"] = exec.Error

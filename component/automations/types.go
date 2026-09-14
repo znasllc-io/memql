@@ -154,6 +154,11 @@ type Automation struct {
 	// string evaluator (evaluator.go) reads. See expressions_v1.go.
 	Expressions string `json:"expressions,omitempty"`
 
+	// Body is "statements" (BodyStatements) when the steps were compiled from
+	// an edition-2026 statement body (epic memql#5370); such an automation's
+	// expressions are v1 too. Empty for every other automation.
+	Body string `json:"body,omitempty"`
+
 	// exprsPrepared records that PrepareExpressions parsed this v1
 	// automation's expressions. The executor refuses a v1 automation that was
 	// never prepared rather than letting a step fall back to the string
@@ -393,7 +398,25 @@ const (
 
 	// StepTypeEmitConceptCard emits a concept card utterance to a conversation.
 	StepTypeEmitConceptCard StepType = "emitConceptCard"
+
+	// StepTypeExpression evaluates one expression in process; a statement
+	// body's `x := <expression>` (epic memql#5370). Statement bodies only.
+	StepTypeExpression StepType = "expression"
+
+	// StepTypeReturn ends the sequence it is in with a value; a statement
+	// body's `return <expression>`. Statement bodies only.
+	StepTypeReturn StepType = "return"
+
+	// StepTypeBlock runs a list of steps in order in a scope of its own; a
+	// parallel statement's branch. Statement bodies only.
+	StepTypeBlock StepType = "block"
 )
+
+// BodyStatements is the value of an automation's `"body"` key that marks
+// its steps as compiled from an edition-2026 statement body (epic memql#5370):
+// they run in order through runSequence, each named statement binds its value
+// under its `binds` name, and names resolve as statements do (sequence.go).
+const BodyStatements = "statements"
 
 // ErrorStrategy defines how to handle step failures.
 type ErrorStrategy string
@@ -471,6 +494,26 @@ type Step struct {
 
 	// EmitConceptCard configuration (type: "emitConceptCard")
 	EmitConceptCard *EmitConceptCardStepConfig `json:"emitConceptCard,omitempty"`
+
+	// Binds is the name a statement-body step binds its value under, when
+	// the statement has one (`x := ...`). It is separate from ID: the id
+	// names the step in the run record and is unique within its list, and
+	// two sibling branches may bind the same name. Statement bodies only.
+	Binds string `json:"binds,omitempty"`
+
+	// Returns marks a statement-body call step written `return <call>`: the
+	// sequence ends after it, with the call's value as the returned value.
+	Returns bool `json:"returns,omitempty"`
+
+	// Expression is an expression step's canonical v1 source (type
+	// "expression").
+	Expression string `json:"expression,omitempty"`
+
+	// Return configures a return step (type "return").
+	Return *ReturnStepConfig `json:"return,omitempty"`
+
+	// Block configures a block step (type "block").
+	Block *BlockStepConfig `json:"block,omitempty"`
 
 	// Exprs holds this step's expressions parsed once at load, for a step of
 	// a v1 automation (PrepareExpressions). Non-nil IS the mark of a v1 step:
@@ -587,6 +630,22 @@ type FunctionStepConfig struct {
 	Name string `json:"name"`
 	// Args are optional function arguments passed at invocation time.
 	Args map[string]any `json:"args,omitempty"`
+	// Kind is the construct kind a statement body wrote before the call --
+	// query, mutation, logic or builtin (epic memql#5370). It decides the
+	// shape of the value the call binds (statementValue). Empty for a
+	// legacy step.
+	Kind string `json:"kind,omitempty"`
+}
+
+// ReturnStepConfig configures a return step: the canonical v1 source of the
+// returned value, empty for a bare `return`.
+type ReturnStepConfig struct {
+	Value string `json:"value,omitempty"`
+}
+
+// BlockStepConfig configures a block step: its own list of steps.
+type BlockStepConfig struct {
+	Steps []*Step `json:"steps"`
 }
 
 // ActionStepConfig configures an action-library replay step (#1758, epic
@@ -788,6 +847,12 @@ type AutomationExecution struct {
 
 	// Steps contains results for each executed step.
 	Steps map[string]*StepResult `json:"steps"`
+
+	// Returned and Output are what a statement body's `return` ended the run
+	// with (epic memql#5370): Returned is false when the body ran off its end,
+	// and Output is the value (nil for a bare return).
+	Returned bool `json:"returned,omitempty"`
+	Output   any  `json:"output,omitempty"`
 
 	// Error contains the automation-level error if any.
 	Error string `json:"error,omitempty"`

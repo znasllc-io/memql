@@ -87,6 +87,9 @@ type StepExprs struct {
 	Topic ast.ExpressionNode
 	// CardType, PartitionID and ConceptRef are a concept-card step's.
 	CardType, PartitionID, ConceptRef ast.ExpressionNode
+	// Value is an expression step's expression, or a return step's value
+	// (nil for a bare return) -- statement bodies (epic memql#5370).
+	Value ast.ExpressionNode
 }
 
 // ExprLeaf is a value-map leaf that is an expression: `{"$expr": src}` in the
@@ -382,6 +385,18 @@ func (p *exprPreparer) step(s *Step) error {
 		}
 	case s.Parallel != nil:
 		if err := p.steps(s.Parallel.Branches); err != nil {
+			return err
+		}
+	case s.Type == StepTypeExpression:
+		if x.Value, err = p.parse(at("expression"), s.Expression); err != nil {
+			return err
+		}
+	case s.Return != nil:
+		if x.Value, err = p.parseOptional(at("return value"), s.Return.Value); err != nil {
+			return err
+		}
+	case s.Block != nil:
+		if err := p.steps(s.Block.Steps); err != nil {
 			return err
 		}
 	case s.Switch != nil:

@@ -187,6 +187,10 @@ func NewRegistry() *Registry {
 	r.Register(automations.StepTypeShape, &ShapeExecutor{})
 	r.Register(automations.StepTypeDetectLeadSignal, &DetectLeadSignalExecutor{})
 	r.Register(automations.StepTypeEmitConceptCard, &EmitConceptCardExecutor{})
+	// A parallel statement's branch (statements.go, epic memql#5370). The
+	// statement body's expression and return steps never reach the registry:
+	// runSequence evaluates them itself.
+	r.Register(automations.StepTypeBlock, &BlockExecutor{})
 
 	return r
 }

@@ -118,6 +118,13 @@ var quotedSegmentPattern = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)
 // their bare-identifier semantics (including the literal-string fallback)
 // are unchanged, so the existing tree cannot regress.
 func validateArgsResolution(a *Automation) error {
+	// A statement body's names were checked when it compiled, by
+	// compiler.CheckBody (epic memql#5370): the scope rules are the gate
+	// there, and the G2 bare-args tier this function polices does not exist
+	// in it -- an argument is read args.x.
+	if a.IsStatementBody() {
+		return nil
+	}
 	// A v1 automation's expressions are parsed nodes, checked on the nodes
 	// (args_resolution_v1.go): the token scan below cannot read the v1
 	// grammar (a lambda parameter is an "unknown" token to it).

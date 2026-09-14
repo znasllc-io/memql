@@ -68,6 +68,12 @@ type Evaluator struct {
 
 	// logger for logging warnings when expression resolution fails.
 	logger *slog.Logger
+
+	// names is the name frame of a statement-body run (statement_scope.go,
+	// epic memql#5370): non-nil puts RunScope in statement resolution. A
+	// Clone shares it; a loop iteration or a parallel branch opens a child
+	// frame of its own (childFrame).
+	names *nameFrame
 }
 
 // SetCanonicalIdResolver wires the engine's id-canonicalization helper
@@ -166,6 +172,7 @@ func (e *Evaluator) Clone() *Evaluator {
 		systemSecretResolver:   e.systemSecretResolver,
 		canonicalIdResolver:    e.canonicalIdResolver,
 		logger:                 e.logger,
+		names:                  e.names,
 	}
 	for k, v := range e.steps {
 		clone.steps[k] = v

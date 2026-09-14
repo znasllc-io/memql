@@ -82,6 +82,11 @@ func (s *RunScope) Lookup(name string) (any, bool) {
 	if e == nil || name == "" {
 		return nil, false
 	}
+	// A statement body resolves names its own way, and none of the tiers
+	// below exist in it (statement_scope.go).
+	if e.statementMode() {
+		return s.statementLookup(name)
+	}
 	if e.item != nil && name == e.itemName {
 		return e.item, true
 	}
@@ -424,7 +429,12 @@ func (e *Evaluator) StepCondition(ctx context.Context, step *Step) (bool, error)
 // or element is omitted -- while an explicit nil is kept. A TOP-LEVEL absent
 // value is returned as memql.Absent for the caller to decide about.
 func (e *Evaluator) ResolveV1Value(ctx context.Context, v any) (any, error) {
-	return resolveV1(ctx, v, e.RunScope(), e.ExprOptions())
+	out, err := resolveV1(ctx, v, e.RunScope(), e.ExprOptions())
+	if err != nil || !e.statementMode() {
+		return out, err
+	}
+	// A statement body's rows leave it as the maps they arrived as.
+	return unwrapStatementValue(out), nil
 }
 
 // ResolveV1Map resolves a v1 value map (see ResolveV1Value). Nil stays nil.
@@ -435,6 +445,10 @@ func (e *Evaluator) ResolveV1Map(ctx context.Context, m map[string]any) (map[str
 	v, err := resolveV1(ctx, m, e.RunScope(), e.ExprOptions())
 	if err != nil {
 		return nil, err
+	}
+	if e.statementMode() {
+		// A statement body's rows leave it as the maps they arrived as.
+		v = unwrapStatementValue(v)
 	}
 	out, _ := v.(map[string]any)
 	return out, nil

@@ -23,6 +23,11 @@ type ForEachExecutor struct {
 
 // Execute runs a forEach step.
 func (e *ForEachExecutor) Execute(ctx context.Context, step *automations.Step, stepCtx *Context) (*automations.StepResult, error) {
+	// A statement body's `for` runs its list through the sequence runner, in
+	// a frame per iteration (statements.go, epic memql#5370).
+	if stepCtx.Evaluator != nil && stepCtx.Evaluator.InStatementBody() {
+		return forEachStatements(ctx, step, stepCtx)
+	}
 	result := &automations.StepResult{
 		StepId:    step.ID,
 		StartedAt: time.Now(),

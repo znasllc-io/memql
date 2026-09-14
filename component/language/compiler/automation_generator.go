@@ -424,6 +424,9 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 			return nil, err
 		}
 		output["steps"] = steps
+		// The runtime reads this to run the steps as statements -- in order,
+		// each name bound to its value (component/automations/sequence.go).
+		output["body"] = "statements"
 	}
 
 	// Steps -- two-pass compile with topological sort.
