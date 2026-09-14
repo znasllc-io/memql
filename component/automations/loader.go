@@ -219,7 +219,14 @@ func invokedLogicNames(a *Automation) []string {
 //   - Can have supporting queries (helpers)
 //   - Cannot have mutations (mutations go in functions/ directory)
 func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
-	authored := source
+	return l.compileMemQLFrom(source, source, path)
+}
+
+// compileMemQLFrom is compileMemQL for a source derived from authored -- a
+// slice of a file placed on its line there, or a terse automation's lowered
+// longhand compiled against the one-line header the author wrote: a parse
+// error or a rewriter refusal is reported where authored has it (memql#5364).
+func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, error) {
 	// Close the annotation silent-tolerance gap (#2712): automations reach
 	// this dedicated loader instead of the function slicer's gate, so an
 	// unknown / dead / retired annotation would otherwise be silently
@@ -404,14 +411,14 @@ func (l *Loader) parseResolveCompile(authored, source, path string) (*compiler.C
 	if languageParser.LooksLikeStructLogic(source) {
 		rewritten, err := languageParser.NormaliseLogicSource(source)
 		if err != nil {
-			return nil, fmt.Errorf("logic rewrite: %w", err)
+			return nil, languageParser.PositionRewriteError(authored, fmt.Errorf("logic rewrite: %w", err))
 		}
 		source = rewritten
 	}
 	if languageParser.LooksLikeStructAutomation(source) {
 		rewritten, err := languageParser.NormaliseAutomationSource(source)
 		if err != nil {
-			return nil, fmt.Errorf("automation rewrite: %w", err)
+			return nil, languageParser.PositionRewriteError(authored, fmt.Errorf("automation rewrite: %w", err))
 		}
 		source = rewritten
 	} else if languageParser.LooksLikeLegacyAutomation(source) {
