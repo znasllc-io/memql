@@ -149,14 +149,15 @@ func TestRun_BundleWithoutLanguageLineExitsOne(t *testing.T) {
 }
 
 // TestRun_AMistypedKeywordIsOneRefusal: a top-level statement opened by a
-// word no construct is spelled with is refused twice over -- by the parser,
-// which Load runs over the whole file, and by the construct-keyword gate the
-// parity pass runs at Init (memql#5356). memqllint printed both, with two
-// keyword lists that disagreed: the parser's listed the internal `func`, the
-// gate's listed `use`. The parser now raises the gate's own refusal from the
-// one table (ConstructKeywords), and memqllint prints it once: the gate's
-// copy, which carries the authored line. The retired `import ( ... )` block
-// is the same statement-level refusal, naming its replacement.
+// word no construct is spelled with is refused by both passes -- by Load,
+// which runs the construct-keyword gate over each whole file and whose parser
+// raises the same refusal, and by the gate the parity pass runs at Init
+// (memql#5356). memqllint printed two, with two keyword lists that disagreed:
+// the parser's listed the internal `func`, the gate's listed `use`. The
+// parser now raises the gate's own refusal from the one table
+// (ConstructKeywords), and memqllint prints it once: Load's copy, which names
+// the line of the file. The retired `import ( ... )` block is the same
+// statement-level refusal, naming its replacement.
 func TestRun_AMistypedKeywordIsOneRefusal(t *testing.T) {
 	cases := []struct {
 		name, queries string
@@ -211,6 +212,43 @@ func TestRun_AMistypedKeywordIsOneRefusal(t *testing.T) {
 		"demo/queries.memql":  testQueries,
 	})}); code != 0 {
 		t.Errorf("the control: run() = %d, want 0\n%s", code, out)
+	}
+}
+
+// TestRun_ARefusalBothPassesMakeNamesTheFileLine (memql#5356): an annotation
+// the registry refuses is refused by Load, which parses the whole file, and by
+// the parity pass, whose query loader parses one construct at a time -- so the
+// parity copy counts its line from the top of that construct ("line 3" here),
+// and the rewriter that lowers the first query moves the parser's own count a
+// line down. memqllint prints the refusal once, naming line 12, the line of
+// the file the author wrote it on.
+func TestRun_ARefusalBothPassesMakeNamesTheFileLine(t *testing.T) {
+	queries := testQueries + `
+
+@bogus
+@enabled
+@description("A second query.")
+query item queryByStatus {
+  args {
+    status  string  @required
+  }
+  filter  status == args.status
+}`
+	if got := strings.Split(queries, "\n")[11]; got != "@bogus" {
+		t.Fatalf("the fixture's line 12 is %q, want @bogus", got)
+	}
+	code, report, out := jsonReport(t, writeTree(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/queries.memql":  queries,
+	}))
+	if code != 1 || len(report.Errors) != 1 {
+		t.Fatalf("one refused annotation: run() = %d, want 1 with exactly one error:\n%s", code, out)
+	}
+	msg := report.Errors[0].Message
+	for _, want := range []string{"demo/queries.memql:", "at line 12, column 1:", `query "queryByStatus": unknown annotation @bogus`, "[annotation_unknown]"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the refusal must carry %q, got %q", want, msg)
+		}
 	}
 }
 

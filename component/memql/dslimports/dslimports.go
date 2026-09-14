@@ -137,6 +137,17 @@ func Load(root fs.FS) (*Tree, error) {
 			continue
 		}
 
+		// A top-level statement no construct keyword opens -- a typo'd
+		// `qurey`, the retired `import ( ... )` block, which the parser
+		// still reads -- loads as nothing, and boot refuses it (the
+		// construct-keyword gate, dslgate). Load runs the same check over
+		// the same text, so a caller that runs Load alone (memql-cockpit's
+		// `memql lint`) sees what boot refuses.
+		unknown := languageParser.FindUnknownConstructKeywords(string(content))
+		for _, u := range unknown {
+			diagnostics = append(diagnostics, &ConstructKeywordError{File: p, Refusal: u})
+		}
+
 		// Run the full rewriter chain (struct-form spec / trait /
 		// query / mutation / logic / automation / file-top args)
 		// before invoking the bare parser. This is the same path
@@ -172,14 +183,21 @@ func Load(root fs.FS) (*Tree, error) {
 			// can name a bad file's importers; without that, a single
 			// malformed file would mask import errors in unrelated
 			// files.
+			//
+			// The parser raises the construct-keyword refusal too, for the
+			// first such statement it meets; that copy is the one above
+			// again, so it is not reported twice.
 			treatAsDedicatedParserFile := errors.Is(parseErr, languageParser.ErrEmptyInput)
+			echo := refusedAbove(parseErr, unknown)
 
 			importsOnly, importsErr := languageParser.ExtractImports(string(content))
 			if importsErr != nil {
-				diagnostics = append(diagnostics, &FileParseError{File: p, Err: parseErr})
+				if !echo {
+					diagnostics = append(diagnostics, &FileParseError{File: p, Err: parseErr})
+				}
 				continue
 			}
-			if !treatAsDedicatedParserFile {
+			if !treatAsDedicatedParserFile && !echo {
 				diagnostics = append(diagnostics, &FileParseError{File: p, Err: parseErr})
 			}
 			importsOnly.Path = p
@@ -261,10 +279,42 @@ type LanguageLineError struct {
 
 func (e *LanguageLineError) Error() string { return e.Problem.Message }
 
+// ConstructKeywordError is one top-level statement of a file opened by a word
+// no construct is spelled with (parser.FindUnknownConstructKeywords), which
+// boot refuses. Its text names the file and the statement's line, then the
+// refusal, which ends with its code ("[construct_unknown]").
+type ConstructKeywordError struct {
+	File    string
+	Refusal languageParser.UnknownConstructKeyword
+}
+
+func (e *ConstructKeywordError) Error() string {
+	return fmt.Sprintf("%s: line %d: %s", e.File, e.Refusal.Line, e.Refusal.Message)
+}
+
+// Unwrap exposes the refusal for errors.As.
+func (e *ConstructKeywordError) Unwrap() error { return &e.Refusal }
+
+// refusedAbove reports whether parseErr is the parser's copy of one of the
+// file's construct-keyword refusals: the same word, refused on the same line.
+func refusedAbove(parseErr error, unknown []languageParser.UnknownConstructKeyword) bool {
+	var u *languageParser.UnknownConstructKeyword
+	if !errors.As(parseErr, &u) {
+		return false
+	}
+	for _, k := range unknown {
+		if k.Keyword == u.Keyword && k.Line == u.Line {
+			return true
+		}
+	}
+	return false
+}
+
 // FileParseError is one file of the tree the parser refused. Its text is the
-// one Load has always printed ("<file>: parse: <the parser's error>"); the
-// type lets a caller read the file, and reach the parser's own error and its
-// cause, without taking the text apart.
+// one Load has always printed ("<file>: parse: <the parser's error>"), whose
+// position is the file's own line (compiler.ParseFileSource); the type lets a
+// caller read the file, and reach the parser's own error and its cause,
+// without taking the text apart.
 type FileParseError struct {
 	File string
 	Err  error

@@ -205,15 +205,15 @@ func run(args []string) int {
 		if perr != nil {
 			integrityErrs = append(integrityErrs, fmt.Errorf("engine-parity lint: %w", perr))
 		}
-		for _, d := range parityDiags {
+		// A refusal both passes make prints once, from Load, whose copy
+		// names the line of the file.
+		for _, d := range withoutLoadEchoes(parityDiags, loadDiags) {
 			if d.File != "" {
 				integrityErrs = append(integrityErrs, fmt.Errorf("%s: %s", d.File, d.Message))
 			} else {
 				integrityErrs = append(integrityErrs, fmt.Errorf("%s", d.Message))
 			}
 		}
-		// A refusal both passes make prints once, from the parity pass.
-		loadDiags = withoutParityEchoes(loadDiags, parityDiags)
 	}
 
 	report := buildReport(tree, loadErr, append(loadDiags, integrityErrs...), target)
@@ -264,9 +264,9 @@ type Diagnostic struct {
 }
 
 // buildReport renders the run: diags is every diagnostic to print -- Load's,
-// flattened and without the parity pass's echoes, then the integrity lanes'
-// and the parity pass's -- and loadErr only decides whether the load order
-// is shown.
+// flattened, then the integrity lanes' and the parity pass's, without its
+// echoes of Load's refusals -- and loadErr only decides whether the load
+// order is shown.
 func buildReport(tree *dslimports.Tree, loadErr error, diags []error, target string) *Report {
 	r := &Report{}
 	if tree != nil {
@@ -366,61 +366,69 @@ func rootLanguageLine(rootDir string) (errs []error, warning string) {
 	return errs, ""
 }
 
-// withoutParityEchoes drops each Load diagnostic the engine-parity pass
-// reports too, so an author reads one refusal once (memql#5356).
+// withoutLoadEchoes drops each engine-parity diagnostic that repeats a
+// refusal Load made, so an author reads one refusal once (memql#5356).
 //
 // Both passes refuse some things: a domain whose language line the engine
-// will not read -- Load because a caller that runs it alone (memql-cockpit's
-// `memql lint`) must see what boot refuses, the parity pass because it IS
-// boot -- and a statement the parser refuses with a coded refusal, which Load
-// meets parsing the whole file and the parity pass meets in the loader or
-// gate that reads the statement. The parity pass's copy is kept: it is the
-// engine's own answer, worded as boot words it, with the authored line. A
-// Load diagnostic is an echo only when a parity diagnostic about the SAME
-// file carries the same refusal, never merely because the parity pass ran:
-// that pass mounts only the domains MountOverlayDomains takes, so a refusal
-// in a domain it left out is Load's alone to report.
-func withoutParityEchoes(load []error, parity []memql.LintDiagnostic) []error {
-	if len(parity) == 0 {
-		return load
-	}
-	out := make([]error, 0, len(load))
+// will not read, a statement no construct keyword opens (construct_unknown),
+// and a statement the parser refuses with a coded refusal, an annotation the
+// registry refuses among them -- Load because a caller that runs it alone
+// (memql-cockpit's `memql lint`) must see what boot refuses, the parity pass
+// because it IS boot. Load's copy is the one kept, because it names the line
+// of the FILE: Load parses and scans whole files and reports the line the
+// author wrote, while the parity pass's loaders parse one construct at a
+// time, so a parse refusal there counts its line from the top of that
+// construct's slice. A parity diagnostic is an echo only when it is about the
+// SAME file and carries a refusal Load made, never merely because Load ran:
+// Load's parse stops at a file's first refusal, so a refusal in a later
+// construct of that file is the parity pass's alone to report, and it prints
+// as that pass words it, its line counted from the top of the construct.
+func withoutLoadEchoes(parity []memql.LintDiagnostic, load []error) []memql.LintDiagnostic {
+	type refusal struct{ file, text string }
+	var made []refusal
 	for _, d := range load {
-		if file, text, ok := refusalOf(d); ok && parityCarries(parity, file, text) {
-			continue
+		if file, text, ok := refusalOf(d); ok {
+			made = append(made, refusal{file, text})
 		}
-		out = append(out, d)
+	}
+	if len(made) == 0 {
+		return parity
+	}
+	out := make([]memql.LintDiagnostic, 0, len(parity))
+	for _, p := range parity {
+		echo := false
+		for _, r := range made {
+			if p.File == r.file && strings.Contains(p.Message, r.text) {
+				echo = true
+				break
+			}
+		}
+		if !echo {
+			out = append(out, p)
+		}
 	}
 	return out
 }
 
 // refusalOf returns the file and the text of a Load diagnostic that the
-// parity pass also makes: a domain's language line the engine will not read,
-// or a parse refusal carrying a typed cause -- a statement no construct
-// keyword opens (construct_unknown), an annotation the registry refuses --
-// which the parity pass's loaders and gates raise in the same words. ok is
-// false for every other diagnostic.
+// parity pass also makes, in the same words: a domain's language line the
+// engine will not read, a statement no construct keyword opens, or a parse
+// refusal carrying a typed cause. ok is false for every other diagnostic.
 func refusalOf(d error) (file, text string, ok bool) {
 	var line *dslimports.LanguageLineError
 	if errors.As(d, &line) {
 		return line.Problem.Source, line.Problem.Message, true
 	}
+	var keyword *dslimports.ConstructKeywordError
+	if errors.As(d, &keyword) {
+		return keyword.File, keyword.Refusal.Message, true
+	}
 	var parse *dslimports.FileParseError
-	var refusal *langparser.ParseError
-	if errors.As(d, &parse) && errors.As(parse.Err, &refusal) && refusal.Cause != nil {
-		return parse.File, refusal.Message, true
+	var refused *langparser.ParseError
+	if errors.As(d, &parse) && errors.As(parse.Err, &refused) && refused.Cause != nil {
+		return parse.File, refused.Message, true
 	}
 	return "", "", false
-}
-
-// parityCarries reports whether a parity diagnostic about file carries text.
-func parityCarries(parity []memql.LintDiagnostic, file, text string) bool {
-	for _, p := range parity {
-		if p.File == file && strings.Contains(p.Message, text) {
-			return true
-		}
-	}
-	return false
 }
 
 // errorMentionsFile returns true if the diagnostic's text mentions
