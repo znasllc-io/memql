@@ -505,28 +505,16 @@ var corpusRetiredMethodRules = map[string]string{
 // edition 2026 retires, refused: each parser.V1RetiredForms() rule is the code
 // of a refused case whose message names the replacement, and every name the
 // function catalog retires (functions.RetiredFunctions, RetiredMethods) is one
-// of those rules.
-//
-// The four predicate-position forms -- a filter with no lambda header, a spec
-// or trait `{ return ... }` body, a raw-text @filter -- are refused only with
-// parser.Options.ExpressionsV1 on, and the corpus parses as the loaders do.
-// Until parser.DefaultOptions turns it on (the tree's flip), no case can show
-// them refused; the exemption below lapses by itself on that change.
+// of those rules. A refusal is judged by the edition's grammar
+// (corpusParseEdition), so the four predicate-position forms the loaders still
+// read until the tree flips -- a filter with no lambda header, a spec or trait
+// `{ return ... }` body, a raw-text @filter -- are shown refused like the rest.
 func TestCorpusRefusesEveryRetiredForm(t *testing.T) {
 	runs := discoverCorpus(t)
 	byCode := map[string][]*corpusRun{}
 	for _, r := range runs {
 		if (r.c.Verdict == verdictRefuseParse || r.c.Verdict == verdictRefuseLoad) && r.c.Code != "" {
 			byCode[r.c.Code] = append(byCode[r.c.Code], r)
-		}
-	}
-	pendingFlip := map[string]bool{}
-	if !langparser.DefaultOptions.ExpressionsV1 {
-		pendingFlip = map[string]bool{
-			"retired_filter_without_lambda": true,
-			"retired_spec_return_body":      true,
-			"retired_trait_return_body":     true,
-			"retired_filter_annotation":     true,
 		}
 	}
 
@@ -536,10 +524,6 @@ func TestCorpusRefusesEveryRetiredForm(t *testing.T) {
 		rules[f.Rule] = f
 		cases := byCode[f.Rule]
 		if len(cases) == 0 {
-			if pendingFlip[f.Rule] {
-				t.Logf("retired form %q (%s) waits for the tree's flip to parser.Options.ExpressionsV1", f.Spelling, f.Rule)
-				continue
-			}
 			t.Errorf("retired form %q has no refused case: write one whose code is %s", f.Spelling, f.Rule)
 			continue
 		}

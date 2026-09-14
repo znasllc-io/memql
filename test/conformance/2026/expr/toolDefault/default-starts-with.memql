@@ -1,5 +1,5 @@
-/// Search the goals, with a prefix test for a default.
-@handler(type="query", query="concept==v1:work:goal")
+/// List the tickets, with a prefix test for a default.
+@handler(type="query", query="paginate(query tdTickets(), args.limit)")
 tool tdStartsWith {
-  limit  integer  @default("10" startsWith "1") @description("How many goals to return.")
+  limit  integer  @default("10" startsWith "1") @description("How many tickets to return.")
 }

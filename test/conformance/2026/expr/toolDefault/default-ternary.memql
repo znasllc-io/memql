@@ -1,5 +1,5 @@
-/// Search the goals, with a conditional default.
-@handler(type="query", query="concept==v1:work:goal")
+/// List the tickets, with a conditional default.
+@handler(type="query", query="paginate(query tdTickets(), args.limit)")
 tool tdTernary {
-  limit  integer  @default(true ? 10 : 20) @description("How many goals to return.")
+  limit  integer  @default(true ? 10 : 20) @description("How many tickets to return.")
 }

@@ -6,6 +6,13 @@
       "note": "A trigger filter is a lambda over the triggering row."
     },
     {
+      "file": "filter-without-lambda.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_filter_annotation",
+      "message": "@filter(<predicate>) is retired in edition 2026: write @filter(row => <predicate>)",
+      "note": "Refused by the edition's grammar (parser.Options.ExpressionsV1); the loaders still read it until the tree flips."
+    },
+    {
       "file": "cond-call.memql",
       "verdict": "refuse_parse",
       "code": "retired_cond_call",

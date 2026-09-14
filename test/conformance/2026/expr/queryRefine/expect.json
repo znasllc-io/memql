@@ -3,7 +3,7 @@
     {
       "file": "refine-after-paginate.memql",
       "verdict": "load_ok",
-      "note": "refine evaluates in process over the page paginate read, and may return fewer rows than the page. Waits for the refine executor that lands with memql.Lower (memql#5366)."
+      "note": "refine evaluates in process over the page paginate read, and may return fewer rows than the page."
     },
     {
       "file": "refine-without-paginate.memql",

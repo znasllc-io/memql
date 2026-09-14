@@ -1,0 +1,11 @@
+/// Note a goal the moment it closes, filtered the pre-v1 way.
+@trigger(event="node.updated", concept="v1:work:goal")
+@filter(payload.status == "closed")
+automation tfNoLambda {
+  args {
+    id  string
+  }
+  step note {
+    mutation tfNoteGoal(goalId: args.id, note: "changed")
+  }
+}

@@ -62,10 +62,20 @@ named by a case; the runner refuses a file nothing names.
 | Verdict | The engine must |
 |---|---|
 | `load_ok` | parse the file and load it with no problem, and register every query, mutation, logic, spec, trait, tool and concept it declares. |
-| `refuse_parse` | refuse the file when it parses it. |
+| `refuse_parse` | refuse the file when it parses it in the edition's grammar. |
 | `refuse_load` | parse the file and refuse it at load. |
 | `lower` | lower the expression to SQL containing `sql`. |
 | `evaluate` | evaluate the expression against `row` to `expect`. |
+
+The edition's grammar is the expression grammar of edition 2026, which the
+loaders read behind `parser.Options.ExpressionsV1` until the embedded tree is
+migrated and the option becomes the default. Until then the loaders still read
+the four spellings it retires from the predicate positions -- a filter with no
+lambda header, a spec or trait `{ return }` body, a raw-text `@filter` -- so
+a refusal is judged by the edition's grammar, and a case that loads must parse
+in both: the grammar the loaders read it with today, and the one they will
+read it with after the flip. A cell written today therefore means the same
+thing after the flip, without anyone touching the corpus.
 
 A case file for `lower` or `evaluate` holds the expression alone -- at a
 position written as a lambda over the row (a query filter, a spec body, a

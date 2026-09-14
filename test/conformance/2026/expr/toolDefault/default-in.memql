@@ -1,5 +1,5 @@
-/// Search the goals, with a membership test for a default.
-@handler(type="query", query="concept==v1:work:goal")
+/// List the tickets, with a membership test for a default.
+@handler(type="query", query="paginate(query tdTickets(), args.limit)")
 tool tdIn {
-  limit  integer  @default(10 in [10]) @description("How many goals to return.")
+  limit  integer  @default(10 in [10]) @description("How many tickets to return.")
 }

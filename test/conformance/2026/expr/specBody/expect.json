@@ -3,7 +3,7 @@
     {
       "file": "urgent-spec.memql",
       "verdict": "load_ok",
-      "note": "A spec over a concept is a lambda naming the row. Waits for the loaders to read the `=` form and for memql.Lower (memql#5366)."
+      "note": "A spec over a concept is a lambda naming the row."
     },
     {
       "file": "trait.memql",
@@ -19,8 +19,8 @@
       "file": "urgent.memql",
       "verdict": "lower",
       "concept": "ticket",
-      "sql": "payload",
-      "note": "Waits for memql.Lower (memql#5366): until it lands, the pushdown half answers nothing and this case fails naming it."
+      "sql": "CASE WHEN jsonb_typeof(payload->'urgent') = 'boolean' THEN (payload #>> '{urgent}')::boolean = ? ELSE FALSE END",
+      "note": "A boolean field compares only where the stored value is a boolean: the string \"true\" is not true."
     },
     {
       "file": "urgent.memql",
@@ -29,8 +29,7 @@
       "row": {
         "urgent": true
       },
-      "expect": true,
-      "note": "Waits for memql.Lower (memql#5366): until it lands, the pushdown half answers nothing and this case fails naming it."
+      "expect": true
     },
     {
       "file": "urgent.memql",
@@ -189,10 +188,24 @@
       "message": "count(x) is retired in edition 2026: write x.count()"
     },
     {
+      "file": "spec-return-body.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_spec_return_body",
+      "message": "spec <bound> <name> { return <predicate> } is retired in edition 2026: write spec <bound> <name> = row => <predicate>",
+      "note": "Refused by the edition's grammar (parser.Options.ExpressionsV1); the loaders still read it until the tree flips."
+    },
+    {
+      "file": "trait-return-body.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_trait_return_body",
+      "message": "trait <name> { return <predicate> } is retired in edition 2026: write trait <name> = row => <predicate>",
+      "note": "Refused by the edition's grammar (parser.Options.ExpressionsV1); the loaders still read it until the tree flips."
+    },
+    {
       "file": "args-in-a-spec.memql",
       "verdict": "refuse_load",
-      "message": "args",
-      "note": "A spec body reads its parameter and the clock; args belong to the query that applies it. Waits for memql.Lower (memql#5366): until it lands, the pushdown half answers nothing and this case fails naming it."
+      "message": "a spec or trait takes no arguments",
+      "note": "A spec body reads its parameter and the clock; args belong to the query that applies it."
     }
   ]
 }
