@@ -154,7 +154,7 @@ func TestLanguageLine_OverlayWithoutLineRefusesBoot(t *testing.T) {
 		`domain "langlinemissing" declares no language line: add langlinemissing/memql.toml containing`,
 		`memql = "` + langparser.LanguageVersion + `"`,
 		`edition = "` + langparser.Edition + `"`,
-		"memqlmigrate --rewrite=language-line",
+		"memqlmigrate --rewrite=language-line -w <dir>, where <dir> is the directory that holds langlinemissing/",
 		"[language_line_missing]",
 	} {
 		if !strings.Contains(err.Error(), want) {

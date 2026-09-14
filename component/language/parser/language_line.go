@@ -238,11 +238,15 @@ func resolveDomainLine(tree fs.FS, core CoreTree, domain string) (LanguageLine, 
 	line := LanguageLine{Domain: domain, Source: domain + "/" + dslfs.ManifestFile}
 	data, err := fs.ReadFile(tree, line.Source)
 	if errors.Is(err, fs.ErrNotExist) {
+		// The migrator writes a file only under -w, and its argument is the
+		// directory that HOLDS the domain: named from the domain here, so the
+		// author reads the path off the message instead of guessing whether
+		// "the tree" meant the domain or the bundle.
 		current := dslfs.Manifest{Language: LanguageVersion, Edition: Edition}
 		return line, []LanguageLineProblem{{
 			Domain: domain, Source: line.Source, Code: CodeLanguageLineMissing,
-			Message: fmt.Sprintf("domain %q declares no language line: add %s containing\n%s(or run: memqlmigrate --rewrite=language-line <tree>) [%s]",
-				domain, line.Source, indentLines(current.Render(), "  "), CodeLanguageLineMissing),
+			Message: fmt.Sprintf("domain %q declares no language line: add %s containing\n%s(or run: memqlmigrate --rewrite=language-line -w <dir>, where <dir> is the directory that holds %s/) [%s]",
+				domain, line.Source, indentLines(current.Render(), "  "), domain, CodeLanguageLineMissing),
 		}}
 	}
 	if err != nil {

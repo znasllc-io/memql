@@ -233,7 +233,7 @@ func TestLanguageLineMessagesNameTheFix(t *testing.T) {
 	}
 	wantMissing := fmt.Sprintf("domain \"znas\" declares no language line: add znas/memql.toml containing\n"+
 		"  memql = %q\n  edition = %q\n"+
-		"(or run: memqlmigrate --rewrite=language-line <tree>) [language_line_missing]", LanguageVersion, Edition)
+		"(or run: memqlmigrate --rewrite=language-line -w <dir>, where <dir> is the directory that holds znas/) [language_line_missing]", LanguageVersion, Edition)
 	if problems[0].Message != wantMissing {
 		t.Errorf("missing-line message:\n got %q\nwant %q", problems[0].Message, wantMissing)
 	}
