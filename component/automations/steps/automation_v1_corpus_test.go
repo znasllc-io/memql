@@ -15,32 +15,25 @@ package steps
 // as every other arm and as the GOLDENS: one JSON file per automation under
 // testdata/automation_corpus/<domain>/<name>.json.
 //
-// # Arms, before and after the flips
+// # The arm, before and after the flips
 //
-// Two arms run: the tree as it is (legacy), and the tree as `memqlmigrate
-// --rewrite=expressions` and then `--rewrite=bodies` carry it (bodies). The
-// goldens are written from the bodies arm, with -update, once the two agree,
-// the legacy defects excepted (automationLegacyDefects: each checked, each
-// mended only in the part that is defective). After the flips the tree is its
-// own statement source, the legacy arm's line goes, and the bodies arm against
-// the goldens is the statement form held to what the legacy build did --
-// evidence only a run before the flips can gather, since the legacy executor
-// goes with them. (The expressions flip alone -- the tree between the two
-// flips -- is epic memql#5363's to measure: an arm for it here would hold the
-// statement form's goldens to that epic's changes.)
+// Before the flips two arms ran: the tree as it was (legacy), and the tree as
+// `memqlmigrate --rewrite=expressions` and then `--rewrite=bodies` carried it
+// (bodies). The goldens were written from the bodies arm, with -update, once
+// the two agreed, run for run. Since the bodies flip (epic memql#5370) the
+// tree is its own statement source and one arm runs it, so the goldens are
+// the statement form held to what the legacy build did -- evidence only a run
+// before the flips could gather, since the legacy executor went with them.
+// A runner that replaces this one adds its arm to the list in
+// TestAutomationCorpusRuns and is held to the same goldens.
 //
 // # What a run is compared on
 //
 // The calls it made and the events it published, in order; whether it was
-// refused; its status; and its output. A logic call runs for real, each arm
-// running its own build of the logic (the logic corpus holds those builds to
-// one another) with the logic's construct calls answered by the same probe,
-// so an automation reads what its logic really returns. That is also what
-// lets a logic the bodies rewrite moves into its automation (a logic may not
-// publish, D14) compare: the calls it made from inside the logic are the
-// calls the moved statements make. Its return value, which the calling
-// automation discarded and the moved statements now end the automation on,
-// is not compared.
+// refused; its status; and its output. A logic call runs for real, the arm
+// running its own build of the logic (the logic corpus holds that build to
+// its goldens) with the logic's construct calls answered by the same probe,
+// so an automation reads what its logic really returns.
 
 import (
 	"bytes"
@@ -228,7 +221,6 @@ func (r *automationProbe) constructEnvelope(logic string, res *memql.ExecuteResu
 // runs them.
 type automationArm struct {
 	name   string
-	legacy bool
 	byName map[string]*automations.Automation
 	reg    *automationProbe
 	exec   *automations.Executor
@@ -266,13 +258,12 @@ func armTree(t *testing.T, sources []*corpusSource, pick func(*corpusSource) str
 // newAutomationArm loads the arm's automations through the boot walk from
 // the arm's source, and wires an executor over one engine, every logic of the
 // tree rebuilt from that source and upserted over the booted one, so a logic
-// call runs the arm's build of it. legacy marks the arm whose bodies are in
-// the retired forms.
-func newAutomationArm(t *testing.T, name string, legacy bool, pick func(*corpusSource) string, sources []*corpusSource) automationArm {
+// call runs the arm's build of it.
+func newAutomationArm(t *testing.T, name string, pick func(*corpusSource) string, sources []*corpusSource) automationArm {
 	t.Helper()
 	eng := bootEmbeddedEngine(t)
 	// A lazy handle satisfies the engine's setup; port 1 makes any database
-	// read that escaped the probe fail loudly (see todayArm).
+	// read that escaped the probe fail loudly (see engineArm).
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(
 		pgdriver.WithDSN("postgres://unused:unused@127.0.0.1:1/unused?sslmode=disable"))), pgdialect.New())
 	t.Cleanup(func() { _ = db.Close() })
@@ -314,7 +305,7 @@ func newAutomationArm(t *testing.T, name string, legacy bool, pick func(*corpusS
 	exec := automations.NewExecutor(automations.ExecutorOptions{
 		Logger: logger, Engine: eng, EventBus: bus, StepRegistry: reg, SandboxRun: true,
 	})
-	return automationArm{name: name, legacy: legacy, byName: byName, reg: reg, exec: exec}
+	return automationArm{name: name, byName: byName, reg: reg, exec: exec}
 }
 
 // run is one fixture's run in comparable form.
@@ -335,11 +326,7 @@ func (arm automationArm) run(fx automationFixture, now time.Time) logicRecord {
 	exec, err := arm.exec.ExecuteWithEvent(context.Background(), a, "corpus", event)
 	rec := logicRecord{Refused: err != nil, Calls: probe.calls}
 	if exec != nil {
-		result := map[string]any{"status": exec.Status}
-		if !fx.MovedLogic {
-			result["output"] = canonicalResult(exec.Output)
-		}
-		rec.Result = canonicalJSON(result)
+		rec.Result = canonicalJSON(map[string]any{"status": exec.Status, "output": canonicalResult(exec.Output)})
 	}
 	return rec
 }
@@ -364,14 +351,11 @@ type automationFixture struct {
 	Event *events.Event
 	Rows  int
 	Label string
-	// MovedLogic: the automation calls a logic the bodies rewrite moves into
-	// it, so its output is not compared.
-	MovedLogic bool
 }
 
 // automationFixtures is every run of the corpus, read off the reference
 // arm's build of each automation.
-func automationFixtures(t *testing.T, autos map[string]*automations.Automation, moved map[string]bool) []automationFixture {
+func automationFixtures(t *testing.T, autos map[string]*automations.Automation) []automationFixture {
 	t.Helper()
 	names := make([]string, 0, len(autos))
 	for n := range autos {
@@ -385,12 +369,6 @@ func automationFixtures(t *testing.T, autos map[string]*automations.Automation, 
 		if i := strings.LastIndexByte(p, ':'); i >= 0 {
 			p = p[:i]
 		}
-		callsMoved := false
-		walkSteps(a.Steps, func(s *automations.Step) {
-			if s.Function != nil && moved[s.Function.Name] {
-				callsMoved = true
-			}
-		})
 		type variant struct {
 			label string
 			event *events.Event
@@ -411,41 +389,12 @@ func automationFixtures(t *testing.T, autos map[string]*automations.Automation, 
 			for _, rows := range []int{2, 0} {
 				out = append(out, automationFixture{
 					Key: p + " " + a.Name, Path: p, Name: a.Name, Event: v.event,
-					Rows: rows, Label: v.label, MovedLogic: callsMoved,
+					Rows: rows, Label: v.label,
 				})
 			}
 		}
 	}
 	return out
-}
-
-func walkSteps(steps []*automations.Step, visit func(*automations.Step)) {
-	for _, s := range steps {
-		if s == nil {
-			continue
-		}
-		visit(s)
-		if s.ForEach != nil {
-			walkSteps(s.ForEach.Do, visit)
-		}
-		if s.Parallel != nil {
-			walkSteps(s.Parallel.Branches, visit)
-		}
-		if s.Block != nil {
-			walkSteps(s.Block.Steps, visit)
-		}
-		if s.Switch != nil {
-			cases := []*automations.SwitchCase{s.Switch.Default}
-			for _, c := range s.Switch.Cases {
-				cases = append(cases, c)
-			}
-			for _, c := range cases {
-				if c != nil {
-					walkSteps(append([]*automations.Step{c.Step}, c.Steps...), visit)
-				}
-			}
-		}
-	}
 }
 
 // automationEvent is the event an automation fires on: its trigger's topic,
@@ -609,48 +558,21 @@ func writeAutomationGoldens(files map[string]*goldenFile) error {
 // the gate
 // ---------------------------------------------------------------------------
 
-// movedLogic are the logic the bodies rewrite moves into their automations:
-// declared in the tree, and no longer in its statement source.
-func movedLogic(sources []*corpusSource) map[string]bool {
-	out := map[string]bool{}
-	for _, f := range sources {
-		kept := map[string]bool{}
-		for _, s := range memql.ExtractFunctionSlices(f.Bodies) {
-			if s.Kind == languageParser.FunctionTypeLogic {
-				kept[s.Name] = true
-			}
-		}
-		for _, s := range memql.ExtractFunctionSlices(f.Current) {
-			if s.Kind == languageParser.FunctionTypeLogic && !kept[s.Name] {
-				out[s.Name] = true
-			}
-		}
-	}
-	return out
-}
-
 // TestAutomationCorpusRuns: every automation of the tree, run by every arm
 // against every fixture, makes the calls and publishes the events its golden
-// holds, in their order, and ends as the golden says -- and the arms agree,
-// the legacy arm where it does not do what the body says excepted
-// (automationLegacyDefects). With -update it writes the goldens from the
-// bodies arm's runs instead, once they agree.
+// holds, in their order, and ends as the golden says -- and the arms agree.
+// With -update it writes the goldens from the bodies arm's runs instead,
+// once they agree.
 func TestAutomationCorpusRuns(t *testing.T) {
 	sources := logicCorpusSources(t)
-	moved := movedLogic(sources)
-	// The first arm is the one the others are compared with. The flip deletes
-	// the legacy arm's line: the tree then has no legacy source.
+	// The first arm is the one the others are compared with. Since the
+	// bodies flip the tree is its own statement source, and one arm runs it.
 	arms := []automationArm{
-		newAutomationArm(t, "legacy", true, func(f *corpusSource) string { return f.Current }, sources),
-		newAutomationArm(t, "bodies", false, func(f *corpusSource) string { return f.Bodies }, sources),
-	}
-	legacyRuns := false
-	for _, arm := range arms {
-		legacyRuns = legacyRuns || arm.legacy
+		newAutomationArm(t, "bodies", func(f *corpusSource) string { return f.Bodies }, sources),
 	}
 	golden := len(arms) - 1 // the bodies arm: the statement form the goldens hold
 
-	fixtures := automationFixtures(t, arms[0].byName, moved)
+	fixtures := automationFixtures(t, arms[0].byName)
 	require.Greater(t, len(fixtures), 100, "dozens of automations times their fixtures; a small count means the fixtures went blind")
 	for _, arm := range arms[1:] {
 		require.Equalf(t, len(arms[0].byName), len(arm.byName), "the %s arm loads %d automations, the %s arm %d", arms[0].name, len(arms[0].byName), arm.name, len(arm.byName))
@@ -665,7 +587,6 @@ func TestAutomationCorpusRuns(t *testing.T) {
 	now := time.Now().UTC()
 	written := map[string]*goldenFile{}
 	taken := map[string]bool{}
-	mended := map[string]int{}
 	var diffs []string
 	matched, refused := 0, 0
 	for _, fx := range fixtures {
@@ -678,11 +599,7 @@ func TestAutomationCorpusRuns(t *testing.T) {
 
 		agreed := true
 		for i := 1; i < len(arms); i++ {
-			m, err := compareAutomationRuns(fx, arms[0].legacy, records[0], arms[i].legacy, records[i])
-			if m {
-				mended[fx.Name]++
-			}
-			if err != nil {
+			if err := compareAutomationRuns(records[0], records[i]); err != nil {
 				agreed = false
 				diffs = append(diffs, fmt.Sprintf("%s: the %s and %s arms: %v\n    %s: %s\n    %s: %s",
 					where, arms[0].name, arms[i].name, err, arms[0].name, records[0], arms[i].name, records[i]))
@@ -704,15 +621,7 @@ func TestAutomationCorpusRuns(t *testing.T) {
 			if _, dup := gf.runs[key]; dup {
 				diffs = append(diffs, where+": two fixtures share one golden run key")
 			}
-			entry := map[string]any{"input": automationInput(fx), "outcome": records[golden].outcome()}
-			if d, ok := automationLegacyDefects[fx.Name]; ok && d.applies(fx) && legacyRuns {
-				entry["legacyDefect"] = d.why
-			} else if prev, ok := goldens[file][key]; ok && !legacyRuns && jsonText(prev["outcome"]) == records[golden].String() && prev["legacyDefect"] != nil {
-				// No legacy arm left to show the defect: an unchanged run keeps
-				// the note an earlier -update wrote.
-				entry["legacyDefect"] = prev["legacyDefect"]
-			}
-			gf.runs[key] = entry
+			gf.runs[key] = map[string]any{"input": automationInput(fx), "outcome": records[golden].outcome()}
 			continue
 		}
 
@@ -728,11 +637,7 @@ func TestAutomationCorpusRuns(t *testing.T) {
 		}
 		want := recordOf(entry["outcome"])
 		for i, arm := range arms {
-			m, err := compareAutomationRuns(fx, arm.legacy, records[i], false, want)
-			if m {
-				mended[fx.Name]++
-			}
-			if err != nil {
+			if err := compareAutomationRuns(records[i], want); err != nil {
 				diffs = append(diffs, fmt.Sprintf("%s: the %s arm and the golden: %v\n    golden: %s\n    %s: %s", where, arm.name, err, want, arm.name, records[i]))
 				continue
 			}
@@ -750,11 +655,6 @@ func TestAutomationCorpusRuns(t *testing.T) {
 	}
 	sort.Strings(diffs)
 	require.Emptyf(t, diffs, "%d runs differ:\n%s", len(diffs), strings.Join(diffs, "\n"))
-	if legacyRuns {
-		for name, d := range automationLegacyDefects {
-			require.Positivef(t, mended[name], "the legacy defect of %s (%s) applies to no run: the entry is stale", name, d.why)
-		}
-	}
 	require.Less(t, refused, len(fixtures)/2, "most runs must complete; a majority of refusals means the fixtures do not reach the bodies")
 
 	if update {
@@ -765,48 +665,10 @@ func TestAutomationCorpusRuns(t *testing.T) {
 	t.Logf("%d arm runs match the goldens over %d automations and %d fixtures (%d refused)", matched, len(arms[0].byName), len(fixtures), refused)
 }
 
-// ---------------------------------------------------------------------------
-// legacy defects
-// ---------------------------------------------------------------------------
-
-// automationDefect is a run in which the LEGACY build does not do what the
-// body says and the statement form does -- legacyDefect's counterpart for an
-// automation's run. mend checks both halves (the defect in the legacy record,
-// the value the body means in the other) and removes the defective part from
-// both, so everything else the run did is still held to equality; a mend that
-// finds no defect fails the gate.
-type automationDefect struct {
-	why     string
-	applies func(fx automationFixture) bool
-	mend    func(fx automationFixture, legacy, other *logicRecord) error
-}
-
-// automationLegacyDefects are the legacy defects the migration corrects, by
-// automation. It is empty: epic 2's flip (memql#5363) fixed every defect this
-// corpus recorded -- the argument renderer's `?? []` text, the seven the
-// logic corpus names for the logic these automations call, bringUpInstance's
-// -- so the legacy arm runs every automation as its statement form does. It
-// stays until the flip deletes the legacy arm, so a defect found in the
-// meantime has a place to be named.
-var automationLegacyDefects = map[string]automationDefect{}
-
-// compareAutomationRuns compares two runs of one fixture; when exactly one is
-// the legacy arm's and the automation has a legacy defect that applies, the
-// defect is checked and mended first (mended reports it).
-func compareAutomationRuns(fx automationFixture, aLegacy bool, a logicRecord, bLegacy bool, b logicRecord) (mended bool, err error) {
-	a, b = a.clone(), b.clone()
-	if d, ok := automationLegacyDefects[fx.Name]; ok && aLegacy != bLegacy && d.applies(fx) {
-		legacy, other := &a, &b
-		if bLegacy {
-			legacy, other = &b, &a
-		}
-		if err := d.mend(fx, legacy, other); err != nil {
-			return false, fmt.Errorf("the legacy defect (%s) does not hold: %w", d.why, err)
-		}
-		mended = true
-	}
+// compareAutomationRuns compares two runs of one fixture.
+func compareAutomationRuns(a, b logicRecord) error {
 	if a.String() != b.String() {
-		return mended, fmt.Errorf("they differ")
+		return fmt.Errorf("they differ")
 	}
-	return mended, nil
+	return nil
 }

@@ -28,9 +28,7 @@
 /// restarted, so completed steps are served and never re-run.
 @trigger(schedule="0 */2 * * * *")
 automation sweepWaitingWorkRuns {
-  step sweep {
-    builtin workSweepWaiting ( olderThanSeconds: 60 )
-  }
+  sweep := builtin workSweepWaiting(olderThanSeconds: 60)
 }
 
 /// Nightly 03:40 UTC: archive then delete journal rows past their retention window. The run's
@@ -38,7 +36,5 @@ automation sweepWaitingWorkRuns {
 /// no archive means no delete -- the log store's rule, reused.
 @trigger(schedule="0 40 3 * * *")
 automation workJournalRetentionSweep {
-  step sweep {
-    builtin workRetentionSweep ( dryRun: false )
-  }
+  sweep := builtin workRetentionSweep(dryRun: false)
 }

@@ -12,9 +12,7 @@ logic releaseWorkspaceOnRunTerminal {
   args {
     event object!
   }
-  body {
-    return query workspaceForRun( runId: args.event.payload.id ?? "" )
-  }
+  return query workspaceForRun(runId: args.event.payload.id ?? "")
 }
 
 /// PURE terminal-status decision table for v1:work:run (#2370): returns true when the status is one
@@ -29,9 +27,7 @@ logic runIsTerminal {
   args {
     status any
   }
-  body {
-    st := args.status ?? ""
-    isTerminal := st == "succeeded" ? true : st == "failed" ? true : st == "cancelled" ? true : st == "abandoned" ? true : false
-    return isTerminal
-  }
+  st := args.status ?? ""
+  isTerminal := st == "succeeded" ? true : st == "failed" ? true : st == "cancelled" ? true : st == "abandoned" ? true : false
+  return isTerminal
 }

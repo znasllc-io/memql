@@ -16,20 +16,18 @@ use common.builtins.{ datasyncDispatchInbound, datasyncReconcileDomains }
 
 /// Offer every staged inbound delivery to the connector its source names. The connector decides
 /// whether the delivery is its own; a source nothing serves is skipped, not failed.
-@trigger(event="node.created", concept="v1:platform:inboundRequest", partition="*")
+@trigger(event="node.created", concept="v1:platform:inboundRequest")
 automation dispatchInboundToConnector {
   args {
     id     any
     source any
     body   any
   }
-  step dispatch {
-    builtin datasyncDispatchInbound (
-      inboundRequestId: id,
-      source: source,
-      body: body
-    )
-  }
+  dispatch := builtin datasyncDispatchInbound(
+    inboundRequestId: args.id,
+    source: args.source,
+    body: args.body
+  )
 }
 
 /// Sweep mirrored domains whose interval says they are due. Every 10 minutes, because the interval
@@ -37,9 +35,7 @@ automation dispatchInboundToConnector {
 /// domain reconciling every 6 hours is not swept 36 times in between.
 @trigger(schedule="0 */10 * * * *")
 automation reconcileMirroredDomains {
-  step sweep {
-    builtin datasyncReconcileDomains ()
-  }
+  sweep := builtin datasyncReconcileDomains()
 }
 
 // ---- Custom domains (epic memql#4805) ----
@@ -59,9 +55,7 @@ automation reconcileMirroredDomains {
 /// one where somebody clicks fastest.
 @trigger(schedule="0 */2 * * * *")
 automation reconcileCustomDomains {
-  step sweep {
-    builtin customDomainReconcile ()
-  }
+  sweep := builtin customDomainReconcile()
 }
 
 /// The same sweep for an account's reserved MemQL name (epic memql#5168), on the same schedule and
@@ -80,9 +74,7 @@ automation reconcileCustomDomains {
 /// the stop says so -- an absent control with no explanation reads as an omission.
 @trigger(schedule="0 */2 * * * *")
 automation reconcileAccountFrontDoors {
-  step sweep {
-    builtin accountFrontDoorReconcile ()
-  }
+  sweep := builtin accountFrontDoorReconcile()
 }
 
 // ---- update detection (epic memql#4794, D11) ----
@@ -91,20 +83,18 @@ automation reconcileAccountFrontDoors {
 /// inbound seam -- the receiver has already checked the source allowlist and the per-source HMAC by
 /// the time a row exists -- so this adds no HTTP surface at all. A delivery matching no package is
 /// a no-op: most of a cluster's webhooks are about something else.
-@trigger(event="node.created", concept="v1:platform:inboundRequest", partition="*")
+@trigger(event="node.created", concept="v1:platform:inboundRequest")
 automation notePackageUpstreamFromWebhook {
   args {
     id     any
     source any
     body   any
   }
-  step note {
-    builtin packageNoteUpstreamFromWebhook (
-      inboundRequestId: id,
-      source: source,
-      body: body
-    )
-  }
+  note := builtin packageNoteUpstreamFromWebhook(
+    inboundRequestId: args.id,
+    source: args.source,
+    body: args.body
+  )
 }
 
 /// The polling fallback for clusters no webhook can reach. Every 10 minutes, which is the cadence
@@ -112,9 +102,7 @@ automation notePackageUpstreamFromWebhook {
 /// cue decides whether a ten-minute-old answer was worth acting on.
 @trigger(schedule="0 */10 * * * *")
 automation pollPackageUpstreams {
-  step poll {
-    builtin packagePollUpstream ()
-  }
+  poll := builtin packagePollUpstream()
 }
 
 /// Close the runs whose nodes are gone (epic memql#4900, task memql#4902).
@@ -130,7 +118,5 @@ automation pollPackageUpstreams {
 /// reader.
 @trigger(schedule="0 */2 * * * *")
 automation sweepAbandonedPackageDeployments {
-  step sweep {
-    builtin packageSweepAbandoned ()
-  }
+  sweep := builtin packageSweepAbandoned()
 }

@@ -34,27 +34,17 @@ automation releaseWorkspaceOnRunTerminal {
     status any
   }
 
-  step terminal {
-    logic runIsTerminal ( status )
-  }
-  step decide {
-    logic releaseWorkspaceOnRunTerminal ( event )
-  }
-  step apply {
-    forEach item in decide.nodes() {
-      if steps.terminal.result == true && item.payload.status == "provisioned" {
-        releaseWorkspace {
-          workspaceId: item.id,
-          reason: "run_terminal"
-        }
-      }
-    }
-  }
-  step teardown {
-    if steps.terminal.result == true && id != nil {
-      builtin workbenchTeardownDirectory (
-        runId: id
+  terminal := logic runIsTerminal(status: args.status)
+  decide := logic releaseWorkspaceOnRunTerminal(event: event)
+  for item in decide.nodes() {
+    if terminal == true && item.status == "provisioned" {
+      mutation releaseWorkspace(
+        workspaceId: item.id,
+        reason: "run_terminal"
       )
     }
+  }
+  if terminal == true && args.id != nil {
+    teardown := builtin workbenchTeardownDirectory(runId: args.id)
   }
 }

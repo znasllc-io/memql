@@ -62,7 +62,7 @@ use platform.mutations.{ stageOutboundRequest }
 /// mark it running. Fires on row CREATION, where the status is `provisioning` -- the settled
 /// `pending` state exists for a row written ahead of any intent to act on it, and is not what
 /// createInstance stamps.
-@trigger(event="node.created", concept="v1:fleet:instance", partition="*")
+@trigger(event="node.created", concept="v1:fleet:instance")
 automation provisionInstanceOnCreate {
   args {
     id              any
@@ -76,26 +76,18 @@ automation provisionInstanceOnCreate {
     status          any
   }
 
-  step command {
-    logic instanceCommand ( status )
-  }
-  step render {
-    switch steps.command.result {
-      case "provision" {
-        action provisionTenant(tenant: name, domain: domain, profile: instanceProfile, dbPreset: dbPreset, ha: haEnabled, maxLlmCalls: maxLlmCalls, maxLlmCostUsd: maxLlmCostUsd, dryRun: false)
-      }
-      default { }
+  command := logic instanceCommand(status: args.status)
+  switch command {
+    case "provision" {
+      action provisionTenant(tenant: args.name, domain: args.domain, profile: args.instanceProfile, dbPreset: args.dbPreset, ha: args.haEnabled, maxLlmCalls: args.maxLlmCalls, maxLlmCostUsd: args.maxLlmCostUsd, dryRun: false)
     }
+    default { }
   }
-  step settle {
-    switch steps.command.result {
-      case "provision" {
-        markInstanceRunning {
-          instanceId: id
-        }
-      }
-      default { }
+  switch command {
+    case "provision" {
+      mutation markInstanceRunning(instanceId: args.id)
     }
+    default { }
   }
 }
 
@@ -107,7 +99,7 @@ automation provisionInstanceOnCreate {
 /// events carry different meanings even where they run identical steps: this one is the tier-change
 /// path, and the day it needs to differ -- draining connections before a downgrade, say -- it is
 /// already its own construct rather than a branch inside a shared one.
-@trigger(event="node.updated", concept="v1:fleet:instance", partition="*")
+@trigger(event="node.updated", concept="v1:fleet:instance")
 automation reRenderInstanceOnShapeChange {
   args {
     id              any
@@ -121,26 +113,18 @@ automation reRenderInstanceOnShapeChange {
     status          any
   }
 
-  step command {
-    logic instanceCommand ( status )
-  }
-  step render {
-    switch steps.command.result {
-      case "provision" {
-        action provisionTenant(tenant: name, domain: domain, profile: instanceProfile, dbPreset: dbPreset, ha: haEnabled, maxLlmCalls: maxLlmCalls, maxLlmCostUsd: maxLlmCostUsd, dryRun: false)
-      }
-      default { }
+  command := logic instanceCommand(status: args.status)
+  switch command {
+    case "provision" {
+      action provisionTenant(tenant: args.name, domain: args.domain, profile: args.instanceProfile, dbPreset: args.dbPreset, ha: args.haEnabled, maxLlmCalls: args.maxLlmCalls, maxLlmCostUsd: args.maxLlmCostUsd, dryRun: false)
     }
+    default { }
   }
-  step settle {
-    switch steps.command.result {
-      case "provision" {
-        markInstanceRunning {
-          instanceId: id
-        }
-      }
-      default { }
+  switch command {
+    case "provision" {
+      mutation markInstanceRunning(instanceId: args.id)
     }
+    default { }
   }
 }
 
@@ -155,7 +139,7 @@ automation reRenderInstanceOnShapeChange {
 /// THE DATABASE STAYS UP (includeDatabase defaults false in the script). Scaling it down saves more,
 /// but adds resume latency and takes the tenant's backups offline while it is down; task memql#3856
 /// measures which one hibernation should default to.
-@trigger(event="node.updated", concept="v1:fleet:instance", partition="*")
+@trigger(event="node.updated", concept="v1:fleet:instance")
 automation suspendInstanceOnRequest {
   args {
     id     any
@@ -163,26 +147,18 @@ automation suspendInstanceOnRequest {
     status any
   }
 
-  step command {
-    logic instanceCommand ( status )
-  }
-  step scaleDown {
-    switch steps.command.result {
-      case "suspend" {
-        action suspendTenant(tenant: name, dryRun: false)
-      }
-      default { }
+  command := logic instanceCommand(status: args.status)
+  switch command {
+    case "suspend" {
+      action suspendTenant(tenant: args.name, dryRun: false)
     }
+    default { }
   }
-  step settle {
-    switch steps.command.result {
-      case "suspend" {
-        markInstanceSuspended {
-          instanceId: id
-        }
-      }
-      default { }
+  switch command {
+    case "suspend" {
+      mutation markInstanceSuspended(instanceId: args.id)
     }
+    default { }
   }
 }
 
@@ -194,7 +170,7 @@ automation suspendInstanceOnRequest {
 /// Resuming a torn-down instance is impossible and is not guarded here: `torn_down` is a settled
 /// status, so nothing can move a torn-down row to `resuming` without going through a mutation that
 /// would have to say so. That is why the two are different statuses rather than a flag on one.
-@trigger(event="node.updated", concept="v1:fleet:instance", partition="*")
+@trigger(event="node.updated", concept="v1:fleet:instance")
 automation resumeInstanceOnRequest {
   args {
     id     any
@@ -202,26 +178,18 @@ automation resumeInstanceOnRequest {
     status any
   }
 
-  step command {
-    logic instanceCommand ( status )
-  }
-  step scaleUp {
-    switch steps.command.result {
-      case "resume" {
-        action resumeTenant(tenant: name, dryRun: false)
-      }
-      default { }
+  command := logic instanceCommand(status: args.status)
+  switch command {
+    case "resume" {
+      action resumeTenant(tenant: args.name, dryRun: false)
     }
+    default { }
   }
-  step settle {
-    switch steps.command.result {
-      case "resume" {
-        markInstanceRunning {
-          instanceId: id
-        }
-      }
-      default { }
+  switch command {
+    case "resume" {
+      mutation markInstanceRunning(instanceId: args.id)
     }
+    default { }
   }
 }
 
@@ -240,7 +208,7 @@ automation resumeInstanceOnRequest {
 /// THE BACKUP FAILING ABORTS THE TEARDOWN. That is the script's behaviour, and the row is left in
 /// `tearing_down` rather than settled -- a state that says what was being attempted, which is what
 /// an operator needs and what a row that looked finished would deny them.
-@trigger(event="node.updated", concept="v1:fleet:instance", partition="*")
+@trigger(event="node.updated", concept="v1:fleet:instance")
 automation tearDownInstanceOnRequest {
   args {
     id     any
@@ -248,29 +216,19 @@ automation tearDownInstanceOnRequest {
     status any
   }
 
-  step command {
-    logic instanceCommand ( status )
-  }
-  step phrase {
-    logic teardownConfirmationPhrase ( tenant: name )
-  }
-  step destroy {
-    switch steps.command.result {
-      case "teardown" {
-        action tearDownTenant(tenant:  name, confirm: steps.phrase.result, dryRun:  false)
-      }
-      default { }
+  command := logic instanceCommand(status: args.status)
+  phrase := logic teardownConfirmationPhrase(tenant: args.name)
+  switch command {
+    case "teardown" {
+      action tearDownTenant(tenant: args.name, confirm: phrase, dryRun: false)
     }
+    default { }
   }
-  step settle {
-    switch steps.command.result {
-      case "teardown" {
-        markInstanceTornDown {
-          instanceId: id
-        }
-      }
-      default { }
+  switch command {
+    case "teardown" {
+      mutation markInstanceTornDown(instanceId: args.id)
     }
+    default { }
   }
 }
 
@@ -290,7 +248,7 @@ automation tearDownInstanceOnRequest {
 /// and which drifts the first time a row is rebuilt. A second "your instance is ready" after a
 /// resume is a mildly redundant email; a missed one is a customer who does not know their instance
 /// exists. Task memql#3855 revisits it when Orbit owns the onboarding sequence.
-@trigger(event="node.updated", concept="v1:fleet:instance", partition="*")
+@trigger(event="node.updated", concept="v1:fleet:instance")
 automation welcomeOnInstanceRunning {
   args {
     id          any
@@ -300,19 +258,17 @@ automation welcomeOnInstanceRunning {
     status      any
   }
 
-  step notify {
-    switch status {
-      case "running" {
-        stageOutboundRequest {
-          requestId:   "fleet-welcome-" + id,
-          medium:      "email",
-          target:      notifyEmail,
-          subject:     "Your MemQL instance is ready",
-          body:        "Your MemQL instance is running at https://" + domain + " -- sign in there to get started.",
-          requestedBy: "fleet.welcomeOnInstanceRunning"
-        }
-      }
-      default { }
+  switch args.status {
+    case "running" {
+      mutation stageOutboundRequest(
+        requestId:   "fleet-welcome-" + args.id,
+        medium:      "email",
+        target:      args.notifyEmail,
+        subject:     "Your MemQL instance is ready",
+        body:        "Your MemQL instance is running at https://" + args.domain + " -- sign in there to get started.",
+        requestedBy: "fleet.welcomeOnInstanceRunning"
+      )
     }
+    default { }
   }
 }

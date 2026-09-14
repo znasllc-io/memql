@@ -7,10 +7,10 @@
 // deployEngineCluster sequences the I8 deploy actions (actions.memql) with the
 // I9 deploy decisions (logic.memql) and the persisted deployment lifecycle
 // (createDeployment / updateDeploymentStatus, dsl/deployment/mutations.memql), one
-// write per step. It is the single construct allowed to compose all the layers
+// write per statement. It is the single construct allowed to compose all the layers
 // (branch / loop / call logic+query+mutation+action), and it stays
-// contract-clean: the logics it calls are pure, each mutation step is one
-// write, each action step is one external capability on the cockpit/runner
+// contract-clean: the logics it calls are pure, each mutation statement is one
+// write, each action statement is one external capability on the cockpit/runner
 // surface (I13). It therefore PASSES the call-graph validator
 // (test/dslconformance/callgraph_contract_test.go) rather than being baselined.
 //
@@ -86,42 +86,35 @@
 //
 // Sequence (decide -> record -> clone -> build -> place -> gate -> finish):
 //
-//   authorize       logic deploymentForwardAllowed       (decide: role gate)
-//   record          createDeployment                     (persist: one write)
-//   clone           action cloneRepoAtVersion            (act: checkout the ref)
-//   build           forEach nt: action buildEngineImage  (act: one image / node)
-//   importDevImages forEach nt where env==development:    (act: dev placement --
-//                     action importImageToK3d              per-node k3d import)
-//   place           switch env { development {} default { (act: staging/prod
-//                     pinOverlayDigests + argoSync } }     placement -- GitOps)
-//   gate            action runDeployGate                 (act: post-deploy gate)
-//   outcome         logic deployOutcomeLabel             (decide: succeeded/failed)
-//   finalize        switch steps.outcome.result {              (persist + act + persist)
+//   authorize       logic deploymentForwardAllowed        (decide: role gate)
+//   record          createDeployment                      (persist: one write)
+//   clone           action cloneRepoAtVersion             (act: checkout the ref)
+//   (build)         for nt: action buildEngineImage       (act: one image / node)
+//   (import)        for nt if docker-local:               (act: local placement --
+//                     action importImageToK3d               per-node k3d import)
+//   (place)         switch provider { docker-local { }    (act: cloud placement --
+//                     default { pinOverlayDigests,          GitOps)
+//                               argoSync } }
+//   gate            action runDeployGate                  (act: post-deploy gate)
+//   outcome         logic deployOutcomeLabel              (decide: succeeded/failed)
+//   (finish)        switch outcome {                      (persist + act)
 //                     succeeded { updateDeploymentStatus succeeded; notifyDeploy }
-//                     default   { revertOverlay; updateDeploymentStatus failed;
-//                                 notifyDeploy } }
+//                     default   { updateDeploymentStatus failed; notifyDeploy } }
+//   rollbackTarget  logic deployRollbackTarget            (decide: revert to?)
+//   (rollback)      switch rollbackTarget { "" { } default { revertOverlay } }
 //
-// EXECUTION ORDER. The automation scheduler runs steps in the compiler's
-// dependency topo-sort order (a step executes after every step it references).
-// The deploy is an ORDERED side-effect pipeline whose phases mostly do NOT pass
-// data to each other, so each phase reads only the EVENT payload (a reserved
-// root, not a step) and carries no inter-step reference -- which keeps every
-// phase at the same dependency depth, where the sort preserves the authored
-// source order (clone -> build -> place -> gate). The only data edges are the
-// two at the tail: outcome reads gate.result, finalize switches on
-// outcome.result, so they sort last exactly where the sequence wants them. A
-// forEach/switch step's result is NOT addressable by name, so a later phase
-// could not depend on it even if we wanted -- reading from the payload is what
-// makes the pipeline order deterministic.
+// EXECUTION ORDER. The statements run in the order they are written (epic
+// memql#5370): the deploy is an ordered side-effect pipeline, and its order is
+// the source order -- clone, build, place, gate, finish. The data edges at the
+// tail read statements written above them, as every read must: outcome reads
+// gate, the finish switches on outcome, and the rollback reads its target.
 //
-// PLACEMENT shape (the env split). `place` is the single env `switch`: the
-// development case takes no GitOps action (overlays/ArgoCD are not the dev
-// path); staging/production pin the overlay to the resolved digests and ask
-// ArgoCD to sync (deploys = merges). The per-NODE development k3d import is the
-// adjacent `importDevImages` forEach gated `where env=="development"` -- the
-// procedural switch-case grammar hosts single steps, not loops, so a per-node
-// loop rides a top-level where-filtered forEach instead of living inside the
-// case. Both stay in THIS one automation; there are no per-env automations.
+// PLACEMENT shape (the provider split). The placement is one `switch` on the
+// provider: the docker-local case takes no GitOps action (overlays and ArgoCD
+// are not the local path), and the cloud pins the overlay to the resolved
+// digests and asks ArgoCD to sync (deploys = merges). The per-node k3d import
+// is the `for` beside it, filtered to docker-local. Both stay in THIS one
+// automation; there are no per-provider automations.
 //
 // THE SWITCH IS ON `provider`, NOT ON AN ENVIRONMENT (epic memql#3943).
 // There is ONE cloud installation and ONE ArgoCD Application, `memql`, so
@@ -132,12 +125,11 @@
 // which `MEMQL_DEPLOY_PROVIDER` sets and `v1:cluster:deployment.provider`
 // records. It was always outside the environment gate for exactly this reason.
 //
-// The alternative -- a logic step mapping provider -> app name -- was rejected
-// for a mechanical reason worth recording: every phase here reads ONLY the
-// event payload, which is what keeps them all at the same dependency depth
-// where the topo-sort preserves authored source order (see EXECUTION ORDER
-// above). Making `place` depend on a logic step would give it a data edge the
-// other phases do not have, and reorder the pipeline.
+// The alternative -- a logic statement mapping provider -> app name -- was
+// rejected before edition 2026 for a reason that no longer holds: the compiler
+// then ordered steps by their references, and a data edge the other phases
+// lacked would have reordered the pipeline. Statements run as written now; the
+// switch on provider stays because it names the one thing that varies.
 //
 // The `importImageToK3d(cluster: "memql")` above is NOT the Application name
 // wearing the same clothes: that is the k3d CLUSTER name on a developer's
@@ -173,68 +165,46 @@ automation deployEngineCluster {
     dryRun               boolean
   }
 
-  step authorize {
-    logic deploymentForwardAllowed ( event )
+  authorize := logic deploymentForwardAllowed(event: event)
+  record := mutation createDeployment(
+    deploymentId: args.deploymentId,
+    provider:     args.provider,
+    version:      args.version,
+    triggeredBy:  args.triggeredBy,
+    status:       "in_progress",
+    previousDeploymentId: args.previousDeploymentId
+  )
+  clone := action cloneRepoAtVersion(workdir: args.workdir, ref: args.ref, dryRun: args.dryRun)
+  for nt in args.engineNodeTypes {
+    action buildEngineImage(nodeType: nt, version: args.version, workdir: args.workdir, dryRun: args.dryRun)
   }
-  step record {
-    mutation createDeployment (
-      deploymentId,
-      provider:     provider,
-      version,
-      triggeredBy:  triggeredBy,
-      status:       "in_progress",
-      previousDeploymentId
-    )
+  for nt in args.engineNodeTypes if args.provider == "docker-local" {
+    action importImageToK3d(nodeType: nt, cluster: "memql", version: args.version, dryRun: args.dryRun)
   }
-  step clone {
-    action cloneRepoAtVersion(workdir, ref: ref, dryRun)
-  }
-  step build {
-    forEach nt in engineNodeTypes {
-      action buildEngineImage(nodeType: nt, version: version, workdir, dryRun)
+  switch args.provider {
+    case "docker-local" { }
+    default {
+      action pinOverlayDigests(overlayPath: args.overlayPath, digests: args.digests, dryRun: args.dryRun)
+      action argoSync(app: "memql", revision: args.ref, dryRun: args.dryRun)
     }
   }
-  step importDevImages {
-    forEach nt in engineNodeTypes where provider == "docker-local" {
-      action importImageToK3d(nodeType: nt, cluster: "memql", version, dryRun)
+  gate := action runDeployGate(provider: args.provider, workdir: args.workdir, dryRun: args.dryRun)
+  outcome := logic deployOutcomeLabel(passed: gate.passed)
+  switch outcome {
+    case "succeeded" {
+      mutation updateDeploymentStatus(deploymentId: args.deploymentId, status: "succeeded")
+      action notifyDeploy(status: "succeeded", deploymentId: args.deploymentId, dryRun: args.dryRun)
+    }
+    default {
+      mutation updateDeploymentStatus(deploymentId: args.deploymentId, status: "failed")
+      action notifyDeploy(status: "failed", deploymentId: args.deploymentId, dryRun: args.dryRun)
     }
   }
-  step place {
-    switch provider {
-      case "docker-local" { }
-      default {
-        action pinOverlayDigests(overlayPath, digests: digests, dryRun)
-        action argoSync(app: "memql", revision: ref, dryRun)
-      }
-    }
-  }
-  step gate {
-    action runDeployGate(provider: provider, workdir: workdir, dryRun)
-  }
-  step outcome {
-    logic deployOutcomeLabel ( passed: steps.gate.result.result.result.passed )
-  }
-  step finalize {
-    switch steps.outcome.result {
-      case "succeeded" {
-        updateDeploymentStatus { deploymentId: deploymentId, status: "succeeded" }
-        action notifyDeploy(status: "succeeded", deploymentId, dryRun)
-      }
-      default {
-        updateDeploymentStatus { deploymentId: deploymentId, status: "failed" }
-        action notifyDeploy(status: "failed", deploymentId, dryRun)
-      }
-    }
-  }
-  step rollbackTarget {
-    logic deployRollbackTarget ( passed: steps.gate.result.result.result.passed, previousDeploymentId )
-  }
-  step rollback {
-    switch steps.rollbackTarget.result {
-      case "" { }
-      default {
-        action revertOverlay(overlayPath, toDeploymentId: steps.rollbackTarget.result, dryRun)
-      }
+  rollbackTarget := logic deployRollbackTarget(passed: gate.passed, previousDeploymentId: args.previousDeploymentId)
+  switch rollbackTarget {
+    case "" { }
+    default {
+      action revertOverlay(overlayPath: args.overlayPath, toDeploymentId: rollbackTarget, dryRun: args.dryRun)
     }
   }
 }
@@ -282,17 +252,15 @@ automation provisionInstance {
     dryRun         boolean
   }
 
-  step provision {
-    action provisionAzureInfrastructure(
-      subscriptionId,
-      resourceGroup,
-      clusterName,
-      registryName,
-      keyVaultName,
-      location,
-      dryRun
-    )
-  }
+  provision := action provisionAzureInfrastructure(
+    subscriptionId: args.subscriptionId,
+    resourceGroup: args.resourceGroup,
+    clusterName: args.clusterName,
+    registryName: args.registryName,
+    keyVaultName: args.keyVaultName,
+    location: args.location,
+    dryRun: args.dryRun
+  )
 }
 
 // installInstance OWNS THE ELEVEN STEPS between a provisioned substrate and an
@@ -316,15 +284,10 @@ automation provisionInstance {
 //
 // and only THEN argoSync, followed by the settle the first sync needs.
 //
-// THE ORDER IS EXPRESSED AS ONE SWITCH CASE, not as sibling steps, and that is
-// deliberate. The scheduler runs steps in dependency topo-sort order, and
-// sibling steps that all read only the event payload sit at the same depth
-// where the sort preserves authored order -- which is how deployEngineCluster's
-// phases stay in sequence. Here the render-diff gate MUST run first and the
-// install MUST depend on its verdict, and that data edge would reorder any
-// sibling step that lacked one. Putting the whole install inside the gated
-// case makes the sequence structural instead of incidental: there is one
-// ordering, and it is the one written down.
+// THE ORDER IS EXPRESSED AS ONE SWITCH CASE. The render-diff gate runs first
+// and the install depends on its verdict, so the whole install sits inside the
+// gated case: the verdict decides whether it runs at all, and inside it the
+// statements run in the order written.
 //
 // THE GATE IS THE HIGHEST-VALUE ITEM HERE (memql#4483). `revision` is not a
 // scalar to swap. One ?ref= line has cost three retired workarounds, a new
@@ -365,68 +328,62 @@ automation installInstance {
   }
 
   // BEFORE anything is applied.
-  step gate {
-    action renderDiff(
-      overlayPath,
-      toRef:   revision,
-      fromRef: fromRevision,
-      acceptKinds
-    )
-  }
-  step verdict {
-    logic renderDiffVerdict (
-      passed:   steps.gate.result.result.result.passed,
-      required: requireRenderDiff
-    )
-  }
-  step install {
-    switch steps.verdict.result {
-      // The gate was required and did not pass. Nothing is applied, and the
-      // run record carries the diff -- which is the whole product of this
-      // step, since what it found is not discoverable any other way.
-      case "blocked" { }
-      default {
-        action installClusterOperators(
-          subscriptionId,
-          resourceGroup,
-          clusterName,
-          repoRoot,
-          acmeEmail,
-          dryRun
-        )
-        action seedInstanceSecrets(
-          keyVaultName,
-          subscriptionId,
-          namespace,
-          dryRun
-        )
-        action wireExternalSecrets(
-          keyVaultName,
-          tenantId,
-          esoClientId,
-          namespace,
-          repoRoot,
-          dryRun
-        )
-        action registerGitOpsRepo(
-          repoUrl,
-          transport: repoTransport,
-          project:   repoProject,
-          tokenFile: repoTokenFile,
-          dryRun
-        )
-        action argoSync(app: "memql", revision: revision, dryRun)
-        // The first sync legitimately fails while the database initialises,
-        // and the mesh then needs a RESTART rather than a retry (memql#4475).
-        action settleAfterSync(
-          namespace,
-          app: "memql",
-          dryRun
-        )
-        // Existence, not health. The whole undeclared-dependency class is
-        // invisible to a health check, because the objects were never created.
-        action verifyInstallDependencies( namespace )
-      }
+  gate := action renderDiff(
+    overlayPath: args.overlayPath,
+    toRef:   args.revision,
+    fromRef: args.fromRevision,
+    acceptKinds: args.acceptKinds
+  )
+  verdict := logic renderDiffVerdict(
+    passed:   gate.passed,
+    required: args.requireRenderDiff
+  )
+  switch verdict {
+    // The gate was required and did not pass. Nothing is applied, and the
+    // run record carries the diff -- which is the whole product of this
+    // step, since what it found is not discoverable any other way.
+    case "blocked" { }
+    default {
+      action installClusterOperators(
+        subscriptionId: args.subscriptionId,
+        resourceGroup: args.resourceGroup,
+        clusterName: args.clusterName,
+        repoRoot: args.repoRoot,
+        acmeEmail: args.acmeEmail,
+        dryRun: args.dryRun
+      )
+      action seedInstanceSecrets(
+        keyVaultName: args.keyVaultName,
+        subscriptionId: args.subscriptionId,
+        namespace: args.namespace,
+        dryRun: args.dryRun
+      )
+      action wireExternalSecrets(
+        keyVaultName: args.keyVaultName,
+        tenantId: args.tenantId,
+        esoClientId: args.esoClientId,
+        namespace: args.namespace,
+        repoRoot: args.repoRoot,
+        dryRun: args.dryRun
+      )
+      action registerGitOpsRepo(
+        repoUrl:   args.repoUrl,
+        transport: args.repoTransport,
+        project:   args.repoProject,
+        tokenFile: args.repoTokenFile,
+        dryRun:    args.dryRun
+      )
+      action argoSync(app: "memql", revision: args.revision, dryRun: args.dryRun)
+      // The first sync legitimately fails while the database initialises,
+      // and the mesh then needs a RESTART rather than a retry (memql#4475).
+      action settleAfterSync(
+        namespace: args.namespace,
+        app: "memql",
+        dryRun: args.dryRun
+      )
+      // Existence, not health. The whole undeclared-dependency class is
+      // invisible to a health check, because the objects were never created.
+      action verifyInstallDependencies(namespace: args.namespace)
     }
   }
 }
@@ -486,35 +443,27 @@ automation repairInstance {
   // that failed on difference would fail on almost every healthy instance --
   // the same mistake memql#4475 names about reading the first Degraded as
   // failure.
-  step version {
-    action reportInstanceVersion(
-      namespace,
-      overlayPath,
-      productEnv,
-      declaredRef,
-      dryRun
-    )
-  }
-  step verify {
-    action verifyInstallDependencies(
-      namespace,
-      ingressClass,
-      clusterIssuer,
-      requireIssuer
-    )
-  }
-  step verdict {
-    logic installDependencyVerdict ( passed: steps.verify.result.result.result.passed )
-  }
-  step resync {
-    switch steps.verdict.result {
-      // Deliberately empty. See the header: a sync cannot create what was
-      // never installed, and running one anyway is how a broken cluster comes
-      // back Healthy.
-      case "missing" { }
-      default {
-        action argoSync(app: "memql", revision: revision, dryRun)
-      }
+  version := action reportInstanceVersion(
+    namespace: args.namespace,
+    overlayPath: args.overlayPath,
+    productEnv: args.productEnv,
+    declaredRef: args.declaredRef,
+    dryRun: args.dryRun
+  )
+  verify := action verifyInstallDependencies(
+    namespace: args.namespace,
+    ingressClass: args.ingressClass,
+    clusterIssuer: args.clusterIssuer,
+    requireIssuer: args.requireIssuer
+  )
+  verdict := logic installDependencyVerdict(passed: verify.passed)
+  switch verdict {
+    // Deliberately empty. See the header: a sync cannot create what was
+    // never installed, and running one anyway is how a broken cluster comes
+    // back Healthy.
+    case "missing" { }
+    default {
+      action argoSync(app: "memql", revision: args.revision, dryRun: args.dryRun)
     }
   }
 }
@@ -559,39 +508,35 @@ automation bringUpInstance {
     dryRun         boolean
   }
 
-  step substrate {
-    automation provisionInstance(
-      instanceId,
-      subscriptionId,
-      resourceGroup,
-      clusterName,
-      registryName,
-      keyVaultName,
-      location,
-      dryRun
-    )
-  }
-  step workloads {
-    automation installInstance(
-      instanceId,
-      subscriptionId,
-      clusterName,
-      resourceGroup,
-      overlayPath,
-      revision,
-      keyVaultName,
-      tenantId,
-      esoClientId,
-      repoUrl,
-      repoTransport,
-      repoTokenFile,
-      repoProject,
-      acmeEmail,
-      namespace,
-      repoRoot,
-      dryRun
-    )
-  }
+  substrate := automation provisionInstance(
+    instanceId: args.instanceId,
+    subscriptionId: args.subscriptionId,
+    resourceGroup: args.resourceGroup,
+    clusterName: args.clusterName,
+    registryName: args.registryName,
+    keyVaultName: args.keyVaultName,
+    location: args.location,
+    dryRun: args.dryRun
+  )
+  workloads := automation installInstance(
+    instanceId: args.instanceId,
+    subscriptionId: args.subscriptionId,
+    clusterName: args.clusterName,
+    resourceGroup: args.resourceGroup,
+    overlayPath: args.overlayPath,
+    revision: args.revision,
+    keyVaultName: args.keyVaultName,
+    tenantId: args.tenantId,
+    esoClientId: args.esoClientId,
+    repoUrl: args.repoUrl,
+    repoTransport: args.repoTransport,
+    repoTokenFile: args.repoTokenFile,
+    repoProject: args.repoProject,
+    acmeEmail: args.acmeEmail,
+    namespace: args.namespace,
+    repoRoot: args.repoRoot,
+    dryRun: args.dryRun
+  )
 }
 
 @trigger(event="instance.deprovisionRequested")
@@ -613,17 +558,15 @@ automation deprovisionInstance {
   // reconstructed here. An orchestrator that could derive its own confirmation
   // from the resource group would be confirming to itself, which is not a
   // safety interlock -- it is a comment.
-  step teardown {
-    action deprovisionAzureInfrastructure(
-      subscriptionId,
-      resourceGroup,
-      confirm,
-      clusterName,
-      keyVaultName,
-      backupStorageAccount,
-      deleteStores,
-      purgeKeyVault,
-      dryRun
-    )
-  }
+  teardown := action deprovisionAzureInfrastructure(
+    subscriptionId: args.subscriptionId,
+    resourceGroup: args.resourceGroup,
+    confirm: args.confirm,
+    clusterName: args.clusterName,
+    keyVaultName: args.keyVaultName,
+    backupStorageAccount: args.backupStorageAccount,
+    deleteStores: args.deleteStores,
+    purgeKeyVault: args.purgeKeyVault,
+    dryRun: args.dryRun
+  )
 }

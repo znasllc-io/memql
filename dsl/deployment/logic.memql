@@ -25,9 +25,7 @@ logic deployGateGreen {
   args {
     gate object!
   }
-  body {
-    return args.gate.passed ?? false
-  }
+  return args.gate.passed ?? false
 }
 
 // ---- version ----
@@ -47,9 +45,7 @@ logic nextDeploymentVersion {
     current  string!
     bump     string
   }
-  body {
-    return builtin suggestNextVersion( current: args.current, bump: args.bump ?? "patch" )
-  }
+  return builtin suggestNextVersion(current: args.current, bump: args.bump ?? "patch")
 }
 
 // ---- role gating ----
@@ -73,12 +69,10 @@ logic nextDeploymentVersion {
 /// actor holds developer, admin, or owner. Writer/reader are read-only.
 @actor
 logic deploymentForwardAllowed {
-  body {
-    role := actor.role ?? ""
-    isElevated := role == "admin" ? true : role == "owner" ? true : false
-    allowed := role == "developer" ? true : isElevated
-    return allowed
-  }
+  role := actor.role ?? ""
+  isElevated := role == "admin" ? true : role == "owner" ? true : false
+  allowed := role == "developer" ? true : isElevated
+  return allowed
 }
 
 // deploymentRollbackAllowed is the pure rollback role gate. It mirrors spec
@@ -89,11 +83,9 @@ logic deploymentForwardAllowed {
 /// the owner role. Rollback is owner-only -- not even admin may roll back.
 @actor
 logic deploymentRollbackAllowed {
-  body {
-    role := actor.role ?? ""
-    allowed := role == "owner" ? true : false
-    return allowed
-  }
+  role := actor.role ?? ""
+  allowed := role == "owner" ? true : false
+  return allowed
 }
 
 /// PURE rollback-target decision (#2380): returns the deployment id to roll back to when the gate
@@ -106,12 +98,10 @@ logic deployRollbackTarget {
     passed any
     previousDeploymentId any
   }
-  body {
-    prev := args.previousDeploymentId ?? ""
-    ok := args.passed ?? false
-    target := ok == true ? "" : prev
-    return target
-  }
+  prev := args.previousDeploymentId ?? ""
+  ok := args.passed ?? false
+  target := ok == true ? "" : prev
+  return target
 }
 
 // ---- engine mesh ----
@@ -125,18 +115,14 @@ logic deployRollbackTarget {
 // set the deploy EMITTER (cockpit `deploy --env` / CI) stamps onto the
 // deploy.requested event payload as `engineNodeTypes`; the deployEngineCluster
 // automation (automations.memql) reads the set off the event and fans the
-// per-node build (and the docker-local k3d import) over it with a
-// forEach step. (Reading from the event -- not a logic step -- is what keeps
-// the per-node fan-out free of an inter-step dependency so the deploy phases
-// run in the authored order; see the automation header.) An emitter may pass a
+// per-node build (and the docker-local k3d import) over it with a `for`
+// statement. An emitter may pass a
 // SUBSET to redeploy a single node.
 /// Canonical ENGINE node-type list the deploy bundle builds + places: identity, bff,
 /// agent, planner, workbench, mcp, edge. No product-carrier nodes (carrier/product
 /// layer, shipped by their own repos).
 logic engineNodeTypes {
-  body {
-    return ["identity", "bff", "agent", "planner", "workbench", "mcp", "edge"]
-  }
+  return ["identity", "bff", "agent", "planner", "workbench", "mcp", "edge"]
 }
 
 // ---- outcome ----
@@ -158,11 +144,9 @@ logic deployOutcomeLabel {
   args {
     passed any
   }
-  body {
-    ok := args.passed ?? false
-    outcome := ok == true ? "succeeded" : "failed"
-    return outcome
-  }
+  ok := args.passed ?? false
+  outcome := ok == true ? "succeeded" : "failed"
+  return outcome
 }
 
 // ---- install-phase verdicts (epic memql#4490) ----
@@ -181,11 +165,9 @@ logic installDependencyVerdict {
   args {
     passed any
   }
-  body {
-    ok := args.passed ?? false
-    verdict := ok == true ? "ok" : "missing"
-    return verdict
-  }
+  ok := args.passed ?? false
+  verdict := ok == true ? "ok" : "missing"
+  return verdict
 }
 
 // renderDiffVerdict maps the render-diff result to the label installInstance
@@ -208,10 +190,8 @@ logic renderDiffVerdict {
     passed   any
     required any
   }
-  body {
-    gateRequired := args.required ?? false
-    clear := args.passed ?? false
-    verdict := gateRequired == true ? (clear == true ? "clear" : "blocked") : "clear"
-    return verdict
-  }
+  gateRequired := args.required ?? false
+  clear := args.passed ?? false
+  verdict := gateRequired == true ? (clear == true ? "clear" : "blocked") : "clear"
+  return verdict
 }

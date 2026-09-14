@@ -60,38 +60,24 @@ func stepIDs(a *automations.Automation) []string {
 // TestInstallInstanceGatesTheWholeInstall pins claim 1.
 func TestInstallInstanceGatesTheWholeInstall(t *testing.T) {
 	a := loadInstallAutomation(t, "installInstance")
+	if !a.IsStatementBody() {
+		t.Fatal("installInstance did not load as a statement body")
+	}
 
-	// The third step is the `install` switch; that it is still a switch is
-	// asserted below. A switch step's id is its author's name, as every
-	// other step's is (memql#5367).
+	// The render-diff gate, then its verdict, then the install -- which is
+	// the switch on the verdict, flattened: each install step carries the
+	// verdict in its condition.
 	ids := stepIDs(a)
-	want := []string{"gate", "verdict", "install"}
-	if len(ids) != len(want) {
-		t.Fatalf("installInstance has steps %v, want exactly %v.\n"+
-			"A NEW SIBLING STEP IS THE REGRESSION THIS CATCHES: a sibling that reads only the "+
-			"event payload carries no data edge, so the topo-sort is free to run it BEFORE the "+
-			"render-diff gate -- which means it runs on a version bump the gate was about to "+
-			"refuse. New install work belongs inside the gated case, not beside it.", ids, want)
+	if len(ids) < 3 || ids[0] != "gate" || ids[1] != "verdict" {
+		t.Fatalf("installInstance steps = %v, want the render-diff gate, then its verdict, then the install", ids)
 	}
-	for i := range want {
-		if ids[i] != want[i] {
-			t.Fatalf("installInstance step order = %v, want %v", ids, want)
+	for _, s := range a.Steps[2:] {
+		if !strings.Contains(s.Condition, "verdict") {
+			t.Errorf("installInstance's %s runs whatever the render-diff verdict (condition %q).\n"+
+				"A NEW SIBLING STATEMENT IS THE REGRESSION THIS CATCHES: written beside the switch "+
+				"instead of inside its gated case, it runs on a version bump the gate was about to "+
+				"refuse. New install work belongs inside the gated case.", s.ID, s.Condition)
 		}
-	}
-
-	install := a.Steps[len(a.Steps)-1]
-	if install.Type != automations.StepTypeSwitch {
-		t.Fatalf("the install step is a %q, want a switch on the render-diff verdict. "+
-			"Flattening it into sibling steps removes the only thing forcing the gate to run "+
-			"first.", install.Type)
-	}
-	if install.Switch == nil {
-		t.Fatal("the install step is typed switch but carries no switch config")
-	}
-	if !strings.Contains(install.Switch.Expression, "verdict") {
-		t.Errorf("the install switch keys on %q, want the render-diff verdict step. Switching on "+
-			"anything else silently removes the gate while leaving its shape in place.",
-			install.Switch.Expression)
 	}
 }
 
@@ -156,7 +142,7 @@ func TestRepairInstanceChecksBeforeItSyncs(t *testing.T) {
 	a := loadInstallAutomation(t, "repairInstance")
 
 	ids := stepIDs(a)
-	want := []string{"version", "verify", "verdict", "resync"}
+	want := []string{"version", "verify", "verdict", "argoSync"}
 	if len(ids) != len(want) {
 		t.Fatalf("repairInstance steps = %v, want %v", ids, want)
 	}
@@ -170,22 +156,21 @@ func TestRepairInstanceChecksBeforeItSyncs(t *testing.T) {
 	// The relation the step list exists to protect, asserted directly so it
 	// survives any future re-ordering of the list above.
 	verifyAt, verdictAt := indexOfStep(ids, "verify"), indexOfStep(ids, "verdict")
-	resyncAt := indexOfStep(ids, "resync")
-	if verifyAt < 0 || verdictAt < 0 || resyncAt < 0 {
-		t.Fatalf("repairInstance lost one of verify/verdict/the conditional resync: %v", ids)
+	syncAt := indexOfStep(ids, "argoSync")
+	if verifyAt < 0 || verdictAt < 0 || syncAt < 0 {
+		t.Fatalf("repairInstance lost one of verify/verdict/the conditional sync: %v", ids)
 	}
-	if !(verifyAt < verdictAt && verdictAt < resyncAt) {
+	if !(verifyAt < verdictAt && verdictAt < syncAt) {
 		t.Errorf("repairInstance order is %v. The check must precede the verdict and the verdict "+
 			"must precede the sync: a sync cannot create a CRD nobody installed, so an "+
 			"unconditional one changes nothing and reports Healthy.", ids)
 	}
 
-	resync := a.Steps[len(a.Steps)-1]
-	if resync.Type != automations.StepTypeSwitch {
-		t.Fatalf("the resync step is not a switch on the dependency verdict (got %v). "+
+	if sync := a.Steps[syncAt]; !strings.Contains(sync.Condition, "verdict") {
+		t.Fatalf("the re-sync runs whatever the dependency verdict (condition %q). "+
 			"An unconditional re-sync cannot create a CRD nobody installed, so it changes "+
 			"nothing and reports Healthy -- which is the failure this verb exists to stop.",
-			resync.Type)
+			sync.Condition)
 	}
 }
 

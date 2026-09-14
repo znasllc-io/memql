@@ -7,7 +7,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	"github.com/znasllc-io/memql/component/language/functions"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -173,52 +172,27 @@ func corpusLogic(t *testing.T) map[string]*Function {
 	return out
 }
 
-// TestV1CorpusLogicBodiesBuild: every logic construct of the tree loads and
-// lands on its runner. A body that is one
-// `return` of a construct call dispatches through fn.Expr, as a call node
-// naming the construct; every other body -- a statement before the return,
-// or a return of an expression (a ternary, `+`, `??`) -- runs on the
-// LogicRunner, which receives the v1 body. What each of them does at run
-// time is pinned construct by construct by component/automations/steps'
-// TestLogicCorpusRuns, against its goldens.
+// TestV1CorpusLogicBodiesBuild: every logic construct of the tree loads, as
+// a statement body (fn.LogicBody): since the bodies flip (epic memql#5370)
+// one runner runs every logic, whether its body is one `return` or many
+// statements. What each of them does at run time is pinned construct by
+// construct by component/automations/steps' TestLogicCorpusRuns, against its
+// goldens.
 func TestV1CorpusLogicBodiesBuild(t *testing.T) {
 	_, err := LoadUnifiedConcepts(nil)
 	require.NoError(t, err)
 	v1 := corpusLogic(t)
-	require.Greater(t, len(v1), 30, "the tree has dozens of logic constructs; a small count means the walk went blind")
+	require.Greater(t, len(v1), 25, "the tree has dozens of logic constructs; a small count means the walk went blind")
 
-	keys := make([]string, 0, len(v1))
-	for k := range v1 {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	calls, onRunner := 0, 0
-	for _, key := range keys {
-		n := v1[key]
-		if n.LogicSteps == nil {
-			nc, ok := n.Expr.(*FunctionCallExpression)
-			require.Truef(t, ok, "%s: a body off the LogicRunner is a return of a construct call, got %T", key, n.Expr)
-			require.Truef(t, isConstructName(nc.Name), "%s: the call dispatched through fn.Expr names %q, which is not a construct", key, nc.Name)
-			calls++
-			continue
+	var off []string
+	for key, n := range v1 {
+		if n.LogicBody == nil {
+			off = append(off, key)
 		}
-		onRunner++
 	}
-	// Both runners must be reached, or one half of this measures nothing.
-	require.Positive(t, calls, "no logic body returns a construct call through fn.Expr")
-	require.Positive(t, onRunner, "no logic body runs on the LogicRunner")
-	t.Logf("%d logic constructs: %d return a construct call through fn.Expr, %d run on the LogicRunner", len(keys), calls, onRunner)
-}
-
-// isConstructName reports whether a legacy call node names a construct rather
-// than one of the in-process builtins the legacy conversion also spells as a
-// call (cond, coalesce, concat, the date and string builtins).
-func isConstructName(name string) bool {
-	if _, catalog := functions.Lookup(name); catalog {
-		return false
-	}
-	_, retired := functions.RetiredFunctions()[name]
-	return !retired
+	sort.Strings(off)
+	require.Emptyf(t, off, "%d logic constructs do not load as a statement body:\n%s", len(off), strings.Join(off, "\n"))
+	t.Logf("%d logic constructs, every one a statement body", len(v1))
 }
 
 func mapKeys(m map[string]any) []string {

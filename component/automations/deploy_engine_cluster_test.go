@@ -68,13 +68,15 @@ func TestDeployEngineClusterCompiles(t *testing.T) {
 		t.Fatalf("expected a deploy.requested trigger, got %+v", auto.Trigger)
 	}
 
-	// The forEach + switch steps carry synthesized IDs (the authored step name
-	// is dropped when a struct-form step lowers to a raw loop/switch statement),
-	// so classify the compiled steps structurally and assert BOTH the per-phase
-	// shape AND the EXECUTION ORDER. Execution order is the compiled slice order
-	// (the scheduler runs steps sequentially); the deploy pipeline must come out
-	// authorize/record -> clone -> build -> import -> place -> gate -> outcome ->
-	// finalize despite the compiler's dependency topo-sort.
+	if !auto.IsStatementBody() {
+		t.Fatalf("deployEngineCluster did not load as a statement body")
+	}
+
+	// A statement body compiles to its steps in the order written: a `for` is
+	// one forEach step, and an if or a switch flattens into the steps of its
+	// branches, each carrying its branch's condition. So the pipeline order is
+	// the compiled slice order, and each branch's calls are found by their
+	// condition.
 	idx := func(pred func(*automations.Step) bool, what string) int {
 		for i, s := range auto.Steps {
 			if pred(s) {
@@ -84,11 +86,15 @@ func TestDeployEngineClusterCompiles(t *testing.T) {
 		t.Fatalf("no step matched %s", what)
 		return -1
 	}
-	isFn := func(name string) func(*automations.Step) bool {
-		return func(s *automations.Step) bool { return s.Function != nil && s.Function.Name == name }
+	isFn := func(name, cond string) func(*automations.Step) bool {
+		return func(s *automations.Step) bool {
+			return s.Function != nil && s.Function.Name == name && strings.Contains(s.Condition, cond)
+		}
 	}
-	isAction := func(prefix string) func(*automations.Step) bool {
-		return func(s *automations.Step) bool { return s.Action != nil && strings.HasPrefix(s.Action.Ref, prefix) }
+	isAction := func(prefix, cond string) func(*automations.Step) bool {
+		return func(s *automations.Step) bool {
+			return s.Action != nil && strings.HasPrefix(s.Action.Ref, prefix) && strings.Contains(s.Condition, cond)
+		}
 	}
 	isForEachDo := func(prefix string) func(*automations.Step) bool {
 		return func(s *automations.Step) bool {
@@ -96,27 +102,34 @@ func TestDeployEngineClusterCompiles(t *testing.T) {
 				strings.HasPrefix(s.ForEach.Do[0].Action.Ref, prefix)
 		}
 	}
-	isSwitchExpr := func(sub string) func(*automations.Step) bool {
-		return func(s *automations.Step) bool { return s.Switch != nil && strings.Contains(s.Switch.Expression, sub) }
-	}
 
-	iAuthorize := idx(isFn("deploymentForwardAllowed"), "authorize logic")
-	iRecord := idx(isFn("createDeployment"), "createDeployment write")
-	iClone := idx(isAction("cloneRepoAtVersion"), "clone action")
-	iBuild := idx(isForEachDo("buildEngineImage"), "build forEach")
-	iImport := idx(isForEachDo("importImageToK3d"), "importDevImages forEach")
-	iPlace := idx(isSwitchExpr("provider"), "place provider switch")
-	iGate := idx(isAction("runDeployGate"), "gate action")
-	iOutcome := idx(isFn("deployOutcomeLabel"), "outcome logic")
-	iFinalize := idx(isSwitchExpr("outcome"), "finalize switch")
+	const notLocal = `!(args.provider == "docker-local")`
+	const succeeded = `outcome == "succeeded"`
+	const failed = `!(outcome == "succeeded")`
+	iAuthorize := idx(isFn("deploymentForwardAllowed", ""), "authorize logic")
+	iRecord := idx(isFn("createDeployment", ""), "createDeployment write")
+	iClone := idx(isAction("cloneRepoAtVersion", ""), "clone action")
+	iBuild := idx(isForEachDo("buildEngineImage"), "build loop")
+	iImport := idx(isForEachDo("importImageToK3d"), "import loop")
+	iPin := idx(isAction("pinOverlayDigests", notLocal), "the cloud placement's pin, in the switch's default")
+	iSync := idx(isAction("argoSync", notLocal), "the cloud placement's sync, in the switch's default")
+	iGate := idx(isAction("runDeployGate", ""), "gate action")
+	iOutcome := idx(isFn("deployOutcomeLabel", ""), "outcome logic")
+	iSucceeded := idx(isFn("updateDeploymentStatus", succeeded), "the succeeded case's write")
+	iNotifySucceeded := idx(isAction("notifyDeploy", succeeded), "the succeeded case's notify")
+	iFailed := idx(isFn("updateDeploymentStatus", failed), "the failure case's write")
+	iNotifyFailed := idx(isAction("notifyDeploy", failed), "the failure case's notify")
+	iTarget := idx(isFn("deployRollbackTarget", ""), "rollbackTarget logic")
+	iRevert := idx(isAction("revertOverlay", `!(rollbackTarget == "")`), "the rollback switch's revert, in its default")
 
 	order := []struct {
 		name string
 		i    int
 	}{
 		{"authorize", iAuthorize}, {"record", iRecord}, {"clone", iClone},
-		{"build", iBuild}, {"importDevImages", iImport}, {"place", iPlace},
-		{"gate", iGate}, {"outcome", iOutcome}, {"finalize", iFinalize},
+		{"build", iBuild}, {"import", iImport}, {"pin", iPin}, {"sync", iSync},
+		{"gate", iGate}, {"outcome", iOutcome}, {"succeeded", iSucceeded}, {"notify succeeded", iNotifySucceeded},
+		{"failed", iFailed}, {"notify failed", iNotifyFailed}, {"rollbackTarget", iTarget}, {"revert", iRevert},
 	}
 	for k := 1; k < len(order); k++ {
 		if order[k].i <= order[k-1].i {
@@ -126,74 +139,24 @@ func TestDeployEngineClusterCompiles(t *testing.T) {
 	}
 
 	// build fans buildEngineImage over the engine node set, read from the event.
-	build := auto.Steps[iBuild]
-	if !strings.Contains(build.ForEach.Source, "engineNodeTypes") {
+	if build := auto.Steps[iBuild]; !strings.Contains(build.ForEach.Source, "engineNodeTypes") {
 		t.Errorf("build must iterate the event engineNodeTypes set, got source %q", build.ForEach.Source)
 	}
-
-	// importDevImages is the per-node k3d import, gated to the local target.
-	imp := auto.Steps[iImport]
-	if !strings.Contains(imp.ForEach.Filter, "docker-local") {
-		t.Errorf("importDevImages must be filtered to the docker-local target, got filter %q", imp.ForEach.Filter)
+	// The per-node k3d import is gated to the local target.
+	if imp := auto.Steps[iImport]; !strings.Contains(imp.ForEach.Filter, "docker-local") {
+		t.Errorf("the import loop must be filtered to the docker-local target, got filter %q", imp.ForEach.Filter)
 	}
-
-	// place is the single provider switch: docker-local no-ops; azure pins the
-	// overlay digests + syncs ArgoCD.
-	place := auto.Steps[iPlace]
-	if _, ok := place.Switch.Cases["docker-local"]; !ok {
-		t.Errorf("place switch must carry a docker-local case, got cases %v", place.Switch.Cases)
+	// The docker-local placement case is empty: no step runs on a local
+	// deploy's placement but the two cloud ones above, which it skips.
+	for _, s := range auto.Steps {
+		if strings.Contains(s.Condition, `args.provider == "docker-local"`) && !strings.Contains(s.Condition, notLocal) {
+			t.Errorf("step %s runs in the docker-local placement case, which places nothing", s.ID)
+		}
 	}
-	if place.Switch.Default == nil {
-		t.Fatal("place switch must carry a default (azure) case")
-	}
-	defRefs := actionRefs(place.Switch.Default.Steps)
-	if !hasPrefix(defRefs, "pinOverlayDigests") || !hasPrefix(defRefs, "argoSync") {
-		t.Errorf("place default must pin overlay digests + sync ArgoCD, got action refs %v", defRefs)
-	}
-
-	// finalize forks on the outcome label: success records succeeded + notifies;
-	// failure rolls the overlay back, records failed, + notifies.
-	finalize := auto.Steps[iFinalize]
-	succ, ok := finalize.Switch.Cases["succeeded"]
-	if !ok {
-		t.Fatalf("finalize must carry a succeeded case, got cases %v", finalize.Switch.Cases)
-	}
-	if !hasFunc(succ.Steps, "updateDeploymentStatus") {
-		t.Error("finalize succeeded case must call updateDeploymentStatus")
-	}
-	if !hasPrefix(actionRefs(succ.Steps), "notifyDeploy") {
-		t.Error("finalize succeeded case must notify the deploy outcome")
-	}
-	if finalize.Switch.Default == nil {
-		t.Fatal("finalize must carry a default (failure) case")
-	}
-	failSteps := finalize.Switch.Default.Steps
-	if !hasFunc(failSteps, "updateDeploymentStatus") {
-		t.Error("finalize failure case must call updateDeploymentStatus")
-	}
-	failRefs := actionRefs(failSteps)
-	if !hasPrefix(failRefs, "notifyDeploy") {
-		t.Errorf("finalize failure case must notify, got action refs %v", failRefs)
-	}
-
-	// The overlay revert moved OUT of the failure case into its own
-	// decide -> switch -> act tail (#2380): rollbackTarget (pure logic;
-	// empty = no rollback -- a passed gate or the docker-local path with no
-	// previousDeploymentId) then a switch that fires revertOverlay only in
-	// the non-empty case.
-	rbt := stepByID(auto.Steps, "rollbackTarget")
-	if rbt == nil || rbt.Function == nil || rbt.Function.Name != "deployRollbackTarget" {
-		t.Fatal("rollbackTarget step must decide via logic deployRollbackTarget")
-	}
-	rb := stepByID(auto.Steps, "rollback")
-	if rb == nil || rb.Switch == nil {
-		t.Fatal("rollback must switch on steps.rollbackTarget.result")
-	}
-	if _, ok := rb.Switch.Cases[""]; !ok {
-		t.Error("rollback switch must carry the empty (no-rollback) case")
-	}
-	if rb.Switch.Default == nil || !hasPrefix(actionRefs(rb.Switch.Default.Steps), "revertOverlay") {
-		t.Error("rollback switch default must revert the overlay")
+	// The rollback decides first: rollbackTarget is its logic, and the revert
+	// runs only when it names a deployment.
+	if rbt := stepByID(auto.Steps, "rollbackTarget"); rbt == nil || rbt.Function == nil || rbt.Function.Name != "deployRollbackTarget" {
+		t.Fatal("rollbackTarget must decide via logic deployRollbackTarget")
 	}
 }
 
@@ -213,32 +176,4 @@ func readDeploymentAutomations(t *testing.T) string {
 		t.Fatalf("read deployment/automations.memql: %v", err)
 	}
 	return string(data)
-}
-
-func actionRefs(steps []*automations.Step) []string {
-	var refs []string
-	for _, s := range steps {
-		if s.Action != nil {
-			refs = append(refs, s.Action.Ref)
-		}
-	}
-	return refs
-}
-
-func hasFunc(steps []*automations.Step, name string) bool {
-	for _, s := range steps {
-		if s.Function != nil && s.Function.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-func hasPrefix(refs []string, prefix string) bool {
-	for _, r := range refs {
-		if strings.HasPrefix(r, prefix) {
-			return true
-		}
-	}
-	return false
 }

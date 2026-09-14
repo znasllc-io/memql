@@ -268,12 +268,13 @@ func TestBodyCallKindsAreEachCalled(t *testing.T) {
 // nativeHeader finds a logic or automation header the rewriter left standing.
 var nativeHeader = regexp.MustCompile(`(?m)^(logic|automation)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
 
-// TestTransitionalDispatchIsExact pins the per-construct dispatch that lets
-// the tree keep loading until it is migrated: every logic and automation in
-// the tree is in a retired form today and takes the rewriter's path (after
-// NormaliseAll, no `logic NAME {` or `automation NAME {` header is left), and
-// every case in v1BodyCases takes the native one (TestV1BodyParses requires a
-// statement body). DELETED WITH THE REWRITER'S STAGES in the flip.
+// TestTransitionalDispatchIsExact pins the per-construct dispatch while it
+// still exists: the tree is migrated (epic memql#5370), so every logic and
+// automation in it takes the native path -- NormaliseAll leaves every
+// `logic NAME {` and `automation NAME {` header standing and finds no terse
+// header -- and every case in v1BodyCases does too (TestV1BodyParses requires
+// a statement body). DELETED WITH THE REWRITER'S STAGES in the flip, when the
+// parser refuses what the dispatch sent to the rewriter.
 func TestTransitionalDispatchIsExact(t *testing.T) {
 	constructs := 0
 	for _, root := range []string{"../../../dsl", "../../../examples", "../../../deploy/fleet/dsl"} {
@@ -295,14 +296,18 @@ func TestTransitionalDispatchIsExact(t *testing.T) {
 				return rerr
 			}
 			src := string(b)
-			constructs += len(nativeHeader.FindAllString(BlankComments(src), -1)) + len(terseAutomationMatches(src))
+			before := len(nativeHeader.FindAllString(BlankComments(src), -1))
+			constructs += before
+			if terse := terseAutomationMatches(src); len(terse) > 0 {
+				t.Errorf("%s: %d terse automation header(s); the tree is migrated to statements", p, len(terse))
+			}
 			out, nerr := NormaliseAll(src)
 			if nerr != nil {
 				t.Errorf("%s: the rewriter refused it: %v", p, nerr)
 				return nil
 			}
-			if m := nativeHeader.FindString(BlankComments(out)); m != "" {
-				t.Errorf("%s: %q took the native path; every construct in the tree is in a retired form until it is migrated", p, m)
+			if after := len(nativeHeader.FindAllString(BlankComments(out), -1)); after != before {
+				t.Errorf("%s: %d of %d logic and automation headers took the rewriter's path; the tree is migrated, so every one is native", p, before-after, before)
 			}
 			return nil
 		})

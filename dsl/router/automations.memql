@@ -37,7 +37,5 @@
 /// covers.
 @trigger(schedule="0 30 3 * * *")
 automation routingEvidenceFold {
-  step fold {
-    routingEvidenceFold { }
-  }
+  fold := builtin routingEvidenceFold()
 }

@@ -123,7 +123,7 @@ use platform.mutations.{ stageOutboundRequest, updateInboundRequestStatus }
 /// could. The fix is generic and belongs in the engine rather than here: one JSON-extract builtin
 /// would serve every product draining `POST /inbound/{source}`, which is the entire point of that
 /// surface existing. Recorded on memql#3854.
-@trigger(event="node.created", concept="v1:platform:inboundRequest", partition="*")
+@trigger(event="node.created", concept="v1:platform:inboundRequest")
 automation claimStripeDelivery {
   args {
     id     any
@@ -131,17 +131,15 @@ automation claimStripeDelivery {
     status any
   }
 
-  step claim {
-    switch source {
-      case "stripe" {
-        updateInboundRequestStatus {
-          requestId: id,
-          status:    "failed",
-          lastError: "no handler: the DSL cannot parse a webhook body, so the Stripe event cannot be mapped to a fleet row (memql#3854). Re-drainable once a JSON-extract builtin lands."
-        }
-      }
-      default { }
+  switch args.source {
+    case "stripe" {
+      mutation updateInboundRequestStatus(
+        requestId: args.id,
+        status:    "failed",
+        lastError: "no handler: the DSL cannot parse a webhook body, so the Stripe event cannot be mapped to a fleet row (memql#3854). Re-drainable once a JSON-extract builtin lands."
+      )
     }
+    default { }
   }
 }
 
@@ -162,7 +160,7 @@ automation claimStripeDelivery {
 /// A subscription entered `past_due`: tell the customer, and mark the account delinquent. The
 /// instance is untouched -- see the policy note above. `graceEndsAt` was set by whoever wrote
 /// `past_due` (the Stripe path, or an operator), and the sweep below acts on it.
-@trigger(event="node.updated", concept="v1:fleet:subscription", partition="*")
+@trigger(event="node.updated", concept="v1:fleet:subscription")
 automation dunningNoticeOnPaymentFailure {
   args {
     id           any
@@ -170,23 +168,21 @@ automation dunningNoticeOnPaymentFailure {
     status       any
   }
 
-  step markAccount {
-    switch status {
-      case "past_due" {
-        setSubscriberStatus {
-          subscriberId: subscriberId,
-          status:       "delinquent"
-        }
-      }
-      default { }
+  switch args.status {
+    case "past_due" {
+      mutation setSubscriberStatus(
+        subscriberId: args.subscriberId,
+        status:       "delinquent"
+      )
     }
+    default { }
   }
 }
 
 /// A subscription recovered: clear the account's delinquency. `activateSubscription` already
 /// cleared the grace clock -- a subscription that is active is not in any grace period by
 /// definition, and a stale `graceEndsAt` is how a recovered account gets torn down a week later.
-@trigger(event="node.updated", concept="v1:fleet:subscription", partition="*")
+@trigger(event="node.updated", concept="v1:fleet:subscription")
 automation clearDelinquencyOnRecovery {
   args {
     id           any
@@ -194,16 +190,14 @@ automation clearDelinquencyOnRecovery {
     status       any
   }
 
-  step clearAccount {
-    switch status {
-      case "active" {
-        setSubscriberStatus {
-          subscriberId: subscriberId,
-          status:       "active"
-        }
-      }
-      default { }
+  switch args.status {
+    case "active" {
+      mutation setSubscriberStatus(
+        subscriberId: args.subscriberId,
+        status:       "active"
+      )
     }
+    default { }
   }
 }
 
@@ -226,7 +220,7 @@ automation clearDelinquencyOnRecovery {
 ///
 /// The message names no amount and no card. It cannot: this row does not carry them, Stripe does,
 /// and a dunning email that guesses at a figure is worse than one that does not mention it.
-@trigger(event="node.updated", concept="v1:fleet:subscription", partition="*")
+@trigger(event="node.updated", concept="v1:fleet:subscription")
 automation dunningEmailOnPaymentFailure {
   args {
     id           any
@@ -235,19 +229,17 @@ automation dunningEmailOnPaymentFailure {
     status       any
   }
 
-  step notify {
-    switch status {
-      case "past_due" {
-        stageOutboundRequest {
-          requestId:   "fleet-dunning-" + id + "-" + graceEndsAt,
-          medium:      "email",
-          target:      billingEmail,
-          subject:     "Action needed: your MemQL Cloud payment did not go through",
-          body:        "We could not process your latest MemQL Cloud payment. Your instance keeps running -- please update your payment details in the billing portal within the grace period to avoid interruption.",
-          requestedBy: "fleet.dunningEmailOnPaymentFailure"
-        }
-      }
-      default { }
+  switch args.status {
+    case "past_due" {
+      mutation stageOutboundRequest(
+        requestId:   "fleet-dunning-" + args.id + "-" + args.graceEndsAt,
+        medium:      "email",
+        target:      args.billingEmail,
+        subject:     "Action needed: your MemQL Cloud payment did not go through",
+        body:        "We could not process your latest MemQL Cloud payment. Your instance keeps running -- please update your payment details in the billing portal within the grace period to avoid interruption.",
+        requestedBy: "fleet.dunningEmailOnPaymentFailure"
+      )
     }
+    default { }
   }
 }

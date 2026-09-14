@@ -13,10 +13,29 @@
 //
 // Schedule chosen as 02:35 UTC, offset from the other retention
 // crons so they don't contend on the same DB window.
+use platform.queries.{ globalVariable }
+
 /// Daily 02:35 UTC sweep: identifies safety-classification rows past
 /// MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90). Observation-only until MemQL gains
 /// row-removal support.
-automation purgeExpiredSafetyClassifications @trigger(schedule="0 35 2 * * *") => logic purgeExpiredSafetyClassifications
+@trigger(schedule="0 35 2 * * *")
+automation purgeExpiredSafetyClassifications {
+  // memqlmigrate: the statements of logic purgeExpiredSafetyClassifications, which published and so could not stay a logic (D14) (memql#5373)
+  // Daily sweep over v1:safety:classification rows past MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS
+  // (default 90). Currently observation-only: emits a 'safety.classification.retention.observed'
+  // event with the candidate count. Per-row delete lands when the engine grows a delete() mutation
+  // -- the same gap auditEventRetentionSweep documents.
+  allRows := query allSafetyClassifications()
+  retentionDays := query globalVariable(name: "MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS")
+
+  publish "safety.classification.retention.observed" {
+    candidateCount: allRows.count(),
+    retentionDays: retentionDays.first().value ?? "90",
+    timestamp: now
+  }
+
+  return allRows.count()
+}
 
 // purgeExpiredOutputScreenings (memql#233)
 // =======================================
@@ -28,4 +47,21 @@ automation purgeExpiredSafetyClassifications @trigger(schedule="0 35 2 * * *") =
 /// Daily 02:40 UTC sweep: identifies output-screening rows past
 /// MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90). Observation-only until MemQL gains
 /// row-removal support.
-automation purgeExpiredOutputScreenings @trigger(schedule="0 40 2 * * *") => logic purgeExpiredOutputScreenings
+@trigger(schedule="0 40 2 * * *")
+automation purgeExpiredOutputScreenings {
+  // memqlmigrate: the statements of logic purgeExpiredOutputScreenings, which published and so could not stay a logic (D14) (memql#5373)
+  // Daily sweep over v1:safety:outputScreening rows past
+  // MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS (default 90). Currently observation-only: emits a
+  // 'safety.outputScreening.retention.observed' event with the candidate count. Per-row delete lands
+  // when the engine grows a delete() mutation -- mirrors purgeExpiredSafetyClassifications.
+  allRows := query allOutputScreenings()
+  retentionDays := query globalVariable(name: "MEMQL_SAFETY_OUTPUT_SCREENING_RETENTION_DAYS")
+
+  publish "safety.outputScreening.retention.observed" {
+    candidateCount: allRows.count(),
+    retentionDays: retentionDays.first().value ?? "90",
+    timestamp: now
+  }
+
+  return allRows.count()
+}

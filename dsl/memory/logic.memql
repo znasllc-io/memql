@@ -73,17 +73,15 @@ logic consolidateMemory {
   args {
     event object!
   }
-  body {
-    // Phase scaffolding: the per-owner consolidation loop (read since
-    // watermark -> cluster -> LLM distill -> similarTo dedup ->
-    // reinforce/create -> decay/prune -> advance watermark) is owned
-    // by the Go harness consolidation handler. The full contract is in
-    // this file's header; the mutations it calls
-    // (createMemoryBelief / reinforceMemoryBelief /
-    // decayMemoryBelief / pruneMemoryBelief /
-    // advanceMemoryConsolidationCursor) ship in
-    // dsl/harness/mutations.memql and the distill prompt
-    // (consolidateMemory) in dsl/harness/prompts.memql.
-    return args.event.topic
-  }
+  // Phase scaffolding: the per-owner consolidation loop (read since
+  // watermark -> cluster -> LLM distill -> similarTo dedup ->
+  // reinforce/create -> decay/prune -> advance watermark) is owned
+  // by the Go harness consolidation handler. The full contract is in
+  // this file's header; the mutations it calls
+  // (createMemoryBelief / reinforceMemoryBelief /
+  // decayMemoryBelief / pruneMemoryBelief /
+  // advanceMemoryConsolidationCursor) ship in
+  // dsl/harness/mutations.memql and the distill prompt
+  // (consolidateMemory) in dsl/harness/prompts.memql.
+  return args.event.topic
 }

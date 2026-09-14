@@ -35,13 +35,11 @@ logic instanceCommand {
   args {
     status string
   }
-  body {
-    s := args.status ?? ""
-    teardown := s == "tearing_down" ? "teardown" : ""
-    resume := s == "resuming" ? "resume" : teardown
-    suspend := s == "suspending" ? "suspend" : resume
-    return s == "provisioning" ? "provision" : suspend
-  }
+  s := args.status ?? ""
+  teardown := s == "tearing_down" ? "teardown" : ""
+  resume := s == "resuming" ? "resume" : teardown
+  suspend := s == "suspending" ? "suspend" : resume
+  return s == "provisioning" ? "provision" : suspend
 }
 
 /// Whether a subscription's status entitles its owner to a RUNNING instance. Mirrors spec
@@ -53,11 +51,9 @@ logic subscriptionIsServiceable {
   args {
     status string
   }
-  body {
-    s := args.status ?? ""
-    active := s == "active" ? true : s == "past_due" ? true : false
-    return s == "trialing" ? true : active
-  }
+  s := args.status ?? ""
+  active := s == "active" ? true : s == "past_due" ? true : false
+  return s == "trialing" ? true : active
 }
 
 /// The confirmation phrase tenant-teardown.sh demands, composed for one tenant. The phrase includes
@@ -70,9 +66,7 @@ logic teardownConfirmationPhrase {
   args {
     tenant string!
   }
-  body {
-    return "teardown " + args.tenant
-  }
+  return "teardown " + args.tenant
 }
 
 /// Whether an instance is up and serving, from a payload status rather than from a row filter.
@@ -82,9 +76,7 @@ logic instanceIsRunning {
   args {
     status string
   }
-  body {
-    return (args.status ?? "") == "running"
-  }
+  return (args.status ?? "") == "running"
 }
 
 // =============================================================================
@@ -121,10 +113,8 @@ logic runningInstances {
   args {
     event object!
   }
-  body {
-    running := query instancesByStatus( status: "running" )
-    return running.nodes()
-  }
+  running := query instancesByStatus(status: "running")
+  return running.nodes()
 }
 
 /// Every SUSPENDED instance -- the candidate set for the grace-expiry teardown. Same unwindowed
@@ -133,10 +123,8 @@ logic suspendedInstances {
   args {
     event object!
   }
-  body {
-    suspended := query instancesByStatus( status: "suspended" )
-    return suspended.nodes()
-  }
+  suspended := query instancesByStatus(status: "suspended")
+  return suspended.nodes()
 }
 
 /// Every subscription still in its trial -- the candidate set for the billing side of day 14.
@@ -144,8 +132,6 @@ logic trialingSubscriptions {
   args {
     event object!
   }
-  body {
-    trialing := query subscriptionsByStatus( status: "trialing" )
-    return trialing.nodes()
-  }
+  trialing := query subscriptionsByStatus(status: "trialing")
+  return trialing.nodes()
 }

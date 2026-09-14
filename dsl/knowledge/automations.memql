@@ -69,12 +69,10 @@ automation trainSpecialist {
     mode          string
   }
 
-  step train {
-    trainSpecialist (
-      domainId: args.domainId,
-      specialistId: args.specialistId ?? "",
-      topic: args.topic ?? "",
-      mode: args.mode ?? "initial"
-    )
-  }
+  train := builtin trainSpecialist(
+    domainId: args.domainId,
+    specialistId: args.specialistId ?? "",
+    topic: args.topic ?? "",
+    mode: args.mode ?? "initial"
+  )
 }

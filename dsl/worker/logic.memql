@@ -32,11 +32,9 @@ logic workerInvocationRetentionSweep {
   args {
     event object!
   }
-  body {
-  windowDays := query globalVariable( name: "WORKER_INVOCATION_RETENTION_DAYS" )
-  candidates := query expiredWorkerInvocations( createdBefore: addDuration(now, "P-" + (windowDays.first().payload.value ?? "90") + "D") )
+  windowDays := query globalVariable(name: "WORKER_INVOCATION_RETENTION_DAYS")
+  candidates := query expiredWorkerInvocations(createdBefore: addDuration(now, "P-" + (windowDays.first().value ?? "90") + "D"))
   return candidates.nodes()
-  }
 }
 
 
@@ -76,15 +74,13 @@ logic workerModelPullStaleSweep {
   args {
     event object!
   }
-  body {
-  claimGrace := query globalVariable( name: "MEMQL_MODEL_PULL_CLAIM_GRACE_SECONDS" )
-  stallGrace := query globalVariable( name: "MEMQL_MODEL_PULL_STALL_GRACE_SECONDS" )
+  claimGrace := query globalVariable(name: "MEMQL_MODEL_PULL_CLAIM_GRACE_SECONDS")
+  stallGrace := query globalVariable(name: "MEMQL_MODEL_PULL_STALL_GRACE_SECONDS")
   abandoned := query openModelPulls(
-    requestedBefore: addDuration(now, "PT-" + (claimGrace.first().payload.value ?? "90") + "S"),
-    updatedBefore: addDuration(now, "PT-" + (stallGrace.first().payload.value ?? "420") + "S")
+    requestedBefore: addDuration(now, "PT-" + (claimGrace.first().value ?? "90") + "S"),
+    updatedBefore: addDuration(now, "PT-" + (stallGrace.first().value ?? "420") + "S")
   )
   return abandoned.nodes()
-  }
 }
 
 
@@ -124,13 +120,11 @@ logic workerModelProbeStaleSweep {
   args {
     event object!
   }
-  body {
-  claimGrace := query globalVariable( name: "MEMQL_MODEL_PROBE_CLAIM_GRACE_SECONDS" )
-  stallGrace := query globalVariable( name: "MEMQL_MODEL_PROBE_STALL_GRACE_SECONDS" )
+  claimGrace := query globalVariable(name: "MEMQL_MODEL_PROBE_CLAIM_GRACE_SECONDS")
+  stallGrace := query globalVariable(name: "MEMQL_MODEL_PROBE_STALL_GRACE_SECONDS")
   abandoned := query openModelProbes(
-    requestedBefore: addDuration(now, "PT-" + (claimGrace.first().payload.value ?? "90") + "S"),
-    updatedBefore: addDuration(now, "PT-" + (stallGrace.first().payload.value ?? "900") + "S")
+    requestedBefore: addDuration(now, "PT-" + (claimGrace.first().value ?? "90") + "S"),
+    updatedBefore: addDuration(now, "PT-" + (stallGrace.first().value ?? "900") + "S")
   )
   return abandoned.nodes()
-  }
 }

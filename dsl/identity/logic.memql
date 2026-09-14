@@ -40,128 +40,9 @@ logic accessRequestExpirySweep {
   args {
     event object!
   }
-  body {
-  windowDays := query globalVariable( name: "IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS" )
-  pending := query expiredPendingAccessRequests( createdBefore: addDuration(now, "P-" + (windowDays.first().payload.value ?? "30") + "D") )
+  windowDays := query globalVariable(name: "IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS")
+  pending := query expiredPendingAccessRequests(createdBefore: addDuration(now, "P-" + (windowDays.first().value ?? "30") + "D"))
   return pending.nodes()
-  }
-}
-
-// accountDeletionReminder25Days
-// ==============================
-//
-// Daily 09:05 UTC sweep that emits a more-urgent reminder event for
-// each user ~25 days into their deletion cooldown -- typically the
-// last reminder before the 30-day cooldown elapses and
-// accountDeletionSweep performs the hard delete.
-//
-// Same shape as accountDeletionReminder7Days; only the windowing
-// (P25D / P26D) and the event subject string differ. Two
-// automations rather than one because:
-//
-//   1. Each fires at a slightly different time so they don't
-//      contend for the same scheduler slot.
-//   2. The bracket is materialised in the if-condition; refactoring
-//      to a single automation would need an array of windows + a
-//      nested loop, which the MemQL automation grammar doesn't
-//      cleanly express today.
-//
-// MemQL parser limitation + email-delivery delegation: see header
-// of accountDeletionReminder7Days.
-/// Daily 09:05 UTC sweep that emits an 'identity.deletion.reminder' event for each user 25-26 days
-/// into their deletion cooldown -- final notice before accountDeletionSweep performs the hard
-/// delete at 30 days. Bracket [P25D, P26D) on deletionScheduledAt fired daily means each user gets
-/// exactly one reminder at this milestone.
-logic accountDeletionReminder25Days {
-  args {
-    event object!
-  }
-  body {
-  candidates := query usersInDeletionCooldown()
-
-  for item := range candidates.nodes() {
-    emitReminder := if addDuration(item.payload.deletionScheduledAt, "P25D") < now && addDuration(item.payload.deletionScheduledAt, "P26D") >= now {
-      publishEvent(
-        topic: "identity.deletion.reminder",
-        payload: {
-          userId: item.id,
-          email: item.payload.primaryEmail,
-          deletionScheduledAt: item.payload.deletionScheduledAt,
-          milestoneDays: 25,
-          subject: "Final notice: your <BRAND_NAME> account will be deleted in 5 days",
-          timestamp: now
-        }
-      )
-    }
-  }
-
-  return candidates.count()
-  }
-}
-
-// accountDeletionReminder7Days
-// =============================
-//
-// Daily 09:00 UTC sweep that emits a reminder event for each user
-// roughly 7 days into their deletion cooldown so the user has a
-// clear chance to cancel before the cooldown elapses (typically a
-// 30-day window, configurable via MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS).
-//
-// The 7-day window is bracketed [P7D, P8D) on deletionScheduledAt:
-// a row whose deletionScheduledAt was approximately 7 days ago lands
-// in this run. The 25-day reminder uses [P25D, P26D). One-day
-// brackets, fired daily, mean each user gets exactly one reminder
-// at each milestone (no duplicates, no gaps).
-//
-// Email delivery: there is no `integration.email.sendEmail` builtin
-// exposed in the DSL today (the Go integration registers the
-// capability but no `(Builtin)` definition surfaces it). This
-// automation publishes an `identity.deletion.reminder` event with
-// the user's email + remaining-cooldown details; the
-// component/server / app/integrations_identity wiring is expected
-// to subscribe and call the email integration's Sender directly.
-// When a builtin email send lands in DSL, swap publishEvent for a
-// direct call.
-//
-// Brand-name interpolation TODO: the subject string is literal
-// "<BRAND_NAME>" today; the consumer of the published event
-// should substitute the actual brand at delivery time.
-//
-// MemQL parser limitation: filter expressions can't push the
-// addDuration windowing down (the planner rejects function-call
-// literals in filter comparisons), so windowing happens per-row
-// inside the loop.
-/// Daily 09:00 UTC sweep that emits an 'identity.deletion.reminder' event for each user 7-8 days
-/// into their deletion cooldown so they can cancel before the cooldown elapses. Bracket [P7D, P8D)
-/// on deletionScheduledAt fired daily means exactly one reminder per user at this milestone. Email
-/// delivery is consumed by the component/server subscriber.
-logic accountDeletionReminder7Days {
-  args {
-    event object!
-  }
-  body {
-  candidates := query usersInDeletionCooldown()
-
-  for item := range candidates.nodes() {
-    // Window: deletionScheduledAt is between 7 and 8 days ago.
-    // Equivalent: scheduledAt + P7D < now AND scheduledAt + P8D >= now.
-    emitReminder := if addDuration(item.payload.deletionScheduledAt, "P7D") < now && addDuration(item.payload.deletionScheduledAt, "P8D") >= now {
-      publishEvent(
-        topic: "identity.deletion.reminder",
-        payload: {
-          userId: item.id,
-          email: item.payload.primaryEmail,
-          deletionScheduledAt: item.payload.deletionScheduledAt,
-          milestoneDays: 7,
-          subject: "Your <BRAND_NAME> account will be permanently deleted soon",
-          timestamp: now
-        }
-      )
-    }
-  }
-
-  return candidates.count()
-  }
 }
 
 // accountDeletionSweep
@@ -214,9 +95,8 @@ logic accountDeletionSweep {
   args {
     event object!
   }
-  body {
-  cooldownDays := query globalVariable( name: "MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS" )
-  candidates := query usersScheduledForDeletion( scheduledBefore: addDuration(now, "P-" + (cooldownDays.first().payload.value ?? "30") + "D") )
+  cooldownDays := query globalVariable(name: "MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS")
+  candidates := query usersScheduledForDeletion(scheduledBefore: addDuration(now, "P-" + (cooldownDays.first().value ?? "30") + "D"))
 
   // Auth-session revocation gap (intentional): the user concept holds
   // user.id, and the only session read keyed on the JWT `sub` claim is
@@ -233,66 +113,29 @@ logic accountDeletionSweep {
   // accountDeletionSweep automation that revokes each session via
   // revokeAuthSession.
   return candidates.nodes()
-  }
 }
 
-// auditEventRetentionSweep
-// =========================
+// usersDueDeletionReminder
+// ========================
 //
-// Daily 02:00 UTC sweep that walks audit-event rows older than
-// MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. The intent is rotation-grade
-// retention (typically 90-365 days for compliance).
-//
-// Note (intentional gap): MemQL has no row-removal mutation today
-// (the AST defines only Insert and Update). Soft-deleting an audit
-// event by `update(active=false)` is also a non-starter -- the
-// AuditEvent concept doesn't carry an `active` field, and adding
-// one would weaken the "append-only" guarantee that's the whole
-// point of an audit log.
-//
-// So this cron is wired but currently emits a "would-expire N rows"
-// publishEvent for observability only; no row state changes. When
-// either:
-//
-//   (a) the engine grows a `delete()` mutation kind, or
-//   (b) a deliberate `tombstoned: true` field lands on AuditEvent
-//       (with the audit semantics it implies),
-//
-// flip this cron to call the corresponding mutation per row inside
-// the for-loop. The query side
-// (expiredAuditEvents) is stable either way.
-//
-// Per-row windowing uses addDuration on item.payload.occurredAt
-// against `now`, same as accessRequestExpirySweep -- MemQL
-// can't push that into the filter today.
-/// Daily 02:00 UTC sweep over v1:identity:auditEvent rows older than
-/// MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Observation-only today: emits an
-/// 'identity.audit.retention.observed' event with the candidate count -- MemQL has no delete()
-/// mutation and AuditEvent's append-only semantics forbid soft-delete via active=false. Per-row
-/// delete lands when one of those gaps closes.
-logic auditEventRetentionSweep {
+// The decision half of the two deletion-reminder sweeps. Each sweep mails the
+// users a fixed span into their deletion cooldown; which users those are is a
+// matter of date math, and date math is POLICY (P4, memql#2371): an automation
+// orchestrates and does not decide, so the window lives here and the sweeps
+// publish for whatever it returns. The sweeps used to be one publishing logic
+// each; a logic may not publish (D14, epic memql#5370), so their publishing
+// moved into the automations and their decision into this one logic.
+/// The users between `from` and `to` into their deletion cooldown: the ones a daily reminder
+/// sweep mails at that milestone. A daily sweep over a one-day window reaches each user once.
+logic usersDueDeletionReminder {
   args {
-    event object!
+    /// How far into the cooldown the window opens, an ISO-8601 duration (P7D).
+    from  string!
+    /// How far into the cooldown the window closes (P8D).
+    to    string!
   }
-  body {
-  allEvents := query expiredAuditEvents()
-  retentionDays := query globalVariable( name: "MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS" )
-
-  // Count how many rows would be deleted under the configured
-  // retention. The publishEvent emits one observation per cron
-  // tick so the operator can see the candidate-row count over time.
-  // No per-row state change today -- see header note.
-  emitObservation := publishEvent(
-    topic: "identity.audit.retention.observed",
-    payload: {
-      candidateCount: allEvents.count(),
-      retentionDays: retentionDays.first().payload.value ?? "365",
-      timestamp: now
-    }
-  )
-
-  return allEvents.count()
-  }
+  candidates := query usersInDeletionCooldown()
+  return candidates.nodes().where(u => addDuration(u.deletionScheduledAt, args.from) < now && addDuration(u.deletionScheduledAt, args.to) >= now)
 }
 
 // magicLinkExpirySweep
@@ -331,35 +174,7 @@ logic magicLinkExpirySweep {
   args {
     event object!
   }
-  body {
-  return query expiredMagicLinkRequests( asOf: now )
-  }
-}
-
-/// Emits a 'delegation.created' event when a new v1:identity:delegation row lands. Carries the
-/// delegation id + identity / agent / role / scope fields for audit logging and downstream event
-/// processing.
-logic onDelegationCreated {
-  args {
-    event object!
-  }
-  body {
-  emitEvent := publishEvent(
-    topic: "delegation.created",
-    payload: {
-      delegationId: args.event.payload.id,
-      identityId: args.event.payload.identityId,
-      identitySubject: args.event.payload.identitySubject,
-      identityType: args.event.payload.identityType,
-      agentId: args.event.payload.agentId,
-      roleCeiling: args.event.payload.roleCeiling,
-      scopes: args.event.payload.scopes,
-      createdBySubject: args.event.payload.createdBySubject,
-      timestamp: now
-    }
-  )
-  return emitEvent
-  }
+  return query expiredMagicLinkRequests(asOf: now)
 }
 
 // ---- logic/v1/identity/revokeExpiredDelegations.memql ----
@@ -386,8 +201,6 @@ logic revokeExpiredDelegations {
   args {
     asOf string!
   }
-  body {
-    return query expiredActiveDelegations( asOf: args.asOf )
-  }
+  return query expiredActiveDelegations(asOf: args.asOf)
 }
 

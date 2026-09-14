@@ -108,13 +108,16 @@ func TestEventContextThreadsIntoNestedSteps(t *testing.T) {
 		wantValues []string
 	}{
 		{
-			logic: "conflictDetection",
-			event: map[string]any{"topic": "node.created", "kind": "node.created", "payload": map[string]any{
-				"id": "rec-1", "partitionId": "space-1", "recordType": "contact",
-				"naturalKeyField": "email", "naturalKeyValue": "a@b.io",
+			logic: "releaseWorkspaceOnRunTerminal",
+			event: map[string]any{"topic": "node.updated", "kind": "node.updated", "payload": map[string]any{
+				"id": "run-7f3a", "status": "completed",
 			}},
-			wantValues: []string{"space-1", "contact", "a@b.io"},
+			wantValues: []string{"run-7f3a"},
 		},
+		// (conflictDetection, this suite's first fixture, published, so the
+		// flip moved its statements into the automation that called it and
+		// deleted the logic (D14, memql#5373). The automation reads its bound
+		// args, not an event envelope.)
 		// (generateResponse -- the cognition.response.requested fixture --
 		// went with the cognition namespace in epic memql#4988. logicAutoJoinAI
 		// moved to the product pack in B2 (#2038) alongside the `space`
@@ -131,14 +134,14 @@ func TestEventContextThreadsIntoNestedSteps(t *testing.T) {
 			if err != nil || fn == nil {
 				t.Fatalf("Functions().Get(%s): %v", tc.logic, err)
 			}
-			if fn.LogicSteps == nil {
-				t.Fatalf("%s has no multi-step LogicSteps body", tc.logic)
+			if fn.LogicBody == nil {
+				t.Fatalf("%s has no statement body", tc.logic)
 			}
 
 			reg := &capturingRegistry{}
 			runner := automations.NewLogicRunner(eng, reg, eng.Logger)
-			if _, err := runner.RunLogic(context.Background(), tc.logic, fn.LogicSteps, map[string]any{"event": tc.event}); err != nil {
-				t.Fatalf("RunLogic(%s): %v", tc.logic, err)
+			if _, err := runner.RunLogicBody(context.Background(), tc.logic, fn.LogicBody, map[string]any{"event": tc.event}); err != nil {
+				t.Fatalf("RunLogicBody(%s): %v", tc.logic, err)
 			}
 
 			if len(reg.resolved) == 0 {

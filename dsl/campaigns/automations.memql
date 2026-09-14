@@ -21,15 +21,11 @@
 /// On a staged inbound webhook delivery, offer it to the campaign feedback parser. Does nothing
 /// unless the row's source is configured as a feedback feed and the delivery was signature-verified;
 /// the builtin decides both, because both are deployment configuration rather than graph state.
-@trigger(event="node.created", concept="v1:platform:inboundRequest", partition="*")
+@trigger(event="node.created", concept="v1:platform:inboundRequest")
 automation ingestCampaignFeedback {
   args {
     id any
   }
 
-  step ingest {
-    builtin campaignIngestFeedback (
-      inboundRequestId: id
-    )
-  }
+  ingest := builtin campaignIngestFeedback(inboundRequestId: args.id)
 }

@@ -40,7 +40,7 @@ use work.builtins.{ cancelComputerUseRuns }
 /// finishes and is journaled rather than being abandoned mid-effect. The builtin is gated on
 /// INTERNAL ORIGIN, which this automation carries because it is tree-loaded AND its payload is the
 /// engine's own -- the pair memql#2888 requires, and the one its predecessor was attacked through.
-@trigger(event="node.updated", concept="v1:identity:user", partition="*")
+@trigger(event="node.updated", concept="v1:identity:user")
 @filter(row => row.preferences.computerUseEnabled == false)
 automation killSwitchCancelsComputerUseRuns {
   // The trigger payload binds INTO this contract at fire time, and the field
@@ -52,11 +52,7 @@ automation killSwitchCancelsComputerUseRuns {
     id any
   }
 
-  step stop {
-    builtin cancelComputerUseRuns (
-      ownerUserId: id
-    )
-  }
+  stop := builtin cancelComputerUseRuns(ownerUserId: args.id)
 }
 
 // workerInvocationRetentionSweep
@@ -83,15 +79,9 @@ automation killSwitchCancelsComputerUseRuns {
 /// gates each row on createdAt + P{N}D < now (#2256/#2254 evaluator fix) and soft-deletes it.
 @trigger(schedule="0 30 2 * * *")
 automation workerInvocationRetentionSweep {
-  step decide {
-    logic workerInvocationRetentionSweep ( event: event )
-  }
-  step apply {
-    forEach item in decide.result {
-      softDeleteWorkerInvocation {
-        invocationId: item.id
-      }
-    }
+  decide := logic workerInvocationRetentionSweep(event: event)
+  for item in decide {
+    mutation softDeleteWorkerInvocation(invocationId: item.id)
   }
 }
 
@@ -123,20 +113,16 @@ automation workerInvocationRetentionSweep {
 /// The remedy is identical either way, which is what the sentence says instead.
 @trigger(schedule="0 */2 * * * *")
 automation workerModelPullStaleSweep {
-  step decide {
-    logic workerModelPullStaleSweep ( event: event )
-  }
-  step apply {
-    forEach item in decide.result {
-      finishModelPull {
-        pullId:       item.id,
-        status:       "failed",
-        statusLine:   "",
-        errorMessage: "No agent replica is driving this pull -- either the node holding the machine's connection stopped before it began, or it went away mid-download. Whatever was already fetched stays on the machine, so starting the pull again resumes rather than restarts.",
-        readvertised: false,
-        endedAt:      now
-      }
-    }
+  decide := logic workerModelPullStaleSweep(event: event)
+  for item in decide {
+    mutation finishModelPull(
+      pullId:       item.id,
+      status:       "failed",
+      statusLine:   "",
+      errorMessage: "No agent replica is driving this pull -- either the node holding the machine's connection stopped before it began, or it went away mid-download. Whatever was already fetched stays on the machine, so starting the pull again resumes rather than restarts.",
+      readvertised: false,
+      endedAt:      now
+    )
   }
 }
 
@@ -169,18 +155,14 @@ automation workerModelPullStaleSweep {
 /// recorded, and running it again costs only the time.
 @trigger(schedule="0 */2 * * * *")
 automation workerModelProbeStaleSweep {
-  step decide {
-    logic workerModelProbeStaleSweep ( event: event )
-  }
-  step apply {
-    forEach item in decide.result {
-      finishModelProbe {
-        probeId:       item.id,
-        status:        "failed",
-        measurementId: "",
-        errorMessage:  "No agent replica is driving this probe -- either the node holding the machine's connection stopped before it began, or it went away mid-suite. Nothing was measured, so nothing was recorded; running it again costs only the time.",
-        endedAt:       now
-      }
-    }
+  decide := logic workerModelProbeStaleSweep(event: event)
+  for item in decide {
+    mutation finishModelProbe(
+      probeId:       item.id,
+      status:        "failed",
+      measurementId: "",
+      errorMessage:  "No agent replica is driving this probe -- either the node holding the machine's connection stopped before it began, or it went away mid-suite. Nothing was measured, so nothing was recorded; running it again costs only the time.",
+      endedAt:       now
+    )
   }
 }

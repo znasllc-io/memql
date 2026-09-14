@@ -15,6 +15,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // nested_call_arg_eval_test.go -- memql#2870.
@@ -286,11 +287,12 @@ func isASTNodeLeak(msg string) bool {
 // absent" -- a deploy gate answering nil instead of false is on the branch
 // that decides whether to auto-promote a release.
 //
-// The body is `return args.gate.passed ?? false`. In edition 2026 a logic
-// that returns an expression runs on the LogicRunner, which evaluates that
-// expression with EvalExpr over the call's arguments (logic_body_v1.go), so
-// the contract is asserted on exactly that: the shipped construct's returned
-// expression, evaluated by EvalExpr. (Before the flip the body was a
+// The body is `return args.gate.passed ?? false`. A logic's body is a
+// statement body (epic memql#5370), compiled at load into fn.LogicBody; the
+// LogicRunner parses its return statement's value and evaluates it with
+// EvalExpr over the call's arguments. So the contract is asserted on exactly
+// that: the shipped construct's returned expression, as its compiled body
+// carries it, evaluated by EvalExpr. (Before the flips the body was a
 // `coalesce(...)` left at plan.Root for the engine's in-memory branch, and
 // this test drove that branch.)
 func TestDeployGateGreenFailsClosed(t *testing.T) {
@@ -299,12 +301,22 @@ func TestDeployGateGreenFailsClosed(t *testing.T) {
 	if err != nil || fn == nil {
 		t.Fatalf("deployGateGreen is not in this tree: %v", err)
 	}
-	if fn.LogicSteps == nil {
-		t.Fatal("deployGateGreen returns an expression, so it must run on the LogicRunner (fn.LogicSteps)")
+	if fn.LogicBody == nil {
+		t.Fatal("deployGateGreen must load as a statement body (fn.LogicBody)")
 	}
-	ret, ok := fn.Expr.(*PlanConstExpression)
-	if !ok {
-		t.Fatalf("deployGateGreen's fn.Expr = %T, want its returned expression as a *PlanConstExpression", fn.Expr)
+	var src string
+	for _, st := range fn.LogicBody {
+		if st["type"] == "return" {
+			ret, _ := st["return"].(map[string]any)
+			src, _ = ret["value"].(string)
+		}
+	}
+	if src == "" {
+		t.Fatalf("deployGateGreen's compiled body returns no value: %v", fn.LogicBody)
+	}
+	ret, err := languageParser.ParseV1Expression(src)
+	if err != nil {
+		t.Fatalf("deployGateGreen's returned value %q does not parse: %v", src, err)
 	}
 
 	cases := []struct {
@@ -320,7 +332,7 @@ func TestDeployGateGreenFailsClosed(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := EvalExpr(context.Background(), ret.Expr, MapScope{"args": map[string]any{"gate": tc.gate}}, EvalOptions{})
+			got, err := EvalExpr(context.Background(), ret, MapScope{"args": map[string]any{"gate": tc.gate}}, EvalOptions{})
 			if err != nil {
 				t.Fatalf("evaluate deployGateGreen: %v", err)
 			}

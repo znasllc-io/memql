@@ -3,21 +3,17 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+use platform.queries.{ globalVariable }
+
 /// Daily 04:00 UTC sweep: expire pending access requests older than
 /// IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS. decide (pure) returns the pending candidates; window reads
 /// the expiry var; the forEach apply gates each row on createdAt + P{N}D < now (#2256/#2254
 /// evaluator fix) and stamps status=expired.
 @trigger(schedule="0 0 4 * * *")
 automation accessRequestExpirySweep {
-  step decide {
-    logic accessRequestExpirySweep ( event: event )
-  }
-  step apply {
-    forEach item in decide.result {
-      expireAccessRequest {
-        requestId: item.id
-      }
-    }
+  decide := logic accessRequestExpirySweep(event: event)
+  for item in decide {
+    mutation expireAccessRequest(requestId: item.id)
   }
 }
 
@@ -44,7 +40,27 @@ automation accessRequestExpirySweep {
 // of accountDeletionReminder7Days.
 /// Daily 09:05 UTC: emit identity.deletion.reminder events (urgent) for users at the 25-day mark of
 /// their deletion cooldown.
-automation accountDeletionReminder25Days @trigger(schedule="0 5 9 * * *") => logic accountDeletionReminder25Days
+@trigger(schedule="0 5 9 * * *")
+automation accountDeletionReminder25Days {
+  // Daily 09:05 UTC sweep that emits an 'identity.deletion.reminder' event for each user 25-26 days
+  // into their deletion cooldown -- final notice before accountDeletionSweep performs the hard
+  // delete at 30 days. The one-day window fired daily means each user gets exactly one reminder at
+  // this milestone. Which users are due is logic usersDueDeletionReminder's decision (P4); the
+  // bodies rewrite (memql#5373) moved this sweep's publishing here from its logic, which a logic
+  // may not do (D14).
+  due := logic usersDueDeletionReminder(from: "P25D", to: "P26D")
+  for item in due {
+    publish "identity.deletion.reminder" {
+      userId: item.id,
+      email: item.primaryEmail,
+      deletionScheduledAt: item.deletionScheduledAt,
+      milestoneDays: 25,
+      subject: "Final notice: your <BRAND_NAME> account will be deleted in 5 days",
+      timestamp: now
+    }
+  }
+  return due.count()
+}
 
 // accountDeletionReminder7Days
 // =============================
@@ -80,7 +96,27 @@ automation accountDeletionReminder25Days @trigger(schedule="0 5 9 * * *") => log
 // inside the loop.
 /// Daily 09:00 UTC: emit identity.deletion.reminder events for users at the 7-day mark of their
 /// deletion cooldown.
-automation accountDeletionReminder7Days @trigger(schedule="0 0 9 * * *") => logic accountDeletionReminder7Days
+@trigger(schedule="0 0 9 * * *")
+automation accountDeletionReminder7Days {
+  // Daily 09:00 UTC sweep that emits an 'identity.deletion.reminder' event for each user 7-8 days
+  // into their deletion cooldown so they can cancel before the cooldown elapses. The one-day window
+  // fired daily means exactly one reminder per user at this milestone. Email delivery is consumed
+  // by the component/server subscriber. Which users are due is logic usersDueDeletionReminder's
+  // decision (P4); the bodies rewrite (memql#5373) moved this sweep's publishing here from its
+  // logic, which a logic may not do (D14).
+  due := logic usersDueDeletionReminder(from: "P7D", to: "P8D")
+  for item in due {
+    publish "identity.deletion.reminder" {
+      userId: item.id,
+      email: item.primaryEmail,
+      deletionScheduledAt: item.deletionScheduledAt,
+      milestoneDays: 7,
+      subject: "Your <BRAND_NAME> account will be permanently deleted soon",
+      timestamp: now
+    }
+  }
+  return due.count()
+}
 
 // accountDeletionSweep
 // =====================
@@ -126,15 +162,9 @@ automation accountDeletionReminder7Days @trigger(schedule="0 0 9 * * *") => logi
 /// via deleteUserHard. Auth-session revocation is the documented gap noted in the decide logic.
 @trigger(schedule="0 0 3 * * *")
 automation accountDeletionSweep {
-  step decide {
-    logic accountDeletionSweep ( event: event )
-  }
-  step apply {
-    forEach item in decide.result {
-      deleteUserHard {
-        userId: item.id
-      }
-    }
+  decide := logic accountDeletionSweep(event: event)
+  for item in decide {
+    mutation deleteUserHard(userId: item.id)
   }
 }
 
@@ -169,7 +199,29 @@ automation accountDeletionSweep {
 // can't push that into the filter today.
 /// Daily 02:00 UTC sweep: identifies audit events past MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS.
 /// Currently observation-only; deletion lands when MemQL gains row-removal support.
-automation auditEventRetentionSweep @trigger(schedule="0 0 2 * * *") => logic auditEventRetentionSweep
+@trigger(schedule="0 0 2 * * *")
+automation auditEventRetentionSweep {
+  // memqlmigrate: the statements of logic auditEventRetentionSweep, which published and so could not stay a logic (D14) (memql#5373)
+  // Daily 02:00 UTC sweep over v1:identity:auditEvent rows older than
+  // MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS. Observation-only today: emits an
+  // 'identity.audit.retention.observed' event with the candidate count -- MemQL has no delete()
+  // mutation and AuditEvent's append-only semantics forbid soft-delete via active=false. Per-row
+  // delete lands when one of those gaps closes.
+  allEvents := query expiredAuditEvents()
+  retentionDays := query globalVariable(name: "MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS")
+
+  // Count how many rows would be deleted under the configured
+  // retention. The publishEvent emits one observation per cron
+  // tick so the operator can see the candidate-row count over time.
+  // No per-row state change today -- see header note.
+  publish "identity.audit.retention.observed" {
+    candidateCount: allEvents.count(),
+    retentionDays: retentionDays.first().value ?? "365",
+    timestamp: now
+  }
+
+  return allEvents.count()
+}
 
 // ---- automations/v1/identity/expireDelegations/automation.memql ----
 
@@ -195,17 +247,13 @@ automation auditEventRetentionSweep @trigger(schedule="0 0 2 * * *") => logic au
 /// `apply` forEaches them into revokeDelegation, which is the write.
 @trigger(schedule="0 */5 * * * *")
 automation expireDelegations {
-  step decide {
-    logic revokeExpiredDelegations ( asOf: now )
-  }
-  step apply {
-    forEach item in decide.nodes() {
-      revokeDelegation {
-        delegationId: item.id,
-        revokedBySubject: "system:expiry",
-        revokedAt: now
-      }
-    }
+  decide := logic revokeExpiredDelegations(asOf: now)
+  for item in decide.nodes() {
+    mutation revokeDelegation(
+      delegationId: item.id,
+      revokedBySubject: "system:expiry",
+      revokedAt: now
+    )
   }
 }
 
@@ -242,16 +290,12 @@ automation expireDelegations {
 /// spent.
 @trigger(schedule="0 0 * * * *")
 automation magicLinkExpirySweep {
-  step decide {
-    logic magicLinkExpirySweep ( event: event )
-  }
-  step apply {
-    forEach item in decide.nodes() {
-      consumeMagicLinkRequest {
-        requestId: item.id,
-        consumedFromIP: "system:expiry"
-      }
-    }
+  decide := logic magicLinkExpirySweep(event: event)
+  for item in decide.nodes() {
+    mutation consumeMagicLinkRequest(
+      requestId: item.id,
+      consumedFromIP: "system:expiry"
+    )
   }
 }
 
@@ -261,5 +305,32 @@ automation magicLinkExpirySweep {
 // Emits a delegation.created event when a new delegation is created.
 // Used for audit logging and downstream event processing.
 /// Emit delegation.created event with full context for audit logging
-automation onDelegationCreated @trigger(event="node.created", concept="v1:identity:delegation", partition="*") => logic onDelegationCreated
+@trigger(event="node.created", concept="v1:identity:delegation")
+automation onDelegationCreated {
+  args {
+    agentId any
+    createdBySubject any
+    id any
+    identityId any
+    identitySubject any
+    identityType any
+    roleCeiling any
+    scopes any
+  }
+  // memqlmigrate: the statements of logic onDelegationCreated, which published and so could not stay a logic (D14) (memql#5373)
+  // Emits a 'delegation.created' event when a new v1:identity:delegation row lands. Carries the
+  // delegation id + identity / agent / role / scope fields for audit logging and downstream event
+  // processing.
+  publish "delegation.created" {
+    delegationId: args.id,
+    identityId: args.identityId,
+    identitySubject: args.identitySubject,
+    identityType: args.identityType,
+    agentId: args.agentId,
+    roleCeiling: args.roleCeiling,
+    scopes: args.scopes,
+    createdBySubject: args.createdBySubject,
+    timestamp: now
+  }
+}
 

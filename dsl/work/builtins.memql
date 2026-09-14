@@ -9,8 +9,9 @@
 // a row write: createGoal opens the goal AND its first run and dispatches
 // compile; forkRun and replayRun read a source run and derive a new one;
 // decideApproval records a decision AND resumes the run parked on it. A
-// mutation step cannot hand its inserted id to a later one, so the
-// composition has to happen in Go.
+// statement body can hand an inserted row to the next write (`x := mutation
+// ...` names the row), but dispatching, deriving and resuming a run are the
+// engine's, so the composition happens in Go.
 //
 // Every handler repeats its own gate. A builtin's annotation set carries
 // no @requiresRank, so the floor is the handler's -- these are all

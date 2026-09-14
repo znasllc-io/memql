@@ -22,17 +22,19 @@ package steps
 // After the flip the tree IS edition 2026, so the v1 arm reads the tree's own
 // files, with no codemod step, and the legacy arm, which had no legacy source
 // left to read, is gone. The v1 arm against the goldens is the whole test.
+// After the bodies flip (epic memql#5370) the tree is written in statements
+// too, and the arm that runs them is that v1 arm (bodiesArm).
 //
 // # Arms
 //
 // An arm is a name, the source it reads, and a run: a function from (source,
 // fixture arguments, probe) to a result; the calls it made are the probe's
-// record. Today's two go through the engine's own logic dispatch --
+// record. Today's goes through the engine's own logic dispatch --
 // engine.Execute of the construct's call, with the LogicRunner wired, so the
-// engine decides between fn.Expr and fn.LogicSteps as it does in production.
-// A runner that replaces them adds its arm to the list in TestLogicCorpusRuns
-// and is held to the same goldens. Nothing but the two arms is specific to
-// today's runners: a construct call's answer is given in the statement's own
+// engine reaches the statement runner as it does in production. A runner
+// that replaces it adds its arm to the list in TestLogicCorpusRuns and is
+// held to the same goldens. Nothing but the arm is specific to today's
+// runner: a construct call's answer is given in the statement's own
 // terms -- a query answers its rows (a []any of row maps), a builtin its
 // result, a logic its return value, a mutation the row it wrote -- which each
 // arm adapts to its runner (probeRegistry and probeFakes do it for today's).
@@ -40,10 +42,12 @@ package steps
 // them. Journal writes are not calls: only construct calls and published
 // events are recorded.
 //
-// In ten constructs the legacy build does not do what the body says
+// In ten constructs the legacy build did not do what the body says
 // (logicLegacyDefects: each checked, each mended only in the part that is
 // defective). The goldens hold what the body says, and name the defect where
-// the legacy build differs.
+// the legacy build differed. Seven of the ten published, so the bodies flip
+// moved them into their automations (a logic may not publish, D14); the
+// table keeps the three the tree still has.
 //
 // Two things the comparison does not pin, because a later runner may answer
 // them differently without changing what a logic does: the envelope a result
@@ -256,6 +260,9 @@ var logicArgVariants = map[string][]map[string]any{
 	},
 	"governanceCanCreatePrincipal": {{"newRoleSlug": "user"}, {"newRoleSlug": "owner"}},
 	"revokeExpiredDelegations":     {{"asOf": "2026-09-01T00:00:00Z"}},
+	// The two reminder windows: the first canned row is a week into its
+	// cooldown and the second 25 days, so each window takes one of them.
+	"usersDueDeletionReminder": {{"from": "P7D", "to": "P8D"}, {"from": "P25D", "to": "P26D"}},
 }
 
 // logicRoles are the actors every fixture runs as: the role gates of the tree
@@ -364,34 +371,21 @@ type logicArm struct {
 	moved func(path, name string) bool
 }
 
-// todayArm runs the tree through today's runners: one engine per arm, booted
-// on the embedded tree, every logic construct of the tree rebuilt from the
-// arm's source with the arm's grammar through the loader's own entry point
-// (memql.BuildFunctionConstruct) and upserted over the booted one, the
-// LogicRunner wired with probeRegistry, and each run an engine.Execute of the
-// construct's call -- so the engine picks fn.Expr or fn.LogicSteps as it does
-// in production.
-func todayArm(t *testing.T, name string, v1 bool, sources []*corpusSource) logicArm {
-	t.Helper()
-	pick := func(f *corpusSource) string { return f.Current }
-	if v1 {
-		pick = func(f *corpusSource) string { return f.V1 }
-	}
-	return engineArm(t, name, v1, false, pick, sources)
-}
-
 // bodiesArm runs the tree with its bodies in statements (corpusSource.Bodies):
-// every logic builds to a statement body (fn.LogicBody) and each run reaches
-// the LogicRunner's RunLogicBody through the engine, the dispatch production
-// takes. Before the flip it holds the statement runtime to the goldens run for
-// run; after it, the tree is its own statement source and this arm is the v1
-// arm.
+// one engine, booted on the embedded tree, every logic construct of the tree
+// rebuilt from the arm's source through the loader's own entry point
+// (memql.BuildFunctionConstruct) and upserted over the booted one, each
+// required to build to a statement body (fn.LogicBody), the LogicRunner wired
+// with probeRegistry, and each run an engine.Execute of the construct's call,
+// which reaches RunLogicBody as production does. Since the bodies flip the
+// tree is its own statement source (Bodies == Current), so this is the v1
+// arm; the arm that ran the tree's text alongside it read the same source.
 func bodiesArm(t *testing.T, sources []*corpusSource) logicArm {
 	t.Helper()
 	return engineArm(t, "bodies", true, true, func(f *corpusSource) string { return f.Bodies }, sources)
 }
 
-// engineArm is an arm through the engine: todayArm's and bodiesArm's.
+// engineArm is an arm through the engine, bodiesArm's.
 // statements requires every logic to build as a statement body.
 func engineArm(t *testing.T, name string, v1, statements bool, pick func(*corpusSource) string, sources []*corpusSource) logicArm {
 	t.Helper()
@@ -904,48 +898,8 @@ type legacyDefect struct {
 // construct. Each was read off the legacy compiled body, not inferred from
 // the difference.
 var logicLegacyDefects = map[string]legacyDefect{
-	"purgeExpiredSafetyClassifications": retentionObservation("safety.classification.retention.observed", "90"),
-	"purgeExpiredOutputScreenings":      retentionObservation("safety.outputScreening.retention.observed", "90"),
-	"auditEventRetentionSweep":          retentionObservation("identity.audit.retention.observed", "365"),
-	"onDelegationCreated": {
-		why:     "`now` in the event payload compiles to the text `timestamp()`, which the event step publishes as text",
-		applies: func(logicFixture) bool { return true },
-		mend: func(_ logicFixture, legacy, other *logicRecord) error {
-			if err := mendEventField(legacy, other, "delegation.created", "timestamp", isInstant); err != nil {
-				return err
-			}
-			// The logic returns the event step's result, which carries the
-			// same payload.
-			return mendResultPath(legacy, other, []string{"payload", "timestamp"}, isInstant)
-		},
-	},
-	"accountDeletionReminder7Days":  deletionReminder(7, 1),
-	"accountDeletionReminder25Days": deletionReminder(25, 2),
-	"governanceCanManagePrincipal":  governanceDefect("rbacGovernPrincipal", []string{"actorUserId", "actorIsOwner", "actorRank", "targetRank"}, "targetRoleSlug"),
-	"governanceCanCreatePrincipal":  governanceDefect("rbacCanCreatePrincipal", []string{"actorIsOwner", "actorRank", "newRank"}, "newRoleSlug"),
-	"conflictDetection": {
-		why: "the condition `! matchingConfirmed.empty()` evaluates false with matches in hand, so the conflict event is never published " +
-			"(and its payload's `matchingConfirmed.count()`, `.nodes()` and `now` compile to text)",
-		applies: func(fx logicFixture) bool { _, hasEvent := fx.Args["event"]; return hasEvent && fx.Rows > 0 },
-		mend: func(fx logicFixture, legacy, other *logicRecord) error {
-			if eventCall(legacy, "data.conflicts.detected") != nil || legacy.Result != nil {
-				return fmt.Errorf("the legacy run published the conflict event")
-			}
-			ev := eventCall(other, "data.conflicts.detected")
-			if ev == nil {
-				return fmt.Errorf("the v1 run did not publish the conflict event")
-			}
-			if n, _ := ev.Args["matchCount"].(float64); int(n) != fx.Rows {
-				return fmt.Errorf("the v1 event counts %v matches, want %d", ev.Args["matchCount"], fx.Rows)
-			}
-			if matches, _ := ev.Args["matches"].([]any); len(matches) != fx.Rows {
-				return fmt.Errorf("the v1 event carries %d matches, want %d", len(matches), fx.Rows)
-			}
-			other.Calls = withoutEvent(other.Calls, "data.conflicts.detected")
-			other.Result = nil
-			return nil
-		},
-	},
+	"governanceCanManagePrincipal": governanceDefect("rbacGovernPrincipal", []string{"actorUserId", "actorIsOwner", "actorRank", "targetRank"}, "targetRoleSlug"),
+	"governanceCanCreatePrincipal": governanceDefect("rbacCanCreatePrincipal", []string{"actorIsOwner", "actorRank", "newRank"}, "newRoleSlug"),
 	"transitionEventKind": {
 		why: "the legacy compiler turns `old == st` into `old == \"st\"`, a comparison with the literal text, so an unchanged status reads as a transition",
 		applies: func(fx logicFixture) bool {
@@ -963,70 +917,6 @@ var logicLegacyDefects = map[string]legacyDefect{
 			return nil
 		},
 	},
-}
-
-// retentionObservation is the defect of the three retention sweeps: the
-// observation event's payload expressions compile to strings, which the
-// event step publishes as their text.
-func retentionObservation(topic, defaultDays string) legacyDefect {
-	return legacyDefect{
-		why: "the event payload's expressions -- `rows.count()`, `retentionDays.first().payload.value ?? \"" + defaultDays +
-			"\"` and `now` -- compile to strings the event step publishes as text",
-		applies: func(logicFixture) bool { return true },
-		mend: func(fx logicFixture, legacy, other *logicRecord) error {
-			days := defaultDays
-			if fx.Rows > 0 {
-				days = "7" // the probe's globalVariable row
-			}
-			for field, want := range map[string]func(any) bool{
-				"candidateCount": func(v any) bool { n, ok := v.(float64); return ok && int(n) == fx.Rows },
-				"retentionDays":  func(v any) bool { return v == days },
-				"timestamp":      isInstant,
-			} {
-				if err := mendEventField(legacy, other, topic, field, want); err != nil {
-					return err
-				}
-			}
-			return nil
-		},
-	}
-}
-
-// deletionReminder is the defect of the two deletion-reminder sweeps: the
-// reminder window -- `addDuration(item.payload.deletionScheduledAt, "PnD") <
-// now && ...` -- compiles to a condition the string evaluator reads as false,
-// so no reminder is ever published. The probe's rows sit one inside each
-// window: row 1 half a day into the 7-day one, row 2 into the 25-day one.
-func deletionReminder(days, row int) legacyDefect {
-	return legacyDefect{
-		why: fmt.Sprintf("the %d-day window condition compiles to one the string evaluator reads as false, so no reminder is published "+
-			"(and the payload's `now` compiles to the text `timestamp()`)", days),
-		applies: func(fx logicFixture) bool { return fx.Rows >= row },
-		mend: func(_ logicFixture, legacy, other *logicRecord) error {
-			const topic = "identity.deletion.reminder"
-			if eventCall(legacy, topic) != nil {
-				return fmt.Errorf("the legacy run published a reminder")
-			}
-			var reminders []probeCall
-			for _, c := range other.Calls {
-				if c.Kind == "event" && c.Name == topic {
-					reminders = append(reminders, c)
-				}
-			}
-			if len(reminders) != 1 {
-				return fmt.Errorf("the v1 run published %d reminders, want the one row inside the window", len(reminders))
-			}
-			got := reminders[0].Args
-			if want := fmt.Sprintf("v1:probe:row:usersInDeletionCooldown-%d", row); got["userId"] != want {
-				return fmt.Errorf("the v1 reminder is for %v, want %s", got["userId"], want)
-			}
-			if n, _ := got["milestoneDays"].(float64); int(n) != days || !isInstant(got["timestamp"]) {
-				return fmt.Errorf("the v1 reminder is %v", got)
-			}
-			other.Calls = withoutEvent(other.Calls, topic)
-			return nil
-		},
-	}
 }
 
 // governanceDefect is the defect of the two rbac governance logics: the
@@ -1094,87 +984,12 @@ func governanceDefect(builtin string, actorFields []string, targetSlugArg string
 	}
 }
 
-// isInstant reports whether v is an instant -- or the mask a golden stores
-// one as.
-func isInstant(v any) bool {
-	s, ok := v.(string)
-	return ok && (s == logicInstantMask || (logicTimestamp.MatchString(s) && logicTimestamp.FindString(s) == s))
-}
-
-func eventCall(rec *logicRecord, topic string) *probeCall {
-	for i := range rec.Calls {
-		if rec.Calls[i].Kind == "event" && rec.Calls[i].Name == topic {
-			return &rec.Calls[i]
-		}
-	}
-	return nil
-}
-
 func lastCall(rec *logicRecord, name string) *probeCall {
 	for i := len(rec.Calls) - 1; i >= 0; i-- {
 		if rec.Calls[i].Name == name {
 			return &rec.Calls[i]
 		}
 	}
-	return nil
-}
-
-func withoutEvent(calls []probeCall, topic string) []probeCall {
-	out := make([]probeCall, 0, len(calls))
-	for _, c := range calls {
-		if c.Kind == "event" && c.Name == topic {
-			continue
-		}
-		out = append(out, c)
-	}
-	return out
-}
-
-// mendEventField checks one field of a published event's payload: the
-// legacy value is expression text, the other arm's satisfies want. It then
-// removes the field from both.
-func mendEventField(legacy, other *logicRecord, topic, field string, want func(any) bool) error {
-	lev, oev := eventCall(legacy, topic), eventCall(other, topic)
-	if lev == nil || oev == nil {
-		return fmt.Errorf("an arm did not publish %s", topic)
-	}
-	if s, _ := lev.Args[field].(string); !strings.Contains(s, "(") {
-		return fmt.Errorf("the legacy %s.%s is %v, not expression text", topic, field, lev.Args[field])
-	}
-	if !want(oev.Args[field]) {
-		return fmt.Errorf("the v1 %s.%s is %v", topic, field, oev.Args[field])
-	}
-	delete(lev.Args, field)
-	delete(oev.Args, field)
-	return nil
-}
-
-// mendResultPath checks a value under a result map the same way.
-func mendResultPath(legacy, other *logicRecord, path []string, want func(any) bool) error {
-	at := func(rec *logicRecord) (map[string]any, bool) {
-		m, ok := rec.Result.(map[string]any)
-		for _, p := range path[:len(path)-1] {
-			if !ok {
-				return nil, false
-			}
-			m, ok = m[p].(map[string]any)
-		}
-		return m, ok
-	}
-	lm, lok := at(legacy)
-	om, ook := at(other)
-	leaf := path[len(path)-1]
-	if !lok || !ook {
-		return fmt.Errorf("a result has no %s", strings.Join(path, "."))
-	}
-	if s, _ := lm[leaf].(string); !strings.Contains(s, "(") {
-		return fmt.Errorf("the legacy result %s is %v, not expression text", strings.Join(path, "."), lm[leaf])
-	}
-	if !want(om[leaf]) {
-		return fmt.Errorf("the v1 result %s is %v", strings.Join(path, "."), om[leaf])
-	}
-	delete(lm, leaf)
-	delete(om, leaf)
 	return nil
 }
 
@@ -1324,13 +1139,11 @@ func compareRuns(fx logicFixture, aLegacy bool, a logicRecord, bLegacy bool, b l
 // instead, once they agree.
 func TestLogicCorpusRuns(t *testing.T) {
 	sources := logicCorpusSources(t)
-	// The first arm is the one the others are compared with. The flip deletes
-	// the legacy arm's line: the tree then has no legacy source, and the v1
-	// arm against the goldens is the whole test. The bodies arm runs the
-	// statement form of every body (epic memql#5370) until the bodies flip
-	// makes it the v1 arm's own.
+	// The first arm is the one the others are compared with. Since the
+	// bodies flip (epic memql#5370) the tree is written in statements and one
+	// arm runs it: that arm against the goldens is the whole test. A runner
+	// that replaces it adds its arm here and is held to the same goldens.
 	arms := []logicArm{
-		todayArm(t, "v1", true, sources),
 		bodiesArm(t, sources),
 	}
 	legacyRuns := false
