@@ -11,6 +11,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/language/ast"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // expr_plan_const_test.go -- the replacement rules for PlanConstExpression
@@ -573,4 +574,63 @@ func TestPlanConstant_ContextSpecEvaluatesInPlace(t *testing.T) {
 	got, err = evaluateSpecExpression(context.Background(), nil, &NotExpression{Target: role}, envelope)
 	require.NoError(t, err)
 	require.Equal(t, false, got)
+}
+
+// The language's ambient roots are always bound in a plan constant's scope
+// (withAmbientDefaults): a plan expanded with no envelope -- the public Parse,
+// a statement rendered and resolved to check it -- reads the DENYING actor,
+// never an unknown name. Found on the flip: every such resolve of
+// packagesByRepoUrl refused with "actor is not defined".
+func TestPlanConstant_NoEnvelopeBindsTheDenyingActorNotAnUnknownName(t *testing.T) {
+	for src, want := range map[string]bool{
+		`actor.isClusterOwner == true`: false,
+		// The #2801 property: an EMPTY actor would read this as true under
+		// the absence table (unset != false); the denying one reads false.
+		`actor.isClusterOwner != false`: false,
+		`actor.userId == nil`:           true, // the denying envelope names nobody
+		`now != nil`:                    true,
+	} {
+		n := parseV1ExprForPlanConstTest(t, src)
+		got, err := planConstantEvaluator(context.Background(), n, planConstantBindings(nil, nil))
+		require.NoError(t, err, "%s: an ambient root is never an unknown name", src)
+		require.Equal(t, want, got, src)
+	}
+	// An unknown root is still refused.
+	_, err := planConstantEvaluator(context.Background(), parseV1ExprForPlanConstTest(t, `event.kind == "x"`), planConstantBindings(nil, nil))
+	require.Error(t, err)
+}
+
+func TestPlanConstant_AQueryResolvedWithNoActorRuns(t *testing.T) {
+	eng, err := bootLowerTree(t, map[string]string{
+		"concepts.memql": lowerInitConcepts,
+		"queries.memql": `use lowerinit.concepts.{ ticket }
+
+/// A caller's tickets, or every ticket for a cluster owner -- packagesByRepoUrl's shape.
+@actor
+query ticket ticketsForCaller {
+  args {
+    s  string!
+  }
+  filter   row => row.status == args.s && (row.title == actor.userId || actor.isClusterOwner == true)
+  paginate 20
+}
+`,
+	})
+	require.NoError(t, err)
+	// Parse carries no envelope: before the fix this refused with
+	// "plan constant actor.isClusterOwner == true: unknown_name ... actor is
+	// not defined".
+	plan, err := eng.Parse(`ticketsForCaller(s: "open")`)
+	require.NoError(t, err, "a query resolved with no actor runs; nothing is refused")
+	filter := canonicalExpression(unwrapToFilter(plan.Root))
+	require.NotContains(t, filter, "isclusterowner", "the plan constant is folded, not left for the executor")
+	require.Contains(t, filter, `payload.title==&{userId}`, "the owner arm stands; the cluster-owner arm folded to false")
+}
+
+// parseV1ExprForPlanConstTest parses one edition-2026 expression.
+func parseV1ExprForPlanConstTest(t *testing.T, src string) ast.ExpressionNode {
+	t.Helper()
+	n, err := languageParser.ParseV1Expression(src)
+	require.NoError(t, err, src)
+	return n
 }

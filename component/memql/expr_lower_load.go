@@ -63,7 +63,9 @@ import (
 // again outside tests -- argument expansion reads it without a lock.
 func init() {
 	planConstantEvaluator = func(ctx context.Context, n ast.ExpressionNode, bindings map[string]any) (any, error) {
-		v, err := EvalExpr(ctx, n, MapScope(bindings), EvalOptions{CanonicalID: canonicalIDForPlanConstant})
+		// The language's ambient roots are always bound, as the denying
+		// envelope when the expansion held none (withAmbientDefaults).
+		v, err := EvalExpr(ctx, n, MapScope(withAmbientDefaults(bindings)), EvalOptions{CanonicalID: canonicalIDForPlanConstant})
 		if err != nil {
 			return nil, err
 		}
