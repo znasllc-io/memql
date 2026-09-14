@@ -73,7 +73,7 @@ var (
 
 	xmSpecHeader  = regexp.MustCompile(`(?m)^[ \t]*spec[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 	xmTraitHeader = regexp.MustCompile(`(?m)^[ \t]*trait[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
-	xmBodyHeader  = regexp.MustCompile(`(?m)^[ \t]*(?:logic|automation|mutate)[ \t]+[A-Za-z_][A-Za-z0-9_]*(?:[ \t]+[A-Za-z_][A-Za-z0-9_]*)?[ \t]*\{`)
+	xmBodyHeader  = regexp.MustCompile(`(?m)^[ \t]*(?:logic|automation|mutate|mutation)[ \t]+[A-Za-z_][A-Za-z0-9_]*(?:[ \t]+[A-Za-z_][A-Za-z0-9_]*)?[ \t]*\{`)
 
 	// The declarations CollectPredicates reads, in either edition: a legacy
 	// body opens with `{`, a migrated one with `= <param> =>`.

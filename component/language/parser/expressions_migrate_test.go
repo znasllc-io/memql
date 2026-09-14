@@ -413,6 +413,20 @@ func TestRewriteExpressions_InProcess(t *testing.T) {
 	}
 }
 
+// A tree the bodies rewrite (epic 3) ran over first says `mutation` where this
+// one says `mutate` (D13), so the in-process pass must find both headers:
+// `expressions` then `bodies` and `bodies` then `expressions` end in the same
+// place.
+func TestRewriteExpressions_MutationKeywordBody(t *testing.T) {
+	for _, kw := range []string{"mutate", "mutation"} {
+		src := kw + " campaign m {\n  insert {\n    id: hash(concat(\"id-\", args.a))\n  }\n}\n"
+		want := kw + " campaign m {\n  insert {\n    id: hash(\"id-\" + args.a)\n  }\n}\n"
+		if got := xmtRewrite(t, src, nil); got != want {
+			t.Errorf("%s body:\n got:\n%s\nwant:\n%s", kw, got, want)
+		}
+	}
+}
+
 // `+` adds two numbers where concat joined their text, so a concat whose first
 // two arguments are not certainly strings has no exact `+` spelling.
 func TestRewriteExpressions_ConcatOfUntypedArgumentsIsRefused(t *testing.T) {
