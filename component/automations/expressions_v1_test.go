@@ -600,6 +600,92 @@ func TestV1LogicReturnOfAStepIsItsRecordedResult(t *testing.T) {
 	}
 }
 
+// TestV1LogicCodemodShapes: the shapes the expressions codemod writes into a
+// logic body run as the legacy spellings they replace meant them -- `(p ? a
+// : b)` for cond(p, a, b), `a + b` for concat(a, b), `x != nil` for
+// exists(x), `??` and `nil` -- as statements, as a construct call's named
+// arguments, inside a map literal with explicit keys, and as the condition of
+// a bare call.
+func TestV1LogicCodemodShapes(t *testing.T) {
+	body := parseV1Logic(t, `logic shapes {
+  args {
+    p bool
+    a string
+    b string
+    maybe string
+  }
+  body {
+    pick := (args.p ? args.a : args.b)
+    nested := args.p ? (args.a == "x" ? "ax" : "a") : "b"
+    joined := "P-" + (args.maybe ?? "30") + "D"
+    known := args.maybe != nil
+    unset := args.maybe ?? nil
+    r := probe(pick: pick, nested: nested, joined: joined, known: known, unset: unset, payload: { userId: args.a, flags: { known: known, none: nil } })
+    if args.p && known {
+      note(pick: pick)
+    }
+    return { pick: pick, joined: joined, known: known }
+  }
+}`)
+	for _, tc := range []struct {
+		args map[string]any
+		want map[string]any
+		ret  map[string]any
+	}{
+		{
+			args: map[string]any{"p": true, "a": "x", "b": "y", "maybe": "7"},
+			want: map[string]any{"pick": "x", "nested": "ax", "joined": "P-7D", "known": true, "unset": "7",
+				"payload": map[string]any{"userId": "x", "flags": map[string]any{"known": true, "none": nil}}},
+			ret: map[string]any{"pick": "x", "joined": "P-7D", "known": true},
+		},
+		{
+			args: map[string]any{"p": false, "a": "x", "b": "y"},
+			want: map[string]any{"pick": "y", "nested": "b", "joined": "P-30D", "known": false, "unset": nil,
+				"payload": map[string]any{"userId": "x", "flags": map[string]any{"known": false, "none": nil}}},
+			ret: map[string]any{"pick": "y", "joined": "P-30D", "known": false},
+		},
+	} {
+		probe := &v1ProbeRegistry{}
+		out, err := NewLogicRunner(&memql.MemQLEngine{}, probe, nil).RunLogic(context.Background(), "shapes", body, tc.args)
+		if err != nil {
+			t.Fatalf("RunLogic(%v): %v", tc.args, err)
+		}
+		wantValues(t, probe.call(t, "probe"), tc.want)
+		// A bare call is a statement of its own, run under the if's condition.
+		if ran := probe.ran("note"); ran != (tc.args["p"] == true && tc.args["maybe"] != nil) {
+			t.Fatalf("RunLogic(%v): the bare call under the if ran=%v", tc.args, ran)
+		}
+		if !reflect.DeepEqual(out, tc.ret) {
+			t.Fatalf("RunLogic(%v) = %#v, want %#v", tc.args, out, tc.ret)
+		}
+	}
+}
+
+// TestV1LogicReturnOnlyBodyRuns: a body that is one `return` of an expression
+// runs on the LogicRunner (the loader sends it there,
+// component/memql/logic_body_v1.go). It compiles to no steps, which an
+// automation may not have, so its return is its one step.
+func TestV1LogicReturnOnlyBodyRuns(t *testing.T) {
+	body := parseV1Logic(t, `logic returnOnly {
+  args {
+    x string
+  }
+  body {
+    return args.x ?? "none"
+  }
+}`)
+	runner := NewLogicRunner(&memql.MemQLEngine{}, &v1ProbeRegistry{}, nil)
+	for arg, want := range map[string]string{"ex": "ex", "": "none"} {
+		out, err := runner.RunLogic(context.Background(), "returnOnly", body, map[string]any{"x": arg})
+		if err != nil {
+			t.Fatalf("RunLogic: %v", err)
+		}
+		if out != want {
+			t.Fatalf("return = %#v, want %q", out, want)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // the trigger filter
 // ---------------------------------------------------------------------------
