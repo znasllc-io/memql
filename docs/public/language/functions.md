@@ -525,14 +525,10 @@ authored/deterministic deploy spine but are never themselves LLM-healed.
 
 ### Attribute Reference
 
-| Attribute | Arguments | Description |
-|-----------|-----------|-------------|
-| `@enabled` / `@disabled` | none | Lifecycle: enabled by default, `@enabled` an accepted no-op; `@disabled` constructs stay in the tree, are not loaded |
-| `@trigger` | `event="..."`, `concept="..."`, `partition="*"` | Event-based trigger; lifecycle events like `system.startup` / `system.shutdown` take `event` only |
-| `@trigger` | `schedule="..."` | Six-field cron schedule |
-| `@filter` | `(<predicate>)` | Event-payload predicate gating the trigger, e.g. `@filter(active==true)` |
-| `@description` | `"..."` | Human-readable description |
-| `precondition NAME { ... }` | `check:` (req), `literal:`, `description:` | First-class deterministic check; a miss aborts the run + emits `healing.precondition.missed` (Epic 4 self-healing) |
+Every annotation an automation accepts, and how each is written, is listed
+under [automation](attribute-matrix.md#automation) in the attribute matrix,
+which is generated from the annotation registry. Each links to its entry,
+which gives its keys (the `@trigger` keys among them) and what it does.
 
 ---
 
@@ -650,11 +646,11 @@ prompt consolidateMemory {
 
 ### Attributes
 
-| Attribute | Description |
-|-----------|-------------|
-| `@description` | Human-readable description of the prompt |
-| `@defaultProvider` | Default AI provider name to use |
-| `@templateFile` | Go text/template file for the prompt |
+Every annotation a prompt accepts (`@level` is required on every prompt) and
+every annotation its input fields accept are listed under
+[prompt](attribute-matrix.md#prompt) and
+[prompt field](attribute-matrix.md#prompt-field) in the attribute matrix, which
+is generated from the annotation registry.
 
 ### Input Field Types
 
@@ -709,14 +705,11 @@ provider anthropic {
 
 ### Attributes
 
-| Attribute | Description |
-|-----------|-------------|
-| `@type` | Provider type (e.g. `OpenAI`, `OpenAIStream`, `Anthropic`, `AnthropicStream`). Optional when `@extends` is used. |
-| `@model` | Model identifier |
-| `@extends` | Inherits `auth` and `@type` from a named base provider |
-| `@base` | Marks a vendor-level base provider definition |
-| `@default` | Marks this provider as the fallback for callers that do not pick one explicitly |
-| `@enabled` / `@disabled` | Lifecycle: enabled by default, `@enabled` an accepted no-op. `@disabled` skips registration entirely (no auth resolution attempted); `@disabled` on a `@base` propagates to every child that `@extends` it. |
+Every annotation a provider accepts, and how each is written, is listed under
+[provider](attribute-matrix.md#provider) in the attribute matrix, which is
+generated from the annotation registry. `@disabled` on a provider skips it at
+load with no auth resolution attempted, and on a `@base` it skips every child
+that `@extends` it.
 
 ### Blocks
 
