@@ -53,6 +53,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
 // GateUnresolvedSubAutomation is the rule id. Declared here rather than in
@@ -113,14 +115,19 @@ func enclosingAutomation(code string, offset int) string {
 
 // scanSubAutomationCalls is the corpus-level gate. Pass 1 indexes every
 // declaration; pass 2 walks every call site and reports the ones that resolve
-// to nothing.
+// to nothing: the text's, and a statement body's, read off its parsed body
+// (epic memql#5370) -- there a call is a statement of its own wherever it
+// sits, named (`x := automation y(...)`), inside a block or on a one-line
+// `if`, which no line pattern can follow.
 func scanSubAutomationCalls(files []SourceFile) []Violation {
 	code := make(map[string]string, len(files))
 	paths := make([]string, 0, len(files))
+	var scanned []SourceFile
 	for _, f := range files {
 		if skipForAutomationScan(f.Path) {
 			continue
 		}
+		scanned = append(scanned, f)
 		paths = append(paths, f.Path)
 		// Strings first, then comments -- the same order imports.go uses, and
 		// for the same reason: blanking comments first lets a `//` inside a
@@ -139,6 +146,26 @@ func scanSubAutomationCalls(files []SourceFile) []Violation {
 	}
 
 	var out []Violation
+	reported := map[string]bool{} // "<path>:<line>:<callee>"
+	report := func(path string, line int, caller, callee string) {
+		key := fmt.Sprintf("%s:%d:%s", path, line, callee)
+		if reported[key] {
+			return
+		}
+		reported[key] = true
+		out = append(out, Violation{
+			Gate:      GateUnresolvedSubAutomation,
+			File:      path,
+			Line:      line,
+			Kind:      "automation",
+			Construct: caller,
+			Detail: fmt.Sprintf(
+				"step calls `automation %s( ... )`, and no automation named %q is declared anywhere in the loaded corpus -- "+
+					"check the spelling, or add the domain it lives in to the tree this node loads (MEMQL_DSL_PATH for a product bundle). "+
+					"Left unresolved this loads clean and fails at RUN time, after every earlier step of %s has already taken effect (memql#4471)",
+				callee, callee, describeCaller(caller)),
+		})
+	}
 	for _, p := range paths {
 		src := code[p]
 		for _, m := range automationCall.FindAllStringSubmatchIndex(src, -1) {
@@ -146,22 +173,41 @@ func scanSubAutomationCalls(files []SourceFile) []Violation {
 			if _, ok := declared[callee]; ok {
 				continue
 			}
-			caller := enclosingAutomation(src, m[0])
-			out = append(out, Violation{
-				Gate:      GateUnresolvedSubAutomation,
-				File:      p,
-				Line:      strings.Count(src[:m[0]], "\n") + 1,
-				Kind:      "automation",
-				Construct: caller,
-				Detail: fmt.Sprintf(
-					"step calls `automation %s( ... )`, and no automation named %q is declared anywhere in the loaded corpus -- "+
-						"check the spelling, or add the domain it lives in to the tree this node loads (MEMQL_DSL_PATH for a product bundle). "+
-						"Left unresolved this loads clean and fails at RUN time, after every earlier step of %s has already taken effect (memql#4471)",
-					callee, callee, describeCaller(caller)),
-			})
+			report(p, strings.Count(src[:m[0]], "\n")+1, enclosingAutomation(src, m[0]), callee)
 		}
 	}
+	eachStatementBody(scanned, func(f SourceFile, kind, name string, startLine int, body *ast.Body) {
+		ast.WalkBody(body.Statements, func(st ast.BodyStatement) bool {
+			call := statementConstructCall(st)
+			if call == nil || call.Kind != "automation" {
+				return true
+			}
+			if _, ok := declared[call.Name]; ok {
+				return true
+			}
+			at := call.Span
+			if at.IsZero() {
+				at = st.StatementSpan()
+			}
+			report(f.Path, startLine+at.Line-1, name, call.Name)
+			return true
+		})
+	})
 	return out
+}
+
+// statementConstructCall is the construct call a statement makes itself, or
+// nil: a call, an assignment of one, or a return of one.
+func statementConstructCall(st ast.BodyStatement) *ast.ConstructCall {
+	switch s := st.(type) {
+	case *ast.CallStatement:
+		return s.Call
+	case *ast.AssignStatement:
+		return s.Call
+	case *ast.ReturnStatement:
+		return s.Call
+	}
+	return nil
 }
 
 func describeCaller(caller string) string {

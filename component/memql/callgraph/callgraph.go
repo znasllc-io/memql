@@ -489,6 +489,10 @@ func literalVocabularyField(cond string) (string, bool) {
 // Switch SUBJECTS are exempt -- switching on a decided value is the sanctioned
 // fan-out shape.
 func automationConditions(text string) []string {
+	filters := annotationArgs(text, automationFilterRE)
+	if conds, ok := statementConditions(text); ok {
+		return append(conds, filters...)
+	}
 	var out []string
 	for _, m := range automationIfRE.FindAllStringSubmatch(text, -1) {
 		out = append(out, m[1])
@@ -496,8 +500,49 @@ func automationConditions(text string) []string {
 	for _, m := range automationWhereRE.FindAllStringSubmatch(text, -1) {
 		out = append(out, m[1])
 	}
-	out = append(out, annotationArgs(text, automationFilterRE)...)
-	return out
+	return append(out, filters...)
+}
+
+// statementConditions returns a statement body's conditions (epic memql#5370),
+// read off the parsed body: every if and else-if condition and every loop
+// filter, wherever it sits. A one-line `if c { ... }`, a `} else if c {` and a
+// `for x in xs if c {` open no line with `if`, which is all the patterns above
+// can see. ok is false for a source the parser does not read as a statement
+// body -- the retired step bodies, which the patterns read until the parser
+// refuses them.
+func statementConditions(text string) ([]string, bool) {
+	pf, err := parser.ParseFile(text)
+	if err != nil {
+		return nil, false
+	}
+	for _, d := range pf.Definitions {
+		fn, ok := d.(*ast.FunctionDef)
+		if !ok {
+			continue
+		}
+		auto, ok := fn.Body.(*ast.AutomationDef)
+		if !ok || auto.Body == nil {
+			continue
+		}
+		var out []string
+		ast.WalkBody(auto.Body.Statements, func(st ast.BodyStatement) bool {
+			switch s := st.(type) {
+			case *ast.IfStatement:
+				for _, b := range s.Branches {
+					if b.Cond != nil {
+						out = append(out, ast.FormatExpr(b.Cond))
+					}
+				}
+			case *ast.ForStatement:
+				if s.Filter != nil {
+					out = append(out, ast.FormatExpr(s.Filter))
+				}
+			}
+			return true
+		})
+		return out, true
+	}
+	return nil, false
 }
 
 // annotationArgs returns the argument text of every annotation whose opening
