@@ -334,7 +334,30 @@ func compileAuthoredSpec(c SandboxConstruct) (*Spec, error) {
 	if err != nil {
 		return nil, err
 	}
-	return specDeclToSpec(decl, "authored:"+c.Kind+":"+c.Name)
+	return specDeclToSpec(decl, authoredSpecOrigin(c))
+}
+
+// authoredSpecOrigin is the origin an authored spec or trait compiles under.
+//
+// A spec's origin is where its binding resolves FIRST: specBindingShape and
+// specBindingConcept look for the bound name in the spec's own domain -- the
+// directory of its origin -- before searching the whole tree, which is what
+// lets a spec bind `ticket` when two domains each declare one. A construct the
+// author wrote in a file they named (SandboxConstruct.Origin, the bundle's
+// tree-relative path, the same ambient domain memql#3800 gave the sandbox)
+// compiles under "authored:<path>:<name>", so it binds exactly as the same
+// spec in that file would at boot. One with no file -- an untitled buffer, a
+// stored row -- keeps "authored:<kind>:<name>", which has no directory and so
+// no own domain, and binds by the unique name across the tree as before.
+//
+// Specs only: a spec registers under its bare name on every authored path,
+// where a function's registry key is qualified by its origin's namespace, so
+// the same stamp on a function would move its key.
+func authoredSpecOrigin(c SandboxConstruct) string {
+	if path := strings.TrimSpace(c.Origin); strings.Contains(path, "/") {
+		return "authored:" + path + ":" + c.Name
+	}
+	return "authored:" + c.Kind + ":" + c.Name
 }
 
 // buildAuthoredFunctionOverlay returns a function registry holding the core

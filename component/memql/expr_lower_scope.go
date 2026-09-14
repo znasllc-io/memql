@@ -140,18 +140,17 @@ func lowerPushdownSet(specs []*Spec, queries []*Function, scope pushdownScope) [
 // canResolveBinding reports whether an engine-free scope can see what a spec
 // binds: nothing for a trait, a shape or concept it holds for a spec. A spec
 // with no binding at all counts as resolvable -- its refusal does not depend on
-// what the scope can see.
+// what the scope can see. It asks the question the binding resolver will
+// (specBindingShape / specBindingConcept, the spec's own domain first), so a
+// bound name two domains declare is seen exactly when the resolver can bind it.
 func (s pushdownScope) canResolveBinding(spec *Spec) bool {
 	if spec.IsTrait || strings.TrimSpace(spec.BoundName) == "" {
 		return true
 	}
-	if _, ok := s.shapes.Get(spec.BoundName); ok {
+	if _, ok := specBindingShape(s.shapes, spec); ok {
 		return true
 	}
-	if s.concepts == nil {
-		return false
-	}
-	c, err := resolveConceptByTrailingSegment(s.concepts, spec.BoundName)
+	c, err := specBindingConcept(s.concepts, spec)
 	return err == nil && c != nil
 }
 
@@ -178,9 +177,12 @@ func checkLoweredSpec(spec *Spec, scope pushdownScope) error {
 	if spec == nil || spec.Expr == nil || spec.Kind == SpecKindContext {
 		return nil
 	}
+	// The concept the spec is bound to, resolved as its binding was (own
+	// domain first) -- not by a bare trailing-segment scan, which answers
+	// nothing for a name two domains declare.
 	conceptContext := ""
-	if !spec.IsTrait && scope.concepts != nil {
-		if c, err := resolveConceptByTrailingSegment(scope.concepts, spec.BoundName); err == nil && c != nil {
+	if !spec.IsTrait {
+		if c, err := specBindingConcept(scope.concepts, spec); err == nil && c != nil {
 			conceptContext = c.Name
 		}
 	}

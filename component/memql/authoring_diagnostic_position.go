@@ -32,7 +32,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/znasllc-io/memql/component/language/dslclause"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -413,51 +412,22 @@ func signatureKeywords(kind string) []string {
 // resolveLowerErrorPosition maps a lowering refusal (memql#5366) to the
 // authored bundle position of the node it refuses.
 //
-// Two cases, because the two predicate forms reach the parser differently:
-//
-//   - a spec or trait body is parsed from the author's own lines (only the
-//     file-top imports stripped), so the refused node's span sits on a line the
-//     LCS map matches exactly, and its column is the author's column;
-//   - a struct query's filter or refine clause is FOLDED -- every continuation
-//     line joined onto the first -- into the one `return` line the rewriter
-//     generates, so its span is a column on a line the author never wrote. The
-//     refusal carries its offset from the clause's lambda body (LowerError
-//     Clause and Anchor), and structClauseBodyPosition folds the author's
-//     clause the same way to find which of their lines, and which column, that
-//     offset lands on.
-//
-// Either way a position that cannot be established is omitted, never guessed:
+// A query, mutation or logic construct is parsed from a POSITIONED lowering
+// (parser.PositionLowering, memql#5364): every v1 node's Span is already the
+// author's extent in c.Source, even for a filter the struct rewriter folded
+// into its generated `return`, so only hop B -- off the import preamble, onto
+// the bundle line -- remains (bundleExtent). A spec or trait body is parsed
+// from c.Source with its file-top imports stripped and nothing lowered, so its
+// Span is in the stripped text; the line map pairs those lines with c.Source's
+// exactly. A position that cannot be established is omitted, never guessed:
 // attachPos then anchors the diagnostic to the construct's signature.
 func resolveLowerErrorPosition(c SandboxConstruct, le *LowerError) authoredPosition {
-	if c.BundleLine <= 0 {
+	if c.BundleLine <= 0 || le.Span.IsZero() {
 		return authoredPosition{}
 	}
-	toBundle := func(sliceLine, col int) (int, int, bool) {
-		bodyLine := sliceLine - c.BundlePreambleLines
-		if bodyLine < 1 {
-			return 0, 0, false
-		}
-		return c.BundleLine + bodyLine - 1, col, true
-	}
-	if le.Clause != "" && !le.Anchor.IsZero() && le.Anchor.Line == le.Span.Line {
-		sliceLine, col, ok := structClauseBodyPosition(c.Source, le.Clause, le.Span.Col-le.Anchor.Col)
-		if !ok {
-			return authoredPosition{}
-		}
-		line, col, ok := toBundle(sliceLine, col)
-		if !ok {
-			return authoredPosition{}
-		}
-		out := authoredPosition{Line: line, Column: col}
-		// End: the last character the span covers, one column past it.
-		if le.Span.EndLine == le.Span.Line && le.Span.EndCol > le.Span.Col {
-			if eSlice, eCol, ok := structClauseBodyPosition(c.Source, le.Clause, le.Span.EndCol-1-le.Anchor.Col); ok {
-				if eLine, eCol, ok := toBundle(eSlice, eCol+1); ok {
-					out.EndLine, out.EndColumn = eLine, eCol
-				}
-			}
-		}
-		return out
+	switch c.Kind {
+	case "query", "mutation", "logic", "automation":
+		return c.bundleExtent(le.Span.Line, le.Span.Col, le.Span.EndLine, le.Span.EndCol)
 	}
 	lm := newAuthoredLineMap(c.Source, rewrittenForKind(c))
 	if _, exact := lm.authoredLine(le.Span.Line); !exact {
@@ -476,59 +446,4 @@ func resolveLowerErrorPosition(c SandboxConstruct, le *LowerError) authoredPosit
 		}
 	}
 	return out
-}
-
-// structClauseBodyPosition finds where the character at offset (0-based) into
-// a struct query clause's lambda BODY sits in the authored slice, as a 1-based
-// slice line and column. It folds the clause exactly as the struct rewriter
-// does -- on the comment-blanked view, each line trimmed, continuation lines
-// (dslclause.ClauseExtent) joined with one space -- and walks the fold back to
-// the line each character came from. ok is false when the slice has no such
-// clause, its value is not a lambda, or the offset falls outside its body.
-func structClauseBodyPosition(source, keyword string, offset int) (line, col int, ok bool) {
-	if offset < 0 {
-		return 0, 0, false
-	}
-	lines := strings.Split(languageParser.BlankComments(source), "\n")
-	first := -1
-	for i, l := range lines {
-		if dslclause.StartsWith(strings.TrimSpace(l), keyword) {
-			first = i
-			break
-		}
-	}
-	if first < 0 {
-		return 0, 0, false
-	}
-	last := dslclause.ClauseExtent(lines, first)
-
-	// seg is one authored line's contribution to the fold: the fold's
-	// [start, end) came from that line starting at column col0 (0-based).
-	type seg struct{ line, col0, start, end int }
-	var segs []seg
-	var fold strings.Builder
-	for i := first; i <= last && i < len(lines); i++ {
-		raw := strings.TrimRight(lines[i], " \t\r")
-		trimmed := strings.TrimLeft(raw, " \t")
-		if trimmed == "" {
-			continue
-		}
-		if fold.Len() > 0 {
-			fold.WriteByte(' ')
-		}
-		start := fold.Len()
-		fold.WriteString(trimmed)
-		segs = append(segs, seg{line: i, col0: len(raw) - len(trimmed), start: start, end: fold.Len()})
-	}
-	clause := fold.String()
-	rest := strings.TrimLeft(strings.TrimPrefix(clause, keyword), " \t")
-	if _, body, isLambda := dslclause.SplitLambdaHeader(rest); isLambda {
-		target := len(clause) - len(body) + offset
-		for _, sg := range segs {
-			if target >= sg.start && target < sg.end {
-				return sg.line + 1, sg.col0 + (target - sg.start) + 1, true
-			}
-		}
-	}
-	return 0, 0, false
 }

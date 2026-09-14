@@ -41,7 +41,7 @@ capability fs.readFile {
 // The spec compiled fine and was deliberately disabled -- "construct is not
 // compiled" points the author at the wrong fix.
 func TestPromoteAuthoredConstruct_DisabledSpec_ActionableMessage(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	reg := NewAuthoredRuntimeRegistry()
 	if _, err := AuthorSessionBundle(reg, "owner-1", sessionDisabledSpecSrc, ""); err != nil {
 		t.Fatalf("author @disabled session spec (Gate-1 must pass an intentional disable): %v", err)
@@ -70,7 +70,7 @@ func TestPromoteAuthoredConstruct_DisabledSpec_ActionableMessage(t *testing.T) {
 // promote funnels through the same refusal, so a @disabled construct never
 // persists a reviewable row (a refused promotion never persists).
 func TestPromoteConstructDurable_DisabledSpec_NothingPersisted(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	reg := NewAuthoredRuntimeRegistry()
 	if _, err := AuthorSessionBundle(reg, "owner-1", sessionDisabledSpecSrc, ""); err != nil {
 		t.Fatalf("author @disabled session spec: %v", err)
@@ -93,7 +93,7 @@ func TestPromoteConstructDurable_DisabledSpec_NothingPersisted(t *testing.T) {
 // retired with @disabled (the ToolRegistry resurrection precedent,
 // #2606/#2607).
 func TestPromoteAuthoredConstruct_DisabledCoreName_Refused(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	e.specs.MarkDisabled("retiredCoreSpec")
 
 	c := &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "spec", Name: "retiredCoreSpec", Status: AuthoredActive,
@@ -114,7 +114,7 @@ func TestPromoteAuthoredConstruct_DisabledCoreName_Refused(t *testing.T) {
 // path, so an empty quarantine list also proves no ERROR log), the name
 // reserved against authored promotion, and nothing registered.
 func TestRehydrate_DisabledStoredSpec_SkipsWithoutQuarantine(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	e.loadReport = newLoadReport()
 	store := &fakeRehydrateStore{
 		bundles: []AuthoringBundleRow{{Id: durablePromoteBundlePrefix + "b1", OwnerUserId: "owner-1", Status: BundleActive}},
@@ -187,7 +187,7 @@ spec actorEnvelope mcpDisabledSpec {
 // skippedDisabled, never Failed, never quarantined. The two walks share
 // recompileAndPromoteRow; the classification must not diverge.
 func TestRehydrateBundle_DisabledStoredSpec_SkipsWithoutFailed(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	e.loadReport = newLoadReport()
 	bundleId := durablePromoteBundlePrefix + "b1"
 	store := &fakeRehydrateStore{
@@ -224,7 +224,7 @@ func TestRehydrateBundle_DisabledStoredSpec_SkipsWithoutFailed(t *testing.T) {
 // the promote refusal message instructs, lifts it. Only a CORE @disabled name
 // (no authored marker) is permanently reserved.
 func TestRehydrate_DisabledName_ReenableByCorrectedPromote(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	e.loadReport = newLoadReport()
 	store := &fakeRehydrateStore{
 		bundles: []AuthoringBundleRow{{Id: durablePromoteBundlePrefix + "b1", OwnerUserId: "owner-1", Status: BundleActive}},
@@ -259,7 +259,7 @@ func TestRehydrate_DisabledName_ReenableByCorrectedPromote(t *testing.T) {
 // retire path for the authored reservation -- it releases the name and clears
 // the marker, and a second demote errors (nothing left to own).
 func TestRehydrate_DisabledName_RetireByDemote(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	e.loadReport = newLoadReport()
 	store := &fakeRehydrateStore{
 		bundles: []AuthoringBundleRow{{Id: durablePromoteBundlePrefix + "b1", OwnerUserId: "owner-1", Status: BundleActive}},
@@ -289,7 +289,7 @@ func TestRehydrate_DisabledName_RetireByDemote(t *testing.T) {
 // name (marked by the loaders, no authored marker) stays permanently reserved
 // -- the re-enable path applies ONLY to reservations an authored row placed.
 func TestPromoteAuthoredConstruct_CoreDisabledName_StillRefused(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	e.specs.MarkDisabled("retiredCoreSpec")
 	c := &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "spec", Name: "retiredCoreSpec", Status: AuthoredActive,
 		Compiled: &Spec{Name: "retiredCoreSpec"}}
@@ -307,7 +307,7 @@ func TestPromoteAuthoredConstruct_CoreDisabledName_StillRefused(t *testing.T) {
 // marker (demote could then REMOVE core -- the never-shadow invariant in
 // reverse). The row is still an intentional skip, not a failure.
 func TestRehydrate_DisabledRow_DoesNotPoisonActiveCoreSpec(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	e.loadReport = newLoadReport()
 	if err := e.specs.Upsert("mcpDisabledSpec", &Spec{Name: "mcpDisabledSpec", ExprSource: "core"}); err != nil {
 		t.Fatalf("seed core spec: %v", err)
@@ -347,7 +347,7 @@ func TestRehydrate_DisabledRow_DoesNotPoisonActiveCoreSpec(t *testing.T) {
 // a stored @disabled authored row of the same name must not overwrite the
 // reservation's provenance -- the corrected promote stays refused.
 func TestRehydrate_DisabledRow_DoesNotLiftCoreReservation(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	e.loadReport = newLoadReport()
 	e.specs.MarkDisabled("mcpDisabledSpec")
 	store := &fakeRehydrateStore{
@@ -383,7 +383,7 @@ func TestRehydrate_DisabledRow_DoesNotLiftCoreReservation(t *testing.T) {
 // re-disable the now-live re-enabled spec -- the re-enable has to survive
 // every subsequent replication tick.
 func TestRehydrate_ReenabledSpec_SurvivesRefire(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	e.loadReport = newLoadReport()
 	bundleId := durablePromoteBundlePrefix + "b1"
 	store := &fakeRehydrateStore{

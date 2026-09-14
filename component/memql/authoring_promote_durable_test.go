@@ -95,7 +95,7 @@ func authorOneSpec(t *testing.T, reg *AuthoredRuntimeRegistry, owner string) *Au
 // bundle + construct row pair AND registers the construct into the shared
 // registry so it is callable by every session.
 func TestPromoteConstructDurable_PersistsAndRegisters(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	reg := NewAuthoredRuntimeRegistry()
 	c := authorOneSpec(t, reg, "owner-1")
 
@@ -131,7 +131,7 @@ func TestPromoteConstructDurable_PersistsAndRegisters(t *testing.T) {
 // session (a different owner, empty registry) through the core-first overlay --
 // the "callable by all" acceptance.
 func TestPromoteConstructDurable_PromotedFunctionCallableInFreshSession(t *testing.T) {
-	e := &MemQLEngine{functions: newFunctionRegistry(), specs: newSpecRegistry()}
+	e := &MemQLEngine{functions: newFunctionRegistry(), specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 
 	// A net-new authored function (compiled form supplied directly, mirroring the
 	// session author path) durably promotes into the shared function registry.
@@ -154,7 +154,7 @@ func TestPromoteConstructDurable_PromotedFunctionCallableInFreshSession(t *testi
 // TestPromoteConstructDurable_RejectsNonOwner: an empty owner (no authenticated
 // identity) cannot promote -- nothing is registered or persisted.
 func TestPromoteConstructDurable_RejectsNonOwner(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	reg := NewAuthoredRuntimeRegistry()
 	c := authorOneSpec(t, reg, "owner-1")
 
@@ -217,7 +217,7 @@ func TestRehydratePromotedConstructs_RestoresCallabilityAfterRestart(t *testing.
 	// the persisted rows. A context-spec recompiles standalone (it binds only to
 	// the actor envelope, no concept/shape deps) -- the durably-promotable shape
 	// the re-hydration recompiles core-first.
-	old := &MemQLEngine{specs: newSpecRegistry()}
+	old := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	authorReg := NewAuthoredRuntimeRegistry()
 	c := authorOneSpec(t, authorReg, "owner-1")
 	persist := &fakePromoteStore{}
@@ -227,7 +227,7 @@ func TestRehydratePromotedConstructs_RestoresCallabilityAfterRestart(t *testing.
 
 	// 2. Simulate a restart: a fresh engine with EMPTY registries, fed the
 	// persisted rows. The construct is gone until re-hydration runs.
-	fresh := &MemQLEngine{specs: newSpecRegistry()}
+	fresh := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	if _, ok := fresh.specs.Lookup("mcpSessSpec"); ok {
 		t.Fatal("fresh engine should not have the promoted construct before re-hydration")
 	}
@@ -258,7 +258,7 @@ func TestRehydratePromotedConstructs_RestoresCallabilityAfterRestart(t *testing.
 // TestRehydratePromotedConstructs_Idempotent: running the re-hydration twice on
 // the same engine is a no-op-equivalent (no error, still callable).
 func TestRehydratePromotedConstructs_Idempotent(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	store := &fakeRehydrateStore{
 		bundles: []AuthoringBundleRow{{Id: durablePromoteBundlePrefix + "b1", OwnerUserId: "owner-1", Status: BundleActive}},
 		constructs: map[string][]AuthoringConstructRow{

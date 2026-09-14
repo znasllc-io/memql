@@ -2,6 +2,8 @@ package memql
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -358,4 +360,72 @@ spec ghostShape danglingSpec = row => row.status == "open"`,
 	d := diagnosticFor(t, rep.Diagnostics, "spec", "danglingSpec")
 	require.Contains(t, d.Error, "unresolved reference", "the reference check names the import to fix; the lowering runs after it")
 	require.Contains(t, d.Error, "ghostShape")
+}
+
+// twinTicketConcepts declares a second `ticket`, in another domain, with
+// `state` where lowerinit's ticket has `status` -- so which of the two a spec
+// bound to `ticket` binds is observable from the fields it may read.
+const twinTicketConcepts = `@version("1.0.0")
+@namespace("lowertwin")
+@description("A second ticket, in another domain.")
+concept ticket {
+  state  string!  @description("Workflow state.")
+}
+`
+
+func TestAuthoringLower_ASessionSpecBindsItsOwnDomainsConcept(t *testing.T) {
+	eng, err := bootLowerDomains(t, map[string]map[string]string{
+		"lowerinit": {"concepts.memql": lowerInitConcepts},
+		"lowertwin": {"concepts.memql": twinTicketConcepts},
+	})
+	require.NoError(t, err, "two domains may each declare a ticket")
+
+	define := func(origin, src string) (SessionDefineResult, *AuthoredRuntimeRegistry, error) {
+		reg := NewAuthoredRuntimeRegistry()
+		var res SessionDefineResult
+		var err error
+		withExpressionsV1(t, func() {
+			res, err = eng.DefineSessionBundle(reg, "owner-1", src, origin)
+		})
+		return res, reg, err
+	}
+
+	// A spec written in lowerinit binds lowerinit's ticket, own domain first,
+	// as a tree spec in that file would.
+	res, reg, err := define("lowerinit/specs.memql", `/// Open, in this domain's sense.
+spec ticket isOpenHere = row => row.status == "open"
+`)
+	require.NoError(t, err, "%+v", res.Diagnostics)
+	c, ok := reg.Lookup("owner-1", "spec", "isOpenHere")
+	require.True(t, ok)
+	require.Equal(t, `payload.status=="open"`, canonicalExpression(c.Compiled.(*Spec).Expr))
+
+	// The same name written in lowertwin binds lowertwin's ticket: its field
+	// is state, and status is not one of its fields.
+	res, _, err = define("lowertwin/specs.memql", `/// Open, in the twin's sense.
+spec ticket isOpenThere = row => row.state == "open"
+`)
+	require.NoError(t, err, "%+v", res.Diagnostics)
+	res, _, err = define("lowertwin/specs.memql", `/// Reads a field only lowerinit's ticket declares.
+spec ticket readsTheOtherTicket = row => row.status == "open"
+`)
+	require.Error(t, err)
+	require.Contains(t, diagnosticFor(t, res.Diagnostics, "spec", "readsTheOtherTicket").Error,
+		"`status` is not a declared field of v1:lowertwin:ticket", "bound to its own domain's ticket, not the first one found")
+}
+
+// coreShapesForTest is the embedded tree's shape registry, loaded as Init
+// loads it. A bare test engine needs it the moment a promote or stage lowers
+// an edition-2026 spec: the spec's binding (actorEnvelope, most often) is
+// resolved against the engine's shapes, and an engine that holds none can bind
+// nothing. Loaded per call, not shared across the package: each engine gets its
+// own registry, as each booted engine does.
+func coreShapesForTest(t *testing.T) *ShapeRegistry {
+	t.Helper()
+	reg := newShapeRegistry()
+	_, err := LoadUnifiedShapes(slog.New(slog.NewTextHandler(io.Discard, nil)), reg)
+	require.NoError(t, err)
+	_, ok := reg.Get("actorEnvelope")
+	require.True(t, ok, "the core tree declares actorEnvelope")
+	return reg
 }

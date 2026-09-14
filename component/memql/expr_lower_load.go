@@ -128,21 +128,13 @@ func lowerQueryFilter(lam *languageParser.LambdaExpr, concept *memoryNodes.Conce
 	if lam == nil || len(lam.Params) != 1 {
 		return nil, fmt.Errorf("a query filter is a lambda of one parameter, the row: filter row => <predicate>")
 	}
-	ir, err := Lower(lam.Body, LowerEnv{
+	return Lower(lam.Body, LowerEnv{
 		Position:  tiers.PositionQueryFilter,
 		Param:     lam.Params[0],
 		Concept:   concept,
 		Args:      args,
 		Predicate: predicate,
 	})
-	var lerr *LowerError
-	if errors.As(err, &lerr) && lerr.Clause == "" {
-		// The filter reaches the parser folded into the struct query's
-		// `return` line; anchor the refusal to the lambda body there so an
-		// authoring diagnostic can find the author's column again.
-		lerr.Clause, lerr.Anchor = "filter", nodeSpan(lam.Body)
-	}
-	return ir, err
 }
 
 // LowerQueryFilter lowers an edition-2026 query-filter lambda over the

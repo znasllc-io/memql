@@ -181,15 +181,11 @@ func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string
 		return fmt.Errorf("refine takes a lambda of one parameter, the row")
 	}
 	param := lam.Params[0]
-	// A refine clause is folded into the struct query's `return` line like a
-	// filter is, so its refusals carry the clause and the body's span as the
-	// anchor an authoring diagnostic maps back from (LowerError.Anchor).
-	anchor := nodeSpan(lam.Body)
 	if cost := EstimateCost(lam.Body); cost > tiers.MaxStaticCost {
 		return &LowerError{Node: ast.FormatExpr(lam), Position: tiers.PositionQueryRefine,
 			Reason: fmt.Sprintf("its static cost estimate is %d node evaluations, above tiers.MaxStaticCost (%d)", cost, tiers.MaxStaticCost),
 			Fix:    "Scan one list per element rather than nesting scans, or move the work into a logic body over a smaller input",
-			Span:   anchor, Clause: "refine", Anchor: anchor}
+			Span:   nodeSpan(lam)}
 	}
 	declared := map[string]bool{}
 	if fn != nil && fn.ArgsSchema != nil {
@@ -203,8 +199,7 @@ func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string
 	var walk func(n ast.ExpressionNode, local map[string]bool)
 	refuse := func(n ast.ExpressionNode, reason, fix string) {
 		if walkErr == nil {
-			walkErr = &LowerError{Node: ast.FormatExpr(n), Position: tiers.PositionQueryRefine, Reason: reason, Fix: fix,
-				Span: nodeSpan(n), Clause: "refine", Anchor: anchor}
+			walkErr = &LowerError{Node: ast.FormatExpr(n), Position: tiers.PositionQueryRefine, Reason: reason, Fix: fix, Span: nodeSpan(n)}
 		}
 	}
 	walk = func(n ast.ExpressionNode, local map[string]bool) {
