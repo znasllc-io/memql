@@ -132,16 +132,14 @@ func TestConstructCatalogCoversTheParserExactly(t *testing.T) {
 	}
 }
 
-// TestBodyBlocksMatchTheParserClauseTables (memql#5359): every construct's
-// BodyBlocks is exactly what the parser's clause table says its body accepts
-// -- the table the parser's own tests pin to the rewriter and the construct
-// parsers. The named facts are the ones the hand list got wrong.
-func TestBodyBlocksMatchTheParserClauseTables(t *testing.T) {
-	for _, c := range constructs() {
-		if got, want := strings.Join(c.BodyBlocks, ","), strings.Join(parser.BodyClauses(c.Keyword), ","); got != want {
-			t.Errorf("DRIFT: construct %q BodyBlocks = [%s], the parser accepts [%s]", c.Keyword, got, want)
-		}
-	}
+// TestBodyBlocksCarryTheFactsTheHandListGotWrong (memql#5359): BodyBlocks is
+// projected from parser.BodyClauses, and the parser's own tests pin that table
+// to the switch each body parser dispatches on and to what the parsers accept
+// and refuse (component/language/parser/body_clauses_test.go). What is checked
+// HERE is the published spec: the facts the hand list it replaced got wrong,
+// derived by hand rather than read back from the table the spec was built
+// from.
+func TestBodyBlocksCarryTheFactsTheHandListGotWrong(t *testing.T) {
 	has := func(kw, clause string) bool {
 		for _, b := range Build().ConstructByKeyword(kw).BodyBlocks {
 			if b == clause {
@@ -200,20 +198,18 @@ func TestClauseKeywordsMatchTheParserClauseTables(t *testing.T) {
 	}
 }
 
-// TestFieldAnnotationsMatchTheFieldReceivers: each construct's
-// FieldAnnotations is its field receiver's registry set, and every field
-// receiver the registry has is reached by at least one construct.
-func TestFieldAnnotationsMatchTheFieldReceivers(t *testing.T) {
+// TestFieldAnnotationsFollowTheFieldLists: every field receiver the registry
+// has is reached by at least one construct, and each construct's
+// FieldAnnotations is the field list its body actually has -- facts derived
+// by hand: a concept's fields take @pii, a tool's @autoInjected, a prompt's
+// @default, a builtin's exactly @description and @required, and every
+// construct with an args block its args-field set; a construct with no field
+// list has none.
+func TestFieldAnnotationsFollowTheFieldLists(t *testing.T) {
 	reached := map[annotations.Receiver]bool{}
 	for _, c := range constructs() {
-		r := fieldReceiverFor(c)
-		want := ""
-		if r != "" {
+		if r := fieldReceiverFor(c); r != "" {
 			reached[r] = true
-			want = strings.Join(annotations.ByReceiver[string(r)], ",")
-		}
-		if got := strings.Join(c.FieldAnnotations, ","); got != want {
-			t.Errorf("construct %q FieldAnnotations = [%s], its field receiver %q takes [%s]", c.Keyword, got, r, want)
 		}
 	}
 	for _, r := range []annotations.Receiver{annotations.ConceptField, annotations.ArgsField, annotations.ToolField, annotations.PromptField, annotations.BuiltinField} {
@@ -221,8 +217,35 @@ func TestFieldAnnotationsMatchTheFieldReceivers(t *testing.T) {
 			t.Errorf("field receiver %s is reached by no construct", r)
 		}
 	}
-	if c := Build().ConstructByKeyword("query"); c == nil || len(c.FieldAnnotations) == 0 {
-		t.Error("a query has an args block, so its fields take the args-field annotations")
+	spec := Build()
+	carries := func(kw, name string) bool {
+		c := spec.ConstructByKeyword(kw)
+		if c == nil {
+			return false
+		}
+		for _, a := range c.FieldAnnotations {
+			if a == name {
+				return true
+			}
+		}
+		return false
+	}
+	for kw, name := range map[string]string{
+		"concept": "pii", "tool": "autoInjected", "prompt": "default",
+		"query": "maxLength", "mutate": "required", "logic": "enum", "automation": "pattern",
+		"action": "minimum", "capability": "maximum",
+	} {
+		if !carries(kw, name) {
+			t.Errorf("%s fields take @%s, but FieldAnnotations lacks it", kw, name)
+		}
+	}
+	if got := strings.Join(spec.ConstructByKeyword("builtin").FieldAnnotations, ","); got != "description,required" {
+		t.Errorf("builtin FieldAnnotations = [%s], want [description,required]", got)
+	}
+	for _, kw := range []string{"shape", "spec", "trait", "policy", "rule", "seed", "provider", "use"} {
+		if c := spec.ConstructByKeyword(kw); c != nil && len(c.FieldAnnotations) != 0 {
+			t.Errorf("%s has no field list, but FieldAnnotations = %v", kw, c.FieldAnnotations)
+		}
 	}
 }
 

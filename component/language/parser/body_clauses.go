@@ -9,8 +9,10 @@ package parser
 // editor came to offer `body { }` inside an automation (it has none) and
 // never offered `sort`, `paginate`, `asOf` or `count` on a query. It is
 // stated once here instead: dslspec projects it as Construct.BodyBlocks, and
-// TestBodyClausesMatchTheParsers pins it to the parsers' own `case` arms and
-// to what they accept and refuse -- a restated list with a pin, rather than a
+// body_clauses_test.go pins it to the switch each body parser dispatches on
+// (TestBodyClausesMatchTheParserDispatch) and to what the parsers accept and
+// refuse (TestBodyClausesMatchWhatTheParsersAccept,
+// TestUnlistedClausesAreRefused) -- a restated list with a pin, rather than a
 // list the parsers read, because the rewriter's `case` arms are themselves
 // the structural arm of the grammar-surface digest and must stay literal.
 
@@ -35,6 +37,13 @@ var lineClauses = map[string]bool{
 	"filter": true, "shape": true, "sort": true, "paginate": true, "asOf": true, "count": true,
 }
 
+// namedBlocks are the body clauses whose block carries a name
+// (`step <name> { ... }`, `precondition <name> { ... }`) -- the name is part
+// of the clause, and a nameless block is refused.
+var namedBlocks = map[string]bool{
+	"step": true, "precondition": true,
+}
+
 // BodyClauses returns the clauses the construct keyword's body accepts, in
 // authoring order, or nil when the body is a bare list. The result is a
 // fresh slice the caller may keep.
@@ -46,4 +55,10 @@ func BodyClauses(keyword string) []string {
 // (`filter <expr>`) rather than opening a `<clause> { ... }` block.
 func IsLineClause(clause string) bool {
 	return lineClauses[clause]
+}
+
+// IsNamedBlock reports whether a body clause's block carries a name:
+// `step <name> { ... }` rather than `args { ... }`.
+func IsNamedBlock(clause string) bool {
+	return namedBlocks[clause]
 }
