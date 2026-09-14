@@ -33,7 +33,8 @@ local args / fields:
 | `now` | RFC3339 timestamp captured at evaluation start. | every body |
 | `partition` | Active partition for this call. | every body |
 | `config` | Allow-listed config entries. See `component/config/policy_exposable.go` for the surface. Read as `config.X`. | every body |
-| `trace` | Reserved engine name. (It carried the policy-trace handle of the decision-policy tier, retired in #984; the name stays reserved so resolution rules remain unambiguous.) | every body |
+| `trace` | Reserved engine name. (It carried the policy-trace handle of the decision-policy tier, retired in #984; the name stays reserved so resolution rules remain unambiguous.) Nothing binds it, so reading it is refused (`body_unknown_name`). | every body |
+| `event` | The triggering event (`event.topic`, `event.kind`). An automation forwards it whole to a logic as `logic l(event: event)`; a dotted `event.<field>` read in an automation is refused, the payload being bound into its `args`. A logic has no trigger: it declares `event` in its args and reads `args.event`. | an automation body |
 
 An args field whose name collides with any of these is a load-time
 error. Defined in `component/memql/keyword_slices.go` and enforced
@@ -247,7 +248,7 @@ cannot be used as identifier names anywhere in the author surface:
 | `spec` | Atomic boolean predicate. |
 | `trait` | Concept-agnostic atomic predicate. |
 | `query` | Read function. |
-| `mutate` | Write function, called as `mutation <name>(...)`. |
+| `mutation` | Write function, declared `mutation <Concept> <name> { ... }` and called `mutation <name>(...)`. |
 | `logic` | Imperative orchestration block. |
 | `automation` | Event-triggered workflow. |
 | `tool` | AI-callable surface. |
@@ -257,10 +258,15 @@ cannot be used as identifier names anywhere in the author surface:
 | `seed` | Declarative row template. |
 | `policy` | AI provider-selection record (`@primary` / `@fallback`). The decision-policy tier is retired (#984). |
 
-Plus body-level keywords inside specific constructs: `args`, `body`,
-`filter`, `shape`, `insert`, `update`, `step`, `params`, `auth`,
-`include`. Their reservation is scoped to the construct that defines
-them.
+Plus body-level keywords inside specific constructs: `args`, `filter`,
+`refine`, `sort`, `paginate`, `count`, `shape`, `insert`, `update`,
+`accept`, `stamp`, `precondition`, `params`, `auth`. Their reservation is
+scoped to the construct that defines them. In a logic and an automation,
+a statement opens with `if`, `for`, `switch` (`case`, `default`),
+`parallel` (`branch`), `publish` or `return`, or with a name and `:=`, and
+a call closes with the clauses `on surface(...)`, `retry(n)` and
+`on error continue` ([Bodies](memql.md#bodies)). No statement or loop
+variable may take a reserved name above (`body_reserved_name`).
 
 The expression keywords `in` and `startsWith` (memql#4208) are reserved
 wherever an expression is parsed, so neither can name a lambda parameter
@@ -299,7 +305,7 @@ is rejected at parse time. The canonical post-migration shape:
   `use common.traits.{ isActiveRecord }`.
 - **Concept binding lives in the construct signature** for seeds /
   queries / mutations / shapes:
-  `query <Concept> <name> { ... }`, `mutate <Concept> <name> { ... }`,
+  `query <Concept> <name> { ... }`, `mutation <Concept> <name> { ... }`,
   `shape <Concept> <name> { ... }`, `seed <Concept> <name> { ... }`.
 
 Inside a prompt's body, two legacy forms are refused with a migration hint:

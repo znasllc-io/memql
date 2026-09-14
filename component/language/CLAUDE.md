@@ -16,7 +16,7 @@ verify anything here.
 
 | Package | Owns | Imported by |
 |---|---|---|
-| `parser/` | Lexer, parser, and the **struct-form rewriter**. Every `.memql` construct is authored in struct form; the rewriter translates it to the procedural form the grammar reads, before the parser proper sees it. Also the language's labels and the language line: `parser/edition.go` (`LanguageVersion`, `Edition`, and the per-edition front ends a file is read through), `parser/grammar_version.go` (`GrammarVersion`, the fine label, which must end with the authored-surface digest its drift test computes) and `parser/language_line.go` (which domain declares which line in its `memql.toml`, and the refusals every loader reports) (epic memql#5356). | ~286 files |
+| `parser/` | Lexer, parser, the **struct-form rewriter** (a query and a mutation, translated to the procedural form the grammar reads before the parser proper sees them) and the **statement parser** (a logic and an automation, read as written: `parser/v1_body.go`). Also the language's labels and the language line: `parser/edition.go` (`LanguageVersion`, `Edition`, and the per-edition front ends a file is read through), `parser/grammar_version.go` (`GrammarVersion`, the fine label, which must end with the authored-surface digest its drift test computes) and `parser/language_line.go` (which domain declares which line in its `memql.toml`, and the refusals every loader reports) (epic memql#5356). | ~286 files |
 | `ast/` | The AST node types, in their own module so consumers can depend on the shape without pulling in the lexer/parser. `parser` re-exports every symbol as a type alias, so old call sites still compile; **new code imports `ast/` directly**. | ~64 files |
 | `compiler/` | AST -> output format (primarily the `.json` the automation scheduler consumes), plus the linter, the CQS validator, and the automation generator. | ~8 files |
 | `annotations/` | The annotation **registry**: every receiver (each construct, the concept body, each field list), every annotation it accepts with its argument forms, keyword keys and example, the retired/misplaced hints, and `Check` / `CheckAll`, which answer with a stable `annotation_*` code (memql#5359). A leaf package -- it imports nothing inside the repo -- so the parser, the concept translator and the editor surface all derive from it with no import cycle. | ~12 files |
@@ -31,13 +31,16 @@ verify anything here.
 
 ---
 
-## The load-bearing thing to know: struct form is a rewrite, not a grammar
+## The load-bearing thing to know: a query and a mutation are rewritten, not parsed
 
-The author surface (`query NAME { args, filter, shape }`, `mutate`, `logic`,
-`automation`, file-top `args { ... }`) is **not** what the grammar parses.
-`parser.NormaliseAll(source)` runs a five-stage chain that rewrites each
-construct into the older procedural form, and only then does the lexer run.
-Each stage is a no-op when its detector does not match.
+The query and mutation author surface (`query <Concept> <name> { args, filter,
+shape }`, `mutation <Concept> <name> { args, insert | update }`, file-top
+`args { ... }`) is **not** what the grammar parses. `parser.NormaliseAll(source)`
+runs a three-stage chain (`structFormSteps`: query, mutation, file-top args)
+that rewrites each construct into the internal procedural form, and only then
+does the lexer run. Each stage is a no-op when its detector does not match. A
+`logic` and an `automation` pass through the chain untouched: the statement
+parser reads them as written (below).
 
 Three consequences that bite:
 
@@ -78,13 +81,13 @@ memql#5370). The parser reads a `logic` or an `automation` in statements
 natively (`parser/v1_body.go`, `parseV1Definition`) into an `ast.Body`, whose
 expressions are the v1 grammar. `compiler.CheckBody` holds a body to its scope
 and construct rules at load, and `compiler.CompileBody` lowers it to the
-executor's step list in the order written, with no topological sort. Until
-the flip, the rewriter's transitional dispatch (`errNativeBody`,
-`TestTransitionalDispatchIsExact`) sends only the retired forms down the
-legacy path: a logic with `body {`, an automation with a `step` block, and the
-terse `=> logic` header. The flip deletes that path, and the parser then
-refuses those forms with `memqlmigrate --rewrite=bodies` as the fix
-(`component/language/bodymigrate`).
+executor's step list in the order written, with no topological sort. The
+retired body forms -- a logic's `body { }`, an automation's `step` block, the
+terse `=> logic` header, `steps.<id>` reads, `forEach`, `publishEvent(...)`,
+a call with no kind, the argument pun, `partition=` on `@trigger` and the
+`@schedule` annotation -- are refused by the statement parser, each by name
+with a code (`parser/v1_body_refusals.go`) and `memqlmigrate --rewrite=bodies`
+as the fix (`component/language/bodymigrate`).
 
 The retired author-side forms (`func (Query) NAME(ctx any)`, the `@use*`
 annotation family, `@concepts(...)`, `@input { ... }`, `include` in a shape

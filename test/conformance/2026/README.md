@@ -36,7 +36,7 @@ domain's `.memql` files.
 Each case loads as its own domain, and the load cases share boots. A concept
 is qualified by its domain (`v1:<domain>:ticket`), so a concept's name may
 repeat -- most cells declare a `ticket`. Every other construct is found by its
-bare name somewhere: a tool's handler, an automation's step, a seed's
+bare name somewhere: a tool's handler, an automation's call, a seed's
 `create<Concept>`, the tool the engine registers for every function, the rule
 and policy registries. Those names must be unique across the corpus, because a
 bare name two domains declare is ambiguous to every such lookup. A cell's
@@ -88,9 +88,10 @@ The edition's grammar is the expression grammar of edition 2026, the only
 grammar the loaders read: a case is judged by the grammar a node boots with.
 Every spelling edition 2026 retires is
 a parse refusal, the predicate positions' old forms included -- a filter with
-no lambda header, a spec or trait `{ return }` body, a raw-text `@filter`.
-The cells were written before the flip to mean the same thing after it, and
-they needed no edit when it landed.
+no lambda header, a spec or trait `{ return }` body, a raw-text `@filter` --
+and so is every retired body form: a logic's `body { }`, an automation's
+`step` block, the terse `=> logic` header, `partition=` on `@trigger` and
+`@schedule` (`statements/<construct>/retired/` holds one case per code).
 
 A case file for `lower` or `evaluate` holds the expression alone -- at a
 position written as a lambda over the row (a query filter, a spec body, a

@@ -444,8 +444,8 @@ client that ignores it sees exactly the previous contract.
 ## Expressions
 
 A `.memql` file writes every expression in one language: a query's `filter` and
-`refine`, a spec or trait body, a trigger `@filter`, an automation condition, a
-statement in a logic body, a mutation value, a step argument. Positions differ
+`refine`, a spec or trait body, a trigger `@filter`, a statement in a logic or
+an automation body and its conditions, a mutation value, a call argument. Positions differ
 in where the expression runs, and so in what it may contain; [Where each
 expression runs](#where-each-expression-runs) lists them. The string a client
 sends to `Execute` is not written in this language: see [The internal query
@@ -485,8 +485,8 @@ field is read through it:
   lambda with two parameters is written `(acc, x) => acc + x`.
 
 A bare name resolves, in order, to a lambda parameter in scope; a reserved root
-(`args`, `actor`, `now`, `config`, `event`, and in an automation `steps`,
-`item`, `index` and `input`); a name a statement above it bound
+(`args`, `actor`, `now`, `config`, `partition`, and in an automation `event`);
+a loop variable; a name a statement above it bound
 (`rows := query activeUsers()`); and, when it is called, a catalog function,
 then a spec or trait. The catalog comes first, so a spec cannot shadow a
 function by taking its name. Any other name is refused as unknown.
@@ -1463,13 +1463,13 @@ concept==v1:lead && classification==nil
 
 ### DSL Mutations (Struct Form)
 
-Named mutations live in `dsl/<namespace>/mutations.memql`. The concept binding lives in the signature (`mutate <Concept> <name>`); the body carries an `args { ... }` block plus exactly one `insert { ... }` **or** `update { ... }` block (one write per body):
+Named mutations live in `dsl/<namespace>/mutations.memql`. The concept binding lives in the signature (`mutation <Concept> <name>`); the body carries an `args { ... }` block plus exactly one `insert { ... }` **or** `update { ... }` block (one write per body):
 
 ```memql
 use library.concepts.{ folder }
 
 /// Insert a new version of a folder record (typically used to archive a folder).
-mutate folder archiveFolder {
+mutation folder archiveFolder {
   args {
     folderId  string  @required
     payload   object  @required
@@ -1769,13 +1769,13 @@ Example validation errors:
 
 ### Function Rules
 
-- One consolidated `queries.memql` / `mutations.memql` file per namespace. The declaration name carries **no kind prefix** (memql#2853) -- name it for what it does (`activeFolders`, `createFolder`); the `query` / `mutate` keyword already marks the kind. See [naming-conventions.md](naming-conventions.md).
+- One consolidated `queries.memql` / `mutations.memql` file per namespace. The declaration name carries **no kind prefix** (memql#2853) -- name it for what it does (`activeFolders`, `createFolder`); the `query` / `mutation` keyword already marks the kind. See [naming-conventions.md](naming-conventions.md).
 - Functions can reference specs and traits (loaded after specs) and call other functions; circular dependencies are detected and rejected at load time.
 - Comments use `//`; construct descriptions come from `@description("...")`.
 
 ### Procedural Form (internal post-rewrite shape)
 
-The struct-form rewriter expands every author-side construct to a `func (Receiver) NAME(ctx any) (any, error)` shape for the engine's parser; the `ctx` parameter name is a placeholder identifier only. **Don't author that form** — every receiver kind has a struct form: queries and mutations as above, logic with `body { ...; return <expr> }`, automations as `step` lists. Receiver-function constructs in authored files are rejected at parse time with migration hints.
+The struct-form rewriter expands a query and a mutation to a `func (Receiver) NAME(ctx any) (any, error)` shape for the engine's parser; the `ctx` parameter name is a placeholder identifier only. **Don't author that form**: a query and a mutation are written in the struct form above, and a logic and an automation in the [body language](#bodies), which the parser reads as written. Receiver-function constructs in authored files are rejected at parse time with migration hints.
 
 ## Bodies
 
@@ -1886,7 +1886,11 @@ These forms are refused at parse, each refusal naming its replacement, and `memq
 | `parallel { wait: "all", branches: [step a { }] }` | `parallel { branch a { } }` |
 | `logic l(event)`, an argument named by its value | `logic l(event: event)` |
 | `publishEvent(topic: "t", payload: { ... })` | `publish "t" { ... }` |
+| `x := if c { <call> }` | `if c { x := <call> }` |
 | a logic that publishes | its statements, moved by the rewrite into the one automation that calls it |
+| `@trigger(..., partition="*")` | `@trigger(...)`: the kwarg is deleted |
+| `@schedule(cron="<cron>")` | `@trigger(schedule="<cron>")` |
+| `mutate <Concept> <name> { ... }` | `mutation <Concept> <name> { ... }` |
 
 ## Logic
 
@@ -1914,7 +1918,7 @@ logic purgeExpiredArchivedFolders {
 
 ### Collection / lambda library
 
-A single method-chained collection library with **arrow lambdas** filters, projects and aggregates a list: a query-step result, an `args` list, a `select` projection, a row's array field:
+A single method-chained collection library with **arrow lambdas** filters, projects and aggregates a list: a query statement's rows, an `args` list, a `select` projection, a row's array field:
 
 ```memql fragment
 // active admins among the passed members
@@ -2614,7 +2618,7 @@ query artifact x {
   shape artifactFull
 }
 
-mutate folder createFolder {
+mutation folder createFolder {
   args {
     folderId string @required
     name string @required
@@ -2633,8 +2637,10 @@ spec artifact isArchivedArtifact = row => row.archived == true
 @row
 shape artifact artifactCard { row.id  title }
 
-@trigger(event="node.created", concept="v1:library:file", partition="*")
-automation indexArtifact { step run { logic indexArtifact(event: event) } }
+@trigger(event="node.created", concept="v1:library:file")
+automation indexArtifact {
+  logic indexArtifact(event: event)
+}
 
 @primary("fleet:strongest")
 @fallback("app:*")

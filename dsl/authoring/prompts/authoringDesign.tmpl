@@ -64,10 +64,16 @@ Reusable catalog (constructs already available to compose -- prefer these):
   `trait <name> = row => <predicate>`; use either as `name(row)`.
 - Caller args: declared in an `args { ... }` block, read as `args.X`.
   Engine values are bare: `now`, `actor.userId`, `partition`.
-- Mutations: exactly one `insert { ... }` or `update { ... }` block.
+- Mutations: `mutation <Concept> <name> { ... }` with exactly one
+  `insert { ... }` or `update { ... }` block.
 - Owner-stamped writes (`createdBy: actor.userId`) and owner-filtered
   reads (`filter row => row.ownerUserId == actor.userId`) for per-row
   authz.
+- A logic is statements that run in order and end with `return`:
+  `x := query q(k: v)`, `if c { ... } else { ... }`, `for x in xs { ... }`,
+  `return <expr>`. A construct call names its kind and its arguments and is a
+  statement of its own; a later statement reads an earlier one's value by its
+  name. A logic calls only queries, other logic and read-only builtins.
 
 # Multi-phase decomposition (long, sequential duties)
 

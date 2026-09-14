@@ -1158,8 +1158,8 @@ a single `<construct>s.memql` file (e.g. `dsl/library/queries.memql`,
 `dsl/identity/concepts.memql`, `dsl/providers/providers.memql`). The flattened
 tree is produced by
 [`scripts/restructure-by-construct`](scripts/restructure-by-construct/main.go).
-Authoring reference skeletons live under `dsl/_reference/` (`_concept`,
-`_shape`, `_spec`, `_trait`, `_agent`). Loaders read through `Source()`, which
+Authoring reference skeletons live under `dsl/_reference/`, one per construct
+(`_concept.memql`, `_logic.memql`, `_automation.memql`, ...). Loaders read through `Source()`, which
 routes through [`core/dslfs`](core/dslfs/dslfs.go).
 
 ### `MEMQL_DSL_PATH` — runtime product-DSL delivery
@@ -1305,9 +1305,11 @@ see one in an old diff:
 - `include` in a shape body.
 - The retired body forms (epic memql#5370): `body { }` around a logic's
   statements, `step` blocks, the terse `=> logic` automation header,
-  `steps.<id>` references and a bare argument read. `memqlmigrate
-  --rewrite=bodies` rewrites each; the language reference lists them
-  ([memql.md](docs/public/language/memql.md#retired-forms)).
+  `steps.<id>` references, a bare argument read, `partition=` on `@trigger`,
+  the `@schedule` annotation (`@trigger(schedule=...)` is the one spelling),
+  and `mutate` as the mutation declaration keyword (it is `mutation`, D13).
+  `memqlmigrate --rewrite=bodies` rewrites each; the language reference lists
+  them ([memql.md](docs/public/language/memql.md#retired-forms)).
 
 Only `dsl/_reference/*.memql` still shows these, deliberately, as
 don't-do-this skeletons.
@@ -1580,10 +1582,10 @@ are stated once in
 [access-model.md](docs/public/operate/auth/access-model.md#grants-to-people-and-groups).
 
 The partition dimension that historically gated tenant isolation is retired in
-#56 (phases 1-7 landed; phase 8 sweeps the remaining cross-repo stragglers + the
-DSL `partition="*"` automation kwarg). The `partition` wire field is already
-removed (`reserved "partition"` in `component/grpc/memql.proto`); nothing
-derives scope from the envelope.
+#56. The `partition` wire field is removed (`reserved "partition"` in
+`component/grpc/memql.proto`), nothing derives scope from the envelope, and the
+DSL's `partition="*"` automation kwarg is refused at parse
+(`trigger_partition_retired`, epic memql#5370).
 
 ### Concepts
 
@@ -1637,19 +1639,37 @@ v1:cluster:node:bff-local
 ### Automations
 
 Event-driven workflows. The `@trigger` annotation keys off an event name plus
-the target concept, using keyword args:
+the target concept, using keyword args, and the automation's `args { }` block
+is the contract the triggering row's payload is bound into:
 
 ```memql
-@trigger(event="node.created", concept="v1:worker:registration", partition="*")
-automation onWorkerRegistered { ... }
+/// On to-do creation, promote it into the Library Records lens.
+@trigger(event="node.created", concept="v1:todos:todo")
+automation indexTodoOnCreate {
+  args {
+    id any
+    ownerUserId any
+    title any
+  }
+
+  persist := mutation createArtifact(
+    sourceConceptRef: args.id,
+    ownerUserId:      args.ownerUserId,
+    lens:             "record",
+    kind:             "todo",
+    source:           "agent_generated",
+    title:            args.title ?? "Untitled to-do",
+    live:             false
+  )
+}
 ```
 
-A time-driven automation uses the `schedule` kwarg instead:
-`@trigger(schedule="0 */10 * * * *")`.
-
-> **#56 phase 8 caveat:** the `partition="*"` kwarg is still required while the
-> event topic carries a partition segment. That segment goes away in phase 8,
-> after which the kwarg drops.
+A time-driven automation uses the `schedule` kwarg instead, with a six-field
+cron (leading seconds): `@trigger(schedule="0 */10 * * * *")`. It is the one
+spelling -- the `@schedule` annotation and `partition=` on a trigger are
+refused at parse. An automation's statements are the body language
+[Logic](#logic) describes, plus `publish`, `automation` and `action` calls,
+which only an automation makes.
 
 ### Functions
 
@@ -1657,7 +1677,7 @@ Reusable query and mutation functions, in the struct form -- the only
 author-facing shape (see "Retired author-side forms" above).
 
 **Concept binding lives in the construct signature.** The two-identifier
-signature `query <Concept> <name>`, `mutate <Concept> <name>`,
+signature `query <Concept> <name>`, `mutation <Concept> <name>`,
 `seed <Concept> <name>` and `shape <Concept> <name>` names the bound concept
 directly; the loader resolves the name through the file's file-top imports.
 
@@ -1773,7 +1793,7 @@ Mutations:
 use library.concepts.{ folder }
 
 @description("Create a Library folder")
-mutate folder mutationCreateFolder {
+mutation folder createFolder {
   args {
     folderId  string  @required
     name      string  @required

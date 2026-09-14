@@ -1076,7 +1076,7 @@ as an exemption knob.
 ## Validator
 
 The classifier lives in `component/memql/dslgate` and walks every
-`query`, `mutate` **and `seed`** in the tree, classifying each one.
+`query`, `mutation` **and `seed`** in the tree, classifying each one.
 
 **It runs at LOAD time** (memql#3629). `MemQLEngine.Init` scans the merged
 tree -- embedded core plus every registered overlay, which is where a
@@ -1121,8 +1121,7 @@ breakdown. **Both are deleted rather than corrected.**
 They were hand-copied from what the classifier already prints, so they
 began drifting the day they were written. Measured against the tree
 while this was being fixed, almost every row of the snapshot was
-numerically wrong, it used the retired `mutation` keyword (the surface
-keyword is `mutate`, memql#2041), it had no Seeds column, and many live
+numerically wrong, it had no Seeds column, and many live
 namespaces were missing from it entirely. The classification block was
 worse — a fraction of the live namespaces, no `srvOnly` column, and it
 reported `owned` constructs in a single namespace when the tree is full
@@ -1152,7 +1151,7 @@ computation the gate fails on, so it cannot disagree with the gate.
 For construct totals per kind:
 
 ```bash
-grep -rhoE '^(query|mutate|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\{' \
+grep -rhoE '^(query|mutation|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\{' \
   --include='*.memql' dsl/ | awk '{print $1}' | sort | uniq -c
 ```
 
