@@ -335,9 +335,11 @@ FAILS when the live grammar (the parser's top-level dispatch plus the
 struct-form rewriter) or the annotations registry moves ahead of the
 spec.
 
-The test is allowed to import the parser and annotation registry that
-production `dslspec` code must not, because a `_test.go` file does not
-create a production import cycle. It compares the spec's construct set
+The test imports the parser and the annotation registry; production
+`dslspec` code imports the parser only for the two labels naming the
+language (`Edition`, `GrammarVersion`, memql#5362), and the parser
+imports nothing from `dslspec`, so neither creates an import cycle. It
+compares the spec's construct set
 against the parser's own authoritative, introspectable lists
 (`parser.TopLevelDeclKeywords`, `parser.StructFormKeywords`) -- not a
 hand-copied literal -- and names the exact drifted symbol on failure
@@ -345,10 +347,11 @@ hand-copied literal -- and names the exact drifted symbol on failure
 construct to the grammar without adding it to the spec, and this test
 goes red.
 
-The `SpecVersion` constant (`1.0.0`) versions the JSON envelope shape,
-not its contents: a new construct or annotation does NOT bump it; only
-a backward-incompatible change to the JSON shape does, so a consuming
-editor can detect a contract mismatch.
+The `SpecVersion` constant (`1.1.0`) versions the JSON envelope shape,
+not its contents: a new construct or annotation does NOT move it. A
+backward-incompatible change to the envelope moves the major, so a
+consuming editor can detect a contract mismatch; an additive one moves
+the minor (`1.1.0` added `edition` and `grammarVersion`).
 
 ### The syntax&lt;-&gt;Sense parity gate (#2734)
 
@@ -387,15 +390,24 @@ shape is:
 
 ```json
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "edition": "2026",
+  "grammarVersion": "<parser.GrammarVersion>",
   "constructs": [ ... ],
   "annotations": [ ... ],
   "keywords": [ ... ],
   "operators": [ ... ],
   "fieldTypes": [ ... ],
-  "nextRules": [ ... ]
+  "nextRules": [ ... ],
+  "builtins": [ ... ]
 }
 ```
+
+`edition` and `grammarVersion` name the language the document describes
+-- the same two facts `ServerHello` states on connect -- so an editor can
+compare the grammar it was built from with the cluster's. A grammar
+version is a label: two compare equal or different, never older or newer
+(see [MemQL in VS Code](vscode.md) for how the extension orders them).
 
 An editor fetches it over gRPC through the Go SDK:
 
@@ -419,7 +431,7 @@ check the contract version without parsing the document.
 
 | Piece | Location |
 |---|---|
-| The spec (source of truth) | `component/language/dslspec/` (`spec.go`, `constructs.go`, `lexicon.go`, `nextrules.go`, `json.go`) |
+| The spec (source of truth) | `component/language/dslspec/` (`spec.go`, `constructs.go`, `lexicon.go`, `nextrules.go`, `punctuation.go`, `json.go`) |
 | The drift guard | `component/language/dslspec/drift_test.go` |
 | Sense core (pure Go) | `component/memql/sense/` |
 | Sense gRPC handlers | `component/grpc/sense_handlers.go` |

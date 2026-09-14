@@ -30,26 +30,31 @@
 //     parser's top-level dispatch (component/language/parser/parser.go) and
 //     the struct-form rewriter (parser/rewriter.go). dslspec is the SoT for
 //     those; the drift test (#2124) introspects the parser/rewriter and
-//     asserts this spec stays in lockstep, rather than this package
-//     importing the (heavy, non-introspectable-by-switch) parser.
+//     asserts this spec stays in lockstep, because the parser's dispatch
+//     switch cannot be read from here. (The package does import the parser,
+//     for Edition and GrammarVersion only; see below.)
 //
-// The package is a near-leaf: it imports only component/language/annotations
-// (itself a leaf), so component/memql/sense and the gRPC/SDK export layer
-// can both consume it without an import cycle.
+// The package imports component/language/annotations and, since memql#5362,
+// component/language/parser for the two labels naming the language a spec
+// describes (Edition, GrammarVersion). The parser does not import dslspec, so
+// component/memql/sense and the gRPC/SDK export layer still consume it
+// without an import cycle.
 package dslspec
 
 import (
 	"sort"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
-// SpecVersion is the schema version of the serialized spec. Bump it on any
-// backward-incompatible change to the JSON shape so a consuming editor can
-// detect a contract mismatch. The field/value semantics living inside the
-// spec (a new construct, a new annotation) do NOT bump this -- only the
-// envelope shape does.
-const SpecVersion = "1.0.0"
+// SpecVersion is the schema version of the serialized spec, so a consuming
+// editor can detect a contract mismatch. The MAJOR moves on a
+// backward-incompatible change to the JSON envelope; the MINOR on an additive
+// one (1.1.0: `edition` and `grammarVersion`, memql#5362). The field/value
+// semantics living inside the spec (a new construct, a new annotation) do NOT
+// move it -- only the envelope shape does.
+const SpecVersion = "1.1.0"
 
 // Category groups a construct by how it reads, so an editor can present
 // constructs in sensible sections and the legal-next rules can refer to a
@@ -184,7 +189,15 @@ type NextRule struct {
 
 // Spec is the whole serializable authoring surface.
 type Spec struct {
-	Version     string       `json:"version"`
+	Version string `json:"version"`
+	// Edition and GrammarVersion name the language this spec describes
+	// (parser.Edition, parser.GrammarVersion) -- the same two facts
+	// ServerHello states on connect (memql#5362, D25), so a client that is
+	// not the VS Code extension can compare its own grammar with a cluster's
+	// from the DslSpec export alone.
+	Edition        string `json:"edition"`
+	GrammarVersion string `json:"grammarVersion"`
+
 	Constructs  []Construct  `json:"constructs"`
 	Annotations []Annotation `json:"annotations"`
 	Keywords    []Keyword    `json:"keywords"`
@@ -199,7 +212,10 @@ type Spec struct {
 // and cheap; callers may build on demand (the export layer caches one copy).
 func Build() *Spec {
 	return &Spec{
-		Version:     SpecVersion,
+		Version:        SpecVersion,
+		Edition:        parser.Edition,
+		GrammarVersion: parser.GrammarVersion,
+
 		Constructs:  constructs(),
 		Annotations: buildAnnotations(),
 		Keywords:    keywords(),
