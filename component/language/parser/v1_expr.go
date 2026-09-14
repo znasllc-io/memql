@@ -493,7 +493,7 @@ func (p *Parser) parseV1MethodCall(recv v1Expr, seg v1Seg) (v1Expr, error) {
 	if seg.text == "contains" {
 		return v1Expr{}, v1Retired(seg.token(), ruleContainsMethod)
 	}
-	args, named, closeTok, err := p.parseV1CallArgs(seg.text, "")
+	args, named, closeTok, err := p.parseV1CallArgs(seg.text, "", false)
 	if err != nil {
 		return v1Expr{}, err
 	}
@@ -615,7 +615,7 @@ func (p *Parser) parseV1FunctionCall() (v1Expr, error) {
 	if rule, retired := v1RetiredCalls[lower]; retired {
 		return v1Expr{}, v1Retired(nameTok, rule)
 	}
-	args, named, closeTok, err := p.parseV1CallArgs(name, "")
+	args, named, closeTok, err := p.parseV1CallArgs(name, "", true)
 	if err != nil {
 		return v1Expr{}, err
 	}
@@ -642,7 +642,7 @@ func (p *Parser) parseV1ConstructCall() (v1Expr, error) {
 		return v1Expr{}, v1Errorf(nameTok, "a construct call needs its argument list: %s %s(k: v, ...), or %s %s() with none", kindTok.Literal, nameTok.Literal, kindTok.Literal, nameTok.Literal)
 	}
 	p.v1Take()
-	args, named, closeTok, err := p.parseV1CallArgs(nameTok.Literal, kindTok.Literal)
+	args, named, closeTok, err := p.parseV1CallArgs(nameTok.Literal, kindTok.Literal, false)
 	if err != nil {
 		return v1Expr{}, err
 	}
@@ -651,25 +651,30 @@ func (p *Parser) parseV1ConstructCall() (v1Expr, error) {
 }
 
 // parseV1CallArgs parses a parenthesised argument list with the cursor on its
-// `(`, for the call named callee (kind is the construct-call prefix, "" for a
-// bare or method call). It returns the closing `)` so the caller can end the
-// call's span on it.
+// `(`, for the call named callee. kind is the construct-call prefix ("" for a
+// bare or a method call) and bare marks a bare `name(...)` call. It returns the
+// closing `)` so the caller can end the call's span on it.
 //
-// Arguments are all positional or all named: a mix is refused, because the
-// two readings of a mix -- "the positional ones fill the leftmost slots" and
-// "a bare name means name: name" -- disagree, and nothing in the text says
-// which was meant. A construct call is named-only, except that a bare name
-// still puns to `name: name` (memql#2365); any other positional argument there
-// is refused as the legacy grammar refused it (memql#2395). A named argument's
-// key may contain '-' (`dry-run: args.dryRun`): a key is never an expression.
-func (p *Parser) parseV1CallArgs(callee, kind string) ([]ast.ExpressionNode, []ast.NamedArg, Token, error) {
+// A construct call's arguments are NAMED, and the result has no positional
+// ones: a bare name is a named argument that puns (`logic f(event, mode: "x")`
+// is `logic f(event: event, mode: "x")`, memql#2365), so it is recorded as
+// exactly that, in source order, and a consumer never has to know a pun was
+// written. Any other positional argument on a construct call is refused as the
+// legacy grammar refused it (memql#2395).
+//
+// A bare or method call's arguments are all positional or all named: a mix is
+// refused, because nothing in `f(a, k: 1)` says whether `a` fills the first
+// slot or means `a: a`. A named argument's key may contain '-'
+// (`dry-run: args.dryRun`): a key is never an expression.
+func (p *Parser) parseV1CallArgs(callee, kind string, bare bool) ([]ast.ExpressionNode, []ast.NamedArg, Token, error) {
 	open := p.v1Take()
-	var (
-		args      []ast.ExpressionNode
-		argStarts []Token
-		named     []ast.NamedArg
-		seen      = map[string]any{}
-	)
+	type argument struct {
+		named *ast.NamedArg      // set for `name: value`
+		value ast.ExpressionNode // set for a positional argument
+		start Token
+	}
+	var list []argument
+	seen := map[string]any{}
 	for !p.check(TokenParenClose) {
 		if p.check(TokenEOF) {
 			return nil, nil, Token{}, p.v1Expected(fmt.Sprintf("`)` to close the argument list of %s(...) opened at line %d, column %d", callee, open.Line, open.Column))
@@ -693,7 +698,7 @@ func (p *Parser) parseV1CallArgs(callee, kind string) ([]ast.ExpressionNode, []a
 			if err != nil {
 				return nil, nil, Token{}, err
 			}
-			named = append(named, ast.NamedArg{Name: tok.Literal, Value: val.n})
+			list = append(list, argument{named: &ast.NamedArg{Name: tok.Literal, Value: val.n}, start: tok})
 		case tok.Type == TokenString && p.peekAhead(1).Type == TokenColon:
 			return nil, nil, Token{}, v1Errorf(tok, "an argument's name is not quoted: write %s: ... in %s(...)", tok.Literal, callee)
 		default:
@@ -704,8 +709,7 @@ func (p *Parser) parseV1CallArgs(callee, kind string) ([]ast.ExpressionNode, []a
 			if id, ok := val.n.(*ast.IdentExpr); ok && p.check(TokenOperator) && p.current.Literal == "=" {
 				return nil, nil, Token{}, v1Errorf(p.current, "a named argument is written `%s: ...`, not `%s = ...`", id.Name, id.Name)
 			}
-			args = append(args, val.n)
-			argStarts = append(argStarts, tok)
+			list = append(list, argument{value: val.n, start: tok})
 		}
 		if p.check(TokenComma) {
 			p.v1Take()
@@ -717,6 +721,53 @@ func (p *Parser) parseV1CallArgs(callee, kind string) ([]ast.ExpressionNode, []a
 	}
 	closeTok := p.v1Take()
 
+	// The retired object-literal wrapper (memql#2335): named arguments go in
+	// the parentheses, not in one map passed positionally. A method's
+	// argument is data, so only bare and construct calls are held to it.
+	if (bare || kind != "") && len(list) == 1 && list[0].named == nil {
+		if _, isMap := list[0].value.(*ast.MapExpr); isMap {
+			return nil, nil, Token{}, v1Errorf(list[0].start,
+				"object-literal call args are removed; pass named args directly: %s(k: v, ...), empty = %s() (was: %s({...}))", callee, callee, callee)
+		}
+	}
+
+	var (
+		args  []ast.ExpressionNode
+		named []ast.NamedArg
+	)
+	if kind != "" {
+		for _, a := range list {
+			if a.named != nil {
+				named = append(named, *a.named)
+				continue
+			}
+			id, pun := a.value.(*ast.IdentExpr)
+			if !pun {
+				return nil, nil, Token{}, v1Errorf(a.start,
+					"positional args are removed on construct calls; name the argument: %s %s(k: v, ...) -- a bare name puns to its own name (%s(x) == %s(x: x))",
+					kind, callee, callee, callee)
+			}
+			start := a.start
+			if err := checkCallArgName(&start, callee, id.Name, seen); err != nil {
+				return nil, nil, Token{}, err
+			}
+			seen[id.Name] = true
+			named = append(named, ast.NamedArg{Name: id.Name, Value: id})
+		}
+		return nil, named, closeTok, nil
+	}
+
+	var firstPositional *Token
+	for i, a := range list {
+		if a.named != nil {
+			named = append(named, *a.named)
+			continue
+		}
+		if firstPositional == nil {
+			firstPositional = &list[i].start
+		}
+		args = append(args, a.value)
+	}
 	if len(args) > 0 && len(named) > 0 {
 		msg := fmt.Sprintf("a call's arguments are all positional or all named: name every argument of %s(...)", callee)
 		for _, a := range args {
@@ -725,22 +776,7 @@ func (p *Parser) parseV1CallArgs(callee, kind string) ([]ast.ExpressionNode, []a
 				break
 			}
 		}
-		return nil, nil, Token{}, v1Errorf(argStarts[0], "%s", msg)
-	}
-	if kind != "" {
-		for i, a := range args {
-			id, pun := a.(*ast.IdentExpr)
-			if !pun {
-				return nil, nil, Token{}, v1Errorf(argStarts[i],
-					"positional args are removed on construct calls; name the argument: %s %s(k: v, ...) -- a bare name puns to its own name (%s(x) == %s(x: x))",
-					kind, callee, callee, callee)
-			}
-			start := argStarts[i]
-			if err := checkCallArgName(&start, callee, id.Name, seen); err != nil {
-				return nil, nil, Token{}, err
-			}
-			seen[id.Name] = true
-		}
+		return nil, nil, Token{}, v1Errorf(*firstPositional, "%s", msg)
 	}
 	return args, named, closeTok, nil
 }
