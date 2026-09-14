@@ -197,6 +197,20 @@ func BuildUnifiedConcepts(logger *slog.Logger, tree fs.FS) (map[string]*memoryNo
 		if readErr != nil {
 			continue
 		}
+		// Through the front end of the edition the file's domain declares
+		// (memql#5358), like every other reader. A file the front end
+		// refuses is left out -- its text is not the core grammar's -- and
+		// engine Init refuses the tree naming it.
+		raw, prepErr := lines.Prepare(p, raw)
+		if prepErr != nil {
+			if logger != nil {
+				logger.Warn("unified loader: skipping a file its edition's front end refused",
+					"component", "memql.unifiedLoader",
+					"file", p,
+					"error", prepErr)
+			}
+			continue
+		}
 
 		decls := ExtractConceptDecls(string(raw))
 		if len(decls) == 0 {

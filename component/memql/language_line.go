@@ -20,6 +20,16 @@ package memql
 // Both render one refusal identically, and the offline passes that collect
 // both (LintUnifiedTree, AnalyzePackageDSL) print it once.
 //
+// EDITIONS AT EVERY PARSE SITE (task memql#5358). Every loader that reads a
+// tree file -- baseloader.ReadAll and, for the loaders that walk the tree
+// themselves, the concept build, the automation loader, the action loader and
+// capability catalog, the capability-name loader, the dependency validator
+// and dslimports -- first hands it to LanguageLines.Prepare, the front end of
+// the edition that file's domain declares. A file a front end refuses is read
+// by no loader. Init reports it, once, on the load report (editionRefusals
+// below); the two readers with problem lists of their own, the automation
+// loader and dslimports, name it there too.
+//
 // The rule itself -- where a declaration lives, what the engine reads, the
 // messages -- is the parser's (component/language/parser/language_line.go):
 // the loaders that read a tree live in four modules, and component/actions
@@ -30,6 +40,7 @@ import (
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
+	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
@@ -81,9 +92,12 @@ func languageLineSkip(p LanguageLineProblem) baseloader.Skip {
 }
 
 // resolveLanguageLines is Init's first step: resolve the merged tree's lines
-// for LanguageLineFor, and record every refusal before any loader runs.
+// for LanguageLineFor, and record every refusal before any loader runs -- a
+// domain whose line the engine will not read, and a file its edition's front
+// end refuses.
 func (e *MemQLEngine) resolveLanguageLines(report *LoadReport) {
-	lines, problems := ResolveLanguageLines(memqldsl.Tree())
+	tree := memqldsl.Tree()
+	lines, problems := ResolveLanguageLines(tree)
 	e.languageLines = lines
 	for _, p := range problems {
 		report.AddSkip(languageLineSkip(p))
@@ -98,4 +112,50 @@ func (e *MemQLEngine) resolveLanguageLines(report *LoadReport) {
 				"detail", p.Message)
 		}
 	}
+	for _, s := range editionRefusals(tree, lines) {
+		report.AddSkip(s)
+		if e.Component != nil && e.Logger != nil {
+			e.Logger.Error("DSL file refused by its edition's front end",
+				"component", "memql.engine",
+				"file", s.File,
+				"detail", s.Err)
+		}
+	}
+}
+
+// editionRefusals is every file of tree its edition's front end refuses
+// (memql#5358), one report entry each.
+//
+// This is the ONE place such a file is reported. Every loader reads a tree
+// file through LanguageLines.Prepare and leaves out a file it refuses -- read
+// under the core grammar, text written for another edition could parse into
+// something else -- so without this the file would simply be missing. The
+// set is the one baseloader.ReadAll reads: a disabled pack's behavioral file
+// is not read, so it cannot refuse boot (module-registry design 4.2).
+func editionRefusals(tree fs.FS, lines LanguageLines) []baseloader.Skip {
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		return nil // every loader walking the tree reports the walk itself
+	}
+	var out []baseloader.Skip
+	for _, p := range paths {
+		if memqldsl.SkipsBehavioralLoad(p) {
+			continue
+		}
+		raw, err := fs.ReadFile(tree, p)
+		if err != nil {
+			continue
+		}
+		if _, err := lines.Prepare(p, raw); err != nil {
+			out = append(out, baseloader.Skip{
+				Component: languageLineComponent,
+				Keyword:   "file",
+				Name:      p,
+				File:      p,
+				Phase:     "edition",
+				Err:       err.Error(),
+			})
+		}
+	}
+	return out
 }

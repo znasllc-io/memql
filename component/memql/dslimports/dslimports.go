@@ -19,6 +19,7 @@ import (
 	languageCompiler "github.com/znasllc-io/memql/component/language/compiler"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/dslfs"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // Compile-time guarantee that the ast alias still exists.
@@ -91,6 +92,13 @@ func Load(root fs.FS) (*Tree, error) {
 	var diagnostics []error
 	rawByFile := make(map[string][]dslfs.RawImport, len(paths))
 
+	// Each file is parsed through the front end of the edition its domain
+	// declares (memql#5358), exactly as the engine reads it at boot, so a
+	// tree written in another edition lints as it loads. A domain the engine
+	// would refuse is read with the engine's own edition; the refusal itself
+	// is the engine-parity pass's to report (memqllint runs both).
+	lines, _ := languageParser.ResolveLanguageLines(root, memqldsl.EmbeddedTree{})
+
 	for _, p := range paths {
 		f, openErr := root.Open(p)
 		if openErr != nil {
@@ -101,6 +109,11 @@ func Load(root fs.FS) (*Tree, error) {
 		f.Close()
 		if readErr != nil {
 			diagnostics = append(diagnostics, fmt.Errorf("%s: read: %w", p, readErr))
+			continue
+		}
+		content, prepErr := lines.Prepare(p, content)
+		if prepErr != nil {
+			diagnostics = append(diagnostics, fmt.Errorf("%s: %w", p, prepErr))
 			continue
 		}
 

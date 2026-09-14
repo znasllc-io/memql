@@ -102,6 +102,7 @@ func validateDependencyTree(tree fs.FS) error {
 	var shapeList []*depShape
 	var consumers []depConsumer
 
+	lines, _ := ResolveLanguageLines(tree)
 	for _, p := range paths {
 		// No _reference/ skip needed: dslfs.WalkMemqlFiles structurally
 		// omits every underscore-prefixed dir and file for any fs.FS
@@ -112,6 +113,14 @@ func validateDependencyTree(tree fs.FS) error {
 		if rErr != nil {
 			return fmt.Errorf("dependency validator: read %s: %w", p, rErr)
 		}
+		// The scan below reads the core grammar, so it reads the file
+		// through its domain's edition (memql#5358). A file the front end
+		// refuses is left out; engine Init refuses the tree naming it.
+		prepared, prepErr := lines.Prepare(p, []byte(raw))
+		if prepErr != nil {
+			continue
+		}
+		raw = string(prepared)
 		collectShapes(p, raw, shapes, &shapeList)
 		collectConsumers(p, raw, &consumers)
 	}

@@ -218,6 +218,49 @@ func TestEmbeddedManifestProblemsNameTheEmbeddedFile(t *testing.T) {
 	}
 }
 
+// Prepare runs a file through the front end of ITS domain's edition, the
+// engine's own for a file in no domain, and refuses a file whose front end
+// refuses it or whose edition has no front end.
+func TestLanguageLinesPrepareUsesTheDomainsEdition(t *testing.T) {
+	unregister := RegisterEdition(FrontEnd{
+		Edition:        "2095",
+		GrammarVersion: "2095.01-test",
+		Prepare: func(src string) (string, error) {
+			if strings.Contains(src, "refuse me") {
+				return "", fmt.Errorf("2095 cannot read this")
+			}
+			return "prepared by 2095: " + src, nil
+		},
+	})
+	defer unregister()
+
+	lines := LanguageLines{
+		"old":     {Domain: "old", Edition: "2095"},
+		"current": {Domain: "current", Edition: Edition},
+		"gone":    {Domain: "gone", Edition: "1999"},
+	}
+	for _, tc := range []struct {
+		path, src, want string
+	}{
+		{"old/queries.memql", "query x", "prepared by 2095: query x"},
+		{"unified:old/queries.memql:x", "query x", "prepared by 2095: query x"},
+		{"current/queries.memql", "query x", "query x"},
+		{"stray.memql", "query x", "query x"},
+		{"nodomain/queries.memql", "query x", "query x"},
+	} {
+		got, err := lines.Prepare(tc.path, []byte(tc.src))
+		if err != nil || string(got) != tc.want {
+			t.Errorf("Prepare(%q) = %q, %v; want %q", tc.path, got, err, tc.want)
+		}
+	}
+	if _, err := lines.Prepare("old/queries.memql", []byte("refuse me")); err == nil || !strings.Contains(err.Error(), "2095 cannot read this") {
+		t.Errorf("a front end's refusal must come back as the file's error, got %v", err)
+	}
+	if _, err := lines.Prepare("gone/queries.memql", []byte("query x")); err == nil || !strings.Contains(err.Error(), `"1999"`) {
+		t.Errorf("an edition with no front end must refuse the file naming it, got %v", err)
+	}
+}
+
 func TestLanguageLinesForFindsTheDomainOfAPath(t *testing.T) {
 	lines := LanguageLines{
 		"good": {Domain: "good", Source: "good/memql.toml", Language: "1.0", Edition: "2026"},

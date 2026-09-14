@@ -75,6 +75,7 @@ func loadCapabilityNamesFromFS(tree fs.FS) (map[string]bool, error) {
 	if tree == nil {
 		return out, nil
 	}
+	lines, _ := ResolveLanguageLines(tree)
 	err := fs.WalkDir(tree, ".", func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -91,6 +92,13 @@ func loadCapabilityNamesFromFS(tree fs.FS) (map[string]bool, error) {
 		raw, rerr := fs.ReadFile(tree, p)
 		if rerr != nil {
 			return fmt.Errorf("capability loader: read %s: %w", p, rerr)
+		}
+		// Through the edition the file's domain declares (memql#5358). A file
+		// its front end refuses is not read; engine Init refuses the tree
+		// naming it.
+		raw, prepErr := lines.Prepare(p, raw)
+		if prepErr != nil {
+			return nil
 		}
 		for _, slice := range extractCapabilitySlices(string(raw)) {
 			decl, perr := languageParser.ParseCapabilityDecl(slice)

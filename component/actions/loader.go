@@ -255,11 +255,21 @@ func (r *Registry) LoadFromFS(tree fs.FS) (int, error) {
 	}
 	sort.Strings(paths)
 
+	// Each file is read through the front end of the edition its domain
+	// declares (memql#5358). A file the front end refuses is not read at all
+	// -- under the core grammar its text could mean something else -- and
+	// engine Init refuses the tree naming it, so it is not reported here too.
+	lines, _ := languageParser.ResolveLanguageLines(tree, memqldsl.EmbeddedTree{})
+
 	total := 0
 	for _, p := range paths {
 		raw, rerr := fs.ReadFile(tree, p)
 		if rerr != nil {
 			return total, fmt.Errorf("actions: read %s: %w", p, rerr)
+		}
+		raw, prepErr := lines.Prepare(p, raw)
+		if prepErr != nil {
+			continue
 		}
 		acts, lerr := LoadSource(string(raw), p)
 		if lerr != nil {

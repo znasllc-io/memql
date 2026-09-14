@@ -16,6 +16,7 @@ import (
 	"io"
 	"log/slog"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
@@ -40,6 +41,14 @@ type RawFile struct {
 // cross-domain imports still resolve, and a malformed behavioral file in
 // a disabled pack cannot refuse boot -- it resurfaces at re-enable time,
 // at boot, fail-loud, which is when it matters.
+//
+// EVERY FILE COMES BACK THROUGH ITS DOMAIN'S EDITION (memql#5358): the
+// content is what the front end of the edition the file's domain declares
+// made of it, so every consumer above sees the core grammar whichever
+// edition a domain is written in. A file its front end refuses is left out
+// -- read under the core grammar it could mean something else -- and engine
+// Init refuses the tree naming it (component/memql/language_line.go), so
+// leaving it out here is never the only word on it.
 func ReadAll(logger *slog.Logger) []RawFile {
 	tree := memqldsl.Tree()
 	paths, err := dslfs.WalkMemqlFiles(tree)
@@ -49,6 +58,7 @@ func ReadAll(logger *slog.Logger) []RawFile {
 		}
 		return nil
 	}
+	lines, _ := langparser.ResolveLanguageLines(tree, memqldsl.EmbeddedTree{})
 	var out []RawFile
 	for _, p := range paths {
 		if memqldsl.SkipsBehavioralLoad(p) {
@@ -63,7 +73,15 @@ func ReadAll(logger *slog.Logger) []RawFile {
 		if readErr != nil {
 			continue
 		}
-		out = append(out, RawFile{Path: p, Content: string(raw)})
+		prepared, prepErr := lines.Prepare(p, raw)
+		if prepErr != nil {
+			if logger != nil {
+				logger.Warn("baseloader: file refused by its edition's front end; not loaded (engine Init refuses the tree)",
+					"file", p, "error", prepErr)
+			}
+			continue
+		}
+		out = append(out, RawFile{Path: p, Content: string(prepared)})
 	}
 	return out
 }

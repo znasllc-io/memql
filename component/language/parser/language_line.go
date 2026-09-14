@@ -142,6 +142,34 @@ func (l LanguageLines) For(path string) (LanguageLine, bool) {
 	return line, ok
 }
 
+// Prepare reads one file of the tree through the front end of the edition its
+// domain declares (task memql#5358), before the struct-form rewriter or any
+// other reader sees it. This is the step that lets two editions load in one
+// engine: every loader that reads a tree file hands it here first, so the rest
+// of the pipeline only ever sees the core grammar.
+//
+// A file in no resolved domain -- one at the root of a tree, or a path of
+// another tree -- is read with this engine's own edition, which is also what a
+// domain the engine refused carries (ResolveLanguageLines).
+//
+// An error means the file must not be parsed at all: read under the core
+// grammar, text written for another edition could parse into something else.
+func (l LanguageLines) Prepare(path string, src []byte) ([]byte, error) {
+	edition := Edition
+	if line, ok := l.For(path); ok {
+		edition = line.Edition
+	}
+	fe, err := FrontEndFor(edition)
+	if err != nil {
+		return nil, err
+	}
+	out, err := fe.Prepare(string(src))
+	if err != nil {
+		return nil, fmt.Errorf("the edition %s front end refused this file: %w", edition, err)
+	}
+	return []byte(out), nil
+}
+
 // lineDomain is the domain a tree path belongs to: its first segment, after
 // any loader origin prefix. A file at the root belongs to no domain.
 func lineDomain(p string) string {

@@ -215,6 +215,9 @@ func LoadCatalogFromFS(tree fs.FS) (*CapabilityCatalog, error) {
 	if tree == nil {
 		return cat, nil
 	}
+	// Each file through the front end of its domain's edition (memql#5358);
+	// see LoadFromFS for why a refused file is left out without a word here.
+	lines, _ := languageParser.ResolveLanguageLines(tree, memqldsl.EmbeddedTree{})
 	err := fs.WalkDir(tree, ".", func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -231,6 +234,10 @@ func LoadCatalogFromFS(tree fs.FS) (*CapabilityCatalog, error) {
 		raw, rerr := fs.ReadFile(tree, p)
 		if rerr != nil {
 			return fmt.Errorf("capability catalog: read %s: %w", p, rerr)
+		}
+		raw, prepErr := lines.Prepare(p, raw)
+		if prepErr != nil {
+			return nil
 		}
 		for _, slice := range extractCapabilityDeclSlices(string(raw)) {
 			decl, perr := languageParser.ParseCapabilityDecl(slice)
