@@ -70,12 +70,24 @@ var v1RetiredSamples = []struct {
 	{"retired_trait_reference", `trait isActiveRecord`, false},
 	{"retired_contains_method", `row.tags.contains("x")`, false},
 	{"retired_contains_method", `f(x).contains(y)`, false},
+	{"retired_keyless_map_entry", `{delegationId: args.event.payload.id, args.event.payload.identityId, timestamp: now}`, false},
+	{"retired_keyless_map_entry", `{a}`, false},
+	{"retired_keyless_map_entry", `f(x: {a: 1, row.b})`, false},
 	{"retired_filter_without_lambda", "query thing probe {\n  filter a == 1\n}", true},
 	{"retired_filter_without_lambda", "query thing probe {\n  filter a == 1 && isX\n  paginate 5\n  shape probeCard\n}", true},
 	{"retired_spec_return_body", "spec thing isX {\n  return a == 1\n}", true},
 	{"retired_trait_return_body", "trait isX {\n  return a == 1\n}", true},
 	{"retired_filter_annotation", "@filter(payload.a == 1)\n@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  step s {\n    logic f(x: 1)\n  }\n}", true},
 	{"retired_filter_annotation", "@trigger(event=\"node.created\", concept=\"v1:probe:thing\", filter=\"payload.a == 1\")\nautomation probe {\n  step s {\n    logic f(x: 1)\n  }\n}", true},
+}
+
+// v1ConcreteRetiredMessages are the refusals that name the author's own entry
+// written out instead of the table's placeholder form: a key-less map entry's
+// fix is that entry with its key, which is also what the codemod writes.
+var v1ConcreteRetiredMessages = map[string]string{
+	`{delegationId: args.event.payload.id, args.event.payload.identityId, timestamp: now}`: "a map entry needs a key: write identityId: args.event.payload.identityId (memqlmigrate --rewrite=expressions rewrites it)",
+	`{a}`:                 "a map entry needs a key: write a: a (memqlmigrate --rewrite=expressions rewrites it)",
+	`f(x: {a: 1, row.b})`: "a map entry needs a key: write b: row.b (memqlmigrate --rewrite=expressions rewrites it)",
 }
 
 // TestV1RetiredFormsRefuse: every retired spelling refuses with the pinned
@@ -109,12 +121,21 @@ func TestV1RetiredFormsRefuse(t *testing.T) {
 				t.Fatalf("refused under rule %q, want %q: %v", rf.Form.Rule, c.rule, err)
 			}
 			msg := err.Error()
-			want := form.Spelling + " is retired in edition 2026: write " + form.Replacement + " (memqlmigrate --rewrite=expressions rewrites it)"
-			if !strings.Contains(msg, want) {
-				t.Fatalf("message does not carry the pinned shape:\n got  %s\n want %s", msg, want)
+			if want, concrete := v1ConcreteRetiredMessages[c.src]; concrete {
+				if !strings.Contains(msg, want) {
+					t.Fatalf("message does not name the entry written out:\n got  %s\n want %s", msg, want)
+				}
+			} else {
+				want := form.Spelling + " is retired in edition 2026: write " + form.Replacement + " (memqlmigrate --rewrite=expressions rewrites it)"
+				if !strings.Contains(msg, want) {
+					t.Fatalf("message does not carry the pinned shape:\n got  %s\n want %s", msg, want)
+				}
+				if !strings.Contains(msg, form.Replacement) {
+					t.Fatalf("message must name the replacement: %s", msg)
+				}
 			}
-			if !strings.Contains(msg, form.Replacement) || !strings.Contains(msg, "memqlmigrate --rewrite=expressions") {
-				t.Fatalf("message must name the replacement and the migrator: %s", msg)
+			if !strings.Contains(msg, "memqlmigrate --rewrite=expressions") {
+				t.Fatalf("message must name the migrator: %s", msg)
 			}
 			var pe *ParseError
 			if !errors.As(err, &pe) || pe.Line < 1 || pe.Column < 1 {
@@ -178,19 +199,27 @@ func TestV1ParseErrors(t *testing.T) {
 		{`f(a = 1)`, []string{"a named argument is written `a: ...`"}},
 		// A hyphen glued into a name is one name, never subtraction.
 		{`remaining == total-used`, []string{"`total-used` reads as one name; write `total - used` (spaces) for subtraction"}},
-		{`row.total-used > 0`, []string{"`row.total-used` reads as one name"}},
-		{`f(x).a-b`, []string{"reads as one name"}},
+		// The suggestion repeats the object path on the right: a bare `used`
+		// is refused in turn, so `row.total - used` is not a fix.
+		{`row.total-used > 0`, []string{"`row.total-used` reads as one name; write `row.total - row.used` (spaces)"}},
+		{`args.a.total-used-spent`, []string{"write `args.a.total - args.a.used - args.a.spent`"}},
+		{`args.a-args.b`, []string{"write `args.a - args.b`"}},
+		{`row.n-1`, []string{"write `row.n - 1`"}},
+		{`f(x).a-b`, []string{"reads as one name", "write `.a - b`"}},
 		{`total-used(x)`, []string{"reads as one name"}},
+		{`{row.total-used}`, []string{"write `row.total - row.used`"}},
 		{`(a-b) => a`, []string{"a lambda parameter is a simple name"}},
 		// A colon glued into a name is a canonical id or a missing space.
 		{`row.concept == v1:crm:lead`, []string{`a canonical id in an expression is written as a string: "v1:crm:lead"`}},
 		{`f(a:b)`, []string{`a canonical id in an expression is written as a string: "a:b"`, "a: b"}},
 		{`{a:b}`, []string{"a: b"}},
-		// Map literals.
+		{`p ? f(x).a:b`, []string{"put a space after it: .a: b"}},
+		// Map literals. A key-less entry is a retired form (v1RetiredSamples);
+		// a dotted KEY is not, and nesting is its fix.
 		{`{"a": 1}`, []string{"authoring rule 18"}},
-		{`{a}`, []string{"key: value"}},
 		{`{a: 1, a: 2}`, []string{"duplicate key", "a"}},
-		{`{a.b: 1}`, []string{"map key is one name"}},
+		{`{a.b: 1}`, []string{"a map key is one name, got `a.b`: nest a map for a path"}},
+		{`{in}`, []string{"key: value"}},
 		// Call arguments.
 		{`f(a, b: 1)`, []string{"all positional or all named", "a: a"}},
 		{`f(1, b: 1)`, []string{"all positional or all named"}},
@@ -319,5 +348,31 @@ func TestV1ContainsDiscriminatesByShape(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the .contains refusal does not name %q: %v", want, err)
 		}
+	}
+}
+
+// TestV1KeylessEntryInPunPosition: where a map is a construct call's
+// arguments in map clothing (a step config's args), a lone name is a pun, and
+// a path is still an entry with no key -- refused with the entry written out.
+func TestV1KeylessEntryInPunPosition(t *testing.T) {
+	parse := func(src string) error {
+		t.Helper()
+		tokens, err := NewLexer(src).Tokenize()
+		if err != nil {
+			t.Fatalf("tokenize %q: %v", src, err)
+		}
+		_, err = NewParser(tokens).parseV1MapWith(true)
+		return err
+	}
+	if err := parse(`{x, y: 1}`); err != nil {
+		t.Fatalf("a pun where the position admits one was refused: %v", err)
+	}
+	err := parse(`{delegationId: args.event.payload.id, args.event.payload.identityId}`)
+	var rf *RetiredFormError
+	if !errors.As(err, &rf) || rf.Form.Rule != "retired_keyless_map_entry" {
+		t.Fatalf("a path with no key must be refused as a key-less entry, got %v", err)
+	}
+	if want := "a map entry needs a key: write identityId: args.event.payload.identityId (memqlmigrate --rewrite=expressions rewrites it)"; !strings.Contains(err.Error(), want) {
+		t.Fatalf("got %v, want the message to contain %q", err, want)
 	}
 }

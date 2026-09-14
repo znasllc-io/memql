@@ -947,7 +947,15 @@ func (p *Parser) parseV1MapWith(allowPuns bool) (v1Expr, error) {
 			return v1Expr{}, v1Errorf(keyTok, "expected a map key (an unquoted name), got %s", v1Describe(keyTok))
 		case strings.Contains(keyTok.Literal, ":"):
 			return v1Expr{}, v1ColonError(keyTok)
-		case strings.Contains(keyTok.Literal, "."):
+		}
+		if next := p.peekAhead(1); keyTok.Type == TokenIdentifier && (next.Type == TokenComma || next.Type == TokenBraceClose) {
+			if err := v1KeylessEntry(keyTok, allowPuns); err != nil {
+				return v1Expr{}, err
+			}
+		}
+		if strings.Contains(keyTok.Literal, ".") {
+			// Followed by `:`, so the author wrote a dotted KEY, and nesting is
+			// the fix; a dotted VALUE with no key was refused just above.
 			return v1Expr{}, v1Errorf(keyTok, "a map key is one name, got `%s`: nest a map for a path", keyTok.Literal)
 		}
 		key := keyTok.Literal
@@ -965,6 +973,8 @@ func (p *Parser) parseV1MapWith(allowPuns bool) (v1Expr, error) {
 				continue
 			}
 			if p.check(TokenComma) || p.check(TokenBraceClose) {
+				// Only a keyword gets here: an identifier with no `key:` was
+				// refused as a key-less entry above.
 				return v1Expr{}, v1Errorf(keyTok, "a map entry is written key: value (write %s: %s)", key, key)
 			}
 			if p.check(TokenOperator) && p.current.Literal == "=" {
