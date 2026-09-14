@@ -289,10 +289,10 @@ func TestLoadClientTLSConfig_LoadsCAPool(t *testing.T) {
 // applies on both sides.
 func TestStripPort(t *testing.T) {
 	cases := map[string]string{
-		"host":           "host",
-		"host:443":       "host",
+		"host":             "host",
+		"host:443":         "host",
 		"memql.test:50050": "memql.test",
-		"":               "",
+		"":                 "",
 	}
 	for in, want := range cases {
 		if got := stripPort(in); got != want {

@@ -3,8 +3,8 @@ package main
 import (
 	"sync"
 
-	"github.com/znasllc-io/memql/cmd/memql-lsp/internal/position"
 	protocol "github.com/tliron/glsp/protocol_3_16"
+	"github.com/znasllc-io/memql/cmd/memql-lsp/internal/position"
 )
 
 // documentStore holds the authoritative full text of every open document,

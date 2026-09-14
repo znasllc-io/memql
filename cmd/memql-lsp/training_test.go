@@ -23,7 +23,7 @@ import (
 //	line  3: query participant trainedQuery
 //	line  9: query participant driftedQuery
 //	line 15: query participant untrainedQuery
-//	line 21: mutate participant seededMutation
+//	line 21: mutation participant seededMutation
 //	line 28: action deployCluster
 const trainingDoc = `use worker.concepts.{ registration }
 
@@ -201,7 +201,7 @@ func TestTrainingState_HandleProducesContractJSON(t *testing.T) {
 		`{"kind":"query","name":"untrainedQuery","concept":"participant",` +
 		`"signatureRange":{"start":{"line":15,"character":0},"end":{"line":15,"character":32}},` +
 		`"state":"untrained"},` +
-		`{"kind":"mutate","name":"seededMutation","concept":"participant",` +
+		`{"kind":"mutation","name":"seededMutation","concept":"participant",` +
 		`"signatureRange":{"start":{"line":21,"character":0},"end":{"line":21,"character":33}},` +
 		`"state":"seeded","origin":"core"},` +
 		`{"kind":"action","name":"deployCluster",` +

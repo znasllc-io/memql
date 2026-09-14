@@ -37,8 +37,8 @@ func TestConstructKindForKeywordTranslatesEveryCatalogedKind(t *testing.T) {
 	// The one keyword whose two halves differ at all. Spelled out because it is
 	// the whole reason the translation exists, and a loop over an inverted map
 	// would pass just as happily if both halves were `mutate`.
-	if got, _ := ConstructKindForKeyword("mutate"); got != ConstructKindMutation {
-		t.Errorf("ConstructKindForKeyword(\"mutate\") = %q; want %q", got, ConstructKindMutation)
+	if got, _ := ConstructKindForKeyword("mutation"); got != ConstructKindMutation {
+		t.Errorf("ConstructKindForKeyword(\"mutation\") = %q; want %q", got, ConstructKindMutation)
 	}
 }
 

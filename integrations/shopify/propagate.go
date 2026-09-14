@@ -385,7 +385,7 @@ func (c *Connector) propagateBulk(ctx context.Context, store Store, inputs []met
 	enc := json.NewEncoder(&body)
 	for _, in := range inputs {
 		if err := enc.Encode(map[string]any{"metafields": []metafieldInput{in}}); err != nil {
-				return memqlsync.PropagateResult{}, memqlsync.Permanentf("could not encode the staged JSONL: %v", err)
+			return memqlsync.PropagateResult{}, memqlsync.Permanentf("could not encode the staged JSONL: %v", err)
 		}
 	}
 	path, err := c.stageUpload(ctx, store, body.Bytes())

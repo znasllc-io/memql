@@ -30,10 +30,9 @@ import (
 var (
 	// conceptHeaderRe matches a top-level `concept <name> {` declaration.
 	conceptHeaderRe = regexp.MustCompile(`(?m)^concept[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
-	// versionAttrRe / namespaceAttrRe pull the string literal from the
+	// versionAttrRe pulls the string literal from the
 	// @version / @namespace annotation in a concept's attribute preamble.
-	versionAttrRe   = regexp.MustCompile(`@version\("([^"]*)"\)`)
-	namespaceAttrRe = regexp.MustCompile(`@namespace\("([^"]*)"\)`)
+	versionAttrRe = regexp.MustCompile(`@version\("([^"]*)"\)`)
 	// useConceptsRe matches a file-top `use <dir>.concepts.{ a, b }` import.
 	// Only `.concepts.` imports participate in concept resolution.
 	useConceptsRe = regexp.MustCompile(`(?m)^use[ \t]+([A-Za-z_][A-Za-z0-9_]*)\.concepts\.\{([^}]*)\}`)
@@ -74,11 +73,23 @@ func buildConceptIndex(roots []string) conceptIndex {
 			}
 			src := string(raw)
 			dir := dirForPath(root, path)
+			// The EFFECTIVE namespace: the directory's one-line namespace.pin
+			// when it has one, else the directory. Lockstep with
+			// ast.AssembleConceptIdFromDeclInDir, which is the point -- this
+			// generator names the concept ids the generated SDK addresses, so a
+			// disagreement here ships client methods pointing at ids the engine
+			// does not have. @namespace used to cover the divergent cases and
+			// was retired in epic memql#5375, which is what makes the pin
+			// load-bearing here rather than a cross-check.
+			ns := namespacePinForDir(filepath.Dir(path))
+			if ns == "" {
+				ns = dir
+			}
 			for _, m := range conceptHeaderRe.FindAllStringSubmatchIndex(src, -1) {
 				name := src[m[2]:m[3]]
-				id := assembleConceptIdFromPreamble(src, m[0], name, dir)
+				id := assembleConceptIdFromPreamble(src, m[0], name, ns)
 				if id == "" {
-					continue // concept missing @version/@namespace -- not addressable
+					continue // malformed @version, or no derivable namespace -- not addressable
 				}
 				if idx[dir] == nil {
 					idx[dir] = map[string]string{}
@@ -100,15 +111,16 @@ func buildConceptIndex(roots []string) conceptIndex {
 func assembleConceptIdFromPreamble(src string, headerStart int, name, dir string) string {
 	preamble := attrPreamble(src, headerStart)
 	vm := versionAttrRe.FindStringSubmatch(preamble)
-	nm := namespaceAttrRe.FindStringSubmatch(preamble)
 	major := 1
 	if vm != nil {
 		major = majorVersion(vm[1])
 	}
+	// `dir` arrives as the EFFECTIVE namespace (pin, else directory). The
+	// @namespace branch that used to override it is gone with the annotation
+	// (epic memql#5375): it could only restate one of those or disagree with
+	// it, and a generator that took the disagreement would emit an id the
+	// engine refuses to assemble.
 	namespace := dir
-	if nm != nil {
-		namespace = strings.TrimSpace(nm[1])
-	}
 	if major < 0 || namespace == "" || name == "" {
 		return ""
 	}
@@ -244,4 +256,17 @@ func dirForPath(root, path string) string {
 	}
 	// File directly under root (no namespace directory).
 	return ""
+}
+
+// namespacePinForDir reads the one-line namespace.pin beside a .memql file, or
+// "" when the directory has none. The #2614 escape hatch for a deliberate
+// id-preserving divergence between where a file lives and the namespace its
+// concepts assemble under -- and, since epic memql#5375 retired @namespace,
+// the only expression of one.
+func namespacePinForDir(dir string) string {
+	raw, err := os.ReadFile(filepath.Join(dir, "namespace.pin"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }

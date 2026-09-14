@@ -48,7 +48,7 @@ func TestConstructHeaderMatchesTheLanguage(t *testing.T) {
 	// Every kind that declares rows must be reached. A zero here means the
 	// classifier is walking a subset of the tree and its clean result covers
 	// only that subset -- exactly the #2799 failure.
-	for _, kind := range []string{"query", "mutate", "seed"} {
+	for _, kind := range []string{"query", "mutation", "seed"} {
 		if kinds[kind] == 0 {
 			t.Errorf("constructHeaderRe matched no %q declarations; the classifier cannot see them, so its result does not cover them", kind)
 		}

@@ -369,5 +369,3 @@ func (h *testHarness) store(t *testing.T) Store {
 	}
 	return s
 }
-
-

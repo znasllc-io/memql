@@ -69,8 +69,14 @@ query space querySpaceCrossNs {
 	}
 
 	want := map[string]string{
-		"querySpaceLocal":   "v1:cognition:space",
-		"queryTurnState":    "v1:cognition:turn:state",
+		"querySpaceLocal": "v1:cognition:space",
+		// Was "v1:cognition:turn:state", from @namespace("cognition:turn") on
+		// this one concept. Epic memql#5375 retired the annotation, and the
+		// replacement -- a directory's namespace.pin -- is per-DIRECTORY, so a
+		// colon-scoped sub-namespace now needs its own sub-directory rather
+		// than a per-concept annotation. `state` sits in cognition/ beside
+		// `space` and `participant`, so it derives the plain domain.
+		"queryTurnState":    "v1:cognition:state",
 		"querySpaceCrossNs": "v1:cognition:space",
 	}
 	for name, wantID := range want {

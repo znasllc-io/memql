@@ -14,21 +14,21 @@ import (
 
 func TestFromLSP_Absolute(t *testing.T) {
 	cases := []struct {
-		name             string
-		content          string
-		lspLine, lspChar int
+		name              string
+		content           string
+		lspLine, lspChar  int
 		wantLine, wantCol int
 	}{
 		{"ascii start", "abc", 0, 0, 1, 1},
 		{"ascii mid", "abc", 0, 2, 1, 3},
 		{"ascii end", "abc", 0, 3, 1, 4},
 		{"second line", "ab\ncd", 1, 1, 2, 2},
-		{"bmp non-ascii", "café", 0, 3, 1, 4},   // é is 1 rune, 1 UTF-16 unit
-		{"cjk non-ascii", "世界x", 0, 2, 1, 3},   // each CJK char is 1 rune, 1 unit
-		{"astral before", "x😀y", 0, 1, 1, 2},    // char 1 == start of the emoji rune
+		{"bmp non-ascii", "café", 0, 3, 1, 4},         // é is 1 rune, 1 UTF-16 unit
+		{"cjk non-ascii", "世界x", 0, 2, 1, 3},          // each CJK char is 1 rune, 1 unit
+		{"astral before", "x😀y", 0, 1, 1, 2},          // char 1 == start of the emoji rune
 		{"astral mid rounds down", "x😀y", 0, 2, 1, 2}, // char 2 splits the surrogate pair
-		{"astral after", "x😀y", 0, 3, 1, 3},     // char 3 == 'y'
-		{"astral end", "x😀y", 0, 4, 1, 4},       // char 4 == end of line
+		{"astral after", "x😀y", 0, 3, 1, 3},           // char 3 == 'y'
+		{"astral end", "x😀y", 0, 4, 1, 4},             // char 4 == end of line
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -43,10 +43,10 @@ func TestFromLSP_Absolute(t *testing.T) {
 
 func TestToLSP_Absolute(t *testing.T) {
 	cases := []struct {
-		name               string
-		content            string
+		name                string
+		content             string
 		senseLine, senseCol int
-		wantLine, wantChar int
+		wantLine, wantChar  int
 	}{
 		{"ascii start", "abc", 1, 1, 0, 0},
 		{"ascii end", "abc", 1, 4, 0, 3},
@@ -69,10 +69,10 @@ func TestToLSP_Absolute(t *testing.T) {
 
 func TestByteOffsetForLSP(t *testing.T) {
 	cases := []struct {
-		name             string
-		content          string
-		line, char       int
-		want             int
+		name       string
+		content    string
+		line, char int
+		want       int
 	}{
 		{"start", "abc", 0, 0, 0},
 		{"mid", "abc", 0, 2, 2},
@@ -82,7 +82,7 @@ func TestByteOffsetForLSP(t *testing.T) {
 		{"second line end", "ab\ncd", 1, 2, 5},
 		{"second line char past end", "ab\ncd", 1, 9, 5},
 		{"line past EOF clamps to doc end", "ab\ncd", 5, 0, 5},
-		{"astral before rune", "a😀b", 0, 2, 1}, // char 2 splits the pair -> rune start (byte 1)
+		{"astral before rune", "a😀b", 0, 2, 1},   // char 2 splits the pair -> rune start (byte 1)
 		{"astral rune boundary", "a😀b", 0, 3, 5}, // start of 'b' (emoji is 4 bytes)
 		{"astral line end", "a😀b", 0, 4, 6},
 		{"empty doc", "", 0, 0, 0},
@@ -153,10 +153,10 @@ func TestMidSurrogateRoundsDownToRuneStart(t *testing.T) {
 
 func TestClamping(t *testing.T) {
 	cases := []struct {
-		name       string
-		fn         string // "from" or "to"
-		content    string
-		a, b       int
+		name         string
+		fn           string // "from" or "to"
+		content      string
+		a, b         int
 		wantA, wantB int
 	}{
 		{"from char past end", "from", "abc", 0, 100, 1, 4},
