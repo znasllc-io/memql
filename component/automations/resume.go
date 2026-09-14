@@ -454,6 +454,7 @@ func (e *Executor) ResumeFrom(
 		writer = nil
 	}
 	writer.reopenRun(ctx, exec)
+	ctx = withRunJournal(ctx, exec.ID, writer)
 
 	// Set up step context.
 	//

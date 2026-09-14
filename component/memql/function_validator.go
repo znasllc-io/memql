@@ -1697,7 +1697,9 @@ func resolvePlanFunctionsWithAmbient(plan *QueryPlan, functions *FunctionRegistr
 	// runner walks the steps via the automation step registry,
 	// binding each result for later steps + the `_return` expression.
 	if call, ok := plan.Root.(*FunctionCallExpression); ok && call != nil && functions != nil {
-		if fn, err := functions.Get(call.Name); err == nil && fn != nil && strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "logic") && fn.LogicSteps != nil {
+		// A statement-body logic (fn.LogicBody, epic memql#5370) always runs on
+		// the sequence runner, one statement or many.
+		if fn, err := functions.Get(call.Name); err == nil && fn != nil && strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "logic") && (fn.LogicSteps != nil || fn.LogicBody != nil) {
 			plan.LogicCall = call
 			plan.Root = nil
 			return nil

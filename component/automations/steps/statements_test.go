@@ -11,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 // statements_test.go -- a statement body's `for` and `parallel` through the
@@ -21,6 +22,7 @@ import (
 type callProbe struct {
 	mu      sync.Mutex
 	calls   []string
+	keys    []string // each call's step key in its run
 	args    []map[string]any
 	answers map[string]any
 	fail    map[string]bool
@@ -44,6 +46,8 @@ func (p *callProbe) Execute(ctx context.Context, step *automations.Step, stepCtx
 	}
 	p.mu.Lock()
 	p.calls = append(p.calls, name)
+	run, _ := common.RunFromContext(ctx)
+	p.keys = append(p.keys, run.StepKey)
 	p.args = append(p.args, args)
 	answer, fails := p.answers[name], p.fail[name]
 	p.mu.Unlock()
@@ -247,5 +251,43 @@ automation races {
 	}
 	if !strings.Contains(probe.called(), "after") {
 		t.Fatalf("calls = %s", probe.called())
+	}
+}
+
+func TestNestedStatementKeysAreTheirListsPath(t *testing.T) {
+	// A step's key in its run is its list's path and its id: the key a model
+	// call it makes is journaled at, and the one a logic it calls journals
+	// its statements under. Ids are unique within one list only, so a `for`
+	// keys each item and a branch keys its block.
+	probe := &callProbe{answers: map[string]any{"items": rowResult(row("i1", nil), row("i2", nil))}}
+	exec, err := runStatementBody(t, `@trigger(event="probe.fired")
+automation keyed {
+  rows := query items()
+  for it in rows {
+    builtin touch(id: it.id)
+  }
+  parallel {
+    branch left {
+      builtin touch(id: "l")
+    }
+    branch right {
+      builtin touch(id: "r")
+    }
+  }
+  builtin touch(id: "last")
+}`, probe)
+	if err != nil {
+		t.Fatalf("run: %v (%s)", err, exec.Error)
+	}
+	probe.mu.Lock()
+	got := append([]string(nil), probe.keys...)
+	probe.mu.Unlock()
+	// The branches run concurrently; their order is theirs.
+	if len(got) == 6 && got[3] > got[4] {
+		got[3], got[4] = got[4], got[3]
+	}
+	want := []string{"rows", "for_it/0/touch", "for_it/1/touch", "parallel.left/touch", "parallel.right/touch", "touch"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("keys %v, want %v", got, want)
 	}
 }

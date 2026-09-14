@@ -10,6 +10,7 @@ package steps
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
@@ -37,7 +38,7 @@ func (e *BlockExecutor) Execute(ctx context.Context, step *automations.Step, ste
 	if stepCtx.Evaluator == nil || !stepCtx.Evaluator.InStatementBody() {
 		return finish(fmt.Errorf("a block step runs only in a statement body"))
 	}
-	returned, value, err := automations.RunStatementBody(ctx, step.Block.Steps, stepCtx, stepCtx.Evaluator.ChildFrame())
+	returned, value, err := automations.RunStatementBody(ctx, step.ID, step.Block.Steps, stepCtx, stepCtx.Evaluator.ChildFrame())
 	if returned {
 		result.Result = value
 		result.Metadata = map[string]any{"returned": true}
@@ -77,7 +78,7 @@ func forEachStatements(ctx context.Context, step *automations.Step, stepCtx *Con
 	}
 	processed, failed := 0, 0
 	var lastErr error
-	for _, item := range items {
+	for i, item := range items {
 		iter := stepCtx.Evaluator.ChildFrame()
 		iter.Bind(cfg.As, item)
 		if step.Exprs.Filter != nil {
@@ -89,7 +90,9 @@ func forEachStatements(ctx context.Context, step *automations.Step, stepCtx *Con
 				continue
 			}
 		}
-		returned, value, rerr := automations.RunStatementBody(ctx, cfg.Do, stepCtx, iter)
+		// Keyed by the item's place in the source, so each iteration's keys
+		// are its own.
+		returned, value, rerr := automations.RunStatementBody(ctx, step.ID+"/"+strconv.Itoa(i), cfg.Do, stepCtx, iter)
 		if rerr != nil {
 			failed++
 			lastErr = rerr

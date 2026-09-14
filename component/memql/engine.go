@@ -256,6 +256,15 @@ type LogicRunner interface {
 	RunLogic(ctx context.Context, fnName string, body *languageParser.AutomationDef, args map[string]any) (any, error)
 }
 
+// StatementLogicRunner runs a logic whose body is an edition-2026 statement
+// body (epic memql#5370), compiled at load into Function.LogicBody: the same
+// sequence runner an automation's statements run on. The automations
+// package's LogicRunner implements it beside RunLogic until the tree is
+// migrated and RunLogic goes.
+type StatementLogicRunner interface {
+	RunLogicBody(ctx context.Context, fnName string, body []map[string]any, args map[string]any) (any, error)
+}
+
 const ComponentName = common.ComponentName("MemQLEngine")
 
 // New constructs a MemQLEngine instance backed by the default implementation.
@@ -1435,7 +1444,7 @@ func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *Functi
 	if err := e.refuseBelowRequiredCapability(ctx, fn, call.Name); err != nil {
 		return nil, err
 	}
-	if fn.LogicSteps == nil {
+	if fn.LogicSteps == nil && fn.LogicBody == nil {
 		return nil, fmt.Errorf("function %q has no multi-step body (LogicSteps unset)", call.Name)
 	}
 	if e.logicRunner == nil {
@@ -1453,7 +1462,18 @@ func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *Functi
 		return nil, err
 	}
 
-	out, err := e.logicRunner.RunLogic(ctx, fn.Name, fn.LogicSteps, args)
+	var out any
+	if fn.LogicBody != nil {
+		// A statement body (epic memql#5370) -- one statement or many -- runs
+		// on the sequence runner an automation's statements run on.
+		runner, ok := e.logicRunner.(StatementLogicRunner)
+		if !ok {
+			return nil, fmt.Errorf("logic %q has a statement body, and the wired LogicRunner cannot run one", fn.Name)
+		}
+		out, err = runner.RunLogicBody(ctx, fn.Name, fn.LogicBody, args)
+	} else {
+		out, err = e.logicRunner.RunLogic(ctx, fn.Name, fn.LogicSteps, args)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("logic %q: %w", fn.Name, err)
 	}

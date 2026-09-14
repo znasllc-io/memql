@@ -24,7 +24,11 @@ package automations
 // The top-level list of an automation also writes the journal, honours both
 // cancellations and advances the chain head, exactly as the legacy loop in
 // executeWithEvent does for every other automation; a nested list does none of
-// that, as a forEach's children never did.
+// that, as a forEach's children never did. A logic's statements journal too
+// (logic_statements.go): as rows of the run they were called in, or as a run
+// of their own that opens at the logic's first write. Every step is keyed in
+// its run by its list's path and its id (stepKeyIn), which is what a logic it
+// calls journals under.
 
 import (
 	"context"
@@ -47,10 +51,18 @@ type seqOutcome struct {
 // sequenceRun is what running one list of steps needs beyond the list.
 type sequenceRun struct {
 	stepCtx *StepContext
-	// top marks an automation's own list: it journals, polls for
-	// cancellation and advances the chain head.
-	top        bool
+	// top marks an automation's own list: it records its steps on the run,
+	// polls for cancellation and advances the chain head.
+	top bool
+	// orders marks a list whose steps are its run's step order: an
+	// automation's own list (top) and a directly called logic's statements.
+	orders bool
+	// journal, when set, writes this list's steps: an automation's own list
+	// against its run, a directly called logic's against the run it opens at
+	// its first write, and a logic's statements inside a caller's run
+	// (rowsOnly: step rows only, the run row being the caller's).
 	journal    *workJournal
+	rowsOnly   bool
 	chainHead  string
 	cancelPoll *cancelPoller
 }
@@ -64,15 +76,50 @@ type bodyRunner func(ctx context.Context, steps []*Step, ev *Evaluator) (seqOutc
 
 // RunStatementBody runs a nested statement list -- a loop iteration's body, a
 // parallel branch -- through the sequence runner of the automation it belongs
-// to, over ev (a child frame the caller opened). It returns whether a return
-// ended the list and with what value.
-func RunStatementBody(ctx context.Context, steps []*Step, stepCtx *StepContext, ev *Evaluator) (bool, any, error) {
+// to, over ev (a child frame the caller opened). key names the list within
+// the step that holds it: `<step id>/<n>` for a `for`'s nth item, the block's
+// id for a branch. It returns whether a return ended the list and with what
+// value.
+func RunStatementBody(ctx context.Context, key string, steps []*Step, stepCtx *StepContext, ev *Evaluator) (bool, any, error) {
 	run, ok := ctx.Value(bodyRunnerKey{}).(bodyRunner)
 	if !ok || run == nil {
 		return false, nil, fmt.Errorf("a statement body's nested steps ran outside a statement run")
 	}
-	out, err := run(ctx, steps, ev)
+	out, err := run(withListKey(ctx, joinStepKey(listKeyFrom(ctx), key)), steps, ev)
 	return out.Returned, out.Value, err
+}
+
+// listKeyKey carries the key path of the statement list a step runs in:
+// empty for a run's own list, the path of its holder for a nested one. A
+// step's key in its run is that path and its id (stepKeyIn): the key a model
+// call it makes is journaled at, and the key a logic it calls journals its
+// statements under. Ids are unique within one list, so a nested step's key
+// needs its holder's path to be unique within the run, and a `for`'s the item
+// too.
+type listKeyKey struct{}
+
+func withListKey(ctx context.Context, key string) context.Context {
+	return context.WithValue(ctx, listKeyKey{}, key)
+}
+
+func listKeyFrom(ctx context.Context) string {
+	key, _ := ctx.Value(listKeyKey{}).(string)
+	return key
+}
+
+// stepKeyIn is the key of the step id in the list ctx runs.
+func stepKeyIn(ctx context.Context, id string) string {
+	return joinStepKey(listKeyFrom(ctx), id)
+}
+
+func joinStepKey(prefix, key string) string {
+	switch {
+	case prefix == "":
+		return key
+	case key == "":
+		return prefix
+	}
+	return prefix + "/" + key
 }
 
 // InStatementBody reports whether the Evaluator runs a statement body.
@@ -116,8 +163,10 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 		if step == nil {
 			continue
 		}
-		if run.top {
+		if run.top || run.orders {
 			exec.StepOrder = append(exec.StepOrder, step.ID)
+		}
+		if run.top {
 			if err := ctx.Err(); err != nil {
 				return seqOutcome{}, err
 			}
@@ -143,17 +192,24 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 				now := time.Now()
 				skipped := &StepResult{StepId: step.ID, Status: "skipped", StartedAt: now, CompletedAt: now}
 				e.recordStep(ctx, run, step, skipped)
-				if run.top {
-					run.journal.stepSkipped(ctx, exec, step, stepIndex)
-				}
+				run.journalSkipped(ctx, step, stepIndex)
 				continue
 			}
 		}
 
 		switch step.Type {
-		case StepTypeExpression:
+		case StepTypeExpression, StepTypeReturn:
+			// Evaluated here rather than through the registry, and journaled
+			// like every other step: an intent row, then its receipt.
+			run.journalRunning(ctx, step, stepIndex, 1)
 			started := time.Now()
-			v, err := ev.EvalV1(ctx, step.Exprs.Value)
+			var (
+				v   any
+				err error
+			)
+			if step.Exprs.Value != nil {
+				v, err = ev.EvalV1(ctx, step.Exprs.Value)
+			}
 			res := &StepResult{StepId: step.ID, StartedAt: started, CompletedAt: time.Now()}
 			res.Duration = res.CompletedAt.Sub(started)
 			if err != nil {
@@ -162,26 +218,16 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 				return seqOutcome{}, fmt.Errorf("step %q: %w", step.ID, err)
 			}
 			res.Status, res.Result = "success", unwrapStatementValue(v)
-			e.recordStep(ctx, run, step, res)
-			ev.names.bind(step.Binds, v)
-			continue
-
-		case StepTypeReturn:
-			started := time.Now()
-			var v any
-			if step.Exprs.Value != nil {
-				var err error
-				if v, err = ev.EvalV1(ctx, step.Exprs.Value); err != nil {
-					return seqOutcome{}, fmt.Errorf("step %q: %w", step.ID, err)
-				}
+			if step.Type == StepTypeExpression {
+				e.recordStep(ctx, run, step, res)
+				ev.names.bind(step.Binds, v)
+				continue
 			}
-			v = unwrapStatementValue(v)
-			if memql.IsAbsent(v) {
-				v = nil
+			if memql.IsAbsent(res.Result) {
+				res.Result = nil
 			}
-			res := &StepResult{StepId: step.ID, Status: "success", Result: v, StartedAt: started, CompletedAt: time.Now()}
 			e.recordStep(ctx, run, step, res)
-			return seqOutcome{Returned: true, Value: v}, nil
+			return seqOutcome{Returned: true, Value: res.Result}, nil
 		}
 
 		result, err := e.runStatementStep(ctx, step, stepIndex, run)
@@ -228,11 +274,9 @@ func (e *Executor) runStatementStep(ctx context.Context, step *Step, stepIndex i
 	for attempt := 1; attempt <= attempts; attempt++ {
 		if run.top {
 			stepCtx.PreviousChainHead = run.chainHead
-			run.journal.stepRunning(ctx, exec, step, stepIndex, attempt)
-			result, err = e.executeJournaledStep(ctx, run.journal, step, stepCtx)
-		} else {
-			result, err = e.executeStep(ctx, step, stepCtx)
 		}
+		run.journalRunning(ctx, step, stepIndex, attempt)
+		result, err = e.executeJournaledStep(ctx, run.heartbeatJournal(), step, stepCtx)
 		if result != nil && run.top && stepCtx.ChainTrackingEnabled {
 			result.PreviousChainHead = run.chainHead
 			result.ContentId = StepDeterministicFingerprint(step, result)
@@ -254,22 +298,52 @@ func (e *Executor) runStatementStep(ctx context.Context, step *Step, stepIndex i
 	return result, err
 }
 
-// recordStep puts a top-level step's result on the run, tells the observer
-// and writes the journal's receipt. A nested list's steps are the step that
-// holds them -- a `for`, a block -- as a forEach's children always were: their
-// ids are unique only within their own list, so on the run they would collide.
+// recordStep puts a top-level step's result on the run and tells the
+// observer, and writes the journal's receipt for a list that journals. A
+// nested list's steps are the step that holds them -- a `for`, a block -- as a
+// forEach's children always were: their ids are unique only within their own
+// list, so on the run they would collide.
 func (e *Executor) recordStep(ctx context.Context, run *sequenceRun, step *Step, result *StepResult) {
-	if !run.top {
+	if run.top {
+		if exec := run.stepCtx.Execution; exec != nil {
+			exec.AddStepResult(result)
+		}
+		notifyStepObserver(ctx, result)
+	}
+	if result.Status != "skipped" {
+		run.journalFinished(ctx, step, result)
+	}
+}
+
+// journalRunning writes a step's intent row, when this list journals.
+func (r *sequenceRun) journalRunning(ctx context.Context, step *Step, seq, attempt int) {
+	r.journal.stepRunning(ctx, r.stepCtx.Execution, step, seq, attempt)
+}
+
+// journalFinished writes a step's receipt, the way this list journals: a
+// run's own list heartbeats its run; a logic's statements inside a caller's
+// run write their rows only, the run row being the caller's.
+func (r *sequenceRun) journalFinished(ctx context.Context, step *Step, result *StepResult) {
+	if r.rowsOnly {
+		r.journal.stepFinishedRowOnly(ctx, r.stepCtx.Execution, step, result)
 		return
 	}
-	exec := run.stepCtx.Execution
-	if exec != nil {
-		exec.AddStepResult(result)
+	r.journal.stepFinished(ctx, r.stepCtx.Execution, step, result, r.chainHead)
+}
+
+// journalSkipped writes a skipped step's row, when this list journals.
+func (r *sequenceRun) journalSkipped(ctx context.Context, step *Step, seq int) {
+	r.journal.stepSkipped(ctx, r.stepCtx.Execution, step, seq)
+}
+
+// heartbeatJournal is the journal whose run a step's execution keeps alive:
+// the list's own. A logic's statements inside a caller's run keep nothing
+// alive: the calling statement's execution heartbeats that run already.
+func (r *sequenceRun) heartbeatJournal() *workJournal {
+	if r.rowsOnly {
+		return nil
 	}
-	notifyStepObserver(ctx, result)
-	if result.Status != "skipped" {
-		run.journal.stepFinished(ctx, exec, step, result, run.chainHead)
-	}
+	return r.journal
 }
 
 // statementValue is the value a step binds: a construct call's result shaped

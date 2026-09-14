@@ -721,6 +721,9 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	} else {
 		journal.openRun(ctx, automation, exec, triggeringEvent)
 	}
+	// A logic a step calls journals its statements where this run's rows go
+	// (logic_statements.go) -- nowhere, when the run is not journaled.
+	ctx = withRunJournal(ctx, exec.ID, journal)
 
 	// Execute steps
 	stepCtx := &StepContext{
@@ -1123,16 +1126,18 @@ func (e *Executor) withRunContext(ctx context.Context, stepCtx *StepContext, ste
 	// Keep inherited lineage and replay policy, but identify the current
 	// step when this executor owns that run. Nested executions keep their
 	// parent's association rather than attributing a call to another run.
+	// A step in a statement body's nested list is keyed by its list's path
+	// (stepKeyIn, sequence.go); every other step's key is its id.
 	if run, ok := common.RunFromContext(ctx); ok {
 		if memql.BareShortId(run.RunId) == memql.BareShortId(stepCtx.Execution.ID) {
-			run.StepKey = step.ID
+			run.StepKey = stepKeyIn(ctx, step.ID)
 			return common.ContextWithRun(ctx, run)
 		}
 		return ctx
 	}
 	return common.ContextWithRun(ctx, common.RunContext{
 		RunId:   stepCtx.Execution.ID,
-		StepKey: step.ID,
+		StepKey: stepKeyIn(ctx, step.ID),
 		Mode:    common.RunModeLive,
 		// No owner: an automation's run is the DEPLOYMENT's, which is what
 		// journalContext's Synthetic actor already makes true of its run and

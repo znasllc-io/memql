@@ -20,7 +20,7 @@
 - Verify with the MODULE PATH, never `go test ./...` from the root: `go test github.com/znasllc-io/memql/component/language/...`, `make test`, and for db-gated trees `MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN='postgres://memql:memql_dev@localhost:15434/memql?sslmode=disable' go test -count=1 ./component/automations/... ./component/memql/... ./test/conformance/...`.
 - Run `go test -count=1 .` (root gates: docs, vendor domains, positioning) and `go test -count=1 ./scripts/ci/...` after adding any file, AFTER `git add` (several gates walk `git ls-files`).
 - Stage files by explicit path; never `git add -A` / `git add .`. No emojis. `gofmt -w` only files you touched. Never run prettier.
-- `GrammarVersion` moves once, in Task 10. After epic 1 lands, the D25 parity gate (`cmd/memql-lsp/editorparity_test.go`) requires `editors/vscode/package.json` `memql.grammarVersion`, the extension version, a CHANGELOG section and `parser.EditorRelease` to move in the same commit.
+- `GrammarVersion` moves once, in Task 13 (the flip, Step 7), when the surface is final: the grammar-surface corpus does not cover the statement forms until then, so the additive parser of Task 2 leaves it standing. After epic 1 lands, the D25 parity gate (`cmd/memql-lsp/editorparity_test.go`) requires `editors/vscode/package.json` `memql.grammarVersion`, the extension version, a CHANGELOG section and `parser.EditorRelease` to move in the same commit.
 - The arch model (`topology.model.json`) goes stale on new packages and files; regenerate it last (`make arch-model`), taking the base branch's side on conflict and regenerating.
 - Commit format: `Issue #<N>: <description>` with the attribution trailer.
 - Do not touch the running k3d cluster `memql`.
@@ -696,6 +696,15 @@ type LogicRunner interface {
 - [ ] **Step 3: Implement.**
 - [ ] **Step 4: Run** `MEMQL_REQUIRE_DB=1 ... go test -count=1 ./component/automations/... ./component/memql/...` and `make test`.
 - [ ] **Step 5: Commit** `Issue #5372: logic and automations share one execution model; a direct writing logic opens a run and a read-only one leaves none`.
+
+**As built.** `LogicRunner` keeps `RunLogic` for the legacy bodies until the flip. The statement form goes through a second interface beside it, `memql.StatementLogicRunner.RunLogicBody(ctx, fnName, body []map[string]any, args)`, which Task 13 folds into `LogicRunner` when `RunLogic` goes. How each case journals (`component/automations/logic_statements.go`):
+- **Direct call.** The journal HOLDS every write, unrendered, in order: the run row, each statement's rows, each heartbeat. The engine's first graph-write report (`common.NotifyWrite` at the end of `executeWrite`) releases it, and after that writes go straight through. A journal that is never released writes nothing. There is no separate back-fill bookkeeping. The run is closed with `closeRunRecord`, never the failure path: the caller already has the error, and nothing resumes a logic's run.
+- **Inside a run.** The executor pairs its journal with the run on the ctx (`withRunJournal`, in `executeWithEvent` and resume). A logic journals rows only, through that journal, keyed `<calling key>/<id>`. A nil pairing (`journalSkipsAutomation`) journals nothing. A logic nested in an unopened direct call therefore rides the caller's held journal, and its write opens the one run.
+- **Keys.** A step's key is its list's path and its id (`stepKeyIn`): `for_x/<item index>/<id>` inside a `for`, `<parallel>.<label>/<id>` inside a branch. Ids are unique per list only.
+- **Expression and return statements** now write an intent row before their receipt, like every other step.
+- **Masking.** The journal's own writes are masked from the observer on both of `write`'s paths. Were they not, a flush would re-enter the release that is flushing it.
+
+The run belongs to the deployment (the synthetic journal actor), as an automation's does. Whether a client's direct call should own its run is not decided by D14; raise it in the PR. **Left for Task 11:** `sandbox_registry.interceptLogicFunction` still delegates a `LogicBody` logic to the real executor, and the sandbox's logic runner journals through the engine. Before any statement-body logic ships, it must run the body through the sandbox registry with no journal.
 
 ## Task 11: Dry run and resume over the compiled form (#5372)
 

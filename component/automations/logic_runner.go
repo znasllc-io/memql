@@ -42,6 +42,10 @@ type LogicRunner struct {
 	logger       *slog.Logger
 	compiler     *compiler.Compiler
 	loader       *Loader
+
+	// journalExec writes a statement-body logic's journal instead of the
+	// engine: a test's recorder (logic_statements.go). Nil in production.
+	journalExec journalExecutor
 }
 
 // NewLogicRunner constructs a LogicRunner. The step registry and engine
