@@ -122,15 +122,16 @@ func (e *Evaluator) childFrame() *Evaluator {
 }
 
 // statementLookup resolves a bare name in a statement body: the frames, then
-// the reserved roots. `now` is left to EvalExpr, which answers it from the
-// run clock (ExprOptions). An unseeded root is absent, as it is in RunScope.
+// the reserved roots the load gate admits (compiler.IsBodyRoot). `now` is left
+// to EvalExpr, which answers it from the run clock (ExprOptions). An unseeded
+// root is absent, as it is in RunScope.
 func (s *RunScope) statementLookup(name string) (any, bool) {
 	e := s.e
 	if v, ok := e.names.lookup(name); ok {
 		return v, true
 	}
 	switch name {
-	case "args", "actor", "event", "config", "partition", "trace":
+	case "args", "actor", "event", "config", "partition":
 		if v, ok := e.custom[name]; ok {
 			return v, true
 		}

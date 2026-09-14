@@ -194,6 +194,14 @@ func TestCheckBodyNamesResolveInSourceOrder(t *testing.T) {
 			body: body(do(2, "logic", "handle", named("event", rd("event", 2)))),
 		},
 		{
+			// Reserved, and bound by no run: a read would be absent every time.
+			name: "trace is not a root",
+			kind: "logic",
+			body: body(ret(2, rd("trace", 2))),
+			want: []string{"body_unknown_name@2:10"},
+			msg:  "`trace` is reserved, and no run binds it a value",
+		},
+		{
 			name: "a logic has no event of its own",
 			kind: "logic",
 			body: body(ret(2, fld(rd("event", 2), "payload"))),

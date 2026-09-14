@@ -21,6 +21,13 @@
       "verdict": "refuse_load",
       "code": "body_call_not_in_logic",
       "message": "`action deploy(...)` belongs in an automation"
+    },
+    {
+      "file": "unknown-bare-call.memql",
+      "verdict": "refuse_load",
+      "code": "body_call_unknown",
+      "message": "`lookupUser(...)` is not a function or a predicate known here",
+      "note": "a bare call names a catalog function or a declared spec or trait; anything else would fail only when it runs"
     }
   ]
 }

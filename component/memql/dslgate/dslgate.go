@@ -277,6 +277,10 @@ func ScanFiles(files []SourceFile, opts Options) []Violation {
 	// the verdict is declared in builtins.memql and the call is written in
 	// automations.memql -- two files, each well-formed alone (memql#4927).
 	out = append(out, scanBuiltinStepArgs(files, opts)...)
+	// A statement body's config reads and bare calls are corpus-level because
+	// a bare call may name a spec or trait declared in any file (epic
+	// memql#5370).
+	out = append(out, scanStatementBodies(files)...)
 
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].File != out[j].File {

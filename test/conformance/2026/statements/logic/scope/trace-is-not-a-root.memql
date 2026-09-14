@@ -1,0 +1,3 @@
+logic readsTrace {
+  return trace
+}

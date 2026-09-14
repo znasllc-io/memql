@@ -68,6 +68,16 @@ const (
 	codeBodyReturnInParallel = "body_return_in_parallel"
 )
 
+// The codes of the two body refusals only the whole corpus can decide, which
+// component/memql/dslgate makes at boot and Sense prints for the first: a
+// `config.<key>` outside the allow-list (component/config.UnknownKey), and a
+// bare call naming neither a catalog function nor a declared spec or trait.
+// They are not CheckBody's, which answers only what one body can decide.
+const (
+	CodeBodyConfigUnknown = "body_config_unknown"
+	CodeBodyCallUnknown   = "body_call_unknown"
+)
+
 // BodyProblemCodes lists every code CheckBody can return.
 func BodyProblemCodes() []string {
 	return []string{
@@ -125,11 +135,13 @@ var bodyReservedNames = map[string]bool{
 func IsBodyRoot(kind, name string) bool { return isRoot(kind, name) }
 
 // isRoot reports whether a bare read of name is a reserved root in a body of
-// this kind. `event` is an automation's trigger; a logic has none of its own
-// and reads what its caller passes, args.event.
+// this kind -- one the run binds a value to. `event` is an automation's
+// trigger; a logic has none of its own and reads what its caller passes,
+// args.event. `trace` is reserved and bound by no run, so a read of it would
+// be absent every time: it is not a root.
 func isRoot(kind, name string) bool {
 	switch name {
-	case "args", "actor", "now", "config", "partition", "trace":
+	case "args", "actor", "now", "config", "partition":
 		return true
 	case "event":
 		return kind == "automation"
@@ -571,6 +583,8 @@ func (w *scopeWalk) unresolved(r *bodyRead, bs []*bodyBinding, declared map[stri
 		msg += "; a logic has no trigger of its own: declare `event` in its args and read args.event, which its caller passes"
 	case r.name == "steps":
 		msg += "; `steps.<id>` is retired: a statement's name is its value"
+	case r.name == "trace":
+		msg += "; `trace` is reserved, and no run binds it a value"
 	}
 	w.problem(codeBodyUnknownName, r.line, r.col, "%s", msg)
 }

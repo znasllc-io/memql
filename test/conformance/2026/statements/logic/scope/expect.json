@@ -21,6 +21,20 @@
       "verdict": "refuse_load",
       "code": "body_unknown_name",
       "message": "a logic has no trigger of its own: declare `event` in its args and read args.event, which its caller passes"
+    },
+    {
+      "file": "trace-is-not-a-root.memql",
+      "verdict": "refuse_load",
+      "code": "body_unknown_name",
+      "message": "`trace` is reserved, and no run binds it a value",
+      "note": "trace is reserved and bound by no run, so a body may not read it"
+    },
+    {
+      "file": "config-key-not-allowed.memql",
+      "verdict": "refuse_load",
+      "code": "body_config_unknown",
+      "message": "`config.definitelyNotExposed` names no key of the config allow-list",
+      "note": "a key outside the allow-list reads absent at run time, so the corpus-level gate refuses it at load"
     }
   ]
 }

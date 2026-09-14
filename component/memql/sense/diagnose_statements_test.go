@@ -43,6 +43,12 @@ func TestDiagnose_StatementRefusalLandsOnTheAuthorsText(t *testing.T) {
 			"limit", 2, "body_unknown_name", "write args.limit"},
 		{"a publish in a logic", "logic loud {\n  publish \"x.y\" { a: 1 }\n  return 1\n}\n",
 			"publish", 1, "body_publish_in_logic", "a logic may not publish"},
+		{"a read of trace", "logic readsTrace {\n  return trace\n}\n",
+			"trace", 1, "body_unknown_name", "`trace` is reserved, and no run binds it a value"},
+		// The boot gate's config check (dslgate), which needs nothing of the
+		// workspace, so the editor shows it too.
+		{"a config key outside the allow-list", "logic readsConfig {\n  return config.definitelyNotExposed\n}\n",
+			"config.definitelyNotExposed", 1, "body_config_unknown", "names no key of the config allow-list"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -97,10 +103,11 @@ logic early {
 
 // TestDiagnose_StatementCorpusAgreesWithTheLoader: over every statement case of
 // the conformance corpus, Sense reaches the engine's verdict -- the statement
-// parser's code on a refuse_parse case, CheckBody's on a refuse_load case whose
-// code is one of its own, and no error on a case the engine loads. A refusal
-// the load path makes for another reason (an argument declared and unused, an
-// unknown construct) needs the loaded workspace and is not Sense's to show here.
+// parser's code on a refuse_parse case, CheckBody's (or the boot gate's config
+// check's) on a refuse_load case with that code, and no error on a case the
+// engine loads. A refusal the load path makes for another reason (an argument
+// declared and unused, an unknown construct, a bare call naming no declared
+// predicate) needs the loaded workspace and is not Sense's to show here.
 func TestDiagnose_StatementCorpusAgreesWithTheLoader(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", "..", "test", "conformance", "2026", "statements"))
 	if err != nil {
@@ -113,6 +120,7 @@ func TestDiagnose_StatementCorpusAgreesWithTheLoader(t *testing.T) {
 	for _, c := range compiler.BodyProblemCodes() {
 		loadCodes[c] = true
 	}
+	loadCodes[compiler.CodeBodyConfigUnknown] = true
 	loads, refusals := 0, 0
 	walk := func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

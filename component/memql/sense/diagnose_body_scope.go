@@ -9,13 +9,19 @@ package sense
 // publish in a logic, a logic that does not end with a return. Diagnose runs
 // that same check over the same parse, so an editor shows each refusal on its
 // line rather than at boot, and the two cannot disagree about what a body may
-// say. A body still written in the retired forms is the rewriter's until the
-// flip and carries no statement body to check.
+// say. It runs the boot gate's config check too (component/memql/dslgate, with
+// component/config.UnknownKey's text), which needs the allow-list and nothing
+// of the workspace; the gate's other check, a bare call's callee, needs every
+// spec and trait loaded and stays at boot. A body still written in the retired
+// forms is the rewriter's until the flip and carries no statement body to
+// check.
 
 import (
 	"strings"
 	"unicode"
 
+	"github.com/znasllc-io/memql/component/config"
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/compiler"
 	"github.com/znasllc-io/memql/component/language/parser"
 )
@@ -56,6 +62,29 @@ func bodyScopeDiagnostics(file *parser.File, lexed string, place func(Diagnostic
 				Code:     p.Code,
 			}))
 		}
+		ast.WalkBody(auto.Body.Statements, func(s ast.BodyStatement) bool {
+			for _, e := range ast.StatementExpressions(s) {
+				ast.WalkV1(e, func(n ast.ExpressionNode) bool {
+					m, ok := n.(*ast.MemberExpr)
+					if !ok {
+						return true
+					}
+					if root, ok := m.Object.(*ast.IdentExpr); ok && root.Name == "config" {
+						if msg, unknown := config.UnknownKey(m.Field); unknown {
+							start := Position{Line: root.Span.Line, Column: root.Span.Col}
+							out = append(out, place(Diagnostic{
+								Range:    spanAt(start, len("config.")+len([]rune(m.Field))),
+								Severity: SeverityError,
+								Message:  kind + " " + def.Name + ": " + msg + " [" + compiler.CodeBodyConfigUnknown + "]",
+								Code:     compiler.CodeBodyConfigUnknown,
+							}))
+						}
+					}
+					return true
+				})
+			}
+			return true
+		})
 	}
 	return out
 }
