@@ -110,23 +110,28 @@ func TestConstructHashParityOnBraceLessPredicates(t *testing.T) {
 	}
 }
 
-// TestConstructHashParityOnTheCorpus is the corpus parity gate over the
-// embedded tree: every construct, in every file, cut at the same bytes by both
-// sides.
-func TestConstructHashParityOnTheCorpus(t *testing.T) {
+// TestConstructHashParityOnTheMigratedCorpus is the corpus parity gate over
+// the embedded tree: every construct, in every file, cut at the same bytes by
+// both sides. Before the flip the tree was migrated in memory with the
+// expressions codemod first; since the flip the tree IS edition 2026, so the
+// gate reads its files as they are, and the codemod has nothing left to
+// rewrite in them.
+func TestConstructHashParityOnTheMigratedCorpus(t *testing.T) {
+	files := baseloader.ReadAll(nil)
 	predicates := 0
-	for _, f := range baseloader.ReadAll(nil) {
+	for _, f := range files {
 		mismatches, n := constructHashParityOf(f.Content)
 		predicates += n
 		for _, m := range mismatches {
 			t.Errorf("%s: %s: the engine and the language server cut this construct differently", f.Path, m)
 		}
 	}
-	// Measured when the floor was set: 39 specs and traits. Without the
+	// Measured when the floor was set: 39 specs and traits over 126 migrated
+	// files; after the flip, 39 over the tree's 308 files. Without the
 	// brace-less arms both sides see zero of them and agree -- which is why
 	// the count, not the agreement, is the floor.
-	if predicates < 30 {
-		t.Errorf("compared %d spec/trait declarations -- the scan has stopped reaching them", predicates)
+	if predicates < 30 || len(files) < 100 {
+		t.Errorf("compared %d spec/trait declarations over %d files -- the scan has stopped reaching them", predicates, len(files))
 	}
-	t.Logf("%d spec/trait declarations cut identically by both sides", predicates)
+	t.Logf("%d spec/trait declarations cut identically by both sides over %d files", predicates, len(files))
 }
