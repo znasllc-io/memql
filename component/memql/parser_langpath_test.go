@@ -101,13 +101,13 @@ var shapeFallsBackToMemqlQueries = []struct {
 	name  string
 	query string
 }{
-	{"shape inline template", `shape(concept==v1:cognition:space;payload.active==true, {"id": node("id")})`},
+	{"shape inline template", `shape(concept==v1:cognition:space&&payload.active==true, {"id": node("id")})`},
 	{"shape composite paginate + sort", `shape(paginate(sort(concept==v1:cognition:space:context; payload.partitionId=="spc1", "createdAt", "desc"), 1), {"snapshot": node("payload.snapshot")})`},
 	// Array-form template (the parse-error failure mode):
-	{"shape array template", `shape(concept==v1:conversation;id=="conv-1",[node("id"),children(node("id")),"done"])`},
+	{"shape array template", `shape(concept==v1:conversation&&id=="conv-1",[node("id"),children(node("id")),"done"])`},
 	// Nested-object template with relationships (the
 	// execute-differently failure mode):
-	{"shape nested relations template", `shape(concept==v1:conversation;id=="conv-1",{"conversation":node("payload.title","id"),"messages":children(id:node("id"),author:createdBy(node("payload.name")))})`},
+	{"shape nested relations template", `shape(concept==v1:conversation&&id=="conv-1",{"conversation":node("payload.title","id"),"messages":children(id:node("id"),author:createdBy(node("payload.name")))})`},
 }
 
 // selectFallsBackToMemqlQueries covers select() runtime usages.
@@ -231,7 +231,7 @@ func TestContainsConceptMemqlVersionRightBoundary(t *testing.T) {
 		{"exact match", `concept==memql:version`, true},
 		{"trailing whitespace", `concept==memql:version `, true},
 		{"followed by close paren", `paginate(concept==memql:version, 1)`, true},
-		{"followed by semicolon (compound)", `concept==memql:version;payload.x==1`, true},
+		{"followed by semicolon (compound)", `concept==memql:version&&payload.x==1`, true},
 		{"trailing ident chars must NOT match", `concept==memql:versionfoo`, false},
 		{"trailing digit must NOT match", `concept==memql:version2`, false},
 	}

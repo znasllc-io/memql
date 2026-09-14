@@ -323,8 +323,8 @@ func TestFormatValueForQuery(t *testing.T) {
 		// MemQL fragment tests - fragments should pass through unquoted
 		{
 			name:     "MemQL fragment with semicolon should NOT be quoted",
-			input:    "concept==v1:user;payload.active==true",
-			expected: "concept==v1:user;payload.active==true",
+			input:    "concept==v1:user&&payload.active==true",
+			expected: "concept==v1:user&&payload.active==true",
 		},
 		{
 			name:     "MemQL fragment with == operator should NOT be quoted",
@@ -479,33 +479,33 @@ func TestEvaluatorCompoundConditions(t *testing.T) {
 		// AND conditions with semicolon
 		{
 			name:      "AND both true",
-			condition: `payload.participantType=="human";payload.status=="active"`,
+			condition: `payload.participantType=="human"&&payload.status=="active"`,
 			expected:  true,
 		},
 		{
 			name:      "AND first true second false",
-			condition: `payload.participantType=="human";payload.status=="inactive"`,
+			condition: `payload.participantType=="human"&&payload.status=="inactive"`,
 			expected:  false,
 		},
 		{
 			name:      "AND first false second true",
-			condition: `payload.participantType=="si";payload.status=="active"`,
+			condition: `payload.participantType=="si"&&payload.status=="active"`,
 			expected:  false,
 		},
 		{
 			name:      "AND both false",
-			condition: `payload.participantType=="si";payload.status=="inactive"`,
+			condition: `payload.participantType=="si"&&payload.status=="inactive"`,
 			expected:  false,
 		},
 		// Three-way AND
 		{
 			name:      "three-way AND all true",
-			condition: `payload.participantType=="human";payload.status=="active";payload.concept=="v1:cognition:participant"`,
+			condition: `payload.participantType=="human"&&payload.status=="active"&&payload.concept=="v1:cognition:participant"`,
 			expected:  true,
 		},
 		{
 			name:      "three-way AND one false",
-			condition: `payload.participantType=="human";payload.status=="inactive";payload.concept=="v1:cognition:participant"`,
+			condition: `payload.participantType=="human"&&payload.status=="inactive"&&payload.concept=="v1:cognition:participant"`,
 			expected:  false,
 		},
 		// OR conditions with comma

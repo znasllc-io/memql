@@ -147,7 +147,7 @@ func TestRelationshipParentOf_ClusteredVersionsReachesEveryParent(t *testing.T) 
 	}
 
 	res, err := eng.Execute(ctx, fmt.Sprintf(
-		`parentOf(concept==%s;createdBy==%q)`, relChildConcept, owner))
+		`parentOf(concept==%s&&createdBy==%q)`, relChildConcept, owner))
 	require.NoError(t, err)
 
 	require.ElementsMatch(t, wantParents, pageIDs(t, res),

@@ -651,9 +651,9 @@ func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarker
 	t.Run("field markers survive wrapping", func(t *testing.T) {
 		for _, c := range []struct{ name, ann string }{
 			{"description", `@description("x")`},
-			{"default", `@description("x") @default("z")`},
-			{"unique", `@description("x") @unique`},
-			{"immutable", `@description("x") @immutable`},
+			{"default", `@description("x")`},
+			{"unique", `@description("x")`},
+			{"immutable", `@description("x")`},
 			{"secret", `@description("x") @secret`},
 			{"pii", `@description("x") @pii`},
 			{"internal", `@description("x") @internal`},

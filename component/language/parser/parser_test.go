@@ -5,7 +5,7 @@ import (
 )
 
 func TestLexer_SimpleQuery(t *testing.T) {
-	input := `concept==v1:crm:lead;payload.active==true`
+	input := `concept==v1:crm:lead&&payload.active==true`
 
 	lexer := NewLexer(input)
 	tokens, err := lexer.Tokenize()
@@ -366,7 +366,7 @@ func TestParser_SimpleQuery(t *testing.T) {
 }
 
 func TestParser_LogicalAnd(t *testing.T) {
-	input := `concept==v1:test;payload.active==true`
+	input := `concept==v1:test&&payload.active==true`
 
 	lexer := NewLexer(input)
 	tokens, err := lexer.Tokenize()
@@ -1612,7 +1612,7 @@ func TestParser_SpecDefinition(t *testing.T) {
 	input := `
 @description("Node includes both email and phone number fields.")
 func (Spec) hasUserContact() bool {
-  return payload.email!=nil;payload.phoneNumber!=nil
+  return payload.email!=nil&&payload.phoneNumber!=nil
 }`
 
 	lexer := NewLexer(input)

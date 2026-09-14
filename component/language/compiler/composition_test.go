@@ -15,11 +15,11 @@ func (Query) getUsers() {
 }
 
 func (Query) getUserById() {
-  concept==v1:user;id==args.id
+  concept==v1:user&&id==args.id
 }
 
 func (Query) getUsersByRole() {
-  concept==v1:user;payload.role==args.role
+  concept==v1:user&&payload.role==args.role
 }
 `
 	ast := mustParse(t, source)
@@ -81,11 +81,11 @@ func (Mutation) createUser() {
 }
 
 func (Query) validateEmail() {
-  concept==v1:user;payload.email==args.email
+  concept==v1:user&&payload.email==args.email
 }
 
 func (Query) checkDuplicate() {
-  concept==v1:user;payload.name==args.name
+  concept==v1:user&&payload.name==args.name
 }
 `
 	ast := mustParse(t, source)

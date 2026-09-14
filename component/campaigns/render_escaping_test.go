@@ -121,7 +121,7 @@ type mergeTagCase struct {
 
 func mergeTagCases() []mergeTagCase {
 	const attack = `Ben & <script>alert(1)</script>`
-	const attackEscaped = `Ben &amp; &lt;script&gt;alert(1)&lt;/script&gt;`
+	const attackEscaped = `Ben &amp; &lt;script&gt&&alert(1)&lt;/script&gt;`
 	return []mergeTagCase{
 		{
 			tag: "{{displayName}}", raw: attack, escaped: attackEscaped,

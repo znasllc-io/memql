@@ -95,7 +95,7 @@ func (e *EmitConceptCardExecutor) Execute(ctx context.Context, step *automations
 	// Build the utterance payload for the concept card
 	// Uses utteranceType "system" with action payload to hold card data
 	utterancePayload := map[string]any{
-		"partitionId":         partitionId,
+		"partitionId":     partitionId,
 		"participantId":   "system:concept-card",
 		"participantType": "system",
 		"utteranceType":   "system",
@@ -147,7 +147,7 @@ func (e *EmitConceptCardExecutor) Execute(ctx context.Context, step *automations
 	result.Result = map[string]any{
 		"utteranceId":   utteranceId,
 		"cardType":      cardType,
-		"partitionId":       partitionId,
+		"partitionId":   partitionId,
 		"conceptRef":    conceptRef,
 		"utteranceType": "system",
 		"action": map[string]any{
@@ -177,7 +177,7 @@ func (e *EmitConceptCardExecutor) Execute(ctx context.Context, step *automations
 		StepId:      step.ID,
 		StepType:    "emitConceptCard",
 		Status:      result.Status,
-		ResultQuery: fmt.Sprintf(`concept==v1:cognition:utterance;id==%q`, utteranceId),
+		ResultQuery: fmt.Sprintf(`concept==v1:cognition:utterance&&id==%q`, utteranceId),
 		ItemCount:   1,
 		Duration:    float64(result.Duration.Milliseconds()),
 	})

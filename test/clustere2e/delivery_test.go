@@ -225,7 +225,7 @@ func probeRowArgs(scope, rowID, goal, userID string) memqlclient.LogMissingCapab
 // into a function of how long the cluster has been up. `partitionId` is the
 // per-run tag, so the raw filter is the only read that means "this run".
 func probeScopeQuery(scope string) string {
-	return fmt.Sprintf(`concept==v1:platform:missingCapability;payload.partitionId==%q`, scope)
+	return fmt.Sprintf(`concept==v1:platform:missingCapability&&payload.partitionId==%q`, scope)
 }
 
 // createProbeRow writes one probe row on conn's replica, failing the test if

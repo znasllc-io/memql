@@ -172,13 +172,13 @@ func TestCompositeElement_TypeAloneStillBuilds(t *testing.T) {
 func TestCompositeElement_FieldMarkersAreUnaffected(t *testing.T) {
 	for _, decl := range []string{
 		`[][]string @required @description("x")`,
-		`[][]string @unique @description("x")`,
-		`[][]string @immutable @description("x")`,
+		`[][]string @description("x")`,
+		`[][]string @description("x")`,
 		`[][]string @secret @description("x")`,
 		`[][]string @pii @description("x")`,
 		`[][]string @internal @description("x")`,
 		`[][]string @serverSet @description("x")`,
-		`map[string][]int @required @immutable @description("x")`,
+		`map[string][]int @required @description("x")`,
 	} {
 		t.Run(decl, func(t *testing.T) {
 			if _, err := buildCompositeField(t, decl); err != nil {

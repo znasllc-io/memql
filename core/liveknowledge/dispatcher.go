@@ -82,7 +82,7 @@ func (d *Dispatcher) Query(ctx context.Context, sourceName string, args map[stri
 // either lookup fails / either row is inactive.
 func (d *Dispatcher) loadSource(ctx context.Context, name string) (Source, error) {
 	// Step 1: load the source row.
-	q := fmt.Sprintf(`from(v1:knowledge:liveSource) ?.payload.name==%q;payload.active==true limit 1`, name)
+	q := fmt.Sprintf(`from(v1:knowledge:liveSource) ?.payload.name==%q&&payload.active==true limit 1`, name)
 	res, err := d.Engine.Execute(ctx, q)
 	if err != nil {
 		return Source{}, err
@@ -102,7 +102,7 @@ func (d *Dispatcher) loadSource(ctx context.Context, name string) (Source, error
 	}
 
 	// Step 2: load the connector row.
-	cq := fmt.Sprintf(`from(v1:knowledge:liveConnector) ?.id==%q;payload.active==true limit 1`, connectorId)
+	cq := fmt.Sprintf(`from(v1:knowledge:liveConnector) ?.id==%q&&payload.active==true limit 1`, connectorId)
 	cres, err := d.Engine.Execute(ctx, cq)
 	if err != nil {
 		return Source{}, err

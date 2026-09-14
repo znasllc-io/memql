@@ -91,7 +91,7 @@ query space queryActiveSpaces {
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := `shape(concept==space;payload.active==true, "spaceFull")`
+	want := `shape(concept==space&&payload.active==true, "spaceFull")`
 	if !strings.Contains(out, want) {
 		t.Errorf("plain query rewrite perturbed, got:\n%s", out)
 	}

@@ -195,7 +195,7 @@ func TestRelationshipChildOf_IncomingRelationshipReachesEveryChild(t *testing.T)
 	_, wantSpokes := seedHubWithSpokes(t, ctx, db, sfx, owner, base, spokes, versions)
 
 	res, err := eng.Execute(ctx, fmt.Sprintf(
-		`childOf(concept==%s;createdBy==%q)`, hubConcept, owner))
+		`childOf(concept==%s&&createdBy==%q)`, hubConcept, owner))
 	require.NoError(t, err)
 
 	require.ElementsMatch(t, wantSpokes, pageIDs(t, res),

@@ -1190,7 +1190,7 @@ func resolveFullId(rawId string, conceptContext string) (string, error) {
 
 	// Short ID requires concept context to resolve
 	if conceptContext == "" {
-		return "", fmt.Errorf("short ID %q requires concept context; either use full ID (e.g., \"v1:concept:name:%s\") or include concept filter in query (e.g., concept==\"v1:your:concept\";id==\"%s\")", rawId, rawId, rawId)
+		return "", fmt.Errorf("short ID %q requires concept context; either use full ID (e.g., \"v1:concept:name:%s\") or include concept filter in query (e.g., concept==\"v1:your:concept\"&&id==\"%s\")", rawId, rawId, rawId)
 	}
 
 	// Construct full ID: concept:shortId

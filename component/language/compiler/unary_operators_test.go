@@ -21,25 +21,25 @@ func TestUnaryOperatorsCompile(t *testing.T) {
 			name: "== nil operator in function query",
 			source: `
 func (Query) testMissing() {
-	concept==v1:test;payload.field==nil
+	concept==v1:test&&payload.field==nil
 }`,
-			expectedQuery:    `concept=="v1:test";payload.field==nil`,
+			expectedQuery:    `concept=="v1:test"&&payload.field==nil`,
 			shouldNotContain: "<nil>",
 		},
 		{
 			name: "!= nil operator in function query",
 			source: `
 func (Query) testNotMissing() {
-	concept==v1:test;payload.field!=nil
+	concept==v1:test&&payload.field!=nil
 }`,
-			expectedQuery:    `concept=="v1:test";payload.field!=nil`,
+			expectedQuery:    `concept=="v1:test"&&payload.field!=nil`,
 			shouldNotContain: "<nil>",
 		},
 		{
 			name: "multiple fields with != nil",
 			source: `
 func (Query) testMultiple() {
-	concept==v1:test;payload.field1!=nil;payload.field2!=nil
+	concept==v1:test&&payload.field1!=nil&&payload.field2!=nil
 }`,
 			shouldContain:    "payload.field1!=nil",
 			shouldNotContain: "<nil>",
@@ -113,7 +113,7 @@ func (Automation) testAutomation(_ any) {
 func TestUnaryOperatorWithOtherConditions(t *testing.T) {
 	source := `
 func (Query) testCombined() {
-	concept==v1:test;payload.status=="active";payload.optionalField!=nil;payload.count>5
+	concept==v1:test&&payload.status=="active"&&payload.optionalField!=nil;payload.count>5
 }
 `
 	result, err := CompileSource(source)

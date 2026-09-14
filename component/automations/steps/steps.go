@@ -104,7 +104,7 @@ func RecordStepExecution(ctx context.Context, engine *memql.MemQLEngine, data St
 	}
 
 	// Return the retrieval query
-	return fmt.Sprintf(`concept==%s;payload.runId==%s;payload.stepId==%s`,
+	return fmt.Sprintf(`concept==%s&&payload.runId==%s&&payload.stepId==%s`,
 		memoryNodes.ConceptMemQLAutomationStep, jsonString(data.RunId), jsonString(data.StepId))
 }
 
@@ -144,7 +144,7 @@ func BuildResultQuery(stepType, query string, result any) string {
 			concept := node.GetConcept()
 			id := node.GetId()
 			if concept != "" && id != "" {
-				return fmt.Sprintf(`concept==%s;id==%s`, concept, jsonString(id))
+				return fmt.Sprintf(`concept==%s&&id==%s`, concept, jsonString(id))
 			}
 		}
 	}

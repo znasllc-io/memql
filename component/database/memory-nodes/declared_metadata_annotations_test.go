@@ -85,10 +85,10 @@ const declaredMetadataFixture = `@version("1.0.0")
 @description("d")
 concept probe {
   label      string  @required @description("l")
-  uniqueKey  string  @unique @description("u")
-  externalId string  @immutable @description("i")
+  uniqueKey  string @description("u")
+  externalId string @description("i")
   apiKey     string  @secret @description("s")
-  tier       string  @default("bronze") @description("t")
+  tier       string @description("t")
 }
 `
 
@@ -473,7 +473,7 @@ func TestBadDefaultRefusesToLoad(t *testing.T) {
 	const tmpl = `@version("1.0.0")
 @description("d")
 concept probe {
-  probeField %s @default(%q) @description("p")
+  probeField %s @description("p")
 }
 `
 
@@ -490,7 +490,7 @@ concept probe {
 	} {
 		src := fmt.Sprintf(tmpl, tc.typeName, tc.text)
 		if err := buildConceptErr(t, src); err == nil {
-			t.Errorf("`probeField %s @default(%q)` built successfully, want a refusal -- the "+
+			t.Errorf("`probeField %s` built successfully, want a refusal -- the "+
 				"emitted schema would carry a default that field can never hold",
 				tc.typeName, tc.text)
 		}
@@ -508,7 +508,7 @@ concept probe {
 	} {
 		src := fmt.Sprintf(tmpl, tc.typeName, tc.text)
 		if err := buildConceptErr(t, src); err != nil {
-			t.Errorf("`probeField %s @default(%q)` failed to build: %v -- this declaration is valid",
+			t.Errorf("`probeField %s` failed to build: %v -- this declaration is valid",
 				tc.typeName, tc.text, err)
 		}
 	}
@@ -535,9 +535,9 @@ func TestBareDefaultLiteralIsRead(t *testing.T) {
 	const src = `@version("1.0.0")
 @description("d")
 concept probe {
-  bareBool    bool  @default(false)    @description("b")
-  quotedBool  bool  @default("false")  @description("q")
-  bareInt     int   @default(7)        @description("i")
+  bareBool    bool    @description("b")
+  quotedBool  bool  @description("q")
+  bareInt     int        @description("i")
 }
 `
 	props := propertySchemas(t, src)

@@ -109,7 +109,7 @@ func TestLoweredQueryUsesAndAnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormaliseAll: %v", err)
 	}
-	if strings.Contains(out, ";active==true") {
+	if strings.Contains(out, "&&active==true") {
 		t.Errorf("the lowering still glues the concept term with `;`, which the parser now refuses:\n%s", out)
 	}
 	if !strings.Contains(out, "&&active==true") {

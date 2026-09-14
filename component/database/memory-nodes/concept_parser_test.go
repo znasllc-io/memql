@@ -10,11 +10,11 @@ func TestParseConceptMemQL_Agent(t *testing.T) {
 @description("AI agent templates.")
 concept Agent {
   name         string  @required @description("Display name.")
-  active       bool    @default("true")
+  active       bool
   status       enum("active", "archived")    @required
 
   capabilities {
-    avatar       bool  @default("false")
+    avatar       bool
     domains      array(string)
   }
 

@@ -1821,7 +1821,7 @@ func buildMutationResultQuery(concept string, execResult any) string {
 			id := node.GetId()
 			if concept != "" && id != "" {
 				// Use quoted concept and id for proper MemQL syntax
-				return fmt.Sprintf(`concept==%s;id==%s`, jsonString(concept), jsonString(id))
+				return fmt.Sprintf(`concept==%s&&id==%s`, jsonString(concept), jsonString(id))
 			}
 		}
 	}

@@ -37,7 +37,7 @@ func TestCompileSource_Automation(t *testing.T) {
 @schedule("*/30 * * * *")
 func (Automation) leadProcessor(_ any) {
 	fetchLeads := query {
-		concept==v1:lead;payload.active==true
+		concept==v1:lead&&payload.active==true
 	}
 
 	processLeads := query {
@@ -411,7 +411,7 @@ func TestCompiler_AutomationWithCondition(t *testing.T) {
 	source := `
 func (Automation) conditional(_ any) {
 	checkExists := query {
-		concept==v1:test;id=="test-id"
+		concept==v1:test&&id=="test-id"
 	}
 
 	createIfMissing := mutation if checkExists.metadata.itemCount == 0 {

@@ -27,7 +27,7 @@ func TestValidateCQS_QueryCallingQueryIsAllowed(t *testing.T) {
 	source := `
 args { id string @required }
 func (Query) queryById(args any) {
-	concept==v1:user;id==args.id
+	concept==v1:user&&id==args.id
 }
 
 args { id string @required }
