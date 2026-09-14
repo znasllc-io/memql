@@ -26,6 +26,10 @@ const rebuildDebounce = 300 * time.Millisecond
 // publish always carries the whole set, so one without a refusal clears the
 // squiggle the previous one drew.
 func (s *server) publishDiagnostics(notify glsp.NotifyFunc, uri protocol.DocumentUri) {
+	// Held from reading the buffer to sending, so a close cannot slip between
+	// the two and be overwritten by what was computed before it (didClose).
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
 	text, ok := s.docs.get(uri)
 	if !ok {
 		return

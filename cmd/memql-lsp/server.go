@@ -44,6 +44,11 @@ type server struct {
 	announceMu sync.Mutex
 	announced  map[string]bool
 
+	// publishMu serializes publishing a document's diagnostics with closing it,
+	// so a publish computed before a close can never land after the close's
+	// clear (didClose states the rule).
+	publishMu sync.Mutex
+
 	// catalogMu guards catalog, the connected cluster's construct catalog as
 	// last pushed by the client over `memql/clusterCatalog`. Its ZERO VALUE IS
 	// DISCONNECTED, which is what makes "no client has pushed anything yet" and
@@ -104,27 +109,22 @@ func (s *server) setBuild(svc *sense.Service, lines memql.WorkspaceLanguageLines
 	s.lines = lines
 }
 
-// buildSense builds the offline Sense service over the workspace root, and
-// resolves the workspace's language lines beside it. On engine failure (a
-// workspace construct trips the strict-boot gate) BuildOfflineSense still
-// returns a service carrying the workspace symbol graph, so import and
-// reference diagnostics keep working on exactly the broken workspace an author
-// is iterating on -- only the registry-backed vocabulary (completion, hover) is
-// absent until boot is clean.
+// buildSense builds the offline Sense service over the workspace root, with the
+// language lines the build's Init resolved. On engine failure (a workspace
+// construct trips the strict-boot gate) the build still returns a service
+// carrying the workspace symbol graph, so import and reference diagnostics
+// keep working on exactly the broken workspace an author is iterating on --
+// only hover and the registry-backed vocabulary in completion are absent until
+// boot is clean.
 //
 // That absence is said, not just logged (languageline.go): a refused language
 // line is published on its domain's files, and the failure is announced once
 // through notify. A nil notify announces nothing.
 func (s *server) buildSense(notify glsp.NotifyFunc) {
-	root := os.DirFS(s.root)
-	// Resolved BEFORE the build, for the one race that is common: a memql.toml
-	// written while the build runs (by the quick fix). Resolved first, the
-	// lines at worst still name a refusal the build no longer has, which the
-	// rebuild that same write triggers clears. Resolved after, they could miss
-	// the refusal the build failed on, and the notification would blame the
-	// wrong thing.
-	lines := memql.ResolveWorkspaceLanguageLines(root)
-	svc, err := memql.BuildOfflineSense(root)
+	// The lines are the build's own, as its Init resolved them, so they and
+	// the build's error are one answer even when a memql.toml changes while
+	// the build runs.
+	svc, lines, err := memql.BuildOfflineSenseWithLanguageLines(os.DirFS(s.root))
 	if err != nil {
 		s.log.Warningf("offline Sense engine build failed for %s (%s); serving workspace-graph reference analysis + syntax diagnostics without the full registry", s.root, err)
 	}
@@ -269,10 +269,28 @@ func (s *server) didChangeWatchedFiles(ctx *glsp.Context, _ *protocol.DidChangeW
 	return nil
 }
 
+// didClose forgets a document and clears its diagnostics.
+//
+// THE RULE: a closed document carries no diagnostics from this server. The
+// server analyzes open buffers only -- a rebuild republishes open documents
+// and nothing else -- so anything left on a closed file would stop being kept
+// true. A language-line refusal is exactly what goes stale that way: its fix
+// is a memql.toml written beside the file, after which a refusal left behind
+// would still say the file is missing. The client clears nothing on close for
+// pushed diagnostics, so the server publishes the empty set itself.
+//
+// Under publishMu, and after the buffer is dropped, so the clear is the last
+// word: a publish that already read the buffer has finished before it, and one
+// that has not finds no buffer and publishes nothing.
 func (s *server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
-	s.diag.cancel(params.TextDocument.URI)
-	// Before the buffer goes: its own diagnostics are republished from it.
-	s.withdrawRefusal(ctx.Notify, params.TextDocument.URI)
-	s.docs.closeDoc(params.TextDocument.URI)
+	uri := params.TextDocument.URI
+	s.diag.cancel(uri)
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
+	s.docs.closeDoc(uri)
+	ctx.Notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
+		URI:         uri,
+		Diagnostics: []protocol.Diagnostic{},
+	})
 	return nil
 }

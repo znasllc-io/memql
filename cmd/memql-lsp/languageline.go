@@ -5,27 +5,27 @@ package main
 //
 // A domain that declares no language line -- every product repository before
 // it migrates -- is refused by the engine's strict Init, and with it the
-// offline build behind completion and hover: the service falls back to the
-// workspace graph alone, for the whole workspace. The editor used to go dark
-// with no visible reason; the one message saying why was a log line in the
-// output channel. Three things here say it where the author is looking:
+// offline build: the service falls back to the workspace graph alone, for the
+// whole workspace. Hover goes, and so does every concept, field and function
+// the build would have loaded; keyword, annotation and snippet completion come
+// from the static spec and stay. The editor used to lose all of that with no
+// visible reason; the one message saying why was a log line in the output
+// channel. Three things here say it where the author is looking:
 //
 //   - every open file of a refused domain carries the refusal on its first
 //     line, beside Sense's own diagnostics (languageLineDiagnostics);
 //   - a missing line has a quick fix that writes the file (codeAction);
-//   - a failed build says once, in a notification, that completion and hover
-//     are off and why (announceBuild).
+//   - a failed build says once per domain, in a notification, what is off and
+//     why (announceBuild).
 //
 // The client watches memql.toml as well as .memql files
 // (editors/vscode/src/extension.ts), so writing the file -- through the quick
-// fix or by hand -- rebuilds, and all three clear with no reload. A rebuild
-// republishes OPEN files only, so a file that closes has its refusal withdrawn
-// then (withdrawRefusal): left behind, it would outlive the fix.
+// fix or by hand -- rebuilds, and all three clear with no reload.
 //
-// WHICH DOMAINS. The lines come from memql.ResolveWorkspaceLanguageLines,
-// which mounts exactly what BuildOfflineSense mounts and resolves them with
-// the resolver Init runs. A file in no mounted domain -- a core domain, or a
-// directory the build does not read -- carries nothing.
+// WHICH DOMAINS. The lines are the build's own, as its Init resolved them
+// (memql.BuildOfflineSenseWithLanguageLines), over exactly the domains it
+// mounted. A file in no mounted domain -- a core domain, or a directory the
+// build does not read -- carries nothing.
 //
 // WHICH DIAGNOSTIC IS OURS, in a code-action request, is decided by its source
 // and message and never by its code. glsp v0.2.2 decodes IntegerOrString with
@@ -41,6 +41,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -90,35 +91,6 @@ func languageLineDiagnostic(text string, p memql.LanguageLineProblem) protocol.D
 		Source:   ptr(lsName),
 		Message:  p.Message,
 	}
-}
-
-// withdrawRefusal takes a refused line's diagnostic off a document that is
-// closing, republishing the rest of what the document carries from its
-// buffer.
-//
-// A refusal is about the domain, and its fix happens elsewhere: a memql.toml
-// written beside the file. A rebuild republishes open files only, so a refusal
-// left on a closed file would still say "no memql.toml" after the file exists.
-// The client clears nothing on close itself, for pushed diagnostics. The
-// refusal stays in view where it can be kept true: on every open file of the
-// domain, and in the notification. The document's own diagnostics are kept,
-// as they always were.
-func (s *server) withdrawRefusal(notify glsp.NotifyFunc, uri protocol.DocumentUri) {
-	text, ok := s.docs.get(uri)
-	if !ok {
-		return
-	}
-	svc, lines := s.getBuild()
-	if svc == nil {
-		return
-	}
-	if _, refused := s.documentRefusal(uri, lines); !refused {
-		return
-	}
-	notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
-		URI:         uri,
-		Diagnostics: senseDiagnostics(svc, uri, text),
-	})
 }
 
 // documentRefusal is the refusal of the line governing a document: every
@@ -244,13 +216,21 @@ func (s *server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) 
 	}}
 	if all := s.missingManifests(lines); len(all) > 1 {
 		actions = append(actions, protocol.CodeAction{
-			Title:       fmt.Sprintf("Create %s in all %d domains without one", dslfs.ManifestFile, len(all)),
+			Title:       allDomainsTitle(len(all)),
 			Kind:        &quickFix,
 			Diagnostics: []protocol.Diagnostic{diagnostic},
 			Edit:        s.createManifests(lines.Root, all),
 		})
 	}
 	return actions, nil
+}
+
+// allDomainsTitle names the action that writes every missing memql.toml.
+func allDomainsTitle(n int) string {
+	if n == 2 {
+		return "Create " + dslfs.ManifestFile + " in both domains without one"
+	}
+	return fmt.Sprintf("Create %s in all %d domains without one", dslfs.ManifestFile, n)
 }
 
 // wantsQuickFix reports whether a request's `only` filter admits a quickfix.
@@ -313,15 +293,19 @@ func (s *server) createManifests(root string, domains []string) *protocol.Worksp
 	return &protocol.WorkspaceEdit{DocumentChanges: changes}
 }
 
-// announceBuild tells the author, once per cause, that completion and hover are
-// off and why, as a Warning notification.
+// announceBuild tells the author, once per cause, what is off and why, as a
+// Warning notification.
 //
 // A failed build is announced when it has a cause the last announcement did
-// not name. The same failure again says nothing, and neither does the same
-// failure with fewer refusals -- the author fixing domains one by one has
-// already been told about the rest. A build that succeeds clears the record,
-// so the next failure is news. buildSense keeps its log line, which carries
-// the engine's full report.
+// not name, and a cause is a refused DOMAIN, not a refusal. So the same
+// failure again says nothing, fewer refused domains after a fix say nothing,
+// and neither does one domain's refusal changing: an empty memql.toml -- a
+// "New File", a touch, or the quick fix with the editor's refactoring
+// auto-save off -- turns a missing line into a malformed one while the author
+// is still typing it, and that is progress, not news. The file's diagnostic
+// still changes with it. A build that succeeds clears the record, so the next
+// failure is news. buildSense keeps its log line, which carries the engine's
+// full report.
 func (s *server) announceBuild(notify glsp.NotifyFunc, err error, lines memql.WorkspaceLanguageLines) {
 	if notify == nil {
 		return
@@ -350,13 +334,13 @@ func (s *server) announceBuild(notify glsp.NotifyFunc, err error, lines memql.Wo
 	})
 }
 
-// buildFailureCauses names a failed build's causes: one per refusal of a
-// mounted domain's line, or bootCause alone when no line is refused and the
+// buildFailureCauses names a failed build's causes: one per mounted domain
+// whose line is refused, or bootCause alone when no line is refused and the
 // build failed on something else.
 func buildFailureCauses(lines memql.WorkspaceLanguageLines) map[string]bool {
 	causes := map[string]bool{}
 	for _, p := range lines.Problems {
-		causes["line "+p.Domain+" "+p.Code] = true
+		causes["line "+p.Domain] = true
 	}
 	if len(causes) == 0 {
 		causes[bootCause] = true
@@ -364,68 +348,168 @@ func buildFailureCauses(lines memql.WorkspaceLanguageLines) map[string]bool {
 	return causes
 }
 
+// lineFamily is what the notification says about a refused domain: each family
+// has one sentence, naming its fix. A domain refused for several reasons is
+// named by the first family among them, in this order -- a file that does not
+// read has to read before its version can matter.
+type lineFamily int
+
+const (
+	// familyMissing: no memql.toml. The quick fix writes it.
+	familyMissing lineFamily = iota
+	// familyMalformed: a memql.toml that does not read. No version could read
+	// it, so the fix is the file, and the error on the domain's files names
+	// what it must declare.
+	familyMalformed
+	// familyOlder: a line older than this server reads. The domain needs
+	// migrating.
+	familyOlder
+	// familyUnread: an edition this server does not read that is not a newer
+	// one (an earlier year, or no year at all), or a refusal code this server
+	// does not know. The error on the domain's files says which.
+	familyUnread
+	// familyNewer: a newer line, or an edition later than every one this
+	// server reads. The fix is a newer extension.
+	familyNewer
+)
+
+// familyOf is the family a refusal belongs to. line is the refused domain's
+// line, whose declared edition tells a newer edition from an unknown one.
+func familyOf(p memql.LanguageLineProblem, line memql.LanguageLine) lineFamily {
+	switch p.Code {
+	case langparser.CodeLanguageLineMissing:
+		return familyMissing
+	case langparser.CodeLanguageLineMalformed:
+		return familyMalformed
+	case langparser.CodeLanguageVersionUnsupported:
+		return familyOlder
+	case langparser.CodeLanguageVersionNewer:
+		return familyNewer
+	case langparser.CodeEditionUnknown:
+		if editionIsNewer(line.Edition) {
+			return familyNewer
+		}
+		return familyUnread
+	default:
+		return familyUnread
+	}
+}
+
+// fourDigitYear is what an edition looks like.
+var fourDigitYear = regexp.MustCompile(`^[0-9]{4}$`)
+
+// editionIsNewer reports whether an edition this server does not read comes
+// after every edition it does. Editions are years, so a later year is a newer
+// MemQL; an earlier year, or something that is not a year, is not -- and
+// telling its author to update the extension would be a claim the facts do
+// not carry.
+func editionIsNewer(edition string) bool {
+	known := langparser.Editions() // oldest first
+	if len(known) == 0 || !fourDigitYear.MatchString(edition) {
+		return false
+	}
+	return edition > known[len(known)-1]
+}
+
 // buildFailureNotice is the notification for a failed build, written from its
-// cause. Refused language lines are named with their fix. Any other failure
-// says the workspace would not boot and where its errors are listed, and does
-// not paste the engine's multi-line report -- that is the log line's.
+// cause: what a failed build takes away, then one sentence per family of
+// refused domains, each naming its fix. A failure with no refused line says
+// the workspace would not boot and where its errors are listed, and does not
+// paste the engine's multi-line report -- that is the log line's.
 //
 // createsFiles is whether the client can take the quick fix: the notice
 // offers it only then.
 func buildFailureNotice(lines memql.WorkspaceLanguageLines, createsFiles bool) string {
-	const off = "MemQL completion and hover are off: "
-	manifest := dslfs.ManifestFile
+	// Exactly what goes: hover, and every name the build would have loaded.
+	// Keyword, annotation and snippet completion is the static spec's and
+	// stays; so does a use line's, which reads the file tree. "Loaded" is the
+	// word that keeps the second true.
+	const lead = "MemQL cannot load this workspace, so hover is off and completion offers keywords, " +
+		"annotations and snippets but no loaded concepts, fields or functions."
 
-	var missing, unusable []string
+	families := map[lineFamily][]string{}
+	familyOfDomain := map[string]lineFamily{}
+	var order []string
 	for _, p := range lines.Problems {
-		switch {
-		case p.Code == langparser.CodeLanguageLineMissing:
-			missing = append(missing, p.Domain)
-		case !slices.Contains(unusable, p.Domain):
-			// A domain whose line is wrong in two ways is named once.
-			unusable = append(unusable, p.Domain)
+		f := familyOf(p, lines.Lines[p.Domain])
+		if prev, seen := familyOfDomain[p.Domain]; !seen {
+			order = append(order, p.Domain)
+			familyOfDomain[p.Domain] = f
+		} else if f < prev {
+			familyOfDomain[p.Domain] = f
 		}
 	}
+	for _, d := range order {
+		families[familyOfDomain[d]] = append(families[familyOfDomain[d]], d)
+	}
 
-	switch {
-	case len(missing) == 0 && len(unusable) == 0:
+	if len(order) == 0 {
 		lintRoot := lines.Root
 		if lintRoot == "" {
 			lintRoot = "."
 		}
-		return off + "this workspace would not boot. The Problems panel lists the errors the editor can see in open files; " +
-			"run \"memqllint " + lintRoot + "\" for the full report."
+		return lead + " The workspace would not boot: the Problems panel lists the errors the editor can see in open files, " +
+			"and \"memqllint " + lintRoot + "\" prints the full report."
+	}
 
-	case len(unusable) == 0 && len(missing) == 1:
-		d := missing[0]
-		if createsFiles {
-			return fmt.Sprintf("%sdomain %q has no %s. Use the quick fix on any of its files, or add %s.",
-				off, d, manifest, manifestPath(lines.Root, d))
+	var b strings.Builder
+	b.WriteString(lead)
+	for f := familyMissing; f <= familyNewer; f++ {
+		if domains := families[f]; len(domains) > 0 {
+			b.WriteString(" ")
+			b.WriteString(familySentence(f, domains, lines.Root, createsFiles))
 		}
-		return fmt.Sprintf("%sdomain %q has no %s. Add %s; the error on any of its files says what it declares.",
-			off, d, manifest, manifestPath(lines.Root, d))
+	}
+	return b.String()
+}
 
-	case len(unusable) == 0:
-		if createsFiles {
-			return fmt.Sprintf("%s%s have no %s. Use the quick fix on any of their files, or add a %s to each.",
-				off, domainsPhrase(missing), manifest, manifest)
+// familySentence is the notification's sentence for one family of refused
+// domains: what is wrong with them, and the fix.
+func familySentence(f lineFamily, domains []string, root string, createsFiles bool) string {
+	manifest := dslfs.ManifestFile
+	one := len(domains) == 1
+	subject := "D" + strings.TrimPrefix(domainsPhrase(domains), "d")
+	is, needs := "are", "need"
+	if one {
+		is, needs = "is", "needs"
+	}
+
+	switch f {
+	case familyMissing:
+		switch {
+		case one && createsFiles:
+			return fmt.Sprintf("%s has no %s: use the quick fix on any of its files, or add %s.",
+				subject, manifest, manifestPath(root, domains[0]))
+		case createsFiles:
+			return fmt.Sprintf("%s have no %s: use the quick fix on any of their files, or add a %s to each.",
+				subject, manifest, manifest)
+		case one:
+			return fmt.Sprintf("%s has no %s: add %s; the error on any of the domain's files shows the lines to write.",
+				subject, manifest, manifestPath(root, domains[0]))
+		default:
+			return fmt.Sprintf("%s have no %s: add one to each; the error on any of their files shows the lines to write.",
+				subject, manifest)
 		}
-		return fmt.Sprintf("%s%s have no %s. Add a %s to each; the error on any of their files says what it declares.",
-			off, domainsPhrase(missing), manifest, manifest)
-
-	case len(missing) == 0:
-		return fmt.Sprintf("%sthis version of MemQL cannot use the %s of %s. Open any of %s files for the reason and the fix.",
-			off, manifest, domainsPhrase(unusable), possessive(len(unusable)))
-
+	case familyMalformed:
+		if one {
+			return fmt.Sprintf("The %s of %s does not read yet: the error on any of the domain's files shows what a %s must declare.",
+				manifest, domainsPhrase(domains), manifest)
+		}
+		return fmt.Sprintf("The %s files of %s do not read yet: the error on any of those domains' files shows what a %s must declare.",
+			manifest, domainsPhrase(domains), manifest)
+	case familyOlder:
+		return fmt.Sprintf("%s %s written for an older MemQL than this extension's language server reads, and %s migrating to MemQL %s.",
+			subject, is, needs, langparser.LanguageVersion)
+	case familyNewer:
+		return fmt.Sprintf("%s %s written for a newer MemQL than this extension's language server reads: update the extension.",
+			subject, is)
 	default:
-		has, ones := "has", "the one"
-		if len(missing) > 1 {
-			has = "have"
+		if one {
+			return fmt.Sprintf("%s declares a language line this extension's language server does not read: the error on any of its files says why.",
+				subject)
 		}
-		if len(unusable) > 1 {
-			ones = "the ones"
-		}
-		return fmt.Sprintf("%s%s %s no %s, and this version of MemQL cannot use %s in %s. Open any of their files for the reason and the fix.",
-			off, domainsPhrase(missing), has, manifest, ones, domainsPhrase(unusable))
+		return fmt.Sprintf("%s declare language lines this extension's language server does not read: the error on any of their files says why.",
+			subject)
 	}
 }
 
@@ -445,12 +529,4 @@ func domainsPhrase(domains []string) string {
 	default:
 		return fmt.Sprintf("domains %s and %d more", strings.Join(quoted[:3], ", "), n-3)
 	}
-}
-
-// possessive is "its" for one domain and "their" for several.
-func possessive(n int) string {
-	if n == 1 {
-		return "its"
-	}
-	return "their"
 }
