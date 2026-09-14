@@ -165,6 +165,7 @@ var (
 		{Name: "partition", Type: "string", Doc: "Partition selector, e.g. \"*\" for all partitions. Required while the event topic carries a partition segment (#56 phase 8)."},
 		{Name: "schedule", Type: "string", Doc: "Cron schedule with a leading seconds field, e.g. \"0 0 * * * *\"."},
 		{Name: "filter", Type: "string", Doc: "The trigger filter as a keyword; the standalone @filter(...) annotation is the usual spelling and sets the same filter."},
+		{Name: "on", Type: "string", Doc: "A synonym for event=: on=<concept>.<created|updated|deleted>, with the concept named through the file's `use` import, folds to the same graph.node.<action>.<concept> pattern event= names (resolved by the automation loader and the concept resolver). A later epic retires the synonyms (D15/D17)."},
 	}
 	scheduleKeys = []ArgSpec{
 		{Name: "cron", Type: "string", Doc: "Cron schedule, e.g. \"0 0 * * * *\". Synonym for @trigger(schedule=...)."},
