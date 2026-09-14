@@ -11,13 +11,37 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
+
+// withLanguageLines returns a copy of root with the engine's own language line
+// declared in every domain that lacks one (memql#5357). Load, like boot, reads
+// no file of a domain whose line is refused, so a fixture meant to be PARSED
+// must declare it -- without one, every test here would pass having read
+// nothing at all.
+func withLanguageLines(root fstest.MapFS) fstest.MapFS {
+	line := dslfs.Manifest{Language: languageParser.LanguageVersion, Edition: languageParser.Edition}.Render()
+	out := make(fstest.MapFS, len(root)+1)
+	for p, f := range root {
+		out[p] = f
+	}
+	for p := range root {
+		if d := languageParser.LanguageLineDomainOf(p); d != "" {
+			if _, declared := out[d+"/"+dslfs.ManifestFile]; !declared {
+				out[d+"/"+dslfs.ManifestFile] = &fstest.MapFile{Data: []byte(line)}
+			}
+		}
+	}
+	return out
+}
 
 // loadTree is a test helper: Load must succeed (the integrity lanes are the
 // object under test, not the parse layer).
 func loadTree(t *testing.T, root fstest.MapFS) *Tree {
 	t.Helper()
-	tree, err := Load(root)
+	tree, err := Load(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -335,7 +359,7 @@ mutate thing createThing {
 }`),
 		"demo/mutationshelpers.memql": file(demoConcepts),
 	}
-	tree, err := Load(root)
+	tree, err := Load(withLanguageLines(root))
 	if err == nil {
 		t.Fatalf("expected a parse diagnostic from the broken concepts file")
 	}

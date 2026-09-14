@@ -402,3 +402,16 @@ func TestCatalogReturnsCopies(t *testing.T) {
 		t.Error("editing Lookup's result changed the catalog entry addDuration")
 	}
 }
+
+// includes() refuses to widen a selection the way startsWith does (authoring
+// rule 32): a blank needle matches nothing, since "" occurs in every string.
+// The doc is what Sense and the generated docs print, so it must say so.
+func TestIncludesDocStatesTheBlankRule(t *testing.T) {
+	m, ok := Method(TypeString, "includes")
+	if !ok {
+		t.Fatal("string.includes is not in the catalog")
+	}
+	if !strings.Contains(m.Doc, "blank") || !strings.Contains(m.Doc, "matches nothing") {
+		t.Errorf("includes doc %q must say that a blank sub matches nothing", m.Doc)
+	}
+}

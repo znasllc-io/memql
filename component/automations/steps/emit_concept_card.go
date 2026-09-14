@@ -40,6 +40,36 @@ func (e *EmitConceptCardExecutor) Execute(ctx context.Context, step *automations
 
 	cfg := step.EmitConceptCard
 
+	// A v1 step (memql#5367): the three string fields are expressions parsed
+	// at load and the data's leaves are literals or parsed expressions, so
+	// none of the `$`-prefix sniffing below applies to it.
+	if x := step.Exprs; x != nil {
+		fail := func(what string, err error) (*automations.StepResult, error) {
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("failed to evaluate %s: %v", what, err)
+			result.CompletedAt = time.Now()
+			result.Duration = result.CompletedAt.Sub(result.StartedAt)
+			return result, fmt.Errorf("failed to evaluate %s: %w", what, err)
+		}
+		cardType, err := v1Text(ctx, stepCtx.Evaluator, x.CardType)
+		if err != nil {
+			return fail("cardType", err)
+		}
+		partitionId, err := v1Text(ctx, stepCtx.Evaluator, x.PartitionID)
+		if err != nil {
+			return fail("partitionId", err)
+		}
+		conceptRef, err := v1Text(ctx, stepCtx.Evaluator, x.ConceptRef)
+		if err != nil {
+			return fail("conceptRef", err)
+		}
+		data, err := stepCtx.Evaluator.ResolveV1Map(ctx, cfg.Data)
+		if err != nil {
+			return fail("data", err)
+		}
+		return e.emit(ctx, step, stepCtx, result, cardType, partitionId, conceptRef, data)
+	}
+
 	// Evaluate cardType
 	cardType := cfg.CardType
 	if strings.HasPrefix(cardType, "$") {
@@ -91,11 +121,16 @@ func (e *EmitConceptCardExecutor) Execute(ctx context.Context, step *automations
 		result.Duration = result.CompletedAt.Sub(result.StartedAt)
 		return result, fmt.Errorf("failed to evaluate data: %w", err)
 	}
+	return e.emit(ctx, step, stepCtx, result, cardType, partitionId, conceptRef, evaluatedData)
+}
 
+// emit inserts the card built from evaluated fields and records the step:
+// the half of the step both grammars share.
+func (e *EmitConceptCardExecutor) emit(ctx context.Context, step *automations.Step, stepCtx *Context, result *automations.StepResult, cardType, partitionId, conceptRef string, evaluatedData map[string]any) (*automations.StepResult, error) {
 	// Build the utterance payload for the concept card
 	// Uses utteranceType "system" with action payload to hold card data
 	utterancePayload := map[string]any{
-		"partitionId":         partitionId,
+		"partitionId":     partitionId,
 		"participantId":   "system:concept-card",
 		"participantType": "system",
 		"utteranceType":   "system",
@@ -147,7 +182,7 @@ func (e *EmitConceptCardExecutor) Execute(ctx context.Context, step *automations
 	result.Result = map[string]any{
 		"utteranceId":   utteranceId,
 		"cardType":      cardType,
-		"partitionId":       partitionId,
+		"partitionId":   partitionId,
 		"conceptRef":    conceptRef,
 		"utteranceType": "system",
 		"action": map[string]any{

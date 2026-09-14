@@ -62,6 +62,13 @@ export const recorded = {
   errors: [] as string[],
   /** window.showWarningMessage bodies. */
   warnings: [] as string[],
+  /**
+   * The action buttons offered alongside each warning body, same order
+   * (memql#5362). Recorded for the reason `infoActions` is: a warning whose
+   * buttons were dropped still lands in `warnings`, still reads as working in
+   * a test, and leaves the operator with no way to act on it.
+   */
+  warningActions: [] as string[][],
   /** window.showInformationMessage bodies. */
   infos: [] as string[],
   /** The action buttons offered alongside each of those bodies, same order. */
@@ -95,6 +102,12 @@ export const recorded = {
   watched: [] as string[],
   /** Command ids passed to commands.executeCommand, in order. */
   executed: [] as string[],
+  /**
+   * The arguments each of those commands was given, same order (memql#5362).
+   * `extension.open` means nothing without the extension id it opens, so the
+   * id alone would let a call that opened the wrong page pass.
+   */
+  executedArgs: [] as unknown[][],
   /** Every panel window.createWebviewPanel has produced, in order. */
   webviews: [] as StubWebviewPanel[],
   /** Every window.showOpenDialog invocation, with the options it was given. */
@@ -149,10 +162,24 @@ export function setNextInformationMessageChoice(choice: string | undefined): voi
   nextInformationMessageChoice = choice;
 }
 
+/**
+ * What the next `window.showWarningMessage` answers with (memql#5362).
+ *
+ * Single-shot and defaulting to undefined -- dismissed -- exactly like the
+ * information answer above, and for the same reasons.
+ */
+export let nextWarningMessageChoice: string | undefined;
+
+export function setNextWarningMessageChoice(choice: string | undefined): void {
+  nextWarningMessageChoice = choice;
+}
+
 /** Drops everything `recorded` holds. Call between cases. */
 export function resetRecorded(): void {
   recorded.errors.length = 0;
   recorded.warnings.length = 0;
+  recorded.warningActions.length = 0;
+  nextWarningMessageChoice = undefined;
   recorded.infos.length = 0;
   recorded.infoActions.length = 0;
   nextInformationMessageChoice = undefined;
@@ -164,6 +191,7 @@ export function resetRecorded(): void {
   recorded.commands.length = 0;
   recorded.watched.length = 0;
   recorded.executed.length = 0;
+  recorded.executedArgs.length = 0;
   recorded.webviews.length = 0;
   recorded.openDialogs.length = 0;
   recorded.terminals.length = 0;
@@ -839,9 +867,15 @@ export const window = {
     );
   },
 
-  showWarningMessage(message: string): Promise<undefined> {
+  // Records the body AND the action buttons, and answers with whatever
+  // setNextWarningMessageChoice() armed (memql#5362) -- the warning twin of
+  // showInformationMessage above.
+  showWarningMessage(message: string, ...items: string[]): Promise<string | undefined> {
     recorded.warnings.push(message);
-    return Promise.resolve(undefined);
+    recorded.warningActions.push([...items]);
+    const answer = nextWarningMessageChoice;
+    nextWarningMessageChoice = undefined;
+    return Promise.resolve(answer);
   },
 
   registerTreeDataProvider(viewId: string, _provider: unknown): StubDisposable {
@@ -966,8 +1000,9 @@ export const commands = {
   // (memql#3477), and both are surfaces of their own with their own tests --
   // what the panel is responsible for is asking for them, in order, which is
   // what the id list preserves.
-  executeCommand(id: string, ..._args: unknown[]): Promise<undefined> {
+  executeCommand(id: string, ...args: unknown[]): Promise<undefined> {
     recorded.executed.push(id);
+    recorded.executedArgs.push(args);
     return Promise.resolve(undefined);
   },
 };

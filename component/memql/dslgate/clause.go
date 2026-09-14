@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/dslclause"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
@@ -266,8 +267,14 @@ func MatchingClose(src string, openIdx int) int {
 // by a user-scope column without checking the caller? Restricting to the filter
 // clause asks exactly that, and takes the corpus from 43 matches to 1.
 //
-// A struct-form filter is a single line -- the parser rejects a multi-line
-// clause -- so line extraction is sufficient here.
+// THE FILTER IS THE WHOLE CLAUSE, continuation lines included. This used to
+// say a struct-form filter is a single line because the parser rejected a
+// multi-line clause; memql#4123 made the normaliser fold continuation lines,
+// and this kept reading the first line only -- so a user-scope column moved
+// onto a wrapped `&& ownerUserId==args.x` line was outside the surface. The
+// edition-2026 codemod wraps every long filter that way (epic memql#5363),
+// which would have made it the common case rather than a corner.
+//
 // The update block is tracked by BRACE DEPTH, not by the first line that
 // trims to `}`. A nested object closes with its own `}`, so the naive version
 // left the block early and every `id:` after a nested field became invisible
@@ -284,19 +291,65 @@ func MatchingClose(src string, openIdx int) int {
 // the brace is scanned like any other line, so the one-line spelling is not an
 // escape hatch either.
 func RowSelectionSurface(body string) string {
-	body = BlankComments(body)
+	clause, ids := rowSelectionParts(body)
 	var b strings.Builder
+	if clause != "" {
+		b.WriteString("filter  ")
+		b.WriteString(clause)
+		b.WriteByte('\n')
+	}
+	for _, id := range ids {
+		b.WriteString(id)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// SelectsByUserScopeField reports whether a construct body SELECTS rows by a
+// user-scope column: whether its row-selection surface (RowSelectionSurface)
+// reads one of UserScopeFields as the row's own column.
+//
+// An edition-2026 filter is read as a tree. There every field is a member of
+// the lambda parameter -- `row.ownerUserId == args.x` -- and UserScopeFieldRe
+// deliberately skips a dotted reference, so the regex could not see a single
+// v1 selection: every one of them would have classified `other`, and the
+// hard-failing bucket would have gone silent tree-wide the day the codemod
+// ran. A v1 clause that does not parse is read as text, looking for
+// `<param>.<field>`: the loader refuses it with the parser's own message, and
+// what this gate must not do is pass over a user-scope selection because the
+// parse failed.
+func SelectsByUserScopeField(body string) bool {
+	clause, ids := rowSelectionParts(body)
+	if lam, isV1, err := v1Clause(clause); isV1 {
+		switch {
+		case err != nil || lam == nil:
+			if v1TextReadsUserScopeField(clause) {
+				return true
+			}
+		case v1ReadsUserScopeField(lam):
+			return true
+		}
+	} else if UserScopeFieldRe.MatchString(clause) {
+		return true
+	}
+	for _, id := range ids {
+		if UserScopeFieldRe.MatchString(id) {
+			return true
+		}
+	}
+	return false
+}
+
+// rowSelectionParts returns a body's filter clause (FilterClauseOf) and every
+// `id:` assignment of its update block.
+func rowSelectionParts(body string) (clause string, ids []string) {
+	body = BlankComments(body)
+	clause = FilterClauseOf(body)
 	depth := 0
 	awaitingOpen := false
 
 	for _, line := range strings.Split(body, "\n") {
 		t := strings.TrimSpace(line)
-
-		if strings.HasPrefix(t, "filter") {
-			b.WriteString(t)
-			b.WriteByte('\n')
-			continue
-		}
 
 		rest := t
 		switch {
@@ -331,8 +384,7 @@ func RowSelectionSurface(body string) string {
 		for _, seg := range strings.Split(rest, ",") {
 			seg = strings.TrimSpace(seg)
 			if strings.HasPrefix(seg, "id:") {
-				b.WriteString(seg)
-				b.WriteByte('\n')
+				ids = append(ids, seg)
 			}
 		}
 		// Braces are counted on the STRUCTURE of the line -- string literals
@@ -344,7 +396,7 @@ func RowSelectionSurface(body string) string {
 			depth = 0
 		}
 	}
-	return b.String()
+	return clause, ids
 }
 
 // MaxPredicateNesting bounds the recursion in the clause walkers. Nothing in
@@ -509,7 +561,25 @@ func UnwrapWhenPredicate(p string) string {
 //
 // Parens are peeled before each test so `(A || B) && C` is read as a
 // conjunction, not as text containing `||`.
+//
+// AN EDITION-2026 CLAUSE IS READ AS A TREE (epic memql#5363). The same four
+// rules are ast.Guarantees over the parsed lambda body, and each leaf is
+// judged by the SAME leaf predicate, over the leaf's canonical source with
+// string contents blanked (v1LeafText) -- so the vocabulary of what counts as
+// an owner or admin check stays one list for both editions. The optional
+// argument guard needs no rule of its own there: `(args.x == nil || e)` is a
+// disjunction whose first arm guarantees nothing, so it is conditional exactly
+// as `when(args.x) { e }` was, and `(args.x != nil && e)` under a `||` admits
+// only rows e admits. A v1 clause that does not parse, that binds other than
+// one parameter, or whose parameter shadows a reserved root (`actor => ...`
+// would make `actor.userId` a ROW field) guarantees nothing.
 func ClauseGuarantees(clause string, leaf func(string) bool) bool {
+	if lam, isV1, err := v1Clause(clause); isV1 {
+		if err != nil || lam == nil || len(lam.Params) != 1 || isReservedRoot(lam.Params[0]) {
+			return false
+		}
+		return ast.Guarantees(lam.Body, func(n ast.ExpressionNode) bool { return leaf(v1LeafText(n)) })
+	}
 	return clauseGuaranteesAt(clause, leaf, 0)
 }
 
@@ -583,24 +653,56 @@ func clauseGuaranteesAt(clause string, leaf func(string) bool, depth int) bool {
 // It exists separately from every other filter extractor in the repo because
 // those FLATTEN the clause into a predicate list, and flattening is exactly
 // what classification cannot use: see ClauseGuarantees.
+//
+// Which lines belong to the clause is dslclause.ClauseExtent's answer -- the
+// fold the struct-query normaliser applies -- so the text classified is the
+// text the engine runs. It used to run to the next blank line, annotation,
+// brace or keyword, which agreed with the normaliser on the clauses it had met
+// and differed on others: a blank line inside a wrapped clause ended it here
+// and not there, so a conjunct after the blank was invisible to the classifier
+// while the engine applied it.
 func FilterClauseOf(body string) string {
-	var out []string
-	inFilter := false
-	for _, line := range strings.Split(BlankComments(body), "\n") {
-		trim := strings.TrimSpace(line)
-		if !inFilter {
-			if rest, ok := strings.CutPrefix(trim, "filter"); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t') {
-				inFilter = true
-				out = append(out, strings.TrimSpace(rest))
-			}
-			continue
+	lines := strings.Split(BlankComments(body), "\n")
+	for i, line := range lines {
+		if isFilterOpener(strings.TrimSpace(line)) {
+			parts, _ := filterClauseLines(lines, i)
+			return joinClauseLines(parts)
 		}
-		if trim == "" || strings.HasPrefix(trim, "@") || strings.HasPrefix(trim, "}") || IsClauseEndKeyword(trim) {
-			break
-		}
-		out = append(out, trim)
 	}
-	return strings.TrimSpace(strings.Join(out, " "))
+	return ""
+}
+
+// isFilterOpener reports whether a trimmed, comment-free line opens a
+// `filter` clause.
+func isFilterOpener(trim string) bool {
+	rest, ok := strings.CutPrefix(trim, "filter")
+	return ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t')
+}
+
+// filterClauseLines returns the filter clause that opens on lines[i], one
+// entry per physical line: the text after the keyword, then every line
+// dslclause.ClauseExtent folds into it, each trimmed. A blank line inside the
+// clause is an empty entry, so an entry's index is its line offset from i and
+// a position the v1 parser reports maps back onto the source. last is the
+// index of the clause's final line. lines must be comment-free.
+func filterClauseLines(lines []string, i int) (parts []string, last int) {
+	last = dslclause.ClauseExtent(lines, i)
+	parts = append(parts, strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[i]), "filter")))
+	for j := i + 1; j <= last; j++ {
+		parts = append(parts, strings.TrimSpace(lines[j]))
+	}
+	return parts, last
+}
+
+// joinClauseLines renders a clause's lines as one line of text.
+func joinClauseLines(parts []string) string {
+	kept := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			kept = append(kept, p)
+		}
+	}
+	return strings.Join(kept, " ")
 }
 
 // IsClauseEndKeyword reports whether a line starts the next clause of a

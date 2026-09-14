@@ -68,7 +68,7 @@ Add v2-specific event handlers to `dsl/library/automations.memql`:
 @description("Handle v2 artifact creation")
 automation handleV2Artifact {
   step run {
-    logic handleV2Artifact { event: event }
+    logic handleV2Artifact(event: event)
   }
 }
 ```

@@ -364,6 +364,17 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 
 	output := make(map[string]any)
 
+	// A body parsed in the edition-2026 expression grammar compiles through
+	// the v1 half (automation_generator_v1.go): its expressions are carried
+	// as canonical v1 source and `{"$expr": ...}` value leaves, and the
+	// runtime evaluates them with EvalExpr (memql#5367). Everything that is
+	// not an expression -- the metadata, the trigger, the args contract --
+	// compiles the same for both.
+	v1 := automation.ExpressionsV1
+	if v1 {
+		output[expressionsV1Key] = expressionsV1Value
+	}
+
 	// Basic metadata
 	output["name"] = def.Name
 	if desc := parser.EffectiveDescription(automation.DocComment, automation.Description); desc != "" {
@@ -438,6 +449,16 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	deps := make(map[string]map[string]struct{}, len(orderedIds))
 	for _, id := range orderedIds {
 		step := stepsById[id]
+		if v1 {
+			// The legacy extractor reads string-evaluator text (dotted
+			// names, first(x)); a v1 step's references are its free names.
+			refs, err := collectStepReferencesV1(step, stepIds)
+			if err != nil {
+				return nil, fmt.Errorf("automation %q: %w", def.Name, err)
+			}
+			deps[id] = refs
+			continue
+		}
 		refs := collectAllStepReferences(c, step, stepIds)
 		deps[id] = refs
 	}
@@ -452,7 +473,7 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	steps := make([]map[string]any, 0, len(sorted))
 	for _, id := range sorted {
 		step := stepsById[id]
-		compiledStep, err := c.compileStep(step)
+		compiledStep, err := c.compileStepFor(step, v1)
 		if err != nil {
 			return nil, err
 		}
@@ -463,7 +484,7 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 
 	// OnComplete hook (using return if defined)
 	if automation.OnComplete != nil {
-		onComplete, err := c.compileStep(automation.OnComplete)
+		onComplete, err := c.compileStepFor(automation.OnComplete, v1)
 		if err != nil {
 			return nil, err
 		}
@@ -472,7 +493,7 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 
 	// OnError hook
 	if automation.OnError != nil {
-		onError, err := c.compileStep(automation.OnError)
+		onError, err := c.compileStepFor(automation.OnError, v1)
 		if err != nil {
 			return nil, err
 		}
@@ -504,7 +525,15 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	// `return args.event.payload.id`); the single-return half is fixed in
 	// substituteArgRefValue. convertEventReferences is applied for symmetry
 	// (a `return event.X` body in an automation logic resolves the same way).
-	if returnStep != nil {
+	//
+	// A v1 return is canonical v1 source, like every other v1 expression.
+	if returnStep != nil && v1 {
+		src, err := v1ReturnSource(returnStep)
+		if err != nil {
+			return nil, fmt.Errorf("automation %q: %w", def.Name, err)
+		}
+		output["_return"] = src
+	} else if returnStep != nil {
 		output["_return"] = convertArgReferences(convertEventReferences(c.expressionToString(returnStep.Config.(*parser.QueryStepConfig).Query)))
 	}
 

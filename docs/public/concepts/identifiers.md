@@ -141,13 +141,13 @@ A client sends a **bare** id; the engine resolves it. There is no client
 composition step. Two resolution paths, both accepting bare AND canonical
 from internal callers (so the transition needs no shims):
 
-- **`id == args.X`** on a query/mutation -- `resolveFullId`
+- **`row.id == args.X`** on a query/mutation -- `resolveFullId`
   (`component/memql/executor_filter.go`) composes the bare arg against the
   construct's signature-bound concept. A colon-bearing value must already
   be a well-formed canonical id under that concept, or it errors loudly
   (wrong-concept / legacy-prefixed ids no longer silently match nothing --
   A1 hardening).
-- **`payload.<field> == args.X`** where `<field>` carries an outgoing
+- **`row.<field> == args.X`** where `<field>` carries an outgoing
   `@relationship` -- `canonicalizeRelationshipComparisons` rewrites the
   bare RHS to canonical against the field's target concept before the
   filter runs (matched by the same insert-time

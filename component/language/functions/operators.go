@@ -9,13 +9,15 @@ package functions
 // Two record decisions shape it:
 //
 //   - D9, the precedence. Level is the row of the record's table, 1 binding
-//     tightest; the parser's own precedence table is pinned against these
-//     levels once it exists (TestOperatorLevelsAreTheRecords pins them to the
-//     record until then).
+//     tightest, and TestOperatorLevelsAreTheParsersPrecedence holds every
+//     level to parser.V1PrecedenceTable, the table the parser binds by and
+//     the language reference publishes.
 //   - D8, absence. "Absent" means the key is missing OR its value is JSON
-//     null, and Absence restates the record's one table for the operator.
-//     Both evaluators reproduce that table, and the differential lane holds
-//     them to it; the prose here is what an author reads.
+//     null. In `==`, `!=` and `in` an absent value, `nil` and the empty string
+//     are one value, "unset" (settled 2026-09-13). Absence restates the
+//     record's one table for the operator; both evaluators reproduce that
+//     table, and the differential lane holds them to it. The prose here is
+//     what an author reads.
 
 // Operator is one operator of the v1 expression grammar.
 type Operator struct {
@@ -108,12 +110,12 @@ func Operators() []Operator {
 		{
 			Symbol: "==", Name: "equal", Kind: "comparison", Form: "a == b", Level: 6,
 			Doc:     "Is true when two values are equal. Numbers compare numerically, and `1 == \"1\"` is false.",
-			Absence: "An absent field equals `nil` and equals `\"\"`, and equals nothing else.",
+			Absence: "A missing field, JSON null, `nil` and `\"\"` are one unset value: each equals the others and nothing else.",
 		},
 		{
 			Symbol: "!=", Name: "notEqual", Kind: "comparison", Form: "a != b", Level: 6,
 			Doc:     "Is true when two values differ.",
-			Absence: "An absent field is not equal to every value except `\"\"` and `nil`: `row.f != \"x\"` matches it, `row.f != \"\"` does not.",
+			Absence: "The exact negation of `==`, so an unset field is not equal to `\"x\"`, and `row.f != nil` and `row.f != \"\"` are false for it.",
 		},
 		{
 			Symbol: "<", Name: "less", Kind: "comparison", Form: "a < b", Level: 6,
@@ -138,7 +140,7 @@ func Operators() []Operator {
 		{
 			Symbol: "in", Name: "in", Kind: "in", Form: "v in list", Level: 6,
 			Doc:     "Is true when v equals an element of the list: `row.status in [\"open\", \"held\"]`, `args.tag in row.tags`.",
-			Absence: "Is false when either side is absent.",
+			Absence: "Membership is `==` against each element, so an unset v is in a list only when the list holds `\"\"` or `nil`. Nothing is in an absent list.",
 		},
 		{
 			Symbol: "startsWith", Name: "startsWith", Kind: "startsWith", Form: "s startsWith p", Level: 6,

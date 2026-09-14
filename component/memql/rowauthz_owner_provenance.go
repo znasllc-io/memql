@@ -110,6 +110,11 @@ func classifyTemplateValue(v any) valueProvenance {
 	case bool, int, int64, float64:
 		return provNone
 	case langparser.ExpressionNode:
+		// An edition-2026 leaf has its own reading (mutation_values_v1.go);
+		// every other node is the string half's.
+		if p, isV1 := classifyV1TemplateLeaf(t); isV1 {
+			return p
+		}
 		return classifyParserExpression(t)
 	default:
 		// FAIL CLOSED. An earlier version rendered the value with

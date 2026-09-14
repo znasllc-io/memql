@@ -3,6 +3,7 @@ package memql
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	memqldsl "github.com/znasllc-io/memql/dsl"
@@ -196,13 +197,18 @@ func importedConceptHints(content string) map[string]string {
 	return out
 }
 
+// bareConceptNameRe is a concept short name: one identifier, no namespace.
+var bareConceptNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 // ResolveCanonicalIdConceptRefs rewrites the typed foreign-concept form
 // `canonicalId(<value>, <importedConceptName>)` to the canonical-id string form
 // `canonicalId(<value>, "v1:ns:name")` (#987), resolving the short-name against
 // the file's `use ...concepts.{ ... }` imports + the concept registry. The
-// quoted string form is left untouched (additive), and `canonicalId(` text
-// inside string literals (e.g. an `@description`) is skipped. An unimported or
-// unknown concept name is a hard error so the typo surfaces at load.
+// short name may be quoted -- `canonicalId(<value>, "name")`, the edition-2026
+// spelling -- and resolves the same way; a quoted canonical id is left
+// untouched (additive), and `canonicalId(` text inside string literals (e.g.
+// an `@description`) is skipped. An unimported or unknown concept name is a
+// hard error so the typo surfaces at load.
 func (r *ConceptResolver) ResolveCanonicalIdConceptRefs(content string) (string, error) {
 	return r.ResolveCanonicalIdConceptRefsInDomain(content, "")
 }
@@ -396,10 +402,23 @@ func (r *ConceptResolver) ResolveCanonicalIdConceptRefsInNamespace(content, doma
 		secondArg := strings.TrimSpace(content[commaIdx+1 : closeParen])
 
 		if strings.HasPrefix(secondArg, "\"") {
-			// String form -- additive, leave unchanged.
-			b.WriteString(content[i : closeParen+1])
-			i = closeParen + 1
-			continue
+			// A quoted SHORT name -- `canonicalId(x, "campaign")` -- is the
+			// edition-2026 spelling of the bare form: a v1 expression
+			// resolves no bare name, so memqlmigrate --rewrite=expressions
+			// quotes the imported name, and it resolves here exactly as the
+			// bare one does, under the same import and ambient rules and
+			// with the same load error for a name this file cannot bind.
+			// Any other string -- a canonical id -- is left unchanged, as
+			// it always was. A quoted short name never worked unresolved: the
+			// engine's canonicalisation knows concepts by their canonical id
+			// only, so it failed on every call.
+			name, err := strconv.Unquote(secondArg)
+			if err != nil || !bareConceptNameRe.MatchString(name) {
+				b.WriteString(content[i : closeParen+1])
+				i = closeParen + 1
+				continue
+			}
+			secondArg = name
 		}
 
 		nsHint, ok := imports[secondArg]

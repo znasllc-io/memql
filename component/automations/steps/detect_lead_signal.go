@@ -87,8 +87,15 @@ func (e *DetectLeadSignalExecutor) Execute(ctx context.Context, step *automation
 		return result, nil
 	}
 
-	// Resolve the source text
-	sourceValue, err := stepCtx.Evaluator.EvaluateStepReference(cfg.Source)
+	// Resolve the source text -- for a v1 step, the source expression parsed
+	// at load (memql#5367).
+	var sourceValue any
+	var err error
+	if x := step.Exprs; x != nil {
+		sourceValue, err = v1Value(ctx, stepCtx.Evaluator, x.Source)
+	} else {
+		sourceValue, err = stepCtx.Evaluator.EvaluateStepReference(cfg.Source)
+	}
 	if err != nil {
 		result.Status = "failed"
 		result.Error = "failed to evaluate source: " + err.Error()

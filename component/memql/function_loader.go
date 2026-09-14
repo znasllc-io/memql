@@ -178,7 +178,22 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// The signature concepts were captured from the PRE-rewrite
 	// source above; we apply the translation against the post-rewrite
 	// content here.
+	//
+	// NOT for a query with an edition-2026 lambda (memql#5366). The
+	// translation is textual, and a v1 filter names every row read through
+	// its parameter -- `row => row.<concept>.x == 1` would become
+	// `row.payload.x`, and a parameter the author named after the concept
+	// (`registration => registration.revoked`) would become a read of an
+	// undefined `payload`. A query never needs the translation in the first
+	// place: its filter reads payload fields bare (legacy) or through the
+	// parameter (v1), and the conformance gate refuses `<concept>.<field>` in
+	// a filter. `=>` appears in a query only as a v1 lambda: a legacy filter
+	// refuses lambdas, and collection-method lambdas live in logic bodies.
+	v1Query := strings.Contains(content, "func (Query)") && strings.Contains(content, "=>")
 	for _, name := range signatureConcepts {
+		if v1Query {
+			break
+		}
 		content = translateSignatureConceptPathsToPayload(content, name)
 	}
 
@@ -547,28 +562,39 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				return nil, fmt.Errorf("function %q mutation body must be an insert() statement, got %T", expectedName, funcDef.Body)
 			}
 
-			payloadObj, err := parsePayloadRawToTemplate(stmt.PayloadRaw)
-			if err != nil {
-				return nil, fmt.Errorf("function %q: parse payload: %w", expectedName, err)
+			// If the mutation body didn't specify a concept (implicit from
+			// use), fill it from BoundConcept. It is also the concept C5
+			// checks the fields of.
+			mutationConcept := stmt.Concept
+			if mutationConcept == "" && boundConcept != "" {
+				mutationConcept = boundConcept
 			}
 
-			// C5 (memql#2035): a caller-supplied arg can never write a
-			// field the concept marks @internal or @serverSet -- those
-			// are server-only / server-stamped. This gate makes the
-			// accept/stamp sugar safe (an `accept { internalField }`
-			// desugars to `internalField: args.internalField`, which is
-			// rejected here) AND catches a hand-written `insert` that
-			// binds a sensitive field straight from caller args. The
-			// concept is resolved from the signature/use binding; an
-			// unannotated concept (today's whole tree) has no sensitive
-			// fields, so this is a no-op until concepts adopt the
-			// annotations.
-			sensitiveConcept := stmt.Concept
-			if sensitiveConcept == "" {
-				sensitiveConcept = boundConcept
-			}
-			if err := validateMutationCallerArgs(registry, sensitiveConcept, expectedName, payloadObj); err != nil {
-				return nil, err
+			// The values. Parsed with the edition-2026 grammar
+			// (Options.ExpressionsV1), the statement carries parsed nodes --
+			// PayloadExpr and the four slots -- and newMutationTemplateV1
+			// builds, checks and lays them out (mutation_values_v1.go);
+			// otherwise the string half reads PayloadRaw's text. Everything
+			// after this block is the same for both.
+			var tmpl *FunctionMutationTemplate
+			if funcDef.ExpressionsV1 {
+				v1, err := mutationTemplateFromStmtV1(stmt, mutationConcept)
+				if err != nil {
+					return nil, fmt.Errorf("function %q: %w", expectedName, err)
+				}
+				// C5 (below, for the string half) reads the block's
+				// fields; for a v1 template those are its laid-out payload
+				// and overlay, with parsed nodes at the leaves.
+				if err := validateMutationCallerArgs(registry, mutationConcept, expectedName, mutationBlockFieldsV1(v1)); err != nil {
+					return nil, err
+				}
+				tmpl = v1
+			} else {
+				legacy, err := mutationTemplateFromStmtLegacy(stmt, mutationConcept, registry, expectedName)
+				if err != nil {
+					return nil, err
+				}
+				tmpl = legacy
 			}
 
 			mergeFields, err := mutationMergeFields(funcDef, stmt.Kind)
@@ -610,69 +636,14 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
 			}
 
-			// Handle object-literal syntax: insert("concept", { id: ..., payload: {...} })
-			// If the payloadObj includes an id or payload key, normalize them.
-			var idTemplate any = stmt.IDTemplate
-			var createdAtTemplate any = stmt.CreatedAtTemplate
-			var payloadTemplate any = payloadObj
-			var payloadOverlay map[string]any
-			if payloadObj != nil {
-				if idVal, ok := payloadObj["id"]; ok && idTemplate == nil {
-					idTemplate = idVal
-				}
-				if createdAtVal, ok := payloadObj["createdAt"]; ok && createdAtTemplate == nil {
-					createdAtTemplate = createdAtVal
-				}
-				payloadVal, hasPayloadKey := payloadObj["payload"]
-				if hasPayloadKey {
-					// payload can itself be an expression (e.g., args.payload) that evaluates to an object at runtime.
-					payloadTemplate = payloadVal
-				}
-				// Remove id if it was embedded inside the object literal.
-				delete(payloadObj, "id")
-				delete(payloadObj, "createdAt")
-				delete(payloadObj, "payload")
-				// If we didn't have an explicit payload wrapper, payloadTemplate remains the entire object.
-				if payloadTemplate == nil {
-					payloadTemplate = payloadObj
-				} else if hasPayloadKey && len(payloadObj) > 0 {
-					// The insert block mixed `args.payload` (the splat) with
-					// explicit fields like `ownerUserId: actor.userId`. Keep
-					// the explicit fields as an overlay -- renderMutationTemplate
-					// evaluates the splat first, then overlays these, so an
-					// authz-relevant server-side stamp wins over any caller-
-					// supplied value in the splat payload (memql#401). Without
-					// this branch the explicit fields were silently dropped.
-					payloadOverlay = payloadObj
-				}
-			}
-
-			parentTemplate := stmt.ParentTemplate
-			aliasOfTemplate := stmt.AliasOfTemplate
-
-			// If the mutation body didn't specify a concept (implicit from use),
-			// fill it from BoundConcept.
-			mutationConcept := stmt.Concept
-			if mutationConcept == "" && boundConcept != "" {
-				mutationConcept = boundConcept
-			}
-			fn.MutationTemplate = &FunctionMutationTemplate{
-				Kind:                   stmt.Kind,
-				Concept:                mutationConcept,
-				IDTemplate:             idTemplate,
-				CreatedAtTemplate:      createdAtTemplate,
-				PayloadTemplate:        payloadTemplate,
-				PayloadOverlayTemplate: payloadOverlay,
-				ParentTemplate:         parentTemplate,
-				AliasOfTemplate:        aliasOfTemplate,
-				MergeFields:            mergeFields,
-				AppendFields:           appendFields,
-				AddToSetFields:         addToSetFields,
-				RemoveFromSetFields:    removeFromSetFields,
-				CreateOnlyFields:       createOnlyFields,
-				NoUnsetFields:          noUnsetFields,
-				ScrubPii:               scrubPii,
-			}
+			tmpl.MergeFields = mergeFields
+			tmpl.AppendFields = appendFields
+			tmpl.AddToSetFields = addToSetFields
+			tmpl.RemoveFromSetFields = removeFromSetFields
+			tmpl.CreateOnlyFields = createOnlyFields
+			tmpl.NoUnsetFields = noUnsetFields
+			tmpl.ScrubPii = scrubPii
+			fn.MutationTemplate = tmpl
 			fn.ExprSource = extractExpressionFromContent(content)
 
 		case languageParser.FunctionTypeLogic:
@@ -729,7 +700,30 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		default:
 			// Query functions: convert the expression AST to executable engine AST.
 			if parserExpr, ok := funcDef.Body.(languageParser.ExpressionNode); ok {
-				converter := NewASTConverter()
+				// An edition-2026 filter -- the lambda the struct-form
+				// rewriter joins onto the concept binding -- lowers through
+				// Lower, against the bound concept's declared fields and the
+				// query's declared arguments (memql#5366). The spec registry
+				// is not loaded yet, so a predicate application's kind is
+				// checked later, by the Init pass, from fn.V1Filter.
+				var lowerOpts []ASTConverterOption
+				if funcDef.Type == languageParser.FunctionTypeQuery {
+					var bound *memoryNodes.Concept
+					if registry != nil && boundConcept != "" {
+						if c, err := registry.Get(boundConcept); err == nil {
+							bound = c
+						}
+					}
+					argTypes := argTypesFromSchema(fn.ArgsSchema)
+					lowerOpts = append(lowerOpts, WithPredicateLowering(func(lam *languageParser.LambdaExpr) (ExpressionNode, error) {
+						if fn.V1Filter != nil {
+							return nil, fmt.Errorf("a query has one filter, and %q has a second lambda where a condition goes", expectedName)
+						}
+						fn.V1Filter = lam
+						return lowerQueryFilter(lam, bound, argTypes, nil)
+					}))
+				}
+				converter := NewASTConverter(lowerOpts...)
 				engineExpr, err := converter.ConvertExpression(parserExpr)
 				if err != nil {
 					return nil, fmt.Errorf("convert function %q body: %w", expectedName, err)
@@ -927,6 +921,8 @@ func stampConceptCacheHint(expr ExpressionNode, seconds int) bool {
 		return stampConceptCacheHint(n.Target, seconds)
 	case *ShapeExpression:
 		return stampConceptCacheHint(n.Target, seconds)
+	case *RefineExpression:
+		return stampConceptCacheHint(n.Target, seconds)
 	default:
 		return false
 	}
@@ -941,6 +937,9 @@ func ensureBoundConceptFilter(expr ExpressionNode, boundConcept string) Expressi
 		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
 		return n
 	case *PaginateExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	case *RefineExpression:
 		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
 		return n
 	case *SelectExpression:
@@ -1045,6 +1044,12 @@ func resolveBareConcept(expr ExpressionNode, boundConcept string) ExpressionNode
 		return &PaginateExpression{
 			Limit:  n.Limit,
 			Target: resolveBareConcept(n.Target, boundConcept),
+		}
+	case *RefineExpression:
+		return &RefineExpression{
+			Target:   resolveBareConcept(n.Target, boundConcept),
+			Lambda:   n.Lambda,
+			Bindings: n.Bindings,
 		}
 	case *ShapeExpression:
 		return &ShapeExpression{
@@ -1299,6 +1304,11 @@ func collectFunctionRefsRecursive(expr ExpressionNode, refs *[]string) {
 		collectFunctionRefsRecursive(node.Target, refs)
 	case *PaginateExpression:
 		collectFunctionRefsRecursive(node.Target, refs)
+	case *RefineExpression:
+		// The target: the refine lambda is a v1 AST whose calls are catalog
+		// functions and predicates, never constructs (validateRefine refuses
+		// a construct call in it).
+		collectFunctionRefsRecursive(node.Target, refs)
 	case *SelectExpression:
 		collectFunctionRefsRecursive(node.Target, refs)
 	case *TimestampExpression:
@@ -1393,6 +1403,11 @@ func walkForImpureLambda(expr ExpressionNode, functions map[string]*Function) er
 	case *CountExpression:
 		return walkForImpureLambda(node.Target, functions)
 	case *ShapeExpression:
+		return walkForImpureLambda(node.Target, functions)
+	case *RefineExpression:
+		// The target. The refine lambda cannot call a construct at all
+		// (validateRefine refuses one), so there is no impure call in it
+		// for this walk to find.
 		return walkForImpureLambda(node.Target, functions)
 	}
 	return nil
@@ -1714,6 +1729,83 @@ func convertArgsField(field *languageParser.ArgsField) (*FunctionArgsField, erro
 	return result, nil
 }
 
+// mutationTemplateFromStmtLegacy builds a mutation's template from the string
+// half's reading of its statement: PayloadRaw's object-literal text, laid out
+// by parsePayloadRawToTemplate and hoisted here, and the four slots as the
+// parser left them. C5 runs on the block's fields before the hoist, where it
+// always has. The annotation fields are the caller's to attach. The flip
+// deletes this with the string half; mutationTemplateFromStmtV1 is its
+// edition-2026 counterpart.
+func mutationTemplateFromStmtLegacy(stmt *languageParser.MutationStmt, concept string, registry memoryNodes.Registry, expectedName string) (*FunctionMutationTemplate, error) {
+	payloadObj, err := parsePayloadRawToTemplate(stmt.PayloadRaw)
+	if err != nil {
+		return nil, fmt.Errorf("function %q: parse payload: %w", expectedName, err)
+	}
+
+	// C5 (memql#2035): a caller-supplied arg can never write a
+	// field the concept marks @internal or @serverSet -- those
+	// are server-only / server-stamped. This gate makes the
+	// accept/stamp sugar safe (an `accept { internalField }`
+	// desugars to `internalField: args.internalField`, which is
+	// rejected here) AND catches a hand-written `insert` that
+	// binds a sensitive field straight from caller args. The
+	// concept is resolved from the signature/use binding; an
+	// unannotated concept (today's whole tree) has no sensitive
+	// fields, so this is a no-op until concepts adopt the
+	// annotations.
+	if err := validateMutationCallerArgs(registry, concept, expectedName, payloadObj); err != nil {
+		return nil, err
+	}
+
+	// Handle object-literal syntax: insert("concept", { id: ..., payload: {...} })
+	// If the payloadObj includes an id or payload key, normalize them.
+	var idTemplate any = stmt.IDTemplate
+	var createdAtTemplate any = stmt.CreatedAtTemplate
+	var payloadTemplate any = payloadObj
+	var payloadOverlay map[string]any
+	if payloadObj != nil {
+		if idVal, ok := payloadObj["id"]; ok && idTemplate == nil {
+			idTemplate = idVal
+		}
+		if createdAtVal, ok := payloadObj["createdAt"]; ok && createdAtTemplate == nil {
+			createdAtTemplate = createdAtVal
+		}
+		payloadVal, hasPayloadKey := payloadObj["payload"]
+		if hasPayloadKey {
+			// payload can itself be an expression (e.g., args.payload) that evaluates to an object at runtime.
+			payloadTemplate = payloadVal
+		}
+		// Remove id if it was embedded inside the object literal.
+		delete(payloadObj, "id")
+		delete(payloadObj, "createdAt")
+		delete(payloadObj, "payload")
+		// If we didn't have an explicit payload wrapper, payloadTemplate remains the entire object.
+		if payloadTemplate == nil {
+			payloadTemplate = payloadObj
+		} else if hasPayloadKey && len(payloadObj) > 0 {
+			// The insert block mixed `args.payload` (the splat) with
+			// explicit fields like `ownerUserId: actor.userId`. Keep
+			// the explicit fields as an overlay -- renderMutationTemplate
+			// evaluates the splat first, then overlays these, so an
+			// authz-relevant server-side stamp wins over any caller-
+			// supplied value in the splat payload (memql#401). Without
+			// this branch the explicit fields were silently dropped.
+			payloadOverlay = payloadObj
+		}
+	}
+
+	return &FunctionMutationTemplate{
+		Kind:                   stmt.Kind,
+		Concept:                concept,
+		IDTemplate:             idTemplate,
+		CreatedAtTemplate:      createdAtTemplate,
+		PayloadTemplate:        payloadTemplate,
+		PayloadOverlayTemplate: payloadOverlay,
+		ParentTemplate:         stmt.ParentTemplate,
+		AliasOfTemplate:        stmt.AliasOfTemplate,
+	}, nil
+}
+
 // valueReferencesCallerArg reports whether a parsed payload-template
 // value is bound to caller-supplied input. The struct-form rewriter
 // passes `args.X` references through verbatim; the object-literal
@@ -1721,6 +1813,10 @@ func convertArgsField(field *languageParser.ArgsField) (*FunctionArgsField, erro
 // thing. Non-string values (literals, nested objects) are never
 // caller-args. Backs the C5 (memql#2035) sensitive-field gate.
 func valueReferencesCallerArg(v any) bool {
+	// An edition-2026 leaf is a parsed node, not text (mutation_values_v1.go).
+	if isArg, isV1 := v1LeafIsCallerArg(v); isV1 {
+		return isArg
+	}
 	s, ok := v.(string)
 	if !ok {
 		return false

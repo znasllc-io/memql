@@ -3,6 +3,22 @@
 The Marketplace renders this file on the extension's page, so it is written for
 someone deciding whether to install rather than for someone reading the repo.
 
+## 0.4.0
+
+**The MemQL it speaks, and the cluster's**
+- This release speaks MemQL edition 2026, grammar
+  `2026.09-dsl-v1-expressions-b80c0409`: its
+  highlighting, completion and diagnostics are that grammar's.
+- When you connect to a cluster, the extension compares the cluster's MemQL
+  with its own. A cluster on a newer grammar raises a notice naming the release
+  of this extension to install, with a button that opens it in the Extensions
+  view. A cluster on an older grammar raises a notice that completion may offer
+  forms the cluster refuses until the cluster is updated. Each cluster is
+  mentioned once per grammar in a session, and the details are in the MemQL
+  Connection output channel.
+- A cluster whose engine predates the comparison does not report its MemQL, and
+  the extension says nothing about it.
+
 ## 0.3.1
 
 First published release. The extension has been built and installed from source

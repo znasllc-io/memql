@@ -42,6 +42,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/dslclause"
 	"github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -224,6 +225,9 @@ func scanTopLevelConstructs(source string) []constructSpan {
 
 	var out []constructSpan
 	depth := 0
+	// scanLines is the comment-blanked source by line, for the extent of a
+	// brace-less declaration (matchPredicateDecl).
+	scanLines := strings.Split(parser.BlankComments(source), "\n")
 	// preambleTok indexes the `@` that opened the pending annotation block, or
 	// -1 when none is pending. Everything at depth 0 between two declarations
 	// is annotations, so the first `@` after a declaration closes is the start
@@ -255,6 +259,14 @@ func scanTopLevelConstructs(source string) []constructSpan {
 				continue
 			}
 			if span, lastTok, ok := matchTerseAutomation(tokens, i); ok {
+				span.start = tokens[startTok].Pos
+				span.end = tokens[lastTok].EndPos
+				out = append(out, span)
+				preambleTok = -1
+				i = lastTok
+				continue
+			}
+			if span, lastTok, ok := matchPredicateDecl(tokens, i, scanLines); ok {
 				span.start = tokens[startTok].Pos
 				span.end = tokens[lastTok].EndPos
 				out = append(out, span)
@@ -443,6 +455,63 @@ func matchTerseAutomation(tokens []parser.Token, i int) (constructSpan, int, boo
 			End:   Position{Line: nameTok.EndLine, Column: nameTok.EndCol},
 		},
 	}, last, true
+}
+
+// matchPredicateDecl recognises an edition-2026 brace-less predicate
+// declaration (memql#5364):
+//
+//	spec agent isAssistant = row => row.role == "assistant"
+//	trait isActiveRecord = row => row.active == true
+//
+// For the terse automation's two reasons: it IS a declaration, and left
+// unrecognised its annotation preamble dangles at depth 0 and the NEXT
+// declaration's span is cut from there -- swallowing this whole declaration
+// into the next one's text and its source hash.
+//
+// Its extent is its expression: the header line plus every continuation line
+// dslclause.ClauseExtent folds into it (the codemod wraps a long spec at its
+// top-level `&&`), ending at the last token on the last of those lines. That
+// is where parser.ExtractPredicateDeclarationSlices ends it on the engine
+// side, byte for byte -- the parity the construct source hash rests on.
+// Returns the span (start filled by the caller) and the index of that token.
+func matchPredicateDecl(tokens []parser.Token, i int, scanLines []string) (constructSpan, int, bool) {
+	t := tokens[i]
+	if t.Type != parser.TokenIdentifier || (t.Literal != "spec" && t.Literal != "trait") {
+		return constructSpan{}, 0, false
+	}
+	idents := make([]int, 0, 2)
+	j := i + 1
+	for ; j < len(tokens) && len(idents) < 2; j++ {
+		if tokens[j].Type != parser.TokenIdentifier && !parser.IsKeywordUsableAsName(tokens[j].Type) {
+			break
+		}
+		idents = append(idents, j)
+	}
+	if len(idents) == 0 || j >= len(tokens) || tokens[j].Type != parser.TokenOperator || tokens[j].Literal != "=" {
+		return constructSpan{}, 0, false
+	}
+	if t.Line < 1 || t.Line > len(scanLines) {
+		return constructSpan{}, 0, false
+	}
+	lastLine := dslclause.ClauseExtent(scanLines, t.Line-1) + 1 // 1-based
+	last := j
+	for k := j + 1; k < len(tokens) && tokens[k].Type != parser.TokenEOF && tokens[k].Line <= lastLine; k++ {
+		last = k
+	}
+
+	nameTok := tokens[idents[len(idents)-1]]
+	span := constructSpan{
+		keyword: t.Literal,
+		name:    nameTok.Literal,
+		signature: Range{
+			Start: Position{Line: t.Line, Column: t.Column},
+			End:   Position{Line: nameTok.EndLine, Column: nameTok.EndCol},
+		},
+	}
+	if len(idents) == 2 {
+		span.concept = tokens[idents[0]].Literal
+	}
+	return span, last, true
 }
 
 // runnableFromSpan parses one construct's authored text in isolation and

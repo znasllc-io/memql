@@ -21,6 +21,7 @@ package sense
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/ast"
@@ -70,8 +71,11 @@ func (s *Service) expressionHover(source string, line, col int) (*HoverResult, b
 		unary := op.Name == "not" || op.Name == "negate"
 		return card(operatorCard(op, ctx.Position, operandsRowFree(toks, idx, ctx.Params, unary)))
 	}
-	if spelling, replacement, ok := retiredAt(toks, idx, col); ok {
-		return card(retiredCard(spelling, replacement))
+	if form, ok := retiredAt(toks, idx, col, ctx.Position); ok {
+		return card(retiredCard(form))
+	}
+	if form, example, ok := s.retiredPredicateAt(source, toks, idx); ok {
+		return card(retiredCardWith(form, example))
 	}
 	if f, site, ok := s.catalogEntryAt(toks, idx, line, col, ctx); ok {
 		a := tiers.Admitted
@@ -348,101 +352,133 @@ func firstWordOfLine(toks []parser.Token, idx int) string {
 
 // ---- Retired spellings ----
 
-// retiredForms are the retired spellings that are syntax rather than a
-// function name, so the catalog's RetiredFunctions has no row for them. The
-// parser's own refusal table (V1RetiredForms, on the parser branch) is the
-// authority; these are the ones an author meets as a single token.
-var retiredForms = map[string]struct{ spelling, replacement string }{
-	"when": {"when(args.x) { ... }", "args.x == nil || <predicate>"},
-	"null": {"null", "nil"},
-	"has":  {"x has v", "v in x"},
+// The parser's refusal table (parser.V1RetiredForms) is the one authority on
+// a retired spelling: how it was written and what replaces it. Sense keys the
+// table by its stable rule ids and knows only which token each form starts
+// at, so a card cannot say something the load refusal does not.
+const (
+	ruleWhenGuard         = "retired_when_guard"
+	ruleConditionalPrefix = "retired_conditional_prefix"
+	ruleSemicolon         = "retired_semicolon_connective"
+	ruleHas               = "retired_has"
+	ruleNotIn             = "retired_not_in"
+	ruleNull              = "retired_null"
+	ruleDollarArgs        = "retired_dollar_args"
+	ruleSpecReference     = "retired_spec_reference"
+	ruleTraitReference    = "retired_trait_reference"
+	ruleContainsMethod    = "retired_contains_method"
+)
+
+// retiredForm looks a rule up in the parser's table.
+func retiredForm(rule string) (parser.RetiredForm, bool) {
+	for _, f := range parser.V1RetiredForms() {
+		if f.Rule == rule {
+			return f, true
+		}
+	}
+	return parser.RetiredForm{}, false
 }
 
-// retiredAt returns the retired spelling the token at idx is, and what to
-// write instead. A retired FUNCTION is its name used as a call -- `count` on
-// its own line is the query's count clause, and `.count(` is the live list
-// method -- and `contains` is retired only in its two-argument substring
-// form: with one argument it is the live traversal.
-func retiredAt(toks []parser.Token, idx, col int) (spelling, replacement string, ok bool) {
+// retiredCallForm is the table's form for a retired function called by name:
+// the parser names each such rule retired_<name>_call, and matches the name
+// without regard to case, as the pre-v1 builtin dispatch did.
+func retiredCallForm(name string) (parser.RetiredForm, bool) {
+	return retiredForm("retired_" + strings.ToLower(name) + "_call")
+}
+
+// retiredAt returns the retired form the token at idx starts. A retired
+// FUNCTION is its name used as a call -- `count` on its own line is the
+// query's count clause, and `.count(` is the live list method -- and
+// `contains` is retired only in its two-argument substring form: with one
+// argument it is the live traversal.
+func retiredAt(toks []parser.Token, idx, col int, pos tiers.Position) (parser.RetiredForm, bool) {
 	t := toks[idx]
 	calls := idx+1 < len(toks) && toks[idx+1].Type == parser.TokenParenOpen
 	switch t.Type {
 	case parser.TokenKeywordWhen:
 		if calls {
-			f := retiredForms["when"]
-			return f.spelling, f.replacement, true
+			return retiredForm(ruleWhenGuard)
+		}
+	case parser.TokenQuestionDot:
+		return retiredForm(ruleConditionalPrefix)
+	case parser.TokenSemicolon:
+		// Nothing but the retired connective writes `;` inside an expression.
+		if pos != "" {
+			return retiredForm(ruleSemicolon)
 		}
 	case parser.TokenKeywordHas:
-		f := retiredForms["has"]
-		return f.spelling, f.replacement, true
+		return retiredForm(ruleHas)
 	case parser.TokenKeywordNot:
-		if calls {
-			return "not(a)", functions.RetiredFunctions()["not"], true
-		}
 		if idx+1 < len(toks) && toks[idx+1].Type == parser.TokenKeywordIn {
-			return "x not in list", "!(x in list)", true
+			return retiredForm(ruleNotIn)
+		}
+		if calls {
+			return retiredCallForm("not")
+		}
+	case parser.TokenOperator:
+		if t.Literal == "$" {
+			return retiredForm(ruleDollarArgs)
 		}
 	case parser.TokenIdentifier:
 		seg, last, recv := segmentAt(t, col)
-		if t.Literal == "null" {
-			f := retiredForms["null"]
-			return f.spelling, f.replacement, true
+		switch {
+		case t.Literal == "null":
+			return retiredForm(ruleNull)
+		case (t.Literal == "spec" || t.Literal == "trait") && pos != "" && idx+1 < len(toks) &&
+			toks[idx+1].Type == parser.TokenIdentifier && toks[idx+1].Line == t.Line:
+			// `spec <name>` inside an expression; the keyword that opens a
+			// declaration sits in no expression position.
+			if t.Literal == "spec" {
+				return retiredForm(ruleSpecReference)
+			}
+			return retiredForm(ruleTraitReference)
 		}
 		if !calls || !last {
-			return "", "", false
+			return parser.RetiredForm{}, false
 		}
 		if recv != "" {
 			// A method: the collection `.contains(v)` is membership now.
-			if r, ok := functions.RetiredMethods()["list."+seg]; ok {
-				return "x." + seg + "(v)", r, true
+			if seg == "contains" {
+				return retiredForm(ruleContainsMethod)
 			}
-			return "", "", false
+			return parser.RetiredForm{}, false
 		}
-		if seg == "contains" {
-			if callArgCount(toks, idx+1) >= 2 {
-				includes, _ := functions.Method(functions.TypeString, "includes")
-				return "contains(s, sub)", methodSpelling(includes, "contains(s, sub)"), true
-			}
-			return "", "", false
+		if strings.EqualFold(seg, "contains") && callArgCount(toks, idx+1) < 2 {
+			return parser.RetiredForm{}, false
 		}
-		if r, ok := functions.RetiredFunctions()[seg]; ok {
-			return retiredSpelling(seg), r, true
-		}
+		return retiredCallForm(seg)
 	}
-	return "", "", false
+	return parser.RetiredForm{}, false
 }
 
-// retiredSpelling returns how a retired function was written: the catalog
-// entry that replaces it records the spelling ("len(x)"), otherwise its name
-// over an ellipsis.
-func retiredSpelling(name string) string {
-	for _, f := range functions.Catalog() {
-		for _, r := range f.Retired {
-			if strings.HasPrefix(r, name+"(") {
-				return r
-			}
-		}
-	}
-	return name + "(...)"
+// retiredChoice matches the one kind of replacement the table writes as a
+// choice rather than a single form: "<a> for <use> or <b> for <use>".
+var retiredChoice = regexp.MustCompile(`^(.+?) for (.+?) or (.+?) for (.+)$`)
+
+// retiredCard renders a retired form's hover card: the replacement, then the
+// retirement and the rewrite that performs it.
+func retiredCard(f parser.RetiredForm) string {
+	return retiredCardWith(f, "")
 }
 
-// methodSpelling renders the call a retired function spelling becomes as a
-// method: its first argument turns into the receiver, `contains(s, sub)` into
-// `s.includes(sub)`.
-func methodSpelling(m functions.Function, retired string) string {
-	open := strings.IndexByte(retired, '(')
-	args := strings.Split(strings.TrimSuffix(retired[open+1:], ")"), ",")
-	for i := range args {
-		args[i] = strings.TrimSpace(args[i])
+// retiredCardWith is retiredCard with the author's own construct, as the
+// rewrite writes it, in the code block in place of the table's placeholder
+// form when there is one.
+func retiredCardWith(f parser.RetiredForm, example string) string {
+	spelling := "`" + f.Spelling + "`"
+	if glyph, ok := strings.CutSuffix(f.Spelling, " as a connective"); ok {
+		spelling = "`" + glyph + "` as a connective"
 	}
-	return args[0] + "." + m.Name + "(" + strings.Join(args[1:], ", ") + ")"
-}
-
-// retiredCard renders a retired spelling's hover card: the replacement, then
-// the retirement and the rewrite that performs it.
-func retiredCard(spelling, replacement string) string {
-	return fmt.Sprintf("```memql\n%s\n```\n\n`%s` is retired in edition 2026. Write `%s` instead; `%s` rewrites it.",
-		replacement, spelling, replacement, migrator)
+	code, write := f.Replacement, "`"+f.Replacement+"` instead"
+	if m := retiredChoice.FindStringSubmatch(f.Replacement); m != nil {
+		code = m[1] + "\n" + m[3]
+		write = fmt.Sprintf("`%s` for %s or `%s` for %s", m[1], m[2], m[3], m[4])
+	}
+	if example != "" {
+		code = example
+	}
+	return fmt.Sprintf("```memql\n%s\n```\n\n%s is retired in edition 2026. Write %s; `%s` rewrites it.",
+		code, spelling, write, migrator)
 }
 
 // callArgCount counts the top-level arguments of the call whose `(` is at
@@ -549,7 +585,8 @@ func (s *Service) resolveMethod(ctx CursorContext, recv, name string, line int) 
 	if p, ok := paramInScope(ctx.Params, head); ok && p.Callee == "" && rest != "" && !strings.Contains(rest, ".") {
 		typ = s.memberType(ctx, rest)
 	} else if head == "args" && rest != "" {
-		typ = receiverForType(declaredArgType(ctx.Source, line, rest))
+		_, types := argsAt(ctx, ctx.Source, line)
+		typ = receiverForType(types[rest])
 	}
 	if typ != "" {
 		if f, ok := functions.Method(typ, name); ok {
@@ -600,6 +637,9 @@ func runsLine(f functions.Function, pos tiers.Position, a tiers.Admission) strin
 		case tiers.PlanConstantOnly:
 			return before
 		}
+	}
+	if pos == tiers.PositionQueryRefine {
+		return "Runs in process, over the rows of the page the query read."
 	}
 	if pos != "" && tiers.TierOf(pos) == tiers.TierM {
 		return inProc

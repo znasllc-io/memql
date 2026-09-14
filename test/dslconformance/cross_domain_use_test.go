@@ -36,8 +36,6 @@ package dslconformance
 
 import (
 	"fmt"
-	"github.com/znasllc-io/memql/dsl"
-	"io"
 	"path"
 	"regexp"
 	"sort"
@@ -45,13 +43,16 @@ import (
 	"testing"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 var (
-	crossDomainDeclRe   = regexp.MustCompile(`(?m)^(trait|spec|shape)\s+([A-Za-z_][\w.-]*)(?:\s+([A-Za-z_][\w.-]*))?\s*\{`)
+	// crossDomainDeclRe ends a declaration at `{` or, for edition 2026's
+	// brace-less `spec b n = row => ...` / `trait n = row => ...` (epic
+	// memql#5363), at `=` -- without which every spec and trait of a migrated
+	// tree is declared nowhere and every use of one is skipped as
+	// runtime-delivered.
+	crossDomainDeclRe   = regexp.MustCompile(`(?m)^(trait|spec|shape)\s+([A-Za-z_][\w.-]*)(?:\s+([A-Za-z_][\w.-]*))?\s*[{=]`)
 	crossDomainUseRe    = regexp.MustCompile(`(?m)^use\s+([\w.]+)\.\{([^}]*)\}`)
-	crossDomainFilterRe = regexp.MustCompile(`(?m)^\s*filter\s+(.+)$`)
 	crossDomainShapeRe  = regexp.MustCompile(`(?m)^\s*shape\s+([A-Za-z_]\w*)\s*$`)
 	crossDomainIdentRe  = regexp.MustCompile(`\b([A-Za-z_]\w*)\b`)
 	crossDomainStringRe = regexp.MustCompile(`"(?:[^"\\]|\\.)*"`)
@@ -64,25 +65,11 @@ type crossDomainDecl struct {
 }
 
 func TestCrossDomainReferencesAreImported(t *testing.T) {
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
+	bothCorpora(t, checkCrossDomainReferencesAreImported)
+}
 
-	sources := make(map[string]string, len(paths))
-	for _, p := range paths {
-		file, openErr := tree.Open(p)
-		if openErr != nil {
-			t.Fatalf("open %s: %v", p, openErr)
-		}
-		raw, readErr := io.ReadAll(file)
-		file.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", p, readErr)
-		}
-		sources[p] = string(raw)
-	}
+func checkCrossDomainReferencesAreImported(t *testing.T, c corpus) {
+	paths, sources := c.paths, c.files
 
 	// Index every trait / spec / shape by the domain that declares it. A name
 	// declared in several domains is kept as a set: if the referencing file's
@@ -106,6 +93,7 @@ func TestCrossDomainReferencesAreImported(t *testing.T) {
 
 	type finding struct{ file, name, want string }
 	var findings []finding
+	resolved := 0
 
 	for _, p := range paths {
 		domain := crossDomainOf(p)
@@ -117,9 +105,12 @@ func TestCrossDomainReferencesAreImported(t *testing.T) {
 		body := crossDomainStringRe.ReplaceAllString(languageParser.BlankComments(raw), `""`)
 
 		refs := map[string]bool{}
-		for _, m := range crossDomainFilterRe.FindAllStringSubmatch(body, -1) {
-			for _, id := range crossDomainIdentRe.FindAllStringSubmatch(m[1], -1) {
-				refs[id[1]] = true
+		// The WHOLE clause, continuation lines included, and only the names
+		// that are not a member read: `row.status` is a field in edition
+		// 2026, not a reference to a construct named `status`.
+		for _, clause := range filterClauseTexts(body) {
+			for _, id := range bareIdents(crossDomainIdentRe, clause) {
+				refs[id] = true
 			}
 		}
 		for _, m := range crossDomainShapeRe.FindAllStringSubmatch(body, -1) {
@@ -140,6 +131,7 @@ func TestCrossDomainReferencesAreImported(t *testing.T) {
 			if len(homes) == 0 {
 				continue // declared nowhere here -- runtime-delivered, unimportable
 			}
+			resolved++
 			ambient := false
 			for _, h := range homes {
 				if h.domain == domain {
@@ -158,6 +150,15 @@ func TestCrossDomainReferencesAreImported(t *testing.T) {
 			})
 		}
 	}
+
+	// The reachable positive: references this resolved to a declaration it
+	// then had to judge (imported ones are counted before this, so the count
+	// is of references that reached the domain check). Measured when the
+	// floor was set: 224 in each edition.
+	if resolved < 150 {
+		t.Errorf("resolved %d trait/spec/shape references to a declaration -- the declaration or reference read has stopped matching and this gate would pass on anything", resolved)
+	}
+	t.Logf("resolved %d references", resolved)
 
 	if len(findings) > 0 {
 		var b strings.Builder

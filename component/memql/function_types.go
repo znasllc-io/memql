@@ -95,6 +95,14 @@ type Function struct {
 	// Expr is the parsed expression AST (for user-defined functions).
 	Expr ExpressionNode
 
+	// V1Filter is a query's edition-2026 filter lambda as written (memql#5366).
+	// Expr already holds its lowering -- the loader lowers it while specs are
+	// still loading, so without the predicate registry -- and the engine's
+	// Init pass lowers it again from here with the registry in hand, to check
+	// every predicate application's kind (lowerAllPushdownPositions). Nil for
+	// a legacy filter.
+	V1Filter *languageParser.LambdaExpr
+
 	// LogicSteps carries the parsed multi-step body for Logic functions
 	// whose body has intermediate `name := <call>` steps before the
 	// `_return` terminator. When set, the engine dispatches the call
@@ -233,13 +241,17 @@ func (f *Function) clone() *Function {
 		mutationCopy = &clone
 	}
 	return &Function{
-		Name:             f.Name,
-		Description:      f.Description,
-		DocComment:       f.DocComment,
-		UsageDoc:         f.UsageDoc,
-		ExprSource:       f.ExprSource,
-		BoundConcept:     f.BoundConcept,
-		Expr:             cloneExpressionNode(f.Expr),
+		Name:         f.Name,
+		Description:  f.Description,
+		DocComment:   f.DocComment,
+		UsageDoc:     f.UsageDoc,
+		ExprSource:   f.ExprSource,
+		BoundConcept: f.BoundConcept,
+		Expr:         cloneExpressionNode(f.Expr),
+		// The v1 filter as written: a parsed AST, read-only after parsing,
+		// so shared. It MUST be listed -- the registry hands out clones, and
+		// a clone without it is a query the Init pass cannot re-check.
+		V1Filter:         f.V1Filter,
 		LogicSteps:       f.LogicSteps, // shared parsed AST -- read-only at runtime
 		MutationTemplate: mutationCopy,
 		Origin:           f.Origin,

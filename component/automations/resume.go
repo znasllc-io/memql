@@ -274,6 +274,9 @@ func (e *Executor) ResumeFrom(
 	if automation == nil {
 		return nil, fmt.Errorf("automation is nil")
 	}
+	if err := requirePreparedExpressions(automation); err != nil {
+		return nil, err
+	}
 	if opts == nil {
 		opts = &ResumeOptions{}
 	}
@@ -363,6 +366,7 @@ func (e *Executor) ResumeFrom(
 		evaluator.SetCustom("args", boundArgs)
 		evaluator.SetCustom("argsDeclared", declaredArgsSet(automation))
 	}
+	bindV1RunAmbient(ctx, e.engine, evaluator, automation)
 
 	// Restore input from the run row
 	if journal.Input != nil {
@@ -493,7 +497,7 @@ func (e *Executor) ResumeFrom(
 					"condition", step.Condition,
 				)
 			}
-			shouldRun, err := evaluator.EvaluateCondition(step.Condition)
+			shouldRun, err := evaluator.StepCondition(ctx, step)
 			if err != nil {
 				if e.logger != nil {
 					e.logger.Warn("step condition evaluation failed",

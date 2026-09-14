@@ -7,9 +7,12 @@ import (
 	"testing"
 )
 
-// The declarative editor-smarts file is hand-maintained (unlike the generated
-// tmLanguage grammar). These tests pin the contract issue #2602 introduced:
-// brace expansion and indentation must be driven by the language configuration
+// The declarative editor-smarts file is GENERATED since memql#5362, like the
+// tmLanguage grammar beside it: internal/grammar/languageconfig.go renders it
+// from dslspec's punctuation table, and TestLanguageConfigurationIsUpToDate
+// holds the committed file to that output. These tests pin the BEHAVIOUR the
+// generated patterns must keep -- the contract issue #2602 introduced: brace
+// expansion and indentation must be driven by the language configuration
 // itself, not by each user's editor.autoIndent setting.
 const checkedInLanguageConfig = "../../editors/vscode/language-configuration.json"
 

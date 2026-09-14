@@ -218,9 +218,9 @@ concept cadet {
 func mountTraversalFixture(t *testing.T) {
 	t.Helper()
 	before := memorynodes.All()
-	memqldsl.RegisterTree(traversalFixtureDomain, fstest.MapFS{
+	memqldsl.RegisterTree(traversalFixtureDomain, withLanguageLine(fstest.MapFS{
 		"concepts.memql": {Data: []byte(traversalFixtureConcepts)},
-	})
+	}))
 	t.Cleanup(func() {
 		memqldsl.UnregisterTree(traversalFixtureDomain)
 		memorynodes.ReplaceAll(before)

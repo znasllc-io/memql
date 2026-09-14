@@ -6,6 +6,9 @@ import (
 	"compress/gzip"
 	"io/fs"
 	"testing/fstest"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // The fixture packages (design section J).
@@ -60,6 +63,11 @@ concept widget {
 
 func file(s string) *fstest.MapFile { return &fstest.MapFile{Data: []byte(s)} }
 
+// languageLine is the memql.toml a package's DSL domain declares: the stager
+// delivers each domain directory on its own, so each carries its own line
+// (memql#5357), exactly as a real package must.
+var languageLine = dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render()
+
 // validPackage is a memql-project-shaped tree: a manifest, two declared
 // deployables, one discovered DSL domain.
 func validPackage() fstest.MapFS {
@@ -70,6 +78,7 @@ func validPackage() fstest.MapFS {
 		"clients/docs/package.json": file(`{"name":"docs"}`),
 		"clients/docs/index.html":   file("<!doctype html>\n"),
 		"dsl/acme/concepts.memql":   file(validConcepts),
+		"dsl/acme/memql.toml":       file(languageLine),
 	}
 }
 
@@ -110,6 +119,7 @@ func reservedDomainPackage() fstest.MapFS {
 func prebuiltNoDslPackage() fstest.MapFS {
 	p := prebuiltPackage()
 	delete(p, "dsl/acme/concepts.memql")
+	delete(p, "dsl/acme/memql.toml")
 	p["clients/docs/dist/index.html"] = file("<!doctype html><title>docs</title>\n")
 	return p
 }

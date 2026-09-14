@@ -60,7 +60,7 @@ func loadFixtureAutomations(t *testing.T, domain, src string) ([]*automations.Au
 	t.Helper()
 	t.Setenv(memql.AllowSkipsEnvVar, "") // strict regardless of ambient env
 
-	memqldsl.RegisterTree(domain, fstest.MapFS{"automations.memql": {Data: []byte(src)}})
+	memqldsl.RegisterTree(domain, withLanguageLine(fstest.MapFS{"automations.memql": {Data: []byte(src)}}))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	var logs bytes.Buffer

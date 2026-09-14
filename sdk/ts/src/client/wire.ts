@@ -595,6 +595,15 @@ export interface ServerHelloPayload {
   // (memql#4575). Absent or empty when it cannot be established -- render it
   // as unknown rather than passing it on.
   engineCommit?: string;
+  // The MemQL language the node speaks (memql#5362): its edition ("2026"),
+  // its grammar version inside that edition, and the first release of MemQL
+  // for VS Code that carries the grammar. Absent when the node predates the
+  // fields -- "older than this contract", which compares as unknown, never as
+  // a match. A grammar version is a label: equal or different, never ordered;
+  // the order comes from editorRelease, which is a release.
+  edition?: string;
+  grammarVersion?: string;
+  editorRelease?: string;
 }
 
 export interface QueryResultPayload {

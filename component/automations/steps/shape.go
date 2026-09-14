@@ -43,7 +43,18 @@ func (e *ShapeExecutor) Execute(ctx context.Context, step *automations.Step, ste
 	// IMPORTANT: .memql automations use bare step references like "stepId.result.X"
 	// (not "$steps.stepId.result.X"). EvaluateStepReference supports resolving
 	// these friendly references.
-	sourceValue, err := stepCtx.Evaluator.EvaluateStepReference(shapeCfg.Source)
+	//
+	// A v1 step's source is an expression parsed at load (memql#5367). The
+	// TEMPLATE is not: it is the shape helpers' own template language
+	// (node(), ai(), children()), not an expression position, and it is
+	// applied the same way for both grammars.
+	var sourceValue any
+	var err error
+	if x := step.Exprs; x != nil {
+		sourceValue, err = v1Value(ctx, stepCtx.Evaluator, x.Source)
+	} else {
+		sourceValue, err = stepCtx.Evaluator.EvaluateStepReference(shapeCfg.Source)
+	}
 	if err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("failed to evaluate source: %v", err)

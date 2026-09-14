@@ -70,6 +70,10 @@ func nestedObjectLeafRefs(tmpl map[string]any) (argNames []string, leafCount int
 // `ctx.<name>` for a single-segment name, and returns that name. Anything with
 // a dot in the path, a call wrapper, or a non-string template is not one.
 func bareArgReference(v any) (string, bool) {
+	// An edition-2026 leaf is a parsed node, not text (mutation_values_v1.go).
+	if name, ok, isV1 := v1LeafBareArg(v); isV1 {
+		return name, ok
+	}
 	s, ok := v.(string)
 	if !ok {
 		return "", false

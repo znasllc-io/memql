@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/env"
 	"github.com/znasllc-io/memql/core/id"
@@ -144,6 +145,20 @@ type Automation struct {
 
 	// Origin tracks where this automation was loaded from (file path).
 	Origin string `json:"-"`
+
+	// Expressions is "v1" (ExpressionsV1) when the automation was compiled
+	// from the edition-2026 expression grammar (epic memql#5363): every
+	// condition, source, filter, subject and string-typed expression field
+	// holds canonical v1 source, and every value-map leaf that is an
+	// expression is `{"$expr": "<source>"}`. Empty is the legacy dialect the
+	// string evaluator (evaluator.go) reads. See expressions_v1.go.
+	Expressions string `json:"expressions,omitempty"`
+
+	// exprsPrepared records that PrepareExpressions parsed this v1
+	// automation's expressions. The executor refuses a v1 automation that was
+	// never prepared rather than letting a step fall back to the string
+	// evaluator over v1 source.
+	exprsPrepared bool
 }
 
 // TriggerConfig defines event-based triggers for an automation.
@@ -155,6 +170,11 @@ type TriggerConfig struct {
 	// Filter is an optional condition expression that must be true for the trigger to fire.
 	// Example: "$event.payload.status == 'completed'"
 	Filter string `json:"filter,omitempty"`
+
+	// FilterLambda is Filter parsed once, for a v1 automation: the
+	// `row => <condition>` lambda whose parameter binds the triggering row.
+	// Nil for a legacy automation.
+	FilterLambda *ast.LambdaExpr `json:"-"`
 }
 
 // ArgsSchema is an automation's declared input contract -- the `args { }`
@@ -314,6 +334,12 @@ type Precondition struct {
 	// Description is human-readable context surfaced in the miss signal
 	// and in the cockpit healed-pack UI (E4.6). Optional.
 	Description string `json:"description,omitempty"`
+
+	// checkExpr is Check parsed once, for a v1 automation (PrepareExpressions).
+	// Nil for a legacy one. Unexported: it is a load-time cache, not part of
+	// the precondition's shape, which healing.PatchPrecondition mirrors field
+	// for field (TestPatchPreconditionShapeParity).
+	checkExpr ast.ExpressionNode
 }
 
 // AutomationInput defines the initial data source for an automation.
@@ -445,6 +471,12 @@ type Step struct {
 
 	// EmitConceptCard configuration (type: "emitConceptCard")
 	EmitConceptCard *EmitConceptCardStepConfig `json:"emitConceptCard,omitempty"`
+
+	// Exprs holds this step's expressions parsed once at load, for a step of
+	// a v1 automation (PrepareExpressions). Non-nil IS the mark of a v1 step:
+	// the step executors evaluate it with EvalExpr, and read every string
+	// leaf of its value maps as a literal. Nil for a legacy step.
+	Exprs *StepExprs `json:"-"`
 }
 
 // QueryStepConfig configures a query step.
@@ -476,6 +508,10 @@ type MutationStepConfig struct {
 
 	// AliasOf is an optional alias reference for relationship hints.
 	AliasOf string `json:"aliasOf,omitempty"`
+
+	// leaves are the value leaves a v1 automation carries in id / parent /
+	// aliasOf when they are not strings (value_leaves.go).
+	leaves leafFields
 }
 
 // ShapeStepConfig configures a shape transformation step.
@@ -517,6 +553,10 @@ type WebhookStepConfig struct {
 
 	// Timeout for the request. Defaults to 30s.
 	Timeout string `json:"timeout,omitempty"`
+
+	// leaves are the value leaves a v1 automation carries in url and the
+	// header values when they are not strings (value_leaves.go).
+	leaves leafFields
 }
 
 // EventStepConfig configures an event publication step.
@@ -535,6 +575,10 @@ type EventStepConfig struct {
 
 	// ResultFrom specifies which step's result to include.
 	ResultFrom string `json:"resultFrom,omitempty"`
+
+	// leaves are the value leaves a v1 automation carries in topic when it
+	// is not a string (value_leaves.go).
+	leaves leafFields
 }
 
 // FunctionStepConfig configures a MemQL function invocation.
@@ -665,6 +709,10 @@ type EmitConceptCardStepConfig struct {
 	// Data contains fields to display on the card.
 	// Values support $ expressions.
 	Data map[string]any `json:"data,omitempty"`
+
+	// leaves are the value leaves a v1 automation carries in cardType /
+	// partitionId / conceptRef when they are not strings (value_leaves.go).
+	leaves leafFields
 }
 
 // StepResult contains the outcome of executing a step.

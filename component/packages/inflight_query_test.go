@@ -1,10 +1,17 @@
 package packages
 
 import (
+	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/dslclause"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // The sweep's reach, held to the Go set that decides what "terminal" means.
@@ -33,18 +40,125 @@ func inFlightExclusions(t *testing.T) map[string]bool {
 	if err != nil {
 		t.Fatalf("read queries.memql: %v", err)
 	}
-	m := inFlightFilter.FindSubmatch(src)
+	return inFlightExclusionsIn(t, string(src))
+}
+
+// inFlightExclusionsIn reads the statuses packageDeploymentsInFlight excludes
+// out of a queries.memql source, in either edition.
+//
+// A legacy filter spells an exclusion `status!="x"`; the edition-2026 codemod
+// (epic memql#5363) writes `row.status != "x"`, with spaces, wrapped across
+// lines at its top-level `&&`. A pattern for the first spelling matches
+// nothing in the second and this fatals -- so a v1 filter is PARSED, and an
+// exclusion is a top-level conjunct comparing the row's `status` with `!=`
+// against a string literal, which is also the only place one excludes
+// anything.
+func inFlightExclusionsIn(t *testing.T, src string) map[string]bool {
+	t.Helper()
+	m := inFlightFilter.FindStringSubmatch(src)
 	if m == nil {
 		t.Fatal("packageDeploymentsInFlight not found in dsl/platform/queries.memql")
 	}
 	out := map[string]bool{}
-	for _, hit := range regexp.MustCompile(`status!="([a-z_]+)"`).FindAllStringSubmatch(string(m[1]), -1) {
-		out[hit[1]] = true
+	clause := inFlightClause(m[1])
+	if dslclause.OpensLambda(clause) {
+		lam, err := langparser.ParseV1Lambda(clause)
+		if err != nil {
+			t.Fatalf("packageDeploymentsInFlight's filter does not parse: %v", err)
+		}
+		for _, c := range ast.Conjuncts(lam.Body) {
+			b, ok := c.(*ast.BinaryExpr)
+			if !ok || b.Op != "!=" {
+				continue
+			}
+			root, fields, isPath := ast.MemberPath(ast.Unparen(b.Left))
+			lit, isLit := ast.Unparen(b.Right).(*ast.LiteralExpr)
+			if isPath && isLit && root == lam.Params[0] && len(fields) == 1 && fields[0] == "status" {
+				if s, ok := lit.Value.(string); ok {
+					out[s] = true
+				}
+			}
+		}
+	} else {
+		for _, hit := range regexp.MustCompile(`status!="([a-z_]+)"`).FindAllStringSubmatch(clause, -1) {
+			out[hit[1]] = true
+		}
 	}
 	if len(out) == 0 {
 		t.Fatal("the filter excludes no status at all; the sweep would close every run")
 	}
 	return out
+}
+
+// inFlightClause returns the filter clause of a query body, continuation lines
+// included (dslclause.ClauseExtent).
+func inFlightClause(body string) string {
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		trim := strings.TrimSpace(line)
+		if !dslclause.StartsWith(trim, "filter") {
+			continue
+		}
+		parts := []string{strings.TrimSpace(strings.TrimPrefix(trim, "filter"))}
+		for j, last := i+1, dslclause.ClauseExtent(lines, i); j <= last; j++ {
+			parts = append(parts, strings.TrimSpace(lines[j]))
+		}
+		return strings.Join(parts, " ")
+	}
+	return ""
+}
+
+// TestInFlightExclusionsReadTheMigratedQuery: the same statuses, read off the
+// query as the expressions codemod rewrites it.
+func TestInFlightExclusionsReadTheMigratedQuery(t *testing.T) {
+	raw, err := os.ReadFile("../../dsl/platform/queries.memql")
+	if err != nil {
+		t.Fatalf("read queries.memql: %v", err)
+	}
+	// The rewrite needs every spec and trait in the tree: whether a bare
+	// `isActiveRecord` becomes `isActiveRecord(row)` is decided by a
+	// declaration in another domain.
+	tree := map[string][]byte{}
+	walkErr := filepath.WalkDir("../../dsl", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if repowalk.SkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".memql") {
+			return nil
+		}
+		b, readErr := os.ReadFile(p)
+		tree[p] = b
+		return readErr
+	})
+	if walkErr != nil {
+		t.Fatalf("read dsl/: %v", walkErr)
+	}
+	preds, err := langparser.CollectPredicates(tree)
+	if err != nil {
+		t.Fatalf("collect predicates: %v", err)
+	}
+	migrated, err := langparser.RewriteExpressions(raw, preds)
+	if err != nil {
+		t.Fatalf("migrating queries.memql: %v", err)
+	}
+	if !strings.Contains(inFlightFilter.FindString(string(migrated)), "row =>") {
+		t.Fatal("the codemod left packageDeploymentsInFlight's filter unmigrated; this would compare the legacy query with itself")
+	}
+	legacy, v1 := inFlightExclusions(t), inFlightExclusionsIn(t, string(migrated))
+	if len(legacy) != len(v1) {
+		t.Fatalf("the migrated query excludes %v, the shipped one %v", v1, legacy)
+	}
+	for s := range legacy {
+		if !v1[s] {
+			t.Errorf("the migrated query does not exclude %q", s)
+		}
+	}
 }
 
 func TestInFlightQueryExcludesEveryTerminalStatus(t *testing.T) {

@@ -17,8 +17,6 @@ import (
 // TestV1PrecedenceTableIsPublished: the reference's `### Operator precedence`
 // table is the parser's table, row for row.
 func TestV1PrecedenceTableIsPublished(t *testing.T) {
-	t.Skip("the published table lands with the docs task (Task 13)")
-
 	published := readPublishedPrecedence(t, "../../../docs/public/language/memql.md")
 	want := V1PrecedenceTable()
 	if len(published) != len(want) {
@@ -107,10 +105,9 @@ func leadingWord(cell string) string {
 }
 
 // TestReadPublishedPrecedenceReadsTheReferenceShape proves the reader that
-// TestV1PrecedenceTableIsPublished rests on, while that test is skipped: fed the
-// plan's own table, in the markdown the reference will carry, it returns
-// V1PrecedenceTable. Without this the docs gate would first run on the day the
-// skip is removed, and a reader that silently parsed nothing would pass.
+// TestV1PrecedenceTableIsPublished rests on: fed the plan's own table, in the
+// markdown the reference carries, it returns V1PrecedenceTable, so a reader
+// that silently parsed nothing cannot pass the docs gate.
 func TestReadPublishedPrecedenceReadsTheReferenceShape(t *testing.T) {
 	doc := strings.Join([]string{
 		"## Operators",

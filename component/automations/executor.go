@@ -424,6 +424,9 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	if automation == nil {
 		return nil, fmt.Errorf("automation is nil")
 	}
+	if err := requirePreparedExpressions(automation); err != nil {
+		return nil, err
+	}
 
 	// Acquire concurrency slot (blocks if limit reached)
 	// This prevents database connection exhaustion during event storms
@@ -566,6 +569,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		// optional field resolve bare to nil instead of the literal fallback.
 		evaluator.SetCustom("argsDeclared", declaredArgsSet(automation))
 	}
+	bindV1RunAmbient(ctx, e.engine, evaluator, automation)
 
 	if e.logger != nil {
 		e.logger.Info("starting automation execution",
@@ -781,7 +785,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 					"condition", step.Condition,
 				)
 			}
-			shouldRun, err := evaluator.EvaluateCondition(step.Condition)
+			shouldRun, err := evaluator.StepCondition(ctx, step)
 			if err != nil {
 				if e.logger != nil {
 					e.logger.Warn("step condition evaluation failed",
@@ -1174,6 +1178,8 @@ func (e *Executor) handleAutomationError(ctx context.Context, automation *Automa
 		evaluator.SetSystemSecretResolver(e.createSystemSecretResolver())
 		evaluator.SetCanonicalIdResolver(e.createCanonicalIdResolver())
 		evaluator.SetLogger(e.logger)
+		bindV1RunAmbient(ctx, e.engine, evaluator, automation)
+		bindV1OnErrorRun(evaluator, automation, exec, triggeringEvent)
 
 		stepCtx := &StepContext{
 			Logger:    e.logger,

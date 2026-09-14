@@ -48,7 +48,7 @@ func TestReferencePackToolResolvesInRegistry(t *testing.T) {
 	// Unique throwaway domain: RegisterTree fails loud on a duplicate domain
 	// (issue 2.4), so register under a unique name + UnregisterTree teardown.
 	const domain = "referencepacktoolload"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := newToolRegistry()
@@ -86,7 +86,7 @@ func TestReferencePackBuiltinLoads(t *testing.T) {
 	}
 	overlay := fstest.MapFS{"builtins.memql": {Data: builtinSrc}}
 	const domain = "referencepackbuiltinload"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := newFunctionRegistry()

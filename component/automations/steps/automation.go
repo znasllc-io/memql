@@ -120,8 +120,21 @@ func (e *AutomationExecutor) Execute(ctx context.Context, step *automations.Step
 		execResult *automations.AutomationExecution
 		err        error
 	)
-	if len(step.Automation.Args) > 0 {
-		execResult, err = stepCtx.AutomationTrigger.TriggerAutomationWithArgs(ctx, automationName, step.Automation.Args)
+	callArgs := step.Automation.Args
+	if step.Exprs != nil && len(callArgs) > 0 {
+		// A v1 step hands the sub-automation evaluated VALUES (memql#5367),
+		// never its own reference text.
+		callArgs, err = stepCtx.Evaluator.ResolveV1Map(ctx, callArgs)
+		if err != nil {
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("automation %q argument resolution failed: %v", automationName, err)
+			result.CompletedAt = time.Now()
+			result.Duration = result.CompletedAt.Sub(result.StartedAt)
+			return result, fmt.Errorf("automation %q argument resolution failed: %w", automationName, err)
+		}
+	}
+	if len(callArgs) > 0 {
+		execResult, err = stepCtx.AutomationTrigger.TriggerAutomationWithArgs(ctx, automationName, callArgs)
 	} else {
 		execResult, err = stepCtx.AutomationTrigger.TriggerAutomation(ctx, automationName)
 	}
