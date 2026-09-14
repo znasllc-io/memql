@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "switch.memql",
+      "verdict": "evaluate",
+      "call": "requestStatus",
+      "args": {
+        "role": "writer"
+      },
+      "expect": "needs_approval"
+    },
+    {
+      "file": "label-twice.memql",
+      "verdict": "refuse_parse",
+      "code": "body_case_label",
+      "message": "a case label is a literal written once: `\"a\"`"
+    }
+  ]
+}

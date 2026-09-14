@@ -1,0 +1,9 @@
+logic bigOrSmall {
+  args {
+    n any
+  }
+  if args.n > 5 {
+    return "big"
+  }
+  return "small"
+}

@@ -1,0 +1,11 @@
+/// A region the wait cell probes.
+concept region {
+  name  string
+}
+
+logic probeRegion {
+  args {
+    n  any
+  }
+  return (args.n ?? 0) + 1
+}

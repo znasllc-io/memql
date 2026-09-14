@@ -1,0 +1,13 @@
+logic sizeBand {
+  args {
+    n any
+  }
+  if args.n > 10 {
+    size := "large"
+  } else if args.n > 5 {
+    size := "medium"
+  } else {
+    size := "small"
+  }
+  return size
+}

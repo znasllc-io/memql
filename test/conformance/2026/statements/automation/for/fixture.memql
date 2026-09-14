@@ -1,0 +1,25 @@
+/// An order line the for cell totals.
+concept line {
+  sku       string
+  quantity  int
+}
+
+query line lineItems {
+  filter row => row.quantity > 0
+}
+
+mutate line recordLine {
+  args {
+    sku  string  @required
+  }
+  insert {
+    sku: args.sku
+  }
+}
+
+logic lineTotal {
+  args {
+    quantity  any
+  }
+  return (args.quantity ?? 0) * 2
+}

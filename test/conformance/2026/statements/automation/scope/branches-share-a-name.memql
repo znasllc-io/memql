@@ -1,0 +1,12 @@
+@trigger(schedule="0 0 * * * *")
+automation branchesShare {
+  args {
+    count any
+  }
+  if (args.count ?? 0) > 10 {
+    size := "large"
+  } else {
+    size := "small"
+  }
+  publish "things.sized" { size: size }
+}

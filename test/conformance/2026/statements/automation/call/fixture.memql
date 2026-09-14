@@ -1,0 +1,25 @@
+/// A thing the call cells write and read.
+concept thing {
+  label  string
+  n      int
+}
+
+query thing things {
+  filter row => row.n > 0
+}
+
+mutate thing saveThing {
+  args {
+    label  string  @required
+  }
+  insert {
+    label: args.label
+  }
+}
+
+logic double {
+  args {
+    n  any
+  }
+  return (args.n ?? 0) * 2
+}

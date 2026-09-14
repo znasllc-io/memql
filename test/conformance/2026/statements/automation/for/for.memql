@@ -1,0 +1,8 @@
+@trigger(schedule="0 0 * * * *")
+automation forStatement {
+  lines := query lineItems()
+  for item in lines if item.quantity > 1 {
+    total := logic lineTotal(quantity: item.quantity)
+    mutation recordLine(sku: total > 4 ? item.sku : "small")
+  }
+}

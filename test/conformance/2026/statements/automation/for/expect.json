@@ -1,0 +1,15 @@
+{
+  "cases": [
+    {
+      "file": "for.memql",
+      "verdict": "load_ok",
+      "note": "the loop variable and the names bound in the body exist in each iteration only"
+    },
+    {
+      "file": "for-over-a-call.memql",
+      "verdict": "refuse_parse",
+      "code": "body_call_in_expression",
+      "message": "a construct call is a statement of its own: bind it, `<n> := query things(...)`, and read <n> here"
+    }
+  ]
+}

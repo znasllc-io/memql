@@ -1,0 +1,7 @@
+logic sumAndSame {
+  args {
+    a any
+    b any
+  }
+  return { sum: args.a + args.b, same: args.a == args.b }
+}

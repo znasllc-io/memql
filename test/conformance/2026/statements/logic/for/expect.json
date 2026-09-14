@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "file": "for.memql",
+      "verdict": "evaluate",
+      "call": "firstAbove",
+      "args": {
+        "items": [
+          1,
+          3,
+          5
+        ]
+      },
+      "expect": 3,
+      "note": "the filter reads the loop variable; a return in the body ends the logic"
+    },
+    {
+      "file": "for-over-a-call.memql",
+      "verdict": "refuse_parse",
+      "code": "body_call_in_expression",
+      "message": "a construct call is a statement of its own: bind it, `<n> := query things(...)`, and read <n> here"
+    }
+  ]
+}

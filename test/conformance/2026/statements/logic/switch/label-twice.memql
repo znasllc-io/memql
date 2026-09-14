@@ -1,0 +1,14 @@
+logic labelTwice {
+  args {
+    role any
+  }
+  switch args.role {
+    case "a" {
+      status := 1
+    }
+    case "b", "a" {
+      status := 2
+    }
+  }
+  return status ?? 0
+}

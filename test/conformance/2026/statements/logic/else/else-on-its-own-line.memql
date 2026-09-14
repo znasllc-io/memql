@@ -1,0 +1,12 @@
+logic elseAlone {
+  args {
+    n any
+  }
+  if args.n > 5 {
+    size := "big"
+  }
+  else {
+    size := "small"
+  }
+  return size
+}

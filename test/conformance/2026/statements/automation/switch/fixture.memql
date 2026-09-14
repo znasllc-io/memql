@@ -1,0 +1,17 @@
+/// A signup the switch cell counts.
+concept signup {
+  email  string
+}
+
+query signup recentSignups {
+  filter row => row.email != ""
+}
+
+mutate signup announceGrowth {
+  args {
+    size  string  @required
+  }
+  insert {
+    email: args.size
+  }
+}

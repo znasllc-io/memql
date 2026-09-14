@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "retry.memql",
+      "verdict": "evaluate",
+      "call": "halvedWithRetry",
+      "args": {
+        "n": 8
+      },
+      "expect": 4
+    },
+    {
+      "file": "retry-on-an-expression.memql",
+      "verdict": "refuse_parse",
+      "code": "body_retry_placement",
+      "message": "`retry(n)` applies to a construct call statement"
+    }
+  ]
+}

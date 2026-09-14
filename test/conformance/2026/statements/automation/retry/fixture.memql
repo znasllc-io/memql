@@ -1,0 +1,19 @@
+/// An invoice the retry cell marks.
+concept invoice {
+  paid  bool
+  note  string
+}
+
+query invoice unpaidInvoices {
+  filter row => row.paid == false
+}
+
+mutate invoice markInvoiced {
+  args {
+    note  string  @required
+  }
+  insert {
+    paid: true
+    note: args.note
+  }
+}

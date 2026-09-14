@@ -1,0 +1,13 @@
+@trigger(schedule="0 0 * * * *")
+automation switchStatement {
+  signups := query recentSignups()
+  size := signups.count() > 10 ? "many" : "few"
+  switch size {
+    case "many" {
+      mutation announceGrowth(size: "many")
+    }
+    default {
+      mutation announceGrowth(size: "few")
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "file": "if.memql",
+      "verdict": "evaluate",
+      "call": "bigOrSmall",
+      "args": {
+        "n": 7
+      },
+      "expect": "big",
+      "note": "a return inside a block ends the logic"
+    },
+    {
+      "file": "if-on-a-call.memql",
+      "verdict": "refuse_parse",
+      "code": "body_call_in_expression",
+      "message": "a construct call is a statement of its own: bind it, `<n> := logic other(...)`, and read <n> here"
+    }
+  ]
+}

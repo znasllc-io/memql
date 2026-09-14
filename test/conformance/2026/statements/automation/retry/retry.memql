@@ -1,0 +1,5 @@
+@trigger(schedule="0 0 * * * *")
+automation retryClause {
+  unpaid := query unpaidInvoices() retry(3)
+  mutation markInvoiced(note: "counted") retry(2) on error continue
+}

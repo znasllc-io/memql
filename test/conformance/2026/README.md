@@ -17,6 +17,7 @@ examples a model is shown, so a case that loads is a form an author may copy.
 | `manifest.json` | The edition and language line every case here is written in, and the corpus status (`draft` until the freeze). |
 | `cells/<receiver>/<annotation>/` | One directory per place an annotation can be written, from the annotation registry. Each holds at least one case that loads and one that is refused. |
 | `expr/<position>/` | One directory per expression position, from `component/language/tiers`. Each holds at least one case that loads and one that is refused. |
+| `statements/<construct>/<form>/` | For `logic` and `automation`, one directory per statement form and trailing clause (`parser.BodyStatementForms`), plus `scope/`, `body/` and `retired/` (one refusal per retired body form). Each form holds a case that runs and one that is refused; `statements_gate_test.go` holds them to the parser's lists. |
 | `negative/<construct>/` | One fault per file, the file named after the fault. |
 | `scenarios/<domain>/` | Whole automations as the product ships them, loaded together. |
 | `fuzz/` | Inputs that once broke the parser. |
@@ -55,6 +56,7 @@ named by a case; the runner refuses a file nothing names.
 | `calls` | For `evaluate`: the answer to each construct call the expression makes, by `"<kind> <name>"` (`"query openTickets"`). The corpus boots no database, so what a call returns is the case's to state; the construct must be one the fixture declares and the engine registered, and a call is admitted only where the position admits one (a logic body, a step argument). |
 | `sql` | For `lower`: text the lowered SQL must contain. |
 | `expect` | For `evaluate`: the value the expression must produce. An absent result is `null`. |
+| `call` | For `evaluate`: a logic the case file declares, run with `args` instead of evaluating a bare expression; `calls` answers the construct calls it makes that are not to another logic the case declares. |
 | `note` | Why the case exists. Not checked. |
 
 ## The verdicts
@@ -95,6 +97,13 @@ depends on the tier the position evaluates in (`test/conformance/engine_adapter_
 
 `now` reads `2026-01-02T03:04:05Z` in every case, so a case that reads the
 clock has one answer on every run.
+
+An `evaluate` case with `call` is the one whose file is not an expression: it
+declares logic and must load clean, and the named logic runs with `args`
+through the runner a node calls it through (`test/conformance/corpus_call_test.go`),
+returning `expect`. No construct call reaches the outside: a call to another
+logic the case declares runs it, `calls` answers any other, and a call neither
+covers fails the case.
 
 ## What a load proves
 

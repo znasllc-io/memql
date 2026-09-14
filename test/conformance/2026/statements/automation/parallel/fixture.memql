@@ -1,0 +1,5 @@
+/// A stock level the parallel cases share.
+concept stock {
+  level  int
+  note   string
+}

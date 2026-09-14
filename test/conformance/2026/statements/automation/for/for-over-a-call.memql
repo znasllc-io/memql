@@ -1,0 +1,6 @@
+@trigger(schedule="0 0 * * * *")
+automation forOverACall {
+  for row in query things() {
+    mutation saveThing(label: row.label)
+  }
+}

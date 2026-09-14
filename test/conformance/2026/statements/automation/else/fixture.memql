@@ -1,0 +1,17 @@
+/// A backorder the else cell counts.
+concept backorder {
+  status  string
+}
+
+query backorder pendingBackorders {
+  filter row => row.status == "pending"
+}
+
+mutate backorder flagBacklog {
+  args {
+    level  string  @required
+  }
+  insert {
+    status: args.level
+  }
+}

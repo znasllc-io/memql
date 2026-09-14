@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "wait-any.memql",
+      "verdict": "evaluate",
+      "call": "halvesUntilOne",
+      "args": {
+        "n": 6
+      },
+      "expect": 6
+    },
+    {
+      "file": "wait-some.memql",
+      "verdict": "refuse_parse",
+      "code": "body_wait_value",
+      "message": "`wait` takes `any` (`wait all` is the default and is not written), got `some`"
+    }
+  ]
+}

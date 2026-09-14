@@ -1,0 +1,4 @@
+logic callInExpression {
+  n := 1 + query countThings()
+  return n
+}

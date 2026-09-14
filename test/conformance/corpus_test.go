@@ -35,7 +35,8 @@ package conformance
 // one.
 //   - lower / evaluate: the expression lowers to SQL containing the expected
 //     text, or evaluates against a row to the expected value, through the
-//     adapter in engine_adapter_test.go.
+//     adapter in engine_adapter_test.go -- or, for an evaluate case naming a
+//     `call`, a logic the file declares runs to it (corpus_call_test.go).
 //
 // A refusal is matched on its MESSAGE (text the diagnostic must contain) and,
 // when the refusal carries one, its CODE (a stable rule id such as
@@ -121,6 +122,11 @@ type corpusCase struct {
 	SQL string `json:"sql,omitempty"`
 	// Expect is the value the expression must evaluate to (evaluate).
 	Expect json.RawMessage `json:"expect,omitempty"`
+	// Call, on an evaluate case, names a logic the case file declares: the
+	// file loads like a load case, and the logic runs with Args, returning
+	// Expect (corpus_call_test.go). Without it an evaluate case's file is a
+	// bare expression.
+	Call string `json:"call,omitempty"`
 	// Note says why the case exists. Not checked.
 	Note string `json:"note,omitempty"`
 }
@@ -168,10 +174,11 @@ func TestCorpusVerdicts(t *testing.T) {
 		t.Fatal("the corpus holds no cases -- the runner is reading nothing, so every gate over it would pass by matching nothing")
 	}
 	for _, r := range runs {
-		switch r.c.Verdict {
-		case verdictRefuseParse:
+		switch {
+		case r.c.Verdict == verdictRefuseParse:
 			r.parseErr = corpusParseEdition(r.line.Edition, r.src)
-		case verdictLoadOK, verdictRefuseLoad:
+		case r.c.Verdict == verdictLoadOK || r.c.Verdict == verdictRefuseLoad || r.c.Call != "":
+			// A logic an evaluate case calls loads like a load case first.
 			r.file, r.parseErr = corpusParseFile(r.line.Edition, r.src)
 			if r.parseErr == nil {
 				if err := corpusParseEdition(r.line.Edition, r.src); err != nil {
@@ -181,20 +188,27 @@ func TestCorpusVerdicts(t *testing.T) {
 		}
 	}
 	corpusCheckConstructNames(t, runs)
-	var loads, probes []*corpusRun
+	var loads, probes, calls []*corpusRun
 	for _, r := range runs {
-		switch r.c.Verdict {
-		case verdictLoadOK, verdictRefuseLoad:
+		switch {
+		case r.c.Call != "":
+			// A logic to run loads like a load case first.
 			if r.parseErr == nil {
 				loads = append(loads, r)
 			}
-		case verdictLower, verdictEvaluate:
+			calls = append(calls, r)
+		case r.c.Verdict == verdictLoadOK || r.c.Verdict == verdictRefuseLoad:
+			if r.parseErr == nil {
+				loads = append(loads, r)
+			}
+		case r.c.Verdict == verdictLower || r.c.Verdict == verdictEvaluate:
 			probes = append(probes, r)
 		}
 	}
 	corpusLoad(t, loads)
 	corpusCheckRegistered(t, loads)
 	corpusProbe(t, probes)
+	corpusCall(t, calls)
 
 	for _, r := range runs {
 		r := r
@@ -247,6 +261,16 @@ func corpusJudge(r *corpusRun) string {
 			return fmt.Sprintf("lowered to %q, which does not contain %q", sql, r.c.SQL)
 		}
 	case verdictEvaluate:
+		if r.c.Call != "" {
+			switch {
+			case r.parseErr != nil:
+				return "the parser refused the file: " + r.parseErr.Error()
+			case !r.loadRan:
+				return "the load batch did not run this case"
+			case len(r.loadDiags) > 0:
+				return "the engine refused the file at load:\n    " + strings.Join(r.loadDiags, "\n    ")
+			}
+		}
 		if r.gotErr != nil {
 			return "did not evaluate: " + r.gotErr.Error()
 		}
@@ -460,35 +484,57 @@ func readCorpusDir(t *testing.T, root fs.FS, edition, dir string, line dslfs.Man
 }
 
 func corpusValidateCase(dir string, c corpusCase) string {
+	if c.Call != "" && c.Verdict != verdictEvaluate {
+		return "call names a logic to run, which only an evaluate case does"
+	}
+	if len(c.Calls) > 0 && c.Verdict != verdictEvaluate {
+		return "calls answers the construct calls of an evaluate case; this case evaluates nothing"
+	}
 	switch c.Verdict {
 	case verdictLoadOK:
 	case verdictRefuseParse, verdictRefuseLoad:
 		if c.Message == "" {
 			return "a refusal names the text its diagnostic must contain (message); the wording is part of the contract"
 		}
-	case verdictLower, verdictEvaluate:
-		if c.Concept == "" {
-			return "an expression case names the concept it is over (concept)"
+	case verdictEvaluate:
+		if c.Call == "" {
+			return corpusValidateExpression(dir, c)
 		}
-		if c.Verdict == verdictLower && c.SQL == "" {
-			return "a lower case names the text the SQL must contain (sql)"
-		}
-		if c.Verdict == verdictEvaluate && len(c.Expect) == 0 {
+		if len(c.Expect) == 0 {
 			return "an evaluate case names the value it must produce (expect)"
 		}
-		pos := c.Position
-		if pos == "" {
-			pos = corpusDefaultPosition(dir)
-		}
-		if !corpusKnownPosition(pos) {
-			return fmt.Sprintf("position %q is not a tiers.Position (write one, or put the case under expr/<position>/)", pos)
-		}
+	case verdictLower:
+		return corpusValidateExpression(dir, c)
 	default:
 		return fmt.Sprintf("verdict %q is not one of load_ok, refuse_parse, refuse_load, lower, evaluate", c.Verdict)
 	}
-	if len(c.Calls) > 0 && c.Verdict != verdictEvaluate {
-		return "calls answers the construct calls of an evaluate case; this case evaluates nothing"
+	return corpusValidateFile(c)
+}
+
+// corpusValidateExpression checks a lower or evaluate case whose file is a
+// bare expression.
+func corpusValidateExpression(dir string, c corpusCase) string {
+	if c.Concept == "" {
+		return "an expression case names the concept it is over (concept)"
 	}
+	if c.Verdict == verdictLower && c.SQL == "" {
+		return "a lower case names the text the SQL must contain (sql)"
+	}
+	if c.Verdict == verdictEvaluate && len(c.Expect) == 0 {
+		return "an evaluate case names the value it must produce (expect)"
+	}
+	pos := c.Position
+	if pos == "" {
+		pos = corpusDefaultPosition(dir)
+	}
+	if !corpusKnownPosition(pos) {
+		return fmt.Sprintf("position %q is not a tiers.Position (write one, or put the case under expr/<position>/)", pos)
+	}
+	return corpusValidateFile(c)
+}
+
+// corpusValidateFile checks that a case names a case file of its directory.
+func corpusValidateFile(c corpusCase) string {
 	if c.File == "" || c.File == "fixture.memql" || strings.Contains(c.File, "/") || !strings.HasSuffix(c.File, ".memql") {
 		return "file names a .memql case in this directory, other than fixture.memql"
 	}

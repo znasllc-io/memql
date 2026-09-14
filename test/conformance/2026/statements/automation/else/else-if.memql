@@ -1,0 +1,11 @@
+@trigger(schedule="0 0 * * * *")
+automation elseStatement {
+  pending := query pendingBackorders()
+  if pending.count() > 10 {
+    mutation flagBacklog(level: "many")
+  } else if pending.count() > 0 {
+    mutation flagBacklog(level: "some")
+  } else {
+    mutation flagBacklog(level: "none")
+  }
+}

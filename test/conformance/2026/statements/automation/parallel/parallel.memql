@@ -1,0 +1,34 @@
+query stock lowStock {
+  filter row => row.level < 5
+}
+
+mutate stock restock {
+  args {
+    note  string  @required
+  }
+  insert {
+    level: 10
+    note: args.note
+  }
+}
+
+logic restockLevel {
+  args {
+    n  any
+  }
+  return (args.n ?? 0) + 10
+}
+
+@trigger(schedule="0 0 * * * *")
+automation parallelStatement {
+  parallel {
+    branch counts {
+      low := query lowStock()
+      mutation restock(note: low.count() > 0 ? "some" : "none")
+    }
+    branch levels {
+      level := logic restockLevel(n: 2)
+      mutation restock(note: level > 11 ? "high" : "low")
+    }
+  }
+}
