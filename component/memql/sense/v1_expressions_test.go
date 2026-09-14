@@ -582,7 +582,7 @@ func TestTokenizePipePipe(t *testing.T) {
 	for src, want := range map[string]map[string]string{
 		"a || b":        {"||": "operator"},
 		"a && b":        {"&&": "operator"},
-		"row.?lineage":  {".": "operator", "?": "operator"},
+		"row.?lineage":  {".?": "operator"},
 		"a has b":       {"has": "operator"},
 		"import x":      {"import": "keyword"},
 		"x => x == nil": {"=>": "operator"},

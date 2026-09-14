@@ -125,16 +125,10 @@ func operatorAt(toks []parser.Token, idx int, ctx CursorContext) (functions.Oper
 			return functions.Operator{}, false
 		}
 		name = "not"
-	case parser.TokenDot:
-		if idx+1 < len(toks) && toks[idx+1].Type == parser.TokenQuestion && adjacent(t, toks[idx+1]) {
-			name = "optionalMember"
-		}
+	case parser.TokenDotQuestion:
+		name = "optionalMember"
 	case parser.TokenQuestion:
-		if idx > 0 && toks[idx-1].Type == parser.TokenDot && adjacent(toks[idx-1], t) {
-			name = "optionalMember"
-		} else {
-			name = "ternary"
-		}
+		name = "ternary"
 	case parser.TokenColon:
 		if isTernaryColon(toks, idx) {
 			name = "ternary"
@@ -286,7 +280,7 @@ func isTernaryColon(toks []parser.Token, idx int) bool {
 				return questions > colons
 			}
 		case parser.TokenQuestion:
-			if depth == 0 && !(i > 0 && toks[i-1].Type == parser.TokenDot && adjacent(toks[i-1], toks[i])) {
+			if depth == 0 {
 				questions++
 			}
 		case parser.TokenColon:

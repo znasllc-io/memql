@@ -225,7 +225,7 @@ func mapTokenType(pt parser.Token, isKeywordPos, isConceptPos bool) Token {
 
 	case parser.TokenOperator,
 		parser.TokenDefine, parser.TokenAmpAmp, parser.TokenPipePipe, parser.TokenBang,
-		parser.TokenQuestion, parser.TokenQuestionDot, parser.TokenQuestionQuestion,
+		parser.TokenQuestion, parser.TokenQuestionDot, parser.TokenDotQuestion, parser.TokenQuestionQuestion,
 		parser.TokenDot, parser.TokenKeywordHas:
 		tokenType = "operator"
 
