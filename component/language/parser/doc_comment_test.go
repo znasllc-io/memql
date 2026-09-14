@@ -95,7 +95,7 @@ query candidate probeQuery {
   args {
     planId string!
   }
-  filter planId == args.planId && ownerUserId == actor.userId
+  filter row => row.planId == args.planId && row.ownerUserId == actor.userId
 }`,
 		"mutation": doc + `
 mutate candidate probeMutation {
@@ -103,7 +103,7 @@ mutate candidate probeMutation {
     widgetId string @required
   }
   insert {
-    id: canonicalId(args.widgetId, candidate)
+    id: canonicalId(args.widgetId, "candidate")
   }
 }`,
 		"logic": doc + `
@@ -112,7 +112,7 @@ logic probeLogic {
     a string @required
   }
   body {
-    return coalesce(args.a, "")
+    return args.a ?? ""
   }
 }`,
 		"automation": doc + `
@@ -124,7 +124,7 @@ automation probeAuto {
 
   step persist {
     mutation createSpawnEvent (
-      nodeId: coalesce(node.id, "")
+      nodeId: node.id ?? ""
     )
   }
 }`,
@@ -150,13 +150,9 @@ provider probeProvider {
 policy probePolicy {
 }`,
 		"spec": doc + `
-spec actorEnvelope probeSpec {
-  return role == "admin"
-}`,
+spec actorEnvelope probeSpec = actor => actor.role == "admin"`,
 		"trait": doc + `
-trait probeTrait {
-  return kind == "assistant"
-}`,
+trait probeTrait = row => row.kind == "assistant"`,
 		"capability": doc + `
 @sideEffect("read")
 capability fs.readFile {
@@ -213,7 +209,7 @@ logic probeLogic {
     a string @required
   }
   body {
-    return coalesce(args.a, "")
+    return args.a ?? ""
   }
 }`
 
@@ -224,19 +220,19 @@ logic probeLogic {
 		}
 	})
 	t.Run("plain-comment-transparent", func(t *testing.T) {
-		src := "/// Attached doc.\n// ordinary note\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+		src := "/// Attached doc.\n// ordinary note\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}"
 		if got := firstDeclDoc(t, src); got != "Attached doc." {
 			t.Errorf("plain comment must be transparent, got %q", got)
 		}
 	})
 	t.Run("four-slashes-ignored", func(t *testing.T) {
-		src := "//// divider ////\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+		src := "//// divider ////\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}"
 		if got := firstDeclDoc(t, src); got != "" {
 			t.Errorf("//// must not be a doc comment, got %q", got)
 		}
 	})
 	t.Run("multi-line-block", func(t *testing.T) {
-		src := "/// Line one.\n/// Line two.\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+		src := "/// Line one.\n/// Line two.\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}"
 		if got := firstDeclDoc(t, src); got != "Line one. Line two." {
 			t.Errorf("multi-line join through attachment, got %q", got)
 		}
@@ -253,7 +249,7 @@ logic probeLogic {
     a string @required
   }
   body {
-    return coalesce(args.a, "")
+    return args.a ?? ""
   }
 }`
 	file := parseNormalised(t, src)
@@ -284,7 +280,7 @@ func TestDocComment_ArgsFieldSlot(t *testing.T) {
     limit number
   }
   body {
-    return coalesce(args.planId, "")
+    return args.planId ?? ""
   }
 }`
 	file := parseNormalised(t, src)
@@ -315,7 +311,7 @@ query candidate probeQuery {
   args {
     planId string!
   }
-  filter planId == args.planId
+  filter row => row.planId == args.planId
 }`
 	normalised, err := NormaliseAll(src)
 	if err != nil {
@@ -359,7 +355,7 @@ func TestDocComment_TrailingCommentsAreOpaque(t *testing.T) {
 		}
 	})
 	t.Run("trailing-slash-in-args-not-stolen-by-next-field", func(t *testing.T) {
-		src := "logic probeLogic {\n  args {\n    planId string! /// note about planId\n    limit number\n  }\n  body {\n    return coalesce(args.planId, \"\")\n  }\n}"
+		src := "logic probeLogic {\n  args {\n    planId string! /// note about planId\n    limit number\n  }\n  body {\n    return args.planId ?? \"\"\n  }\n}"
 		file := parseNormalised(t, src)
 		for _, def := range file.Definitions {
 			if fn, ok := def.(*FunctionDef); ok && fn.ArgsSchema != nil {
@@ -372,13 +368,13 @@ func TestDocComment_TrailingCommentsAreOpaque(t *testing.T) {
 		}
 	})
 	t.Run("trailing-comment-does-not-make-code-line-transparent", func(t *testing.T) {
-		src := "/// Doc.\nuse cognition.concepts.{ space } // trailing note\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+		src := "/// Doc.\nuse cognition.concepts.{ space } // trailing note\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}"
 		if got := firstDeclDoc(t, src); got != "" {
 			t.Errorf("a /// block must not tunnel through a code line with a trailing comment, got %q", got)
 		}
 	})
 	t.Run("trailing-block-comment-same", func(t *testing.T) {
-		src := "/// Doc.\nuse cognition.concepts.{ space } /* trailing */\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+		src := "/// Doc.\nuse cognition.concepts.{ space } /* trailing */\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}"
 		if got := firstDeclDoc(t, src); got != "" {
 			t.Errorf("a /// block must not tunnel through a trailing block comment, got %q", got)
 		}
@@ -396,7 +392,7 @@ func TestDocComment_SingleDeclEntries(t *testing.T) {
 	if decl, err := ParsePolicyDecl("/// Policy doc.\n@primary(\"p\")\npolicy probePolicy {\n}"); err != nil || decl.DocComment != "Policy doc." {
 		t.Errorf("ParsePolicyDecl: doc=%q err=%v", declDoc(decl), err)
 	}
-	if decl, err := ParseSpecDecl("/// Spec doc.\nspec actorEnvelope probeSpec {\n  return role == \"admin\"\n}"); err != nil || decl.DocComment != "Spec doc." {
+	if decl, err := ParseSpecDecl("/// Spec doc.\nspec actorEnvelope probeSpec = actor => actor.role == \"admin\""); err != nil || decl.DocComment != "Spec doc." {
 		t.Errorf("ParseSpecDecl: doc=%q err=%v", declDoc(decl), err)
 	}
 }
@@ -452,7 +448,7 @@ automation probeAuto {
 
   step persist {
     mutation createSpawnEvent (
-      nodeId: coalesce(node.id, "")
+      nodeId: node.id ?? ""
     )
   }
 }`
@@ -481,7 +477,7 @@ query candidate probeQuery {
   args {
     planId string!
   }
-  filter planId == args.planId
+  filter row => row.planId == args.planId
 }`
 	file := parseNormalised(t, src)
 	for _, def := range file.Definitions {
@@ -506,19 +502,19 @@ query candidate probeQuery {
 // ParseFile unchanged through internal-form sources).
 func TestDocComment_LeadingBlockCommentWithCodeIsOpaque(t *testing.T) {
 	t.Run("single-line", func(t *testing.T) {
-		src := "/// Doc.\n/* note */ use cognition.concepts.{ space }\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+		src := "/// Doc.\n/* note */ use cognition.concepts.{ space }\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}"
 		if got := firstDeclDoc(t, src); got != "" {
 			t.Errorf("code after a leading block comment must break attachment, got %q", got)
 		}
 	})
 	t.Run("multi-line-ending-on-code", func(t *testing.T) {
-		src := "/// Doc.\n/* note\n   more */ use cognition.concepts.{ space }\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+		src := "/// Doc.\n/* note\n   more */ use cognition.concepts.{ space }\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}"
 		if got := firstDeclDoc(t, src); got != "" {
 			t.Errorf("a block comment ending on a code line must not tunnel, got %q", got)
 		}
 	})
 	t.Run("own-line-block-comment-still-transparent", func(t *testing.T) {
-		src := "/// Doc.\n/* just a note */\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+		src := "/// Doc.\n/* just a note */\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}"
 		if got := firstDeclDoc(t, src); got != "Doc." {
 			t.Errorf("a comment-only block line stays transparent, got %q", got)
 		}
@@ -548,7 +544,7 @@ func TestDocComment_SingleLineArgsNoStealAtParseFileAltitude(t *testing.T) {
 // The `/* x */ /// Doc.` comment-only mix: the /// half is the doc block and
 // still attaches (check-then-walk), never silently dropped.
 func TestDocComment_MixedCommentLineStillAttaches(t *testing.T) {
-	src := "/* x */ /// Doc.\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+	src := "/* x */ /// Doc.\nlogic probeLogic {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}"
 	if got := firstDeclDoc(t, src); got != "Doc." {
 		t.Errorf("mixed comment-only line must still attach its /// half, got %q", got)
 	}
@@ -559,7 +555,7 @@ func TestDocComment_MixedCommentLineStillAttaches(t *testing.T) {
 // use line breaks adjacency in the real parser), a construct /// BELOW the
 // prelude attaches, and a multi-line import ( ... ) block is a prelude too.
 func TestLeadingDocComment_PreludeShapes(t *testing.T) {
-	logicSrc := "logic preludeProbe {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}"
+	logicSrc := "logic preludeProbe {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}"
 	for name, tc := range map[string]struct {
 		src  string
 		want string

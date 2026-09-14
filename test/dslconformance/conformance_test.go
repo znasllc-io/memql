@@ -1541,7 +1541,7 @@ func checkPaginationAuthoringRule(t *testing.T, c corpus) {
 	// relies on this classifier; the synthetic query locks its correctness
 	// in even if the tree ever reached zero list queries.
 	newQuery := `query widget queryEveryWidget {
-  filter  payload.kind=="gizmo"
+  filter  row => row.kind == "gizmo"
   shape   widgetFull
 }`
 	got := pagination.ScanSource("synthetic/queries.memql", newQuery)

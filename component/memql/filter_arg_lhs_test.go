@@ -26,7 +26,7 @@ query account probeAccountsIncludeArchived {
   args {
     includeArchived  boolean
   }
-  filter  payload.status=="active" || args.includeArchived==true
+  filter  row => row.status == "active" || args.includeArchived == true
 }
 `
 

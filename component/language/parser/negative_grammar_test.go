@@ -118,7 +118,7 @@ func TestNegative_BodyRule(t *testing.T) {
 			"logic", "must wrap its procedural code in a `body { }` block")
 	})
 	t.Run("query-with-body", func(t *testing.T) {
-		_, err := NormaliseAll("use cognition.concepts.{ space }\nquery space q {\n  filter active == true\n  body { return 1 }\n}\n")
+		_, err := NormaliseAll("use cognition.concepts.{ space }\nquery space q {\n  filter row => row.active == true\n  body { return 1 }\n}\n")
 		assertParseErr(t, "query with body{}", err,
 			"must not declare a `body { }` block", "reserved for `logic`")
 	})
@@ -139,7 +139,7 @@ func TestNegative_BodyRule(t *testing.T) {
 // must carry exactly the right number of identifiers.
 func TestNegative_SignatureArity(t *testing.T) {
 	t.Run("query-missing-concept", func(t *testing.T) {
-		_, err := NormaliseAll("query q {\n  filter active == true\n  shape s\n}\n")
+		_, err := NormaliseAll("query q {\n  filter row => row.active == true\n  shape s\n}\n")
 		assertParseErr(t, "query missing concept binding", err, "missing concept binding")
 	})
 	t.Run("mutation-missing-concept", func(t *testing.T) {
@@ -365,7 +365,7 @@ func TestHOLE_UnknownAnnotationSilentlyAccepted(t *testing.T) {
 			func(s string) error { _, e := ParsePromptDecl(s); return e }},
 		{"spec", "@bogusAnno\n@enabled\nspec someShape sp {\n  return active == true\n}\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
-		{"trait", "@bogusAnno\n@enabled\ntrait tr {\n  return active == true\n}\n", "unknown annotation @bogusAnno",
+		{"trait", "@bogusAnno\n@enabled\ntrait tr = row => row.active == true\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
 		{"policy", "@bogusAnno\n@primary(\"x\")\npolicy p { }\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParsePolicyDecl(s); return e }},

@@ -17,9 +17,7 @@ spec agent isAssistant = row => row.role == "assistant"
                          && row.kind != "system"   // not the system agent
 
 /// A braced spec beside it is not this slicer's.
-spec agent isLegacy {
-  return role == "x"
-}
+spec agent isLegacy = row => row.role == "x"
 
 /* spec agent commentedOut = row => row.a == 1 */
 trait isActiveRecord = row => row.active == true

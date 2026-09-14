@@ -84,7 +84,7 @@ var automationCon = memql.SandboxConstruct{
 	Kind: "automation", Name: "dailyDigest", Source: "automation dailyDigest { }",
 }
 var specCon = memql.SandboxConstruct{
-	Kind: "spec", Name: "specDigestItemActive", Source: "spec activeRowTrait specDigestItemActive {\n  return active == true\n}",
+	Kind: "spec", Name: "specDigestItemActive", Source: "spec activeRowTrait specDigestItemActive = row => row.active == true",
 }
 
 // emitFakeEngine returns a fakeEngine whose authoringEmit / authoringRepair
@@ -159,7 +159,7 @@ func TestEmitAndRepair_CleanFirstPass(t *testing.T) {
 // compiles after one repair re-emit. Acceptance: Responsibility -> Gate-1-clean
 // bundle WITHIN the repair budget.
 func TestEmitAndRepair_RepairsThenClean(t *testing.T) {
-	brokenSpec := memql.SandboxConstruct{Kind: "spec", Name: "specDigestItemActive", Source: "@bogus(\"x\")\nspec activeRowTrait specDigestItemActive {\n  return active == true\n}"}
+	brokenSpec := memql.SandboxConstruct{Kind: "spec", Name: "specDigestItemActive", Source: "@bogus(\"x\")\nspec activeRowTrait specDigestItemActive = row => row.active == true"}
 	fixedSpec := specCon
 
 	fe := emitFakeEngine(
@@ -345,9 +345,9 @@ func TestEmitAndRepair_RealGate1_RepairsToClean(t *testing.T) {
 	// #2281). The unknown annotation @bogus is the genuine Gate-1 break the
 	// single repair clears.
 	broken := memql.SandboxConstruct{Kind: "trait", Name: "specDigestActive",
-		Source: "@bogus(\"x\")\ntrait specDigestActive {\n  return active == true\n}"}
+		Source: "@bogus(\"x\")\ntrait specDigestActive = row => row.active == true"}
 	fixed := memql.SandboxConstruct{Kind: "trait", Name: "specDigestActive",
-		Source: "trait specDigestActive {\n  return active == true\n}"}
+		Source: "trait specDigestActive = row => row.active == true"}
 
 	fe := emitFakeEngine(
 		emitJSON(t, []memql.SandboxConstruct{auto, broken}),

@@ -55,19 +55,19 @@ automation bootstrapCluster {
   step databaseRecord {
     if steps.decide.result == true {
       createDatabase {
-        host:    coalesce(database.host, "localhost"),
-        dbName:  coalesce(database.dbName, "memql"),
-        sslMode: coalesce(database.sslMode, "disable")
+        host:    database.host ?? "localhost",
+        dbName:  database.dbName ?? "memql",
+        sslMode: database.sslMode ?? "disable"
       }
     }
   }
   step idpRecord {
-    if steps.decide.result == true && exists(payload.identityProvider) {
+    if steps.decide.result == true && payload.identityProvider != nil {
       createIdentityProvider {
-        name:           coalesce(identityProvider.name, "memql-identity"),
-        issuerUrl:      coalesce(identityProvider.issuerUrl, ""),
-        clientIdPrefix: coalesce(identityProvider.clientIdPrefix, ""),
-        redirectUrl:    coalesce(identityProvider.redirectUrl, "")
+        name:           identityProvider.name ?? "memql-identity",
+        issuerUrl:      identityProvider.issuerUrl ?? "",
+        clientIdPrefix: identityProvider.clientIdPrefix ?? "",
+        redirectUrl:    identityProvider.redirectUrl ?? ""
       }
     }
   }
@@ -77,8 +77,8 @@ automation bootstrapCluster {
         name:        "development",
         environment: "development",
         region:      "local",
-        provider:    coalesce(provider, ""),
-        version:     coalesce(node.version, "")
+        provider:    provider ?? "",
+        version:     node.version ?? ""
       }
     }
   }

@@ -25,12 +25,12 @@ query widget first {
     /// Which widget.
     id string @required
   }
-  filter  id==args.id
+  filter  row => row.id == args.id
 }
 
 @description("the second")
 query widget second {
-  filter  active==true
+  filter  row => row.active == true
 }
 `
 
@@ -60,7 +60,7 @@ shape widget widgetCard {
 }
 
 query widget listWidgets {
-  filter  active==true
+  filter  row => row.active == true
 }
 `
 	found := map[string]string{}

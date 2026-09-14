@@ -193,9 +193,7 @@ func TestInit_RefusesWhatOnlyTheRegistryCanRefuse(t *testing.T) {
 		"legacy.memql": `use lowerinit.concepts.{ ticket }
 
 /// A pre-2026 body: EvalExpr has no v1 body to apply in a refine.
-spec ticket isLegacyOpen {
-  return status == "open"
-}
+spec ticket isLegacyOpen = row => row.status == "open"
 `,
 		"queries.memql": `use lowerinit.concepts.{ ticket }
 use lowerinit.specs.{ callerIsOwner, isOpenTicket }

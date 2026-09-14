@@ -15,12 +15,12 @@ import (
 // the core @actor shape is an actor predicate and the core trait resolves.
 func TestWorkspacePredicateSources_BundleResolvesOverTheCoreTree(t *testing.T) {
 	root := fstest.MapFS{
-		"fylo/specs.memql":               {Data: []byte("spec actorEnvelope isAdmin {\n  return role == \"admin\"\n}\n")},
-		"fylo/node_modules/stray.memql":  {Data: []byte("trait strayTrait {\n  return x == 1\n}\n")},
-		"fylo/queries.memql":             {Data: []byte("query order orders {\n  filter  isAdmin\n}\n")},
+		"fylo/specs.memql":               {Data: []byte("spec actorEnvelope isAdmin = actor => actor.role == \"admin\"\n")},
+		"fylo/node_modules/stray.memql":  {Data: []byte("trait strayTrait = row => row.x == 1\n")},
+		"fylo/queries.memql":             {Data: []byte("query order orders {\n  filter  row => isAdmin(actor)\n}\n")},
 		"fylo/prompts/readme.txt":        {Data: []byte("not a memql file")},
-		"fylo/nested/more/deeper.memql":  {Data: []byte("trait isDeep {\n  return deep == true\n}\n")},
-		"other/unrelated/ignored.memql":  {Data: []byte("trait isOther {\n  return other == true\n}\n")},
+		"fylo/nested/more/deeper.memql":  {Data: []byte("trait isDeep = row => row.deep == true\n")},
+		"other/unrelated/ignored.memql":  {Data: []byte("trait isOther = row => row.other == true\n")},
 		"other/unrelated/ignored2.memql": {Data: []byte("\n")},
 	}
 	files, dir := WorkspacePredicateSources(root)
@@ -68,10 +68,10 @@ func TestWorkspacePredicateSources_BundleResolvesOverTheCoreTree(t *testing.T) {
 
 // The engine repository's own dsl/ is found below the workspace root.
 func TestWorkspacePredicateSources_FindsTheDSLTree(t *testing.T) {
-	mine := []byte("trait onlyMine {\n  return mine == true\n}\n")
+	mine := []byte("trait onlyMine = row => row.mine == true\n")
 	root := fstest.MapFS{
 		"dsl/common/traits.memql": {Data: mine},
-		"dsl/fylo/queries.memql":  {Data: []byte("query order orders {\n  filter  onlyMine\n}\n")},
+		"dsl/fylo/queries.memql":  {Data: []byte("query order orders {\n  filter  row => onlyMine(row)\n}\n")},
 		"README.md":               {Data: []byte("# repo")},
 	}
 	files, dir := WorkspacePredicateSources(root)

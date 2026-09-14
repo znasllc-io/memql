@@ -27,7 +27,7 @@ func TestDeclaredUsage_AcceptsFullyUsedDecls(t *testing.T) {
   insert {
     id: "x"
     name: args.name
-    description: coalesce(args.description, "")
+    description: args.description ?? ""
     status: "active"
   }
 }`
@@ -71,7 +71,7 @@ query space queryStaleSpec {
   args {
     userId string
   }
-  filter ?.createdBy==args.userId
+  filter row => args.userId == nil || row.createdBy == args.userId
 }`
 	_, err := tryParseNewFunctionSyntax("queryStaleSpec", "query", src, "test.memql", registry)
 	require.Error(t, err)

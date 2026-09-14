@@ -106,7 +106,7 @@ var snippetBodies = map[string]struct {
 	clauses map[string][2]string // clause -> {construct with %s, cursor text}
 }{
 	"query": {"query thing probe {\n  ", map[string][2]string{
-		"args": {"query thing probe {\n  %s\n  filter row.id == args.x\n}", "x string"},
+		"args": {"query thing probe {\n  %s\n  filter row => row.id == args.x\n}", "x string"},
 	}},
 	"mutate": {"mutate thing probe {\n  ", map[string][2]string{
 		"args":   {"mutate thing probe {\n  %s\n  update {\n    id: args.x\n  }\n}", "x string"},

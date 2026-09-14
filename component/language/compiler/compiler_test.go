@@ -931,7 +931,7 @@ use common.builtins.{ ensureDailySpaceForUser }
 logic logicEnsureDailySpaceOnAuthSession {
   args { event object @required }
   body {
-    ensured := ensureDailySpaceForUser(userId: coalesce(args.event.payload.userId, args.event.payload.subject))
+    ensured := ensureDailySpaceForUser(userId: args.event.payload.userId ?? args.event.payload.subject)
     return ensured
   }
 }`

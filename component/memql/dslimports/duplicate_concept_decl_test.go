@@ -129,7 +129,7 @@ query widget consumerWidgets {
   args {
     v  string  @required
   }
-  filter  a == args.v
+  filter  row => row.a == args.v
 }`),
 	})
 

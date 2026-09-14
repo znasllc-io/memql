@@ -144,7 +144,7 @@ func TestStartsWith_StructQueryFilter(t *testing.T) {
   args {
     prefixes []string!
   }
-  filter codeReference startsWith args.prefixes
+  filter row => row.codeReference startsWith args.prefixes
 }`
 	file, err := rewriteAndParse(t, src)
 	if err != nil {
@@ -169,9 +169,7 @@ func TestStartsWith_StructQueryFilter(t *testing.T) {
 func TestStartsWith_SpecBody(t *testing.T) {
 	decl, err := ParseSpecDecl(`@enabled
 @description("Matches integration-owned code references.")
-spec codeMetric isIntegrationMetric {
-  return codeReference startsWith "integration."
-}`)
+spec codeMetric isIntegrationMetric = row => row.codeReference startsWith "integration."`)
 	if err != nil {
 		t.Fatalf("ParseSpecDecl: %v", err)
 	}

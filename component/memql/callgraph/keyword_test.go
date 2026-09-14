@@ -134,7 +134,7 @@ func TestLiveMutateSpellingSplits(t *testing.T) {
 // stayed broken.
 func TestEveryRestrictedKindSplitsItsLiveForm(t *testing.T) {
 	for _, tc := range []struct{ kind, src string }{
-		{"query", "query node q {\n  filter row.id == args.id\n}"},
+		{"query", "query node q {\n  filter row => row.id == args.id\n}"},
 		{"mutation", "mutate node m {\n  insert { id: args.id }\n}"},
 		{"logic", "logic decide {\n  body { return true }\n}"},
 		{"action", "action run {\n  args { x string }\n}"},

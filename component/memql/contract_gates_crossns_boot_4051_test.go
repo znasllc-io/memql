@@ -136,7 +136,7 @@ func TestBootContractGatesStillRunThePerFileRules(t *testing.T) {
 		Content: `use cognition.concepts.{ space }
 
 query space listSpaces {
-  filter  status=="active"; ownerUserId==actor.userId
+  filter  row => row.status == "active" && row.ownerUserId == actor.userId
 }
 `,
 	}}

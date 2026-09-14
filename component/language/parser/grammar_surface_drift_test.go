@@ -84,23 +84,23 @@ var grammarSurfaceCorpus = []struct {
   args {
     id string @required
   }
-  filter row.id==args.id
+  filter row => row.id == args.id
   shape probeCard
 }`},
 	{"struct query: sort + paginate", true, `query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
   sort "row.createdAt", "desc"
   paginate 25
 }`},
 	{"struct query: count", true, `query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
   count
 }`},
 	{"struct query: asOf with the ?? latest fallback", true, `query thing probe {
   args {
     at string
   }
-  filter row.id!=""
+  filter row => row.id != ""
   asOf args.at ?? latest
 }`},
 	{"struct mutation: insert", true, `mutate thing probe {
@@ -136,9 +136,7 @@ var grammarSurfaceCorpus = []struct {
     return x
   }
 }`},
-	{"spec: bare return", true, `spec thing probe {
-  return active == true
-}`},
+	{"spec: bare return", true, `spec thing probe = row => row.active == true`},
 	{"shape: @row path list", true, `@row
 shape probe {
   row.id
@@ -186,7 +184,7 @@ automation probe {
   args {
     at string
   }
-  filter row.id!=""
+  filter row => row.id != ""
   asOf args.at
 }`},
 	{"retired expression builtin `year()` (93b365ed, memql#2707)", false, `logic probe {
@@ -199,10 +197,10 @@ automation probe {
 }`},
 	{"inline `concept` line in a struct query", false, `query thing probe {
   concept v1:probe:thing
-  filter row.id!=""
+  filter row => row.id != ""
 }`},
 	{"unknown struct-query clause", false, `query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
   project name
 }`},
 	{"named write block `insert <Concept> { }` (memql#988)", false, `mutate thing probe {
@@ -238,11 +236,11 @@ automation probe {
 }`},
 	{"a flag annotation given an argument (memql#5359)", false, `@serverOnly("yes")
 query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
 }`},
 	{"unknown annotation on a query, refused at parse (memql#5359)", false, `@bogusAnnotation
 query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
 }`},
 	{"unknown annotation on an action (memql#5359)", false, `@bogusAnnotation
 action probe {
@@ -257,7 +255,7 @@ automation probe {
 	{"a non-repeatable annotation written twice (memql#5359)", false, `@description("one")
 @description("two")
 query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
 }`},
 	{"@when() with empty parentheses on a rule", true, `@when()
 @policy("localFirst")

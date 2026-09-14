@@ -30,7 +30,7 @@ shape todo executionTodoCard { %s }
 @actor
 query todo executionTodos {
   args { todoId string! }
-  filter row.id==args.todoId && ownerUserId==actor.userId
+  filter row => row.id == args.todoId && row.ownerUserId == actor.userId
   paginate 10
   shape %s
 }`, tc.body, tc.reference)
@@ -115,7 +115,7 @@ shape todo todoFull { row.id }
 @actor
 query todo executionCoreShape {
   args { todoId string! }
-  filter row.id==args.todoId && ownerUserId==actor.userId
+  filter row => row.id == args.todoId && row.ownerUserId == actor.userId
   paginate 10
   shape %s
 }`, tc.reference), "")

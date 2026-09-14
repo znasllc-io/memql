@@ -94,7 +94,7 @@ logic doStuff {
   body {
     first := queryFoo( partitionId: args.partitionId )
     second := queryBar( id: first.first().id )
-    return coalesce(second.first(), first.first())
+    return second.first() ?? first.first()
   }
 }`
 	body := parseLogicBody(t, src)
@@ -162,7 +162,7 @@ logic provisionThing {
     created := if existing.empty() {
       mutationCreateThing( name: args.name )
     }
-    return coalesce(created, existing.first())
+    return created ?? existing.first()
   }
 }`
 	body := parseLogicBody(t, src)
@@ -1102,8 +1102,8 @@ logic aov {
     orders int @required
   }
   body {
-    r := coalesce(args.revenue, 0)
-    o := coalesce(args.orders, 1)
+    r := args.revenue ?? 0
+    o := args.orders ?? 1
     return r / o
   }
 }
@@ -1138,8 +1138,8 @@ logic ratio {
     b int @required
   }
   body {
-    x := coalesce(args.a, 0)
-    y := coalesce(args.b, 0)
+    x := args.a ?? 0
+    y := args.b ?? 0
     return x / y
   }
 }
@@ -1167,8 +1167,8 @@ logic remainder {
     b int @required
   }
   body {
-    x := coalesce(args.a, 0)
-    y := coalesce(args.b, 1)
+    x := args.a ?? 0
+    y := args.b ?? 1
     return x % y
   }
 }
@@ -1334,7 +1334,7 @@ logic boundary {
     start string @required
   }
   body {
-    seed := coalesce(args.start, "")
+    seed := args.start ?? ""
     return addDuration(seed, "P1D")
   }
 }
@@ -1365,7 +1365,7 @@ logic weeksBetween {
     b string @required
   }
   body {
-    seed := coalesce(args.a, "")
+    seed := args.a ?? ""
     return daysBetween(args.a, args.b) / 7
   }
 }

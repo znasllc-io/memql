@@ -333,7 +333,7 @@ func TestRefusedAnnotationDiagnosticCoversTheAnnotation(t *testing.T) {
 		src        string
 		start, end Position
 	}{
-		{"@bogus\nquery thing probe {\n  filter row.id != \"\"\n}\n", Position{Line: 1, Column: 1}, Position{Line: 1, Column: 7}},
+		{"@bogus\nquery thing probe {\n  filter row => row.id != \"\"\n}\n", Position{Line: 1, Column: 1}, Position{Line: 1, Column: 7}},
 		{"prompt probe {\n  x string @nope\n}\n", Position{Line: 2, Column: 12}, Position{Line: 2, Column: 17}},
 	} {
 		var found bool

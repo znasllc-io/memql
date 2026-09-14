@@ -50,7 +50,7 @@ query widget betaWidgets {
   args {
     label  string  @required
   }
-  filter  label == args.label
+  filter  row => row.label == args.label
 }`),
 	}
 }
@@ -111,7 +111,7 @@ query widget alphaWidgets {
   args {
     label  string  @required
   }
-  filter  label == args.label
+  filter  row => row.label == args.label
 }`),
 	}
 }
@@ -349,7 +349,7 @@ query widget deploymentWidgets {
   args {
     label  string  @required
   }
-  filter  label == args.label
+  filter  row => row.label == args.label
 }`)
 	for _, e := range loadTree(t, root).VerifyReferentialIntegrity() {
 		t.Errorf("the tree still does not lint clean after following the diagnostic's own remedy. "+

@@ -78,8 +78,8 @@ logic condBranchProbe {
     b string
   }
   body {
-    z := coalesce(args.b, "")
-    return cond(args.a == "x", (coalesce(args.b, "") == "y"), "n")
+    z := args.b ?? ""
+    return args.a == "x" ? (args.b ?? "" == "y") : "n"
   }
 }
 `

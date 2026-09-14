@@ -64,7 +64,7 @@ logic grantGateProbeLogic {
     probe string @required
   }
   body {
-    return cond(args.probe == "x", "yes", "no")
+    return args.probe == "x" ? "yes" : "no"
   }
 }
 `
@@ -79,7 +79,7 @@ logic rankGateProbeLogic {
     probe string @required
   }
   body {
-    return cond(args.probe == "x", "yes", "no")
+    return args.probe == "x" ? "yes" : "no"
   }
 }
 `
@@ -93,7 +93,7 @@ query role grantGateProbeQuery {
   args {
     slug string!
   }
-  filter  slug == args.slug
+  filter  row => row.slug == args.slug
 }
 `
 

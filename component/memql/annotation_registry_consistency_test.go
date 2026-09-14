@@ -32,7 +32,7 @@ import (
 func receiverFixture(r annotations.Receiver, name, ann string) string {
 	switch r {
 	case annotations.Query:
-		return ann + "\nquery thing probe {\n  filter row.id != \"\"\n}\n"
+		return ann + "\nquery thing probe {\n  filter row => row.id != \"\"\n}\n"
 	case annotations.Mutation:
 		return ann + "\nmutate thing probe {\n  args {\n    id string!\n  }\n  update {\n    id: args.id\n  }\n}\n"
 	case annotations.Logic:
@@ -44,7 +44,7 @@ func receiverFixture(r annotations.Receiver, name, ann string) string {
 	case annotations.Capability:
 		return ann + "\ncapability integration.probe.run {\n}\n"
 	case annotations.Spec:
-		return ann + "\nspec thing probe {\n  return active == true\n}\n"
+		return ann + "\nspec thing probe = row => row.active == true\n"
 	case annotations.Tool:
 		return ann + "\ntool probe {\n  x string\n}\n"
 	case annotations.Builtin:

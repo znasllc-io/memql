@@ -40,7 +40,7 @@ query invocation recentInvocations {
   args {
     ownerUserId  string  @required
   }
-  filter  ownerUserId == args.ownerUserId
+  filter  row => row.ownerUserId == args.ownerUserId
 }
 `,
 		},
@@ -106,7 +106,7 @@ query invocation recentInvocations {
   args {
     ownerUserId  string  @required
   }
-  filter  ownerUserId == args.ownerUserId
+  filter  row => row.ownerUserId == args.ownerUserId
 }
 `,
 		},

@@ -130,7 +130,7 @@ func TestConvertExpressionHandlesCoalesce(t *testing.T) {
 @description("repro: return value uses coalesce")
 logic logicSample {
   body {
-    return coalesce("a", "b")
+    return "a" ?? "b"
   }
 }
 `

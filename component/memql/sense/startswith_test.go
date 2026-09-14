@@ -27,7 +27,7 @@ func TestTokenize_StartsWithIsKeyword(t *testing.T) {
 func TestHover_StartsWithKeyword(t *testing.T) {
 	s := New(&stubRegistry{})
 	// "  filter codeReference startsWith \"integration.\"" -- hover inside the keyword.
-	src := "query codeMetric q {\n  filter codeReference startsWith \"integration.\"\n}"
+	src := "query codeMetric q {\n  filter row => row.codeReference startsWith \"integration.\"\n}"
 	res := hoverAt(t, s, src, 2, 28)
 	if res == nil || !strings.HasPrefix(res.Contents, "```memql\ns startsWith p\n```") {
 		t.Fatalf("expected the startsWith operator card, got %+v", res)
@@ -38,7 +38,7 @@ func TestHover_StartsWithKeyword(t *testing.T) {
 }
 
 func TestBareRowIntrinsicRuleFlagsStartsWith(t *testing.T) {
-	got := bareRowIntrinsicRule("query widget q {\n  filter id startsWith \"v1:widget:\"\n}\n")
+	got := bareRowIntrinsicRule("query widget q {\n  filter row => row.id startsWith \"v1:widget:\"\n}\n")
 	if len(got) != 1 {
 		t.Fatalf("expected exactly 1 diagnostic for a bare `id startsWith`, got %d", len(got))
 	}
@@ -47,8 +47,8 @@ func TestBareRowIntrinsicRuleFlagsStartsWith(t *testing.T) {
 	}
 	// The canonical spelling, and a payload property, stay silent.
 	for _, src := range []string{
-		"query widget q {\n  filter row.id startsWith \"v1:widget:\"\n}\n",
-		"query widget q {\n  filter codeReference startsWith args.prefixes\n}\n",
+		"query widget q {\n  filter row => row.id startsWith \"v1:widget:\"\n}\n",
+		"query widget q {\n  filter row => row.codeReference startsWith args.prefixes\n}\n",
 	} {
 		if diags := bareRowIntrinsicRule(src); len(diags) != 0 {
 			t.Errorf("%q: expected no diagnostic, got %s", src, diags[0].Message)

@@ -93,7 +93,7 @@ query widget deployWidgets {
   args {
     label  string  @required
   }
-  filter  label == args.label
+  filter  row => row.label == args.label
 }`),
 	}
 }
@@ -153,7 +153,7 @@ query widget deployWidgets {
   args {
     label  string  @required
   }
-  filter  label == args.label
+  filter  row => row.label == args.label
 }`)
 	tree := loadTree(t, root)
 

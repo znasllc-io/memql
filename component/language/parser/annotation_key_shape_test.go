@@ -32,7 +32,7 @@ func TestKeywordKeyShapeIsChecked(t *testing.T) {
 		{
 			name: "a valued key written bare on a query",
 			parse: func() error {
-				lowered, err := NormaliseAll("@cache(ttl)\nquery thing probe {\n  filter row.id != \"\"\n}\n")
+				lowered, err := NormaliseAll("@cache(ttl)\nquery thing probe {\n  filter row => row.id != \"\"\n}\n")
 				if err != nil {
 					return err
 				}
@@ -63,7 +63,7 @@ func TestKeywordKeyShapeIsChecked(t *testing.T) {
 // does not say which of a file's queries it is in.
 func TestArgsFieldRefusalNamesTheConstruct(t *testing.T) {
 	for _, tc := range []struct{ src, want string }{
-		{"query thing probe {\n  args {\n    x string @nope\n  }\n  filter row.id == args.x\n}\n", `query "probe", args field "x": unknown annotation @nope on an args field`},
+		{"query thing probe {\n  args {\n    x string @nope\n  }\n  filter row => row.id == args.x\n}\n", `query "probe", args field "x": unknown annotation @nope on an args field`},
 		{"action probe {\n  args {\n    x string @nope\n  }\n  capability script(script: args.x)\n}\n", `action "probe", args field "x": unknown annotation @nope on an args field`},
 	} {
 		lowered, err := NormaliseAll(tc.src)

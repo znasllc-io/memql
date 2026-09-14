@@ -28,8 +28,8 @@ use identity.concepts.{ user }
 
 mutate participant joinSpace {
   insert {
-    id: concat("participant-", hash(concat(canonicalId(args.partitionId, space), ":", canonicalId(args.userId, user))))
-    partitionId: canonicalId(args.partitionId, space)
+    id: "participant-" + hash(canonicalId(args.partitionId, "space") + ":" + canonicalId(args.userId, "user"))
+    partitionId: canonicalId(args.partitionId, "space")
   }
 }`
 
@@ -66,7 +66,7 @@ func TestResolveCanonicalIdConceptRefs_StringFormUntouched(t *testing.T) {
 // type check stands.
 func TestResolveCanonicalIdConceptRefs_Unimported(t *testing.T) {
 	src := `use cognition.concepts.{ space }
-mutate x y { insert { id: canonicalId(args.id, widget) } }`
+mutate x y { insert { id: canonicalId(args.id, "widget") } }`
 	_, err := cidResolver(t).ResolveCanonicalIdConceptRefs(src)
 	if err == nil {
 		t.Fatalf("expected an error for the unimported concept %q", "widget")
@@ -82,7 +82,7 @@ mutate x y { insert { id: canonicalId(args.id, widget) } }`
 func TestResolveCanonicalIdConceptRefs_SkipsStringLiteralProse(t *testing.T) {
 	src := `use cognition.concepts.{ space }
 @description("derive the id via canonicalId(args.partitionId, space) and hash it")
-query space q { filter id==args.x }`
+query space q { filter row => row.id == args.x }`
 	got, err := cidResolver(t).ResolveCanonicalIdConceptRefs(src)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)

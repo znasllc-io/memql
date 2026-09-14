@@ -18,9 +18,7 @@ import (
 func TestSpecDeclToSpec_AcceptsBindingAndEnabled(t *testing.T) {
 	src := `@enabled
 @description("Caller must hold owner or admin role.")
-spec actorEnvelope requiresOwnerOrAdminFixture {
-  return role == "admin" || role == "owner"
-}`
+spec actorEnvelope requiresOwnerOrAdminFixture = actor => actor.role == "admin" || actor.role == "owner"`
 	decl, err := languageParser.ParseSpecDecl(src)
 	if err != nil {
 		t.Fatalf("ParseSpecDecl: %v", err)
@@ -49,9 +47,7 @@ spec actorEnvelope requiresOwnerOrAdminFixture {
 func TestSpecDeclToSpec_RejectsUnknownAnnotation(t *testing.T) {
 	// @public is a valid annotation for Query/Mutation but not for Spec.
 	src := `@public
-spec actorEnvelope specWithMisplacedAnnotation {
-  return role == "admin"
-}`
+spec actorEnvelope specWithMisplacedAnnotation = actor => actor.role == "admin"`
 	_, err := languageParser.ParseSpecDecl(src)
 	if err == nil {
 		t.Fatal("ParseSpecDecl accepted @public on a spec; want a parse-time rejection (memql#2395)")

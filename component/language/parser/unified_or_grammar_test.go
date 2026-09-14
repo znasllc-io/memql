@@ -104,9 +104,7 @@ func TestOrPrecedenceAndParens(t *testing.T) {
 func TestSpecWithOrLoads(t *testing.T) {
 	src := `@enabled
 @description("Caller must hold owner or admin role to use the Deployment Console.")
-spec actorEnvelope requiresOwnerOrAdmin {
-  return role == "admin" || role == "owner"
-}`
+spec actorEnvelope requiresOwnerOrAdmin = actor => actor.role == "admin" || actor.role == "owner"`
 
 	decl, err := ParseSpecDecl(src)
 	if err != nil {

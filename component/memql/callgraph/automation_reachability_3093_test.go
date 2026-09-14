@@ -134,7 +134,7 @@ automation secondBraced {
 // and be believed.
 func TestCheckFile_SanctionedAutomationShapesAreClean(t *testing.T) {
 	src := `@trigger(event="node.updated", concept="v1:identity:user", partition="*")
-@filter(event.node.payload.preferences.computerUseEnabled == false)
+@filter(row => event.node.payload.preferences.computerUseEnabled == false)
 automation killSwitchSuspendsRunningPlans {
   step decide {
     logic killSwitchSuspendsRunningPlans ( event: event )

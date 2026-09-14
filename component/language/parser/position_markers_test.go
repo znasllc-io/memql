@@ -187,7 +187,7 @@ query thing second {
   args {
     a string
   }
-  filter a == 1
+  filter row => row.a == 1
   paginate 5
 }
 `,
@@ -274,7 +274,7 @@ trait isB = row => row.b == null
   }
   insert {
     id: args.id
-    note: null
+    note: nil
   }
 }
 `,
@@ -287,7 +287,7 @@ trait isB = row => row.b == null
     a bool
   }
   body {
-    return cond(args.a, 1, 2)
+    return args.a ? 1 : 2
   }
 }
 `,
@@ -301,7 +301,7 @@ automation probe {
     logic runIt(mode: "x")
   }
   step second {
-    if event.payload.y != null {
+    if event.payload.y != nil {
       builtin doIt(id: event.payload.id)
     }
   }
@@ -314,7 +314,7 @@ automation probe {
 		src: `@trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
   step loop {
-    forEach t in event.payload.items where t.active == null {
+    forEach t in event.payload.items where t.active == nil {
       touch { id: t.id }
     }
   }
@@ -327,7 +327,7 @@ automation probe {
 		src: `@trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
   step first {
-    logic record(payload: { delegationId: event.payload.id, event.payload.identityId })
+    logic record(payload: { delegationId: event.payload.id, identityId: event.payload.identityId })
   }
 }
 `,
