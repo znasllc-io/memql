@@ -1,0 +1,4 @@
+/// Background calls -- with no policy to resolve them through.
+@when(tag="background")
+@precedence(21)
+rule backgroundNowhere { }

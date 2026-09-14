@@ -1,0 +1,15 @@
+/// A support ticket: the row this cell's cases read and write.
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}
+
+/// The tickets in one status, newest first; every status when none is named.
+query ticket ticketsToListEnum {
+  args {
+    status  string
+  }
+  filter row => args.status == nil || row.status == args.status
+  sort "row.createdAt", "desc"
+}

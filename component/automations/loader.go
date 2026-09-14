@@ -348,7 +348,7 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 	// static cost limit refuses the automation at load rather than at its
 	// first run. Before the args-resolution gate, which reads the parsed
 	// nodes of a v1 automation.
-	if err := PrepareExpressions(&automation); err != nil {
+	if err := prepareExpressions(&automation, l.registry); err != nil {
 		return nil, err
 	}
 
@@ -393,12 +393,12 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 	return &automation, nil
 }
 
-// parseResolveCompile parses source, runs concept resolution on the AST, then compiles.
-// This replaces compiler.CompileSource to insert the resolution step.
-//
-// authored is the text source was derived from; parse positions are reported
-// against it (languageParser.PositionLowering, memql#5364).
-func (l *Loader) parseResolveCompile(authored, source, path string) (*compiler.CompileResult, error) {
+// parseAutomationFile lowers an automation slice's struct forms and parses it,
+// with the author's positions (authored) carried in the tokens. It is the
+// parse half of parseResolveCompile, shared with the step-order gate, which
+// reads the step order the compiler is handed. file is nil when the source
+// parses to something other than a file; lowered is the lowered source.
+func parseAutomationFile(authored, source string) (file *languageParser.File, lowered string, err error) {
 	// Apply struct-form rewriters before tokenisation. The automation
 	// loader bypasses compiler.CompileSource (so it can interleave
 	// concept resolution between parse and compile), which means it
@@ -406,18 +406,18 @@ func (l *Loader) parseResolveCompile(authored, source, path string) (*compiler.C
 	if languageParser.LooksLikeStructLogic(source) {
 		rewritten, err := languageParser.NormaliseLogicSource(source)
 		if err != nil {
-			return nil, languageParser.PositionRewriteError(authored, fmt.Errorf("logic rewrite: %w", err))
+			return nil, "", languageParser.PositionRewriteError(authored, fmt.Errorf("logic rewrite: %w", err))
 		}
 		source = rewritten
 	}
 	if languageParser.LooksLikeStructAutomation(source) {
 		rewritten, err := languageParser.NormaliseAutomationSource(source)
 		if err != nil {
-			return nil, languageParser.PositionRewriteError(authored, fmt.Errorf("automation rewrite: %w", err))
+			return nil, "", languageParser.PositionRewriteError(authored, fmt.Errorf("automation rewrite: %w", err))
 		}
 		source = rewritten
 	} else if languageParser.LooksLikeLegacyAutomation(source) {
-		return nil, fmt.Errorf("automation source: `func (Automation) NAME(...)` is retired -- author the struct form: `automation NAME { step <name> { logic <bareName> { ... } } }`. See dsl/v1/automations/v1/identity/expireDelegations/automation.memql for a worked example.")
+		return nil, "", fmt.Errorf("automation source: `func (Automation) NAME(...)` is retired -- author the struct form: `automation NAME { step <name> { logic <bareName> { ... } } }`. See dsl/v1/automations/v1/identity/expireDelegations/automation.memql for a worked example.")
 	}
 
 	// Tokenize the lowering with the author's positions carried in it, so a
@@ -426,7 +426,7 @@ func (l *Loader) parseResolveCompile(authored, source, path string) (*compiler.C
 	lexer := languageParser.NewLexer(languageParser.PositionLowering(authored, source))
 	tokens, err := lexer.Tokenize()
 	if err != nil {
-		return nil, fmt.Errorf("lexer error: %w", err)
+		return nil, "", fmt.Errorf("lexer error: %w", err)
 	}
 
 	// Parse
@@ -434,13 +434,26 @@ func (l *Loader) parseResolveCompile(authored, source, path string) (*compiler.C
 	p.SetDocComments(lexer.DocComments())
 	ast, err := p.Parse()
 	if err != nil {
-		return nil, fmt.Errorf("parser error: %w", err)
+		return nil, "", fmt.Errorf("parser error: %w", err)
 	}
 
-	file, ok := ast.(*languageParser.File)
-	if !ok {
+	f, _ := ast.(*languageParser.File)
+	return f, source, nil
+}
+
+// parseResolveCompile parses source, runs concept resolution on the AST, then compiles.
+// This replaces compiler.CompileSource to insert the resolution step.
+//
+// authored is the text source was derived from; parse positions are reported
+// against it (languageParser.PositionLowering, memql#5364).
+func (l *Loader) parseResolveCompile(authored, source, path string) (*compiler.CompileResult, error) {
+	file, lowered, err := parseAutomationFile(authored, source)
+	if err != nil {
+		return nil, err
+	}
+	if file == nil {
 		// Fall back to CompileSource for non-file AST (shouldn't happen for automations)
-		return compiler.CompileSource(source)
+		return compiler.CompileSource(lowered)
 	}
 
 	// Resolve use declarations if present
@@ -844,7 +857,7 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 
 	// The same one-time parse compileMemQL runs, for a body compiled from
 	// the v1 grammar (memql#5367).
-	if err := PrepareExpressions(&automation); err != nil {
+	if err := prepareExpressions(&automation, l.registry); err != nil {
 		return nil, err
 	}
 
@@ -1074,58 +1087,31 @@ func extractConceptFromTopic(topic string) string {
 	return concept
 }
 
-// extractConceptFromFilter extracts the concept from a filter like "concept==v1:cognition:participant;...".
-// Returns empty string if no concept filter is found.
-//
-// An edition-2026 trigger filter (`@filter(row => ...)`, epic memql#5363)
-// reaches here as its canonical source, and is read as a tree: a top-level
-// conjunct `<param>.concept == "<id>"`. The text scan below looks for a part
-// that STARTS with `concept==`, which the v1 spelling never does, so this
-// warning went silent for every migrated automation.
+// extractConceptFromFilter extracts the concept a trigger filter narrows to:
+// a top-level conjunct `<param>.concept == "<id>"` of the filter's lambda
+// (`@filter(row => ...)`), read as a tree. Returns "" when there is none, and
+// for a filter that is not a one-parameter lambda -- which PrepareExpressions
+// refuses, so no loaded automation carries one (memql#5367).
 func extractConceptFromFilter(filter string) string {
-	if filter == "" {
+	if filter == "" || !dslclause.OpensLambda(filter) {
 		return ""
 	}
-	if dslclause.OpensLambda(filter) {
-		lam, err := languageParser.ParseV1Lambda(filter)
-		if err != nil || len(lam.Params) != 1 {
-			return ""
-		}
-		for _, c := range ast.Conjuncts(lam.Body) {
-			b, ok := c.(*ast.BinaryExpr)
-			if !ok || b.Op != "==" {
-				continue
-			}
-			root, fields, isPath := ast.MemberPath(ast.Unparen(b.Left))
-			lit, isLit := ast.Unparen(b.Right).(*ast.LiteralExpr)
-			if isPath && isLit && root == lam.Params[0] && len(fields) == 1 && fields[0] == "concept" {
-				if s, ok := lit.Value.(string); ok {
-					return s
-				}
-			}
-		}
+	lam, err := languageParser.ParseV1Lambda(filter)
+	if err != nil || len(lam.Params) != 1 {
 		return ""
 	}
-
-	// Split by semicolons (AND) and commas (OR), and by `&&`: the unified
-	// grammar's AND (memql#977). Without the last, `concept==X && y` read its
-	// value as "X && y" and warned of a contradiction that was not there.
-	// Look for concept== patterns
-	for _, part := range strings.FieldsFunc(filter, func(r rune) bool {
-		return r == ';' || r == ','
-	}) {
-		for _, conjunct := range strings.Split(part, "&&") {
-			conjunct = strings.TrimSpace(conjunct)
-
-			// Check for concept== pattern
-			if strings.HasPrefix(conjunct, "concept==") {
-				value := strings.TrimSpace(strings.TrimPrefix(conjunct, "concept=="))
-				// Remove quotes if present
-				value = strings.Trim(value, `"'`)
-				return value
+	for _, c := range ast.Conjuncts(lam.Body) {
+		b, ok := c.(*ast.BinaryExpr)
+		if !ok || b.Op != "==" {
+			continue
+		}
+		root, fields, isPath := ast.MemberPath(ast.Unparen(b.Left))
+		lit, isLit := ast.Unparen(b.Right).(*ast.LiteralExpr)
+		if isPath && isLit && root == lam.Params[0] && len(fields) == 1 && fields[0] == "concept" {
+			if s, ok := lit.Value.(string); ok {
+				return s
 			}
 		}
 	}
-
 	return ""
 }

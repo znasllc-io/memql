@@ -55,19 +55,19 @@ automation bootstrapCluster {
   step databaseRecord {
     if steps.decide.result == true {
       createDatabase {
-        host:    coalesce(database.host, "localhost"),
-        dbName:  coalesce(database.dbName, "memql"),
-        sslMode: coalesce(database.sslMode, "disable")
+        host:    database.host ?? "localhost",
+        dbName:  database.dbName ?? "memql",
+        sslMode: database.sslMode ?? "disable"
       }
     }
   }
   step idpRecord {
-    if steps.decide.result == true && exists(payload.identityProvider) {
+    if steps.decide.result == true && payload.identityProvider != nil {
       createIdentityProvider {
-        name:           coalesce(identityProvider.name, "memql-identity"),
-        issuerUrl:      coalesce(identityProvider.issuerUrl, ""),
-        clientIdPrefix: coalesce(identityProvider.clientIdPrefix, ""),
-        redirectUrl:    coalesce(identityProvider.redirectUrl, "")
+        name:           identityProvider.name ?? "memql-identity",
+        issuerUrl:      identityProvider.issuerUrl ?? "",
+        clientIdPrefix: identityProvider.clientIdPrefix ?? "",
+        redirectUrl:    identityProvider.redirectUrl ?? ""
       }
     }
   }
@@ -77,8 +77,8 @@ automation bootstrapCluster {
         name:        "development",
         environment: "development",
         region:      "local",
-        provider:    coalesce(provider, ""),
-        version:     coalesce(node.version, "")
+        provider:    provider ?? "",
+        version:     node.version ?? ""
       }
     }
   }
@@ -141,7 +141,7 @@ func TestBootstrapCluster_CompilesToDecideThenGatedCreates(t *testing.T) {
 		step, mutation, condition string
 	}{
 		{"databaseRecord", "createDatabase", "steps.decide.result == true"},
-		{"idpRecord", "createIdentityProvider", "steps.decide.result == true && exists(payload.identityProvider)"},
+		{"idpRecord", "createIdentityProvider", "steps.decide.result == true && payload.identityProvider != nil"},
 		{"cluster", "createCluster", "steps.decide.result == true"},
 	}
 	for _, tc := range cases {
@@ -168,7 +168,7 @@ func TestBootstrapCluster_CompilesToDecideThenGatedCreates(t *testing.T) {
 func TestBootstrapCluster_GateSemantics(t *testing.T) {
 	const (
 		databaseCond = "steps.decide.result == true"
-		idpCond      = "steps.decide.result == true && exists(payload.identityProvider)"
+		idpCond      = "steps.decide.result == true && payload.identityProvider != nil"
 	)
 
 	mkEval := func(create bool, idpPresent bool) *Evaluator {
@@ -184,9 +184,9 @@ func TestBootstrapCluster_GateSemantics(t *testing.T) {
 
 	eval := func(t *testing.T, e *Evaluator, cond string) bool {
 		t.Helper()
-		got, err := e.EvaluateCondition(cond)
+		got, err := evalV1Cond(t, e, cond)
 		if err != nil {
-			t.Fatalf("EvaluateCondition(%q): %v", cond, err)
+			t.Fatalf("%s: %v", cond, err)
 		}
 		return got
 	}
@@ -261,15 +261,13 @@ func TestPruneStaleClusterNodes_CompilesToDecideThenForEachWrite(t *testing.T) {
 //
 //	return existing.empty() && args.event.payload.node.type == "bff"
 //
-// -- through the logic-time local surface (EvaluateLocalExpr). On main this
-// FAILS: the top-level `&&` matches no single-node local evaluator, so it falls
-// through to engine.Execute whose default converter rejects the `existing.empty()`
-// collection-method operand with the ADR 2.2 gate ("convert logical left:
-// collection methods ... not allowed in specs or query filters"). With the
-// local logical evaluator wired in, it resolves to the correct `create` boolean.
-// (The sibling TestBootstrapCluster_GateSemantics only exercises the automation
-// `if steps.decide.result == true` given a decide result; it never evaluates the
-// logic body that PRODUCES that boolean.)
+// -- over the run, as a logic body's return is evaluated. It once fell through
+// to engine.Execute, whose converter refused the `existing.empty()`
+// collection-method operand with the ADR 2.2 gate; it must resolve to the
+// correct `create` boolean. (The sibling TestBootstrapCluster_GateSemantics
+// only exercises the automation `if steps.decide.result == true` given a
+// decide result; it never evaluates the logic body that PRODUCES that
+// boolean.)
 func TestBootstrapCluster_LogicReturnResolvesCreate(t *testing.T) {
 	const ret = `existing.empty() && args.event.payload.node.type == "bff"`
 
@@ -308,12 +306,9 @@ func TestBootstrapCluster_LogicReturnResolvesCreate(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			e := mkEval(tc.clusterExists, tc.nodeType)
-			val, handled, err := EvaluateLocalExpr(ret, e)
+			val, err := evalV1(e, ret)
 			if err != nil {
-				t.Fatalf("EvaluateLocalExpr error (pre-fix this hit the ADR 2.2 gate): %v", err)
-			}
-			if !handled {
-				t.Fatalf("expected handled=true: the local logical evaluator must claim a top-level && return")
+				t.Fatalf("%s: %v", ret, err)
 			}
 			got, ok := val.(bool)
 			if !ok {

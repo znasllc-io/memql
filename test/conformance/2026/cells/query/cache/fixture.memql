@@ -1,0 +1,6 @@
+/// A support ticket: the row this cell's cases read and write.
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}

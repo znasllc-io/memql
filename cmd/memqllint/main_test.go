@@ -93,7 +93,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`
 
 const testShapes = `use demo.concepts.{ item }
@@ -182,7 +182,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`,
 			},
 		},
@@ -198,7 +198,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`,
 			},
 		},
@@ -445,7 +445,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`,
 	})
 
@@ -559,7 +559,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }
 
 @enabled
@@ -575,9 +575,7 @@ query item unstatusedItems {
 
 @enabled
 @description("An item with a name.")
-spec item isNamed {
-  return name != ""
-}
+spec item isNamed = row => row.name != ""
 
 @enabled
 @description("An item with a status, written with the retired null.")
@@ -669,9 +667,7 @@ var lintRewriteRefusalCases = []struct {
 	// one line, and a query the query stage lowers to fewer lines.
 	{"a refine below a stripped spec and a lowered query", `use probe.concepts.{ thing }
 
-spec thing isOpen {
-  return status == "open"
-}
+spec thing isOpen = row => row.status == "open"
 
 query thing first {
   args {

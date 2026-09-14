@@ -1544,42 +1544,11 @@ func filterEnumViolations(n languageAst.Node, enums map[string][]string) []enumV
 		switch v := node.(type) {
 		case *languageAst.QueryStmt:
 			walk(v.Expression)
-		case *languageAst.ComparisonExpr:
-			if len(v.Field.Parts) != 1 {
-				return
-			}
-			allowed, isEnum := enums[strings.TrimSpace(v.Field.Parts[0])]
-			if !isEnum {
-				return
-			}
-			switch v.Operator {
-			case languageAst.OpEq, languageAst.OpNe, languageAst.OpIn, languageAst.OpOut:
-			default:
-				return
-			}
-			member := make(map[string]bool, len(allowed))
-			for _, a := range allowed {
-				member[a] = true
-			}
-			for _, lit := range stringLiterals(v.Value) {
-				if !member[lit] {
-					out = append(out, enumViolation{
-						field:       v.Field.Parts[0],
-						value:       lit,
-						allowed:     allowed,
-						consequence: enumConsequence(v.Operator),
-					})
-				}
-			}
 		case *languageAst.LogicalExpr:
+			// The lowered query joins its concept term to the filter
+			// lambda: `concept==<id> && (row => ...)`.
 			walk(v.Left)
 			walk(v.Right)
-		case *languageAst.ConditionalFilterExpr:
-			walk(v.Filter)
-		case *languageAst.NotExpr:
-			walk(v.Target)
-		case *languageAst.RelationshipExpr:
-			walk(v.Target)
 		case *languageAst.ShapeExpr:
 			walk(v.Target)
 		case *languageAst.SortExpr:
@@ -1612,15 +1581,14 @@ func filterEnumViolations(n languageAst.Node, enums map[string][]string) []enumV
 	return out
 }
 
-// v1EnumViolations is filterEnumViolations for an edition-2026 predicate
-// (epic memql#5363): `filter row => ...` or a brace-less spec's `row => ...`.
+// v1EnumViolations is filterEnumViolations for one predicate (epic
+// memql#5363): `filter row => ...` or a spec's `row => ...`.
 //
-// The same comparisons are inspected, spelled as v1 nodes: `==` / `!=`
-// between the parameter's field and a string literal (either operand order),
-// and `in` between the parameter's field and a list of them, a `!` directly
-// over the `in` taking the `not in` consequence. Only a single-field member of
-// the PARAMETER is the enum -- `args.status` and a nested lambda's own
-// parameter are not the row's field.
+// The comparisons inspected: `==` / `!=` between the parameter's field and a
+// string literal (either operand order), and `in` between the parameter's
+// field and a list of them, a `!` directly over the `in` taking the `not in`
+// consequence. Only a single-field member of the PARAMETER is the enum --
+// `args.status` and a nested lambda's own parameter are not the row's field.
 func v1EnumViolations(lam *languageAst.LambdaExpr, enums map[string][]string) []enumViolation {
 	if lam == nil || len(lam.Params) != 1 || len(enums) == 0 {
 		return nil
@@ -1697,26 +1665,6 @@ func v1EnumViolations(lam *languageAst.LambdaExpr, enums map[string][]string) []
 	return out
 }
 
-// stringLiterals extracts the string literal(s) a comparison value carries --
-// one for `==` / `!=`, a list for `in`. A non-literal yields none.
-func stringLiterals(value any) []string {
-	switch v := value.(type) {
-	case string:
-		return []string{v}
-	case []string:
-		return v
-	case []any:
-		var out []string
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	return nil
-}
-
 // filterRowIntrinsics are the row intrinsics a FILTER may name, lower-cased.
 //
 // Deliberately NOT lane 3's rowIntrinsics: that map is the write side, and it
@@ -1786,23 +1734,11 @@ func filterFieldHeads(n languageAst.Node) []string {
 		switch v := node.(type) {
 		case *languageAst.QueryStmt:
 			walk(v.Expression)
-		case *languageAst.ComparisonExpr:
-			add(v.Field)
-			for _, sel := range v.FieldSelections {
-				add(sel)
-			}
 		case *languageAst.LogicalExpr:
+			// The lowered query joins its concept term to the filter
+			// lambda: `concept==<id> && (row => ...)`.
 			walk(v.Left)
 			walk(v.Right)
-		case *languageAst.ConditionalFilterExpr:
-			walk(v.Filter)
-		case *languageAst.NotExpr:
-			walk(v.Target)
-		case *languageAst.RelationshipExpr:
-			// The engine's rewriteFilterFieldRefs walks this, so a bare
-			// property under childOf(...) IS payload-prefixed -- omitting it
-			// here left the lane blind to the exact defect it exists to catch.
-			walk(v.Target)
 		case *languageAst.ShapeExpr:
 			walk(v.Target)
 		case *languageAst.SortExpr:
@@ -1825,13 +1761,14 @@ func filterFieldHeads(n languageAst.Node) []string {
 				walk(v.Lambda)
 			}
 		case *languageAst.LambdaExpr:
-			// An edition-2026 predicate (epic memql#5363): every field is a
-			// member of the lambda's parameter, `row.status`, so the head is
-			// the FIRST FIELD of each chain rooted at it -- not the root,
-			// which would report `row` for every reference. A chain rooted
-			// anywhere else (`args.x`, `actor.userId`, a nested lambda's own
-			// parameter) is not the row's field and contributes nothing, as
-			// a reserved head contributes nothing above.
+			// The predicate (epic memql#5363): every field is a member of the
+			// lambda's parameter, `row.status`, so the head is the FIRST
+			// FIELD of each chain rooted at it -- not the root, which would
+			// report `row` for every reference. A chain rooted anywhere else
+			// (`args.x`, `actor.userId`, a traversal's own parameter) is not
+			// the row's field and contributes nothing. A field of the row read
+			// inside a traversal (`childOf(p => p.id == row.parentId)`) is
+			// still the row's, and is reached.
 			if len(v.Params) != 1 {
 				return
 			}
@@ -2459,38 +2396,35 @@ func (t *Tree) verifySpecBodyFields(path string, f *languageAst.File, idx *declI
 	var errs []error
 	for _, def := range f.Definitions {
 		spec, ok := def.(*languageAst.SpecDecl)
-		if !ok || spec.IsTrait || spec.BoundName == "" {
+		if !ok || spec.IsTrait || spec.BoundName == "" || spec.Lambda == nil {
 			continue
 		}
-		// An edition-2026 spec (`spec <bound> <name> = row => ...`, epic
-		// memql#5363) carries its body as Lambda with Body nil -- the two are
-		// one declaration's alternatives. Keying on Body alone skipped every
-		// migrated spec, and SpecBodyCoverage counts a skipped spec as
-		// checked, so the lane would have gone blind tree-wide in silence.
-		var body languageAst.Node
-		switch {
-		case spec.Lambda != nil:
-			body = spec.Lambda
-		case spec.Body != nil:
-			body = spec.Body
-		default:
-			continue
+		// A spec takes no arguments: the engine's lowering refuses an
+		// `args.x` read in a spec body at load, so the lane says so rather
+		// than lint clean and refuse at boot. It needs no binding.
+		if len(spec.Lambda.Params) == 1 {
+			languageAst.MemberPaths(spec.Lambda.Body, func(root string, fields []string) {
+				if root == "args" && root != spec.Lambda.Params[0] && len(fields) > 0 {
+					errs = append(errs, fmt.Errorf(
+						"%s: spec %q: body reads args.%s, and a spec does not take arguments",
+						path, spec.Name, fields[0]))
+				}
+			})
 		}
 		allowed, kind := t.resolveSpecBindingFields(path, f, idx, spec.BoundName)
 		if allowed == nil {
 			continue // unresolved -- lane 2 reports it
 		}
-		for _, head := range filterFieldHeads(body) {
+		// Each head is the first field of a chain rooted at the lambda's
+		// parameter; a chain rooted at actor, config or now is the predicate's
+		// scope, not the binding's, and is not a head.
+		for _, head := range filterFieldHeads(spec.Lambda) {
 			if allowed[head] {
 				continue
 			}
-			// A concept-bound (row) spec may name a BARE row intrinsic.
-			// It may NOT name a reserved head (args / actor / config ...):
-			// conceptFieldMapper reads "the bound concept by bare name
-			// only" and rejects any dotted reference, so admitting those
-			// -- as lane 5 does for a filter, where they ARE legal -- would
-			// lint clean and refuse at boot. A shape-bound spec gets
-			// neither: its mapper resolves projected keys and nothing else.
+			// A concept-bound (row) spec may name a row intrinsic
+			// (`row.createdAt`). A shape-bound spec may not: its mapper
+			// resolves projected keys and nothing else.
 			if kind == "concept" && filterRowIntrinsics[strings.ToLower(head)] {
 				continue
 			}

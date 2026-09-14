@@ -1,0 +1,6 @@
+/// Background calls resolve through the local-first chain at the strong level.
+@when(tag="background")
+@policy("localFirst")
+@precedence(15)
+@level(strong)
+rule backgroundLocalLevel { }

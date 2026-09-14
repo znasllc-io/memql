@@ -14,7 +14,9 @@ query agent activeAgents {
   args {
     groupId  string
   }
-  filter  isActiveRecord && isNotDeleted && when(args.groupId) { args.groupId in groupIds }
+  filter  row => isActiveRecord(row)
+              && isNotDeleted(row)
+              && (args.groupId == nil || args.groupId in row.groupIds)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -43,10 +45,10 @@ query agent activeAgents {
 // would wire it back up.
 //
 // THE SPLIT #3178 USED FOR PATs IS NOT AVAILABLE HERE, and the reason is
-// worth stating so nobody re-proposes it: a second `userId==args.userId`
+// worth stating so nobody re-proposes it: a second `row.userId == args.userId`
 // arm -- admin-gated or `@serverOnly` -- still binds a concept that
 // declares a tier, so #3172's land gate measures it and refuses it too.
-// Under a declared tier, `userId==actor.userId` is the only readable
+// Under a declared tier, `row.userId == actor.userId` is the only readable
 // shape. The four server-side call sites that legitimately resolve
 // ANOTHER user's envelope ceiling (the agent's owner, not the caller)
 // therefore supply that user's actor envelope for the one Execute call
@@ -62,7 +64,7 @@ query agent activeAgents {
 @actor
 @unbounded("per-user standing authorizations -- a small bounded set the caller evaluates whole for authz decisions")
 query agentAuthorization agentAuthorizationsForSelf {
-  filter  userId==actor.userId && isActiveRecord
+  filter  row => row.userId == actor.userId && isActiveRecord(row)
   shape   agentAuthorizationFull
 }
 
@@ -78,7 +80,7 @@ query agent agentById {
   args {
     agentId  string!
   }
-  filter  row.id==args.agentId
+  filter  row => row.id == args.agentId
   shape   agentFull
 }
 
@@ -96,7 +98,7 @@ query agent agentOwner {
   args {
     agentId  string!
   }
-  filter  row.id==args.agentId
+  filter  row => row.id == args.agentId
   shape   agentFull
 }
 
@@ -111,7 +113,7 @@ query agent agentOwner {
 /// the create-agent UI to filter out already-taken roles.
 @unbounded("distinct role slugs in use -- a small bounded dedupe set consumed whole")
 query agent agentRoleSlugsInUse {
-  filter  isActiveRecord && isNotDeleted
+  filter  row => isActiveRecord(row) && isNotDeleted(row)
   shape   agentRoleSlugLite
 }
 
@@ -124,7 +126,7 @@ query agent agentRoleSlugsInUse {
 
 /// Returns all AI agent templates regardless of active status.
 query agent allAgents {
-  filter  isNotDeleted
+  filter  row => isNotDeleted(row)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -161,7 +163,7 @@ query agent allAgents {
 @serverOnly
 @unbounded("the in-process agent registry must be COMPLETE -- a truncated page silently makes an agent unresolvable, and the paged form cannot self-heal under version churn")
 query agent agentsForRegistry {
-  filter  isNotDeleted
+  filter  row => isNotDeleted(row)
   shape   agentFull
 }
 
@@ -175,7 +177,7 @@ query agent agentsForRegistry {
 // `actor.userId`; splitting tracked as a follow-up under #54.
 /// Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space
 /// scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check
-/// before proposing a new agent. Platform-infrastructure agents (payload.kind=='system' -- MemQL
+/// before proposing a new agent. Platform-infrastructure agents (`row.kind == "system"` -- MemQL
 /// Planner, MemQL Trainer) are returned by this query and filtered out structurally by
 /// loadExistingAgents in integrations/agents/factory.go before they enter the dedupe candidate
 /// pool; the filter lives one layer up rather than in the query so the same query can serve other
@@ -186,7 +188,7 @@ query agent activeAgentsForUser {
   args {
     ownerUserId  string!
   }
-  filter  ownerUserId==args.ownerUserId && isActiveRecord && isNotDeleted
+  filter  row => row.ownerUserId == args.ownerUserId && isActiveRecord(row) && isNotDeleted(row)
   shape   agentMinimalForDedupe
 }
 
@@ -208,7 +210,10 @@ query agent assistantAgentForUser {
   args {
     ownerUserId  string!
   }
-  filter  ownerUserId==args.ownerUserId && roleSlug=="assistant" && isActiveRecord && isNotDeleted
+  filter  row => row.ownerUserId == args.ownerUserId
+              && row.roleSlug == "assistant"
+              && isActiveRecord(row)
+              && isNotDeleted(row)
   shape   agentMinimalForDedupe
 }
 
@@ -224,7 +229,7 @@ query agentRole agentRoleBySlug {
   args {
     slug  string!
   }
-  filter  slug==args.slug && isActiveRecord
+  filter  row => row.slug == args.slug && isActiveRecord(row)
   shape   agentRoleFull
 }
 
@@ -296,7 +301,7 @@ query agentRole agentRoleBySlug {
 @unbounded("agent role catalog -- a small admin-defined bounded set consumed whole")
 @cache(300)
 query agentRole activeAgentRoles {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   agentRoleFull
 }
 
@@ -319,7 +324,7 @@ query skillChangeEvent skillChangeEventsForAgent {
   args {
     targetAgentId  string!
   }
-  filter  targetAgentId==args.targetAgentId
+  filter  row => row.targetAgentId == args.targetAgentId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -343,7 +348,7 @@ query skillChangeEvent skillChangeEventsForAgent {
 // undeclared concepts in the per-row-authz long tail: it carries no
 // `@rowAuthz` tier, and every existing agent read here either declares
 // `@public` (activeAgentsForUser, assistantAgentForUser) or is unclassified.
-// An `ownerUserId==actor.userId` conjunct would LOOK like narrowing and
+// A `row.ownerUserId == actor.userId` conjunct would LOOK like narrowing and
 // would in fact be a silent emptiness: `createAgent` takes `ownerUserId`
 // as a caller ARGUMENT rather than stamping it from the actor, so a
 // planner-provisioned specialist can carry an empty one -- and the row the
@@ -359,18 +364,18 @@ query skillChangeEvent skillChangeEventsForAgent {
 // section 7 (docs/superpowers/specs/2026-08-22-nexus-living-map-of-a-goal-design.md),
 // which rules exactly this: "the client filters by their plan pointers, and
 // the residual is recorded in the undeclared gate, not hidden here."
-/// The agents raised while working one goal -- every agent whose lineage.originatingPlanId names
-/// the plan. Backs the Nexus map's agent lane (memql#4371). Non-owned by design: v1:agents:agent
-/// declares no row-authz tier and a planner-raised specialist carries no reliable owner pointer, so
-/// the plan id is the narrowing and the residual is recorded in the per-row-authz audit rather than
-/// masked by a conjunct that would only ever return an empty map. The plan's own ownerAgentId is
-/// resolved separately through agentById.
+/// The agents raised while working one goal -- every agent whose lineage.originatingRunId names the
+/// goal's run, passed as planId. Backs the Nexus map's agent lane (memql#4371). Non-owned by
+/// design: v1:agents:agent declares no row-authz tier and a planner-raised specialist carries no
+/// reliable owner pointer, so the run id is the narrowing and the residual is recorded in the
+/// per-row-authz audit rather than masked by a conjunct that would only ever return an empty map.
+/// The plan's own ownerAgentId is resolved separately through agentById.
 @public
 @unbounded("the agents raised by one goal -- bounded by the plan; the map draws the whole set at once, and a truncated page silently loses an agent from the scene")
 query agent agentsForPlan {
   args {
     planId  string!
   }
-  filter  lineage.originatingPlanId==args.planId && isNotDeleted
+  filter  row => row.?lineage.originatingRunId == args.planId && isNotDeleted(row)
   shape   agentFull
 }

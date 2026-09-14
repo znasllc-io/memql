@@ -436,9 +436,10 @@ func evalCollCond(node *FunctionCallExpression, args, locals map[string]any) (an
 // "1", ...) of a converter-normalised builtin call.
 //
 // One at a time rather than all at once, so coalesce can stop at the first
-// operand that is present -- matching mutationTemplateEvaluator.evalCoalesce
-// and MutationExecutor.evaluateCoalesce, which parse and evaluate lazily. An
-// operand that is already a plain value (a literal) is returned as-is.
+// operand that is present -- matching coalesceSelect, which evaluates its arms
+// lazily, and MutationExecutor.evaluateCoalesce, which parses and evaluates
+// lazily. An operand that is already a plain value (a literal) is returned
+// as-is.
 func evalCollPositionalOperand(node *FunctionCallExpression, name string, i int, args, locals map[string]any) (any, error) {
 	raw, ok := node.Args[strconv.Itoa(i)]
 	if !ok {

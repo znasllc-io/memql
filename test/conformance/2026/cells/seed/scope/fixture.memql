@@ -1,0 +1,19 @@
+/// The row this cell's seed writes.
+concept personalQueue {
+  ownerUserId  string
+  name         string
+}
+
+/// The mutation the seed materializer writes this concept's rows through: create<Concept>.
+mutate personalQueue createPersonalQueue {
+  args {
+    personalQueueId  string!
+    ownerUserId      string!
+    name             string!
+  }
+  insert {
+    id: args.personalQueueId
+    ownerUserId: args.ownerUserId
+    name: args.name
+  }
+}

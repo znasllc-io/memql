@@ -97,11 +97,11 @@ func TestCrossNamespaceHintNamesTheDeclaringFile(t *testing.T) {
 
 func TestImportedCrossNamespaceReferenceIsFine(t *testing.T) {
 	got := gateOn(t, map[string]string{
-		"common/traits.memql": "trait isActiveRecord {\n  return active == true\n}\n",
+		"common/traits.memql": "trait isActiveRecord = row => row.active == true\n",
 		"cognition/queries.memql": `use common.traits.{ isActiveRecord }
 
 query participant q {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
 }
 `,
 	})
@@ -114,9 +114,9 @@ query participant q {
 // memql#2617 was right about for these kinds.
 func TestSameNamespaceNeedsNoImport(t *testing.T) {
 	got := gateOn(t, map[string]string{
-		"common/traits.memql": "trait isActiveRecord {\n  return active == true\n}\n",
+		"common/traits.memql": "trait isActiveRecord = row => row.active == true\n",
 		"common/queries.memql": `query thing q {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
 }
 `,
 	})
@@ -247,7 +247,7 @@ func TestConceptsAreNotReportedHere(t *testing.T) {
 	got := gateOn(t, map[string]string{
 		"planner/concepts.memql": "concept plan {\n  x string\n}\n",
 		"agents/queries.memql": `query plan q {
-  filter  row.id != ""
+  filter  row => row.id != ""
 }
 `,
 	})

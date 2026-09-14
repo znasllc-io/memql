@@ -35,20 +35,43 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry, report ...*Lo
 	}
 	files := baseloader.ReadAll(logger)
 
+	// Each file's `use` imports, by the path the loader stamps into an origin
+	// ("unified:<path>:<name>"). A spec's binding resolves through the
+	// imports of the file it was written in first (specBindingConcept), as a
+	// query's signature concept does; the slice the parser reads carries no
+	// imports, so they ride on the Spec. A file whose imports do not parse
+	// leaves its specs with none -- the dslimports lanes report the import.
+	usesByPath := make(map[string][]*languageParser.UseDeclaration, len(files))
+	for _, f := range files {
+		if uses, err := parsedUseDeclarations(f.Content); err == nil && len(uses) > 0 {
+			usesByPath[f.Path] = uses
+		}
+	}
+
 	parse := func(origin string, raw []byte) (*Spec, error) {
 		decl, err := languageParser.ParseSpecDecl(string(raw))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", origin, err)
 		}
-		spec, err := specDeclToSpec(decl, origin)
+		spec, disabled, err := convertSpecDecl(decl, origin)
 		if err != nil {
 			return nil, err
 		}
+		if spec != nil {
+			spec.Uses = usesByPath[unifiedOriginPath(origin, decl.Name)]
+		}
 		// nil, nil = @disabled (the intentional-skip contract). Reserve
 		// the name: promotion guards refuse it and diagnostics say
-		// "disabled" instead of "not found" (#2607).
-		if spec == nil {
+		// "disabled" instead of "not found" (#2607). An edition-2026 body
+		// comes back whole and is kept for the Init pass to lower, never
+		// registered: disabling a spec must not ship a body that does not
+		// lower, or re-enabling it bricks boot (SpecRegistry.disabledBodies).
+		if disabled {
 			registry.MarkDisabled(decl.Name)
+			if spec != nil && spec.Lambda != nil {
+				registry.addDisabledBody(spec)
+			}
+			return nil, nil
 		}
 		return spec, nil
 	}
@@ -98,4 +121,10 @@ func anchoredExtractAdapter(content, keyword string) []baseloader.Slice {
 		out[i] = baseloader.Slice{Name: s.Name, Source: languageParser.AnchorSource(s.Source, line)}
 	}
 	return out
+}
+
+// unifiedOriginPath is the file path inside a unified loader origin,
+// "unified:<path>:<name>".
+func unifiedOriginPath(origin, name string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(origin, "unified:"), ":"+name)
 }

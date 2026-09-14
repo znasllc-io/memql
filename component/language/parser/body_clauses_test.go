@@ -135,14 +135,14 @@ func TestBodyClausesMatchTheParserDispatch(t *testing.T) {
 // that uses the clause.
 var bodyClauseFixtures = map[string]map[string]string{
 	"query": {
-		"args":     "query thing probe {\n  args {\n    id string\n  }\n  filter row.id == args.id\n}",
-		"filter":   "query thing probe {\n  filter row.id != \"\"\n}",
-		"refine":   "query thing probe {\n  filter row.id != \"\"\n  refine row => row.id != \"\"\n  paginate 25\n}",
-		"shape":    "query thing probe {\n  filter row.id != \"\"\n  shape probeCard\n}",
-		"sort":     "query thing probe {\n  filter row.id != \"\"\n  sort \"row.createdAt\", \"desc\"\n}",
-		"paginate": "query thing probe {\n  filter row.id != \"\"\n  paginate 25\n}",
-		"asOf":     "query thing probe {\n  filter row.id != \"\"\n  asOf latest\n}",
-		"count":    "query thing probe {\n  filter row.id != \"\"\n  count\n}",
+		"args":     "query thing probe {\n  args {\n    id string\n  }\n  filter row => row.id == args.id\n}",
+		"filter":   "query thing probe {\n  filter row => row.id != \"\"\n}",
+		"refine":   "query thing probe {\n  filter row => row.id != \"\"\n  refine row => row.id != \"\"\n  paginate 25\n}",
+		"shape":    "query thing probe {\n  filter row => row.id != \"\"\n  shape probeCard\n}",
+		"sort":     "query thing probe {\n  filter row => row.id != \"\"\n  sort \"row.createdAt\", \"desc\"\n}",
+		"paginate": "query thing probe {\n  filter row => row.id != \"\"\n  paginate 25\n}",
+		"asOf":     "query thing probe {\n  filter row => row.id != \"\"\n  asOf latest\n}",
+		"count":    "query thing probe {\n  filter row => row.id != \"\"\n  count\n}",
 	},
 	"mutate": {
 		"args":   "mutate thing probe {\n  args {\n    id string!\n  }\n  insert {\n    id: args.id\n  }\n}",
@@ -202,7 +202,7 @@ func TestBodyClausesMatchWhatTheParsersAccept(t *testing.T) {
 // bodyProbeFixtures is, per construct, a minimal body that parses, with %s
 // where a probed clause goes.
 var bodyProbeFixtures = map[string]string{
-	"query":      "query thing probe {\n  filter row.id != \"\"\n  %s\n}",
+	"query":      "query thing probe {\n  filter row => row.id != \"\"\n  %s\n}",
 	"mutate":     "mutate thing probe {\n  insert {\n    id: \"x\"\n  }\n  %s\n}",
 	"logic":      "logic probe {\n  %s\n  body {\n    return 1\n  }\n}",
 	"automation": "automation probe {\n  %s\n  step run {\n    mutation createThing (id: \"x\")\n  }\n}",

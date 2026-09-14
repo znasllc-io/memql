@@ -46,7 +46,7 @@ automation referencePackGreetOnNoteCreate {
   // failed check, and the asserted literal -- rather than the step
   // silently greeting a blank user.
   precondition ownerPresent {
-    check: exists(args.ownerUserId)
+    check: args.ownerUserId != nil
     literal: ownerUserId
     description: "The created note must carry the owner id the greeting targets."
   }

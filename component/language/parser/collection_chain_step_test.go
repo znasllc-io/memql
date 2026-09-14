@@ -2,12 +2,13 @@ package parser
 
 import (
 	"testing"
+
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
 // parseLogicStepDefs is a local helper: it normalises + parses a logic source
-// string and returns the parsed *AutomationDef step list. It mirrors the
-// production load path (NormaliseAll -> NewParser -> SetSource -> Parse) so a
-// collection-chain step RHS gets its source span captured (#2317).
+// string and returns the parsed *AutomationDef step list, as the production
+// load path does (NormaliseAll -> NewParser -> Parse).
 func parseLogicStepDefs(t *testing.T, src string) []StepDef {
 	t.Helper()
 	normalised, err := NormaliseAll(src)
@@ -20,14 +21,13 @@ func parseLogicStepDefs(t *testing.T, src string) []StepDef {
 		t.Fatalf("Tokenize: %v", err)
 	}
 	p := NewParser(tokens)
-	p.SetSource(normalised)
-	ast, err := p.Parse()
+	root, err := p.Parse()
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	file, ok := ast.(*File)
+	file, ok := root.(*File)
 	if !ok {
-		t.Fatalf("expected *File, got %T", ast)
+		t.Fatalf("expected *File, got %T", root)
 	}
 	for _, def := range file.Definitions {
 		fd, ok := def.(*FunctionDef)
@@ -49,8 +49,8 @@ func parseLogicStepDefs(t *testing.T, src string) []StepDef {
 // (`active := args.members.where(m => m.active)`) is no longer rejected with
 // "step RHS must be a function call or builtin; got *ast.MethodCallExpr".
 // Instead it parses into a StepTypeQuery step whose QueryStepConfig carries the
-// chain's VERBATIM source on the MethodCallExpr.Raw field, which the compiler
-// emits as-is so the runtime collection evaluator re-parses what was written.
+// chain -- in edition 2026 the v1 method call itself, whose canonical source
+// is what was written, for the runtime evaluator to run in process.
 func TestParser_CollectionChainStepRHS_EmitsQueryStep(t *testing.T) {
 	src := `@description("chain step probe")
 logic logicProbe {
@@ -81,43 +81,51 @@ logic logicProbe {
 	if !ok {
 		t.Fatalf("active step config = %T, want *QueryStepConfig", active.Config)
 	}
-	chain, ok := cfg.Query.(*MethodCallExpr)
-	if !ok {
-		t.Fatalf("active step query expr = %T, want *MethodCallExpr", cfg.Query)
+	chain, ok := cfg.Query.(*ast.CallExpr)
+	if !ok || chain.Receiver == nil || chain.Name != "where" {
+		t.Fatalf("active step query expr = %T %v, want the method call .where(...)", cfg.Query, cfg.Query)
 	}
-	if chain.Raw != `args.members.where(m => m.active)` {
-		t.Errorf("captured chain source = %q, want %q", chain.Raw, `args.members.where(m => m.active)`)
+	if got := ast.FormatExpr(chain); got != `args.members.where(m => m.active)` {
+		t.Errorf("the chain reads %q, want %q", got, `args.members.where(m => m.active)`)
 	}
 }
 
-// TestParser_NonChainStepRHS_StillErrors pins that the #2317 rescue is narrow:
-// only a genuine *MethodCallExpr RHS is converted to a query step. A bare
-// literal RHS (`x := 5`) is neither a function call nor a chain, so it keeps
-// erroring exactly as before (the chain rescue lives inside the `ident(...)`
-// call branch, which a literal never enters).
-func TestParser_NonChainStepRHS_StillErrors(t *testing.T) {
-	src := `@description("invalid literal step RHS")
-logic logicBad {
+// TestParser_NonCallStepRHS_IsAQueryStep pins what edition 2026 made of the
+// #2317 rescue. The legacy grammar converted only a genuine method chain to a
+// query step and refused every other non-call RHS; edition 2026's step RHS is
+// any expression -- a call without a receiver is a function step, anything
+// else a query step the runtime evaluates in process -- so a bare literal
+// (`x := 5`) is a query step carrying the literal, and a call is still a
+// function step.
+func TestParser_NonCallStepRHS_IsAQueryStep(t *testing.T) {
+	src := `@description("literal step RHS")
+logic logicLiteral {
   args {
     n integer @required
   }
   body {
     x := 5
-    return x
+    y := double(n: args.n)
+    return x + y
   }
 }`
-	normalised, err := NormaliseAll(src)
-	if err != nil {
-		t.Fatalf("NormaliseAll: %v", err)
+	steps := parseLogicStepDefs(t, src)
+	byID := map[string]StepDef{}
+	for _, s := range steps {
+		byID[s.ID] = s
 	}
-	lexer := NewLexer(normalised)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Tokenize: %v", err)
+	x, ok := byID["x"]
+	if !ok || x.Type != StepTypeQuery {
+		t.Fatalf("x step = %+v, want a query step", x)
 	}
-	p := NewParser(tokens)
-	p.SetSource(normalised)
-	if _, err := p.Parse(); err == nil {
-		t.Fatalf("expected a parse error for `x := 5` (a non-call, non-chain literal step RHS), got nil")
+	if lit, ok := x.Config.(*QueryStepConfig).Query.(*ast.LiteralExpr); !ok || ast.FormatExpr(lit) != "5" {
+		t.Errorf("x step query = %T %v, want the literal 5", x.Config.(*QueryStepConfig).Query, x.Config.(*QueryStepConfig).Query)
+	}
+	y, ok := byID["y"]
+	if !ok || y.Type != StepTypeFunction {
+		t.Fatalf("y step = %+v, want a function step", y)
+	}
+	if cfg := y.Config.(*FunctionStepConfig); cfg.Name != "double" {
+		t.Errorf("y step calls %q, want double", cfg.Name)
 	}
 }

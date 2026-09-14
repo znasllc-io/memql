@@ -1,7 +1,7 @@
 package memql
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"testing"
 
@@ -45,6 +45,15 @@ import (
 // different answers". A test that only checked the true branch would pass
 // against the broken code for the `!=` and `<` shapes, where the constant
 // else-branch happens to be the expected answer.
+//
+// # In edition 2026
+//
+// cond() is retired: the conditional is `p ? a : b`, and a logic body that
+// returns an expression runs on the LogicRunner, which evaluates it with
+// EvalExpr over the call's arguments (logic_body_v1.go). The mechanism above
+// has no edition-2026 path. What stays is the property -- a comparison
+// predicate over an argument discriminates -- driven through the real parse
+// and the evaluator the runner calls, with the two-inputs assertion.
 
 // condProbeSource builds a single-statement logic whose body is `expr`.
 func condProbeSource(expr string) string {
@@ -63,18 +72,17 @@ logic condProbe {
 `, expr)
 }
 
-// evalCondProbe parses `expr` as a logic body and evaluates it against args,
-// through the same chain a caller drives.
+// evalCondProbe parses `expr` as a logic body and evaluates its returned
+// expression against args with EvalExpr, the evaluator the LogicRunner runs it
+// with.
 func evalCondProbe(t *testing.T, expr string, args map[string]any) any {
 	t.Helper()
 	fn, err := tryParseNewFunctionSyntax("condProbe", "logic", condProbeSource(expr), "memql#2962-test", memorynodes.DefaultRegistry())
 	require.NoErrorf(t, err, "the probe body %q must parse", expr)
+	ret, ok := fn.Expr.(*PlanConstExpression)
+	require.Truef(t, ok, "fn.Expr = %T, want the returned expression as a *PlanConstExpression", fn.Expr)
 
-	v := newFunctionValidatorWithOrigin(nil, nil, 0)
-	out, err := v.expandExpressionWithArgs(fn.Expr, args)
-	require.NoErrorf(t, err, "expanding %q", expr)
-
-	got, err := evalCollScalar(out, args, nil)
+	got, err := EvalExpr(context.Background(), ret.Expr, MapScope{"args": args}, EvalOptions{})
 	require.NoErrorf(t, err, "evaluating %q", expr)
 	return got
 }
@@ -93,22 +101,21 @@ func TestCond_ComparisonPredicateOverArgsDiscriminates(t *testing.T) {
 		wantHi any
 		wantLo any
 	}{
-		{"eq", `cond(args.role == "owner", "elevated", "plain")`, "elevated", "plain"},
-		{"ne", `cond(args.role != "owner", "elevated", "plain")`, "plain", "elevated"},
-		{"gt", `cond(args.n > 5, "elevated", "plain")`, "elevated", "plain"},
-		{"ge", `cond(args.n >= 5, "elevated", "plain")`, "elevated", "plain"},
-		{"lt", `cond(args.n < 5, "elevated", "plain")`, "plain", "elevated"},
-		{"le", `cond(args.n <= 5, "elevated", "plain")`, "plain", "elevated"},
+		{"eq", `args.role == "owner" ? "elevated" : "plain"`, "elevated", "plain"},
+		{"ne", `args.role != "owner" ? "elevated" : "plain"`, "plain", "elevated"},
+		{"gt", `args.n > 5 ? "elevated" : "plain"`, "elevated", "plain"},
+		{"ge", `args.n >= 5 ? "elevated" : "plain"`, "elevated", "plain"},
+		{"lt", `args.n < 5 ? "elevated" : "plain"`, "plain", "elevated"},
+		{"le", `args.n <= 5 ? "elevated" : "plain"`, "plain", "elevated"},
 
-		// The predicate must still work when the cond is not the root node --
-		// the resolution happens per-node, but a wrapper is where a partial
-		// fix would show up.
-		{"nested in coalesce", `coalesce(cond(args.role == "owner", "elevated", "plain"), "fallback")`, "elevated", "plain"},
-		{"nested in concat", `concat("role-", cond(args.role == "owner", "elevated", "plain"))`, "role-elevated", "role-plain"},
+		// The predicate must still work when the conditional is not the root
+		// node -- a wrapper is where a partial fix would show up.
+		{"nested in coalesce", `(args.role == "owner" ? "elevated" : "plain") ?? "fallback"`, "elevated", "plain"},
+		{"nested in a join", `"role-" + (args.role == "owner" ? "elevated" : "plain")`, "role-elevated", "role-plain"},
 
 		// memql#2915's shape, kept here so a change to the arg-ref path that
 		// breaks it is caught next to its sibling.
-		{"bare arg-ref predicate", `cond(args.flag, "elevated", "plain")`, "elevated", "plain"},
+		{"bare arg-ref predicate", `args.flag ? "elevated" : "plain"`, "elevated", "plain"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			gotHi := evalCondProbe(t, tc.expr, hi)
@@ -132,70 +139,29 @@ func TestCond_ComparisonPredicateOverArgsDiscriminates(t *testing.T) {
 	}
 }
 
-// TestCond_UnsupportedPredicateShapesAreLoadErrors is memql#2962's fourth
-// definition-of-done item: a shape that cannot be supported must fail at LOAD,
-// never evaluate to a silent constant.
-//
-// Measured rather than assumed -- all three already refuse, and this pins that
-// they keep refusing. A future change that made `&&` inside a cond arg parse
-// without also evaluating it would recreate exactly the defect this file is
-// about, one connective over.
-func TestCond_UnsupportedPredicateShapesAreLoadErrors(t *testing.T) {
-	for _, tc := range []struct{ name, expr string }{
-		{"conjunction", `cond(args.role == "owner" && args.n > 5, "elevated", "plain")`},
-		{"disjunction", `cond(args.role == "owner" || args.n > 5, "elevated", "plain")`},
-		{"negation", `cond(!(args.role == "owner"), "elevated", "plain")`},
+// TestCond_CompoundPredicatesDiscriminate is memql#2962's fourth
+// definition-of-done item in edition 2026. Before the flip a conjunction,
+// disjunction or negation inside a cond predicate could not be evaluated, so
+// each was refused at LOAD rather than evaluate to a silent constant. The
+// one grammar evaluates them -- a condition is `&&`, `||` or `!` over
+// booleans, in every position -- so they load, and the two-inputs assertion
+// shows they discriminate rather than fold to a constant.
+func TestCond_CompoundPredicatesDiscriminate(t *testing.T) {
+	hi := map[string]any{"role": "owner", "n": 10, "flag": true}
+	lo := map[string]any{"role": "reader", "n": 1, "flag": false}
+	for _, tc := range []struct {
+		name, expr     string
+		wantHi, wantLo any
+	}{
+		{"conjunction", `args.role == "owner" && args.n > 5 ? "elevated" : "plain"`, "elevated", "plain"},
+		{"disjunction", `args.role == "owner" || args.n > 5 ? "elevated" : "plain"`, "elevated", "plain"},
+		{"negation", `!(args.role == "owner") ? "elevated" : "plain"`, "plain", "elevated"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := tryParseNewFunctionSyntax("condProbe", "logic", condProbeSource(tc.expr), "memql#2962-test", memorynodes.DefaultRegistry())
-			require.Errorf(t, err,
-				"%q must be refused at load. Accepting it without evaluating it is the "+
-					"memql#2962 defect: a predicate that parses but never discriminates is a "+
-					"silent constant, and a gate written on it is open or closed by accident.",
-				tc.expr)
+			gotHi, gotLo := evalCondProbe(t, tc.expr, hi), evalCondProbe(t, tc.expr, lo)
+			require.Equal(t, tc.wantHi, gotHi, "%s: wrong branch for the high input", tc.expr)
+			require.Equal(t, tc.wantLo, gotLo, "%s: wrong branch for the low input", tc.expr)
+			require.NotEqual(t, gotHi, gotLo, "%s returned the same value for both inputs: a silent constant (memql#2962)", tc.expr)
 		})
 	}
-}
-
-// TestExecute_CondComparisonPredicate_RunsAndDiscriminates is the end-to-end
-// guard memql#2962 asks for by name: "a test driving it through
-// MemQLEngine.Execute, not evalCollScalar -- the seam tests cannot see this,
-// which is how it survived."
-//
-// Postgres-gated (Execute needs a configured DB), so it skips locally without
-// one and runs in CI. The DB-free tests above cover the same chain from the
-// parser down; this one covers the last hop.
-func TestExecute_CondComparisonPredicate_RunsAndDiscriminates(t *testing.T) {
-	eng, _, ctx := sharedReadMergeEngine(t)
-
-	const src = `@enabled
-@description("memql#2962 end-to-end role gate")
-logic roleGate {
-  args {
-    role string @required
-  }
-  body {
-    return cond(args.role == "owner", "elevated", "plain")
-  }
-}
-`
-	fn, err := tryParseNewFunctionSyntax("roleGate", "logic", src, "memql#2962-test", memorynodes.DefaultRegistry())
-	require.NoError(t, err, "the role-gate shape must parse")
-	require.NoError(t, eng.Functions().Upsert(fn))
-
-	call := func(role string) any {
-		raw, mErr := json.Marshal(role)
-		require.NoError(t, mErr)
-		res, eErr := eng.Execute(ctx, "logic roleGate(role: "+string(raw)+")")
-		require.NoErrorf(t, eErr, "roleGate(%q) must run to completion", role)
-		require.NotNil(t, res)
-		return res.OutputPayload()
-	}
-
-	owner, reader := call("owner"), call("reader")
-	require.Equal(t, "elevated", owner, "an owner must take the then branch")
-	require.Equal(t, "plain", reader, "a reader must take the else branch")
-	require.NotEqual(t, owner, reader,
-		"roleGate returned the same value for both roles through Execute -- the gate never "+
-			"fires (memql#2962)")
 }

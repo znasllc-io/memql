@@ -74,7 +74,7 @@ query gadget gadgets {
 }
 
 const (
-	cleanFilter  = `ownerUserId==actor.userId && when(args.gadgetId) { row.id==args.gadgetId }`
+	cleanFilter  = `row => row.ownerUserId == actor.userId && (args.gadgetId == nil || row.id == args.gadgetId)`
 	cleanSortKey = `row.createdAt`
 )
 
@@ -143,42 +143,55 @@ func TestContractGatesRefuseAViolatingBundle(t *testing.T) {
 		why     string
 	}{
 		{
-			// The memql#3612 shape. The engine reads `,` as a pure alias for
-			// `||`, so the ownership conjunct becomes a DISJUNCT and every
-			// row matching the other arm is returned. Both gates that refuse
-			// it -- the retired-operator gate and the authz classifier -- were
-			// test-only, which is why this issue leads with it.
+			// The memql#3612 shape. The engine read `,` as a pure alias for
+			// `||`, so the ownership conjunct became a DISJUNCT and every row
+			// matching the other arm was returned. Both gates that refused it
+			// -- the retired-operator gate and the authz classifier -- were
+			// test-only, which is why this issue led with it. Edition 2026's
+			// parser refuses the `,` (retired_comma_connective), and the gate
+			// must still name itself in the refusal.
 			//
 			// The clause keeps its args.gadgetId reference on purpose: an
 			// args field declared and never referenced is refused by a
 			// different load-time check (memql#3626), which would refuse this
 			// fixture for a reason that has nothing to do with the gate.
 			name:    "retired comma-as-OR inside parens is an authorization bypass",
-			filter:  `(ownerUserId==actor.userId, title==args.gadgetId)`,
+			filter:  `row => (row.ownerUserId == actor.userId, row.title == args.gadgetId)`,
 			sortKey: cleanSortKey,
 			gate:    dslgate.GateRetiredOperator,
-			why:     "`,` is the retired OR separator and the engine still honours it",
+			why:     "`,` is the retired OR separator, which read as `||`",
+		},
+		{
+			// A bundle that has not run `memqlmigrate --rewrite=expressions`:
+			// a filter with no lambda header is the retired form itself
+			// (retired_filter_without_lambda).
+			name: "a pre-2026 filter with no lambda header",
+			// The legacy spelling is the subject. memqlmigrate:keep
+			filter:  `ownerUserId==actor.userId && title==args.gadgetId`,
+			sortKey: cleanSortKey,
+			gate:    dslgate.GateRetiredOperator,
+			why:     "edition 2026 reads a filter only as `row => ...`",
 		},
 		{
 			name:    "a user-scope column selected with no caller check",
-			filter:  `ownerUserId==args.gadgetId`,
+			filter:  `row => row.ownerUserId == args.gadgetId`,
 			sortKey: cleanSortKey,
 			gate:    dslgate.GateUserScopeSelection,
 			why:     "the row set is picked by an owner column the caller supplies",
 		},
 		{
 			name:    "an admin gate composed as a disjunct is switched off by the other arm",
-			filter:  `title==args.gadgetId || actor.isClusterOwner==true`,
+			filter:  `row => row.title == args.gadgetId || actor.isClusterOwner == true`,
 			sortKey: cleanSortKey,
 			gate:    dslgate.GateAdminGateComposition,
 			why:     "a false gate does not zero the result set",
 		},
 		{
 			name:    "a bare row intrinsic in a filter",
-			filter:  `ownerUserId==actor.userId && id==args.gadgetId`,
+			filter:  `row => row.ownerUserId == actor.userId && id == args.gadgetId`,
 			sortKey: cleanSortKey,
 			gate:    dslgate.GateFilterRowIntrinsic,
-			why:     "a bare name is a payload property, so this filters a JSONB path rather than the row id",
+			why:     "a bare name is not the row's: the intrinsic is `row.id`",
 		},
 		{
 			name:    "a bare row intrinsic as a sort key",

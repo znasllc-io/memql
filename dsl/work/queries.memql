@@ -7,7 +7,7 @@
 // SYNTHETIC cluster actor (component/automations/journal.go), whose rows
 // have their owner blanked to present-and-empty by
 // rowauthz_nonprincipal_owner.go -- they are the deployment's. So an
-// `ownerUserId==actor.userId` conjunct would match ZERO of them, and the
+// `row.ownerUserId == actor.userId` conjunct would match ZERO of them, and the
 // reads resume needs would return nothing on exactly the runs resume
 // exists for. Caller-scoping is not a narrower version of these reads; it
 // is a different read that answers about a person's own goals, and that
@@ -37,7 +37,7 @@ query run workRunById {
   args {
     runId  string!
   }
-  filter  row.id==args.runId && actor.isClusterOwner==true
+  filter  row => row.id == args.runId && actor.isClusterOwner == true
   shape   workRunFull
 }
 
@@ -51,7 +51,7 @@ query step workStepsForRun {
   args {
     runId  string!
   }
-  filter  runId==args.runId && actor.isClusterOwner==true
+  filter  row => row.runId == args.runId && actor.isClusterOwner == true
   shape   workStepFull
 }
 
@@ -64,7 +64,7 @@ query run workRunsForAutomation {
   args {
     automationName  string!
   }
-  filter  automationName==args.automationName && actor.isClusterOwner==true
+  filter  row => row.automationName == args.automationName && actor.isClusterOwner == true
   sort    "row.createdAt", "desc"
   shape   workRunFull
 }
@@ -78,7 +78,7 @@ query modelCall workModelCallsForRun {
   args {
     runId  string!
   }
-  filter  runId==args.runId && actor.isClusterOwner==true
+  filter  row => row.runId == args.runId && actor.isClusterOwner == true
   shape   workModelCallFull
 }
 
@@ -91,7 +91,7 @@ query observation workObservationsForRun {
   args {
     runId  string!
   }
-  filter  runId==args.runId && actor.isClusterOwner==true
+  filter  row => row.runId == args.runId && actor.isClusterOwner == true
   shape   workObservationFull
 }
 
@@ -105,14 +105,14 @@ query approval workApprovalById {
   args {
     approvalId  string!
   }
-  filter  row.id==args.approvalId && actor.isClusterOwner==true
+  filter  row => row.id == args.approvalId && actor.isClusterOwner == true
   shape   workApprovalFull
 }
 
-/// The caller's goals, newest first. Owned: ownerUserId==actor.userId binds server-side.
+/// The caller's goals, newest first. Owned: `row.ownerUserId == actor.userId` binds server-side.
 @actor
 query goal workGoalsForOwner {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   sort    "row.createdAt", "desc"
   shape   workGoalFull
 }
@@ -129,16 +129,16 @@ query goal workGoalsForResponsibility {
   args {
     responsibilityId  string!
   }
-  filter  ownerUserId==actor.userId && responsibilityId==args.responsibilityId
+  filter  row => row.ownerUserId == actor.userId && row.responsibilityId == args.responsibilityId
   sort    "row.createdAt", "desc"
   shape   workGoalFull
 }
 
-/// The caller's pending approvals, newest first. Owned. decision=="" is the pending state, and it
+/// The caller's pending approvals, newest first. Owned. `row.decision == ""` is the pending state, and it
 /// matches because createWorkApproval STAMPS the empty string rather than leaving the key absent.
 @actor
 query approval workApprovalsForOwner {
-  filter  ownerUserId==actor.userId && decision==""
+  filter  row => row.ownerUserId == actor.userId && row.decision == ""
   sort    "row.createdAt", "desc"
   shape   workApprovalFull
 }
@@ -151,7 +151,7 @@ query approval workApprovalsForOwner {
 // the SAME rows read by the person who owns them, from a browser, and
 // they are separate constructs rather than one because the two callers
 // satisfy the owned tier by different arms: the journal by the
-// cluster-owner escape, a person by ownerUserId==actor.userId. One
+// cluster-owner escape, a person by `row.ownerUserId == actor.userId`. One
 // construct cannot spell both without widening the read for somebody.
 //
 // Spec section I names these as client-reachable; the MemQL OS Work app
@@ -165,11 +165,11 @@ query goal workGoalForOwner {
   args {
     goalId  string!
   }
-  filter  row.id==args.goalId && ownerUserId==actor.userId
+  filter  row => row.id == args.goalId && row.ownerUserId == actor.userId
   shape   workGoalFull
 }
 
-/// The caller's runs, newest first. Owned: ownerUserId==actor.userId binds server-side, and the
+/// The caller's runs, newest first. Owned: `row.ownerUserId == actor.userId` binds server-side, and the
 /// concept's tier admits the same rows on the SUBSCRIPTION, so a browser watching this feed is not
 /// handed anybody else's work the way an undeclared concept would.
 ///
@@ -179,12 +179,12 @@ query goal workGoalForOwner {
 /// make this query one surface's, and the second surface would add a second query that drifts.
 @actor
 query run workRunsForOwner {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   sort    "row.createdAt", "desc"
   shape   workRunFull
 }
 
-/// The caller's runs that are executing right now. Owned: ownerUserId==actor.userId binds
+/// The caller's runs that are executing right now. Owned: `row.ownerUserId == actor.userId` binds
 /// server-side, so this answers for whoever the actor is and nobody else.
 ///
 /// SEPARATE FROM workRunsForOwner rather than a narrowing of it, for the reason that one states in
@@ -200,7 +200,7 @@ query run workRunsForOwner {
 /// next worker call is denied regardless.
 @actor
 query run workRunningRunsForOwner {
-  filter  ownerUserId==actor.userId && statusIsRunning
+  filter  row => row.ownerUserId == actor.userId && statusIsRunning(row)
   sort    "row.createdAt", "desc"
   paginate 500
   shape   workRunFull
@@ -212,7 +212,7 @@ query run workRunsForGoal {
   args {
     goalId  string!
   }
-  filter  goalId==args.goalId && ownerUserId==actor.userId
+  filter  row => row.goalId == args.goalId && row.ownerUserId == actor.userId
   sort    "row.createdAt", "desc"
   shape   workRunFull
 }
@@ -224,7 +224,7 @@ query run workRunForOwner {
   args {
     runId  string!
   }
-  filter  row.id==args.runId && ownerUserId==actor.userId
+  filter  row => row.id == args.runId && row.ownerUserId == actor.userId
   shape   workRunFull
 }
 
@@ -236,7 +236,7 @@ query step workStepsForOwnerRun {
   args {
     runId  string!
   }
-  filter  runId==args.runId && ownerUserId==actor.userId
+  filter  row => row.runId == args.runId && row.ownerUserId == actor.userId
   shape   workStepFull
 }
 
@@ -248,7 +248,7 @@ query modelCall workModelCallsForOwnerRun {
   args {
     runId  string!
   }
-  filter  runId==args.runId && ownerUserId==actor.userId
+  filter  row => row.runId == args.runId && row.ownerUserId == actor.userId
   shape   workModelCallFull
 }
 
@@ -259,7 +259,7 @@ query observation workObservationsForOwnerRun {
   args {
     runId  string!
   }
-  filter  runId==args.runId && ownerUserId==actor.userId
+  filter  row => row.runId == args.runId && row.ownerUserId == actor.userId
   shape   workObservationFull
 }
 
@@ -274,6 +274,6 @@ query observation workObservationsForOwnerRun {
 @actor
 @unbounded("every in-flight run cluster-wide -- the sweep must see all of them, and the set is bounded by what is actually running")
 query run workRunsInFlight {
-  filter  status in ["compiling", "running", "waiting"] && actor.isClusterOwner==true
+  filter  row => row.status in ["compiling", "running", "waiting"] && actor.isClusterOwner == true
   shape   workRunFull
 }

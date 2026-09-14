@@ -976,10 +976,13 @@ func functionSearchText(fn *Function) string {
 	var b strings.Builder
 	b.WriteString(fn.ExprSource)
 	if fn.MutationTemplate != nil {
+		// The template's values are parsed nodes, printed back as source:
+		// a field a value reads (`status: args.status ?? row.status`) is as
+		// findable as the key it writes.
 		b.WriteByte('\n')
-		b.WriteString(fmt.Sprint(fn.MutationTemplate.PayloadTemplate))
+		b.WriteString(mutationLayoutSource(fn.MutationTemplate.PayloadTemplate))
 		b.WriteByte('\n')
-		b.WriteString(fmt.Sprint(fn.MutationTemplate.PayloadOverlayTemplate))
+		b.WriteString(mutationLayoutSource(fn.MutationTemplate.PayloadOverlayTemplate))
 	}
 	return b.String()
 }

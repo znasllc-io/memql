@@ -49,7 +49,7 @@ tool forgeActiveProjects {}
 /// project row including its id. Use this when the caller says a project name in natural language
 /// so you can obtain the projectId for subsequent requests. Slugs are unique within the caller's
 /// partition (tenant), so this always returns at most one project.
-@handler(type="query", query="query projectBySlug(slug: \"$args.slug\")")
+@handler(type="query", query="query projectBySlug(slug: args.slug)")
 @executionTime("fast")
 @allowedRoles("owner", "admin", "developer", "writer", "reader")
 @mcp
@@ -90,7 +90,7 @@ tool forgeSubmitRequest {
 tool forgeMyRequests {}
 
 /// Get a single forge request by id (full detail).
-@handler(type="query", query="query requestById(requestId: \"$args.requestId\")")
+@handler(type="query", query="query requestById(requestId: args.requestId)")
 @executionTime("fast")
 @allowedRoles("owner", "admin", "developer", "writer", "reader")
 @mcp
@@ -100,7 +100,7 @@ tool forgeRequestById {
 
 /// Get the full lifecycle/audit trail for a request (submitted, routed, validated, approved, ...),
 /// newest first.
-@handler(type="query", query="query requestEvents(requestId: \"$args.requestId\")")
+@handler(type="query", query="query requestEvents(requestId: args.requestId)")
 @executionTime("fast")
 @allowedRoles("owner", "admin", "developer", "writer")
 @mcp

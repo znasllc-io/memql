@@ -49,6 +49,11 @@ func (r *Refusal) Error() string {
 	return r.Message + " [" + r.Code + "]"
 }
 
+// RuleCode is the refusal's stable rule id. A load report reads a refusal's
+// code through this method (baseloader.CodedRefusal), without importing this
+// package.
+func (r *Refusal) RuleCode() string { return r.Code }
+
 // Check decides one written annotation on one receiver. It returns nil when
 // the receiver accepts the annotation in the form it was written, and the
 // refusal otherwise.
@@ -186,10 +191,13 @@ func keyShapeRefusal(p Placement, spec ArgSpec) *Refusal {
 }
 
 // valuedSpelling renders a valued key the way it is written:
-// `maxCalls=<number>`, `ttl="..."`.
+// `maxCalls=<number>`, `filter=row => <predicate>`, `ttl="..."`.
 func valuedSpelling(k ArgSpec) string {
-	if k.Type == "int" || k.Type == "number" {
+	switch k.Type {
+	case "int", "number":
 		return k.Name + "=<number>"
+	case "expression":
+		return k.Name + "=row => <predicate>"
 	}
 	return k.Name + `="..."`
 }

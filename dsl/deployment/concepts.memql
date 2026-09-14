@@ -56,7 +56,7 @@ concept deployment {
 /// this node type to a specific version that overrides the spine. Append-only + time-series like
 /// the parent deployment: the row is written when the spec is first set and every re-pin
 /// (version/replicas/imageDigest change) appends a new payload version under the SAME concept id --
-/// `hash(concat(shortId(deploymentId), ':', nodeType))` -- so the per-node-type spec history is reconstructable
+/// `hash(shortId(deploymentId) + ":" + nodeType)` -- so the per-node-type spec history is reconstructable
 /// asOf any time, and `asOf latest` collapses to the node type's current spec. The CDC path emits
 /// graph.node.created/updated.<partition>.v1:cluster:deploymentNodeSpec on every write.
 /// deploymentId is a plain string FK to v1:cluster:deployment.deploymentId (cross-concept

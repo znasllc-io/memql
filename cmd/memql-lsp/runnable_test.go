@@ -25,7 +25,7 @@ query participant spaceParticipants {
     spaceId  string  @required
     kind     string  @enum("human", "ai")
   }
-  filter  spaceId==args.spaceId
+  filter  row => row.spaceId == args.spaceId
   shape   participantFull
 }
 
@@ -128,7 +128,7 @@ func TestRunnableConstructs_EmptyResultsSerialiseAsArrays(t *testing.T) {
 	}
 
 	// And a runnable construct with no declared args carries [] too.
-	const noArgs = "@description(\"Every space\")\nquery space allSpaces {\n  filter  isActiveRecord\n  shape   spaceCard\n}\n"
+	const noArgs = "@description(\"Every space\")\nquery space allSpaces {\n  filter  row => isActiveRecord(row)\n  shape   spaceCard\n}\n"
 	const uri2 = "file:///w/noargs.memql"
 	openDoc(t, s, uri2, noArgs)
 	res2, _, _, err := callRunnable(t, h, `{"textDocument":{"uri":"`+uri2+`"}}`)

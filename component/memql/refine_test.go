@@ -140,6 +140,12 @@ func TestRefine_FiltersThePageInProcessAndCountsTheDrop(t *testing.T) {
 
 func TestRefine_ValidateRefusesWhatEvalExprCouldNotRun(t *testing.T) {
 	e := &MemQLEngine{specs: newSpecRegistry()}
+	// A spec with no edition-2026 body: EvalExpr evaluates a predicate from
+	// its v1 lambda, and this one has only the IR a pre-2026 body converted
+	// to. No DSL can register one since the flip, so it is placed here
+	// directly -- the refusal is the in-process evaluator's to make, whatever
+	// registered the spec.
+	require.NoError(t, e.specs.add(&Spec{Name: "legacyOpen", Kind: SpecKindRow, Origin: "test", Expr: irConceptEq("v1:x:ticket")}))
 	fn := &Function{Name: "q", ArgsSchema: &ArgsSchemaConfig{Fields: []*FunctionArgsField{{Name: "word", Type: "string"}}}}
 	for _, tc := range []struct{ src, want string }{
 		{`row => row.title.includes(args.word)`, ""},
@@ -149,6 +155,7 @@ func TestRefine_ValidateRefusesWhatEvalExprCouldNotRun(t *testing.T) {
 		{`row => query other().count() > 0`, "is not admitted in a refine clause"},
 		{`row => childOf(p => p.id == "x")`, "a traversal selects rows in SQL"},
 		{`row => isNothing(row)`, "`isNothing` is not a spec, trait or catalog function known here"},
+		{`row => legacyOpen(row)`, "`legacyOpen` has a pre-2026 body, which the in-process evaluator cannot evaluate"},
 		{`row => row.tags.any(a => row.tags.any(b => row.tags.any(c => a == c)))`, "above tiers.MaxStaticCost"},
 	} {
 		err := e.validateRefine(fn, &RefineExpression{Lambda: refineLambda(t, tc.src)})

@@ -71,7 +71,7 @@ concept invocation {
 /// TIER: the composite `owner, clusterOwner` (memql#4312). A registration is one person's machine
 /// -- it carries their hostname, their platform, the IP it last connected from -- so the owner tier
 /// is the right one, and a plain owner tier would hide every machine from the operator who has to
-/// support them. The engine ANDs `(ownerUserId==actor.userId)||(actor.isClusterOwner==true)` onto
+/// support them. The engine ANDs `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` onto
 /// every read and refuses a write onto a row failing the same test.
 ///
 /// The tier is why `component/worker`'s store stamps `auth.ContextWithUserActor(ctx, ownerUserId)`

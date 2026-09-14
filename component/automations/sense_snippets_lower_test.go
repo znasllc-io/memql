@@ -71,7 +71,7 @@ func fillSnippet(text, cursor string) string {
 // conceptSlots is, per concept-binding construct, the text before its concept
 // slot and the rest of a construct that lowers once a concept fills the slot.
 var conceptSlots = map[string][2]string{
-	"query":  {"query ", " probe {\n  filter row.id != \"\"\n}\n"},
+	"query":  {"query ", " probe {\n  filter row => row.id != \"\"\n}\n"},
 	"mutate": {"mutate ", " probe {\n  insert {\n    id: \"x\"\n  }\n}\n"},
 	"seed":   {"seed ", " probe {\n  name: \"x\"\n}\n"},
 	"shape":  {"shape ", " probe {\n  row.id\n}\n"},
@@ -106,7 +106,7 @@ var snippetBodies = map[string]struct {
 	clauses map[string][2]string // clause -> {construct with %s, cursor text}
 }{
 	"query": {"query thing probe {\n  ", map[string][2]string{
-		"args": {"query thing probe {\n  %s\n  filter row.id == args.x\n}", "x string"},
+		"args": {"query thing probe {\n  %s\n  filter row => row.id == args.x\n}", "x string"},
 	}},
 	"mutate": {"mutate thing probe {\n  ", map[string][2]string{
 		"args":   {"mutate thing probe {\n  %s\n  update {\n    id: args.x\n  }\n}", "x string"},

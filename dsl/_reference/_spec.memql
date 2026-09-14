@@ -69,14 +69,10 @@ use common.shapes.{ actorEnvelope }
 use agents.concepts.{ agent }
 
 @description("Matches participants with human participantType")
-spec participant isHumanParticipant {
-  return participantType == "human"
-}
+spec participant isHumanParticipant = row => row.participantType == "human"
 
 @description("Matches participants with AI participantType")
-spec participant isAIParticipant {
-  return participantType == "si"
-}
+spec participant isAIParticipant = row => row.participantType == "si"
 
 // =============================================================================
 //   3. Caller / context spec -- bind an @actor shape
@@ -104,14 +100,10 @@ spec participant isAIParticipant {
 // grant can express -- a question about the actor themselves:
 
 @description("Caller is acting on their own behalf rather than through a delegation.")
-spec actorEnvelope isSelfActing {
-  return identityId == userId
-}
+spec actorEnvelope isSelfActing = actor => actor.identityId == actor.userId
 
 @description("Caller is the cluster owner.")
-spec actorEnvelope isClusterOwner {
-  return isClusterOwner == true
-}
+spec actorEnvelope isClusterOwner = actor => actor.isClusterOwner == true
 
 // =============================================================================
 //   4. Row-metadata spec -- bind a @row shape, read its key bare
@@ -134,9 +126,7 @@ shape participant participantRow {
 }
 
 @description("Row authored by a specific seed identity.")
-spec participantRow isSeedParticipant {
-  return createdBy == "seed" && participantType == "human"
-}
+spec participantRow isSeedParticipant = row => row.createdBy == "seed" && row.participantType == "human"
 
 // =============================================================================
 //   5. Trait -- the deliberately UNBOUND row predicate
@@ -150,19 +140,13 @@ spec participantRow isSeedParticipant {
 // library lives under `dsl/<ns>/traits.memql`.
 
 @description("Matches records with active == true.")
-trait isActiveRecord {
-  return active == true
-}
+trait isActiveRecord = row => row.active == true
 
 @description("Matches records with deleted != true.")
-trait isNotDeleted {
-  return deleted != true
-}
+trait isNotDeleted = row => row.deleted != true
 
 @description("Matches records with status == 'active'.")
-trait statusIsActive {
-  return status == "active"
-}
+trait statusIsActive = row => row.status == "active"
 
 // =============================================================================
 //   6. Classification follows the BINDING (not the body)
@@ -206,13 +190,11 @@ trait statusIsActive {
 // (the `agent` concept is imported in the file-top preamble above)
 
 @description("Rich predicate showing the operator surface (concept-bound).")
-spec agent richPredicate {
-  return role == "assistant"
-    && (roleSlug == "it-support" || roleSlug == "customer-service")
-    && kind != "system"
-    && colorIndex >= 3
-    && active == true
-}
+spec agent richPredicate = row => row.role == "assistant"
+                               && (row.roleSlug == "it-support" || row.roleSlug == "customer-service")
+                               && row.kind != "system"
+                               && row.colorIndex >= 3
+                               && row.active == true
 
 // =============================================================================
 //   9. Calling specs

@@ -79,14 +79,14 @@ automation produceArtifact {
     builtin runAgentTurn (
       agentId: args.agentId,
       requireFile: true,
-      prompt: concat(
-        "Produce the following deliverable and save it to the Library. Do not reply with the ",
-        "content itself -- write it to a file and confirm what you saved.\n\nDeliverable: ",
-        args.goal,
-        "\nFormat: ",
-        args.format ?? "markdown",
-        "\nFilename: ",
-        args.filename ?? "(choose a sensible one)"
+      prompt: (
+        "Produce the following deliverable and save it to the Library. Do not reply with the " +
+        "content itself -- write it to a file and confirm what you saved.\n\nDeliverable: " +
+        args.goal +
+        "\nFormat: " +
+        (args.format ?? "markdown") +
+        "\nFilename: " +
+        (args.filename ?? "(choose a sensible one)")
       )
     )
   }

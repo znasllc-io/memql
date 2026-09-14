@@ -63,7 +63,7 @@ mutate demoWidget createDemoWidget {
     label     string  @required
   }
   insert {
-    id:          canonicalId(args.widgetId, demoWidget)
+    id:          canonicalId(args.widgetId, "demoWidget")
     label:       args.label
     ownerUserId: actor.userId
   }
@@ -74,7 +74,7 @@ mutate demoWidget createDemoWidget {
 @unbounded("fixture query over a per-test concept")
 @actor
 query demoWidget demoWidgetsAll {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
 }`, ns)
 	return retireDBFixture{
 		namespace: ns,

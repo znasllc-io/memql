@@ -1,0 +1,7 @@
+/// Today's date key in a timezone. Switched off: not loaded while @disabled stays.
+@executor("integration.timeutil.dateKeyInTimezone")
+@disabled
+builtin ticketDateKeyDisabled {
+  timezone  string  @description("An IANA timezone; UTC when empty.")
+  now       string  @description("The instant to key, RFC3339.")
+}

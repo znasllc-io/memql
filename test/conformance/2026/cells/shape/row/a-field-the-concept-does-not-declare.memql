@@ -1,0 +1,7 @@
+/// A ticket as a card: its title and a field the ticket does not have.
+@row
+shape ticket ticketCardWithHeadline {
+  row.id
+  title
+  headline
+}

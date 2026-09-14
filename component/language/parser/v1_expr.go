@@ -606,6 +606,13 @@ func (p *Parser) parseV1Name() (v1Expr, error) {
 // parseV1FunctionCall parses `name(args)`: a function, a predicate applied to
 // its receiver (`isActiveRecord(row)`), or a builtin. An unknown name is not an
 // error here; the engine resolves names, against the position.
+//
+// Three names the legacy callable dispatch refused keep their refusals, with
+// the legacy messages: the builtins retired under the 2026.08 epoch (#2707)
+// and caller(), which edition 2026 did not bring back, and `asOf` outside a
+// query (core-builtins ADR §2.3). Without them an in-process position -- a
+// logic statement, an if-condition, a step argument -- would read each as a
+// call to a function nothing defines, and the migration hint would be gone.
 func (p *Parser) parseV1FunctionCall() (v1Expr, error) {
 	nameTok := p.v1Take()
 	name := nameTok.Literal
@@ -615,6 +622,15 @@ func (p *Parser) parseV1FunctionCall() (v1Expr, error) {
 	lower := strings.ToLower(name)
 	if rule, retired := v1RetiredCalls[lower]; retired {
 		return v1Expr{}, v1Retired(nameTok, rule)
+	}
+	if hint, retired := retiredExprBuiltins[lower]; retired {
+		return v1Expr{}, v1Errorf(nameTok, "%s", retiredExprBuiltinMessage(name, hint))
+	}
+	if lower == "caller" {
+		return v1Expr{}, v1Errorf(nameTok, "%s", baseparser.ErrCallerRetired.Error())
+	}
+	if lower == "asof" && p.asOfOutsideQuery() {
+		return v1Expr{}, v1Errorf(nameTok, "%s", asOfQueryOnlyMessage(p.currentFuncType))
 	}
 	args, named, closeTok, err := p.parseV1CallArgs(name, "", true)
 	if err != nil {

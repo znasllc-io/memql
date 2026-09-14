@@ -62,7 +62,9 @@ Sense package; it forks no brain and changes no wire contract.
   `memql.BuildOfflineSense` -- the DB-free construction the boot-time
   validation tier already uses (no database, no network). It advertises
   incremental text sync, push diagnostics, semantic tokens, completion, hover,
-  and signature help.
+  signature help, go-to-definition, and code actions: the
+  [rewrite to edition 2026](sense.md#the-rewrite-quick-fix), as a quick fix
+  and as `source.fixAll`.
 - **Positions.** Sense is 1-based (line and column-in-runes); LSP is 0-based
   (line and character-in-UTF-16-code-units). The server converts on every
   request (`cmd/memql-lsp/internal/position`); the two diverge only on
@@ -252,6 +254,10 @@ and the `GrammarVersion` its section of `editors/vscode/CHANGELOG.md` names
   install (see above).
 - The language configuration is generated from `dslspec`, like the grammar,
   and gated the same way.
+- Writing edition 2026 (epic memql#5363): completion and hover by expression
+  position, every retired spelling reported as the parse error it is, and the
+  [rewrite to edition 2026](sense.md#the-rewrite-quick-fix) as a quick fix and
+  on save. The 0.4.0 section of `editors/vscode/CHANGELOG.md` lists them.
 
 **Updating:** the intelligence lives in the bundled `memql-lsp` binary, so a new
 release ships only when you rebuild it. Run `make vscode-package`, reinstall the

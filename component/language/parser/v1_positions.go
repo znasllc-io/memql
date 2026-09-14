@@ -2,33 +2,26 @@ package parser
 
 // v1_positions.go -- where the construct parsers hand an expression to the
 // edition-2026 grammar (task memql#5364, Task 3 of the DSL v1 expressions
-// plan), and the transition that lets the tree keep loading while it happens.
+// plan).
 //
-// # The transition
+// # The positions
 //
 // The PUSHDOWN positions -- a query's `filter`, a spec or trait body, an
-// automation's `@filter` -- have v1 spellings no legacy spelling can be
-// mistaken for (`row => ...`, `= row => ...`), so both are accepted side by
-// side, always: the tree migrates construct by construct and every step of it
-// loads.
+// automation's `@filter` -- take a lambda (`row => ...`, `= row => ...`); the
+// legacy spelling each replaced is refused naming memqlmigrate
+// --rewrite=expressions.
 //
 // The IN-PROCESS positions -- conditions, forEach sources and filters, switch
-// subjects, step-call arguments, logic statements, mutation values -- reuse
-// spellings the two grammars read differently (`cond(`, `concat(`, a bare
-// `payload.x`), so they change grammar as ONE unit behind
-// Options.ExpressionsV1. With it on, each position parses with the v1 parser,
-// its existing string field holds the canonical v1 source (ast.FormatExpr),
-// and the node sits beside it (StepDef.ConditionExpr, ForEachStepConfig.
-// SourceExpr/FilterExpr, SwitchStepConfig.ExpressionExpr, MutationStmt.
-// PayloadExpr, or the v1 node itself inside a value map); and the legacy
-// pushdown spellings are refused naming memqlmigrate --rewrite=expressions.
-// With it off, nothing an existing construct parses to changes.
+// subjects, step-call arguments, logic statements, mutation values -- parse
+// with the v1 parser: each position's string field holds the canonical v1
+// source (ast.FormatExpr), and the node sits beside it (StepDef.ConditionExpr,
+// ForEachStepConfig.SourceExpr/FilterExpr, SwitchStepConfig.ExpressionExpr,
+// MutationStmt.PayloadExpr, or the v1 node itself inside a value map).
 //
 // The engine's internal query form -- the string an SDK sends to Execute --
-// keeps the legacy grammar in both modes. The one thing the legacy grammar
-// learns here is to read a v1 lambda where it meets an operand, because that
-// is how a struct-form query's v1 filter reaches it:
-// `concept==<id> && (row => ...)`.
+// keeps its own grammar. The one thing that grammar learns here is to read a
+// v1 lambda where it meets an operand, because that is how a struct-form
+// query's v1 filter reaches it: `concept==<id> && (row => ...)`.
 
 import (
 	"strconv"
@@ -43,11 +36,10 @@ import (
 // `(a, b) => body`; and `x => body`. ok=false, consuming nothing, when the
 // cursor is at none of them.
 //
-// Purely additive: every one of these shapes failed to parse in the legacy
-// grammar, which read the name and then choked on `=>`. A collection method's
-// lambda argument never reaches here -- parseMethodArg claims `x => ...` and
-// `(a, b) => ...` first, with a legacy body -- so today's logic bodies are
-// unchanged.
+// Purely additive: every one of these shapes failed to parse in the internal
+// query form, which read the name and then choked on `=>`. A collection
+// method's lambda argument never reaches here -- parseMethodArg claims
+// `x => ...` and `(a, b) => ...` first.
 func (p *Parser) tryParseV1LambdaOperand() (ExpressionNode, bool, error) {
 	switch {
 	case p.check(TokenParenOpen) && p.peekAhead(1).Type == TokenIdentifier && p.isArrowAt(2):
@@ -150,6 +142,39 @@ func (p *Parser) refuseCommaAfterLambda() error {
 	return nil
 }
 
+// refuseAfterPredicate refuses a token left on the line of a spec's or
+// trait's lambda. The lambda is the one predicate clause no bracket or brace
+// closes: it is parsed mid-stream and stops at the first token that cannot
+// extend it, so a word the grammar does not know (`row => row.a == 1 or
+// row.b == 2`) would end the predicate early and everything after it would be
+// dropped -- the declaration would load meaning less than its author wrote.
+// A declaration that follows starts on a line of its own. what names the
+// predicate for the message.
+func (p *Parser) refuseAfterPredicate(what string) error {
+	if p.check(TokenEOF) || p.pos == 0 || p.current.Line != p.tokens[p.pos-1].Line {
+		return nil
+	}
+	return p.v1Trailing(what)
+}
+
+// v1Trailing refuses the token at the cursor, left over after what: a known
+// mistake by its fix, an English connective by the operator that replaces
+// it, anything else as unexpected.
+func (p *Parser) v1Trailing(what string) error {
+	if err := p.v1RefuseMistake(); err != nil {
+		return err
+	}
+	if p.check(TokenIdentifier) {
+		switch p.current.Literal {
+		case "or":
+			return v1Errorf(p.current, "`or` is not an operator: write `||`")
+		case "and":
+			return v1Errorf(p.current, "`and` is not an operator: write `&&`")
+		}
+	}
+	return v1Errorf(p.current, "unexpected %s after %s", v1Describe(p.current), what)
+}
+
 // v1FilterLambdaAhead reports whether the cursor opens a lambda: `x =>`, or a
 // parenthesised parameter list and `=>`.
 func (p *Parser) v1FilterLambdaAhead() bool {
@@ -158,8 +183,9 @@ func (p *Parser) v1FilterLambdaAhead() bool {
 
 // parseAttributeArgValue parses one named attribute argument's value.
 // @trigger's filter= takes the edition-2026 lambda @filter takes (memql#5364),
-// stored as the node; with ExpressionsV1 on its legacy raw-text value is
-// refused, as a legacy @filter is. Everything else is today's value grammar.
+// stored as the node; any other value is the retired raw-text filter and is
+// refused, as a raw-text @filter is. Every other argument takes the attribute
+// value grammar.
 func (p *Parser) parseAttributeArgValue(attrName, argName string, argTok Token) (any, error) {
 	if attrName == AttrTrigger && argName == "filter" {
 		if p.v1FilterLambdaAhead() {
@@ -169,9 +195,7 @@ func (p *Parser) parseAttributeArgValue(attrName, argName string, argTok Token) 
 			}
 			return lam, nil
 		}
-		if p.opts.ExpressionsV1 {
-			return nil, v1Retired(argTok, ruleFilterAnnotation)
-		}
+		return nil, v1Retired(argTok, ruleFilterAnnotation)
 	}
 	return p.parseValue()
 }
@@ -179,15 +203,11 @@ func (p *Parser) parseAttributeArgValue(attrName, argName string, argTok Token) 
 // formatV1 is ast.FormatExpr: canonical edition-2026 source.
 func formatV1(n ExpressionNode) string { return ast.FormatExpr(n) }
 
-// checkV1QueryFilter refuses, with ExpressionsV1 on, a query whose filter is
-// not a lambda. A struct-form query reaches the parser as
+// checkV1QueryFilter refuses a query whose filter is not a lambda. A struct-form query reaches the parser as
 // `[directives](concept==<id> [&& (<filter>)])`, so the filter is the right
 // operand of the join under the directive wrappers. from is the index of the
 // body's first token.
 func (p *Parser) checkV1QueryFilter(body ExpressionNode, from int) error {
-	if !p.opts.ExpressionsV1 {
-		return nil
-	}
 	base := unwrapQueryDirectives(body)
 	and, ok := base.(*LogicalExpr)
 	if !ok || and.Op != LogicalAnd {
@@ -273,17 +293,12 @@ func unwrapQueryDirectives(n ExpressionNode) ExpressionNode {
 }
 
 // ---------------------------------------------------------------------------
-// In-process positions, behind Options.ExpressionsV1.
+// In-process positions.
 // ---------------------------------------------------------------------------
 
 // parseStepCondition parses a step's condition, up to the `{` that opens its
-// block: with ExpressionsV1 on, a v1 expression -- its canonical source and
-// its node -- and otherwise today's canonicalised string and no node.
+// block: a v1 expression, returned as its canonical source and its node.
 func (p *Parser) parseStepCondition() (string, ExpressionNode, error) {
-	if !p.opts.ExpressionsV1 {
-		s, err := p.parseConditionExpression()
-		return s, nil, err
-	}
 	n, err := p.parseV1Expression()
 	if err != nil {
 		return "", nil, err
@@ -314,9 +329,9 @@ func (p *Parser) stepBlockAhead() bool {
 
 // v1Step is the step a v1 right-hand side makes. A call to a function or a
 // construct is a function step, its Args map holding the v1 argument nodes
-// under the keys the legacy call step used -- the argument's name, or its
-// position ("0", "1", ...) -- and anything else is a query step carrying the
-// node, which the runtime evaluates in process.
+// under the argument's name, or its position ("0", "1", ...), and anything
+// else is a query step carrying the node, which the runtime evaluates in
+// process.
 func v1Step(id string, retry int, n ExpressionNode) *StepDef {
 	if call, ok := n.(*ast.CallExpr); ok && call.Receiver == nil {
 		return &StepDef{ID: id, Type: StepTypeFunction, RetryCount: retry, Config: &FunctionStepConfig{Name: call.Name, Args: v1CallArgs(call)}}
@@ -351,35 +366,37 @@ func (p *Parser) parseV1StepCall(what string) (*ast.CallExpr, error) {
 	return call, nil
 }
 
-// ifStatementToStepsV1 is ifStatementToSteps over v1 conditions: each step
-// under the if carries the if's condition, ANDed with its own, and the else
-// branch carries its negation -- as nodes, so the stamped Condition string is
-// canonical v1 source rather than the legacy `(a) and (b)` / `not (...)`.
-func ifStatementToStepsV1(stmt *IfStmt) []StepDef {
+// ifStatementToSteps flattens a parsed IfStmt into a list of conditional
+// StepDefs, so the runtime sees a flat list of gated steps rather than a
+// nested if: each step under the if carries the if's condition, ANDed with
+// its own, and the else branch carries its negation -- as nodes, so the
+// stamped Condition string is canonical v1 source. An empty if body is no
+// steps.
+func ifStatementToSteps(stmt *IfStmt) []StepDef {
 	if stmt == nil {
 		return nil
 	}
 	cond := stmt.Condition
 	var out []StepDef
 	for _, step := range stmt.ThenSteps {
-		out = append(out, stampStepConditionV1(step, cond))
+		out = append(out, stampStepCondition(step, cond))
 	}
 	negated := &ast.UnaryExpr{Op: "!", Operand: cond}
 	if stmt.ElseIf != nil {
-		for _, step := range ifStatementToStepsV1(stmt.ElseIf) {
-			out = append(out, stampStepConditionV1(step, negated))
+		for _, step := range ifStatementToSteps(stmt.ElseIf) {
+			out = append(out, stampStepCondition(step, negated))
 		}
 	} else {
 		for _, step := range stmt.ElseSteps {
-			out = append(out, stampStepConditionV1(step, negated))
+			out = append(out, stampStepCondition(step, negated))
 		}
 	}
 	return out
 }
 
-// stampStepConditionV1 ANDs outer onto a step's condition, and onto every step
+// stampStepCondition ANDs outer onto a step's condition, and onto every step
 // inside a for-range the step owns (they do not inherit it otherwise).
-func stampStepConditionV1(step StepDef, outer ExpressionNode) StepDef {
+func stampStepCondition(step StepDef, outer ExpressionNode) StepDef {
 	if outer == nil {
 		return step
 	}
@@ -391,18 +408,14 @@ func stampStepConditionV1(step StepDef, outer ExpressionNode) StepDef {
 	step.Condition = formatV1(step.ConditionExpr)
 	if cfg, ok := step.Config.(*ForEachStepConfig); ok && cfg != nil {
 		for i := range cfg.Do {
-			cfg.Do[i] = stampStepConditionV1(cfg.Do[i], outer)
+			cfg.Do[i] = stampStepCondition(cfg.Do[i], outer)
 		}
 	}
 	return step
 }
 
-// parseMutationValue parses one insert()/update() argument value: a v1 node
-// with ExpressionsV1 on, today's template value otherwise.
+// parseMutationValue parses one insert()/update() argument value, a v1 node.
 func (p *Parser) parseMutationValue() (any, error) {
-	if !p.opts.ExpressionsV1 {
-		return p.parseValueMaybeCoalesce()
-	}
 	n, err := p.parseV1Expression()
 	if err != nil {
 		return nil, err
@@ -410,8 +423,8 @@ func (p *Parser) parseMutationValue() (any, error) {
 	return n, nil
 }
 
-// parseV1Payload parses an insert()/update() payload -- a map literal -- with
-// ExpressionsV1 on: the node, and its canonical source for PayloadRaw.
+// parseV1Payload parses an insert()/update() payload -- a map literal -- into
+// the node, and its canonical source for PayloadRaw.
 func (p *Parser) parseV1Payload() (ExpressionNode, string, error) {
 	if !p.check(TokenBraceOpen) {
 		return nil, "", v1Errorf(p.current, "a payload is a map literal, { key: value, ... }; got %s", v1Describe(p.current))
@@ -423,8 +436,8 @@ func (p *Parser) parseV1Payload() (ExpressionNode, string, error) {
 	return e.n, formatV1(e.n), nil
 }
 
-// parseV1ArgsMap parses a step config's `args: { ... }` with ExpressionsV1 on,
-// into an Args map of v1 nodes. allowPuns admits a bare name as `name: name`:
+// parseV1ArgsMap parses a step config's `args: { ... }` into an Args map of v1
+// nodes. allowPuns admits a bare name as `name: name`:
 // the struct-form rewriter lowers `action f(workdir, ref: ref)` into
 // `args: { workdir, ref: ref }`, so an action's args map is a construct call's
 // argument list in map clothing, and a construct call's bare name puns.

@@ -1447,13 +1447,10 @@ var bareArgsPathRe = regexp.MustCompile(`^args(?:\.[A-Za-z_][A-Za-z0-9_]*)+$`)
 //
 // The shorthand is write-block SYNTAX, not an expression, so it is resolved
 // here, where the block is still a list of lines, and never reaches an
-// expression parser. The string half used to resolve it inside its object
-// literal parser (mutation_templates.go's tryParseShorthandCtx); the
-// edition-2026 map literal has no key-less entry, and a key cannot be
-// dotted, so under Options.ExpressionsV1 the line would be refused. Expanding
-// it here gives both grammars the same explicit entry -- the one the string
-// half's shorthand produced -- and gives rule 15's constraint a message
-// instead of a vague object-literal failure: a multi-segment path has no
+// expression parser: the edition-2026 map literal has no key-less entry, and
+// a key cannot be dotted, so the line would be refused there. Expanding it
+// here gives the payload the explicit entry, and gives rule 15's constraint a
+// message instead of a vague map-literal failure: a multi-segment path has no
 // single key to infer, so `args.user.id` is refused, naming the explicit
 // spelling. Any other field passes through untouched.
 func expandBareMirror(field string) (string, error) {

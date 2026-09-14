@@ -167,16 +167,28 @@ func (e *MemQLEngine) refinePredicates() func(string) (string, ast.ExpressionNod
 //   - every call is a catalog function or method, or a predicate applied to
 //     the row whose v1 body EvalExpr can evaluate;
 //   - every name is the parameter, a lambda parameter, args (a declared
-//     argument), actor, now or config.
+//     argument), actor, now or config;
+//   - no condition position holds a bare field of the bound concept whose
+//     declared type is not boolean (CheckConditionFields, D8): at run time
+//     such a field is "not true" on every row, so the refine would load and
+//     silently empty every page.
 func (e *MemQLEngine) validateRefine(fn *Function, refine *RefineExpression) error {
-	return validateRefineIn(fn, refine, e.predicateLookup())
+	var concept *memorynodes.Concept
+	if e != nil && e.concepts != nil && fn != nil && fn.BoundConcept != "" {
+		concept, _ = e.concepts.Get(fn.BoundConcept)
+	}
+	return validateRefineIn(fn, refine, e.predicateLookup(), concept)
 }
 
 // validateRefineIn is validateRefine over an explicit spec lookup -- the
 // engine's registry at Init, the scope an authored construct is lowered in at
 // define time. A nil lookup (an engine-free validation, which sees no spec
 // registry) defers the predicate checks to the lowering that has one.
-func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string) (*Spec, bool)) error {
+// concept is the query's bound concept: a bare field of a declared non-boolean
+// type used as the refine's condition is refused against it
+// (CheckConditionFields), as Lower refuses one in a filter. Nil checks no
+// field types.
+func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string) (*Spec, bool), concept *memorynodes.Concept) error {
 	lam := refine.Lambda
 	if lam == nil || len(lam.Params) != 1 {
 		return fmt.Errorf("refine takes a lambda of one parameter, the row")
@@ -186,6 +198,7 @@ func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string
 		return &LowerError{Node: ast.FormatExpr(lam), Position: tiers.PositionQueryRefine,
 			Reason: fmt.Sprintf("its static cost estimate is %d node evaluations, above tiers.MaxStaticCost (%d)", cost, tiers.MaxStaticCost),
 			Fix:    "Scan one list per element rather than nesting scans, or move the work into a logic body over a smaller input",
+			Code:   LowerCodeCostOverBudget,
 			Span:   nodeSpan(lam)}
 	}
 	declared := map[string]bool{}
@@ -198,9 +211,9 @@ func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string
 	}
 	var walkErr error
 	var walk func(n ast.ExpressionNode, local map[string]bool)
-	refuse := func(n ast.ExpressionNode, reason, fix string) {
+	refuse := func(code string, n ast.ExpressionNode, reason, fix string) {
 		if walkErr == nil {
-			walkErr = &LowerError{Node: ast.FormatExpr(n), Position: tiers.PositionQueryRefine, Reason: reason, Fix: fix, Span: nodeSpan(n)}
+			walkErr = &LowerError{Node: ast.FormatExpr(n), Position: tiers.PositionQueryRefine, Reason: reason, Fix: fix, Code: code, Span: nodeSpan(n)}
 		}
 	}
 	walk = func(n ast.ExpressionNode, local map[string]bool) {
@@ -208,7 +221,7 @@ func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string
 			return
 		}
 		if kind := ast.KindOf(n); kind != "" && tiers.KindAdmission(tiers.PositionQueryRefine, kind) == tiers.Refused {
-			refuse(n, fmt.Sprintf("%s is not admitted in a refine clause: a refine decides about a row, it does not read or write", kind),
+			refuse(LowerCodeRefused, n, fmt.Sprintf("%s is not admitted in a refine clause: a refine decides about a row, it does not read or write", kind),
 				"Call it from a logic body and pass the result to the query as an argument")
 			return
 		}
@@ -218,11 +231,11 @@ func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string
 			case local[x.Name] || x.Name == param:
 			case x.Name == "args" || x.Name == "actor" || x.Name == "now" || x.Name == "config":
 			default:
-				refuse(x, fmt.Sprintf("`%s` is not defined here", x.Name), "A refine reads its row ("+param+"), args, actor, now and config")
+				refuse(LowerCodeUnknownName, x, fmt.Sprintf("`%s` is not defined here", x.Name), "A refine reads its row ("+param+"), args, actor, now and config")
 			}
 		case *ast.MemberExpr:
 			if root, path, ok := simpleRootPath(x); ok && !local[root] && root == "args" && !declared[path[0]] {
-				refuse(x, fmt.Sprintf("`args.%s` is not a declared argument", path[0]), "Declare it in the query's args block")
+				refuse(LowerCodeUnknownName, x, fmt.Sprintf("`args.%s` is not a declared argument", path[0]), "Declare it in the query's args block")
 				return
 			}
 			walk(x.Object, local)
@@ -231,7 +244,7 @@ func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string
 				if _, ok := functions.Lookup(x.Name); !ok {
 					checkRefinePredicate(x, param, local, refuse, lookup)
 				} else if isTraversalName(x.Name) {
-					refuse(x, "a traversal selects rows in SQL and has no in-process value", "Move it into the query's filter")
+					refuse(LowerCodeRefused, x, "a traversal selects rows in SQL and has no in-process value", "Move it into the query's filter")
 					return
 				}
 			}
@@ -275,19 +288,22 @@ func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string
 		}
 	}
 	walk(lam.Body, map[string]bool{})
-	return walkErr
+	if walkErr != nil {
+		return walkErr
+	}
+	return CheckConditionFields(lam, concept, tiers.PositionQueryRefine)
 }
 
 // checkRefinePredicate checks a predicate application inside a refine: it is
 // applied to the row, and it names an edition-2026 row spec or trait -- the
 // only kind EvalExpr can evaluate.
-func checkRefinePredicate(call *ast.CallExpr, param string, local map[string]bool, refuse func(ast.ExpressionNode, string, string), lookup func(string) (*Spec, bool)) {
+func checkRefinePredicate(call *ast.CallExpr, param string, local map[string]bool, refuse func(string, ast.ExpressionNode, string, string), lookup func(string) (*Spec, bool)) {
 	if len(call.Args) != 1 {
-		refuse(call, fmt.Sprintf("a predicate is applied to exactly one argument, and %s() has %d", call.Name, len(call.Args)), "Apply it to the row: `"+call.Name+"("+param+")`")
+		refuse(LowerCodeRefused, call, fmt.Sprintf("a predicate is applied to exactly one argument, and %s() has %d", call.Name, len(call.Args)), "Apply it to the row: `"+call.Name+"("+param+")`")
 		return
 	}
 	if arg, ok := ast.Unparen(call.Args[0]).(*ast.IdentExpr); !ok || arg.Name != param || local[arg.Name] {
-		refuse(call, "a predicate in a refine is applied to the row", "Apply it to the row: `"+call.Name+"("+param+")`")
+		refuse(LowerCodeRefused, call, "a predicate in a refine is applied to the row", "Apply it to the row: `"+call.Name+"("+param+")`")
 		return
 	}
 	if lookup == nil {
@@ -297,11 +313,11 @@ func checkRefinePredicate(call *ast.CallExpr, param string, local map[string]boo
 	spec, _ := lookup(call.Name)
 	switch {
 	case spec == nil:
-		refuse(call, fmt.Sprintf("`%s` is not a spec, trait or catalog function known here", call.Name), "Check the name and the file-top `use` import")
+		refuse(LowerCodeUnknownName, call, fmt.Sprintf("`%s` is not a spec, trait or catalog function known here", call.Name), "Check the name and the file-top `use` import")
 	case spec.Kind == SpecKindContext:
-		refuse(call, fmt.Sprintf("`%s` is a context spec over the actor, not a predicate over rows", call.Name), "Apply it in the query's filter: `"+call.Name+"(actor)`")
+		refuse(LowerCodeContextSpecOnRow, call, fmt.Sprintf("`%s` is a context spec over the actor, not a predicate over rows", call.Name), "Apply it in the query's filter: `"+call.Name+"(actor)`")
 	case spec.Lambda == nil:
-		refuse(call, fmt.Sprintf("`%s` has a pre-2026 body, which the in-process evaluator cannot evaluate", call.Name),
+		refuse(LowerCodeRefused, call, fmt.Sprintf("`%s` has a pre-2026 body, which the in-process evaluator cannot evaluate", call.Name),
 			"Migrate it with memqlmigrate --rewrite=expressions, or apply it in the query's filter instead")
 	}
 }

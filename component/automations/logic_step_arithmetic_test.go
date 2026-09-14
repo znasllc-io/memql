@@ -28,7 +28,7 @@ logic doubler {
     n int @required
   }
   body {
-    base := coalesce(args.n, 0)
+    base := args.n ?? 0
     doubled := base * 2
     return doubled
   }
@@ -52,9 +52,7 @@ logic doubler {
 
 // TestLogicRunner_RunLogic_ArithmeticStepRHS_ArgsOperands pins that an
 // arithmetic step RHS whose operands are caller args (`net := args.gross -
-// args.fee`) resolves them -- the serializer's convertArgReferences rewrite
-// applied to query steps is what makes the `$args.X` operands re-parse and
-// resolve, exactly as a terminal-return arithmetic already does.
+// args.fee`) resolves them, exactly as a terminal-return arithmetic does.
 func TestLogicRunner_RunLogic_ArithmeticStepRHS_ArgsOperands(t *testing.T) {
 	src := `@enabled
 @description("args operands in an arithmetic step RHS (#2542 GAP 2)")
@@ -127,8 +125,8 @@ logic ratioStep {
     b int @required
   }
   body {
-    x := coalesce(args.a, 0)
-    y := coalesce(args.b, 0)
+    x := args.a ?? 0
+    y := args.b ?? 0
     q := x / y
     return q
   }
@@ -141,15 +139,15 @@ logic ratioStep {
 	if err == nil {
 		t.Fatalf("RunLogic succeeded on x / 0 step RHS; want a division-by-zero error")
 	}
-	if !strings.Contains(err.Error(), "division by zero") {
-		t.Errorf("error = %q, want it to name division by zero", err.Error())
+	if !strings.Contains(err.Error(), "division_by_zero") {
+		t.Errorf("error = %q, want the division_by_zero refusal", err.Error())
 	}
 }
 
 // TestLogicRunner_CompileRoundTrip_ArithmeticStepRHS pins that an intermediate
-// arithmetic step compiles to the parenthesized operator form (never the
-// <<unsupported>> marker), with args operands rewritten to the $args form the
-// runtime re-parses -- the same serialized shape a terminal return carries.
+// arithmetic step compiles to canonical v1 source (never the <<unsupported>>
+// marker), its args operands carried as written -- the same shape a terminal
+// return carries.
 func TestLogicRunner_CompileRoundTrip_ArithmeticStepRHS(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -157,9 +155,9 @@ func TestLogicRunner_CompileRoundTrip_ArithmeticStepRHS(t *testing.T) {
 		stepID    string
 		wantQuery string
 	}{
-		{"step_operand", "doubled := base * 2", "doubled", "(base * 2)"},
-		{"args_operands", "net := args.gross - args.fee", "net", "($args.gross - $args.fee)"},
-		{"date_in_arithmetic", "weeks := daysBetween(args.gross, args.fee) / 7", "weeks", "(daysBetween($args.gross, $args.fee) / 7)"},
+		{"step_operand", "doubled := base * 2", "doubled", "base * 2"},
+		{"args_operands", "net := args.gross - args.fee", "net", "args.gross - args.fee"},
+		{"date_in_arithmetic", "weeks := daysBetween(args.gross, args.fee) / 7", "weeks", "daysBetween(args.gross, args.fee) / 7"},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -172,7 +170,7 @@ logic probe {
     fee string @required
   }
   body {
-    base := coalesce(args.gross, "")
+    base := args.gross ?? ""
     ` + tc.stepLine + `
     return base
   }

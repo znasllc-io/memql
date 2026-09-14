@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-an-unquoted-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@defaultProvider on a prompt takes one string"
+    },
+    {
+      "file": "a-policy-name.memql",
+      "verdict": "refuse_load",
+      "message": "@defaultProvider(\"localFirst\") is not a declared provider"
+    }
+  ]
+}

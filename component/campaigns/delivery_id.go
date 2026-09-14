@@ -31,10 +31,10 @@ import (
 //
 // `recordCampaignDelivery` derives:
 //
-//	id: hash(concat(
-//	      hash(canonicalId(args.campaignId, campaign)),
-//	      hash(canonicalId(args.recipientId, recipient))
-//	    ))
+//	id: hash(
+//	      hash(canonicalId(args.campaignId, "campaign")) +
+//	      hash(canonicalId(args.recipientId, "recipient"))
+//	    )
 //
 // with `hash(x)` = hex(sha256(x)) and `canonicalId(v, C)` = v when v is
 // already tagged with C, else "C:v". This file reproduces exactly that, and
@@ -44,9 +44,9 @@ import (
 // confirm it, because on the send path there is nothing to read yet.
 //
 // So the DSL expression itself is the gate. delivery_id_test.go parses the id
-// block out of dsl/campaigns/mutations.memql and fails when it stops matching
-// the shape this file assumes -- which is the only check available that is
-// not a copy of the thing being checked.
+// block out of dsl/campaigns/mutations.memql, fails when it stops matching
+// the shape this file assumes, and evaluates it to the ids this file derives
+// -- the only check available that is not a copy of the thing being checked.
 
 const (
 	campaignConcept  = "v1:campaigns:campaign"

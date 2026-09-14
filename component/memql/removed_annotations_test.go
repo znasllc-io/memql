@@ -47,11 +47,18 @@ func TestRemovedAnnotationsRejected(t *testing.T) {
 			}
 			// @role (#2709) and @permission (#2713) graduated from the
 			// generic unknown-annotation error to the pointed BURY
-			// message -- the rejection this test locks in is preserved,
-			// sharper.
-			if buried := map[string]string{"role": "#2709", "permission": "#2713"}; buried[tc.annotation] != "" {
-				if code != annotations.CodeRetired || !strings.Contains(err.Error(), buried[tc.annotation]) {
-					t.Fatalf("expected the @%s bury message (%s), got: %v", tc.annotation, buried[tc.annotation], err)
+			// message, and the #989 removals (and @async, refused on
+			// automations since #2712) to a retirement naming that history
+			// (memql#5360) -- the rejection this test locks in is
+			// preserved, sharper.
+			retired := map[string]string{
+				"role": "#2709", "permission": "#2713",
+				"timeout": "memql#989", "retry": "memql#989", "audit": "memql#989", "idempotent": "memql#989",
+				"async": "memql#2712",
+			}
+			if ticket := retired[tc.annotation]; ticket != "" {
+				if code != annotations.CodeRetired || !strings.Contains(err.Error(), ticket) {
+					t.Fatalf("expected @%s retired with its history (%s), got: %v", tc.annotation, ticket, err)
 				}
 				return
 			}
@@ -75,7 +82,7 @@ func TestKeptAnnotationsStillAccepted(t *testing.T) {
 		{"@public", annotations.Query},
 		{"@actor", annotations.Mutation},
 		{`@trigger(event="x")`, annotations.Automation},
-		{"@filter(a == 1)", annotations.Automation},
+		{"@filter(row => row.a == 1)", annotations.Automation},
 		// @schedule reinstated on automations (#2712): LIVE (folds to the
 		// honored AutomationDef.Schedule / cron scheduler).
 		{`@schedule(cron="0 5 9 * * *")`, annotations.Automation},

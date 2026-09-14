@@ -32,3 +32,40 @@ func TestShadowReadsTheIRNotTheEdition(t *testing.T) {
 		t.Fatal("an undecidable verdict must say what it could not see")
 	}
 }
+
+// TestShadowCreditsOnlySpellingsEvalExprDecidesAsTheGate pins the strictness
+// of the plan-constant arm TestShadowReadsTheLoweredClusterOwnerGate proves
+// through the lowering. A spelling is credited as the cluster-owner gate only
+// when EvalExpr decides it as the gate for every caller: the optional hop and
+// parentheses read the same value (the envelope is always bound), while a
+// string literal compares a bool with a string, a misspelled key reads an
+// absent one, and an inverted or negated gate admits the wrong callers --
+// crediting any of those would report a read as restating the tier while it
+// does something else. Built by hand rather than lowered: whether Lower
+// admits each spelling is Lower's business.
+func TestShadowCreditsOnlySpellingsEvalExprDecidesAsTheGate(t *testing.T) {
+	composite := &langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: "ownerUserId", ClusterOwnerBypass: true}
+	planGate := func(gate string) ExpressionNode {
+		t.Helper()
+		node, err := langparser.ParseV1Expression(gate)
+		if err != nil {
+			t.Fatalf("parse %s: %v", gate, err)
+		}
+		return or(ownerScoped("ownerUserId"), &PlanConstExpression{Expr: node})
+	}
+	for _, gate := range []string{`actor.?isClusterOwner == true`, `(actor.isClusterOwner)`} {
+		if got, reason := AnalyzeShadow(planGate(gate), composite); got != ShadowAlreadyImplied {
+			t.Errorf("`%s` is the cluster-owner gate, but the disjunction reads %s (%s)", gate, got, reason)
+		}
+	}
+	for _, gate := range []string{
+		`actor.isClusterOwner == "true"`,
+		`actor.isclusterowner == true`,
+		`actor.isClusterOwner != true`,
+		`!actor.isClusterOwner`,
+	} {
+		if got, _ := AnalyzeShadow(planGate(gate), composite); got == ShadowAlreadyImplied {
+			t.Errorf("`%s` was credited as the cluster-owner gate; EvalExpr never decides it as one, so the disjunction does not restate the tier", gate)
+		}
+	}
+}

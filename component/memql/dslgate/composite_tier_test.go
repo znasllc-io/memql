@@ -22,7 +22,7 @@ import "testing"
 const compositeFilterSource = `use worker.concepts.{ registration }
 
 query registration myWorkersOrAll {
-  filter  ownerUserId==actor.userId || actor.isClusterOwner==true
+  filter  row => row.ownerUserId == actor.userId || actor.isClusterOwner == true
   shape   workerRegistrationFull
 }
 `
@@ -64,7 +64,7 @@ func TestAdminGateOverASelectionTermIsStillRefused(t *testing.T) {
 	const failOpen = `use telephony.concepts.{ call }
 
 query call callsByNumber {
-  filter  fromE164==args.e164 || actor.isClusterOwner==true
+  filter  row => row.fromE164 == args.e164 || actor.isClusterOwner == true
   shape   callFull
 }
 `

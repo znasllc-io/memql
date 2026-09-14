@@ -40,7 +40,7 @@
 // in Go (deploycontrol.authorize -> auth.AtLeastAdmin); the DSL mirror
 // is requiresOwnerOrAdmin in dsl/deployment/specs.memql.
 //
-// Every field is bound with an explicit key + coalesce to a valid value
+// Every field is bound with an explicit key + a `??` fallback to a valid value
 // (mirroring createNode #1643/#1671): status defaults to "pending" so the enum
 // column always receives a member of its value set; the plain string fields
 // coalesce to "" when the caller omits them.
@@ -118,7 +118,7 @@ mutate deployment updateDeploymentStatus {
 // bare deploymentId without canonical-id prefixing.
 //
 // Why hashed rather than joined (#2885): a raw
-// concat(deploymentId, ":", nodeType) is a colon-bearing shortId, and
+// deploymentId + ":" + nodeType is a colon-bearing shortId, and
 // Concept.Create runs core/id ValidateShortId BEFORE it touches the
 // store -- that admits only a colon-free shortId or the concept-prefixed
 // form, so the raw join was rejected on every call and this mutation
@@ -255,8 +255,8 @@ mutate deployment updateDeploymentStatus {
 // is requiresOwnerOrAdmin on the cut-version/rollback effects
 // (Epic 2.6). Additive: no existing overlay or query is affected.
 /// Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. The concept id
-/// is hash(concat(shortId(deploymentId), ':', nodeType)) so re-pins append to one timeline and a
-/// bare or canonical deploymentId derive the same row.
+/// is hash(shortId(deploymentId) + ":" + nodeType) so re-pins append to one timeline and a bare
+/// or canonical deploymentId derive the same row.
 /// Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
 mutate deploymentNodeSpec createDeploymentNodeSpec {
   args {
@@ -284,10 +284,10 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
       // `asOf latest`, so a canonical re-pin would make the spec invisible to
       // a bare lookup (#2925 review).
       deploymentId: shortId(args.deploymentId)
-      id: hash(concat(
-        shortId(args.deploymentId), ":",
+      id: hash(
+        shortId(args.deploymentId) + ":" +
         args.nodeType
-      ))
+      )
       version: args.version ?? ""
       replicas: args.replicas ?? 1
       imageDigest: args.imageDigest ?? ""
@@ -331,10 +331,10 @@ mutate deploymentNodeSpec updateDeploymentNodeSpec {
     imageDigest   string
   }
   update {
-    id: hash(concat(
-      shortId(args.deploymentId), ":",
+    id: hash(
+      shortId(args.deploymentId) + ":" +
       args.nodeType
-    ))
+    )
     version: args.version ?? ""
     replicas: args.replicas ?? 1
     imageDigest: args.imageDigest ?? ""

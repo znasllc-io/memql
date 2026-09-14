@@ -26,7 +26,7 @@ use common.traits.{ isActiveRecord }
 
 @description("Get space participants")
 query participant spaceParticipants {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   participantFull
 }
 `
@@ -88,7 +88,7 @@ func TestImports_IgnoresAUseInsideAStringLiteral(t *testing.T) {
 
 @description("do not write use cognition.shapes.{ participantFull } here")
 query participant spaceParticipants {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   participantFull
 }
 `
@@ -181,7 +181,7 @@ func TestImports_SkipsAnUnclosedBraceGroup(t *testing.T) {
 
 // Always a non-nil empty slice: the TypeScript consumer iterates it directly.
 func TestImports_EmptyAndUnlexableBuffersYieldEmptySlices(t *testing.T) {
-	for _, src := range []string{"", "// nothing here\n", "query participant q {\n  filter  isActiveRecord\n}\n"} {
+	for _, src := range []string{"", "// nothing here\n", "query participant q {\n  filter  row => isActiveRecord(row)\n}\n"} {
 		got := newImportsService().Imports(src)
 		if got == nil {
 			t.Fatalf("Imports(%q) = nil; want a non-nil empty slice", src)

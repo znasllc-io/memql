@@ -3,6 +3,9 @@ package parser
 // v1_refusals_test.go -- what the edition-2026 expression parser refuses, and
 // how: a retired spelling names its replacement and the migrator that writes
 // it, and every other refusal names the fix and where it is.
+//
+// memqlmigrate:keep-file -- the retired spellings in this file are its cases,
+// so the fixture codemod must leave them as written.
 
 import (
 	"errors"
@@ -14,8 +17,8 @@ import (
 // forms that can appear in more than one place. TestV1EveryRetiredFormHasASample
 // holds the table and this list together. A FILE sample is a whole authored
 // construct, parsed the way the engine parses one (the struct-form rewriter,
-// then the parser) with Options.ExpressionsV1 on: the predicate positions'
-// legacy forms are refused only there.
+// then the parser): the predicate positions' legacy forms are refused only
+// there.
 var v1RetiredSamples = []struct {
 	rule string
 	src  string
@@ -113,7 +116,7 @@ func TestV1RetiredFormsRefuse(t *testing.T) {
 			}
 			var err error
 			if c.file {
-				_, err = parseV1Authored(t, c.src, v1On)
+				_, err = parseV1Authored(t, c.src)
 			} else {
 				_, err = ParseV1Expression(c.src)
 			}

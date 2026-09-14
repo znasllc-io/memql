@@ -57,7 +57,7 @@ func TestNoRedundantDescription_GateIsLive(t *testing.T) {
 	regressed := []byte(`// Lists active spaces for the calling user, newest first.
 @description("Lists active spaces for the calling user, newest first.")
 query space queryGateProbe {
-  filter ownerUserId == actor.userId
+  filter row => row.ownerUserId == actor.userId
 }
 `)
 	rewritten, err := languageParser.RewriteDocCommentDescriptions(regressed)

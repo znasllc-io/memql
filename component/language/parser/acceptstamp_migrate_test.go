@@ -1,5 +1,10 @@
 package parser
 
+// memqlmigrate:keep-file -- these are the accept/stamp rewrite's own inputs,
+// each a mutation spelled the way the case needs it (a multi-line field that
+// stays longhand, an escaped quote before it); the expressions codemod
+// rewriting them would change what each case tests.
+
 import (
 	"strings"
 	"testing"

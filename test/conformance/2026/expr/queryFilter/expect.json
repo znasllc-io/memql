@@ -637,7 +637,7 @@
       "verdict": "refuse_parse",
       "code": "retired_filter_without_lambda",
       "message": "filter <predicate> is retired in edition 2026: write filter row => <predicate>",
-      "note": "Refused by the edition's grammar (parser.Options.ExpressionsV1); the loaders still read it until the tree flips."
+      "note": "Refused by the edition's grammar, the only one the loaders read."
     },
     {
       "file": "unquoted-canonical-id.memql",
@@ -648,36 +648,42 @@
     {
       "file": "bare-payload-field.memql",
       "verdict": "refuse_load",
+      "code": "lower_unknown_name",
       "message": "`status` is not defined here. A payload field is read through the parameter: write `row.status`",
       "note": "A payload field is never a bare name: it is always the parameter's member, and the refusal writes the fix."
     },
     {
       "file": "function-over-the-row.memql",
       "verdict": "refuse_load",
+      "code": "lower_refused",
       "message": "`lower` runs in process and reads the row. Compare against a computed value instead: `row.title == lower(args.title)`",
       "note": "lower() runs in process, so over the row it does not lower; the refusal names the pushdown spelling, which moves the function onto the plan constant."
     },
     {
       "file": "arithmetic-over-the-row.memql",
       "verdict": "refuse_load",
+      "code": "lower_refused",
       "message": "arithmetic over the row runs in process. Move the arithmetic to the other side: `row.priority > 1`",
       "note": "Arithmetic over the row has no SQL both evaluators agree on; the refusal names the comparison that says the same thing."
     },
     {
       "file": "non-boolean-filter.memql",
       "verdict": "refuse_load",
+      "code": "lower_not_boolean",
       "message": "`row.title` is a string, and a condition must be boolean",
       "note": "There is no truthiness: a declared string is never a condition, and the load says so."
     },
     {
       "file": "member-of-an-optional-object.memql",
       "verdict": "refuse_load",
+      "code": "lower_optional_hop",
       "message": "`row.lineage` is an optional object, so it may be absent. Read through it with `.?`: `row.?lineage.planId`",
       "note": "`.?` is required where the object may be absent; the refusal names the spelling."
     },
     {
       "file": "construct-call-in-a-filter.memql",
       "verdict": "refuse_load",
+      "code": "lower_refused",
       "message": "does not lower in a query filter: a query result is an unbounded source",
       "note": "A construct call has no place in a predicate: over the row it would run a query for every row, and its result is an unbounded source a pushdown position cannot scan."
     },

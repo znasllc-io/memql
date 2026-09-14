@@ -1,0 +1,6 @@
+/// Open a support ticket. Switched off: not loaded while @disabled stays.
+@handler(type="function", name="openTicketDisabled")
+@disabled
+tool openSupportTicketDisabled {
+  title  string!  @description("The ticket's one-line title.")
+}

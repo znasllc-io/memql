@@ -49,7 +49,7 @@ mutate trainedWidget mutationCreateTrainedWidget {
     widgetId  string  @required
   }
   insert {
-    id:    canonicalId(args.widgetId, trainedWidget)
+    id:    canonicalId(args.widgetId, "trainedWidget")
     label: "x"
   }
 }`

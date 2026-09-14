@@ -23,16 +23,17 @@ import (
 //  1. Every concept carrying customer data declares `@rowAuthz(owner=...)`, so
 //     the engine injects the ownership predicate into every read and refuses a
 //     write whose target belongs to somebody else.
-//  2. Every caller-scoped QUERY additionally names `ownerUserId==actor.userId`
-//     as a TOP-LEVEL conjunct.
+//  2. Every caller-scoped QUERY additionally names `row.ownerUserId ==
+//     actor.userId` as a TOP-LEVEL conjunct.
 //
 // # Why the second one, when the first already enforces it
 //
 // Because of WHERE the conjunct sits, not whether it exists. A conjunct inside
-// a `when()` guard VANISHES when its argument is absent -- that is what the
-// guard is for -- so a query that reads as scoped returns the whole table the
-// moment a caller omits an optional argument. That is memql#2883, it has
-// happened, and it looks completely correct in review.
+// an optional-argument guard `(args.x == nil || ...)` VANISHES when its
+// argument is absent -- that is what the guard is for -- so a query that reads
+// as scoped returns the whole table the moment a caller omits an optional
+// argument. That is memql#2883, it has happened, and it looks completely
+// correct in review.
 //
 // The declaration and the conjunct are also read by different things: the
 // engine enforces the first, and the per-row-authz CLASSIFIER reads the second.
@@ -52,7 +53,7 @@ var (
 	conceptDecl   = regexp.MustCompile(`(?m)^concept\s+(\w+)\s*\{`)
 	queryDecl     = regexp.MustCompile(`(?m)^query\s+(\w+)\s+(\w+)\s*\{`)
 	publicAttr    = regexp.MustCompile(`(?m)^@public\s*$`)
-	ownerConjunct = "ownerUserId==actor.userId"
+	ownerConjunct = "row.ownerUserId == actor.userId"
 )
 
 func fleetFile(t *testing.T, name string) string {
@@ -64,44 +65,10 @@ func fleetFile(t *testing.T, name string) string {
 	return string(b)
 }
 
-// migratedFleetFile is fleetFile as the edition-2026 expressions codemod
-// (memqlmigrate --rewrite=expressions, epic memql#5363) would leave it,
-// computed in memory with the codemod's own engine over the whole bundle --
-// the bundle declares the specs its filters name, so it migrates alone.
-// Nothing on disk changes.
-func migratedFleetFile(t *testing.T, name string) string {
-	t.Helper()
-	dir := filepath.Join(bundleRoot(t), "fleet")
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read %s: %v", dir, err)
-	}
-	files := map[string][]byte{}
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".memql") {
-			continue
-		}
-		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		if err != nil {
-			t.Fatalf("read %s: %v", e.Name(), err)
-		}
-		files[e.Name()] = b
-	}
-	preds, err := langparser.CollectPredicates(files)
-	if err != nil {
-		t.Fatalf("collect predicates: %v", err)
-	}
-	out, err := langparser.RewriteExpressions(files[name], preds)
-	if err != nil {
-		t.Fatalf("migrate %s: %v", name, err)
-	}
-	return string(out)
-}
-
 // filterClauseOf returns a query block's filter clause: the text after the
 // keyword plus every continuation line the struct-query normaliser folds into
 // it (dslclause.ClauseExtent). It used to read the opening line only, so a
-// wrapped clause -- legal since memql#4123, and how the edition-2026 codemod
+// wrapped clause -- legal since memql#4123, and how the expressions codemod
 // writes every long filter -- was judged by its first conjunct.
 func filterClauseOf(body string) (string, bool) {
 	lines := strings.Split(body, "\n")
@@ -121,16 +88,17 @@ func filterClauseOf(body string) (string, bool) {
 	return "", false
 }
 
-// scopedByOwner reports whether a filter names `ownerUserId == actor.userId` as
-// a TOP-LEVEL conjunct. An edition-2026 filter is read as a tree: a top-level
-// `&&` operand comparing the lambda parameter's `ownerUserId` with
+// scopedByOwner reports whether a filter names `row.ownerUserId ==
+// actor.userId` as a TOP-LEVEL conjunct. The filter is read as a tree: a
+// top-level `&&` operand comparing the lambda parameter's `ownerUserId` with
 // `actor.userId`, in either operand order -- the parameter's field, never a
-// nested path, and never an arm of a guard `(args.x == nil || ...)`, which is
-// the edition-2026 spelling of the when() guard this gate exists to see
-// through.
+// nested path, and never an arm of an optional-argument guard `(args.x == nil
+// || ...)`, which is exactly what this gate exists to see through. A filter
+// that is not an edition-2026 lambda, or does not parse, scopes nothing: the
+// loader refuses it, and an authz gate does not read it as a guarantee.
 func scopedByOwner(filter string) bool {
 	if !dslclause.OpensLambda(filter) {
-		return hasTopLevelConjunct(filter, ownerConjunct)
+		return false
 	}
 	lam, err := langparser.ParseV1Lambda(filter)
 	if err != nil || len(lam.Params) != 1 {
@@ -208,23 +176,15 @@ func TestEveryCustomerConceptDeclaresAnOwner(t *testing.T) {
 //
 // The load-bearing half. A query is either `@public` -- and then it must bind
 // the narrow public projection and touch no customer concept -- or it names
-// `ownerUserId==actor.userId` as a TOP-LEVEL conjunct of its filter.
+// `row.ownerUserId == actor.userId` as a TOP-LEVEL conjunct of its filter.
 //
-// Top-level is checked by splitting on `&&` at depth zero and requiring the
-// conjunct to be one of the resulting terms. Inside a `when()` guard it is not
-// a top-level term, which is exactly the distinction that matters: the guard
-// drops its conjunct when the argument is absent, so a scoped-looking query
-// returns everything (memql#2883).
+// Top-level is read on the filter's tree: the owner comparison must be one of
+// the operands of its top-level `&&`. Inside an optional-argument guard
+// `(args.x == nil || ...)` it is not, which is exactly the distinction that
+// matters: the guard drops its conjunct when the argument is absent, so a
+// scoped-looking query returns everything (memql#2883).
 func TestEveryFleetQueryIsCallerScoped(t *testing.T) {
-	// Both editions: the bundle as authored, and as the expressions codemod
-	// leaves it -- where every filter opens `row =>` and the owner term reads
-	// `row.ownerUserId == actor.userId`, which the text match below never
-	// equals.
-	t.Run("authored", func(t *testing.T) { checkEveryFleetQueryIsCallerScoped(t, fleetFile(t, "queries.memql")) })
-	t.Run("migrated", func(t *testing.T) { checkEveryFleetQueryIsCallerScoped(t, migratedFleetFile(t, "queries.memql")) })
-}
-
-func checkEveryFleetQueryIsCallerScoped(t *testing.T, src string) {
+	src := fleetFile(t, "queries.memql")
 
 	// THREE CATEGORIES, and the third is the one worth explaining.
 	//
@@ -334,36 +294,35 @@ func checkEveryFleetQueryIsCallerScoped(t *testing.T, src string) {
 
 		if !scopedByOwner(filter) {
 			t.Errorf("query %s does not name %s as a TOP-LEVEL conjunct of its filter:\n    filter %s\n"+
-				"A conjunct inside a when() guard vanishes when its argument is absent, so this query returns the whole table for a caller who omits an optional argument (memql#2883).",
+				"A conjunct inside an optional-argument guard `(args.x == nil || ...)` vanishes when its argument is absent, so this query returns the whole table for a caller who omits an optional argument (memql#2883).",
 				name, ownerConjunct, filter)
 		}
 	}
 
 	// The reachable positive: caller-scoped queries this read. Measured when
-	// the floor was set: 7, in both editions.
+	// the floor was set: 7.
 	if checked < 5 {
 		t.Fatalf("checked the scoping of %d queries -- the query split or the filter read has stopped reaching them", checked)
 	}
 	t.Logf("checked the scoping of %d queries", checked)
 }
 
-// TestFleetOwnerScopeReadsBothEditions: the scoping rule's CATCH and PASS
-// cases in both spellings. The bundle is clean, so without these a rule that
-// went blind to the v1 spelling -- or that took a guard's arm for a top-level
-// conjunct -- would read as a clean bundle.
-func TestFleetOwnerScopeReadsBothEditions(t *testing.T) {
+// TestFleetOwnerScopeReadsTheClause: the scoping rule's CATCH and PASS cases.
+// The bundle is clean, so without these a rule that went blind -- or that took
+// a guard's arm for a top-level conjunct -- would read as a clean bundle.
+func TestFleetOwnerScopeReadsTheClause(t *testing.T) {
 	for _, tc := range []struct {
 		filter string
 		want   bool
 	}{
-		{`ownerUserId==actor.userId && when(args.status) { status==args.status }`, true},
 		{`row => row.ownerUserId == actor.userId && (args.status == nil || row.status == args.status)`, true},
 		{`row => actor.userId == row.ownerUserId`, true},
 		// CATCH: inside a guard, under a disjunction, or on a nested path.
-		{`when(args.mine) { ownerUserId==actor.userId }`, false},
 		{`row => (args.mine == nil || row.ownerUserId == actor.userId)`, false},
 		{`row => row.ownerUserId == actor.userId || row.public == true`, false},
 		{`row => row.credentials.ownerUserId == actor.userId`, false},
+		// A pre-2026 clause is refused by the loader and scopes nothing.
+		{`ownerUserId==actor.userId`, false},
 	} {
 		if got := scopedByOwner(tc.filter); got != tc.want {
 			t.Errorf("scopedByOwner(%q) = %v, want %v", tc.filter, got, tc.want)
@@ -447,40 +406,6 @@ func splitQueryBlocks(src string) map[string]string {
 		preamble = nil
 	}
 	return out
-}
-
-// hasTopLevelConjunct reports whether `want` is one of the filter's `&&` terms
-// at bracket depth zero -- i.e. not nested inside a when() guard, a parenthesis
-// group, or a sub-expression.
-func hasTopLevelConjunct(filter, want string) bool {
-	var depth int
-	var cur strings.Builder
-	var terms []string
-
-	for i := 0; i < len(filter); i++ {
-		c := filter[i]
-		switch c {
-		case '(', '{', '[':
-			depth++
-		case ')', '}', ']':
-			depth--
-		}
-		if depth == 0 && c == '&' && i+1 < len(filter) && filter[i+1] == '&' {
-			terms = append(terms, cur.String())
-			cur.Reset()
-			i++ // consume the second '&'
-			continue
-		}
-		cur.WriteByte(c)
-	}
-	terms = append(terms, cur.String())
-
-	for _, term := range terms {
-		if strings.ReplaceAll(strings.TrimSpace(term), " ", "") == want {
-			return true
-		}
-	}
-	return false
 }
 
 // TestEveryOwnedMutationStampsTheOwnerFromTheActor.

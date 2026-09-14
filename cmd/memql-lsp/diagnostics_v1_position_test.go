@@ -56,10 +56,10 @@ query thing byA {
 // wide: the refusal sat on the rewriter's synthesized `concept==` join, and
 // the line map could place that line but not a column.
 func TestPublishDiagnostics_RetiredFilterSquigglesItsClause(t *testing.T) {
-	expressionsV1(t)
 	s := newTestServerWithSense(t, sense.New(nil))
 	notify, got := capturingNotify()
 
+	// memqlmigrate:keep -- the legacy filter is the case.
 	src := `use probe.concepts.{ thing }
 
 query thing openThings {

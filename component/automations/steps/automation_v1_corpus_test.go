@@ -103,7 +103,7 @@ func (r *automationProbe) Execute(ctx context.Context, step *automations.Step, s
 		if step.Action == nil {
 			break
 		}
-		args, err := probeStepArgs(ctx, step, stepCtx, step.Action.Args, true)
+		args, err := probeStepArgs(ctx, step, stepCtx, step.Action.Args)
 		if err != nil {
 			return nil, err
 		}
@@ -115,7 +115,7 @@ func (r *automationProbe) Execute(ctx context.Context, step *automations.Step, s
 		}
 		// The real executor hands a legacy step's arguments over as written and
 		// a v1 step's as values (steps/automation.go); so does the probe.
-		args, err := probeStepArgs(ctx, step, stepCtx, step.Automation.Args, false)
+		args, err := probeStepArgs(ctx, step, stepCtx, step.Automation.Args)
 		if err != nil {
 			return nil, err
 		}
@@ -132,10 +132,9 @@ func (r *automationProbe) Execute(ctx context.Context, step *automations.Step, s
 	return r.probeRegistry.Execute(ctx, step, stepCtx)
 }
 
-// probeStepArgs are a step's arguments as its real executor sends them: a v1
-// step's evaluated (ResolveV1Map); a legacy step's resolved through
-// resolveArgsRefs when legacyResolves, and as written otherwise.
-func probeStepArgs(ctx context.Context, step *automations.Step, stepCtx *automations.StepContext, args map[string]any, legacyResolves bool) (map[string]any, error) {
+// probeStepArgs are a step's arguments as its real executor sends them:
+// evaluated (ResolveV1Map), every step being prepared since epic 2's flip.
+func probeStepArgs(ctx context.Context, step *automations.Step, stepCtx *automations.StepContext, args map[string]any) (map[string]any, error) {
 	in := make(map[string]any, len(args))
 	for k, v := range args {
 		in[k] = v
@@ -145,11 +144,6 @@ func probeStepArgs(ctx context.Context, step *automations.Step, stepCtx *automat
 	}
 	if step.Exprs != nil {
 		return stepCtx.Evaluator.ResolveV1Map(ctx, in)
-	}
-	if legacyResolves {
-		if resolved, err := resolveArgsRefs(in, stepCtx.Evaluator); err == nil {
-			return resolved, nil
-		}
 	}
 	return in, nil
 }
@@ -175,25 +169,11 @@ func probeActionAnswer(ref string) map[string]any {
 // the engine, whose LogicRunner answers the logic's own steps from the probe
 // (and whose one-`return` logic reach the probe through probeFakes).
 func (r *automationProbe) runLogic(ctx context.Context, step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
-	var text string
-	if step.Exprs != nil {
-		args, err := stepCtx.Evaluator.ResolveV1Map(ctx, step.Function.Args)
-		if err != nil {
-			return nil, err
-		}
-		text = step.Function.Name + "(" + renderV1CallArgs(args) + ")"
-	} else {
-		args := step.Function.Args
-		if len(args) > 0 {
-			resolved, err := resolveArgsRefs(args, stepCtx.Evaluator)
-			if err != nil {
-				return nil, err
-			}
-			args = resolved
-		}
-		text = step.Function.Name + "(" + renderFunctionArgs(args) + ")"
+	args, err := stepCtx.Evaluator.ResolveV1Map(ctx, step.Function.Args)
+	if err != nil {
+		return nil, err
 	}
-	res, err := r.engine.Execute(ctx, text)
+	res, err := r.engine.Execute(ctx, step.Function.Name+"("+renderV1CallArgs(args)+")")
 	if err != nil {
 		return nil, err
 	}
@@ -283,11 +263,12 @@ func armTree(t *testing.T, sources []*corpusSource, pick func(*corpusSource) str
 	return out
 }
 
-// newAutomationArm loads the arm's automations through the boot walk in the
-// arm's grammar and wires an executor over one engine, every logic of the
-// tree rebuilt from the arm's source and upserted over the booted one, so a
-// logic call runs the arm's build of it.
-func newAutomationArm(t *testing.T, name string, v1 bool, pick func(*corpusSource) string, sources []*corpusSource) automationArm {
+// newAutomationArm loads the arm's automations through the boot walk from
+// the arm's source, and wires an executor over one engine, every logic of the
+// tree rebuilt from that source and upserted over the booted one, so a logic
+// call runs the arm's build of it. legacy marks the arm whose bodies are in
+// the retired forms.
+func newAutomationArm(t *testing.T, name string, legacy bool, pick func(*corpusSource) string, sources []*corpusSource) automationArm {
 	t.Helper()
 	eng := bootEmbeddedEngine(t)
 	// A lazy handle satisfies the engine's setup; port 1 makes any database
@@ -307,9 +288,6 @@ func newAutomationArm(t *testing.T, name string, v1 bool, pick func(*corpusSourc
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	saved := languageParser.DefaultOptions
-	languageParser.DefaultOptions = languageParser.Options{ExpressionsV1: v1}
-	defer func() { languageParser.DefaultOptions = saved }()
 	loaded, err := automations.NewLoader(automations.LoaderOptions{Logger: logger}).LoadFromTree(armTree(t, sources, pick))
 	require.NoErrorf(t, err, "%s arm: the tree's automations do not load", name)
 	byName := make(map[string]*automations.Automation, len(loaded))
@@ -336,7 +314,7 @@ func newAutomationArm(t *testing.T, name string, v1 bool, pick func(*corpusSourc
 	exec := automations.NewExecutor(automations.ExecutorOptions{
 		Logger: logger, Engine: eng, EventBus: bus, StepRegistry: reg, SandboxRun: true,
 	})
-	return automationArm{name: name, legacy: !v1, byName: byName, reg: reg, exec: exec}
+	return automationArm{name: name, legacy: legacy, byName: byName, reg: reg, exec: exec}
 }
 
 // run is one fixture's run in comparable form.
@@ -663,8 +641,8 @@ func TestAutomationCorpusRuns(t *testing.T) {
 	// The first arm is the one the others are compared with. The flip deletes
 	// the legacy arm's line: the tree then has no legacy source.
 	arms := []automationArm{
-		newAutomationArm(t, "legacy", false, func(f *corpusSource) string { return f.Current }, sources),
-		newAutomationArm(t, "bodies", true, func(f *corpusSource) string { return f.Bodies }, sources),
+		newAutomationArm(t, "legacy", true, func(f *corpusSource) string { return f.Current }, sources),
+		newAutomationArm(t, "bodies", false, func(f *corpusSource) string { return f.Bodies }, sources),
 	}
 	legacyRuns := false
 	for _, arm := range arms {

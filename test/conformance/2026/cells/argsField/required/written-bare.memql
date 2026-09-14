@@ -1,0 +1,9 @@
+/// The tickets that match, newest first.
+query ticket matchingTicketsRequired {
+  args {
+    status  string  @required
+  }
+  filter row => row.status == args.status
+  sort "row.createdAt", "desc"
+  paginate 20
+}

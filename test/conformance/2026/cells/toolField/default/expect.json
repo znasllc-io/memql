@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-number.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@default on a tool field takes one string"
+    }
+  ]
+}

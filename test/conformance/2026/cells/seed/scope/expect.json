@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-an-unquoted-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@scope on a seed takes one string"
+    },
+    {
+      "file": "per-user-with-its-own-id.memql",
+      "verdict": "refuse_load",
+      "message": "cannot declare its own `id` (derived as `<seedName>-<userId>` by the materializer)"
+    },
+    {
+      "file": "an-unknown-scope.memql",
+      "verdict": "refuse_parse",
+      "message": "@scope must be \"global\" or \"perUser\", got \"perTeam\""
+    }
+  ]
+}

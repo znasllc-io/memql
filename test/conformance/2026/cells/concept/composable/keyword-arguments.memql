@@ -1,0 +1,14 @@
+/// A support ticket raised by a customer.
+@composable(as="ticket", fields="title,status", list="ticketsToCompose")
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}
+
+/// The tickets a composed file is made from.
+query ticket ticketsToCompose {
+  filter row => row.status == "open"
+  sort "row.createdAt", "desc"
+  paginate 20
+}

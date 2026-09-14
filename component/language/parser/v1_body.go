@@ -169,14 +169,13 @@ func (p *Parser) parseV1Definition(attrs []*Attribute, attrToks []Token) (*Funct
 	}
 
 	body := &ast.Body{Statements: stmts, Span: joinV1Span(v1TokenSpan(kindTok), v1TokenSpan(closeTok))}
-	auto := &AutomationDef{Name: name, Steps: []StepDef{}, Enabled: true, ExpressionsV1: true, Body: body}
+	auto := &AutomationDef{Name: name, Steps: []StepDef{}, Enabled: true, Body: body}
 	def := &FunctionDef{
-		Name:          name,
-		Args:          []FunctionArg{{Name: "_", Type: "any"}},
-		Body:          auto,
-		Enabled:       true,
-		ArgsSchema:    schema,
-		ExpressionsV1: true,
+		Name:       name,
+		Args:       []FunctionArg{{Name: "_", Type: "any"}},
+		Body:       auto,
+		Enabled:    true,
+		ArgsSchema: schema,
 	}
 	if kind == "logic" {
 		def.Receiver = &FunctionReceiver{Type: ReceiverLogic}

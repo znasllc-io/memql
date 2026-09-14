@@ -1,0 +1,7 @@
+/// When a node joins the cluster, open a ticket to welcome it.
+@trigger("node.created")
+automation welcomeNodeTrigger {
+  step raise {
+    mutation raiseTicketTrigger (title: "A node joined the cluster")
+  }
+}

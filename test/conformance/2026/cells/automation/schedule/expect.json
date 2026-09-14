@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "file": "keyword-arguments.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-number.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@schedule on an automation takes one string or keyword arguments"
+    },
+    {
+      "file": "an-invalid-cron.memql",
+      "verdict": "refuse_load",
+      "message": "invalid cron schedule \"0 * * * *\": expected exactly 6 fields, found 5",
+      "note": "MemQL crons carry a leading seconds field; the refusal names the six-field spelling of the same schedule."
+    }
+  ]
+}

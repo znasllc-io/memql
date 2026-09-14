@@ -1,8 +1,6 @@
 package automations
 
 import (
-	"encoding/json"
-	"strings"
 	"testing"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -13,25 +11,16 @@ import (
 // Regression for memql#1044 (autoJoinAI errors when the space owner has no
 // assistant agent).
 //
-// In logicAutoJoinAI the GA is resolved with
+// The GA was resolved as `getGA := getActiveGA ?? getFallbackGA`. When the
+// owner has NO assistant, getActiveGA is a skipped `if` and getFallbackGA
+// returns 0 rows, so getGA is a NON-NIL but EMPTY (0-node) result. The
+// original guard `!getGA.empty()` could never gate that case in the string
+// evaluator, which did not apply a leading `!` (memql#1096 later taught it
+// to), so the join branch fired with no GA and the write was refused for a
+// missing `agentId`.
 //
-//	getGA := coalesce(getActiveGA, getFallbackGA)
-//
-// When the owner has NO assistant, getActiveGA is a skipped `if` and
-// getFallbackGA returns 0 rows, so coalesce(...) yields a NON-NIL but
-// EMPTY (0-node) ExecuteResult. The original guard `!getGA.empty()`
-// could never gate that case: the automation condition evaluator does
-// not apply the leading `!` negation operator, so `!getGA.empty()`
-// evaluated truthy unconditionally, the join branch fired with no GA,
-// and coalesce(getGA.first().id, "") resolved to nil -- which
-// participantByAgentSpace rejected as a missing required
-// `agentId`.
-//
-// The fix guards the join on a POSITIVE id-presence check,
-// `first(getGA).id != ""`, which the compiler rewrites to a fully
-// resolvable `$steps.getGA.result.Bundle.nodes.0.id` path. These tests
-// pin both the runtime condition semantics and the compiled shape so a
-// revert to the broken `!...empty()` form is caught.
+// Both guard spellings must decide correctly over a query result: the
+// positive id-presence check and the `!`-negation.
 
 func autoJoinResult(ids ...string) *memqlengine.ExecuteResult {
 	var nodes []*memqlv1.MemoryNode
@@ -45,14 +34,11 @@ func autoJoinResult(ids ...string) *memqlengine.ExecuteResult {
 	return &memqlengine.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: nodes}}
 }
 
-// The runtime guard `first(getGA).id != ""` (in its compiled,
-// path-resolvable form) must be FALSE when the owner has no assistant
-// (empty getGA) so the join branch cleanly no-ops, and TRUE when the
-// owner has an assistant so the GA joins.
+// The id-presence guard must be FALSE when the owner has no assistant
+// (empty getGA) so the join branch cleanly no-ops, and TRUE when the owner
+// has an assistant so the GA joins.
 func TestAutoJoinAI_JoinGuard_NoOpsWithoutAssistant(t *testing.T) {
-	// The guard as the compiler emits it (see
-	// TestAutoJoinAI_JoinGuardCompilesToResolvablePath).
-	const guard = `$steps.getGA.result.Bundle.nodes.0.id != ""`
+	const guard = `getGA.first().id != nil`
 
 	cases := []struct {
 		name     string
@@ -80,9 +66,9 @@ func TestAutoJoinAI_JoinGuard_NoOpsWithoutAssistant(t *testing.T) {
 				Result: tc.getGA,
 			})
 
-			got, err := eval.EvaluateCondition(guard)
+			got, err := evalV1Cond(t, eval, guard)
 			if err != nil {
-				t.Fatalf("EvaluateCondition(%q): %v", guard, err)
+				t.Fatalf("%s: %v", guard, err)
 			}
 			if got != tc.wantJoin {
 				t.Fatalf("join guard = %v, want %v (owner-no-assistant must no-op, owner-with-assistant must join)", got, tc.wantJoin)
@@ -91,20 +77,10 @@ func TestAutoJoinAI_JoinGuard_NoOpsWithoutAssistant(t *testing.T) {
 	}
 }
 
-// Pins the now-FIXED negation semantics behind the original #1044 bug.
-//
-// memql#1096 taught the condition evaluator to honour a leading `!`, so the
-// `! $steps.getGA.empty` form the compiler emits for `!getGA.empty()` now
-// correctly evaluates to FALSE on an empty result (empty=true, !empty=false)
-// and TRUE on a non-empty one. The #1044 DSL guard was rewritten to the
-// positive `first(getGA).id != ""` form before the evaluator was fixed; that
-// form stays as belt-and-suspenders (see
-// TestAutoJoinAI_JoinGuard_NoOpsWithoutAssistant), but the `!`-negation form
-// it replaced is no longer broken -- this test pins that fix.
-func TestAutoJoinAI_BangEmptyGuard_NowHonoursNegation(t *testing.T) {
-	// `! ...` is the form the compiler emits for `!getGA.empty()` (the
-	// lowercase accessor spelling; Story 5 / #2303 retired `.Empty()`).
-	const guard = "! $steps.getGA.empty"
+// The `!`-negation guard: `!getGA.empty()` is FALSE on an empty result and
+// TRUE on a non-empty one.
+func TestAutoJoinAI_BangEmptyGuard_HonoursNegation(t *testing.T) {
+	const guard = "!getGA.empty()"
 
 	cases := []struct {
 		name  string
@@ -132,51 +108,13 @@ func TestAutoJoinAI_BangEmptyGuard_NowHonoursNegation(t *testing.T) {
 				Result: tc.getGA,
 			})
 
-			got, err := eval.EvaluateCondition(guard)
+			got, err := evalV1Cond(t, eval, guard)
 			if err != nil {
-				t.Fatalf("EvaluateCondition(%q): %v", guard, err)
+				t.Fatalf("%s: %v", guard, err)
 			}
 			if got != tc.want {
-				t.Fatalf("`%s` = %v, want %v (#1096 fixed leading-! negation)", guard, got, tc.want)
+				t.Fatalf("`%s` = %v, want %v", guard, got, tc.want)
 			}
 		})
-	}
-}
-
-// The DSL guard `first(getGA).id != ""` must compile to a fully
-// resolvable `$steps`-path comparison (not a raw `*.Empty()` method-call
-// or `!`-negation, neither of which the condition evaluator resolves at
-// runtime).
-func TestAutoJoinAI_JoinGuardCompilesToResolvablePath(t *testing.T) {
-	src := `use cognition.queries.{ participantByAgentSpace }
-@description("autoJoinAI guard shape")
-logic logicAutoJoinGuardShape {
-  args { event object @required }
-  body {
-    getGA := participantByAgentSpace(partitionId: args.event.payload.id, agentId: "seed")
-    joinGA := if first(getGA).id != "" {
-      participantByAgentSpace(partitionId: args.event.payload.id, agentId: "join")
-    }
-    return joinGA
-  }
-}`
-	body := parseLogicBody(t, src)
-	r := NewLogicRunner(nil, nil, nil)
-	auto, err := r.compileBodyToAutomation("logicAutoJoinGuardShape", body)
-	if err != nil {
-		t.Fatalf("compileBodyToAutomation: %v", err)
-	}
-	raw, err := json.Marshal(auto)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	compiled := string(raw)
-
-	if !strings.Contains(compiled, `$steps.getGA.result.Bundle.nodes.0.id`) {
-		t.Fatalf("compiled guard missing resolvable first()-id path; got:\n%s", compiled)
-	}
-	// Guard against a regression to either runtime-unresolvable form.
-	if strings.Contains(compiled, `getGA.empty()`) {
-		t.Fatalf("compiled guard still carries the runtime-unresolvable getGA.empty() method-call form:\n%s", compiled)
 	}
 }

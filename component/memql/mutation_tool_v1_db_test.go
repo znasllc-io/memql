@@ -18,7 +18,8 @@ import (
 // handlers against a REAL engine and a REAL Postgres (epic memql#5363,
 // memql#5367). The DB-free tests pin the rendering; these pin that what is
 // rendered is written, validated against the real concept, read back and
-// served to a tool call exactly as the string half's was.
+// served to a tool call -- beside the shipped constructs the tree loads, which
+// before the flip were the string evaluator's and now are the same kind.
 //
 // Postgres-gated through the package's shared engine (sharedReadMergeEngine):
 // they only read and write rows, under a user minted per run, so they leave
@@ -70,8 +71,9 @@ func rowIDs(rows map[string]map[string]any) []string {
 // TestV1MutationTemplateWritesThroughTheEngine renders createTodo's values in
 // edition 2026, executes the node through the engine's real write path
 // (reserved-field guard, concept validation, @relationship canonicalisation,
-// row-authz), and reads the row back beside one the string half wrote from
-// the same arguments: the two stored payloads are one payload.
+// row-authz), and reads the row back beside one the shipped createTodo wrote
+// from the same arguments: the two stored payloads are one payload, so the
+// block below is what the shipped mutation writes.
 func TestV1MutationTemplateWritesThroughTheEngine(t *testing.T) {
 	eng, _, base := sharedReadMergeEngine(t)
 	user := "user-v1mut-" + id.NewShortId()
@@ -85,14 +87,13 @@ func TestV1MutationTemplateWritesThroughTheEngine(t *testing.T) {
 		sourceResponsibilityId: args.sourceResponsibilityId,
 		id: args.todoId, ownerUserId: actor.userId, done: false
 	}`})
-	legacyFn, err := eng.functions.Get("createTodo")
+	shippedFn, err := eng.functions.Get("createTodo")
 	require.NoError(t, err)
-	require.False(t, legacyFn.MutationTemplate.ValuesV1, "the tree still loads the string half until the flip")
 
 	// The Execute path stamps a named mutation's provenance before the
 	// write; a node executed directly carries it the same way.
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Mutation("createTodo"))
-	v1ID, legacyID := "todo-v1-"+id.NewShortId(), "todo-legacy-"+id.NewShortId()
+	v1ID, shippedID := "todo-v1-"+id.NewShortId(), "todo-shipped-"+id.NewShortId()
 	args := func(todoID string) map[string]any {
 		return map[string]any{"todoId": todoID, "title": "Buy milk", "priority": "high"}
 	}
@@ -100,14 +101,14 @@ func TestV1MutationTemplateWritesThroughTheEngine(t *testing.T) {
 	for _, w := range []struct {
 		tmpl   *FunctionMutationTemplate
 		todoID string
-	}{{v1, v1ID}, {legacyFn.MutationTemplate, legacyID}} {
+	}{{v1, v1ID}, {shippedFn.MutationTemplate, shippedID}} {
 		node, err := eng.renderMutationTemplate(ctx, w.tmpl, args(w.todoID))
 		require.NoError(t, err)
 		_, err = eng.executeMutation(ctx, node)
 		require.NoError(t, err, "the rendered node must pass the engine's real write path")
 		written = append(written, node.PayloadRaw)
 	}
-	require.JSONEq(t, written[1], written[0], "the two renderers wrote different payloads")
+	require.JSONEq(t, written[1], written[0], "the block and the shipped createTodo wrote different payloads")
 	require.NotContains(t, written[0], `"dueAt"`, "a missing optional argument writes no key")
 
 	read := func(todoID string) map[string]any {
@@ -125,8 +126,8 @@ func TestV1MutationTemplateWritesThroughTheEngine(t *testing.T) {
 	}
 	// Read back through the owner-gated query: the stored rows, owner
 	// canonicalised on insert, are one row but for their ids.
-	gotV1, gotLegacy := read(v1ID), read(legacyID)
-	require.Equal(t, gotLegacy, gotV1, "the two renderers stored different payloads")
+	gotV1, gotShipped := read(v1ID), read(shippedID)
+	require.Equal(t, gotShipped, gotV1, "the block and the shipped createTodo stored different payloads")
 	require.Equal(t, "Buy milk", gotV1["title"])
 	require.Equal(t, false, gotV1["done"])
 }
@@ -134,10 +135,10 @@ func TestV1MutationTemplateWritesThroughTheEngine(t *testing.T) {
 // TestV1ToolHandlersExecuteAgainstTheEngine runs the todos tools with their
 // handlers written in edition 2026 through ExecuteTool: parsed at load,
 // arguments evaluated, the call rendered from values and executed. For every
-// filled call the rows served equal the legacy tool's, and an unfilled filter
+// filled call the rows served equal the shipped tool's, and an unfilled filter
 // is omitted from the call, so every row is served. An explicit JSON null for
 // a typed argument never reaches either handler: the tool's input schema
-// refuses it first, on both paths.
+// refuses it first, on both.
 func TestV1ToolHandlersExecuteAgainstTheEngine(t *testing.T) {
 	eng, _, base := sharedReadMergeEngine(t)
 	user := "user-v1tool-" + id.NewShortId()
@@ -145,9 +146,9 @@ func TestV1ToolHandlersExecuteAgainstTheEngine(t *testing.T) {
 
 	list := v1ToolFromDecl(t, "/// List to-dos\n@handler(type=\"query\", query=\"query todos(done: args.done)\")\ntool zzTodosListV1 {\n  done boolean @description(\"d\")\n}\n")
 	complete := v1ToolFromDecl(t, "/// Complete a to-do\n@handler(type=\"query\", query=\"mutation completeTodo(todoId: args.todoId, payload: args.payload)\")\ntool zzTodosCompleteV1 {\n  todoId string! @description(\"d\")\n  payload object! @description(\"d\")\n}\n")
-	legacyList, err := eng.tools.Get("todosList")
+	shippedList, err := eng.tools.Get("todosList")
 	require.NoError(t, err)
-	require.Nil(t, legacyList.Handler.queryV1, "the shipped todosList is still the legacy handler")
+	require.NotNil(t, shippedList.Handler.queryV1, "the shipped todosList is parsed at load like every query handler")
 
 	openID, doneID := "todo-open-"+id.NewShortId(), "todo-done-"+id.NewShortId()
 	for _, todoID := range []string{openID, doneID} {
@@ -183,14 +184,14 @@ func TestV1ToolHandlersExecuteAgainstTheEngine(t *testing.T) {
 			rows, v1Text := toolRows(t, eng, ctx, list, tc.args)
 			require.Equal(t, tc.want, rowIDs(rows))
 			if tc.filled {
-				_, legacyText := toolRows(t, eng, ctx, legacyList, tc.args)
-				require.JSONEq(t, legacyText, v1Text, "a filled call serves what the legacy handler serves")
+				_, shippedText := toolRows(t, eng, ctx, shippedList, tc.args)
+				require.JSONEq(t, shippedText, v1Text, "a filled call serves what the shipped handler serves")
 			}
 		})
 	}
 
 	// An explicit null is refused by the input schema before either handler.
-	for _, tool := range []*Tool{list, legacyList} {
+	for _, tool := range []*Tool{list, shippedList} {
 		res, err := eng.ExecuteTool(ctx, tool, map[string]any{"done": nil})
 		require.NoError(t, err)
 		require.True(t, res.IsError, "%s: a null boolean is not a boolean", tool.Name)

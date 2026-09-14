@@ -115,7 +115,7 @@ logic decide {
   body {
     existing := query existingCluster()
     v := builtin serviceVersion()
-    return coalesce(existing.first(), v)
+    return existing.first() ?? v
   }
 }`
 	if fs := CheckFile("dsl/cluster/logic.memql", src, nil); len(fs) != 0 {

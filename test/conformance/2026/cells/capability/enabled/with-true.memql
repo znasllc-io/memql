@@ -1,0 +1,8 @@
+/// Whether a path exists on the runner's workspace. @enabled restates the default.
+@sideEffect("read")
+@enabled(true)
+capability fs.exists {
+  args {
+    path  string!
+  }
+}

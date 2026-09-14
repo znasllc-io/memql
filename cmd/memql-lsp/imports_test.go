@@ -22,7 +22,7 @@ use common.traits.{ isActiveRecord }
 
 @description("Get space participants")
 query participant spaceParticipants {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   participantFull
 }
 `

@@ -2374,7 +2374,10 @@ shipped it (`cmd/memqlmigrate/rewrites.go`), and reached with `--edition`
 (default: the edition this engine writes) and `--rewrite=<name>`;
 `--rewrite=language-line` is the one that declares the line in every domain
 that has none, and `--rewrite=expressions` moves filters, spec and trait
-bodies, conditions and values onto the edition-2026 expression grammar.
+bodies, conditions and values onto the edition-2026 expression grammar. In
+VS Code the language server makes the same `--rewrite=expressions` edit one
+construct at a time, as the **Rewrite to edition 2026** quick fix on a retired
+spelling's diagnostic ([Sense](sense.md#the-rewrite-quick-fix)).
 
 A rewrite is **required** when a narrowing can strand source someone else
 holds: the retired form has in-tree usage, or plausible usage in a
@@ -2467,6 +2470,9 @@ Declared-but-unused is legal. A spec or trait body does not read the
 `actor` root: a spec that asks about the actor binds an `@actor` shape,
 and its lambda parameter, spelled `actor`, is the envelope
 (`spec actorEnvelope requiresOwner = actor => actor.role == "owner"`).
+A spec or trait over rows that reads it is refused at load
+(`lower_actor_in_row_predicate`): an ownership test belongs in the query
+filter, `row.ownerUserId == actor.userId`, where row-authz reads it.
 Shapes use `@actor` as their kind marker; the seed-file
 `@actor("system")` is a different construct. An unknown member (`actor.displayName`) is likewise a load
 error and an `actor-unknown-property` squiggle (#2625): the envelope is
@@ -2848,7 +2854,10 @@ naming complaint would be the larger defect.
 sending blank, that is `@noUnset("field")` on the mutation (memql#3415)
 — the targeted opt-out. It drops a named field from the delta when the
 incoming value is empty and the stored one is not, which is exactly the
-"do not let a blank overwrite this" rule that `??` does not express.
+"do not let a blank overwrite this" rule that `??` does not express. Empty
+means nil, a blank or whitespace-only string, or an empty array or object;
+a numeric or boolean zero is a value, so `0` and `false` still write (see
+[`@noUnset`](attribute-matrix.md#nounset)).
 
 **One rule, one implementation.** Every evaluator of `??` resolves
 through `coalesceSelect` in `component/memql/mutation_templates.go`,

@@ -164,9 +164,9 @@ A condition is boolean: there is no truthiness, and `!` negates exactly. An
 optional argument is a plain predicate, `args.x == nil || row.f == args.x`,
 which the engine folds before the query runs. The retired spellings (`when(...)`,
 `;` and `,` as connectives, `has`, `?.`, `cond(...)`, `coalesce(...)`,
-`concat(...)`, ...) are refused where an expression is written; the full list is
-[memql.md](memql.md#retired-spellings), and `memqlmigrate --rewrite=expressions`
-rewrites them.
+`concat(...)`, ...) are refused at parse wherever a `.memql` file writes them;
+the full list is [memql.md](memql.md#retired-spellings), and
+`memqlmigrate --rewrite=expressions` rewrites them.
 
 ---
 
@@ -214,9 +214,9 @@ Filter rules:
 An optional argument is a plain predicate: `args.x == nil || <predicate>`.
 Nothing in it reads the row until the second half, so the engine computes
 `args.x == nil` once before the query runs: the clause becomes true when the
-caller leaves the argument out and the predicate alone when they pass it. It
-replaces the retired `when(args.x) { ... }` guard, and under `||` the form is
-`args.x != nil && <predicate>`:
+argument is unset (left out, null or `""`) and the predicate alone when it is
+set. It replaces the retired `when(args.x) { ... }` guard, and under `||` the
+form is `args.x != nil && <predicate>`:
 
 ```memql
 @description("Active folders, optionally narrowed to a creator")
@@ -513,14 +513,10 @@ authored/deterministic deploy spine but are never themselves LLM-healed.
 
 ### Attribute Reference
 
-| Attribute | Arguments | Description |
-|-----------|-----------|-------------|
-| `@enabled` / `@disabled` | none | Lifecycle: enabled by default, `@enabled` an accepted no-op; `@disabled` constructs stay in the tree, are not loaded |
-| `@trigger` | `event="..."`, `concept="..."`, `partition="*"` | Event-based trigger; lifecycle events like `system.startup` / `system.shutdown` take `event` only |
-| `@trigger` | `schedule="..."` | Six-field cron schedule |
-| `@filter` | `(row => <predicate>)` | A predicate over the triggering row gating the trigger, e.g. `@filter(row => row.active == true)` |
-| `@description` | `"..."` | Human-readable description |
-| `precondition NAME { ... }` | `check:` (req), `literal:`, `description:` | First-class deterministic check; a miss aborts the run + emits `healing.precondition.missed` (Epic 4 self-healing) |
+Every annotation an automation accepts, and how each is written, is listed
+under [automation](attribute-matrix.md#automation) in the attribute matrix,
+which is generated from the annotation registry. Each links to its entry,
+which gives its keys (the `@trigger` keys among them) and what it does.
 
 ---
 
@@ -653,11 +649,11 @@ prompt consolidateMemory {
 
 ### Attributes
 
-| Attribute | Description |
-|-----------|-------------|
-| `@description` | Human-readable description of the prompt |
-| `@defaultProvider` | Default AI provider name to use |
-| `@templateFile` | Go text/template file for the prompt |
+Every annotation a prompt accepts (`@level` is required on every prompt) and
+every annotation its input fields accept are listed under
+[prompt](attribute-matrix.md#prompt) and
+[prompt field](attribute-matrix.md#prompt-field) in the attribute matrix, which
+is generated from the annotation registry.
 
 ### Input Field Types
 
@@ -712,14 +708,11 @@ provider anthropic {
 
 ### Attributes
 
-| Attribute | Description |
-|-----------|-------------|
-| `@type` | Provider type (e.g. `OpenAI`, `OpenAIStream`, `Anthropic`, `AnthropicStream`). Optional when `@extends` is used. |
-| `@model` | Model identifier |
-| `@extends` | Inherits `auth` and `@type` from a named base provider |
-| `@base` | Marks a vendor-level base provider definition |
-| `@default` | Marks this provider as the fallback for callers that do not pick one explicitly |
-| `@enabled` / `@disabled` | Lifecycle: enabled by default, `@enabled` an accepted no-op. `@disabled` skips registration entirely (no auth resolution attempted); `@disabled` on a `@base` propagates to every child that `@extends` it. |
+Every annotation a provider accepts, and how each is written, is listed under
+[provider](attribute-matrix.md#provider) in the attribute matrix, which is
+generated from the annotation registry. `@disabled` on a provider skips it at
+load with no auth resolution attempted, and on a `@base` it skips every child
+that `@extends` it.
 
 ### Blocks
 
@@ -749,7 +742,9 @@ Tool body fields take `@required`, `@default("...")`, `@enum`, and
 `@description`. (Tool fields are the one place `@default` is valid --
 it is rejected on query / mutation `args` fields.) The legacy
 `func (Tool)` form is retired; the parser rejects it with a migration
-hint.
+hint. What a query handler's call and a webhook's url may be written
+as, and the retired `$args.` placeholder, are in
+[the language reference](memql.md#tools).
 
 ---
 

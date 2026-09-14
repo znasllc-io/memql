@@ -1,0 +1,4 @@
+@primary("fleet:strongest")
+@description
+@fallback("app:*")
+policy localThenAppDescription { }

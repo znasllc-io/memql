@@ -64,7 +64,7 @@ query participant spaceParticipants {
   args {
     spaceId string @required @description("the space")
   }
-  filter spaceId==args.spaceId
+  filter row => row.spaceId == args.spaceId
   shape  participantFull
 }`,
 		},

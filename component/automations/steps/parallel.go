@@ -112,8 +112,8 @@ func (e *ParallelExecutor) Execute(ctx context.Context, step *automations.Step, 
 						"condition", branchCopy.Condition,
 					)
 				}
-				// StepCondition: EvalCondition for a v1 step (branchCopy
-				// carries the parsed Exprs), the string evaluator otherwise.
+				// StepCondition evaluates the condition parsed at load
+				// (branchCopy is a copy, so it carries the parsed Exprs).
 				shouldRun, err := branchCtx.Evaluator.StepCondition(ctx, &branchCopy)
 				if err != nil {
 					if stepCtx.Logger != nil {

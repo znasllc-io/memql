@@ -317,7 +317,7 @@ func (e *Executor) ResumeFrom(
 	if automation == nil {
 		return nil, fmt.Errorf("automation is nil")
 	}
-	if err := requirePreparedExpressions(automation); err != nil {
+	if err := ensurePrepared(automation); err != nil {
 		return nil, err
 	}
 	if opts == nil {
@@ -412,7 +412,7 @@ func (e *Executor) ResumeFrom(
 		evaluator.SetCustom("args", boundArgs)
 		evaluator.SetCustom("argsDeclared", declaredArgsSet(automation))
 	}
-	bindV1RunAmbient(ctx, e.engine, evaluator, automation)
+	bindRunAmbient(ctx, e.engine, evaluator)
 
 	// Restore input from the run row
 	if journal.Input != nil {

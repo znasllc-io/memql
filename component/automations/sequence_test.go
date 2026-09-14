@@ -110,8 +110,8 @@ func statementAutomation(t *testing.T, src string) *Automation {
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	if !a.IsStatementBody() || !a.IsV1() {
-		t.Fatalf("%s did not load as a statement body (body %q, expressions %q)", a.Name, a.Body, a.Expressions)
+	if !a.IsStatementBody() {
+		t.Fatalf("%s did not load as a statement body (body %q)", a.Name, a.Body)
 	}
 	return a
 }

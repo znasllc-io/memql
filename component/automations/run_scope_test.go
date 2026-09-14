@@ -26,6 +26,26 @@ func evalV1Src(t *testing.T, e *Evaluator, src string) (any, error) {
 	return e.EvalV1(context.Background(), n)
 }
 
+// evalV1 parses src and evaluates it over e -- the spelling for a probe that
+// has no *testing.T. A parse error is returned as the error.
+func evalV1(e *Evaluator, src string) (any, error) {
+	n, err := languageParser.ParseV1Expression(src)
+	if err != nil {
+		return nil, err
+	}
+	return e.EvalV1(context.Background(), n)
+}
+
+// evalV1Cond parses src and evaluates it over e as a condition.
+func evalV1Cond(t *testing.T, e *Evaluator, src string) (bool, error) {
+	t.Helper()
+	n, err := languageParser.ParseV1Expression(src)
+	if err != nil {
+		t.Fatalf("parse %s: %v", src, err)
+	}
+	return e.EvalV1Condition(context.Background(), n)
+}
+
 // TestRunScopeResolution walks the lookup order in run_scope.go's file
 // comment, one root at a time, over an evaluator seeded as the executor
 // seeds one.

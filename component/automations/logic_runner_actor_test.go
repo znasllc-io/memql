@@ -1,7 +1,7 @@
 package automations
 
 // #2380: the logic runner binds actor.* from the caller's auth context so
-// role-gate logics (`role := coalesce(actor.role, "")`) resolve at runtime.
+// role-gate logics (`role := actor.role ?? ""`) resolve at runtime.
 
 import (
 	"context"
@@ -14,7 +14,7 @@ func TestLogicRunnerEvaluator_BindsActor(t *testing.T) {
 	r := NewLogicRunner(nil, nil, nil)
 	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "u1", Role: auth.RoleOwner})
 	ev := r.newEvaluatorForLogic(ctx, map[string]any{})
-	got, err := ev.EvaluateValue("$actor.role")
+	got, err := evalV1(ev, "actor.role")
 	if err != nil || got != "owner" {
 		t.Fatalf("actor.role = %v err=%v, want owner", got, err)
 	}
@@ -22,7 +22,7 @@ func TestLogicRunnerEvaluator_BindsActor(t *testing.T) {
 	// so reads resolve to the envelope's empty values -- not to nil, and
 	// certainly not to the literal path text.
 	ev = r.newEvaluatorForLogic(context.Background(), map[string]any{})
-	got, _ = ev.EvaluateValue("$actor.role")
+	got, _ = evalV1(ev, "actor.role")
 	if got == "actor.role" {
 		t.Fatal("unbound actor must not resolve to its own literal path")
 	}
@@ -30,22 +30,27 @@ func TestLogicRunnerEvaluator_BindsActor(t *testing.T) {
 
 // memql#2801: the runner must bind the denying envelope on absent auth.
 //
-// Leaving actor unbound was fail-open, and only through THIS seam is that
-// visible: the evaluator renders an unresolved dotted path as its own
-// path text, so `actor.isClusterOwner != false` compared a non-empty
-// string against false and read TRUE. Testing the binder helper in
-// isolation does not catch a regression here -- removing the runner's
-// call to it leaves such a test green, which is how the first attempt at
-// this fix shipped uncovered.
+// Leaving actor unbound was fail-open: the string evaluator rendered an
+// unresolved dotted path as its own path text, so `actor.isClusterOwner !=
+// false` compared a non-empty string against false and read TRUE. Testing
+// the binder helper in isolation does not catch a regression here --
+// removing the runner's call to it leaves such a test green, which is how
+// the first attempt at this fix shipped uncovered. RunScope now answers an
+// unseeded actor with the same denying envelope, so the conditions below
+// would stay false without the runner's binding: the SEEDING is asserted
+// directly, so this seam's own regression still fails here.
 func TestLogicRunnerEvaluator_AbsentAuthDeniesTheAdminGate(t *testing.T) {
 	r := NewLogicRunner(nil, nil, nil)
 	ev := r.newEvaluatorForLogic(context.Background(), map[string]any{})
+	if _, seeded := ev.custom["actor"]; !seeded {
+		t.Fatal("the logic runner did not seed `actor` on absent auth (memql#2801)")
+	}
 
 	for _, cond := range []string{
 		"actor.isClusterOwner != false",
 		"actor.isClusterOwner == true",
 	} {
-		got, err := ev.EvaluateCondition(cond)
+		got, err := evalV1Cond(t, ev, cond)
 		if err != nil {
 			t.Fatalf("%s: %v", cond, err)
 		}
@@ -58,7 +63,7 @@ func TestLogicRunnerEvaluator_AbsentAuthDeniesTheAdminGate(t *testing.T) {
 	// admin surface rather than a gate.
 	ownerCtx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "u1", Role: auth.RoleOwner})
 	ev = r.newEvaluatorForLogic(ownerCtx, map[string]any{})
-	got, err := ev.EvaluateCondition("actor.isClusterOwner == true")
+	got, err := evalV1Cond(t, ev, "actor.isClusterOwner == true")
 	if err != nil {
 		t.Fatalf("owner: %v", err)
 	}

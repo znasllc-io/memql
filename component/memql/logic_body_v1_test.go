@@ -11,28 +11,24 @@ import (
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// logic_body_v1_test.go -- the logic-body bridge (logic_body_v1.go): what a v1
-// body loads into, what load refuses, and the tree migrated by the codemod
-// loading every logic construct with the edition-2026 grammar. The run-time
-// equivalence of the two grammars over the same tree is
-// component/automations/steps' logic_v1_corpus_test.go, which runs what these
-// build on the LogicRunner.
+// logic_body_v1_test.go -- the logic-body bridge (logic_body_v1.go): what a
+// body loads into, what load refuses, and every logic construct of the tree
+// loading. What they do at run time is component/automations/steps'
+// logic_v1_corpus_test.go, which runs what these build on the LogicRunner
+// against its goldens.
 
-// loadLogicV1 builds one logic construct from source with the edition-2026
-// grammar, through the loader's own entry point.
+// loadLogicV1 builds one logic construct from source, through the loader's
+// own entry point.
 func loadLogicV1(t *testing.T, name, src string) (*Function, error) {
 	t.Helper()
-	saved := languageParser.DefaultOptions
-	languageParser.DefaultOptions = languageParser.Options{ExpressionsV1: true}
-	defer func() { languageParser.DefaultOptions = saved }()
 	return BuildFunctionConstruct(src, name, "unified:probe/logic.memql", memorynodes.DefaultRegistry())
 }
 
 // TestLogicBodyV1Routing: the three shapes of a v1 body, and the runner each
 // lands on. A statement before the return, or a return of an expression,
 // runs on the LogicRunner; a return of a construct call runs through fn.Expr
-// as the call node the legacy conversion produces, its expression arguments
-// carried as leaves for argument expansion.
+// as a call node, its expression arguments carried as leaves for argument
+// expansion.
 func TestLogicBodyV1Routing(t *testing.T) {
 	multi, err := loadLogicV1(t, "multi", `logic multi {
   args {
@@ -45,7 +41,6 @@ func TestLogicBodyV1Routing(t *testing.T) {
 }`)
 	require.NoError(t, err)
 	require.NotNil(t, multi.LogicSteps, "a body with a statement before its return runs on the LogicRunner")
-	require.True(t, multi.LogicSteps.ExpressionsV1)
 
 	pure, err := loadLogicV1(t, "pure", `logic pure {
   args {
@@ -152,17 +147,12 @@ func mustParseV1(t *testing.T, src string) languageParser.ExpressionNode {
 	return n
 }
 
-// corpusLogic loads every logic construct of the tree, migrated by the codemod
-// or as it is, with the matching grammar, through the loader's entry point,
-// keyed by path and name. It fails the test on any construct that does not
-// load.
-func corpusLogic(t *testing.T, migrated bool) map[string]*Function {
+// corpusLogic loads every logic construct of the tree through the loader's
+// entry point, keyed by path and name. It fails the test on any construct
+// that does not load.
+func corpusLogic(t *testing.T) map[string]*Function {
 	t.Helper()
-	files := corpusFiles(t, migrated)
-
-	saved := languageParser.DefaultOptions
-	languageParser.DefaultOptions = languageParser.Options{ExpressionsV1: migrated}
-	defer func() { languageParser.DefaultOptions = saved }()
+	files := corpusFiles(t, false) // the tree as it is
 
 	out := map[string]*Function{}
 	var failures []string
@@ -179,46 +169,44 @@ func corpusLogic(t *testing.T, migrated bool) map[string]*Function {
 			out[f.Path+" "+slice.Name] = fn
 		}
 	}
-	require.Emptyf(t, failures, "%d logic constructs do not load (migrated=%v):\n%s", len(failures), migrated, strings.Join(failures, "\n"))
+	require.Emptyf(t, failures, "%d logic constructs do not load:\n%s", len(failures), strings.Join(failures, "\n"))
 	return out
 }
 
-// TestV1CorpusLogicBodiesBuild: every logic construct of the tree, migrated by
-// the codemod, loads with the edition-2026 grammar -- the same set that loads
-// today -- and lands on the runner its legacy build lands on, except that a
-// one-`return` expression moves to the LogicRunner (see logic_body_v1.go). A
-// return of a construct call keeps the legacy call node's name and argument
-// names, which is what makes its dispatch the legacy dispatch.
+// TestV1CorpusLogicBodiesBuild: every logic construct of the tree loads and
+// lands on its runner. A body that is one
+// `return` of a construct call dispatches through fn.Expr, as a call node
+// naming the construct; every other body -- a statement before the return,
+// or a return of an expression (a ternary, `+`, `??`) -- runs on the
+// LogicRunner, which receives the v1 body. What each of them does at run
+// time is pinned construct by construct by component/automations/steps'
+// TestLogicCorpusRuns, against its goldens.
 func TestV1CorpusLogicBodiesBuild(t *testing.T) {
 	_, err := LoadUnifiedConcepts(nil)
 	require.NoError(t, err)
-	legacy := corpusLogic(t, false)
-	v1 := corpusLogic(t, true)
-	require.Greater(t, len(legacy), 30, "the tree has dozens of logic constructs; a small count means the walk went blind")
-	require.Equal(t, len(legacy), len(v1), "the migrated tree loads the same logic constructs")
+	v1 := corpusLogic(t)
+	require.Greater(t, len(v1), 30, "the tree has dozens of logic constructs; a small count means the walk went blind")
 
-	keys := make([]string, 0, len(legacy))
-	for k := range legacy {
+	keys := make([]string, 0, len(v1))
+	for k := range v1 {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	calls, onRunner := 0, 0
 	for _, key := range keys {
-		l, n := legacy[key], v1[key]
-		require.NotNilf(t, n, "%s loads today and not after the migration", key)
-		if lc, ok := l.Expr.(*FunctionCallExpression); ok && l.LogicSteps == nil && isConstructName(lc.Name) {
+		n := v1[key]
+		if n.LogicSteps == nil {
 			nc, ok := n.Expr.(*FunctionCallExpression)
-			require.Truef(t, ok, "%s: a return of a construct call stays a call node, got %T", key, n.Expr)
-			require.Nilf(t, n.LogicSteps, "%s: a return of a construct call dispatches through fn.Expr", key)
-			require.Equalf(t, lc.Name, nc.Name, "%s: the call names the same construct", key)
-			require.ElementsMatchf(t, mapKeys(lc.Args), mapKeys(nc.Args), "%s: the call passes the same arguments", key)
+			require.Truef(t, ok, "%s: a body off the LogicRunner is a return of a construct call, got %T", key, n.Expr)
+			require.Truef(t, isConstructName(nc.Name), "%s: the call dispatched through fn.Expr names %q, which is not a construct", key, nc.Name)
 			calls++
 			continue
 		}
-		require.NotNilf(t, n.LogicSteps, "%s runs on the LogicRunner", key)
-		require.Truef(t, n.LogicSteps.ExpressionsV1, "%s: the body the runner receives is the v1 body", key)
 		onRunner++
 	}
+	// Both runners must be reached, or one half of this measures nothing.
+	require.Positive(t, calls, "no logic body returns a construct call through fn.Expr")
+	require.Positive(t, onRunner, "no logic body runs on the LogicRunner")
 	t.Logf("%d logic constructs: %d return a construct call through fn.Expr, %d run on the LogicRunner", len(keys), calls, onRunner)
 }
 

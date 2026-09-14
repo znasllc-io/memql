@@ -1,0 +1,6 @@
+/// Close a ticket; the caller confirms before it runs.
+@handler(type="function", name="closeTicketRequiresConfirmation")
+@requiresConfirmation(true)
+tool closeSupportTicketRequiresConfirmation {
+  ticketId  string!  @description("The ticket to close.")
+}

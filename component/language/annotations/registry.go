@@ -141,12 +141,13 @@ var placementIndex = func() map[Receiver]map[string]Placement {
 }()
 
 // lifecycle returns the three annotations almost every construct takes:
-// @description, @enabled, @disabled.
+// @description, @enabled, @disabled. Every @disabled placement carries the
+// same docDisabled, which says what disabling does to each kind of construct.
 func lifecycle(r Receiver, description string) []Placement {
 	return []Placement{
 		{Receiver: r, Name: "description", Forms: FormString, Example: `@description("` + description + `")`},
 		{Receiver: r, Name: "enabled", Forms: FormFlag, Example: "@enabled"},
-		{Receiver: r, Name: "disabled", Forms: FormFlag, Example: "@disabled"},
+		{Receiver: r, Name: "disabled", Forms: FormFlag, Example: "@disabled", Doc: docDisabled},
 	}
 }
 
@@ -164,7 +165,7 @@ var (
 		{Name: "concept", Type: "string", Doc: "Concept id the triggering event targets; required by the structured node.* event kinds."},
 		{Name: "partition", Type: "string", Doc: "Partition selector, e.g. \"*\" for all partitions. Required while the event topic carries a partition segment (#56 phase 8)."},
 		{Name: "schedule", Type: "string", Doc: "Cron schedule with a leading seconds field, e.g. \"0 0 * * * *\"."},
-		{Name: "filter", Type: "string", Doc: "The trigger filter as a keyword; the standalone @filter(...) annotation is the usual spelling and sets the same filter."},
+		{Name: "filter", Type: "expression", Doc: "The trigger filter as a keyword: a lambda of one parameter over the triggering row, filter=row => <predicate>. The standalone @filter(...) annotation is the usual spelling and sets the same filter."},
 		{Name: "on", Type: "string", Doc: "A synonym for event=: on=<concept>.<created|updated|deleted>, with the concept named through the file's `use` import, folds to the same graph.node.<action>.<concept> pattern event= names (resolved by the automation loader and the concept resolver). A later epic retires the synonyms (D15/D17)."},
 	}
 	scheduleKeys = []ArgSpec{
@@ -257,14 +258,14 @@ var placementTable = concat(
 	lifecycle(Mutation, "Rename one of the caller's tickets."),
 	[]Placement{
 		{Receiver: Mutation, Name: "actor", Forms: FormFlag, Example: "@actor", Doc: docActorOnFunction},
-		{Receiver: Mutation, Name: "addToSet", Forms: FormString | FormStrings, Example: `@addToSet("disabledDeployables")`},
+		{Receiver: Mutation, Name: "addToSet", Forms: FormString | FormStrings, Example: `@addToSet("disabledDeployables")`, Doc: docAddToSet + "\n\n" + docSetMembershipRules},
 		{Receiver: Mutation, Name: "appendFields", Forms: FormString | FormStrings, Example: `@appendFields("attachmentIds")`},
 		{Receiver: Mutation, Name: "createOnly", Forms: FormString | FormStrings, Example: `@createOnly("status", "attempts")`},
 		{Receiver: Mutation, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
 		{Receiver: Mutation, Name: "mergeFields", Forms: FormString | FormStrings, Example: `@mergeFields("preferences")`},
-		{Receiver: Mutation, Name: "noUnset", Forms: FormString | FormStrings, Example: `@noUnset("bootstrappedAt")`},
+		{Receiver: Mutation, Name: "noUnset", Forms: FormString | FormStrings, Example: `@noUnset("bootstrappedAt")`, Doc: docNoUnset + "\n\n" + docNoUnsetEmpty},
 		{Receiver: Mutation, Name: "public", Forms: FormFlag, Example: "@public"},
-		{Receiver: Mutation, Name: "removeFromSet", Forms: FormString | FormStrings, Example: `@removeFromSet("disabledDeployables")`},
+		{Receiver: Mutation, Name: "removeFromSet", Forms: FormString | FormStrings, Example: `@removeFromSet("disabledDeployables")`, Doc: docRemoveFromSet + "\n\n" + docSetMembershipRules},
 		{Receiver: Mutation, Name: "requiresCapability", Forms: FormString | FormStrings, Example: `@requiresCapability("execute", "app:deployables/publish")`},
 		{Receiver: Mutation, Name: "requiresRank", Forms: FormString, Example: `@requiresRank("admin")`},
 		{Receiver: Mutation, Name: "scrubPii", Forms: FormFlag, Example: "@scrubPii"},
@@ -284,7 +285,7 @@ var placementTable = concat(
 	lifecycle(Automation, "On a new ticket, notify its owner."),
 	[]Placement{
 		{Receiver: Automation, Name: "actor", Forms: FormFlag, Example: "@actor", Doc: docActorOnFunction},
-		{Receiver: Automation, Name: "filter", Forms: FormExpression | FormString, Example: `@filter(row => row.status == "open")`},
+		{Receiver: Automation, Name: "filter", Forms: FormExpression, Example: `@filter(row => row.status == "open")`},
 		{Receiver: Automation, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
 		{Receiver: Automation, Name: "schedule", Forms: FormKeywords | FormString, Keys: scheduleKeys, Example: `@schedule(cron="0 0 * * * *")`},
 		{Receiver: Automation, Name: "template", Forms: FormFlag, Example: "@template"},
@@ -340,7 +341,7 @@ var placementTable = concat(
 		{Receiver: Provider, Name: "extends", Forms: FormString, Example: `@extends("openai")`},
 		{Receiver: Provider, Name: "modality", Forms: FormString, Example: `@modality("embedding")`},
 		{Receiver: Provider, Name: "model", Forms: FormString, Example: `@model("gpt-5.4-mini")`},
-		{Receiver: Provider, Name: "type", Forms: FormString, Example: `@type("OpenAI")`, Doc: "The provider's vendor: \"OpenAI\" or \"Anthropic\"."},
+		{Receiver: Provider, Name: "type", Forms: FormString, Example: `@type("OpenAI")`, Doc: docProviderType},
 	},
 
 	// ---- Shape ----------------------------------------------------------
@@ -388,7 +389,7 @@ var placementTable = concat(
 		{Receiver: Concept, Name: "origin", Forms: FormString, Example: `@origin("memql")`},
 		{Receiver: Concept, Name: "rowAuthz", Forms: FormKeywords, Keys: rowAuthzKeys, Example: `@rowAuthz(owner="ownerUserId", clusterOwner)`},
 		{Receiver: Concept, Name: "type", Forms: FormString, Example: `@type("collection")`, Doc: "The concept's row kind: \"object\" (the default), \"collection\" or \"reference\"."},
-		{Receiver: Concept, Name: "version", Forms: FormString, Example: `@version("1.0.0")`},
+		{Receiver: Concept, Name: "version", Forms: FormString, Example: `@version("1.0.0")`, Doc: docVersionConcept},
 	},
 
 	// ---- ConceptBody ----------------------------------------------------
@@ -398,7 +399,7 @@ var placementTable = concat(
 
 	// ---- ConceptField ---------------------------------------------------
 	[]Placement{
-		{Receiver: ConceptField, Name: "default", Forms: FormString | FormNumber | FormBool, Example: `@default("open")`, Doc: "The default the concept schema declares for the field. Declared metadata: it is emitted into the schema and NEVER applied on insert -- `??` in the mutation is what fills a value (memql#2960)."},
+		{Receiver: ConceptField, Name: "default", Forms: FormString | FormNumber | FormBool, Example: `@default("open")`, Doc: docDefaultConceptField},
 		{Receiver: ConceptField, Name: "description", Forms: FormString, Example: `@description("The ticket's one-line title.")`, Doc: "The field's description, emitted into the concept schema."},
 		{Receiver: ConceptField, Name: "immutable", Forms: FormFlag, Example: "@immutable"},
 		{Receiver: ConceptField, Name: "internal", Forms: FormFlag, Example: "@internal"},
@@ -410,7 +411,7 @@ var placementTable = concat(
 		{Receiver: ConceptField, Name: "pattern", Forms: FormString, Example: `@pattern("^[a-z][a-z0-9-]*$")`},
 		{Receiver: ConceptField, Name: "pii", Forms: FormFlag, Example: "@pii"},
 		{Receiver: ConceptField, Name: "required", Forms: FormFlag, Example: "@required"},
-		{Receiver: ConceptField, Name: "secret", Forms: FormFlag, Example: "@secret"},
+		{Receiver: ConceptField, Name: "secret", Forms: FormFlag, Example: "@secret", Doc: docSecretField},
 		{Receiver: ConceptField, Name: "serverSet", Forms: FormFlag, Example: "@serverSet"},
 		{Receiver: ConceptField, Name: "unique", Forms: FormFlag, Example: "@unique"},
 		{Receiver: ConceptField, Name: "variant", Forms: FormKeywords, Keys: variantKeys, Example: `@variant(discriminator="kind")`},
@@ -475,22 +476,22 @@ var Docs = map[string]string{
 	"actor":              "On a query / mutation / logic / automation: declares that the body reads the authenticated actor (actor.*). On a shape: kind marker -- projects the auth-context envelope (actor.userId / role / ...).",
 	"mergeFields":        "On an update mutation: deep-merge the named object-typed payload fields into the stored object instead of replacing them wholesale, so sibling keys survive a single-key write. Format: @mergeFields(\"preferences\").",
 	"appendFields":       "On an update mutation: append the named array-typed payload fields' elements to the stored array instead of replacing it wholesale, so a single-writer mutation can accumulate list items (e.g. attach one id). Format: @appendFields(\"attachmentIds\").",
-	"addToSet":           "On an update mutation: treat the named array-typed payload fields as SETS and UNION the written elements into the stored array -- deduped, existing order kept, new members appended in the order given. The membership half @appendFields is not: append is not deduped and has no counterpart that removes, so a toggle built on it duplicates on a double click. Pairs with @removeFromSet. Format: @addToSet(\"disabledDeployables\"). See memql#4951.",
-	"removeFromSet":      "On an update mutation: treat the named array-typed payload fields as SETS and REMOVE the written elements from the stored array, keeping the order of what remains. Removing something absent is a no-op rather than an error, so the mutation is idempotent and two callers removing the same member both succeed. Pairs with @addToSet, and the pair is what lets a set be edited one member at a time instead of read-modify-written whole. Format: @removeFromSet(\"disabledDeployables\"). See memql#4951.",
+	"addToSet":           docAddToSet,
+	"removeFromSet":      docRemoveFromSet,
 	"createOnly":         "On an insert (create-or-upsert) mutation: write the named payload fields ONLY when creating the row. If the target id already exists, the fields are dropped from the delta before the engine read-merge, so the stored value is preserved rather than clobbered -- making a deterministic-id re-stage idempotent for lifecycle fields another writer owns after creation (e.g. stageOutboundRequest seeds status but must not reset a row the outbound worker moved to sent). The inverse of @mergeFields/@appendFields: only valid on insert-kind mutations. Format: @createOnly(\"status\", \"attempts\"). See fylo#63.",
-	"noUnset":            "On any mutation: declare the named payload fields ONE-WAY -- a write may set them or change one non-empty value to another, but may never take a stored non-empty value back to empty. On the read-merge path a named field arriving empty is dropped from the delta when the stored row holds a non-empty value. Closes the gap read-merge cannot (it only inherits fields ABSENT from a delta, so a body writing `f: args.f ?? \"\"` blanks the stored value with an explicit empty string). Distinct from @createOnly, which forbids any post-create write; @noUnset forbids only set -> unset, so a legitimately-later stamp still lands. Format: @noUnset(\"bootstrappedAt\"). See memql#3415.",
+	"noUnset":            docNoUnset,
 	"scrubPii":           "On an update mutation (the hard-delete / data-deletion path): after the partial payload merges, zero EVERY field the bound concept marks @pii. The field set is derived from the schema, so a newly-annotated PII field is scrubbed automatically with no change to the mutation. Bare flag, no arguments. See memql#1711.",
 	// Automation.
 	"trigger":  "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",
-	"filter":   "Filter expression for automation triggers.",
+	"filter":   "Filter for automation triggers: a lambda of one parameter over the triggering row, as in @filter(row => row.status == \"open\").",
 	"template": "On an automation: this is a work-spine TEMPLATE, invoked by a v1:work:run that named it rather than fired by the graph (memql#5048). It is the third way an automation can be reachable, alongside an event trigger and a schedule. A @template automation must carry NEITHER @trigger nor @schedule -- the load-time gate refuses both combinations, so \"called\" and \"triggered\" stay distinct.",
 	"schedule": "Cron schedule for a scheduled automation. Format: @schedule(cron=\"0 0 * * * *\"). Synonym for @trigger(schedule=...); folds to the same scheduler field (#2712).",
 	// Capability (memql#2218, behavioral-constructs ADR §2.3).
-	"sideEffect": "On a capability: the coarse risk class @sideEffect(\"read\"|\"write\"|\"exec\"). The AUTHORITATIVE sideEffectClass lives on the capability (ADR §7) and must equal the Go capability class, so an authored or generated action cannot spoof it.",
+	"sideEffect": "On a capability: the coarse risk class @sideEffect(\"read\"|\"write\"|\"exec\"). It is the authoritative side-effect class: it lives on the capability, not on the action that calls it, and must equal the class of the Go capability the declaration names, so an authored or generated action cannot claim a lower one.",
 	// Pagination opt-out (epic 5, memql#1965).
 	"unbounded": "On a list-returning query: opt out of the pagination authoring rule and the implicit 50-row runtime cap. Format: @unbounded(\"reason\"). The reason string is REQUIRED -- it documents why this query is a legitimate full-set read (small bounded catalog, sweep job, etc.) and is enumerated by the pagination audit report. A query that paginates/sorts is already bounded and must NOT carry @unbounded; the engine clamps the realized window to MEMQL_MEMORY_ENGINE_MAX_WINDOW regardless. See docs/public/language/authoring-rules.md.",
 	// Temporal-access visibility (core-builtins ADR §2.3, memql#2305).
-	"latestMode": "On a query: marks the query as time-dependent because it reads `asOf latest` (the live tip of the append-only stream), so its result is clock-dependent / not reproducible. The engine AUTO-DERIVES this from a `asOf latest` clause in the body, so the annotation is an explicit, reader-facing restatement of that contract -- not a switch. A query with `asOf <explicit timestamp>` is deterministic and is NOT time-dependent. See core-builtins-and-collections-adr.md §2.3.",
+	"latestMode": "On a query: marks the query as time-dependent because it reads `asOf latest` (the live tip of the append-only stream), so its result is clock-dependent / not reproducible. The engine AUTO-DERIVES this from an `asOf latest` clause in the body, so the annotation is an explicit, reader-facing restatement of that contract -- not a switch. A query with `asOf <explicit timestamp>` is deterministic and is NOT time-dependent.",
 	// MCP promotion (epic memql#1529 Phase 4 #1534).
 	"mcp": "Expose this construct on the MCP connector surface. On a query/mutation/automation it promotes the construct into its own first-class MCP tool (otherwise it stays reachable via the generic run_query / run_mutation / run_automation dispatchers). On a tool it opts the tool into the curated connector allowlist: once ANY tool carries @mcp, tools/list reflects only @mcp tools (otherwise -- zero tagged -- the full tool surface is reflected, so the annotation is inert until the curated set is tagged).",
 	// Tool.
@@ -536,7 +537,7 @@ var Docs = map[string]string{
 	"version":     "Version tag for a concept or a seed: a semver string, @version(\"1.0.0\"). Metadata only -- canonical ids are not versioned by it (#2613).",
 	"namespace":   "Concept namespace. DEFAULTS to the containing dsl/<domain>/ directory (#2614) -- write it only for a colon-scoped sub-namespace (\"cognition:client:tool\") or a pinned divergence (namespace.pin). An explicit value must equal the directory, extend it as <dir>:..., or match the domain pin; any other mismatch is a load error (the moved-file guard: file location is id-bearing, so moving a .memql file between domains changes canonical ids).",
 	"scope":       "On a seed: \"global\" seeds once for the cluster, \"perUser\" once for every user. (On a concept @scope is retired -- every concept lives in the default partition, #56.)",
-	"cache":       "Override the result-cache TTL for the query. Preferred form (#2618): @cache(300) -- the single ttl arg makes position unambiguous. The keyword form @cache(ttl=\"300\") keeps parsing. Pure reads cache BY DEFAULT (60s backstop) without this annotation (5.6); @cache sets a different TTL, longer or shorter. @cache(ttl=\"0\") is the explicit \"never cache\" opt-out (or use @nocache). The engine keys the cache on the plan signature (query/sort/limit/depth/shape + the keyset cursor) and evicts on any write to the read concept via the cache.invalidate.* broadcast channel (5.4/5.6 invalidation) -- cross-node eviction needs no per-concept routing rule.",
+	"cache":       "Override the result-cache TTL for the query. Preferred form (#2618): @cache(300) -- the single ttl arg makes position unambiguous. The keyword form @cache(ttl=\"300\") keeps parsing. Pure reads cache BY DEFAULT (a 60s backstop) without this annotation; @cache sets a different TTL, longer or shorter. @cache(ttl=\"0\") is the explicit \"never cache\" opt-out (or use @nocache). The engine keys the cache on the plan signature (query/sort/limit/depth/shape + the keyset cursor) and evicts on any write to the read concept via the cache.invalidate.* broadcast channel -- cross-node eviction needs no per-concept routing rule.",
 	"nocache":     "Opt this query OUT of caching entirely (force \"never cache\"). Clearer alias for @cache(ttl=\"0\"); use it for reads that must always be live (auth, monotonic counters, presence). Pure reads cache by default (5.6), so @nocache is the escape for the rare read where even brief staleness is wrong.",
 	"displayCard": "Rendering hints for concept-agnostic clients (memql#160): the field shown as a row's title (primary=, required) and the fields for the secondary, tertiary and status slots. Each must be a displayable field the concept declares, checked once the property set is known.",
 	"composable":  "The Materializer's mark (epic memql#4977, D2): this concept's rows are worth composing a file FROM. Bare, it takes the defaults; as= names the row kind, fields= lists the fields to compose from and list= names the query that lists the rows.",
@@ -547,7 +548,7 @@ var Docs = map[string]string{
 	// by memql#1067, so the editor was teaching an author the one spelling the
 	// conformance gate rejects (memql#3661).
 	"relationship": "Foreign-key relationship metadata. Format: @relationship(type=\"parent\", field=\"x\", target=concept, direction=\"outgoing\"), plus an optional as=\"domainVerb\" label.",
-	"rowAuthz":     "Declares WHO MAY SEE this concept's rows, once on the concept, instead of as an `actor.*` term every filter over it must remember to carry. Four tiers, one spelling each: @rowAuthz(public) (globally readable by intent -- spelled explicitly, because \"no annotation\" and \"declared public\" are different states), @rowAuthz(clusterOwner) (administrative), @rowAuthz(owner=\"<field>\") (the field is compared against actor.userId; it must be a field the concept declares, OR the literal \"id\" for a SELF-OWNED concept whose owner is the row itself -- memql#3029; `id` and only `id`, since createdBy means who WROTE the row, not whose row it is), @rowAuthz(via=\"<spec>\") (a relationship spec grants visibility). A fifth FORM, not a fifth tier: @rowAuthz(owner=\"<field>\", clusterOwner) is the composite -- the owner, OR a cluster owner (memql#4312) -- the only two-argument list, order-independent, and the form an operator console needs over per-user rows since a plain owner= tier has no cluster-owner bypass. ENFORCED ON THE READ PATH since Phase 3 (memql#3172): declaring a tier CHANGES WHAT READS RETURN. Two mechanisms, and neither consults the filter to decide whether to engage -- the tier's predicate is ANDed into the plan before the read runs (resolved from the construct's declared binding, so the narrowing pushes down into SQL), and every row leaving the engine is separately admitted against the tier ITS OWN concept declares, which is the only mechanism available to a raw client-supplied query string, to graph expansion, or to a TOP-LEVEL BUILTIN CALL whose rows come out of a Go handler (memql#3982) -- none of which has a filter to AND anything into. SUBSCRIPTIONS are gated by the same row admission (memql#4309): a graph.node.* event reaches a stream only if the tier admits the row for that stream's actor, a `granted` row arrives id-only with payload_omitted set for the client to re-read, and an UNDECLARED concept is delivered to everyone exactly as its reads already return to everyone -- the live feed mirrors the read path rather than running a second rulebook. The write side is enforced too: update/delete refuse when the target row's declared owner is not the actor (memql#3174). Implementation: component/memql/rowauthz_enforce.go, called from parser.go. MEASURED BY TestClusterOwnerTierInjectsTheAdminGate, TestFilteredReadPathAppliesTheRowGate, TestGraphExpansionAppliesTheTraversalGateBeforeItEmitsTheRow TestTopLevelBuiltinAppliesTheRowGate and TestSubscriptionFanOutAppliesTheRowGate -- named so a reader can check whether this is still true rather than trust the sentence. Trusting it would have been wrong before: this paragraph described the tier as parsed-but-unread for as long as Phase 3 had been live, which is false in the one direction that costs a reader a wrong authorization assumption, and it feeds editor hover, so the reach was wider than this file (memql#3727). See docs/public/operate/auth/per-row-authz-audit.md and memql#2803.",
+	"rowAuthz":     docRowAuthz,
 	// Data origins (epic memql#4378). Two declarations, three derived
 	// states, no fourth.
 	"origin":     "Declares WHERE CHANGES TO THIS CONCEPT ARE MADE -- the system that owns the data. @origin(\"memql\") (the default when the annotation is absent) means MemQL originates it; @origin(\"<connector>\") names an external system, which makes the concept a MIRROR. A mirror is READ-ONLY BY CONSTRUCTION: component/memql refuses every write to it -- mutation, tool handler, raw insert or staged write -- that does not come from the connector the origin names, so what the badge says is what a reader may assume. The name must be a registered connector or the engine REFUSES BOOT naming the concept: a mirror nobody fills is a lie. Pairs with @mirroredTo to derive dataState (mirror | origin | native), which the registry, both SDKs and the portal badge read. See docs/public/concepts/data-origins.md.",

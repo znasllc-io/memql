@@ -683,9 +683,23 @@ filter  row => row.bucket == args.bucket
 ```
 
 A subexpression that reads the row has to push down itself. The load refuses
-one that cannot, and names the node, the position and the nearest pushdown
-spelling: `lower(row.email) == args.email` is refused in a filter, and
-`row.email == lower(args.email)` is the filter that runs.
+one that cannot, and names the node, the position, the nearest pushdown
+spelling and the rule's id: `lower(row.email) == args.email` is refused in a
+filter, and `row.email == lower(args.email)` is the filter that runs. The id is
+printed last, in brackets, and carried as a field on the load report and on an
+authoring diagnostic; the message may be reworded, the id may not:
+
+| Rule id | Refused |
+|---|---|
+| `lower_refused` | A node with no form at its position: an in-process function or arithmetic over the row, a construct call in a predicate, a node kind the position does not admit |
+| `lower_unknown_name` | A name the position does not bind: a bare payload field (`status` for `row.status`), an undeclared argument, a predicate nothing registers |
+| `lower_unknown_field` | A field the bound concept, shape or actor envelope does not declare |
+| `lower_optional_hop` | A read through an optional object written with `.` instead of `.?` |
+| `lower_context_spec_on_row` | A context spec applied to the row |
+| `lower_row_predicate_on_actor` | A row spec or trait applied to the actor |
+| `lower_not_boolean` | A condition whose type is known and is not boolean |
+| `lower_cost_over_budget` | An in-process expression whose static cost estimate is over the bound below |
+| `lower_actor_in_row_predicate` | A spec or trait over rows reading the `actor` root ([Specs](#specs)) |
 
 An in-process expression is bounded twice. At load, a static estimate of how
 many nodes it can evaluate is refused above 1,000,000; the estimate counts a
@@ -727,8 +741,8 @@ the rows before any of them is read.
 
 ### Retired spellings
 
-Edition 2026 retires the spellings below. The parser refuses each one where an
-expression is written, with one message shape:
+Edition 2026 retires the spellings below. The parser refuses each one wherever
+a `.memql` file writes it, with one message shape:
 
 ```text
 cond(p, a, b) is retired in edition 2026: write p ? a : b (memqlmigrate --rewrite=expressions rewrites it)
@@ -736,8 +750,15 @@ cond(p, a, b) is retired in edition 2026: write p ? a : b (memqlmigrate --rewrit
 
 `memqlmigrate --rewrite=expressions` rewrites a tree onto the new forms, and
 refuses, naming the clause, anything it cannot convert without changing what it
-means. The table is the parser's own (`parser.V1RetiredForms`), which Sense reads
-for its hover too.
+means. In VS Code the refusal is underlined as an error, and the language server
+offers the same rewrite as a quick fix, **Rewrite to edition 2026**, for one
+construct or the whole file ([Sense](sense.md#the-rewrite-quick-fix)). The table
+is the parser's own (`parser.V1RetiredForms`), which Sense reads for its hover
+too.
+
+The string a client sends to `Execute` is not an authored expression:
+[the internal query form](#the-internal-query-form) keeps its own grammar, which
+this table does not change.
 
 <!-- BEGIN GENERATED: retired spellings. Do not edit: go test github.com/znasllc-io/memql/component/language/parser -run TestV1RetiredFormsArePublished -update-docs -->
 
@@ -1476,6 +1497,8 @@ Specs are atomic boolean predicates, declared in `dsl/<namespace>/specs.memql`. 
 
 A spec reads only what its binding provides, through its parameter: the bound concept's fields and intrinsics, or the keys the bound shape projects. The `@shape("name")` annotation is **removed**; the binding moved to the signature.
 
+A spec or trait over rows does not read the `actor` root. It is the same predicate for every caller -- applied in any query, cached, composed -- and the ownership test is what row-authz looks for in a query's own filter, where a spec would hide it. `spec note isCallersNote = row => row.ownerUserId == actor.userId` is refused at load (`lower_actor_in_row_predicate`): compare in the query filter (`row.ownerUserId == actor.userId`), or ask the actor question with a context-spec over an `@actor` shape.
+
 ```memql fragment
 use library.concepts.{ artifact }
 
@@ -1945,7 +1968,7 @@ Tools are AI-callable tool definitions — the AI-facing surface of queries, mut
 
 ```memql
 /// Search for users
-@handler(type="query", query="concept==v1:memql:backend:user")
+@handler(type="query", query="paginate(query searchUsers(active: args.active), args.limit)")
 @executionTime("fast")
 tool searchUsers {
   active  boolean  @description("Filter by active status")
@@ -1953,7 +1976,17 @@ tool searchUsers {
 }
 ```
 
-The tool loop binds tool-call args to handler args and forwards. A query handler reads each tool argument as `args.<name>`, as in `@handler(type="query", query="query findEvents(title: args.title)")`; the `$args.<name>` text substitution is retired. The legacy `func (Tool)` form is retired; the parser rejects it with a migration hint.
+The tool loop binds tool-call args to handler args and forwards. A query handler is one construct call -- a query, mutation, logic, builtin or automation -- or that call inside `paginate(...)`, as above, and it is parsed when the tool loads: a handler that is not a call, such as a raw filter, refuses the load. It reads each tool argument as `args.<name>`, as in `@handler(type="query", query="query findEvents(title: args.title)")`, and the call is rendered from the arguments' values, so a caller's text is data whatever it contains; an argument the caller did not supply is left out of the call. The `$args.<name>` text substitution is retired: `$args.x`, bare or quoted as `"$args.x"`, refuses the load -- write `args.x` (`memqlmigrate --rewrite=expressions` rewrites both spellings). The legacy `func (Tool)` form is retired; the parser rejects it with a migration hint.
+
+A webhook handler, `@handler(type="webhook", url=..., method=...)`, is written the same way. Its url is one expression over the tool's arguments: a fixed address is a quoted string, and a caller's value is joined with `+`, as in `url="\"https://api.example.com/items/\" + args.id"`. A bare address refuses the load, and the refusal shows it quoted. With no body template the request body is the tool's arguments as JSON; a body template (a tool registered from Go can carry one) is a map whose string leaves are expressions over `args`, fixed text quoted, and an argument the caller did not supply omits its key. `$args.` is refused in a url or a body leaf exactly as in a query handler, with the same replacement.
+
+```memql
+/// Tell the on-call channel
+@handler(type="webhook", url="\"https://hooks.example.com/notify\"", method="post")
+tool notifyOnCall {
+  message  string  @required @description("What to tell the on-call channel")
+}
+```
 
 ## Automations
 

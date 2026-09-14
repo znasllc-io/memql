@@ -70,10 +70,9 @@ func (r *LogicRunner) statementLogic(fnName string, body []map[string]any) (*Aut
 	statementLogics.mu.Unlock()
 
 	data, err := json.Marshal(map[string]any{
-		"name":        "logic:" + fnName,
-		"expressions": ExpressionsV1,
-		"body":        BodyStatements,
-		"steps":       body,
+		"name":  "logic:" + fnName,
+		"body":  BodyStatements,
+		"steps": body,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("logic %q: encode its body: %w", fnName, err)

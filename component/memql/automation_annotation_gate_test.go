@@ -20,7 +20,7 @@ func TestAutomationAnnotationGate(t *testing.T) {
 	}
 	accept := []string{
 		"@trigger(event=\"x\", concept=\"v1:a:b\")\n",
-		"@filter(a == 1)\n",
+		"@filter(row => row.a == 1)\n",
 		"@enabled\n",
 		"@description(\"d\")\n",
 		"@schedule(cron=\"0 5 9 * * *\")\n", // LIVE -- must stay accepted
@@ -32,17 +32,21 @@ func TestAutomationAnnotationGate(t *testing.T) {
 	}
 
 	// Dead behavior-promises -- not on the Automation receiver. @version is
-	// live on a concept and a seed, so it is refused as misplaced; the rest
-	// are unknown.
-	for _, name := range []string{"retry", "audit", "async", "deprecated", "version", "timeout"} {
+	// live on a concept and a seed, so it is refused as misplaced; @deprecated
+	// is unknown.
+	for _, name := range []string{"deprecated", "version"} {
 		err := runReceiverGate(annotations.Automation, body("@"+name+"\n"))
 		if code := refusalCode(err); code != annotations.CodeUnknown && code != annotations.CodeMisplaced {
 			t.Errorf("dead @%s must be refused on an automation, got code %q: %v", name, code, err)
 		}
 	}
 
-	// Retired / buried -- refused with the pointed ticket message.
-	for name, ticket := range map[string]string{"internal": "#2708", "role": "#2709", "permission": "#2713"} {
+	// Retired / buried -- refused with the pointed ticket message. The #989
+	// removals and @async carry their history since memql#5360.
+	for name, ticket := range map[string]string{
+		"internal": "#2708", "role": "#2709", "permission": "#2713",
+		"retry": "memql#989", "audit": "memql#989", "timeout": "memql#989", "async": "memql#2712",
+	} {
 		err := runReceiverGate(annotations.Automation, body("@"+name+"\n"))
 		if refusalCode(err) != annotations.CodeRetired || !strings.Contains(err.Error(), ticket) {
 			t.Errorf("retired @%s must carry %s on an automation, got: %v", name, ticket, err)

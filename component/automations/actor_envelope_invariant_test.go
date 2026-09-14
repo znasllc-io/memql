@@ -8,10 +8,11 @@ package automations
 // representation of "no actor" (an empty map, an unbound root, absent
 // keys, the envelope), and review-by-review discovery did not converge.
 //
-// An unbound actor root is not neutral: the evaluator renders an
+// An unbound actor root was not neutral: the string evaluator rendered an
 // unresolved dotted path as its own path TEXT, so `actor.isClusterOwner`
-// is a non-empty -- therefore truthy -- string, and a negated admin gate
-// reads TRUE with no auth context.
+// was a non-empty -- therefore truthy -- string, and a negated admin gate
+// read TRUE with no auth context. (RunScope now answers an unseeded actor
+// with the denying envelope as a second guard; these rules keep the first.)
 //
 // The rule these enforce, in one sentence: every evaluator must get the
 // canonical envelope UNCONDITIONALLY and before first use, and nothing

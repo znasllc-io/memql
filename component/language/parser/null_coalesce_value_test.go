@@ -35,7 +35,6 @@ func parseAuthored(t *testing.T, src string) error {
 	}
 	p := NewParser(toks)
 	p.SetDocComments(lx.DocComments())
-	p.SetSource(norm)
 	_, perr := p.Parse()
 	return perr
 }
@@ -85,7 +84,7 @@ func TestNullCoalesce_WriteBlockIdSlot(t *testing.T) {
 		{
 			name: "id falls back to a call",
 			src: "mutate node probe {\n  args {\n    id string\n    nodeType string!\n  }\n" +
-				"  insert {\n    id: args.id ?? concat(\"node-\", args.nodeType)\n  }\n}\n",
+				"  insert {\n    id: args.id ?? hash(\"node-\" + args.nodeType)\n  }\n}\n",
 		},
 		{
 			name: "sibling payload fields still parse alongside",

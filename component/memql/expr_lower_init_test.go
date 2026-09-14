@@ -190,16 +190,8 @@ func TestInit_RefusesWhatOnlyTheRegistryCanRefuse(t *testing.T) {
 	eng, err := bootLowerTree(t, map[string]string{
 		"concepts.memql": lowerInitConcepts,
 		"specs.memql":    lowerInitSpecs,
-		"legacy.memql": `use lowerinit.concepts.{ ticket }
-
-/// A pre-2026 body: EvalExpr has no v1 body to apply in a refine.
-spec ticket isLegacyOpen {
-  return status == "open"
-}
-`,
 		"queries.memql": `use lowerinit.concepts.{ ticket }
 use lowerinit.specs.{ callerIsOwner, isOpenTicket }
-use lowerinit.legacy.{ isLegacyOpen }
 
 /// Refused at Init: a context spec applied to the row.
 query ticket misKinded {
@@ -207,11 +199,11 @@ query ticket misKinded {
   paginate 20
 }
 
-/// Refused at Init: a refine applying a pre-2026 spec.
-query ticket refinesALegacySpec {
+/// Refused at Init: a refine applying a context spec to the row.
+query ticket refinesAContextSpec {
   filter   row => isOpenTicket(row)
   paginate 20
-  refine   row => isLegacyOpen(row)
+  refine   row => callerIsOwner(row)
 }
 
 /// Refused at Init: a refine whose nested scans exceed the static cost bound.
@@ -227,8 +219,12 @@ query ticket refinesTooMuch {
 	require.Contains(t, skips, "misKinded")
 	require.Contains(t, skips, "`callerIsOwner(row)` does not lower in a query filter: `callerIsOwner` is a context spec over the actor")
 	require.Contains(t, skips, "`callerIsOwner(actor)`")
-	require.Contains(t, skips, "refinesALegacySpec")
-	require.Contains(t, skips, "does not lower in a refine clause: `isLegacyOpen` has a pre-2026 body")
+	// The refine's half of the kind check: only the registry knows
+	// callerIsOwner is over the actor. (A refine applying a spec with no
+	// edition-2026 body is the check's other registry-only arm; no spec in a
+	// tree can be one any more, so refine_test.go pins it over a registry.)
+	require.Contains(t, skips, "refinesAContextSpec")
+	require.Contains(t, skips, "does not lower in a refine clause: `callerIsOwner` is a context spec over the actor, not a predicate over rows")
 	require.Contains(t, skips, "refinesTooMuch")
 	require.Contains(t, skips, "above tiers.MaxStaticCost")
 }

@@ -192,20 +192,58 @@
       "verdict": "refuse_parse",
       "code": "retired_spec_return_body",
       "message": "spec <bound> <name> { return <predicate> } is retired in edition 2026: write spec <bound> <name> = row => <predicate>",
-      "note": "Refused by the edition's grammar (parser.Options.ExpressionsV1); the loaders still read it until the tree flips."
+      "note": "Refused by the edition's grammar, the only one the loaders read."
     },
     {
       "file": "trait-return-body.memql",
       "verdict": "refuse_parse",
       "code": "retired_trait_return_body",
       "message": "trait <name> { return <predicate> } is retired in edition 2026: write trait <name> = row => <predicate>",
-      "note": "Refused by the edition's grammar (parser.Options.ExpressionsV1); the loaders still read it until the tree flips."
+      "note": "Refused by the edition's grammar, the only one the loaders read."
     },
     {
       "file": "args-in-a-spec.memql",
       "verdict": "refuse_load",
+      "code": "lower_refused",
       "message": "a spec or trait takes no arguments",
       "note": "A spec body reads its parameter and the clock; args belong to the query that applies it."
+    },
+    {
+      "file": "fields-through-the-parameter.memql",
+      "verdict": "load_ok",
+      "note": "A spec body reads the bound concept's fields through its parameter. (Before edition 2026 it read them bare.)"
+    },
+    {
+      "file": "urgent-and-open.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open",
+        "priority": 5
+      },
+      "expect": true
+    },
+    {
+      "file": "urgent-and-open.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open",
+        "priority": 2
+      },
+      "expect": false
+    },
+    {
+      "file": "reads-an-intrinsic-through-the-parameter.memql",
+      "verdict": "load_ok",
+      "note": "The parameter is the row, intrinsics included. Before edition 2026 a spec body read its fields bare and refused row.* (\"a spec body may not read row.* directly\")."
+    },
+    {
+      "file": "reads-the-actor.memql",
+      "verdict": "refuse_load",
+      "code": "lower_actor_in_row_predicate",
+      "message": "a spec or trait over rows does not read the actor -- an ownership test belongs in the query filter, where row-authz reads it, and an actor question binds an @actor shape. Compare in the query filter (`row.ownerUserId == actor.userId`), or bind an @actor shape",
+      "note": "A spec or trait over rows is the same predicate for every caller -- applied in any query, cached, composed -- and the ownership test is what the row-authz classifier looks for in a QUERY FILTER; hidden in a spec it is invisible there. So its body does not read the `actor` root (authoring rule 26): an actor question binds an @actor shape, whose parameter is the envelope (actor-spec.memql). Refused at load by Lower, which would otherwise have read the root as a plan constant."
     }
   ]
 }

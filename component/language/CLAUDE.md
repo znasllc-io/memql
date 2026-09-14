@@ -90,8 +90,12 @@ annotation family, `@concepts(...)`, `@input { ... }`, `include` in a shape
 body) are refused at parse time with a migration hint. They survive only in
 `dsl/_reference/*.memql` as don't-do-this skeletons. Do not restore them when
 you see one in an old diff. The retired expression spellings (`;`/`,` as
-connectives, `has`, `?.`, `when(...)`, `cond(`, `null`, ...) are refused with
-`memqlmigrate --rewrite=expressions` as the fix.
+connectives, `has`, `?.`, `when(...)`, `cond(`, `null`, a filter with no
+lambda header, ...) are refused at parse wherever a `.memql` file writes them:
+edition 2026 is the only grammar a file is read in. The refusal names
+`memqlmigrate --rewrite=expressions` as the
+fix, and the language server offers the same rewrite as a quick fix
+(`cmd/memql-lsp/codeaction.go`).
 
 ---
 

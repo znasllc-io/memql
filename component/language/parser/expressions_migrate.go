@@ -39,6 +39,8 @@ package parser
 import (
 	"errors"
 	"fmt"
+	"io/fs"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -47,6 +49,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/dslclause"
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // PredicateInfo is what the rewrite knows about a spec or trait by name.
@@ -58,6 +61,13 @@ type PredicateInfo struct {
 	// (shapeSpecKind in component/memql): a pure @actor shape evaluates in
 	// process against the caller, a mixed shape compiles to SQL like a row.
 	Actor bool
+	// Unbound, when set, is the name a spec binds that no shape and no
+	// concept declares -- not in the sources the set was collected from, nor
+	// in the base it was resolved over (ResolvePredicatesOver). Nothing then
+	// says whether the spec reads a row or the actor, so the rewrite refuses
+	// the spec's body and every clause naming it, and names the binding,
+	// rather than guess a row.
+	Unbound string
 }
 
 // xmWrapWidth is the width, measured from the `filter` keyword, past which a
@@ -78,6 +88,15 @@ var (
 	xmSpecDecl  = regexp.MustCompile(`(?m)^[ \t]*spec[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*(?:\{|=[^=>])`)
 	xmTraitDecl = regexp.MustCompile(`(?m)^[ \t]*trait[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*(?:\{|=[^=>])`)
 	xmShapeDecl = regexp.MustCompile(`(?m)^[ \t]*shape[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+	// A concept is what a spec binds when its binding is no shape: one the
+	// sources declare, or one another construct's signature binds
+	// (`query <Concept> <name>`, and mutate / seed / shape the same) -- the
+	// engine resolves every such signature to a concept, so the name is one.
+	xmConceptDecl      = regexp.MustCompile(`(?m)^[ \t]*concept[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+	xmSignatureConcept = regexp.MustCompile(`(?m)^[ \t]*(?:query|mutate|mutation|seed|shape)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_-]*[ \t]*\{`)
+	// `use <ns>.concepts.{ a, b }` imports from a concepts file, which declares
+	// nothing but concepts.
+	xmConceptImport = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*\.concepts\.\{([^}]*)\}`)
 
 	xmAnnotation        = regexp.MustCompile(`@([A-Za-z_][A-Za-z0-9_]*)`)
 	xmFilterAnnotation  = regexp.MustCompile(`@filter[ \t]*\(`)
@@ -217,15 +236,16 @@ func CollectPredicates(files map[string][]byte) (map[string]PredicateInfo, error
 }
 
 // PredicateDeclarations is what one source contributes to a predicate set: its
-// top-level shape, spec and trait declarations. CollectPredicates is
-// ScanPredicateDeclarations over every source followed by ResolvePredicates;
-// the two are exported apart for a caller that keeps a tree's scans and
-// rescans only the source that changed (the language server, as a file is
-// typed in). Scanning is the expensive half.
+// top-level shape, spec and trait declarations, and the concepts a spec can
+// bind. CollectPredicates is ScanPredicateDeclarations over every source
+// followed by ResolvePredicates; the two are exported apart for a caller that
+// keeps a tree's scans and rescans only the source that changed (the language
+// server, as a file is typed in). Scanning is the expensive half.
 type PredicateDeclarations struct {
-	shapes []xmShapeDeclaration
-	specs  []xmSpecDeclaration
-	traits []xmTraitDeclaration
+	shapes   []xmShapeDeclaration
+	specs    []xmSpecDeclaration
+	traits   []xmTraitDeclaration
+	concepts []string
 }
 
 type xmShapeDeclaration struct {
@@ -262,21 +282,124 @@ func ScanPredicateDeclarations(path string, src []byte) PredicateDeclarations {
 		}
 		d.traits = append(d.traits, xmTraitDeclaration{name: f.src[m[2]:m[3]], where: where(m[0])})
 	}
+	for _, re := range []*regexp.Regexp{xmConceptDecl, xmSignatureConcept} {
+		for _, m := range re.FindAllStringSubmatchIndex(f.mask, -1) {
+			if f.depthAt(m[0]) != 0 {
+				continue
+			}
+			d.concepts = append(d.concepts, f.src[m[2]:m[3]])
+		}
+	}
+	for _, m := range xmConceptImport.FindAllStringSubmatchIndex(f.mask, -1) {
+		if f.depthAt(m[0]) != 0 {
+			continue
+		}
+		for _, name := range strings.Split(f.src[m[2]:m[3]], ",") {
+			if name = strings.TrimSpace(name); xmIdent.MatchString(name) {
+				d.concepts = append(d.concepts, name)
+			}
+		}
+	}
 	return d
+}
+
+// ScanPredicateTree scans every .memql file under fsys, in path order: the
+// base ResolvePredicatesOver resolves a tree over -- the embedded core tree,
+// most often, which is where every shape and concept a bundle or a Go test
+// fixture binds without declaring is declared.
+func ScanPredicateTree(fsys fs.FS) ([]PredicateDeclarations, error) {
+	var paths []string
+	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if p != "." && repowalk.SkipDir(d.Name()) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if path.Ext(p) == ".memql" {
+			paths = append(paths, p)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+	out := make([]PredicateDeclarations, 0, len(paths))
+	for _, p := range paths {
+		src, err := fs.ReadFile(fsys, p)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ScanPredicateDeclarations(p, src))
+	}
+	return out, nil
 }
 
 // ResolvePredicates answers CollectPredicates' question over scanned sources.
 // Pass them in the order CollectPredicates reads them -- sorted by path -- for
 // the same answer: where one name is declared twice, the first declaration is
-// the one the others are compared against.
+// the one the others are compared against. A spec whose binding no source
+// declares as a shape or a concept comes back Unbound.
 func ResolvePredicates(decls []PredicateDeclarations) (map[string]PredicateInfo, error) {
-	shapes := map[string][]xmDecl{}
+	return resolvePredicates(decls, nil)
+}
+
+// ResolvePredicatesOver resolves local over base: a spec of local whose
+// binding local does not declare resolves to its kind through base's shapes
+// and concepts, and a name local does not declare takes base's answer. Where
+// both declare a name, local's declaration is the answer.
+//
+// base is a tree the sources being rewritten load OVER -- the embedded core
+// tree under a bundle, or the repository's dsl/ under the MemQL a Go test
+// embeds in a string -- so a spec over the core @actor shape actorEnvelope
+// is an actor predicate whether or not the file that declares the spec also
+// declares the shape.
+func ResolvePredicatesOver(base, local []PredicateDeclarations) (map[string]PredicateInfo, error) {
+	out, err := resolvePredicates(base, nil)
+	if err != nil {
+		return nil, err
+	}
+	over, err := resolvePredicates(local, newXMBindings(base))
+	if err != nil {
+		return nil, err
+	}
+	for name, info := range over {
+		out[name] = info
+	}
+	return out, nil
+}
+
+// xmBindings is what a spec's binding can resolve to: the shapes, by name,
+// with their kinds, and the concepts.
+type xmBindings struct {
+	shapes   map[string][]xmDecl
+	concepts map[string]bool
+}
+
+func newXMBindings(decls []PredicateDeclarations) *xmBindings {
+	b := &xmBindings{shapes: map[string][]xmDecl{}, concepts: map[string]bool{}}
+	for _, d := range decls {
+		for _, s := range d.shapes {
+			b.shapes[s.name] = append(b.shapes[s.name], s.xmDecl)
+		}
+		for _, c := range d.concepts {
+			b.concepts[c] = true
+		}
+	}
+	return b
+}
+
+// resolvePredicates is ResolvePredicates with a fallback for bindings decls do
+// not declare.
+func resolvePredicates(decls []PredicateDeclarations, fallback *xmBindings) (map[string]PredicateInfo, error) {
+	own := newXMBindings(decls)
 	byName := map[string][]xmDecl{}
 	var specs []xmSpecDeclaration
 	for _, d := range decls {
-		for _, s := range d.shapes {
-			shapes[s.name] = append(shapes[s.name], s.xmDecl)
-		}
 		specs = append(specs, d.specs...)
 		for _, t := range d.traits {
 			byName[t.name] = append(byName[t.name], xmDecl{where: t.where})
@@ -286,20 +409,32 @@ func ResolvePredicates(decls []PredicateDeclarations) (map[string]PredicateInfo,
 	var errs []error
 	for _, s := range specs {
 		// A shape binding wins over a concept of the same name, as it does in
-		// the engine (resolveOneSpecBinding looks the shape up first). A name
-		// that is no shape binds a concept, and a concept is a row.
-		actor := false
-		if ds := shapes[s.bound]; len(ds) > 0 {
-			actor = ds[0].actor
+		// the engine (resolveOneSpecBinding looks the shape up first), and the
+		// sources' own declarations win over the fallback's. A concept is a
+		// row. A name that is neither, anywhere, is left for the rewrite to
+		// refuse: guessing a row writes `= row =>` over an @actor shape, which
+		// the engine refuses at define, and a second run would see the v1
+		// spelling and keep it.
+		ds := own.shapes[s.bound]
+		if len(ds) == 0 && fallback != nil {
+			ds = fallback.shapes[s.bound]
+		}
+		decl := xmDecl{where: s.where}
+		switch {
+		case len(ds) > 0:
+			decl.actor = ds[0].actor
 			for _, d := range ds[1:] {
-				if d.actor != actor {
+				if d.actor != decl.actor {
 					errs = append(errs, fmt.Errorf("spec %s (%s) binds shape %s, which is declared as an @actor shape at one place and a row shape at another (%s, %s)",
 						s.name, s.where, s.bound, ds[0].where, d.where))
 					break
 				}
 			}
+		case own.concepts[s.bound] || (fallback != nil && fallback.concepts[s.bound]):
+		default:
+			decl.unbound = s.bound
 		}
-		byName[s.name] = append(byName[s.name], xmDecl{where: s.where, actor: actor})
+		byName[s.name] = append(byName[s.name], decl)
 	}
 
 	names := make([]string, 0, len(byName))
@@ -310,7 +445,18 @@ func ResolvePredicates(decls []PredicateDeclarations) (map[string]PredicateInfo,
 	out := make(map[string]PredicateInfo, len(byName))
 	for _, n := range names {
 		ds := byName[n]
-		out[n] = PredicateInfo{Actor: ds[0].actor}
+		info := PredicateInfo{Actor: ds[0].actor}
+		for _, d := range ds {
+			// One declaration nobody can classify leaves the name unclassified.
+			if d.unbound != "" {
+				info = PredicateInfo{Unbound: d.unbound}
+				break
+			}
+		}
+		out[n] = info
+		if info.Unbound != "" {
+			continue
+		}
 		for _, d := range ds[1:] {
 			if d.actor != ds[0].actor {
 				actorAt, rowAt := ds[0].where, d.where
@@ -330,10 +476,12 @@ func ResolvePredicates(decls []PredicateDeclarations) (map[string]PredicateInfo,
 }
 
 // xmDecl is one declaration CollectPredicates found: where, and whether it is
-// an actor predicate (for a shape: an @actor shape that is not also @row).
+// an actor predicate (for a shape: an @actor shape that is not also @row). A
+// spec whose binding resolves to nothing carries that binding in unbound.
 type xmDecl struct {
-	where string
-	actor bool
+	where   string
+	actor   bool
+	unbound string
 }
 
 // xmPreambleAnnotations returns the annotation names above a declaration,
@@ -484,7 +632,11 @@ func (r *xmRewrite) filters() {
 		if end < 0 {
 			continue // unbalanced: the load refuses the construct; nothing to migrate
 		}
-		r.queryFilters(f.src[h[4]:h[5]], open+1, end)
+		bound := ""
+		if h[2] >= 0 {
+			bound = f.src[h[2]:h[3]]
+		}
+		r.queryFilters(f.src[h[4]:h[5]], bound, open+1, end)
 	}
 }
 
@@ -492,7 +644,7 @@ func (r *xmRewrite) filters() {
 // parseStructQueryBody does -- args block cut out, physical lines folded into
 // clauses by joinStructQueryContinuations' three rules -- but keeping each
 // line's offset so the clause can be spliced back where it was.
-func (r *xmRewrite) queryFilters(query string, lo, hi int) {
+func (r *xmRewrite) queryFilters(query, bound string, lo, hi int) {
 	f := r.f
 	view := []byte(f.code[lo:hi])
 	// The args block holds declarations, not clauses: blank it, so an argument
@@ -513,7 +665,7 @@ func (r *xmRewrite) queryFilters(query string, lo, hi int) {
 	acc := ""
 	flush := func() {
 		if len(clause) > 0 && xmOpensFilter(strings.TrimSpace(clause[0].text)) {
-			r.filterClause(query, clause)
+			r.filterClause(query, bound, clause)
 		}
 		clause, acc = nil, ""
 	}
@@ -552,7 +704,7 @@ func xmOpensFilter(t string) bool {
 	return unicode.IsSpace(c) || c == '('
 }
 
-func (r *xmRewrite) filterClause(query string, lines []xmLine) {
+func (r *xmRewrite) filterClause(query, bound string, lines []xmLine) {
 	f := r.f
 	first, last := lines[0], lines[len(lines)-1]
 	kw := first.start + len(first.text) - len(strings.TrimLeftFunc(first.text, unicode.IsSpace))
@@ -577,7 +729,7 @@ func (r *xmRewrite) filterClause(query string, lines []xmLine) {
 		r.fail(kw, exprEnd, kw, "query %s: filter %q: a comment inside the clause would be lost; move it above the clause and rerun", query, clause)
 		return
 	}
-	expr, err := xmConvertChecked(clause, xmConverter{mode: xmFilter, param: "row", preds: r.preds})
+	expr, err := xmConvertChecked(clause, xmConverter{mode: xmFilter, param: "row", preds: r.preds, bound: bound})
 	if err != nil {
 		r.fail(kw, exprEnd, kw, "query %s: filter %q: %v", query, clause, err)
 		return
@@ -601,13 +753,17 @@ func (r *xmRewrite) predicateBodies() {
 			continue
 		}
 		name := f.src[h[4]:h[5]]
+		hi := h[1]
+		if end := MatchingCloseBrace(f.code, h[1]-1); end >= 0 {
+			hi = end + 1
+		}
 		info, ok := r.preds[name]
 		if !ok {
-			hi := h[1]
-			if end := MatchingCloseBrace(f.code, h[1]-1); end >= 0 {
-				hi = end + 1
-			}
 			r.fail(h[0], hi, h[0], "spec %s is not in the predicate set; collect every spec and trait in the tree (CollectPredicates) before rewriting a file", name)
+			continue
+		}
+		if info.Unbound != "" {
+			r.fail(h[0], hi, h[0], "spec %s binds %s, which no shape and no concept declares -- in these sources or the tree they load over -- so nothing says whether its body reads a row or the actor; declare %s, or bind the shape or concept the spec means, and rerun", name, info.Unbound, info.Unbound)
 			continue
 		}
 		param := "row"
@@ -882,6 +1038,10 @@ type xmConverter struct {
 	// block declares: a bare one resolves to the bound argument (G2,
 	// memql#2364) in both grammars, so it keeps its bare name.
 	argsFields map[string]bool
+	// bound is, in filter mode, the concept the query's signature binds
+	// (`query <bound> <name>`): the legacy `<bound>.<field>` spelling is a
+	// field of that row.
+	bound string
 }
 
 // xmConvertChecked converts src and verifies the result: the conversion is run
@@ -1077,6 +1237,9 @@ func (c xmConverter) predicate(name string) (ast.ExpressionNode, error) {
 	if !ok {
 		return nil, fmt.Errorf("%q is neither a spec nor a trait declared in the tree: the legacy grammar reads a bare name as a predicate, so there is nothing this could be (a boolean field is written row.%s == true)", name, name)
 	}
+	if info.Unbound != "" {
+		return nil, fmt.Errorf("%s is a spec over %s, which no shape and no concept declares, so nothing says whether it applies to row or to actor", name, info.Unbound)
+	}
 	arg := "row"
 	if info.Actor {
 		arg = "actor"
@@ -1170,6 +1333,18 @@ func (c xmConverter) field(parts []string) (ast.ExpressionNode, error) {
 			return nil, fmt.Errorf("payload.%s names the PAYLOAD field %s while row.%s names the row intrinsic; migrate it by hand", parts[1], parts[1], parts[1])
 		}
 		return xmPath("row", parts[1:]...), nil
+	}
+	if c.bound != "" && head == c.bound && len(parts) > 1 {
+		// `<boundConcept>.<field>`: before bare payload access (epic #2292) a
+		// filter wrote a payload field under the name of the concept its
+		// query binds, and the legacy rewriter read the prefix as the
+		// payload. It is that row's field. The tree carries none
+		// (TestFilterSyntaxCanonical), but Go fixtures and bundles do.
+		rest := parts[1:]
+		if canon, ok := xmIntrinsic(rest[0]); ok {
+			return xmPath("row", append([]string{canon}, rest[1:]...)...), nil
+		}
+		return xmPath("row", rest...), nil
 	}
 	if xmReservedHead(head) {
 		return nil, fmt.Errorf("%s is a reserved engine name, not a field of the row", head)

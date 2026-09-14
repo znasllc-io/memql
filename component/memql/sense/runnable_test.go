@@ -28,7 +28,7 @@ query participant spaceParticipants {
     limit    int
     kind     string  @enum("human", "ai")
   }
-  filter  spaceId==args.spaceId && isActiveRecord
+  filter  row => row.spaceId == args.spaceId && isActiveRecord(row)
   shape   participantFull
 }
 
@@ -86,15 +86,11 @@ automation sweepStalePlans {
 
 @enabled
 @description("Matches guest participants")
-spec participant isGuestParticipant {
-  return isGuest == true
-}
+spec participant isGuestParticipant = row => row.isGuest == true
 
 @enabled
 @description("Matches records with active==true")
-trait isActiveRow {
-  return active == true
-}
+trait isActiveRow = row => row.active == true
 
 @row
 shape space spaceCard {
@@ -338,7 +334,7 @@ query space assortedTypes {
     freeform   any
     flag       bool
   }
-  filter  row.id in args.ids
+  filter  row => row.id in args.ids
   shape   spaceCard
 }
 `
@@ -361,7 +357,7 @@ func TestRunnableConstructs_NoArgsBlockYieldsEmptySlice(t *testing.T) {
 
 @description("Every space")
 query space allSpaces {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   spaceCard
 }
 `
@@ -406,7 +402,7 @@ query participant healthyQuery {
   args {
     spaceId  string  @required
   }
-  filter  spaceId==args.spaceId
+  filter  row => row.spaceId == args.spaceId
   shape   participantFull
 }
 
@@ -478,7 +474,7 @@ query participant firstQuery {
   args {
     spaceId  string  @required
   }
-  filter  spaceId==args.spaceId
+  filter  row => row.spaceId == args.spaceId
   shape   participantFull
 }
 
@@ -528,9 +524,7 @@ func TestRunnableConstructs_AnnotationPreambleAttribution(t *testing.T) {
 
 @enabled
 @description("A non-runnable spec whose annotations must stay with it")
-spec participant isGuestParticipant {
-  return isGuest == true
-}
+spec participant isGuestParticipant = row => row.isGuest == true
 
 @trigger(event="node.deleted", concept="v1:cognition:participant")
 automation onParticipantRemoved {
@@ -697,7 +691,7 @@ query space disabledSpaceLookup {
   args {
     spaceId  string  @required
   }
-  filter  row.id==args.spaceId
+  filter  row => row.id == args.spaceId
   shape   spaceCard
 }
 

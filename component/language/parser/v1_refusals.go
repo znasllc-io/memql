@@ -73,9 +73,9 @@ const (
 	ruleContainsMethod      = "retired_contains_method"
 	ruleKeylessMapEntry     = "retired_keyless_map_entry"
 
-	// The predicate positions' legacy forms. Refused only with
-	// Options.ExpressionsV1 on: until the tree flips, both spellings of a
-	// predicate position load side by side.
+	// The predicate positions' legacy forms, refused by the construct
+	// parsers rather than the expression parser: each is legal expression
+	// text, and only its position makes it the retired form.
 	ruleFilterWithoutLambda = "retired_filter_without_lambda"
 	ruleSpecReturnBody      = "retired_spec_return_body"
 	ruleTraitReturnBody     = "retired_trait_return_body"
@@ -132,7 +132,7 @@ var v1RetiredFormTable = []RetiredForm{
 	{Spelling: "{ args.x.y }", Replacement: "{ y: args.x.y }", Rule: ruleKeylessMapEntry},
 
 	// The predicate positions (D1): every predicate is a lambda naming the
-	// row it reads. Refused only with Options.ExpressionsV1 on.
+	// row it reads.
 	{Spelling: "filter <predicate>", Replacement: "filter row => <predicate>", Rule: ruleFilterWithoutLambda},
 	{Spelling: "spec <bound> <name> { return <predicate> }", Replacement: "spec <bound> <name> = row => <predicate>", Rule: ruleSpecReturnBody},
 	{Spelling: "trait <name> { return <predicate> }", Replacement: "trait <name> = row => <predicate>", Rule: ruleTraitReturnBody},
@@ -183,6 +183,11 @@ type RetiredFormError struct {
 }
 
 func (e *RetiredFormError) Error() string { return e.Parse.Error() }
+
+// RuleCode is the retired form's stable rule id, as the conformance corpus
+// pins it. A load report reads it through this method
+// (baseloader.CodedRefusal).
+func (e *RetiredFormError) RuleCode() string { return e.Form.Rule }
 
 // Unwrap returns the positioned parse error, which itself unwraps to
 // ErrInvalidSyntax.

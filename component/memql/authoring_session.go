@@ -109,9 +109,20 @@ func SplitBundleSource(source string) []SandboxConstruct {
 	}
 	// Struct-form / dedicated-parser kinds the function slicer does not cover:
 	// shape, spec, trait (each via the generic keyword slicer).
+	//
+	// A spec or trait slice carries the bundle's import preamble, as a function
+	// slice does (memql#5366). Its binding resolves through those imports
+	// first, and the slice's source is what a define registers, a promote
+	// persists and a boot re-hydrates -- so an import the author wrote at the
+	// top of the bundle has to travel with the construct, or the stored row
+	// binds differently from the define that accepted it.
 	for _, kind := range []string{"shape", "spec", "trait"} {
 		for _, s := range ExtractKeywordSlices(source, kind) {
-			add(kind, s.Name, s.Source)
+			src := s.Source
+			if kind != "shape" && usePreamble != "" {
+				src = usePreamble + src
+			}
+			add(kind, s.Name, src)
 		}
 	}
 	// Automations (event-triggered orchestration) -- sliced by the dedicated
@@ -334,30 +345,21 @@ func compileAuthoredSpec(c SandboxConstruct) (*Spec, error) {
 	if err != nil {
 		return nil, err
 	}
-	return specDeclToSpec(decl, authoredSpecOrigin(c))
-}
-
-// authoredSpecOrigin is the origin an authored spec or trait compiles under.
-//
-// A spec's origin is where its binding resolves FIRST: specBindingShape and
-// specBindingConcept look for the bound name in the spec's own domain -- the
-// directory of its origin -- before searching the whole tree, which is what
-// lets a spec bind `ticket` when two domains each declare one. A construct the
-// author wrote in a file they named (SandboxConstruct.Origin, the bundle's
-// tree-relative path, the same ambient domain memql#3800 gave the sandbox)
-// compiles under "authored:<path>:<name>", so it binds exactly as the same
-// spec in that file would at boot. One with no file -- an untitled buffer, a
-// stored row -- keeps "authored:<kind>:<name>", which has no directory and so
-// no own domain, and binds by the unique name across the tree as before.
-//
-// Specs only: a spec registers under its bare name on every authored path,
-// where a function's registry key is qualified by its origin's namespace, so
-// the same stamp on a function would move its key.
-func authoredSpecOrigin(c SandboxConstruct) string {
-	if path := strings.TrimSpace(c.Origin); strings.Contains(path, "/") {
-		return "authored:" + path + ":" + c.Name
+	spec, err := specDeclToSpec(decl, "authored:"+c.Kind+":"+c.Name)
+	if err != nil || spec == nil {
+		return spec, err
 	}
-	return "authored:" + c.Kind + ":" + c.Name
+	// The binding resolves through the construct's own imports first
+	// (specBindingConcept): the source is what a stored row keeps, so an
+	// import is the one disambiguation re-hydration can repeat -- which is why
+	// an authored spec has no own-domain step (its origin names no directory)
+	// and a name several domains declare must be imported to bind.
+	uses, err := parsedUseDeclarations(c.Source)
+	if err != nil {
+		return nil, fmt.Errorf("%s %q: file-top imports: %w", c.Kind, c.Name, err)
+	}
+	spec.Uses = uses
+	return spec, nil
 }
 
 // buildAuthoredFunctionOverlay returns a function registry holding the core

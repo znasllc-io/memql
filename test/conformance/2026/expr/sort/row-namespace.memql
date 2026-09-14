@@ -1,0 +1,6 @@
+/// The open tickets, newest first: a row intrinsic sorts under the row. namespace.
+query ticket newestOpenTickets {
+  filter row => row.status == "open"
+  sort "row.createdAt", "desc"
+  paginate 20
+}

@@ -17,7 +17,7 @@ query budget routerBudgets {
   args {
     scope  string
   }
-  filter  when(args.scope) { scope==args.scope } && isActiveRecord
+  filter  row => (args.scope == nil || row.scope == args.scope) && isActiveRecord(row)
   shape   budgetFull
 }
 
@@ -61,11 +61,11 @@ query call routerDecisionsRecent {
     /// Only decisions with this outcome. A park is recorded as its refusal code.
     outcome  string
   }
-  filter   when(args.since) { row.createdAt >= args.since }
-        && when(args.level) { level == args.level }
-        && when(args.door) { door == args.door }
-        && when(args.rule) { rule == args.rule }
-        && when(args.outcome) { outcome == args.outcome }
+  filter   row => (args.since == nil || row.createdAt >= args.since)
+               && (args.level == nil || row.level == args.level)
+               && (args.door == nil || row.door == args.door)
+               && (args.rule == nil || row.rule == args.rule)
+               && (args.outcome == nil || row.outcome == args.outcome)
   shape    routerDecision
   sort     "row.createdAt", "desc"
   paginate 200
@@ -79,7 +79,7 @@ query call routerDecisionsRecent {
 /// SCOPED BY SURFACE, NOT BY OWNER, and the difference is a wrong answer rather
 /// than a style choice. `machineOwnerUserId` is deliberately EMPTY for a call a
 /// person ran on their own machine -- it names whose machine served a call when
-/// that machine was somebody ELSE's -- so `machineOwnerUserId==actor.userId`
+/// that machine was somebody ELSE's -- so `row.machineOwnerUserId == actor.userId`
 /// would return only the calls OTHER people ran on your hardware and none of
 /// your own. The fold counts the owner's own calls alongside everybody else's,
 /// because the figure answers "how busy has this machine been" rather than "how
@@ -107,7 +107,9 @@ query call routerCallsOnMachine {
     /// Exclusive upper bound, RFC3339.
     until    string!
   }
-  filter  executionSurface==args.surface && row.createdAt>=args.since && row.createdAt<args.until
+  filter  row => row.executionSurface == args.surface
+              && row.createdAt >= args.since
+              && row.createdAt < args.until
   shape   routerCallLedger
 }
 
@@ -130,6 +132,6 @@ query call routerCallsInWindow {
     /// Exclusive upper bound, RFC3339.
     until  string!
   }
-  filter  actor.isClusterOwner==true && row.createdAt>=args.since && row.createdAt<args.until
+  filter  row => actor.isClusterOwner == true && row.createdAt >= args.since && row.createdAt < args.until
   shape   routerCallEvidence
 }

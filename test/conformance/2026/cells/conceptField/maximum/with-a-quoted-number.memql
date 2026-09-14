@@ -1,0 +1,6 @@
+/// A support ticket.
+concept ticket {
+  title     string
+  status    string
+  progress  int  @maximum("100")
+}

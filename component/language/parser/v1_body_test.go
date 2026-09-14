@@ -278,12 +278,12 @@ func TestV1BodyParses(t *testing.T) {
 
 func TestV1BodyDefinition(t *testing.T) {
 	fn := parseV1BodyFile(t, v1BodyCases[1].src)
-	if fn.Type != FunctionTypeAutomation || fn.Name != "routeRequest" || !fn.Enabled || !fn.ExpressionsV1 {
+	if fn.Type != FunctionTypeAutomation || fn.Name != "routeRequest" || !fn.Enabled {
 		t.Fatalf("definition = %+v", fn)
 	}
 	auto := fn.Body.(*AutomationDef)
-	if auto.Trigger == nil || auto.Trigger.Event != "node.created" || !auto.ExpressionsV1 || !auto.Enabled {
-		t.Fatalf("automation = %+v, want the trigger attached, enabled, v1", auto)
+	if auto.Trigger == nil || auto.Trigger.Event != "node.created" || !auto.Enabled || auto.Body == nil {
+		t.Fatalf("automation = %+v, want the trigger attached, enabled, a statement body", auto)
 	}
 	if fn.ArgsSchema == nil || len(fn.ArgsSchema.Fields) != 2 {
 		t.Fatalf("args = %+v, want the two declared fields", fn.ArgsSchema)

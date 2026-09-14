@@ -10,7 +10,7 @@
       "verdict": "refuse_parse",
       "code": "retired_filter_annotation",
       "message": "@filter(<predicate>) is retired in edition 2026: write @filter(row => <predicate>)",
-      "note": "Refused by the edition's grammar (parser.Options.ExpressionsV1); the loaders still read it until the tree flips."
+      "note": "Refused by the edition's grammar, the only one the loaders read."
     },
     {
       "file": "cond-call.memql",
@@ -232,6 +232,17 @@
         "status": "held"
       },
       "expect": true
+    },
+    {
+      "file": "payload-comparison.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "empty-parentheses.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@filter on an automation takes an expression",
+      "note": "An @filter with nothing in it is refused by its form. The lambda in a filled one is parsed at load, and a raw-text predicate is the retired spelling."
     }
   ]
 }

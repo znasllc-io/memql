@@ -758,19 +758,16 @@ type MutationStmt struct {
 	// produced before update() landed.
 	Kind    MutationKind
 	Concept string
-	// IDTemplate preserves the id=... expression (string literal, args.X, concat(...), etc.)
-	// for later runtime evaluation by mutation/function execution. Parsed with
-	// the edition-2026 grammar (parser.Options.ExpressionsV1) it -- and the
-	// three templates below -- hold the v1 ExpressionNode itself.
+	// IDTemplate preserves the id=... expression for later runtime evaluation
+	// by mutation/function execution: the v1 ExpressionNode itself, as are the
+	// three templates below.
 	IDTemplate any
 	// CreatedAtTemplate preserves createdAt=... expression for optional CreatedAt overrides.
 	// It should evaluate to an RFC3339/RFC3339Nano timestamp string at runtime.
 	CreatedAtTemplate any
 	PayloadRaw        string
-	// PayloadExpr is the payload parsed as an edition-2026 map literal
-	// (parser.Options.ExpressionsV1); PayloadRaw then holds its canonical
-	// source (ast.FormatExpr). Nil when the payload was parsed as today's
-	// raw text.
+	// PayloadExpr is the payload, a map literal; PayloadRaw holds its
+	// canonical source (ast.FormatExpr).
 	PayloadExpr ExpressionNode
 	// ParentTemplate and AliasOfTemplate preserve relationship hints for later evaluation.
 	ParentTemplate  any
@@ -802,12 +799,11 @@ type Attribute struct {
 	Name  string         // e.g., "enabled", "trigger", "description"
 	Value any            // Single value (string, bool, etc.) or nil for flag attributes
 	Args  map[string]any // Named args: key=value pairs
-	// Spelling records how the argument list was written, for the three
+	// Spelling records how the argument list was written, for the two
 	// spellings Value and Args cannot tell apart (memql#5359): `@when()` and
-	// `@when` both leave Value and Args empty; `@filter(a == b)` and
-	// `@filter("a == b")` both leave the text in Value; `@x(!"a")` and
-	// `@x("!a")` both store "!a". The annotation registry's check reads it,
-	// because a placement may take one spelling and not the other.
+	// `@when` both leave Value and Args empty; `@x(!"a")` and `@x("!a")` both
+	// store "!a". The annotation registry's check reads it, because a
+	// placement may take one spelling and not the other.
 	Spelling ArgSpelling
 	// ArgKeys records the keyword arguments in the order they were written,
 	// and which were written BARE (`clusterOwner`) rather than with a value
@@ -832,9 +828,6 @@ const (
 	ArgsAsParsed ArgSpelling = iota
 	// ArgsEmptyParens: written `@name()`.
 	ArgsEmptyParens
-	// ArgsRawExpression: `@filter(<expr>)`; Value holds the expression text
-	// verbatim rather than a quoted string.
-	ArgsRawExpression
 	// ArgsExclusion: `@name(!"a", !"b")`; Value holds "!a" or {"!a", "!b"}.
 	ArgsExclusion
 )
@@ -1227,13 +1220,6 @@ type FunctionDef struct {
 	// ArgsSchema is the function's input schema, populated from the
 	// file-top `args { ... }` block.
 	ArgsSchema *ArgsSchema
-
-	// ExpressionsV1 records that the definition was parsed with the
-	// edition-2026 expression grammar in its in-process positions
-	// (parser.Options.ExpressionsV1, memql#5364), so its expression strings
-	// hold canonical v1 source and its expression fields hold v1 nodes.
-	// Consumers key their v1 path on it until the tree flips as one unit.
-	ExpressionsV1 bool
 }
 
 // RateLimitConfig holds rate limiting configuration.
@@ -1300,14 +1286,6 @@ type AutomationDef struct {
 	// automation runtime (audited in #2712) and are load-rejected on
 	// automations by the #2712 gate; the dead fields were removed in #2724.
 	Enabled bool // from @enabled
-
-	// ExpressionsV1 records that the automation (or logic) body was parsed
-	// with the edition-2026 expression grammar (parser.Options.ExpressionsV1,
-	// memql#5364): step conditions, forEach sources and filters, switch
-	// subjects, step arguments and the trigger filter hold canonical v1
-	// source, and their *Expr fields hold the parsed nodes. The compiler and
-	// the automation runtime key their v1 path on it.
-	ExpressionsV1 bool
 }
 
 func (*AutomationDef) node() {}
@@ -1384,9 +1362,8 @@ type StepDef struct {
 	OnError    string // error handling strategy (e.g., "continue", "fail")
 	Config     any    // Step-type-specific configuration
 
-	// ConditionExpr is Condition parsed with the edition-2026 grammar
-	// (parser.Options.ExpressionsV1); Condition then holds its canonical
-	// source. Nil when the condition is today's canonicalised string.
+	// ConditionExpr is Condition parsed; Condition holds its canonical
+	// source. Nil when the step has no condition.
 	ConditionExpr ExpressionNode
 }
 
@@ -1439,9 +1416,8 @@ type ForEachStepConfig struct {
 	Concurrency int
 	Do          []StepDef
 
-	// SourceExpr and FilterExpr are Source and Filter parsed with the
-	// edition-2026 grammar (parser.Options.ExpressionsV1); the string fields
-	// then hold their canonical source. Nil otherwise.
+	// SourceExpr and FilterExpr are Source and Filter parsed; the string
+	// fields hold their canonical source. FilterExpr is nil with no filter.
 	SourceExpr ExpressionNode
 	FilterExpr ExpressionNode
 }
@@ -1459,9 +1435,8 @@ type SwitchStepConfig struct {
 	Cases      map[string]*SwitchCase
 	Default    *SwitchCase
 
-	// ExpressionExpr is Expression parsed with the edition-2026 grammar
-	// (parser.Options.ExpressionsV1); Expression then holds its canonical
-	// source. Nil otherwise.
+	// ExpressionExpr is Expression parsed; Expression holds its canonical
+	// source.
 	ExpressionExpr ExpressionNode
 }
 
@@ -1865,25 +1840,21 @@ type PromptField struct {
 }
 
 // SpecDecl is the shared-frontend AST node for a struct-form spec
-// or trait declaration (`spec NAME { <bool-expr> }` /
-// `trait NAME { <bool-expr> }`). Introduced by memql#334
+// or trait declaration (`spec <bound> <name> = row => <bool-expr>` /
+// `trait <name> = row => <bool-expr>`). Introduced by memql#334
 // (sub-epic #329 / #310 Stage 1C) so the unified spec loader can
 // parse specs + traits through the langparser instead of the
 // hand-rolled spec_parser.go mini-parser.
 //
-// Body grammar: a single boolean expression. The langparser parses
-// the body via the shared expression-parsing path and stores the
-// resulting typed ExpressionNode here; the memql-side converter
-// (specDeclToSpec) runs NewASTConverter().ConvertExpression on it
-// + the existing classifier + boolean-shape validator.
+// The body is the edition-2026 lambda (memql#5364), held in Lambda; the
+// engine lowers it against the resolved binding at Init.
 //
 // Annotation surface (validated by the converter, not the parser):
 //
 //	@description("text")              documentation (both specs + traits)
 //	@enabled / @disabled              lifecycle (traits only; no-op flags)
 //
-// IsTrait discriminates the two header keywords (`spec NAME { ... }`
-// vs `trait NAME { ... }`). Specs and traits share the SpecRegistry
+// IsTrait discriminates the two header keywords (`spec` vs `trait`). Specs and traits share the SpecRegistry
 // runtime contract; the trait flag drives the converter's
 // classification of whether the entry binds a concept (specs do via
 // file-top use + signature; traits are concept-agnostic).
@@ -1892,17 +1863,15 @@ type SpecDecl struct {
 	// immediately above this declaration (memql#2633, capture-only;
 	// description sourcing flips in #2634).
 	DocComment string
-	Name       string         // spec / trait name
-	BoundName  string         // signature binding: `spec <BoundName> <Name>` resolves to an imported shape XOR concept (specs only; empty for traits)
-	IsTrait    bool           // true for `trait NAME { ... }`, false for `spec NAME { ... }`
-	Attributes []*Attribute   // declaration-level annotations
-	Body       ExpressionNode // parsed boolean expression body (the `return <bool>` body's expression)
-	Path       string         // source path, for errors/diagnostics
+	Name       string       // spec / trait name
+	BoundName  string       // signature binding: `spec <BoundName> <Name>` resolves to an imported shape XOR concept (specs only; empty for traits)
+	IsTrait    bool         // true for a trait, false for a spec
+	Attributes []*Attribute // declaration-level annotations
+	Path       string       // source path, for errors/diagnostics
 
-	// Lambda is the edition-2026 body, `spec <bound> <name> = row => ...` /
+	// Lambda is the body, `spec <bound> <name> = row => ...` /
 	// `trait <name> = row => ...` (memql#5364): exactly one parameter, the
-	// bound row -- or, over an @actor shape, `actor`. Body is nil when it is
-	// set; the two forms are one declaration's alternatives, never both.
+	// bound row -- or, over an @actor shape, `actor`.
 	Lambda *LambdaExpr
 }
 

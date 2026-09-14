@@ -3,9 +3,8 @@ package automations
 // migrated_tree_load_test.go -- the flip's acceptance for automations, run
 // ahead of the flip (epic memql#5370, plan Task 13).
 //
-// The tree as the two edition-2026 rewrites carry it -- `memqlmigrate
-// --rewrite=expressions`, then `--rewrite=bodies` -- goes through the boot
-// walk itself (LoadFromTree): the edition front end, extraction, compile, the
+// The tree as `memqlmigrate --rewrite=bodies` carries it (the tree is in the
+// edition-2026 expression grammar already) goes through the boot walk itself (LoadFromTree): the edition front end, extraction, compile, the
 // trigger-wiring refusal and strict load. cmd/memqlmigrate's
 // TestBodiesRewriteOfTheTreeIsTheLanguage checks that the same migration
 // parses and passes the scope rules; this checks that the loader takes it,
@@ -33,8 +32,7 @@ import (
 )
 
 // migratedTree is the embedded tree with its .memql files carried by the
-// expressions rewrite (unless the tree is already in edition 2026) and then by
-// the bodies rewrite over the whole tree; every other file as it is. A
+// bodies rewrite over the whole tree; every other file as it is. A
 // soft-disabled directory (`_` or `.`) is copied untouched, as the rewrites
 // and the loaders skip it.
 func migratedTree(t *testing.T) fstest.MapFS {
@@ -59,15 +57,6 @@ func migratedTree(t *testing.T) fstest.MapFS {
 	require.NoError(t, err)
 	require.Greater(t, len(files), 50, "the embedded tree reads few .memql files; the walk went blind")
 
-	if !languageParser.DefaultOptions.ExpressionsV1 {
-		preds, err := languageParser.CollectPredicates(files)
-		require.NoError(t, err)
-		for p, b := range files {
-			migrated, err := languageParser.RewriteExpressions(b, preds)
-			require.NoErrorf(t, err, "the expressions rewrite refuses %s", p)
-			files[p] = migrated
-		}
-	}
 	changed, err := bodymigrate.RewriteTree(files, bodymigrate.IndexFiles(files))
 	require.NoError(t, err, "the bodies rewrite refuses the tree")
 	require.NotEmpty(t, changed, "the bodies rewrite changed nothing: the tree is already in statements, and this test has nothing left to check")
@@ -109,9 +98,6 @@ func TestMigratedTreeAutomationsLoad(t *testing.T) {
 	require.NoError(t, err)
 
 	tree := migratedTree(t)
-	saved := languageParser.DefaultOptions
-	languageParser.DefaultOptions = languageParser.Options{ExpressionsV1: true}
-	t.Cleanup(func() { languageParser.DefaultOptions = saved })
 
 	migrated, err := NewLoader(LoaderOptions{Logger: logger}).LoadFromTree(tree)
 	require.NoError(t, err, "the migrated tree does not load")
@@ -153,9 +139,6 @@ func TestMigratedTreeImportsResolve(t *testing.T) {
 	shipped := findings(memqldsl.Tree())
 
 	tree := migratedTree(t)
-	saved := languageParser.DefaultOptions
-	languageParser.DefaultOptions = languageParser.Options{ExpressionsV1: true}
-	t.Cleanup(func() { languageParser.DefaultOptions = saved })
 	require.ElementsMatch(t, shipped, findings(tree), "the migrated tree's references resolve otherwise than the shipped tree's")
 }
 
@@ -167,9 +150,6 @@ func TestMigratedTreeImportsResolve(t *testing.T) {
 // silence is not a body they could not read.
 func TestMigratedTreePassesTheStatementBodyGates(t *testing.T) {
 	tree := migratedTree(t)
-	saved := languageParser.DefaultOptions
-	languageParser.DefaultOptions = languageParser.Options{ExpressionsV1: true}
-	t.Cleanup(func() { languageParser.DefaultOptions = saved })
 
 	// The corpus as boot hands it to the gates: each file through the front
 	// end of its domain's edition, as dslgate.ScanTree reads it.

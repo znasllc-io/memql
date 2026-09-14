@@ -200,7 +200,7 @@ func specLowerEnv(spec *Spec, shapes *ShapeRegistry, concepts memoryNodes.Regist
 		} else if concept, err := specBindingConcept(concepts, spec); err == nil && concept != nil {
 			env.Concept = concept
 		} else {
-			return env, fmt.Errorf("binding %q resolves to neither an imported shape nor a concept", spec.BoundName)
+			return env, specBindingRefusal(spec, shapes, concepts)
 		}
 	}
 	// D1: over an @actor shape the parameter IS the envelope and is spelled
@@ -268,7 +268,7 @@ func (e *MemQLEngine) lowerAllPushdownPositions(report *LoadReport, specs *SpecR
 		}
 		problems = append(problems, fmt.Errorf("%s %q: %w", keyword, name, f.err))
 		if report != nil {
-			report.AddSkip(baseloader.Skip{Component: "memql.lower", Keyword: keyword, Name: name, File: origin, Phase: f.phase, Err: f.err.Error()})
+			report.AddSkip(baseloader.SkipFor("memql.lower", keyword, name, origin, f.phase, f.err))
 		}
 	}
 	for _, spec := range specList {
@@ -277,6 +277,38 @@ func (e *MemQLEngine) lowerAllPushdownPositions(report *LoadReport, specs *SpecR
 		}
 		if err := specs.Upsert(QualifyConstruct(ConstructNamespaceForOrigin(spec.Origin), spec.Name), spec); err != nil {
 			problems = append(problems, fmt.Errorf("%s %q: %w", specKeyword(spec), spec.Name, err))
+		}
+	}
+	return append(problems, e.lowerDisabledSpecBodies(report, specs, shapes)...)
+}
+
+// lowerDisabledSpecBodies validates the @disabled edition-2026 specs and
+// traits the loader skipped: each is lowered exactly as an enabled one --
+// binding, body, dry-compile -- and never written back, so it stays
+// unregistered and uncallable. A body is validated by Lower, which runs here,
+// so without this pass a disabled spec whose body does not lower loads green
+// and re-enabling it refuses boot. A disabled spec applying another disabled
+// one is refused too: re-enabling it alone would be.
+func (e *MemQLEngine) lowerDisabledSpecBodies(report *LoadReport, specs *SpecRegistry, shapes *ShapeRegistry) []error {
+	if specs == nil {
+		return nil
+	}
+	disabled := specs.DisabledBodies()
+	if len(disabled) == 0 {
+		return nil
+	}
+	sort.Slice(disabled, func(i, j int) bool { return disabled[i].Name < disabled[j].Name })
+	scope := e.engineScope(shapes)
+	// The binding resolver ran over the REGISTERED specs only, so these
+	// resolve their bindings here, in lowerPushdownSet's first pass.
+	scope.bindingsResolved = false
+	var problems []error
+	for _, f := range lowerPushdownSet(disabled, nil, scope) {
+		keyword := specKeyword(f.spec)
+		err := fmt.Errorf("@disabled, and its body does not lower -- re-enabling it would refuse boot: %w", f.err)
+		problems = append(problems, fmt.Errorf("%s %q: %w", keyword, f.spec.Name, err))
+		if report != nil {
+			report.AddSkip(baseloader.SkipFor("memql.lower", keyword, f.spec.Name, f.spec.Origin, f.phase, err))
 		}
 	}
 	return problems

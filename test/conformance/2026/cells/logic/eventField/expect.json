@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "file": "a-list-of-strings.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-unquoted-values.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@eventField on a logic takes one or more strings"
+    },
+    {
+      "file": "reads-an-undeclared-field.memql",
+      "verdict": "refuse_load",
+      "message": "references event payload field(s) priority not declared in its @eventField schema (declared: id, status)",
+      "note": "What @eventField exists for: every event.payload.<field> the body reads is checked against the declared set at load (memql#1743)."
+    }
+  ]
+}

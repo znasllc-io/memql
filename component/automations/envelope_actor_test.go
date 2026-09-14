@@ -79,29 +79,29 @@ func TestEvaluator_EventActorInCondition(t *testing.T) {
 	ev := actorEvent("user:alice")
 	e := NewEvaluator()
 	e.SetCustom("event", buildEventEnvelope(&ev, "", ""))
-	ok, err := e.EvaluateCondition(`event.actor.id == "user:alice"`)
+	ok, err := evalV1Cond(t, e, `event.actor.id == "user:alice"`)
 	if err != nil {
-		t.Fatalf("EvaluateCondition: %v", err)
+		t.Fatalf("condition: %v", err)
 	}
 	if !ok {
 		t.Fatal("event.actor.id condition should match the stamped actor")
 	}
-	ok, err = e.EvaluateCondition(`exists(event.actor)`)
+	ok, err = evalV1Cond(t, e, `event.actor != nil`)
 	if err != nil {
-		t.Fatalf("EvaluateCondition exists: %v", err)
+		t.Fatalf("condition != nil: %v", err)
 	}
 	if !ok {
-		t.Fatal("exists(event.actor) should be true when stamped")
+		t.Fatal("event.actor != nil should be true when stamped")
 	}
-	// Unstamped event: exists() must be false.
+	// Unstamped event: the presence test must be false.
 	noActor := actorEvent("")
 	e2 := NewEvaluator()
 	e2.SetCustom("event", buildEventEnvelope(&noActor, "", ""))
-	ok, err = e2.EvaluateCondition(`exists(event.actor)`)
+	ok, err = evalV1Cond(t, e2, `event.actor != nil`)
 	if err != nil {
-		t.Fatalf("EvaluateCondition exists (absent): %v", err)
+		t.Fatalf("condition != nil (absent): %v", err)
 	}
 	if ok {
-		t.Fatal("exists(event.actor) must be false when the emitter stamped none")
+		t.Fatal("event.actor != nil must be false when the emitter stamped none")
 	}
 }

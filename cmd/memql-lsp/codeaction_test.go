@@ -23,9 +23,13 @@ import (
 // editor drives them: initialize over a workspace on disk, open a legacy
 // document, take the diagnostic the server publishes, ask for code actions at
 // it, apply the edit. The expected text is the CLI's: memqlmigrate
-// --rewrite=expressions is CollectPredicates over the tree's .memql files and
-// RewriteExpressions over the file (cmd/memqlmigrate/expressions.go), which
+// --rewrite=expressions is the tree's .memql files resolved over the core tree
+// and RewriteExpressions over the file (cmd/memqlmigrate/expressions.go), which
 // cliRewrite repeats.
+//
+// Every MemQL document here is legacy on purpose -- the rewrite of a legacy
+// document is the subject -- so the Go-fixture migration leaves the file as it
+// is: memqlmigrate:keep-file.
 
 // codemodWorkspace is a bundle domain whose query names a spec over an @actor
 // shape declared in two OTHER files: `isAdmin` becomes `isAdmin(actor)` only
@@ -58,15 +62,6 @@ func writeWorkspace(t *testing.T, files map[string]string) string {
 		}
 	}
 	return root
-}
-
-// expressionsV1 turns the edition-2026 grammar on for one test: the flip is
-// langparser.DefaultOptions, and the code actions exist only past it.
-func expressionsV1(t *testing.T) {
-	t.Helper()
-	saved := langparser.DefaultOptions
-	t.Cleanup(func() { langparser.DefaultOptions = saved })
-	langparser.DefaultOptions = langparser.Options{ExpressionsV1: true}
 }
 
 func initializedServer(t *testing.T, root string) *server {
@@ -195,7 +190,20 @@ func cliRewrite(t *testing.T, root, rel string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	preds, err := langparser.CollectPredicates(files)
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	local := make([]langparser.PredicateDeclarations, 0, len(paths))
+	for _, p := range paths {
+		local = append(local, langparser.ScanPredicateDeclarations(p, files[p]))
+	}
+	core, err := corePredicates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preds, err := langparser.ResolvePredicatesOver(core, local)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +249,6 @@ func TestCodeAction_Advertised(t *testing.T) {
 // id, the action keys on it, and the edit writes the CLI's text -- one
 // changed line, touched alone -- which then parses clean.
 func TestCodeAction_QuickFixWritesTheCLIRewrite(t *testing.T) {
-	expressionsV1(t)
 	root := writeWorkspace(t, codemodWorkspace)
 	s := initializedServer(t, root)
 	const rel = "fylo/queries.memql"
@@ -287,7 +294,6 @@ func TestCodeAction_QuickFixWritesTheCLIRewrite(t *testing.T) {
 // with retired calls, null and the key-less map entry of onDelegationCreated --
 // equals the CLI's output and parses clean. Only changed lines are edited.
 func TestCodeAction_FixAllWritesTheCLIRewrite(t *testing.T) {
-	expressionsV1(t)
 	files := map[string]string{}
 	for k, v := range codemodWorkspace {
 		files[k] = v
@@ -372,7 +378,6 @@ func TestCodeAction_FixAllWritesTheCLIRewrite(t *testing.T) {
 // A clause the codemod refuses gets no action and keeps its diagnostic; the
 // region beside it is still rewritable, and fix-all rewrites only that one.
 func TestCodeAction_RefusedClauseGetsNoAction(t *testing.T) {
-	expressionsV1(t)
 	files := map[string]string{}
 	for k, v := range codemodWorkspace {
 		files[k] = v
@@ -425,7 +430,6 @@ func TestCodeAction_RefusedClauseGetsNoAction(t *testing.T) {
 // automation shares its region (no blank line, no closing brace between), so
 // the @filter's fix is withheld too.
 func TestCodeAction_RegionWithARefusalOffersNothing(t *testing.T) {
-	expressionsV1(t)
 	files := map[string]string{}
 	for k, v := range codemodWorkspace {
 		files[k] = v
@@ -458,7 +462,6 @@ func TestCodeAction_RegionWithARefusalOffersNothing(t *testing.T) {
 // rewrite still reports a syntax error and offers nothing, while the query
 // beside it is fixed.
 func TestCodeAction_NoEditThatWouldNotParse(t *testing.T) {
-	expressionsV1(t)
 	files := map[string]string{}
 	for k, v := range codemodWorkspace {
 		files[k] = v
@@ -498,26 +501,9 @@ func TestCodeAction_NoEditThatWouldNotParse(t *testing.T) {
 	}
 }
 
-// Before the flip there is nothing to offer: the in-process positions still
-// read the legacy grammar, which the rewrite would break.
-func TestCodeAction_NothingBeforeTheFlip(t *testing.T) {
-	saved := langparser.DefaultOptions
-	t.Cleanup(func() { langparser.DefaultOptions = saved })
-	langparser.DefaultOptions = langparser.Options{}
-
-	root := writeWorkspace(t, codemodWorkspace)
-	s := workspaceServer(t, root)
-	uri, _, _ := openWorkspaceDoc(t, s, root, "fylo/queries.memql")
-	diag := protocol.Diagnostic{Code: &protocol.IntegerOrString{Value: "retired_filter_without_lambda"}, Range: protocol.Range{Start: protocol.Position{Line: 7}}}
-	if actions := codeActions(t, s, uri, diag.Range, []protocol.Diagnostic{diag}); len(actions) != 0 {
-		t.Errorf("offered %d actions before the flip", len(actions))
-	}
-}
-
 // The predicate set reads the open buffers, not the saved files: a spec typed
 // into another open file, not yet saved, decides the rewrite.
 func TestCodeAction_PredicatesReadOpenBuffers(t *testing.T) {
-	expressionsV1(t)
 	files := map[string]string{}
 	for k, v := range codemodWorkspace {
 		files[k] = v
@@ -554,7 +540,6 @@ func TestCodeAction_PredicatesReadOpenBuffers(t *testing.T) {
 // holds the core domains the workspace does not carry, as the engine's flat
 // registry does when the bundle loads over the core tree.
 func TestCodeAction_CorePredicatesResolve(t *testing.T) {
-	expressionsV1(t)
 	files := map[string]string{}
 	for k, v := range codemodWorkspace {
 		files[k] = v
@@ -570,6 +555,32 @@ func TestCodeAction_CorePredicatesResolve(t *testing.T) {
 	}
 	if got := applyEdits(t, text, all[0], uri); !strings.Contains(got, "filter  row => isActiveRecord(row) && row.status == \"open\"") {
 		t.Errorf("rewrote:\n%s", got)
+	}
+}
+
+// A bundle's spec over the core @actor shape actorEnvelope, which the bundle
+// does not declare, is rewritten as an actor predicate -- the workspace
+// resolves over the core tree, as memqlmigrate does.
+func TestCodeAction_SpecOverACoreActorShape(t *testing.T) {
+	const rel = "fylo/specs.memql"
+	root := writeWorkspace(t, map[string]string{
+		"fylo/concepts.memql": "@namespace(\"fylo\")\nconcept order {\n  status  string\n}\n",
+		rel:                   "use common.shapes.{ actorEnvelope }\n\nspec actorEnvelope isAdmin {\n  return role == \"admin\"\n}\n\nquery order adminOrders {\n  filter  isAdmin\n}\n",
+	})
+	s := workspaceServer(t, root)
+	uri, text, _ := openWorkspaceDoc(t, s, root, rel)
+	all := actionsOfKind(codeActions(t, s, uri, protocol.Range{}, nil, "source.fixAll.memql"), "source.fixAll.memql")
+	if len(all) != 1 {
+		t.Fatal("no fix-all for a spec over the core actorEnvelope")
+	}
+	got := applyEdits(t, text, all[0], uri)
+	if want := cliRewrite(t, root, rel); got != want {
+		t.Errorf("fix-all wrote:\n%s\nmemqlmigrate writes:\n%s", got, want)
+	}
+	for _, line := range []string{"spec actorEnvelope isAdmin = actor => actor.role == \"admin\"\n", "  filter  row => isAdmin(actor)\n"} {
+		if !strings.Contains(got, line) {
+			t.Errorf("the rewrite lacks %q:\n%s", line, got)
+		}
 	}
 }
 

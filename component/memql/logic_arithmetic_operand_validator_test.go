@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -8,15 +9,16 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
-// Tests for the unparenthesized-comparison arithmetic trap validator (#2542).
+// Tests for the unparenthesized-comparison arithmetic trap (#2542).
 //
-// `a - b > 0` parses as `a - (b > 0)` (the trailing bare identifier folds the
-// comparison into the subtraction's right operand), so the arithmetic operand is
-// a boolean -- always an author mistake. memqllint accepted it (parse + Init both
-// pass) and the runtime failed with an opaque non-numeric-operand error. These
-// tests pin the LOAD-time rejection (which the lint/boot-parity pass surfaces)
-// for both the terminal-return and the intermediate-step positions, and pin the
-// parenthesized / plain-arithmetic forms as clean.
+// Before edition 2026, `a - b > 0` parsed as `a - (b > 0)` (the trailing bare
+// identifier folded the comparison into the subtraction's right operand), so
+// the arithmetic operand was a boolean -- always an author mistake -- and the
+// loader refused it for both the terminal-return and the intermediate-step
+// positions. Edition 2026 has one precedence table (rule 11c): arithmetic
+// binds tighter than comparison, so the same text is `(a - b) > 0`. These tests
+// pin that the unparenthesized form loads in both positions and means what it
+// reads as, and that the parenthesized / plain-arithmetic forms stay clean.
 
 func arithTrapRegistry() memoryNodes.Registry {
 	return newMemoryRegistry(map[string]*memoryNodes.Concept{
@@ -24,9 +26,8 @@ func arithTrapRegistry() memoryNodes.Registry {
 	})
 }
 
-// FAIL-before / PASS-after: a terminal `return a - b > 0` is rejected at load
-// with the parenthesise-the-arithmetic guidance.
-func TestLogicArithmeticOperand_RejectsUnparenthesizedComparison_Return(t *testing.T) {
+// A terminal `return a - b > 0` loads, and answers `(a - b) > 0`.
+func TestLogicArithmeticOperand_UnparenthesizedComparisonReadsByPrecedence_Return(t *testing.T) {
 	src := `@description("returns an unparenthesized arithmetic-then-comparison")
 logic ratioGate {
   args {
@@ -37,16 +38,23 @@ logic ratioGate {
     return args.a - args.b > 0
   }
 }`
-	_, err := tryParseNewFunctionSyntax("ratioGate", "logic", src, "test.memql", arithTrapRegistry())
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "comparison")
-	require.Contains(t, err.Error(), "(a - b) > 0")
-	require.Contains(t, err.Error(), "2542")
+	fn, err := tryParseNewFunctionSyntax("ratioGate", "logic", src, "test.memql", arithTrapRegistry())
+	require.NoError(t, err)
+	pc, ok := fn.Expr.(*PlanConstExpression)
+	require.Truef(t, ok, "fn.Expr = %T, want the returned expression as a *PlanConstExpression", fn.Expr)
+	for _, tc := range []struct {
+		a, b int64
+		want bool
+	}{{5, 3, true}, {3, 5, false}, {3, 3, false}} {
+		got, err := EvalExpr(context.Background(), pc.Expr, MapScope{"args": map[string]any{"a": tc.a, "b": tc.b}}, EvalOptions{})
+		require.NoError(t, err)
+		require.Equalf(t, tc.want, got, "a=%d b=%d: `args.a - args.b > 0` is `(args.a - args.b) > 0`", tc.a, tc.b)
+	}
 }
 
-// The same trap in an INTERMEDIATE `:=` step (which the loader stashes
-// un-converted) is caught by the AutomationDef walk so it too fails at load.
-func TestLogicArithmeticOperand_RejectsUnparenthesizedComparison_IntermediateStep(t *testing.T) {
+// The same text in an INTERMEDIATE `:=` step loads too: the step's right-hand
+// side is the one grammar every position reads.
+func TestLogicArithmeticOperand_UnparenthesizedComparisonReadsByPrecedence_IntermediateStep(t *testing.T) {
 	src := `@description("computes an unparenthesized comparison into an intermediate step")
 logic ratioStepGate {
   args {
@@ -58,11 +66,9 @@ logic ratioStepGate {
     return flag
   }
 }`
-	_, err := tryParseNewFunctionSyntax("ratioStepGate", "logic", src, "test.memql", arithTrapRegistry())
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "ratioStepGate")
-	require.Contains(t, err.Error(), "comparison")
-	require.Contains(t, err.Error(), "2542")
+	fn, err := tryParseNewFunctionSyntax("ratioStepGate", "logic", src, "test.memql", arithTrapRegistry())
+	require.NoError(t, err)
+	require.NotNil(t, fn.LogicSteps, "a body with a statement before its return runs on the LogicRunner")
 }
 
 // The PARENTHESIZED form is the working idiom (an expression-led

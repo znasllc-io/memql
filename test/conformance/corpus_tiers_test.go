@@ -25,11 +25,9 @@ package conformance
 // expression at the case's position out of it -- a filter's lambda, a spec's
 // lambda, a trigger filter, a refine clause, and the literal of the three
 // literal positions. A load_ok case at an in-process position is not read for
-// coverage: until the tree flips to the edition-2026 expression grammar
-// (parser.Options.ExpressionsV1), those positions load in the older grammar,
-// so what the file MEANS there is not yet an edition-2026 tree. Their
-// coverage comes from evaluate cases, which run through the edition-2026
-// evaluator itself.
+// coverage: a load there shows that the form parses and loads, not what it
+// answers, so the in-process positions are credited by their evaluate cases,
+// which run through the edition-2026 evaluator itself.
 //
 // It also refuses a positive case that uses what its position refuses, so the
 // corpus cannot show a form as legal that the manifest says is not.
@@ -526,10 +524,10 @@ var corpusKeylessRewrite = regexp.MustCompile(`write ([A-Za-z_][A-Za-z0-9_]*): (
 // edition 2026 retires, refused: each parser.V1RetiredForms() rule is the code
 // of a refused case whose message names the replacement, and every name the
 // function catalog retires (functions.RetiredFunctions, RetiredMethods) is one
-// of those rules. A refusal is judged by the edition's grammar
-// (corpusParseEdition), so the four predicate-position forms the loaders still
-// read until the tree flips -- a filter with no lambda header, a spec or trait
-// `{ return ... }` body, a raw-text @filter -- are shown refused like the rest.
+// of those rules. A refusal is judged by the parser every loader uses
+// (corpusParse), which reads only edition 2026, so the four predicate-position
+// forms -- a filter with no lambda header, a spec or trait `{ return ... }`
+// body, a raw-text @filter -- are shown refused like the rest.
 func TestCorpusRefusesEveryRetiredForm(t *testing.T) {
 	runs := discoverCorpus(t)
 	byCode := map[string][]*corpusRun{}

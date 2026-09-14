@@ -2,9 +2,9 @@ package dslconformance
 
 // v1_gate_fixtures_test.go -- a CATCH and a PASS fixture in the edition-2026
 // forms for each gate in this package that reads expression text (epic
-// memql#5363, task memql#5368). The corpus runs (bothCorpora) prove a gate
-// still reads the migrated tree; these prove it still FAILS on it, which a
-// clean corpus cannot.
+// memql#5363, task memql#5368). The corpus runs (onTree) prove a gate still
+// reads the tree; these prove it still FAILS on a violation, which a clean
+// corpus cannot.
 
 import (
 	"regexp"
@@ -51,7 +51,7 @@ query user catchById {
   shape   userFixtureCard
 }
 
-/// Operands reversed: the legacy regex reads id==args left to right only.
+/// Operands reversed: the comparison is found in either order.
 query user catchByIdReversed {
   args {
     userId  string
@@ -138,7 +138,7 @@ func TestPiiProjectionGateOnV1Fixtures(t *testing.T) {
 
 func TestSpecDeclarationsAreReadInBothEditions(t *testing.T) {
 	for _, src := range []string{
-		"spec actorEnvelope isFixtureOperator {\n  return role == \"owner\"\n}\n",
+		"spec actorEnvelope isFixtureOperator = actor => actor.role == \"owner\"\n",
 		"spec actorEnvelope isFixtureOperator = actor => actor.role == \"owner\"\n",
 	} {
 		m := specDeclRe.FindStringSubmatch(src)
@@ -252,7 +252,7 @@ func TestServerOnlyLocatorStopsAtABraceLessSpec(t *testing.T) {
 	if name, ok := constructNameAfter(src, 0); !ok || name != "isFixtureSpec" {
 		t.Errorf("constructNameAfter = %q %v, want isFixtureSpec", name, ok)
 	}
-	if name, _ := constructNameAfter("@serverOnly\nspec user isFixtureSpec {\n  return role == \"a\"\n}\n", 0); name != "isFixtureSpec" {
+	if name, _ := constructNameAfter("@serverOnly\nspec user isFixtureSpec = row => row.role == \"a\"\n", 0); name != "isFixtureSpec" {
 		t.Errorf("the braced spec is no longer located: %q", name)
 	}
 }

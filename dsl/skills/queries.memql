@@ -15,7 +15,7 @@ query skill skillBySlug {
   args {
     slug  string!
   }
-  filter  slug==args.slug && isActiveRecord
+  filter  row => row.slug == args.slug && isActiveRecord(row)
   shape   skillFull
 }
 
@@ -26,7 +26,7 @@ query skill skillBySlug {
 @unbounded("skill catalog (summary) -- a small admin-defined bounded registry consumed whole")
 @cache(300)
 query skill activeSkills {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   skillSummary
 }
 
@@ -38,7 +38,7 @@ query skill activeSkills {
 @unbounded("skill catalog (full) -- a small admin-defined bounded registry consumed whole")
 @cache(300)
 query skill activeSkillsFull {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   skillFull
 }
 
@@ -54,7 +54,7 @@ query skill skillNeedsRefresh {
   args {
     staleDomainId  string!
   }
-  filter  isActiveRecord && when(args.staleDomainId) { args.staleDomainId in domainIds }
+  filter  row => isActiveRecord(row) && (args.staleDomainId == nil || args.staleDomainId in row.domainIds)
   shape   skillSummary
 }
 
@@ -65,7 +65,7 @@ query skillEdge skillEdgesForSkill {
   args {
     skillId  string!
   }
-  filter  (fromSkillId==args.skillId || toSkillId==args.skillId) && status=="committed"
+  filter  row => (row.fromSkillId == args.skillId || row.toSkillId == args.skillId) && row.status == "committed"
   shape   skillEdgeFull
 }
 
@@ -79,6 +79,6 @@ query skill skillById {
   args {
     skillId  string!
   }
-  filter  row.id==args.skillId
+  filter  row => row.id == args.skillId
   shape   skillFull
 }

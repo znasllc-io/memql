@@ -81,7 +81,7 @@ func TestAdoptionPersistsCallerTrustForResume(t *testing.T) {
 type resumedArgumentProbe struct{ got any }
 
 func (p *resumedArgumentProbe) Execute(ctx context.Context, step *Step, sc *StepContext) (*StepResult, error) {
-	p.got, _ = sc.Evaluator.EvaluateValue("$args.compositionId")
+	p.got, _ = evalV1(sc.Evaluator, "args.compositionId")
 	return &StepResult{StepId: step.ID, Status: "completed"}, nil
 }
 

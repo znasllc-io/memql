@@ -14,8 +14,8 @@ import (
 	"github.com/znasllc-io/memql/component/language/parser"
 )
 
-// compileV1 parses src with the edition-2026 grammar on and compiles its one
-// automation or logic body the way the loader and the LogicRunner do.
+// compileV1 parses src and compiles its one automation or logic body the way
+// the loader and the LogicRunner do.
 func compileV1(t *testing.T, src string) map[string]any {
 	t.Helper()
 	out, err := compileV1Err(t, src)
@@ -31,7 +31,7 @@ func compileV1Err(t *testing.T, src string) (map[string]any, error) {
 	if err != nil {
 		t.Fatalf("NormaliseAll: %v", err)
 	}
-	f, err := parser.ParseFileWithOptions(normalised, parser.Options{ExpressionsV1: true})
+	f, err := parser.ParseFile(normalised)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -102,10 +102,11 @@ func wantJSON(t *testing.T, what string, got any, want string) {
 	}
 }
 
-// TestCompileV1LogicBody pins the compiled shape of a v1 logic body: the
-// marker, conditions and sources as canonical source with no rewrite, value
-// leaves as literals and `{"$expr"}` leaves, a string-typed field as v1
-// source, a catalog call as an in-process query step, and the return.
+// TestCompileV1LogicBody pins the compiled shape of a v1 logic body:
+// conditions and sources as canonical source with no rewrite, value leaves as
+// literals and `{"$expr"}` leaves, a string-typed field as v1 source, a
+// catalog call as an in-process query step, and the return -- and no
+// `"expressions"` marker, which retired with the grammar switch.
 func TestCompileV1LogicBody(t *testing.T) {
 	c := asJSON(t, compileV1(t, `logic conflictDetection {
   args {
@@ -124,8 +125,8 @@ func TestCompileV1LogicBody(t *testing.T) {
     return emitConflicts
   }
 }`))
-	if c["expressions"] != "v1" {
-		t.Fatalf(`"expressions" = %#v, want "v1"`, c["expressions"])
+	if _, marked := c["expressions"]; marked {
+		t.Fatalf(`the retired "expressions" marker is written: %#v`, c["expressions"])
 	}
 	if c["_return"] != "emitConflicts" {
 		t.Fatalf("_return = %#v", c["_return"])
@@ -179,9 +180,6 @@ automation probe {
     logic other(s: status, e: event, n: 1)
   }
 }`))
-	if c["expressions"] != "v1" {
-		t.Fatalf(`"expressions" = %#v`, c["expressions"])
-	}
 	trigger := c["trigger"].(map[string]any)
 	if trigger["filter"] != `row => row.status startsWith "arch"` {
 		t.Fatalf("trigger.filter = %#v", trigger["filter"])
@@ -223,7 +221,6 @@ func TestCompileV1OrdersByV1References(t *testing.T) {
 // rather than written as text the runtime cannot read back.
 func TestCompileV1RefusesALegacyNode(t *testing.T) {
 	def := &parser.FunctionDef{Name: "mixed", Type: parser.FunctionTypeAutomation, Body: &parser.AutomationDef{
-		ExpressionsV1: true,
 		Steps: []parser.StepDef{{ID: "s", Type: parser.StepTypeFunction, Config: &parser.FunctionStepConfig{
 			Name: "f", Args: map[string]any{"v": &ast.ArgRefExpr{Path: "x"}},
 		}}},
@@ -231,43 +228,6 @@ func TestCompileV1RefusesALegacyNode(t *testing.T) {
 	_, err := NewDefault().CompileFile(&parser.File{Definitions: []parser.Node{def}})
 	if err == nil || !strings.Contains(err.Error(), "not an edition-2026 expression") {
 		t.Fatalf("want the legacy-node refusal, got %v", err)
-	}
-}
-
-// TestCompileLegacyBodyUnchanged: a body parsed without the option compiles
-// exactly as before -- no marker, conditions translated, references
-// `$`-lifted.
-func TestCompileLegacyBodyUnchanged(t *testing.T) {
-	normalised, err := parser.NormaliseAll(`logic legacy {
-  args {
-    event object!
-  }
-  body {
-    rows := query findRows( id: args.event.payload.id )
-    tell := if !rows.empty() { publishEvent( topic: "t", payload: { id: args.event.payload.id } ) }
-    return tell
-  }
-}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err := parser.ParseFile(normalised)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fn := f.Definitions[0].(*parser.FunctionDef)
-	wrapped := &parser.FunctionDef{Name: fn.Name, Type: parser.FunctionTypeAutomation, Body: fn.Body}
-	res, err := NewDefault().CompileFile(&parser.File{Definitions: []parser.Node{wrapped}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := asJSON(t, res.Automations[0].JSON)
-	if _, marked := c["expressions"]; marked {
-		t.Fatal("a legacy body carries the v1 marker")
-	}
-	rows := stepsByID(t, c)["rows"]["function"].(map[string]any)["args"].(map[string]any)
-	if rows["id"] != "$args.event.payload.id" {
-		t.Fatalf("legacy arg = %#v, want the $-lifted reference text", rows["id"])
 	}
 }
 

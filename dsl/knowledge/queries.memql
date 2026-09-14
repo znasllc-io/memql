@@ -9,7 +9,7 @@ use common.shapes.{ documentChunkDomainLite, documentChunkFull }
 /// render per-domain chunk counts in the Knowledge panel.
 @unbounded("distinct chunk domain ids -- a bounded dedupe enumeration consumed whole")
 query documentChunk allDocumentChunkDomains {
-  filter  domainId!=""
+  filter  row => row.domainId != ""
   shape   documentChunkDomainLite
 }
 
@@ -27,7 +27,7 @@ query documentChunk documentChunksForDomain {
   args {
     domainId  string!
   }
-  filter  domainId==args.domainId
+  filter  row => row.domainId == args.domainId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

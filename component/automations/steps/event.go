@@ -38,14 +38,11 @@ func (e *EventExecutor) Execute(ctx context.Context, step *automations.Step, ste
 
 	eventCfg := step.Event
 
-	// Evaluate topic with $ expressions -- or, for a v1 step, the topic
-	// expression parsed at load (memql#5367).
+	// The topic: its expression, parsed at load (memql#5367).
+	x, err := preparedExprs(step)
 	var topic string
-	var err error
-	if x := step.Exprs; x != nil {
+	if err == nil {
 		topic, err = v1RequiredText(ctx, stepCtx.Evaluator, x.Topic, "event topic")
-	} else {
-		topic, err = stepCtx.Evaluator.EvaluateString(eventCfg.Topic)
 	}
 	if err != nil {
 		result.Status = "failed"
@@ -58,15 +55,9 @@ func (e *EventExecutor) Execute(ctx context.Context, step *automations.Step, ste
 	// Build payload
 	payload := make(map[string]any)
 
-	// Evaluate payload with $ expressions
+	// The payload: each leaf a literal or an expression parsed at load.
 	if eventCfg.Payload != nil {
-		var evaluatedPayload map[string]any
-		var err error
-		if step.Exprs != nil {
-			evaluatedPayload, err = stepCtx.Evaluator.ResolveV1Map(ctx, eventCfg.Payload)
-		} else {
-			evaluatedPayload, err = stepCtx.Evaluator.EvaluateMap(eventCfg.Payload)
-		}
+		evaluatedPayload, err := stepCtx.Evaluator.ResolveV1Map(ctx, eventCfg.Payload)
 		if err != nil {
 			result.Status = "failed"
 			result.Error = fmt.Sprintf("failed to evaluate payload: %v", err)

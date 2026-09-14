@@ -333,11 +333,17 @@ func TestLower_DefersThePredicateKindCheckWithoutARegistry(t *testing.T) {
 }
 
 // TestLowerError_ReadsAsOneSentence pins the rendering the coordinator's
-// example names.
+// example names: one sentence -- the node, the position, the reason, the fix
+// -- and the rule id last, in brackets (D24), the annotation registry's
+// convention. A refusal built without a code carries the generic one.
 func TestLowerError_ReadsAsOneSentence(t *testing.T) {
 	err := &LowerError{Node: "lower(row.email)", Position: tiers.PositionQueryFilter,
 		Reason: "`lower` runs in process and reads the row", Fix: "Compare against a computed value instead: `row.email == lower(args.email)`"}
 	require.Equal(t, "`lower(row.email)` does not lower in a query filter: `lower` runs in process and reads the row. "+
-		"Compare against a computed value instead: `row.email == lower(args.email)`", err.Error())
-	require.False(t, strings.HasSuffix(err.Error(), "."))
+		"Compare against a computed value instead: `row.email == lower(args.email)` [lower_refused]", err.Error())
+	require.Equal(t, LowerCodeRefused, err.RuleCode())
+
+	err.Code = LowerCodeNotBoolean
+	require.True(t, strings.HasSuffix(err.Error(), "[lower_not_boolean]"), err.Error())
+	require.Equal(t, LowerCodeNotBoolean, err.RuleCode())
 }

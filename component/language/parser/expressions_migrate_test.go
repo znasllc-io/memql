@@ -283,12 +283,24 @@ spec agent richPredicate = row => row.role == "assistant"
                                && (row.roleSlug == "it-support" || row.roleSlug == "customer-service")
                                && row.kind != "system"
 `
-	preds, err := CollectPredicates(map[string][]byte{"specs.memql": []byte(src)})
+	// The two concepts the specs bind are declared by the tree the file loads
+	// over, not by the file: alone, the file cannot say what they are.
+	alone, err := CollectPredicates(map[string][]byte{"specs.memql": []byte(src)})
 	if err != nil {
 		t.Fatalf("CollectPredicates: %v", err)
 	}
+	for _, name := range []string{"isSendableRecipient", "richPredicate"} {
+		if alone[name].Unbound == "" {
+			t.Errorf("preds[%s] = %+v: a spec over a concept nothing declares must come back Unbound", name, alone[name])
+		}
+	}
+	base := []PredicateDeclarations{ScanPredicateDeclarations("concepts.memql", []byte("concept recipient {\n  subscriptionStatus string\n}\n\nconcept agent {\n  role string\n}\n"))}
+	preds, err := ResolvePredicatesOver(base, []PredicateDeclarations{ScanPredicateDeclarations("specs.memql", []byte(src))})
+	if err != nil {
+		t.Fatalf("ResolvePredicatesOver: %v", err)
+	}
 	for name, actor := range map[string]bool{"isSendableRecipient": false, "isSeedParticipant": false, "requiresOwner": true, "isActiveRecord": false, "richPredicate": false} {
-		if info, ok := preds[name]; !ok || info.Actor != actor {
+		if info, ok := preds[name]; !ok || info.Actor != actor || info.Unbound != "" {
 			t.Errorf("preds[%s] = %+v, %v; want Actor=%v", name, info, ok, actor)
 		}
 	}
@@ -1167,5 +1179,119 @@ func TestPlanExpressions(t *testing.T) {
 	}
 	if !strings.Contains(plan.Refused[1].Err.Error(), "the bare word active") {
 		t.Errorf("refusal names %v", plan.Refused[1].Err)
+	}
+}
+
+// A spec's binding resolves through the tree the sources load over: a Go
+// fixture or a bundle that declares a spec over the core @actor shape
+// actorEnvelope, without declaring the shape, still gets `= actor =>` -- a
+// real engine refuses the row spelling at define, and a second run would see
+// the v1 form and keep it. A binding nothing declares is refused by name.
+func TestResolvePredicatesOver_BindingsResolveThroughTheBase(t *testing.T) {
+	base := []PredicateDeclarations{
+		ScanPredicateDeclarations("common/shapes.memql", []byte("/// The caller.\n@actor\nshape actorEnvelope {\n  actor.userId\n  actor.role\n}\n")),
+		ScanPredicateDeclarations("todos/concepts.memql", []byte("concept todo {\n  ownerUserId string\n}\n")),
+		ScanPredicateDeclarations("common/traits.memql", []byte("trait isActiveRecord {\n  return active == true\n}\n")),
+	}
+	src := "spec actorEnvelope isAdmin {\n  return role == \"admin\"\n}\n\n" +
+		"spec todo isMine {\n  return ownerUserId == \"me\"\n}\n\n" +
+		"query todo myTodos {\n  filter  isAdmin || isMine && isActiveRecord\n}\n"
+	local := []PredicateDeclarations{ScanPredicateDeclarations("fixture.memql", []byte(src))}
+	preds, err := ResolvePredicatesOver(base, local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]PredicateInfo{"isAdmin": {Actor: true}, "isMine": {}, "isActiveRecord": {}} {
+		if preds[name] != want {
+			t.Errorf("preds[%s] = %+v, want %+v", name, preds[name], want)
+		}
+	}
+	got := xmtRewrite(t, src, preds)
+	for _, line := range []string{
+		"spec actorEnvelope isAdmin = actor => actor.role == \"admin\"\n",
+		"spec todo isMine = row => row.ownerUserId == \"me\"\n",
+		"  filter  row => isAdmin(actor) || isMine(row) && isActiveRecord(row)\n",
+	} {
+		if !strings.Contains(got, line) {
+			t.Errorf("\n got:\n%s\nwant the line %s", got, line)
+		}
+	}
+
+	// The same source alone: the @actor shape is declared nowhere, so its spec
+	// is refused by name rather than guessed a row. `todo` is still a concept
+	// -- the query's signature binds it, and the engine resolves every
+	// signature to a concept -- while `gadget` is bound by nothing at all.
+	alone, err := CollectPredicates(map[string][]byte{"fixture.memql": []byte(src + "\nspec gadget isShiny {\n  return shiny == true\n}\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alone["isAdmin"].Unbound != "actorEnvelope" || alone["isMine"] != (PredicateInfo{}) || alone["isShiny"].Unbound != "gadget" {
+		t.Fatalf("alone: isAdmin=%+v isMine=%+v isShiny=%+v", alone["isAdmin"], alone["isMine"], alone["isShiny"])
+	}
+	out, err := RewriteExpressions([]byte(src), alone)
+	if err == nil || string(out) != src {
+		t.Fatalf("a spec over a binding nothing declares was rewritten:\n%s", out)
+	}
+	for _, want := range []string{
+		"line 1: spec isAdmin binds actorEnvelope, which no shape and no concept declares",
+		"isAdmin is a spec over actorEnvelope, which no shape and no concept declares",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q:\n%v", want, err)
+		}
+	}
+
+	// The sources' own declarations win over the base's: a fixture's own
+	// @row shape named like a core @actor shape binds its specs as rows.
+	own := []PredicateDeclarations{ScanPredicateDeclarations("fixture.memql", []byte("@row\nshape actorEnvelope {\n  role\n}\n\nspec actorEnvelope isAdmin {\n  return role == \"admin\"\n}\n"))}
+	if preds, err := ResolvePredicatesOver(base, own); err != nil || preds["isAdmin"] != (PredicateInfo{}) {
+		t.Errorf("isAdmin over the fixture's own @row shape = %+v, %v; want a row predicate", preds["isAdmin"], err)
+	}
+}
+
+// The legacy `<boundConcept>.<field>` spelling -- `todo.ownerUserId` in a query
+// bound to todo -- is that row's field, as the legacy rewriter read it: not a
+// nested `row.todo.ownerUserId`. Another prefix stays a path.
+func TestRewriteExpressions_BoundConceptPrefix(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"query todo sandboxOwned {\n  filter todo.ownerUserId == actor.userId\n}\n",
+			"query todo sandboxOwned {\n  filter row => row.ownerUserId == actor.userId\n}\n"},
+		// An intrinsic takes its canonical row spelling.
+		{"query todo one {\n  filter  todo.id == args.id && todo.createdat > args.since\n}\n",
+			"query todo one {\n  filter  row => row.id == args.id && row.createdAt > args.since\n}\n"},
+		// Deeper paths keep their tail; a guard's comparison is a filter's too.
+		{"query todo meta {\n  filter  when(args.kind) { todo.meta.kind == args.kind }\n}\n",
+			"query todo meta {\n  filter  row => args.kind == nil || row.meta.kind == args.kind\n}\n"},
+		// A prefix that is not the bound concept is a nested field, as it was.
+		{"query todo other {\n  filter  task.status == \"open\"\n}\n",
+			"query todo other {\n  filter  row => row.task.status == \"open\"\n}\n"},
+	} {
+		got := xmtRewrite(t, tc.in, nil)
+		if got != tc.want {
+			t.Errorf("\n got:\n%s\nwant:\n%s", got, tc.want)
+		}
+		if again := xmtRewrite(t, got, nil); again != got {
+			t.Errorf("a second run changed the output:\n%s", again)
+		}
+	}
+}
+
+// A name a source imports from a concepts file is a concept: the engine
+// resolves `use <ns>.concepts.{ x }` to that file, which declares nothing but
+// concepts. A name imported from a shapes file says only that it is a shape,
+// not which kind, and stays unresolved.
+func TestCollectPredicates_ConceptImportsBindRows(t *testing.T) {
+	src := "use lab.concepts.{ gizmo, widget }\nuse lab.shapes.{ labActor }\n\n" +
+		"spec widget inRegion {\n  return region == \"eu\"\n}\n\n" +
+		"spec labActor requiresAdmin {\n  return role == \"admin\"\n}\n"
+	preds, err := CollectPredicates(map[string][]byte{"specs.memql": []byte(src)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preds["inRegion"] != (PredicateInfo{}) {
+		t.Errorf("inRegion = %+v, want a row predicate over the imported concept", preds["inRegion"])
+	}
+	if preds["requiresAdmin"].Unbound != "labActor" {
+		t.Errorf("requiresAdmin = %+v, want its shape binding unresolved", preds["requiresAdmin"])
 	}
 }

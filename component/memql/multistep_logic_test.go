@@ -1,9 +1,11 @@
 package memql
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	langast "github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -113,43 +115,25 @@ logic revokeExpiredDelegations {
 	_ = strings.TrimSpace // keep import live in case we add more checks
 }
 
-// TestConvertExpressionHandlesCoalesce pins the ASTConverter's
-// handling of `coalesce(...)`. The parser emits a typed
-// languageParser.CoalesceExpr for `coalesce(a, b)` (and matching
-// dedicated nodes for `cond`, `concat`, `hash`, `canonicalId`,
-// `first`, `last`, `lower`, `upper`, `trim`); before this fix the
-// converter only knew about FunctionCallExpr and rejected the
-// typed forms with `unsupported parser expression type:
-// *ast.CoalesceExpr`. That broke every Logic body whose `return`
-// expression used `coalesce(...)` -- bootstrapSession,
-// releaseWorkspaceOnPlanTerminal, etc. -- because
-// extractLogicReturnExpression handed the raw CoalesceExpr to
-// the converter.
-func TestConvertExpressionHandlesCoalesce(t *testing.T) {
+// TestLogicReturnCoalesceParsesAsTheOperator pins a Logic body whose
+// `return` uses `??`. Before edition 2026 the parser emitted a typed
+// CoalesceExpr for `coalesce(a, b)`, and the ASTConverter once rejected it
+// with `unsupported parser expression type: *ast.CoalesceExpr`, which broke
+// every Logic body whose return used it (bootstrapSession,
+// releaseWorkspaceOnPlanTerminal). In edition 2026 `coalesce(...)` is
+// retired and `??` is an operator: the synthetic `_return` step carries a
+// `??` BinaryExpr, which the LogicRunner evaluates with EvalExpr -- there is
+// no typed builtin node left to convert.
+func TestLogicReturnCoalesceParsesAsTheOperator(t *testing.T) {
 	source := `
 @description("repro: return value uses coalesce")
 logic logicSample {
   body {
-    return coalesce("a", "b")
+    return "a" ?? "b"
   }
 }
 `
-	normalised, err := languageParser.NormaliseAll(source)
-	if err != nil {
-		t.Fatalf("NormaliseAll: %v", err)
-	}
-	lexer := languageParser.NewLexer(normalised)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Tokenize: %v", err)
-	}
-	ast, err := languageParser.NewParser(tokens).Parse()
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	file := ast.(*languageParser.File)
-	def := file.Definitions[0].(*languageParser.FunctionDef)
-	body := def.Body.(*languageParser.AutomationDef)
+	body := parseLogicBody(t, source)
 
 	// Pull out the synthetic `_return` step's expression.
 	var retExpr languageParser.ExpressionNode
@@ -165,27 +149,13 @@ logic logicSample {
 	if retExpr == nil {
 		t.Fatalf("no _return step expression")
 	}
-	if _, ok := retExpr.(*languageParser.CoalesceExpr); !ok {
-		t.Fatalf("expected CoalesceExpr, got %T", retExpr)
+	bin, ok := retExpr.(*langast.BinaryExpr)
+	if !ok || bin.Op != "??" {
+		t.Fatalf("expected the `??` operator, got %T", retExpr)
 	}
-
-	// The real check: ConvertExpression handles the typed builtin
-	// without erroring. Before the fix this returned "unsupported
-	// parser expression type: *ast.CoalesceExpr".
-	converter := NewASTConverter()
-	converted, err := converter.ConvertExpression(retExpr)
-	if err != nil {
-		t.Fatalf("ConvertExpression: %v", err)
-	}
-	call, ok := converted.(*FunctionCallExpression)
-	if !ok {
-		t.Fatalf("expected *FunctionCallExpression, got %T", converted)
-	}
-	if call.Name != "coalesce" {
-		t.Errorf("call.Name = %q, want %q", call.Name, "coalesce")
-	}
-	if len(call.Args) != 2 {
-		t.Errorf("expected 2 positional args, got %d (%v)", len(call.Args), call.Args)
+	got, err := EvalExpr(context.Background(), retExpr, MapScope{}, EvalOptions{})
+	if err != nil || got != "a" {
+		t.Fatalf(`"a" ?? "b" = %#v, %v; want "a"`, got, err)
 	}
 }
 
@@ -332,9 +302,9 @@ logic logicSample {
   }
   body {
     if flag.enabled == true {
-      enabled := someQuery()
+      enabled := query someQuery()
     } else {
-      disabled := someOtherQuery()
+      disabled := query someOtherQuery()
     }
     return "done"
   }
@@ -356,8 +326,9 @@ logic logicSample {
 	if disabledCond == "" {
 		t.Errorf("expected `disabled` step to carry the negated condition")
 	}
-	if !strings.HasPrefix(disabledCond, "not (") {
-		t.Errorf("expected else-branch condition to start with `not (`, got %q", disabledCond)
+	// Edition 2026 negates with `!`; the pre-2026 renderer wrote `not (`.
+	if !strings.HasPrefix(disabledCond, "!(") {
+		t.Errorf("expected else-branch condition to start with `!(`, got %q", disabledCond)
 	}
 }
 

@@ -276,7 +276,7 @@ builtin routerSetApiKey {
 //
 // Invoked manually for catalog-wide regeneration:
 //   client.executeQueryAsync({
-//     query: 'seedAllDomainContent({recipeVersion: "v1"})'
+//     query: 'seedAllDomainContent(recipeVersion: "v1")'
 //   })
 //
 // Optional filters:
@@ -310,7 +310,7 @@ builtin seedAllDomainContent {
 //   - The training pipeline's just-in-time path (trainAgent step A
 //     when a domain is empty or stale).
 //   - Direct call for recipe iteration: client.executeQueryAsync({
-//       query: 'seedDomainContent({domainId: "physics_quantum_mechanics"})'
+//       query: 'seedDomainContent(domainId: "physics_quantum_mechanics")'
 //     })
 //
 // See docs/internal/planning/knowledge-seeder.md and

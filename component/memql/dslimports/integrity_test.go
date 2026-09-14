@@ -106,7 +106,7 @@ query ghost queryGhosts {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree,
@@ -124,7 +124,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree,
@@ -145,7 +145,7 @@ query item queryBySpace {
   args {
     spaceId  string  @required
   }
-  filter  name == args.spaceId
+  filter  row => row.name == args.spaceId
 }`),
 	})
 	assertFindings(t, tree)
@@ -164,7 +164,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree)
@@ -271,7 +271,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name && someBuiltin == true
+  filter  row => row.name == args.name && row.someBuiltin == true
 }`),
 	})
 	if !tree.ImportsOnly["demo/builtins.memql"] {
@@ -298,7 +298,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }
 
 @enabled
@@ -307,7 +307,7 @@ query phantom queryPhantoms {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree,
@@ -386,7 +386,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 		"other/queries.memql": file(`@enabled
 @description("Signature concept resolved through the global fallback.")
@@ -394,7 +394,7 @@ query item queryOtherItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree)
@@ -413,7 +413,7 @@ query space querySpaces {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree)
@@ -440,7 +440,7 @@ query widget queryWidgets {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree,
@@ -476,7 +476,7 @@ query widget queryWidgets {
   args {
     label  string  @required
   }
-  filter  label == args.label
+  filter  row => row.label == args.label
 }`),
 	})
 	assertFindings(t, tree)
@@ -503,7 +503,7 @@ query item queryImported {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 		"fourth/queries.memql": file(`use fourth.helpers.{ helperItemQueryDoc }
 
@@ -513,7 +513,7 @@ query item queryUnimported {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 		"fourth/helpers.memql": file(`@description("Helper shape so the fourth file authors an in-root import.")
 @row
@@ -549,19 +549,16 @@ shape item helperItemQueryDoc {
 func TestVerify_SpecBoundNameMissing(t *testing.T) {
 	tree := loadTree(t, fstest.MapFS{
 		"demo/concepts.memql": file(demoConcepts),
+		// The binding is dangling on purpose. memqlmigrate:keep
 		"demo/specs.memql": file(`use demo.concepts.{ item }
 
 @enabled
 @description("A healthy concept-bound spec.")
-spec item specIsActive {
-  return status == "active"
-}
+spec item specIsActive = row => row.status == "active"
 
 @enabled
 @description("Binds a shape/concept that exists nowhere.")
-spec ghostShape specIsGhost {
-  return status == "ghost"
-}`),
+spec ghostShape specIsGhost = row => row.status == "ghost"`),
 	})
 	assertFindings(t, tree,
 		`demo/specs.memql: spec "specIsGhost" binds "ghostShape", which is not declared as a shape or concept anywhere in the DSL root`)
@@ -614,7 +611,7 @@ mutate item upsertItem {
   insert {
     id: args.itemId
     args.name
-    status: coalesce(args.name, "active")
+    status: args.name ?? "active"
     createdAt: now
     createdBy: actor.userId
     args.payload
@@ -729,7 +726,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree,
@@ -774,7 +771,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree,

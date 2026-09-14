@@ -687,7 +687,7 @@ func ArchiveLibraryFileBuild(args ArchiveLibraryFileArgs) string {
 	return b.String()
 }
 
-// ArchiveLibraryFolder -- Archive a folder -- the soft delete, same shape as archiveArtifact. The row survives with its name and its place in the tree; libraryFolders' `archived != true` filter drops it from the default read. The CLIENT drives the recursive walk (design B5/D11): contents first via archiveArtifact (whose automation archives backing files), then folders children-first, so this write is always the LAST touch on an emptied branch -- and re-running an interrupted walk archives the remainder idempotently. Artifacts still pointing here render at root with an orphan marker rather than vanishing: the fold is tolerant, and a row is never lost to a dangling pointer.
+// ArchiveLibraryFolder -- Archive a folder -- the soft delete, same shape as archiveArtifact. The row survives with its name and its place in the tree; libraryFolders' `row.archived != true` filter drops it from the default read. The CLIENT drives the recursive walk (design B5/D11): contents first via archiveArtifact (whose automation archives backing files), then folders children-first, so this write is always the LAST touch on an emptied branch -- and re-running an interrupted walk archives the remainder idempotently. Artifacts still pointing here render at root with an orphan marker rather than vanishing: the fold is tolerant, and a row is never lost to a dangling pointer.
 //
 // Bound concept: v1:library:folder (machine-readable: BoundConcepts["archiveLibraryFolder"] in generated_concepts.go).
 type ArchiveLibraryFolderArgs struct {
@@ -3582,7 +3582,7 @@ func CreateDeploymentBuild(args CreateDeploymentArgs) string {
 	return b.String()
 }
 
-// CreateDeploymentNodeSpec -- Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. The concept id is hash(concat(shortId(deploymentId), ':', nodeType)) so re-pins append to one timeline and a bare or canonical deploymentId derive the same row. Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
+// CreateDeploymentNodeSpec -- Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. The concept id is hash(shortId(deploymentId) + ":" + nodeType) so re-pins append to one timeline and a bare or canonical deploymentId derive the same row. Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
 //
 // Bound concept: v1:cluster:deploymentNodeSpec (machine-readable: BoundConcepts["createDeploymentNodeSpec"] in generated_concepts.go).
 type CreateDeploymentNodeSpecArgs struct {
@@ -4227,7 +4227,7 @@ func CreateIdentityProviderBuild(args CreateIdentityProviderArgs) string {
 	return b.String()
 }
 
-// CreateLibraryFile -- Create a Library file row for bytes already written to blob storage. Owner-acted: ownerUserId is stamped from actor.userId, so a file can only ever be created for the person the call runs as. format is the caller's MIME-derived classification, defaulting to 'other' (the metadata-only card) for a type nothing recognises. status starts at 'stored' -- the bytes are durable and nothing has looked at them yet; the analysis pass moves it on through setLibraryFileStatus. That status is STAMPED rather than accepted is load-bearing beyond this mutation: indexFileOnCreate filters on status=="stored" so it promotes exactly once, because graph.node.created fires on every write and a second promotion would wipe the artifact's labels -- a caller-supplied status would let a later write re-enter that state. indexFileOnCreate folds the new row into the Library index automatically.
+// CreateLibraryFile -- Create a Library file row for bytes already written to blob storage. Owner-acted: ownerUserId is stamped from actor.userId, so a file can only ever be created for the person the call runs as. format is the caller's MIME-derived classification, defaulting to 'other' (the metadata-only card) for a type nothing recognises. status starts at 'stored' -- the bytes are durable and nothing has looked at them yet; the analysis pass moves it on through setLibraryFileStatus. That status is STAMPED rather than accepted is load-bearing beyond this mutation: indexFileOnCreate filters on `row.status == "stored"` so it promotes exactly once, because graph.node.created fires on every write and a second promotion would wipe the artifact's labels -- a caller-supplied status would let a later write re-enter that state. indexFileOnCreate folds the new row into the Library index automatically.
 //
 // Bound concept: v1:library:file (machine-readable: BoundConcepts["createLibraryFile"] in generated_concepts.go).
 type CreateLibraryFileArgs struct {
@@ -8483,7 +8483,7 @@ func ProvisionWorkspaceBuild(args ProvisionWorkspaceArgs) string {
 	return b.String()
 }
 
-// PruneMemoryBelief -- Prune a decayed v1:memory:belief: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier).
+// PruneMemoryBelief -- Prune a decayed v1:memory:belief: status -> 'pruned' (soft-delete; the append-only model has no row removal). Recall (#585) + consolidation dedup filter `row.status == "active"`, so a pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from actor.userId (owned tier).
 //
 // Bound concept: v1:memory:belief (machine-readable: BoundConcepts["pruneMemoryBelief"] in generated_concepts.go).
 type PruneMemoryBeliefArgs struct {
@@ -10166,7 +10166,7 @@ func RejectAccessRequestBuild(args RejectAccessRequestArgs) string {
 	return b.String()
 }
 
-// RejectOverride -- Reject a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and sets validationStatus=rejected (valid stays false, so the override is never resolution-eligible), stamping validatedBy=actor.userId + validatedAt + the rejectionReason. A rejected proposal is RECORDED for audit, not silently dropped. Owned: gated by ownerUserId==actor.userId in the update read-merge.
+// RejectOverride -- Reject a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and sets validationStatus=rejected (valid stays false, so the override is never resolution-eligible), stamping validatedBy=actor.userId + validatedAt + the rejectionReason. A rejected proposal is RECORDED for audit, not silently dropped. Owned: gated by `row.ownerUserId == actor.userId` in the update read-merge.
 //
 // Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["rejectOverride"] in generated_concepts.go).
 type RejectOverrideArgs struct {
@@ -10226,7 +10226,7 @@ func ReleaseWorkspaceBuild(args ReleaseWorkspaceArgs) string {
 }
 
 // RemoveCustomDomain -- Ask for a binding to come down. The row walks to `removing`; the sweep dispatches the unbind script, and `markCustomDomainRemoved` closes the walk.
-// THE HOSTNAME STOPS RESOLVING AT THIS WRITE, not at the Ingress deletion: `liveCustomDomainByHostname` filters `status=="live"`, so the edge stops answering the moment this lands. That ordering is the point -- an operator removing a binding because it is being abused should not have to wait for kubectl.
+// THE HOSTNAME STOPS RESOLVING AT THIS WRITE, not at the Ingress deletion: `liveCustomDomainByHostname` filters `row.status == "live"`, so the edge stops answering the moment this lands. That ordering is the point -- an operator removing a binding because it is being abused should not have to wait for kubectl.
 //
 // Bound concept: v1:platform:customDomain (machine-readable: BoundConcepts["removeCustomDomain"] in generated_concepts.go).
 type RemoveCustomDomainArgs struct {
@@ -10486,7 +10486,7 @@ func ResolveApprovalRequestBuild(args ResolveApprovalRequestArgs) string {
 }
 
 // RestoreArtifact -- Bring a Library artifact index row back out of the Bin (memql#4784) -- the exact inverse of archiveArtifact, and the write that makes archiving a door rather than a one-way door. Nothing was destroyed by the archive, so nothing has to be reconstructed here: the row keeps its labels, its folder, its provenance and its sourceConceptRef throughout, and this write only flips the flag back. updatedAt advances because a restore IS a change a person made.
-// THE BACKING FILE IS NOT RESTORED BY AN AUTOMATION, and that asymmetry with the archive path is deliberate. archiveFileOnArtifactArchive rides `node.updated` on v1:library:artifact filtered on `archived == true`; a mirror of it filtered on `archived == false` would fire on essentially EVERY artifact update, since almost no artifact is archived -- and, with the archive automation already in place, the two together close the cycle that automation's own header warns about (each write publishes an event the other subscribes to, and both being idempotent does not stop the events). So restore is a CLIENT-DRIVEN PAIR, exactly as the recursive archive walk is: the Bin calls this and restoreLibraryFile together, and a re-run of an interrupted restore simply finds the half that already landed absent from its next plan.
+// THE BACKING FILE IS NOT RESTORED BY AN AUTOMATION, and that asymmetry with the archive path is deliberate. archiveFileOnArtifactArchive rides `node.updated` on v1:library:artifact filtered on `row.archived == true`; a mirror of it filtered on `row.archived == false` would fire on essentially EVERY artifact update, since almost no artifact is archived -- and, with the archive automation already in place, the two together close the cycle that automation's own header warns about (each write publishes an event the other subscribes to, and both being idempotent does not stop the events). So restore is a CLIENT-DRIVEN PAIR, exactly as the recursive archive walk is: the Bin calls this and restoreLibraryFile together, and a re-run of an interrupted restore simply finds the half that already landed absent from its next plan.
 //
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["restoreArtifact"] in generated_concepts.go).
 type RestoreArtifactArgs struct {
@@ -11085,7 +11085,7 @@ func RotateAuthSessionBuild(args RotateAuthSessionArgs) string {
 // # One row per person, by construction
 // The id is DERIVED from the actor rather than supplied, so there is no call that writes a second desktop for one person and no read a writer has to hope was fresh. That is what makes this a single `insert{}` instead of the create-or-update pair a caller-minted id forces (compare createRoutingPolicy / updateRoutingPolicy, whose "exactly one active row per owner" is held on the write side by an editor that read first). `insert{}` is create-or-upsert at the engine's single write chokepoint (memql#1709), so the first call creates and the rest overwrite.
 // It is `hash(actor.userId)` and not `actor.userId` itself: an actor id is canonical (`v1:identity:user:<slug>`), and a canonical id under a DIFFERENT concept is refused by the storage gate (core/id.ValidateShortId). hash() gives a bare slug -- the form the gate names, derived identically on every replica.
-// UNPREFIXED, per authoring-rules.md section 20: `concat("desktop-", hash(...))` would repeat in the shortId what the canonical id already says one colon to its left. (The gate that rejects that, TestNoShortIdConceptPrefix, works off a hardcoded list of known prefixes and would not have caught `desktop-`; the rule is the rule regardless of whether a list has caught up with it.)
+// UNPREFIXED, per authoring-rules.md section 20: `"desktop-" + hash(...)` would repeat in the shortId what the canonical id already says one colon to its left. (The gate that rejects that, TestNoShortIdConceptPrefix, works off a hardcoded list of known prefixes and would not have caught `desktop-`; the rule is the rule regardless of whether a list has caught up with it.)
 // # Every save fires graph.node.created, including the ones that overwrite
 // Only the update() path publishes graph.node.updated; executeWrite publishes created for every write it takes, insert and update alike. So the client subscribes to created and the mesh routing rule (component/node/routing.go) forwards created -- an `updated` rule here would be a rule for an event this mutation cannot emit. Do not "complete the pair".
 // # revision is the caller's, on purpose
@@ -11195,7 +11195,7 @@ func SetAccountEntitlementBuild(args SetAccountEntitlementArgs) string {
 
 // SetArtifactAccounts -- Label a Library item with the clients it is about (epic memql#4800, D5) -- the Files inspector's account picker, and its only caller.
 // A READ-MERGE update in the shape moveArtifactToFolder set: folder, labels, archived and every other index field survive a re-label untouched, which is what makes labelling cheap enough to be a chip somebody toggles rather than a form they submit.
-// `accountIds` is STAMPED with `?? []`, not accepted, for moveArtifactToFolder's reason applied to a list: an accepted arg omitted is dropped and inherited, so REMOVING the last label would silently re-save the label just removed. An explicit empty list is what "no client" looks like, and the coalesce is what lets an omitted arg mean it.
+// `accountIds` is STAMPED with `?? []`, not accepted, for moveArtifactToFolder's reason applied to a list: an accepted arg omitted is dropped and inherited, so REMOVING the last label would silently re-save the label just removed. An explicit empty list is what "no client" looks like, and the `??` is what lets an omitted arg mean it.
 // `updatedAt` advances because a re-label IS a change a person made to the row, and the Library's default sort should say so -- the same call moveArtifactToFolder makes.
 // Ids are not validated against the registry: an account has no read effect, and a list filtered against the caller's own visible accounts would quietly DROP a label somebody else's account put there. The Files browse filter reads an unresolvable id as a tie to something not visible.
 //
@@ -15776,7 +15776,7 @@ func UpsertTerritoryBuild(args UpsertTerritoryArgs) string {
 	return b.String()
 }
 
-// ValidateOverride -- Validate (ACCEPT) a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and flips valid=false->true + validationStatus=proposed->validated, stamping validatedBy=actor.userId + validatedAt, and bumps version (capture-as-version). Blast-radius-scaled by role: the validateHealingValidationRankBound Go guard rejects the write unless the actor's role rank meets the override's blastRadius-required rank (personal->user, shared->admin, spine_adjacent->developer; owner always allowed). Once validated the override becomes resolution-eligible -- the two-tier resolver prefers it over base. Owned: gated by ownerUserId==actor.userId in the update read-merge.
+// ValidateOverride -- Validate (ACCEPT) a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and flips valid=false->true + validationStatus=proposed->validated, stamping validatedBy=actor.userId + validatedAt, and bumps version (capture-as-version). Blast-radius-scaled by role: the validateHealingValidationRankBound Go guard rejects the write unless the actor's role rank meets the override's blastRadius-required rank (personal->user, shared->admin, spine_adjacent->developer; owner always allowed). Once validated the override becomes resolution-eligible -- the two-tier resolver prefers it over base. Owned: gated by `row.ownerUserId == actor.userId` in the update read-merge.
 //
 // Bound concept: v1:healing:healedOverride (machine-readable: BoundConcepts["validateOverride"] in generated_concepts.go).
 type ValidateOverrideArgs struct {

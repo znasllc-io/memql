@@ -114,7 +114,7 @@ mutate node createNode {
     // carries colons -- so ("bff", "2026-01-01T00:00:00Z") and
     // ("bff:2026-01-01T00", "00:00Z") derived one node id. Fixed-width sha256
     // digests concatenate unambiguously, so there is nothing to alias on.
-    id: args.id ?? concat("node-", hash(concat(hash(args.nodeType), hash(now))))
+    id: args.id ?? ("node-" + hash(hash(args.nodeType) + hash(now)))
     args.nodeType
     address: args.address ?? ""
     parentId: ""

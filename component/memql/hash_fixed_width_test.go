@@ -1,7 +1,6 @@
 package memql
 
 import (
-	"context"
 	"testing"
 )
 
@@ -19,13 +18,14 @@ import (
 // down and stated in-tree as if it were structural.
 //
 // The reachable site is dsl/cognition/logic.memql, which derives an id from two
-// event-payload fields that can both be absent. Logic evaluates through the
-// runtime evaluator; mutation `insert` templates evaluate through
-// mutationTemplateEvaluator, which already normalised missing to "". So the
-// same authored hash(x) had two widths depending on which construct held it,
-// and only one of the two was safe.
+// event-payload fields that can both be absent. Logic evaluated through the
+// runtime evaluator; mutation `insert` templates through their own evaluator,
+// which already normalised missing to "". So the same authored hash(x) had two
+// widths depending on which construct held it, and only one of the two was
+// safe. A mutation value's hash() is pinned in
+// TestMutationValuesV1HashIsFixedWidth.
 
-// Both evaluators, one rule. A width that depends on the construct an
+// One rule on every evaluator. A width that depends on the construct an
 // expression sits in is a property nobody can reason about at the call site.
 func TestHashIsFixedWidthOnBothEvaluators(t *testing.T) {
 	const sha256HexLen = 64
@@ -48,29 +48,6 @@ func TestHashIsFixedWidthOnBothEvaluators(t *testing.T) {
 					"because every part is the same width. A short part means (absent, X) and "+
 					"(X, absent) concatenate identically and derive one id -- the memql#3009 "+
 					"aliasing, reintroduced below the fix.", tc.name, len(got), sha256HexLen)
-			}
-		}
-	})
-
-	t.Run("mutation template evaluator", func(t *testing.T) {
-		eval := &mutationTemplateEvaluator{args: map[string]any{
-			"present": "x",
-			"action":  map[string]any{"type": "chat"},
-		}}
-		for _, expr := range []string{
-			`hash(args.present)`,
-			`hash(args.absent)`,
-			`hash(args.action.type)`,
-			`hash(args.action.idempotencyKey)`, // nested absent
-			`hash("")`,
-		} {
-			got, err := eval.evalHash(context.Background(), expr)
-			if err != nil {
-				t.Fatalf("%s: %v", expr, err)
-			}
-			if len(got) != sha256HexLen {
-				t.Errorf("%s is %d chars, want %d -- see the runtime-evaluator case above for why",
-					expr, len(got), sha256HexLen)
 			}
 		}
 	})

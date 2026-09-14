@@ -69,9 +69,7 @@ var senseRewriteRefusalCases = []struct {
 	// one line, and a query the query stage lowers to fewer lines.
 	{"a refine below a stripped spec and a lowered query", `use probe.concepts.{ thing }
 
-spec thing isOpen {
-  return status == "open"
-}
+spec thing isOpen = row => row.status == "open"
 
 query thing first {
   args {

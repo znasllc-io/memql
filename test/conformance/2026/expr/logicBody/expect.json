@@ -390,6 +390,15 @@
       "code": "retired_keyless_map_entry",
       "message": "a map entry needs a key: write identityId: args.event.payload.identityId (memqlmigrate --rewrite=expressions rewrites it)",
       "note": "Every entry of a map literal names its key. The retired spelling took the key from the path's last segment."
+    },
+    {
+      "file": "coalesce.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "comparison-as-the-value.memql",
+      "verdict": "load_ok",
+      "note": "A comparison is a boolean value in any position. Before edition 2026 a comparison in a value position returned its own source text (#2655, #2693), and the loader refused it."
     }
   ]
 }

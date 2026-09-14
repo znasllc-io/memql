@@ -32,17 +32,17 @@ use platform.queries.{ globalVariable }
 
 /// Pure decide for the access-request expiry sweep (#2369, cluster pruneStaleClusterNodes pattern):
 /// reads IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS (default 30), computes cutoff = now - window via
-/// addDuration with a negative ISO duration, and returns
-/// expiredPendingAccessRequests({createdBefore: cutoff}).nodes() -- the pending rows past the
-/// window, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling
-/// automation's forEach is unconditional.
+/// addDuration with a negative ISO duration, reads
+/// `query expiredPendingAccessRequests(createdBefore: cutoff)` and returns its nodes() -- the
+/// pending rows past the window, filtered by QUERY PUSHDOWN. The retention policy lives entirely
+/// here; the calling automation's forEach is unconditional.
 logic accessRequestExpirySweep {
   args {
     event object!
   }
   body {
   windowDays := query globalVariable( name: "IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS" )
-  pending := query expiredPendingAccessRequests( createdBefore: addDuration(now, concat("P-", windowDays.first().payload.value ?? "30", "D")) )
+  pending := query expiredPendingAccessRequests( createdBefore: addDuration(now, "P-" + (windowDays.first().payload.value ?? "30") + "D") )
   return pending.nodes()
   }
 }
@@ -204,9 +204,10 @@ logic accountDeletionReminder7Days {
 //     time inside the loop.
 /// Pure decide for the account-deletion sweep (#2369, cluster pattern): reads
 /// MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS (default 30), computes cutoff = now - cooldown via
-/// addDuration with a negative ISO duration, and returns
-/// usersScheduledForDeletion({scheduledBefore: cutoff}).nodes() -- users whose cooldown has
-/// elapsed, filtered by QUERY PUSHDOWN; the automation's forEach hard-deletes each unconditionally.
+/// addDuration with a negative ISO duration, reads
+/// `query usersScheduledForDeletion(scheduledBefore: cutoff)` and returns its nodes() -- users
+/// whose cooldown has elapsed, filtered by QUERY PUSHDOWN; the automation's forEach hard-deletes
+/// each unconditionally.
 /// Audit-event rows, invitations the user issued, and access-request rows are intentionally
 /// retained for the trail.
 logic accountDeletionSweep {
@@ -215,7 +216,7 @@ logic accountDeletionSweep {
   }
   body {
   cooldownDays := query globalVariable( name: "MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS" )
-  candidates := query usersScheduledForDeletion( scheduledBefore: addDuration(now, concat("P-", cooldownDays.first().payload.value ?? "30", "D")) )
+  candidates := query usersScheduledForDeletion( scheduledBefore: addDuration(now, "P-" + (cooldownDays.first().payload.value ?? "30") + "D") )
 
   // Auth-session revocation gap (intentional): the user concept holds
   // user.id, and the only session read keyed on the JWT `sub` claim is

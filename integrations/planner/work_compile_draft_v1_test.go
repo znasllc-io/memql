@@ -6,13 +6,11 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/automations"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// work_compile_draft_v1_test.go -- the work draft follows the grammar the
-// engine parses with (langparser.DefaultOptions), so the flip of the tree to
-// edition 2026 flips what the generator writes with it (memql#5367).
+// work_compile_draft_v1_test.go -- the work draft is written in edition 2026,
+// the grammar the engine parses (memql#5367).
 
 // workDraftVariants synthesizes the draft for every route shape: one turn or
 // sections, a text answer or a native file.
@@ -44,16 +42,10 @@ func workDraftVariants(t *testing.T) map[string]string {
 }
 
 // TestSectionableBundleCompilesInEdition2026: the sectionable generator's
-// logic closure -- `body { return now }` -- and its automations are written
-// the same in both grammars, and compile through the real Gate 1 with
-// edition 2026 the default: the logic body is a one-`return` expression,
-// which the loader's bridge runs on the LogicRunner
-// (component/memql/logic_body_v1.go).
+// logic closure -- `body { return now }` -- and its automations compile
+// through the real Gate 1: the logic body is a one-`return` expression, which
+// the loader's bridge runs on the LogicRunner (component/memql/logic_body_v1.go).
 func TestSectionableBundleCompilesInEdition2026(t *testing.T) {
-	saved := langparser.DefaultOptions
-	langparser.DefaultOptions = langparser.Options{ExpressionsV1: true}
-	t.Cleanup(func() { langparser.DefaultOptions = saved })
-
 	bundle, ok := synthesizeSectionableBundle("vendors", "profile two vendors", sectionableDecision{
 		Sectionable: true,
 		Sections:    []sectionSpec{{Label: "vendor Acme", Instruction: "Profile Acme."}, {Label: "vendor Globex", Instruction: "Profile Globex."}},
@@ -69,31 +61,11 @@ func TestSectionableBundleCompilesInEdition2026(t *testing.T) {
 	}
 }
 
-// TestWorkDraftLegacyTextIsUnchanged: with the legacy grammar the default,
-// the draft is written exactly as it was.
-func TestWorkDraftLegacyTextIsUnchanged(t *testing.T) {
-	if langparser.DefaultOptions.ExpressionsV1 {
-		t.Skip("the tree parses edition 2026 by default")
-	}
-	for name, src := range workDraftVariants(t) {
-		if !strings.Contains(src, `, field(event, "payload")`) || !strings.Contains(src, "concat(") {
-			t.Fatalf("%s: the legacy draft lost its concat(..., field(event, \"payload\")):\n%s", name, src)
-		}
-		if strings.Contains(src, "toString(") || strings.Contains(src, " + ") {
-			t.Fatalf("%s: the legacy draft carries edition-2026 text:\n%s", name, src)
-		}
-	}
-}
-
-// TestWorkDraftFollowsEdition2026: with edition 2026 the default, every draft
-// shape passes Gate 1 and loads as the engine loads a validated headline --
+// TestWorkDraftFollowsEdition2026: every draft shape passes Gate 1 and loads
+// as the engine loads a validated headline --
 // and the prompt a step passes evaluates to the statement, the heading and
 // the goal input as the JSON its heading promises.
 func TestWorkDraftFollowsEdition2026(t *testing.T) {
-	saved := langparser.DefaultOptions
-	langparser.DefaultOptions = langparser.Options{ExpressionsV1: true}
-	t.Cleanup(func() { langparser.DefaultOptions = saved })
-
 	for name, src := range workDraftVariants(t) {
 		t.Run(name, func(t *testing.T) {
 			if strings.Contains(src, "concat(") || strings.Contains(src, "field(") {
@@ -109,8 +81,8 @@ func TestWorkDraftFollowsEdition2026(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load: %v\n%s", err, src)
 			}
-			if !auto.IsV1() {
-				t.Fatal("the draft did not load as an edition-2026 automation")
+			if len(auto.Steps) == 0 || auto.Steps[0].Exprs == nil {
+				t.Fatal("the draft did not load as an edition-2026 automation: its steps carry no parsed expressions")
 			}
 			if name != "turn" {
 				return

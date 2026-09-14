@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"strings"
@@ -9,7 +10,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/component"
 )
 
 // authoring_lower_test.go -- a session-authored query, spec or trait is lowered
@@ -20,19 +23,7 @@ import (
 // once every row is back.
 //
 // Each test boots the real engine over the embedded tree plus the lowerinit
-// fixture domain (expr_lower_init_test.go), with the edition-2026 grammar
-// switched on around the authoring calls -- the grammar every authored bundle
-// is parsed with after the flip.
-
-// withExpressionsV1 runs fn with the edition-2026 grammar on, as the flip will
-// leave DefaultOptions. No test in this package runs in parallel.
-func withExpressionsV1(t *testing.T, fn func()) {
-	t.Helper()
-	saved := languageParser.DefaultOptions
-	languageParser.DefaultOptions = languageParser.Options{ExpressionsV1: true}
-	defer func() { languageParser.DefaultOptions = saved }()
-	fn()
-}
+// fixture domain (expr_lower_init_test.go).
 
 // bootAuthoringEngine is the lowerinit engine: core ticket concept plus the
 // specs isOpenTicket, owesReport, isUrgentTicket and the context spec
@@ -109,11 +100,11 @@ func positionOf(t *testing.T, src, needle string) (int, int) {
 func TestAuthoringLower_DefineRegistersLoweredForms(t *testing.T) {
 	eng := bootAuthoringEngine(t)
 	reg := NewAuthoredRuntimeRegistry()
-	withExpressionsV1(t, func() {
+	{
 		res, err := eng.DefineSessionBundle(reg, "owner-1", sessionGoodBundle, "")
 		require.NoError(t, err, "%+v", res.Diagnostics)
 		require.True(t, res.OK)
-	})
+	}
 
 	c, ok := reg.Lookup("owner-1", "spec", "isHighTicket")
 	require.True(t, ok)
@@ -135,9 +126,7 @@ func TestAuthoringLower_DefineRefusesWithTheThreePartMessageOnTheAuthorsLine(t *
 	reg := NewAuthoredRuntimeRegistry()
 	var res SessionDefineResult
 	var err error
-	withExpressionsV1(t, func() {
-		res, err = eng.DefineSessionBundle(reg, "owner-1", sessionRefusedBundle, "")
-	})
+	res, err = eng.DefineSessionBundle(reg, "owner-1", sessionRefusedBundle, "")
 	require.Error(t, err, "a bundle that does not lower is refused at define, not at its first call")
 	require.False(t, res.OK)
 	require.Empty(t, reg.ListForOwner("owner-1"), "a refused define registers nothing")
@@ -171,7 +160,7 @@ query ticket misKindedOnly {
   paginate 20
 }
 `
-	withExpressionsV1(t, func() {
+	{
 		// With no engine the kind check is deferred -- the bundle alone cannot
 		// see callerIsOwner -- so the engine-free define accepts it...
 		free, err := AuthorSessionBundle(NewAuthoredRuntimeRegistry(), "owner-1", misKinded, "")
@@ -185,24 +174,22 @@ query ticket misKindedOnly {
 		// So does the engine's validate.
 		rep := eng.ValidateAuthoredBundle(misKinded, "")
 		require.False(t, rep.OK)
-	})
+	}
 }
 
 func TestAuthoringLower_StageRefusesBeforeStagingAnything(t *testing.T) {
 	eng := bootAuthoringEngine(t)
 	store := &fakePromoteStore{}
 	var err error
-	withExpressionsV1(t, func() {
-		_, err = eng.stageBundleDurableWithStore(context.Background(), store, "owner-1", sessionRefusedBundle, "")
-	})
+	_, err = eng.stageBundleDurableWithStore(context.Background(), store, "owner-1", sessionRefusedBundle, "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "bundle failed validation")
 	require.Empty(t, store.constructs, "a stage that does not lower persists nothing")
 
-	withExpressionsV1(t, func() {
+	{
 		res, err := eng.stageBundleDurableWithStore(context.Background(), store, "owner-1", sessionGoodBundle, "")
 		require.NoError(t, err, "%+v", res.Diagnostics)
-	})
+	}
 	staged, ok := eng.stagedAuthored.Lookup("owner-1", "spec", "isHighTicket")
 	require.True(t, ok)
 	require.Equal(t, `payload.priority>3`, canonicalExpression(staged.Compiled.(*Spec).Expr), "the staged spec is lowered")
@@ -225,12 +212,12 @@ shape ticket ticketBrief {
 /// A spec over the session shape.
 spec ticketBrief briefOpen = row => row.status == "open"
 `
-	withExpressionsV1(t, func() {
+	{
 		_, err := eng.DefineSessionBundle(reg, "owner-1", sessionGoodBundle, "")
 		require.NoError(t, err)
 		res, err := eng.DefineSessionBundle(reg, "owner-1", withShape, "")
 		require.NoError(t, err, "%+v", res.Diagnostics)
-	})
+	}
 
 	// A spec over a concept promotes, lowered against the shared registries.
 	c, ok := reg.Lookup("owner-1", "spec", "isHighTicket")
@@ -306,11 +293,11 @@ query ticket misKindedStored {
 		},
 	}
 	var res RehydrateResult
-	withExpressionsV1(t, func() {
+	{
 		var err error
 		res, err = eng.rehydratePromotedNow(context.Background(), store)
 		require.NoError(t, err)
-	})
+	}
 
 	spec, err := eng.specs.Get("isHighTicket")
 	require.NoError(t, err, "the stored v1 spec is back")
@@ -346,16 +333,14 @@ func TestAuthoringLower_AnUnloweredSessionSpecIsRefusedByNameNeverInlinedAsNothi
 func TestAuthoringLower_ADanglingImportKeepsTheReferenceDiagnostic(t *testing.T) {
 	eng := bootAuthoringEngine(t)
 	var rep SandboxReport
-	withExpressionsV1(t, func() {
-		rep = SandboxCompileBundleWithEngine([]SandboxConstruct{{
-			Kind: "spec",
-			Name: "danglingSpec",
-			Source: `use lowerinit.shapes.{ ghostShape }
+	rep = SandboxCompileBundleWithEngine([]SandboxConstruct{{
+		Kind: "spec",
+		Name: "danglingSpec",
+		Source: `use lowerinit.shapes.{ ghostShape }
 
 /// A spec over a shape nothing declares.
 spec ghostShape danglingSpec = row => row.status == "open"`,
-		}}, eng)
-	})
+	}}, eng)
 	require.False(t, rep.OK)
 	d := diagnosticFor(t, rep.Diagnostics, "spec", "danglingSpec")
 	require.Contains(t, d.Error, "unresolved reference", "the reference check names the import to fix; the lowering runs after it")
@@ -373,45 +358,147 @@ concept ticket {
 }
 `
 
-func TestAuthoringLower_ASessionSpecBindsItsOwnDomainsConcept(t *testing.T) {
+// bootTwinTicketDomains boots the engine over two domains that each declare a
+// `ticket` concept -- lowerinit's with `status`, lowertwin's with `state`.
+func bootTwinTicketDomains(t *testing.T) *MemQLEngine {
+	t.Helper()
 	eng, err := bootLowerDomains(t, map[string]map[string]string{
 		"lowerinit": {"concepts.memql": lowerInitConcepts},
 		"lowertwin": {"concepts.memql": twinTicketConcepts},
 	})
 	require.NoError(t, err, "two domains may each declare a ticket")
+	return eng
+}
 
+// twinImportMessage is the refusal of a spec bound to `ticket` with no import
+// to choose between the two domains that declare one: it names the imports.
+const twinImportMessage = "binding \"ticket\" is declared by more than one domain, and no file-top `use` import says which -- " +
+	"import the one you mean: `use lowerinit.concepts.{ ticket }` or `use lowertwin.concepts.{ ticket }`"
+
+func TestAuthoringLower_ASessionSpecBindsThroughItsImports(t *testing.T) {
+	eng := bootTwinTicketDomains(t)
 	define := func(origin, src string) (SessionDefineResult, *AuthoredRuntimeRegistry, error) {
 		reg := NewAuthoredRuntimeRegistry()
 		var res SessionDefineResult
 		var err error
-		withExpressionsV1(t, func() {
-			res, err = eng.DefineSessionBundle(reg, "owner-1", src, origin)
-		})
+		res, err = eng.DefineSessionBundle(reg, "owner-1", src, origin)
 		return res, reg, err
 	}
 
-	// A spec written in lowerinit binds lowerinit's ticket, own domain first,
-	// as a tree spec in that file would.
-	res, reg, err := define("lowerinit/specs.memql", `/// Open, in this domain's sense.
+	// The import decides which ticket -- also from an untitled buffer, which
+	// has no domain of its own to fall back on.
+	res, reg, err := define("", `use lowerinit.concepts.{ ticket }
+
+/// Open, in lowerinit's sense.
 spec ticket isOpenHere = row => row.status == "open"
 `)
 	require.NoError(t, err, "%+v", res.Diagnostics)
 	c, ok := reg.Lookup("owner-1", "spec", "isOpenHere")
 	require.True(t, ok)
 	require.Equal(t, `payload.status=="open"`, canonicalExpression(c.Compiled.(*Spec).Expr))
+	require.Contains(t, c.Source, "use lowerinit.concepts.{ ticket }", "the spec carries the bundle's import")
 
-	// The same name written in lowertwin binds lowertwin's ticket: its field
-	// is state, and status is not one of its fields.
-	res, _, err = define("lowertwin/specs.memql", `/// Open, in the twin's sense.
-spec ticket isOpenThere = row => row.state == "open"
-`)
-	require.NoError(t, err, "%+v", res.Diagnostics)
-	res, _, err = define("lowertwin/specs.memql", `/// Reads a field only lowerinit's ticket declares.
+	res, _, err = define("", `use lowertwin.concepts.{ ticket }
+
+/// Reads a field only lowerinit's ticket declares.
 spec ticket readsTheOtherTicket = row => row.status == "open"
 `)
 	require.Error(t, err)
 	require.Contains(t, diagnosticFor(t, res.Diagnostics, "spec", "readsTheOtherTicket").Error,
-		"`status` is not a declared field of v1:lowertwin:ticket", "bound to its own domain's ticket, not the first one found")
+		"`status` is not a declared field of v1:lowertwin:ticket", "bound to the imported ticket, not the first one found")
+
+	// With no import the name is ambiguous -- even from a file in one of the
+	// two domains, since a stored row keeps no file: refused at define, naming
+	// the imports that would choose.
+	res, _, err = define("lowerinit/specs.memql", `/// Which ticket?
+spec ticket whichTicket = row => row.status == "open"
+`)
+	require.Error(t, err)
+	require.Contains(t, diagnosticFor(t, res.Diagnostics, "spec", "whichTicket").Error, twinImportMessage)
+}
+
+func TestAuthoringLower_AnImportedBindingSurvivesPromoteAndReHydration(t *testing.T) {
+	eng := bootTwinTicketDomains(t)
+	const bundle = `use lowertwin.concepts.{ ticket }
+
+/// Open, in the twin's sense.
+spec ticket isTwinOpen = row => row.state == "open"
+
+/// Closed, in the twin's sense.
+spec ticket isTwinClosed = row => row.state == "closed"
+`
+	persist := &fakePromoteStore{}
+	{
+		res, err := eng.promoteBundleDurableWithStore(context.Background(), persist, "owner-1", bundle, "", false)
+		require.NoError(t, err, "%+v", res.Diagnostics)
+	}
+	require.Len(t, persist.constructs, 2)
+	for _, row := range persist.constructs {
+		require.Contains(t, row.Source, "use lowertwin.concepts.{ ticket }", "%s's stored row carries the import it binds through", row.Name)
+	}
+
+	// A single construct promoted from a session carries it too.
+	reg := NewAuthoredRuntimeRegistry()
+	single := &fakePromoteStore{}
+	{
+		res, err := eng.DefineSessionBundle(reg, "owner-1", `use lowertwin.concepts.{ ticket }
+
+/// Held, in the twin's sense.
+spec ticket isTwinHeld = row => row.state == "held"
+`, "")
+		require.NoError(t, err, "%+v", res.Diagnostics)
+	}
+	c, ok := reg.Lookup("owner-1", "spec", "isTwinHeld")
+	require.True(t, ok)
+	require.NoError(t, eng.promoteConstructDurableWithStore(context.Background(), single, nil, "owner-1", c))
+	require.Len(t, single.constructs, 1)
+	require.Contains(t, single.constructs[0].Source, "use lowertwin.concepts.{ ticket }")
+
+	// The next boot: a fresh engine over the same tree re-hydrates the stored
+	// rows, and they bind as the author's define did.
+	fresh, err := New(nil, (&component.Component{}).WithLoggerWriter(io.Discard))
+	require.NoError(t, err)
+	fresh.Logger = eng.Logger
+	require.NoError(t, fresh.Init(concept.DefaultRegistry()))
+	rows := append(append([]AuthoringConstructRow{}, persist.constructs...), single.constructs...)
+	store := &fakeRehydrateStore{constructs: map[string][]AuthoringConstructRow{}}
+	for i, row := range rows {
+		row.OwnerUserId, row.Status = "owner-1", "active"
+		bundleID := row.BundleId
+		if bundleID == "" {
+			bundleID = fmt.Sprintf("b%d", i)
+			row.BundleId = bundleID
+		}
+		store.bundles = append(store.bundles, AuthoringBundleRow{Id: bundleID, OwnerUserId: "owner-1", Status: BundleActive})
+		store.constructs[bundleID] = append(store.constructs[bundleID], row)
+	}
+	var res RehydrateResult
+	res, err = fresh.rehydratePromotedNow(context.Background(), store)
+	require.NoError(t, err)
+	require.Empty(t, res.Failed, "nothing is quarantined: the import binds at boot as it did at promote")
+	require.Equal(t, 3, res.Rehydrated)
+	for name, want := range map[string]string{
+		"isTwinOpen":   `payload.state=="open"`,
+		"isTwinClosed": `payload.state=="closed"`,
+		"isTwinHeld":   `payload.state=="held"`,
+	} {
+		spec, err := fresh.specs.Get(name)
+		require.NoError(t, err, name)
+		require.Equal(t, want, canonicalExpression(spec.Expr), name)
+	}
+}
+
+func TestAuthoringLower_AnAmbiguousBindingWithNoImportIsRefusedAtPromote(t *testing.T) {
+	eng := bootTwinTicketDomains(t)
+	persist := &fakePromoteStore{}
+	var res PromoteBundleResult
+	var err error
+	res, err = eng.promoteBundleDurableWithStore(context.Background(), persist, "owner-1", `/// Open -- but whose ticket?
+spec ticket isSomeoneOpen = row => row.state == "open"
+`, "lowertwin/specs.memql", false)
+	require.Error(t, err, "refused at promote, never passed to be quarantined at the next boot")
+	require.Contains(t, diagnosticFor(t, res.Diagnostics, "spec", "isSomeoneOpen").Error, twinImportMessage)
+	require.Empty(t, persist.constructs, "nothing is persisted")
 }
 
 // coreShapesForTest is the embedded tree's shape registry, loaded as Init

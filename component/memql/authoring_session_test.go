@@ -25,15 +25,13 @@ mutate mcpWidget mutationCreateMcpWidget {
     widgetId  string  @required
   }
   insert {
-    id:    canonicalId(args.widgetId, mcpWidget)
+    id:    canonicalId(args.widgetId, "mcpWidget")
     label: "x"
   }
 }`
 
 const sessionSpecSrc = `@description("session spec")
-spec actorEnvelope mcpSessSpec {
-  return role == "admin"
-}`
+spec actorEnvelope mcpSessSpec = actor => actor.role == "admin"`
 
 // SplitBundleSource recognizes concept + function-family + shape constructs and
 // dedupes by (kind, name).
@@ -80,7 +78,7 @@ func TestAuthorSessionBundle_ValidatesAndRegisters(t *testing.T) {
 // An invalid bundle registers nothing and reports the failure.
 func TestAuthorSessionBundle_RejectsInvalid(t *testing.T) {
 	reg := NewAuthoredRuntimeRegistry()
-	res, err := AuthorSessionBundle(reg, "owner-1", `spec actorEnvelope broken { return role == }`, "")
+	res, err := AuthorSessionBundle(reg, "owner-1", `spec actorEnvelope broken = actor => actor.role ==`, "")
 	if err == nil {
 		t.Fatal("expected an error for an invalid bundle")
 	}

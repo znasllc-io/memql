@@ -3,7 +3,8 @@ package emailrules
 // generate_v1_test.go -- the rule condition as an edition-2026 predicate over
 // `row` (epic memql#5363, memql#5368): both stored spellings generate one
 // automation, the generated construct parses and compiles as a v1 automation
-// and loads today, and every refusal speaks to the person who typed it.
+// and loads through the authoring pipeline, and every refusal speaks to the
+// person who typed it.
 
 import (
 	"encoding/json"
@@ -108,8 +109,7 @@ func TestV1ConditionsAccepted(t *testing.T) {
 // rule is most often written with (an exact address, a domain) are accepted
 // by the form check, generate with the literal intact, and load through the
 // real compiler on every path a rule takes: Gate 1, which activation runs;
-// the legacy load path the authoring pipeline uses today; and the v1 compile
-// and runtime preparation the flip turns on.
+// the authoring pipeline's load; and the v1 compile and runtime preparation.
 func TestConditionsWithAnAtInAStringLoad(t *testing.T) {
 	for _, c := range []struct{ cond, filter string }{
 		{`row.email == "boss@acme.com"`, `row.email == "boss@acme.com"`},
@@ -139,20 +139,20 @@ func loadsThroughTheRealCompiler(t *testing.T, src string) {
 	if report := memqlengine.ValidateBundle(src, "campaigns/automations.memql"); !report.OK {
 		t.Fatalf("Gate 1 refused the construct:\n%s\ndiagnostics: %+v", src, report.Diagnostics)
 	}
-	legacy, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(src, "authored:emailrules")
+	authored, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(src, "authored:emailrules")
 	if err != nil {
-		t.Fatalf("the legacy load path refused the construct: %v\n%s", err, src)
+		t.Fatalf("the authoring pipeline's load refused the construct: %v\n%s", err, src)
 	}
-	if legacy.Trigger == nil || legacy.Trigger.FilterLambda == nil {
-		t.Fatalf("the legacy load path lost the lambda filter: %+v", legacy.Trigger)
+	if authored.Trigger == nil || authored.Trigger.FilterLambda == nil {
+		t.Fatalf("the authoring pipeline did not load the construct with its lambda filter: trigger=%+v", authored.Trigger)
 	}
 	normalised, err := langparser.NormaliseAll(src)
 	if err != nil {
 		t.Fatalf("normalise: %v", err)
 	}
-	file, err := langparser.ParseFileWithOptions(normalised, langparser.Options{ExpressionsV1: true})
+	file, err := langparser.ParseFile(normalised)
 	if err != nil {
-		t.Fatalf("the construct does not parse with ExpressionsV1 on: %v\n%s", err, src)
+		t.Fatalf("the construct does not parse: %v\n%s", err, src)
 	}
 	res, err := compiler.NewDefault().CompileFile(file)
 	if err != nil {
@@ -169,8 +169,8 @@ func loadsThroughTheRealCompiler(t *testing.T, src string) {
 	if err := automations.PrepareExpressions(&a); err != nil {
 		t.Fatalf("the runtime refused the compiled construct: %v", err)
 	}
-	if !a.IsV1() || a.Trigger.FilterLambda == nil {
-		t.Fatal("the runtime did not load the construct as v1 with its lambda filter")
+	if a.Trigger == nil || a.Trigger.FilterLambda == nil {
+		t.Fatal("the runtime did not load the construct with its lambda filter")
 	}
 }
 
@@ -217,19 +217,19 @@ func TestConditionRefusals(t *testing.T) {
 	}
 }
 
-// TestGeneratedAutomationIsV1: the construct parses with the edition-2026
-// grammar on and compiles as a v1 automation -- the trigger filter a lambda,
-// its one statement's arguments expression leaves the run's scope resolves --
-// which the automations runtime prepares without refusal.
+// TestGeneratedAutomationIsV1: the construct parses in edition 2026 and
+// compiles as a v1 automation -- the trigger filter a lambda,
+// the step's arguments expression leaves the run's scope resolves -- which the
+// automations runtime prepares without refusal.
 func TestGeneratedAutomationIsV1(t *testing.T) {
 	src := generate(t, `payload.role == "admin" && payload.active == true`)
 	normalised, err := langparser.NormaliseAll(src)
 	if err != nil {
 		t.Fatalf("normalise: %v", err)
 	}
-	file, err := langparser.ParseFileWithOptions(normalised, langparser.Options{ExpressionsV1: true})
+	file, err := langparser.ParseFile(normalised)
 	if err != nil {
-		t.Fatalf("the generated construct does not parse with ExpressionsV1 on: %v\n%s", err, src)
+		t.Fatalf("the generated construct does not parse: %v\n%s", err, src)
 	}
 	var def *langparser.FunctionDef
 	for _, d := range file.Definitions {
@@ -238,8 +238,8 @@ func TestGeneratedAutomationIsV1(t *testing.T) {
 		}
 	}
 	body, ok := def.Body.(*langparser.AutomationDef)
-	if !ok || !body.ExpressionsV1 || body.Trigger == nil || body.Trigger.FilterLambda == nil {
-		t.Fatalf("parsed %T %+v: want a v1 automation with a lambda trigger filter", def.Body, def.Body)
+	if !ok || body.Trigger == nil || body.Trigger.FilterLambda == nil {
+		t.Fatalf("parsed %T %+v: want an automation with a lambda trigger filter", def.Body, def.Body)
 	}
 
 	res, err := compiler.NewDefault().CompileFile(file)
@@ -247,8 +247,8 @@ func TestGeneratedAutomationIsV1(t *testing.T) {
 		t.Fatalf("compile: %v", err)
 	}
 	compiled := res.Automations[0].JSON
-	if compiled["expressions"] != "v1" {
-		t.Fatalf(`compiled "expressions" = %#v, want "v1"`, compiled["expressions"])
+	if _, marked := compiled["expressions"]; marked {
+		t.Fatalf(`the retired "expressions" marker is written: %#v`, compiled["expressions"])
 	}
 	b, err := json.Marshal(compiled)
 	if err != nil {
@@ -273,22 +273,23 @@ func TestGeneratedAutomationIsV1(t *testing.T) {
 	if err := automations.PrepareExpressions(&a); err != nil {
 		t.Fatalf("the runtime refused the compiled construct: %v", err)
 	}
-	if !a.IsV1() || a.Trigger.FilterLambda == nil {
-		t.Fatal("the runtime did not load the construct as v1 with its lambda filter")
+	if a.Trigger == nil || a.Trigger.FilterLambda == nil {
+		t.Fatal("the runtime did not load the construct with its lambda filter")
 	}
 }
 
-// TestGeneratedAutomationLoadsAsStatements: the authoring pipeline's load path
-// takes the construct as an edition-2026 statement body (epic memql#5370) --
-// one builtin statement -- whose trigger filter is the lambda it is.
+// TestGeneratedAutomationLoadsAsStatements: the authoring pipeline -- the
+// loader activation arms a rule through -- takes the construct as an
+// edition-2026 statement body (epic memql#5370), one builtin statement, and its
+// filter is the lambda it generated, parsed at load.
 func TestGeneratedAutomationLoadsAsStatements(t *testing.T) {
 	src := generate(t, `row.role == "admin"`)
 	a, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(src, "authored:emailrules")
 	if err != nil {
-		t.Fatalf("the load path refused the construct: %v\n%s", err, src)
+		t.Fatalf("the authoring pipeline refused the construct: %v\n%s", err, src)
 	}
-	if !a.IsV1() || !a.IsStatementBody() || a.Trigger == nil || a.Trigger.FilterLambda == nil {
-		t.Fatalf("v1=%v statements=%v trigger=%+v: want a statement body whose lambda filter was parsed", a.IsV1(), a.IsStatementBody(), a.Trigger)
+	if !a.IsStatementBody() || a.Trigger == nil || a.Trigger.FilterLambda == nil {
+		t.Fatalf("statements=%v trigger=%+v: want a statement body whose lambda filter was parsed at load", a.IsStatementBody(), a.Trigger)
 	}
 	if len(a.Steps) != 1 || a.Steps[0].Function == nil || a.Steps[0].Function.Name != "emailRuleFire" || a.Steps[0].Function.Kind != "builtin" {
 		t.Fatalf("steps %+v: want the one builtin statement", a.Steps)

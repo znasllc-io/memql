@@ -27,7 +27,7 @@
 /// removes the directory tree (even when no concept row exists -- the integration provisions
 /// without writing the row), both gated on the terminal scalar.
 @trigger(event="graph.node.updated.v1:work:run")
-@filter(payload.status != "running" && payload.status != "compiling" && payload.status != "waiting")
+@filter(row => row.status != "running" && row.status != "compiling" && row.status != "waiting")
 automation releaseWorkspaceOnRunTerminal {
   args {
     id any
@@ -51,7 +51,7 @@ automation releaseWorkspaceOnRunTerminal {
     }
   }
   step teardown {
-    if steps.terminal.result == true && exists(id) {
+    if steps.terminal.result == true && id != nil {
       builtin workbenchTeardownDirectory (
         runId: id
       )

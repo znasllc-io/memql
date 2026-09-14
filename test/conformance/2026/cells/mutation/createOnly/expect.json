@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "a-list-of-strings.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-unquoted-values.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@createOnly on a mutation takes one or more strings"
+    },
+    {
+      "file": "on-an-update.memql",
+      "verdict": "refuse_load",
+      "message": "@createOnly is only valid on insert mutations"
+    }
+  ]
+}

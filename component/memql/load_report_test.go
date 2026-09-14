@@ -121,7 +121,7 @@ func TestRehydrationQuarantine(t *testing.T) {
 		Name:        "rottedSpec",
 		BundleId:    "authoring:bundle:rot1",
 		OwnerUserId: "u-owner",
-		Source:      "spec activeRowTrait rottedSpec {\n  return status ==== \"x\" &&&& true\n}\n",
+		Source:      "spec actorEnvelope rottedSpec = actor => actor.role ==== \"x\" &&&& true\n",
 		Status:      "active",
 	}
 

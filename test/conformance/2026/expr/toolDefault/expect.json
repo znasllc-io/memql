@@ -58,6 +58,17 @@
       "verdict": "refuse_parse",
       "message": "expected ')'",
       "note": "methodCall"
+    },
+    {
+      "file": "a-quoted-number.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "a-number.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@default on a tool field takes one string",
+      "note": "A tool field's default is the string the input schema advertises to the model. What is inside the quotes is not checked today: @default(\"twenty\") on an integer field, and a default outside the field's @enum, both load."
     }
   ]
 }

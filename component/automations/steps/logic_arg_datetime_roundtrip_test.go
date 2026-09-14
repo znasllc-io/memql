@@ -3,16 +3,16 @@ package steps
 // logic_arg_datetime_roundtrip_test.go -- the memql#2543 end-to-end
 // regression: an automation step passes a query/step-result collection into
 // a logic arg (`logic dayRollup(rows: steps.getRows.result)`); the
-// FunctionExecutor resolves the reference to live Go values, stringifies
-// them into query text, and engine.Execute re-parses that text before
+// FunctionExecutor evaluates the argument to live Go values, renders them
+// into query text, and engine.Execute re-parses that text before
 // dispatching the logic. A row's createdAt (a live time.Time) rendered in
 // Go's default format and the re-parse rejected it with `expected '}', got
 // "-07"` -- a runtime crash memqllint could not see.
 //
 // The test drives every production stage of that boundary in order:
 //
-//  1. SERIALIZE -- resolveArgsRefs + renderFunctionArgs, exactly the two
-//     calls FunctionExecutor.Execute makes to build the query text.
+//  1. SERIALIZE -- ResolveV1Map + renderV1CallArgs, exactly the two calls
+//     FunctionExecutor.Execute makes to build the query text.
 //  2. RE-PARSE -- MemQLEngine.Parse on the real engine (the same
 //     parseWithFunctions path engine.Execute runs), with the receiving
 //     logic registered so the call classifies as plan.LogicCall.
@@ -50,7 +50,6 @@ func parseLogicBodyForSteps(t *testing.T, src string) *langparser.AutomationDef 
 		t.Fatalf("Tokenize: %v", err)
 	}
 	p := langparser.NewParser(tokens)
-	p.SetSource(normalised)
 	ast, err := p.Parse()
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -75,11 +74,18 @@ func parseLogicBodyForSteps(t *testing.T, src string) *langparser.AutomationDef 
 }
 
 // nullStepRegistry satisfies the LogicRunner's registry dependency for
-// bodies whose steps all resolve locally (collection chains, literal
-// returns). Any step that reaches it succeeds with an empty result.
+// bodies whose steps all evaluate in process (collection chains, literal
+// returns): a query step that is not a construct call runs on the real query
+// executor, which evaluates it with no engine round trip. Any other step
+// that reaches it succeeds with an empty result.
 type nullStepRegistry struct{}
 
-func (r *nullStepRegistry) Execute(_ context.Context, step *automations.Step, _ *automations.StepContext) (*automations.StepResult, error) {
+func (r *nullStepRegistry) Execute(ctx context.Context, step *automations.Step, sc *automations.StepContext) (*automations.StepResult, error) {
+	if sc != nil && sc.Evaluator != nil {
+		if _, inProcess, _ := sc.Evaluator.InProcessQuery(ctx, step); inProcess {
+			return (&QueryExecutor{}).Execute(ctx, step, sc)
+		}
+	}
 	now := time.Now()
 	return &automations.StepResult{StepId: step.ID, Status: "success", StartedAt: now, CompletedAt: now}, nil
 }
@@ -116,7 +122,7 @@ logic logicDayRollupProbe {
 
 	// STAGE 1 -- serialize. Seed the sending automation's evaluator with a
 	// step result whose rows carry a live time.Time createdAt (the DB-model
-	// representation, memory-nodes/models.go), then resolve + render the
+	// representation, memory-nodes/models.go), then evaluate + render the
 	// compiled `logic dayRollupProbe(rows: steps.getRows.result, day: ...)`
 	// args exactly as FunctionExecutor.Execute does.
 	cet := time.FixedZone("CET", 3600)
@@ -129,15 +135,19 @@ logic logicDayRollupProbe {
 			{"id": "v1:ship:scan:2", "createdAt": time.Date(2026, 7, 13, 9, 30, 0, 0, cet), "count": 30},
 		},
 	})
+	rowsRef, err := langparser.ParseV1Expression("steps.getRows.result")
+	if err != nil {
+		t.Fatal(err)
+	}
 	compiledArgs := map[string]any{
-		"rows": "steps.getRows.result",
+		"rows": &automations.ExprLeaf{Src: "steps.getRows.result", Node: rowsRef},
 		"day":  "2026-07-14",
 	}
-	resolved, err := resolveArgsRefs(compiledArgs, evaluator)
+	resolved, err := evaluator.ResolveV1Map(context.Background(), compiledArgs)
 	if err != nil {
-		t.Fatalf("resolveArgsRefs: %v", err)
+		t.Fatalf("resolve: %v", err)
 	}
-	query := "logicDayRollupProbe(" + renderFunctionArgs(resolved) + ")"
+	query := "logicDayRollupProbe(" + renderV1CallArgs(resolved) + ")"
 	for _, leak := range []string{" CET", " MST", "+0100", "seconds:"} {
 		if strings.Contains(query, leak) {
 			t.Fatalf("rendered query leaked Go-format datetime %q (the #2543 crash text):\n%s", leak, query)

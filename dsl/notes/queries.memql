@@ -1,14 +1,14 @@
 // notes domain -- caller-scoped reads.
 //
 // Authz tier: owned. Every filter gates on
-// payload.ownerUserId==actor.userId so a caller can only ever read
+// `row.ownerUserId == actor.userId` so a caller can only ever read
 // their own notes; no arg widens the row set beyond their ownership.
 
-/// List the caller's notes. Owned: the row set is gated by ownerUserId==actor.userId server-side,
+/// List the caller's notes. Owned: the row set is gated by `row.ownerUserId == actor.userId` server-side,
 /// so cross-user reads are impossible.
 @actor
 query note notes {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full notes-list pull. Literal page size --
   // the struct-query paginate directive only accepts an integer literal.
@@ -17,7 +17,7 @@ query note notes {
   shape    noteFull
 }
 
-/// Fetch a single note by id, gated to the caller. Owned: ownerUserId==actor.userId is the
+/// Fetch a single note by id, gated to the caller. Owned: `row.ownerUserId == actor.userId` is the
 /// load-bearing guard, so a caller can never read another user's note even with its id. Used by the
 /// update tool to confirm the row exists before re-inserting a new version.
 @mcp
@@ -27,11 +27,11 @@ query note noteById {
   args {
     noteId  string!
   }
-  filter  when(args.noteId) { row.id==args.noteId } && ownerUserId==actor.userId
+  filter  row => (args.noteId == nil || row.id == args.noteId) && row.ownerUserId == actor.userId
   shape   noteFull
 }
 
-/// Search the caller's notes by tag. Owned: ownerUserId==actor.userId gates the row set
+/// Search the caller's notes by tag. Owned: `row.ownerUserId == actor.userId` gates the row set
 /// server-side; the tag predicate narrows to notes carrying the given tag. Body substring matching
 /// is done client-side over this caller-scoped result so the search never leaks across users.
 @actor
@@ -39,7 +39,7 @@ query note notesByTag {
   args {
     tag  string!
   }
-  filter  ownerUserId==actor.userId && when(args.tag) { args.tag in tags }
+  filter  row => row.ownerUserId == actor.userId && (args.tag == nil || args.tag in row.tags)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full tag-filtered notes pull. Literal page
   // size -- the struct-query paginate directive only accepts an integer literal.

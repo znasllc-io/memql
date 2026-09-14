@@ -1,0 +1,20 @@
+/// A support ticket: the row this cell's cases read and write.
+concept ticket {
+  ownerUserId      string
+  title            string
+  status           string
+  openedByAgentId  string
+}
+
+/// Open a ticket, recording which agent opened it.
+mutate ticket openTicketAutoInjected {
+  args {
+    title    string!
+    agentId  string
+  }
+  insert {
+    title: args.title
+    status: "open"
+    openedByAgentId: args.agentId
+  }
+}

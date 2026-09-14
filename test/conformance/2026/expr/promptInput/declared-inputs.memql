@@ -1,0 +1,6 @@
+/// Summarise a ticket in one sentence. The template reads the title, which the prompt declares.
+@level("fast")
+@templateFile("summariseTicket.tmpl")
+prompt summariseTicketFromTitle {
+  title  string!  @description("The ticket's title.")
+}

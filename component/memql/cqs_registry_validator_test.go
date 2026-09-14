@@ -69,7 +69,7 @@ func TestValidateCQSAcrossRegistry_QueryCallsQuery(t *testing.T) {
 	must(t, reg.Upsert(&Function{
 		Name:         "queryInner",
 		FunctionKind: "query",
-		ExprSource:   `filter id == args.id`,
+		ExprSource:   `filter row => row.id == args.id`,
 	}))
 
 	if err := ValidateCQSAcrossRegistry(reg); err != nil {

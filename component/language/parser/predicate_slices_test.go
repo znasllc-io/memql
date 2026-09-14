@@ -9,6 +9,7 @@ import (
 // brace-less spec or trait (memql#5364): preamble through the expression's
 // last character, continuation lines included, trailing comment excluded.
 func TestExtractPredicateDeclarationSlices(t *testing.T) {
+	// memqlmigrate:keep -- the braced spec is a case: not this slicer's.
 	src := `use agents.concepts.{ agent }
 
 /// Assistants only.
