@@ -1721,6 +1721,10 @@ func convertArgsField(field *languageParser.ArgsField) (*FunctionArgsField, erro
 // thing. Non-string values (literals, nested objects) are never
 // caller-args. Backs the C5 (memql#2035) sensitive-field gate.
 func valueReferencesCallerArg(v any) bool {
+	// An edition-2026 leaf is a parsed node, not text (mutation_values_v1.go).
+	if isArg, isV1 := v1LeafIsCallerArg(v); isV1 {
+		return isArg
+	}
 	s, ok := v.(string)
 	if !ok {
 		return false
