@@ -37,6 +37,7 @@ import (
 	"sync"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/ast"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -458,7 +459,19 @@ func isRowIdName(f FieldReference) bool {
 
 // isClusterOwnerLeaf reports whether a conjunct is the cluster-owner gate,
 // written either as `actor.isClusterOwner` or `actor.isClusterOwner==true`.
+//
+// An edition-2026 filter carries the gate as a PLAN CONSTANT: Lower makes a
+// condition with no row in it a PlanConstExpression that argument expansion
+// evaluates once per call (expr_plan_const.go), so `actor.isClusterOwner ==
+// true` reaches this analyzer as the v1 AST inside one, not as the `actor.`
+// comparison the legacy converter built. Without this arm every composite
+// tier's own spelling, `row.ownerUserId == actor.userId ||
+// actor.isClusterOwner == true`, read as an opaque disjunction and the
+// tree-wide measurement went undecidable for every construct written in it.
 func isClusterOwnerLeaf(node ExpressionNode) bool {
+	if pc, ok := node.(*PlanConstExpression); ok {
+		return isClusterOwnerGateV1(pc.Expr)
+	}
 	cmp, ok := node.(*ComparisonExpression)
 	if !ok {
 		return false
@@ -480,6 +493,52 @@ func isClusterOwnerLeaf(node ExpressionNode) bool {
 	default:
 		return false
 	}
+}
+
+// isClusterOwnerGateV1 reads the cluster-owner gate in a plan constant's v1
+// AST: `actor.isClusterOwner` alone, `== true` or `!= false`, with the
+// operands in either order, through `.` or `.?` (the envelope is always
+// bound, so the two hops read the same value). It is STRICTER than the legacy
+// arm above, and on purpose, because each form it admits must be one EvalExpr
+// decides as the gate: the field name is matched exactly (the envelope's keys
+// are case-sensitive, so `actor.isclusterowner` reads an absent key -- false
+// for every caller), and only a BOOLEAN literal counts (`== "true"` compares a
+// bool with a string, which is never true, where the legacy compiler coerced
+// it). A spelling credited here that is never true would report a read as
+// restating the tier while it returns nothing to anyone.
+func isClusterOwnerGateV1(n ast.ExpressionNode) bool {
+	isGateField := func(n ast.ExpressionNode) bool {
+		m, ok := ast.Unparen(n).(*ast.MemberExpr)
+		if !ok || m.Field != "isClusterOwner" {
+			return false
+		}
+		root, ok := ast.Unparen(m.Object).(*ast.IdentExpr)
+		return ok && root.Name == "actor"
+	}
+	switch e := ast.Unparen(n).(type) {
+	case *ast.MemberExpr:
+		return isGateField(e)
+	case *ast.BinaryExpr:
+		field, other := e.Left, e.Right
+		if !isGateField(field) {
+			field, other = other, field
+		}
+		if !isGateField(field) {
+			return false
+		}
+		lit, ok := ast.Unparen(other).(*ast.LiteralExpr)
+		if !ok {
+			return false
+		}
+		b, isBool := lit.Value.(bool)
+		switch e.Op {
+		case "==":
+			return isBool && b
+		case "!=":
+			return isBool && !b
+		}
+	}
+	return false
 }
 
 func isFalseLiteral(v any) bool {
