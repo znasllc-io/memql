@@ -34,7 +34,7 @@ func TestBuildNonEmpty(t *testing.T) {
 // lockstep (the #2124 drift test additionally cross-checks the parser).
 func TestConstructsCoverLiveGrammar(t *testing.T) {
 	want := map[string]bool{
-		"concept": true, "query": true, "mutate": true, "logic": true,
+		"concept": true, "query": true, "mutation": true, "logic": true,
 		"automation": true, "spec": true, "trait": true, "shape": true,
 		"tool": true, "prompt": true, "provider": true, "builtin": true,
 		"policy": true, "rule": true, "seed": true, "use": true,

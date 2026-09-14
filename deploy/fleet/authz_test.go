@@ -363,7 +363,7 @@ func hasTopLevelConjunct(filter, want string) bool {
 func TestEveryOwnedMutationStampsTheOwnerFromTheActor(t *testing.T) {
 	src := fleetFile(t, "mutations.memql")
 
-	blocks := regexp.MustCompile(`(?m)^mutate\s+(\w+)\s+(\w+)\s*\{`).FindAllStringSubmatchIndex(src, -1)
+	blocks := regexp.MustCompile(`(?m)^mutation\s+(\w+)\s+(\w+)\s*\{`).FindAllStringSubmatchIndex(src, -1)
 	if len(blocks) == 0 {
 		t.Fatal("parsed no mutations -- this gate is watching nothing")
 	}

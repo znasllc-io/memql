@@ -36,9 +36,9 @@ func TestEmitConceptCardExecutor_RequiresEngine(t *testing.T) {
 		ID:   "emitCard",
 		Type: automations.StepTypeEmitConceptCard,
 		EmitConceptCard: &automations.EmitConceptCardStepConfig{
-			CardType:   "lead_captured",
-			PartitionId:    "test-space",
-			ConceptRef: "v1:crm:lead:test-lead",
+			CardType:    "lead_captured",
+			PartitionId: "test-space",
+			ConceptRef:  "v1:crm:lead:test-lead",
 			Data: map[string]any{
 				"name":  "Test Lead",
 				"email": "test@example.com",
@@ -67,9 +67,9 @@ func TestEmitConceptCardExecutor_EvaluatesExpressions(t *testing.T) {
 		ID:   "emitCard",
 		Type: automations.StepTypeEmitConceptCard,
 		EmitConceptCard: &automations.EmitConceptCardStepConfig{
-			CardType:   "lead_captured",
-			PartitionId:    "$event.payload.partitionId",
-			ConceptRef: "$steps.upsertLead.result.Bundle.nodes.0.id",
+			CardType:    "lead_captured",
+			PartitionId: "$event.payload.partitionId",
+			ConceptRef:  "$steps.upsertLead.result.Bundle.nodes.0.id",
 			Data: map[string]any{
 				"name":  "$steps.extractLead.result[0].extraction.name",
 				"email": "literal@example.com",

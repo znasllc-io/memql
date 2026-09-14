@@ -173,7 +173,7 @@ func TestCallGraphCoverage(t *testing.T) {
 // the exact-count assertion above turns red -- which is the point: 10 of the 31
 // use that form, and two of the tree's three live @filter conditions sit on it.
 var kindKeywords = map[string]string{
-	"mutation":   "mutate",
+	"mutation":   "mutation",
 	"query":      "query",
 	"logic":      "logic",
 	"action":     "action",

@@ -6,11 +6,11 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/actions"
-	"github.com/znasllc-io/memql/component/automations"
-	"github.com/znasllc-io/memql/component/actions/pin"
-	"github.com/znasllc-io/memql/component/actions/fingerprint"
 	"github.com/znasllc-io/memql/component/actions/bind"
+	"github.com/znasllc-io/memql/component/actions/fingerprint"
+	"github.com/znasllc-io/memql/component/actions/pin"
 	"github.com/znasllc-io/memql/component/actions/surfaceresolver"
+	"github.com/znasllc-io/memql/component/automations"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 

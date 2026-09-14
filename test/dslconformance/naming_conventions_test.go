@@ -43,7 +43,7 @@ import (
 // WHY THIS GATE READS TOKENS AND NOT A REGEX. The first version of this file
 // matched declarations with
 //
-//	^(query|mutate|logic|spec|trait|seed)[ \t]+(?:[A-Za-z_]\w*[ \t]+)?([A-Za-z_]\w*)[ \t]*\{
+//	^(query|mutation|logic|spec|trait|seed)[ \t]+(?:[A-Za-z_]\w*[ \t]+)?([A-Za-z_]\w*)[ \t]*\{
 //
 // and review found it was narrower than the grammar in four separate ways --
 // the same class of defect the gate exists to prevent, in the gate itself:
@@ -147,7 +147,7 @@ var declKeywordPrefixes = func() map[string][]string {
 	for _, kw := range rewriterLoweredKeywords {
 		m[kw] = []string{kw}
 	}
-	m["mutate"] = []string{"mutate", "mutation"}
+	m["mutation"] = []string{"mutation"}
 	return m
 }()
 
@@ -164,7 +164,7 @@ var declKeywordPrefixes = func() map[string][]string {
 // (#2036), and would move no total.
 var declKeywordsPinned = []string{
 	"action", "automation", "builtin", "capability", "concept", "logic",
-	"mutate", "policy", "prompt", "provider", "query", "rule", "seed",
+	"mutation", "policy", "prompt", "provider", "query", "rule", "seed",
 	"shape", "spec", "tool", "trait",
 }
 

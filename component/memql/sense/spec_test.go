@@ -39,7 +39,7 @@ func TestCompleteTopLevelPrefixFilter(t *testing.T) {
 			got[it.Label] = true
 		}
 	}
-	if !got["mutate"] {
+	if !got["mutation"] {
 		t.Error("prefix `mut` should offer `mutate`")
 	}
 	if got["query"] || got["concept"] {
@@ -54,7 +54,7 @@ func TestKeywordsProjectedFromSpec(t *testing.T) {
 	for _, k := range Keywords {
 		kw[k] = true
 	}
-	for _, want := range []string{"mutate", "logic", "trait", "use", "in"} {
+	for _, want := range []string{"mutation", "logic", "trait", "use", "in"} {
 		if !kw[want] {
 			t.Errorf("Keywords missing %q", want)
 		}

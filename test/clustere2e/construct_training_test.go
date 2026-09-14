@@ -141,7 +141,6 @@ func newTrainingFixture() trainingFixture {
 // wrong.
 func (f trainingFixture) conceptSrc() string {
 	return fmt.Sprintf(`@version("1.0.0")
-@namespace("%s")
 @description("A concept taught to a running cluster by the memql#3745 gate")
 concept %s {
   ownerUserId  string  @required
@@ -152,7 +151,6 @@ concept %s {
 // conceptSrcAdditive adds one OPTIONAL field. Design section 7.3: additive lands.
 func (f trainingFixture) conceptSrcAdditive() string {
 	return fmt.Sprintf(`@version("1.0.0")
-@namespace("%s")
 @description("A concept taught to a running cluster by the memql#3745 gate")
 concept %s {
   ownerUserId  string  @required
@@ -165,7 +163,6 @@ concept %s {
 // 7.3: breaking, refused, and the refusal names the field.
 func (f trainingFixture) conceptSrcBreaking() string {
 	return fmt.Sprintf(`@version("1.0.0")
-@namespace("%s")
 @description("A concept taught to a running cluster by the memql#3745 gate")
 concept %s {
   ownerUserId  string  @required
@@ -187,7 +184,7 @@ func (f trainingFixture) mutationSrc() string {
 
 @actor
 @description("Create a trained widget")
-mutate %s %s {
+mutation %s %s {
   args {
     widgetId  string  @required
     label     string  @required

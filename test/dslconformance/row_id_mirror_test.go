@@ -75,7 +75,7 @@ import (
 
 var (
 	// mirrorMutateHeaderRe matches a concept-bound mutation header.
-	mirrorMutateHeaderRe = regexp.MustCompile(`(?m)^[ \t]*mutate[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+	mirrorMutateHeaderRe = regexp.MustCompile(`(?m)^[ \t]*mutation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 
 	// mirrorQueryHeaderRe matches a concept-bound query header.
 	mirrorQueryHeaderRe = regexp.MustCompile(`(?m)^[ \t]*query[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)

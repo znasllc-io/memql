@@ -73,7 +73,7 @@ import (
 
 var (
 	dsConceptHdr  = regexp.MustCompile(`^concept[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
-	dsMutateHdr   = regexp.MustCompile(`^mutate[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+	dsMutateHdr   = regexp.MustCompile(`^mutation[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 	dsUseConcepts = regexp.MustCompile(`^[ \t]*use[ \t]+([A-Za-z_][A-Za-z0-9_.]*)\.concepts\.\{([^}]*)\}`)
 	dsFieldDecl   = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)[ \t]+(\S+)`)
 	dsWriteOpen   = regexp.MustCompile(`^[ \t]*(insert|update)[ \t]*\{`)

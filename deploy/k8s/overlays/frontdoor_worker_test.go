@@ -168,7 +168,6 @@ func TestTheWorkerStreamReachesTheAgentInEveryGeneratedOverlay(t *testing.T) {
 	}
 }
 
-
 // TestTheWorkerStreamIngressIdleTimeoutsAndSticky gates the annotations that
 // stop Jose's 408@60.000s on api-front-door-grpc and keep reconnects on one
 // of the two agent pods. Read/send must be hours (well above the ~30s gRPC
@@ -177,10 +176,10 @@ func TestTheWorkerStreamReachesTheAgentInEveryGeneratedOverlay(t *testing.T) {
 func TestTheWorkerStreamIngressIdleTimeoutsAndSticky(t *testing.T) {
 	const grpcIngress = "api-front-door-grpc"
 	want := map[string]string{
-		"nginx.ingress.kubernetes.io/backend-protocol":    "GRPC",
-		"nginx.ingress.kubernetes.io/proxy-read-timeout":  "14400",
-		"nginx.ingress.kubernetes.io/proxy-send-timeout":  "14400",
-		"nginx.ingress.kubernetes.io/upstream-hash-by":    "$binary_remote_addr",
+		"nginx.ingress.kubernetes.io/backend-protocol":   "GRPC",
+		"nginx.ingress.kubernetes.io/proxy-read-timeout": "14400",
+		"nginx.ingress.kubernetes.io/proxy-send-timeout": "14400",
+		"nginx.ingress.kubernetes.io/upstream-hash-by":   "$binary_remote_addr",
 	}
 	for _, overlay := range generatedOverlays {
 		t.Run(overlay, func(t *testing.T) {

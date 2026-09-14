@@ -163,9 +163,13 @@ func TestEvaluateHash_StableAcrossCalls(t *testing.T) {
 // --- memql#1065 reproduction --------------------------------------
 //
 // ensureDailySpaceOnAuthSession's logic body returns
-//   ensureDailySpaceForUser({ userId: coalesce(args.event.payload.userId, args.event.payload.subject) })
+//
+//	ensureDailySpaceForUser({ userId: coalesce(args.event.payload.userId, args.event.payload.subject) })
+//
 // which the compiler renders to the function-arg expression
-//   coalesce($args.event.payload.userId, $args.event.payload.subject)
+//
+//	coalesce($args.event.payload.userId, $args.event.payload.subject)
+//
 // (see automation_generator.go convertArgReferences). authSession's
 // userId field is OPTIONAL and frequently stored as "" while subject
 // (the JWT sub, v1:identity:user:<uuid>) is @required and always set.
@@ -248,7 +252,9 @@ func TestCoalesce_AuthSessionMissingSubjectYieldsNil(t *testing.T) {
 //
 // The fix reshapes logicEnsureDailySpaceOnAuthSession into a function step
 // whose object arg carries the coalesce expression in the $args form:
-//   { userId: coalesce($args.event.payload.userId, $args.event.payload.subject) }
+//
+//	{ userId: coalesce($args.event.payload.userId, $args.event.payload.subject) }
+//
 // The FunctionExecutor resolves these args (resolveArgsRefs -> resolveArgValueRef)
 // BEFORE rendering the engine query, so the builtin receives the resolved
 // subject -- never the empty userId, never the raw arg() text. This locks

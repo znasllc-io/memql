@@ -90,6 +90,7 @@ func parseEnv(r io.Reader, label string) ([]EnvEntry, error) {
 	}
 	return out, nil
 }
+
 // ParseEnvReader was here, and was deleted in memql#4055 rather than
 // unexported. It wrapped parseEnv, which ParseEnvFile already calls, so
 // unexporting would have left an unreferenced private wrapper -- and the

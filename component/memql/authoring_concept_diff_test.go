@@ -768,7 +768,6 @@ func TestPromoteConcept_RefusalReportsRealRowsAndRealConstructs(t *testing.T) {
 	conceptId := "v1:" + ns + ":order"
 
 	v1 := fmt.Sprintf(`@version("1.0.0")
-@namespace("%s")
 @description("An order")
 concept order {
   ownerUserId  string  @required
@@ -827,7 +826,6 @@ mutate order createOrder%s {
 	}
 
 	v2 := fmt.Sprintf(`@version("1.0.0")
-@namespace("%s")
 @description("An order")
 concept order {
   ownerUserId  string  @required
@@ -890,7 +888,6 @@ func TestConceptRowCount_NarrowedEnumCountsOnlyTheValuesThatStoppedBeingLegal(t 
 	conceptId := "v1:" + ns + ":ticket"
 
 	v1 := fmt.Sprintf(`@version("1.0.0")
-@namespace("%s")
 @description("A ticket")
 concept ticket {
   ownerUserId  string  @required
@@ -926,7 +923,6 @@ mutate ticket createTicket%s {
 	}
 
 	v2 := fmt.Sprintf(`@version("1.0.0")
-@namespace("%s")
 @description("A ticket")
 concept ticket {
   ownerUserId  string  @required

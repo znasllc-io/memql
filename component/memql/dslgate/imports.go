@@ -95,7 +95,7 @@ var flatKinds = map[string]bool{
 // a field named `provider` whose type is an enum -- then registers a bogus
 // `provider enum`, after which every `@enum(...)` annotation in the tree reads
 // as a cross-namespace provider call. That mistake cost 45 phantom findings.
-var declLineRe = regexp.MustCompile(`(?m)^(query|mutate|mutation|logic|spec|trait|shape|tool|prompt|provider|builtin|policy|rule|seed|concept|automation|action|capability)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?\s*[{(]`)
+var declLineRe = regexp.MustCompile(`(?m)^(query|mutation|logic|spec|trait|shape|tool|prompt|provider|builtin|policy|rule|seed|concept|automation|action|capability)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?\s*[{(]`)
 
 var useLineRe = regexp.MustCompile(`(?m)^\s*use\s+([a-zA-Z0-9_.]+)\.\{([^}]*)\}`)
 

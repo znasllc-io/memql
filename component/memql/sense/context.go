@@ -721,7 +721,7 @@ func isIdentStart(c byte) bool {
 
 // enclosingSignatureConceptRe captures the concept short-name of the
 // nearest preceding concept-binding construct header.
-var enclosingSignatureConceptRe = regexp.MustCompile(`(?m)^[ \t]*(?:query|mutate|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
+var enclosingSignatureConceptRe = regexp.MustCompile(`(?m)^[ \t]*(?:query|mutation|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
 
 // enclosingSignatureConcept returns the signature concept of the last
 // construct header above the cursor, or "" (automations/logic carry

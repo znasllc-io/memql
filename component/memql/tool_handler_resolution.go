@@ -37,7 +37,7 @@ import (
 // expression naming no construct at all (`concept==v1:...`). Only the names
 // this finds are resolvable; a handler naming no construct is left alone
 // rather than guessed at.
-var toolQueryConstructCall = regexp.MustCompile(`\b(query|mutation|mutate|logic|builtin|automation)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
+var toolQueryConstructCall = regexp.MustCompile(`\b(query|mutation|logic|builtin|automation)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
 
 // toolHandlerTargets returns every registry name a tool's handler depends on,
 // in declaration order, or nil when the handler resolves against nothing (a

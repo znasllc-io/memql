@@ -47,10 +47,12 @@ import (
 //
 //   - An AccessContext already present (a server-side on-behalf-of context,
 //     a test's ContextWithUserActor) wins untouched.
+//
 //   - No claims attaches NOTHING: a tokenless request keeps failing the
 //     handlers' own gates exactly as before. FallbackFromClaims(nil) would
 //     fabricate a blank-UserId reader envelope; the absence of claims is the
 //     absence of a caller, and it stays one.
+//
 //   - A MACHINE-SUBJECT credential class attaches nothing either, and this
 //     is a surface pin, not bookkeeping. service_account is read/query-pinned
 //     and voice_agent is pinned to its gRPC message set -- their pins live in
@@ -81,6 +83,7 @@ import (
 //     This was only expressible once app_session stopped being minted AS
 //     service_account. One name for two subjects is why the rule could not
 //     be stated for one and not the other.
+//
 // httpResolvableClass reports whether a verified credential class names a
 // SUBJECT an HTTP actor may be resolved from. Closed on purpose: a class
 // nobody has adjudicated resolves to nothing and the handler's own gate

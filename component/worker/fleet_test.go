@@ -531,7 +531,6 @@ func TestClearConnectedNodeStillClearsWhenWeHold(t *testing.T) {
 	}
 }
 
-
 func TestStreamSessionClose_DoesNotRemoveSuccessor(t *testing.T) {
 	store := &fakeRegistrationStore{}
 	store.byUser = []RegistrationRow{{

@@ -219,7 +219,7 @@ type mutationDecl struct {
 	serverOnly bool
 }
 
-var mutateHeaderRe = regexp.MustCompile(`^[ \t]*mutate[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+var mutateHeaderRe = regexp.MustCompile(`^[ \t]*mutation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 
 // scanMutationDeclarations walks the embedded tree and returns every
 // mutation declaration with its annotation preamble resolved.
