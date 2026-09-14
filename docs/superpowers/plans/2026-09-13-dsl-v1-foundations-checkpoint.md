@@ -51,22 +51,37 @@ Both branches are pushed to origin.
 - Worktree: `/home/znas/memql-projects/epic-dsl-v1-final-engine`
 - Branch: `wt/dsl-v1-final-engine`
 - Items A1-A9: the `-w` in the refusal, `dslimports.Load` reporting, the runbook upgrade order, the non-fatal unread manifest, the matrix doc claims, the `import ( ... )` block, the migrator and the lint root, concept annotations at parse time, stale docs and dead code.
-- Done before the checkpoint:
-  - `474aa3383` A1
-  - `198c97b6a` A2
-  - `defef8261` A7
-- A6 and the rest were in progress. Read `final-fix-A-report.md`.
+- Tip `292663b19`, pushed, clean. Details per item are in `final-fix-A-report.md`.
+- DONE:
+  - `474aa3383` A1: the refusal names `memqlmigrate --rewrite=language-line -w <dir>`.
+  - `198c97b6a` A2: `dslimports.Load` returns one `*LanguageLineError` per refused line; memqllint prints each once.
+  - `defef8261` A7: the migrator skips core domains; memqllint reads a domain directory, or a file inside one, as its domain; `For` uses `LanguageLineDomainOf`.
+- PARTIAL: `292663b19` A6 (WIP). `import ( ... )` is refused by name, naming `use`, and the parser's top-level error is construct_unknown's refusal from `ConstructKeywords()`. Remaining:
+  - a memqllint test for a mistyped keyword;
+  - the corpus case `negative/use/import-block` (`refuse_load`);
+  - the narrowing note in `grammar_version.go`;
+  - a re-run of `component/memql`.
+- NOT STARTED:
+  - A3: the runbooks;
+  - A4: the unread root manifest made non-fatal;
+  - A5: the registry docs at `registry.go:332` and `:376`, citing memql#5426, then regenerate the matrix;
+  - A9: the stale docs, and the dead `receiverKeyToConstructKeywords`.
+- DEFERRED: A8, under the ruling below.
+- **Ruling (A8 re-ruled, 2026-09-14).** Concept annotations stay checked at load. Moving the check into the concept parse would make boot SILENTLY DROP a concept with a bad annotation, because `ExtractConceptDecls` drops a concept that fails to parse. It would also flip about 28 corpus verdicts and move GrammarVersion. Meanwhile the refusal still happens at load, memqllint reports it, and B4's notification now surfaces a workspace that would not boot. Deferred to epic 4 (#5375), with the design notes in `final-fix-A-report.md`. The pre-existing silent drop of a concept block that fails to parse goes on memql#5426.
 
 **B: editor.**
 
 - Worktree: `/home/znas/memql-projects/epic-dsl-v1-final-editor`
 - Branch: `wt/dsl-v1-final-editor`
 - Items B1-B6: refused-domain diagnostics, the quick fix that writes `memql.toml`, the extension watching `**/memql.toml`, the notification, the CHANGELOG, the lockfile version.
-- Done before the checkpoint:
-  - `3845e0c58`
-  - `ff8fd9604`
-  - `ae68066d0`
-- Read `final-fix-B-report.md`.
+- Tip `90fb9e91b`, pushed, clean. ALL DONE (B1-B6); details in `final-fix-B-report.md`.
+- Kept, beyond the brief:
+  - a second, non-preferred quick fix that writes every missing line at once;
+  - a closed file's refusal is cleared.
+- Known:
+  - glsp v0.2.2 decodes a returned diagnostic's code to nil, so the code action matches on source and message.
+  - With `files.refactoring.autoSave` off, the quick fix leaves an empty `memql.toml` on disk, which reads `language_line_malformed` until saved.
+- After integrating both, run `make arch-model` (the model is stale on B) and re-run `scripts/vscode/package.sh`.
 
 ## Remaining steps, in order
 
