@@ -72,6 +72,19 @@ each one's replacement, are the table in `parser/v1_refusals.go`
 string the rewriter emits is the engine's internal query form -- also what an
 SDK sends to `Execute` -- and its grammar (`ParseExpression`) does not change.
 
+**A body written in statements is not rewritten** (edition 2026, epic
+memql#5370). The parser reads a `logic` or an `automation` in statements
+natively (`parser/v1_body.go`, `parseV1Definition`) into an `ast.Body`, whose
+expressions are the v1 grammar. `compiler.CheckBody` holds a body to its scope
+and construct rules at load, and `compiler.CompileBody` lowers it to the
+executor's step list in the order written, with no topological sort. Until
+the flip, the rewriter's transitional dispatch (`errNativeBody`,
+`TestTransitionalDispatchIsExact`) sends only the retired forms down the
+legacy path: a logic with `body {`, an automation with a `step` block, and the
+terse `=> logic` header. The flip deletes that path, and the parser then
+refuses those forms with `memqlmigrate --rewrite=bodies` as the fix
+(`component/language/bodymigrate`).
+
 The retired author-side forms (`func (Query) NAME(ctx any)`, the `@use*`
 annotation family, `@concepts(...)`, `@input { ... }`, `include` in a shape
 body) are refused at parse time with a migration hint. They survive only in

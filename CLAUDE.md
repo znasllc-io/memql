@@ -1270,7 +1270,7 @@ against it (`@required` / type / `@enum` / `@pattern`), and a violation refuses
 the run rather than binding a partial map
 (`component/automations/args_binding.go`, memql#2352). The triggering **event**
 rides its own `event` envelope (`event.topic` / `event.kind` /
-`event.payload.<field>`), which a step conventionally forwards to logic as
+`event.payload.<field>`), which a statement forwards to logic as
 `logic name(event: event)`; the logic declares `event` in its args block and
 reads `args.event.payload.<field>`. The bare-name argument pun
 (`logic name ( event )`) is retired (D12): name the argument.
@@ -1303,6 +1303,11 @@ see one in an old diff:
   two-identifier construct signature.
 - `@input { ... }` — the prompt body IS the field list.
 - `include` in a shape body.
+- The retired body forms (epic memql#5370): `body { }` around a logic's
+  statements, `step` blocks, the terse `=> logic` automation header,
+  `steps.<id>` references and a bare argument read. `memqlmigrate
+  --rewrite=bodies` rewrites each; the language reference lists them
+  ([memql.md](docs/public/language/memql.md#retired-forms)).
 
 Only `dsl/_reference/*.memql` still shows these, deliberately, as
 don't-do-this skeletons.
@@ -1785,9 +1790,9 @@ block per mutation.
 
 ### Logic
 
-Imperative procedure called from an automation step. `args { ... }` declares
-inputs; `body { ... }` is a sequence of named statements ending in
-`return <expr>`. The single-statement form is the common case:
+A procedure an automation or another logic calls. `args { ... }` declares its
+inputs, and its statements follow, the last of them a `return`. The
+one-statement form is the common case:
 
 ```memql
 /// Pure decide for the workspace-release sweep: every v1:workbench:workspace
@@ -1796,9 +1801,7 @@ logic releaseWorkspaceOnRunTerminal {
   args {
     event object!
   }
-  body {
-    return query workspaceForRun(runId: args.event.payload.id ?? "")
-  }
+  return query workspaceForRun(runId: args.event.payload.id ?? "")
 }
 ```
 
@@ -1807,11 +1810,15 @@ A construct call names its kind and its arguments -- `query workspaceForRun(runI
 object-literal form `name({ k: v })` is refused, and the bare-name pun
 (`logic decide(event)` for `event: event`) is retired.
 
-Multi-statement bodies (intermediate `name := <call>` steps with side effects,
-followed by a trailing `return <expr>`) execute via the `LogicRunner`: the
-runner walks intermediate steps in dependency order through the same step
-registry the automation scheduler uses, then evaluates the trailing `return`.
-Logic functions don't write `ctx.output = ...`.
+A logic and an automation share one body language (epic memql#5370):
+`name := <call>` binds, `if` / `for` / `switch` / `parallel` / `return`, trailing
+`retry(n)` and `on error continue`. Statements run in the order written, through
+the same sequence runner an automation's run uses; nothing is reordered by
+dependency, and there is no `ctx.output = ...`. A logic may call queries,
+mutations, logic and builtins, and ends with `return`; publishing and calling an
+automation or an action are an automation's. The whole language (statements,
+names and scope, trailing clauses, what each statement is at run time) is in
+[memql.md](docs/public/language/memql.md#bodies).
 
 ### Prompts
 

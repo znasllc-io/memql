@@ -83,7 +83,7 @@ A construct call is a statement of its own -- the whole right-hand side of `:=`,
 
 ### Names and scope (owner answers 1 and 4)
 
-- A bare name is a statement name, a loop variable, a lambda parameter or a reserved root (`args actor event now config partition trace`). An argument is read `args.x` in both keywords; the G2 bare-args reading (memql#2364) is retired with the rest of the pun.
+- A bare name is a statement name, a loop variable, a lambda parameter or a reserved root (`args actor event now config partition`; `trace` is reserved and unbound, so a read of it is refused, `daa0f0d99`). An argument is read `args.x` in both keywords; the G2 bare-args reading (memql#2364) is retired with the rest of the pun.
 - A block that runs at most once -- an `if`/`else` branch, a `switch` case -- shares the enclosing scope. A name bound in a branch that did not run is absent. Each branch of ONE if/else chain or ONE switch may bind the same name; whichever runs binds it.
 - A loop body and a parallel branch have their own scope: a name bound inside exists only inside. A loop variable or a loop-body name may not shadow a name or a root of an enclosing scope.
 - A name is bound once per scope, apart from the sibling-branch rule above. Reading a name before the statement that binds it is refused, naming both lines. Reading a name bound in another branch of the same chain is refused (that branch cannot have run).

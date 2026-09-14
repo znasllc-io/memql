@@ -1754,67 +1754,140 @@ Example validation errors:
 
 The struct-form rewriter expands every author-side construct to a `func (Receiver) NAME(ctx any) (any, error)` shape for the engine's parser; the `ctx` parameter name is a placeholder identifier only. **Don't author that form** — every receiver kind has a struct form: queries and mutations as above, logic with `body { ...; return <expr> }`, automations as `step` lists. Receiver-function constructs in authored files are rejected at parse time with migration hints.
 
-## Logic
+## Bodies
 
-Logic constructs are imperative procedures called from automation steps (or other logic). `args { ... }` declares inputs; `body { ... }` is a sequence of named statements ending in `return <expr>`:
+A `logic` and an `automation` are written in one body language: statements, which run in the order they are written. A logic is a name, an optional `args { }` block and statements, the last of them a `return`. An automation is a trigger (or `@template`), an optional `@filter`, an optional `args { }` block, optional `precondition` blocks, and the same statements. There is no `body { }` wrapper and no `step` block.
 
 ```memql
-use common.builtins.{ ensureKnowledgeBridge }
-
-/// On document creation, make sure its knowledge bridge exists.
-logic provisionBridgeOnDocumentCreate {
+/// Route a submitted request by the submitter's role.
+logic requestRouteStatus {
   args {
-    event object @required
+    submitterRole any
   }
-  body {
-    return ensureKnowledgeBridge(documentId: args.event.payload.id)
-  }
+  role := args.submitterRole ?? ""
+  return role == "owner" ? "queued" : role == "admin" || role == "writer" ? "needs_approval" : "needs_validation"
 }
 ```
 
-Multi-statement bodies use `name := <call>` steps followed by a trailing `return <expr>`. Step results support iteration and result accessors, and steps can be gated with `if`:
+### Statements
 
-```memql
-/// Daily sweep that hard-deletes archived folders whose retention window has elapsed.
+| Statement | Form | Notes |
+|---|---|---|
+| bind | `name := <call>` or `name := <expression>` | `name` holds the value from the next statement on |
+| call | `<kind> <name>(<named arguments>)` | the kind is one of `query`, `mutation`, `logic`, `builtin`, `automation`, `action` |
+| if | `if <cond> { } else if <cond> { } else { }` | `else` goes on the line of the closing brace |
+| for | `for <x> in <expression> [if <cond>] { }` | the author names the loop variable |
+| switch | `switch <expression> { case <literal>[, <literal>] { } default { } }` | labels are literals, each used once |
+| parallel | `parallel { branch <label> { } ... } [wait any]` | waits for every branch unless `wait any` is written |
+| publish | `publish "<topic>" { <field>: <value>, ... }` | automations only; the payload is a map literal |
+| return | `return [<expression or call>]` | ends the body, and in an automation the run |
+
+One statement per line. An expression continues onto the next line when the line ends inside an open bracket or on an operator, or when the next line begins with one.
+
+```memql fragment
+pending := query pendingBackorders()
+if pending.count() > 10 {
+  mutation flagBacklog(level: "many")
+} else if pending.count() > 0 {
+  mutation flagBacklog(level: "some")
+} else {
+  mutation flagBacklog(level: "none")
+}
+
+lines := query lineItems()
+for item in lines if item.quantity > 1 {
+  total := logic lineTotal(quantity: item.quantity)
+  mutation recordLine(sku: total > 4 ? item.sku : "small")
+}
+```
+
+**A construct call is a statement of its own**: the whole right-hand side of `:=`, the whole value of `return`, or a line by itself. A call nested inside an expression is refused, because a side effect that is not a statement is not journaled, previewed or retried. Arguments are always named (`logic triple(n: 14)`). A bare call inside an expression is a catalog function (`lower(x)`, `addDuration(now, "PT1H")`) or a spec or trait predicate; anything else is refused at load (`body_call_unknown`), since it could only fail when it runs.
+
+### Trailing clauses
+
+A statement can close with clauses, in this order when several are written:
+
+| Clause | Written on | Means |
+|---|---|---|
+| `on surface("<name>")` | an `action` call | runs the action on that surface |
+| `retry(<n>)` | a call | retries a failed call up to `n` more times |
+| `on error continue` | a call, a `for`, a `parallel` | records the failure, leaves the name absent, and goes on |
+
+Stopping the run on an error is the default and is never written.
+
+```memql fragment
+unpaid := query unpaidInvoices() retry(3)
+mutation markInvoiced(note: "counted") retry(2) on error continue
+action deployRun(target: "cluster") on surface("ops")
+```
+
+### Names and scope
+
+A bare name is a statement's name, a loop variable, a lambda parameter or a reserved root: `args`, `actor`, `now`, `config`, `partition`, and in an automation `event`. `trace` is reserved and nothing binds it, so reading it is refused. An argument is read `args.<name>` in both keywords; a bare argument name is refused.
+
+- A name is bound once, and read only after the statement that binds it. Reading it earlier is refused, naming both lines (`body_forward_reference`).
+- An `if`/`else` branch or a `switch` case runs at most once, and shares the scope around it. A name bound in a branch that did not run reads absent. The branches of one chain may each bind the same name; whichever runs binds it.
+- A loop body and a parallel branch have their own scope. A name bound inside exists only there, and it may not shadow a name or a root outside.
+- `config.<key>` reads the configuration allow-list (`component/config`). A key the list does not hold is refused at load (`body_config_unknown`) rather than read as absent.
+
+### What a logic may do, and what an automation may do
+
+- A logic calls `query`, `mutation`, `logic` and `builtin`. `publish`, `automation` and `action` are an automation's, and a logic that uses one is refused (`body_publish_in_logic`, `body_call_not_in_logic`). A logic's last top-level statement is a `return` (`body_logic_return`).
+- An automation makes every call, publishes, and may `return` to end its run early. The value it returns is recorded on the run.
+- `return` is refused inside a parallel branch (`body_return_in_parallel`).
+
+### What runs
+
+A body compiles at load to a list of steps in the order written; nothing is reordered. Each call is one step: journaled on the run, previewed by a dry run, retried by `retry(n)` and by a resume. An `if` or a `switch` flattens into the steps of its branches, each carrying its branch's condition, so a switch compares with typed equality (`1 == "1"` is false). A logic called inside a run journals its statements as steps of that run.
+
+A statement's value depends on its kind:
+
+- a query's is its rows: each row reads `row.id` and the other intrinsics from the row, and every other name from its payload (`rows.first().email`);
+- a mutation's is the written row;
+- a logic's is its return value;
+- a builtin's is its result;
+- an action's is the result its capability produced.
+
+### Retired forms
+
+These forms are refused at parse, each refusal naming its replacement, and `memqlmigrate --rewrite=bodies` rewrites a tree that still holds them:
+
+| Retired | Written now |
+|---|---|
+| `body { ... }` around a logic's statements | the statements, after `args { }` |
+| `step n { <call> }` | `n := <call>` |
+| `steps.n.result.f`, `n.result.f` | `n.f` |
+| `automation a @trigger(...) => logic l` | an automation whose one statement is `logic l(event: event)` |
+| a bare argument, or `event.payload.f` in an automation | `args.limit`, `args.f` |
+| `for item := range x.nodes()`, `forEach x in s where f { }` | `for x in s if f { }` |
+| `parallel { wait: "all", branches: [step a { }] }` | `parallel { branch a { } }` |
+| `logic l(event)`, an argument named by its value | `logic l(event: event)` |
+| `publishEvent(topic: "t", payload: { ... })` | `publish "t" { ... }` |
+| a logic that publishes | its statements, moved by the rewrite into the one automation that calls it |
+
+## Logic
+
+A logic is a procedure an automation or another logic calls. It reads its arguments as `args.<name>`, runs its [statements](#bodies) in order, and ends with `return`:
+
+```memql fragment
+/// Daily sweep: hard-delete the archived folders whose retention window has elapsed.
 logic purgeExpiredArchivedFolders {
   args {
     event object @required
   }
-  body {
-    expired := query expiredArchivedFolders(asOf: now)
-
-    for item := range expired.nodes() {
-      deleteStep := mutation deleteFolderNow(
-        folderId: item.id,
-        payload: {
-          name: item.payload.name,
-          status: "archived",
-          active: false,
-          deleted: true
-        }
-      )
-    }
-
-    return expired.count()
+  expired := query expiredArchivedFolders(asOf: now)
+  for folder in expired {
+    mutation deleteFolderNow(folderId: folder.id)
   }
+  return expired.count()
 }
 ```
 
-`now` above is the bare reserved current-timestamp primitive — it resolves to the clock in every body with no import and no call parens. The `now()` / `timestamp()` call-forms are **retired** and rejected at parse time.
+`now` above is the bare reserved current-timestamp primitive: it resolves to the clock in every body with no import and no call parens. The `now()` / `timestamp()` call forms are **retired** and rejected at parse time.
 
-**Result accessors.** A query-step result is a collection you can iterate or run the collection/lambda library over (see below). It exposes the lowercase accessors `X.nodes()` (the matched node slice), `X.empty()` (true when nothing matched), `X.count()` (match count), `X.first()` / `X.last()` (a single node), and `X.Ran()` (whether a guarded step executed). Within a `for item := range X.nodes()` loop, the loop variable **must be named `item`**; `item.id` and `item.payload.<field>` reach the current node.
+**Rows.** A query's value is a list of rows, which a `for` iterates and the collection library (below) filters, orders and aggregates: `expired.count()`, `expired.first()`, `expired.empty()`. `x.nodes()` returns the same rows as a list.
 
-> **Retired.** The capitalized accessors `.First()` / `.Nodes()` / `.Len()` / `.Empty()` / `.Count()` / `.Last()` are retired in favor of the lowercase spellings above (`.Len()` → `.count()`). `.Ran()` is kept (it has no lowercase pair).
-
-**Conditional steps** use `if <cond> { <call> }`:
-
-```memql fragment
-siResponse := if existingResponse.empty() {
-  si(args.event.payload.promptTemplateId, args.event.payload.promptData)
-}
-```
-
-Logic functions return via the trailing `return <expr>` — there is no `ctx.output = ...`. The `LogicRunner` walks intermediate steps in dependency order through the same step registry the automation scheduler uses, then evaluates the trailing `return <expr>` as the function's return value.
+> **Retired.** The capitalized accessors `.First()` / `.Nodes()` / `.Len()` / `.Empty()` / `.Count()` / `.Last()` are retired in favor of the lowercase spellings above (`.Len()` becomes `.count()`).
 
 ### Collection / lambda library
 
@@ -1884,17 +1957,15 @@ The tool loop binds tool-call args to handler args and forwards. A query handler
 
 ## Automations
 
-Automations are event- or schedule-triggered workflows declared in `dsl/<namespace>/automations.memql`. The body is a list of `step` blocks; steps call logic, named mutations/queries, or builtins:
+Automations are event- or schedule-triggered workflows declared in `dsl/<namespace>/automations.memql`, written in the [body language](#bodies):
 
-```memql
+```memql fragment
 use library.logic.{ indexArtifact }
 
-@trigger(event="node.created", concept="v1:library:file", partition="*")
+@trigger(event="node.created", concept="v1:library:file")
 /// Indexes a file into the Library the moment its row lands
 automation indexArtifact {
-  step run {
-    logic indexArtifact(event: event)
-  }
+  logic indexArtifact(event: event)
 }
 ```
 
@@ -1902,91 +1973,51 @@ automation indexArtifact {
 
 | Form | Example | Fires |
 |------|---------|-------|
-| Node event | `@trigger(event="node.created", concept="v1:library:folder", partition="*")` | When a node of the concept is created (`node.updated` / `node.deleted` likewise) |
+| Node event | `@trigger(event="node.created", concept="v1:library:folder")` | When a node of the concept is created (`node.updated` / `node.deleted` likewise) |
 | Custom topic | `@trigger(event="library.artifact.indexed")` | When the named application event is published |
 | Lifecycle | `@trigger(event="system.startup")` / `@trigger(event="system.shutdown")` | At engine start/stop |
 | Schedule | `@trigger(schedule="0 0 2 * * *")` | On a 6-field cron schedule (seconds first) |
 
-The triggering event is bound as the `event` value in step bodies and is conventionally forwarded to logic as `logic <name>(event: event)`; inside the logic body it is read as `args.event.payload.<field>`, `args.event.topic`, etc.
-
-### Terse single-step form
-
-When an automation exists only to make one `logic` reactive — its whole body is `step run { logic X(event: event) }` — use the terse single-step form instead. It keeps the reactive surface explicit and greppable (the `@trigger` stays on the declaration line) while dropping the boilerplate:
-
-```memql
-automation registerNode        @trigger(event="system.startup")    => logic registerNode
-automation pruneStaleClusterNodes @trigger(schedule="0 */10 * * * *") => logic pruneStaleClusterNodes
-```
-
-This lowers to the canonical longhand above — identical runtime automation, no separate execution path (dry-run and live stay in parity). The synthesized step always forwards the bound trigger payload as `event: event`; a target logic that declares no args simply ignores it. Use the longhand block form whenever the automation has more than one step or any branching/looping.
-
-The longhand single-step form is gate-enforced out of the shipped corpus, not merely discouraged (#2619): `test/dslconformance/no_longhand_single_step_test.go` runs the `memqlmigrate --rewrite=terse-automation` codemod, which proves each conversion token-identical through the engine's own lowering before collapsing it. Longhand singles the codemod cannot prove safe (extra payload keys, comments inside the construct, multiple @trigger lines) legitimately remain longhand.
+The fields of the triggering event's payload are bound into the automation's `args` block, validated against it before the run starts: declare each field the body reads and read it as `args.<field>`. `event` is the event itself (`event.topic`, `event.kind`), and it is what an automation forwards when a logic wants the whole event: `logic l(event: event)`.
 
 ### `@filter` Annotation
 
 `@filter(row => <predicate>)` decides whether a trigger fires the automation. `row` is the row whose event fired the trigger, and the automation runs only when the predicate holds:
 
-```memql
-@trigger(event="node.created", concept="v1:data:record", partition="*")
+```memql fragment
+@trigger(event="node.created", concept="v1:data:record")
 @filter(row => row.naturalKeyValue != nil)
 /// Detects conflicts between new data records and existing confirmed records.
 automation conflictDetection {
-  step decide {
-    logic conflictDetection(event: event)
-  }
+  logic conflictDetection(event: event)
 }
 ```
 
 A trigger filter is written in the same expression language as a query filter, but it runs in process, against the one row that fired: every in-process function is available, and `args` holds the automation's declared args, bound from the event payload and validated before the filter runs.
 
-### Parallel Fan-Out Step
+### Parallel branches
 
-A step body can be a `parallel { ... }` block that runs several branch steps CONCURRENTLY (the executor fans the branches out on goroutines):
+`parallel` runs its branches concurrently and continues when every branch has finished, or, with `wait any`, when the first has succeeded:
 
-```memql
-automation gather {
-  step layer0 {
-    parallel {
-      wait: "all"        // all | any | none (default: all)
-      failFast: true      // default: false
-      branches: [
-        step sales   { automation fetchSales { } },
-        step support { automation fetchSupport { } }
-      ]
+```memql fragment
+@trigger(schedule="0 0 * * * *")
+automation parallelStatement {
+  parallel {
+    branch counts {
+      low := query lowStock()
+      mutation restock(note: low.count() > 0 ? "some" : "none")
     }
-  }
-
-  step merge {
-    if steps.layer0.status == "success" {
-      automation mergeReports { }
+    branch levels {
+      level := logic restockLevel(n: 2)
+      mutation restock(note: level > 11 ? "high" : "low")
     }
   }
 }
 ```
 
-Rules:
+Each branch has its own scope, and a branch label is used once per `parallel`. A failed branch stops the others and fails the `parallel`; closing it with `on error continue` lets the body go on past it.
 
-- `branches` is required and non-empty. Each entry is a full `step` block — any step body works (automation / logic / query / mutation calls), including per-branch `if <cond> { ... }` gating and nested `parallel` blocks.
-- Branch ids must be unique within one parallel; at runtime they surface as `<parent>.<branch>` (e.g. `layer0.sales`).
-- `wait` picks the join strategy: `"all"` (default) waits for every branch, `"any"` returns on the first success, `"none"` is fire-and-forget.
-- `failFast: true` cancels the remaining branches when one fails and fails the parallel step — combine with a downstream `if steps.<id>.status == "success"` gate to skip dependents when any branch fails. Without `failFast`, branch errors do not fail the step under `wait: "all"`.
-- The parallel step itself can be gated: `step layerN { if <cond> { parallel { ... } } }`.
-
-This is also the shape the phased-authoring headline synthesizer emits for a dependency layer with 2+ independent phases (within-layer concurrency, memql#1164 / memql#1368); single-phase layers stay plain sequential steps.
-
-### Bare-Reference Rules (strict)
-
-In automation and logic bodies, MemQL supports a small amount of "bare reference" convenience, but it is **strictly limited**:
-
-- **for-range loops**: the loop variable **must be named `item`**
-  - Valid: `for item := range someStep.nodes() { ... }`
-  - Invalid: `for lead := range ... { ... }`
-- **Bare dotted paths** are only auto-resolved when they start with a **known step ID** (e.g. `expired.nodes()` where `expired := ...`), the reserved **`item.*`** root inside a for-range body, or a reserved engine name (`event`, `args`, `actor`, `now`, ...).
-- If you need a **literal string containing dots**, quote it: `"foo.bar"`.
-
-The roots an automation expression reads are `args`, `actor`, `now`, `config`, `event`, `steps`, `item`, `index` and `input`; do not name a step after one of them. A bare name resolves as [the lambda parameter and bare names](#the-lambda-parameter-and-bare-names) describes.
-
-> **Retired.** The receiver form `func (Automation) name() { ... }` is rejected at parse time — automations are authored as the `automation <name> { step ... }` struct form shown above. JSON workflow definitions (`workflows/v1/**`) and the `$var.NAME` variable-substitution machinery they used are gone entirely.
+> **Retired.** The receiver form `func (Automation) name() { ... }` is rejected at parse time, and JSON workflow definitions (`workflows/v1/**`) and the `$var.NAME` variable-substitution machinery they used are gone entirely. The `step` block, the terse `=> logic` header and the other retired body forms are listed under [Bodies](#retired-forms).
 
 ## Introspection Functions
 
