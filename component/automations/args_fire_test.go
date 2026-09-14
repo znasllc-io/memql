@@ -157,8 +157,8 @@ func newMinimalScheduler(buf *bytes.Buffer, bus *events.Bus) *Scheduler {
 // Validation runs BEFORE the @filter: a contract violation refuses the fire
 // (skip counter++) without the filter ever being consulted. A valid payload
 // is NOT refused. The filter itself reads the validated `args` binding
-// (proven by TestEvaluatorSeesArgs, which uses the same EvaluateCondition
-// path this scheduler filter uses).
+// (proven by TestEvaluatorSeesArgs, over the same RunScope this scheduler
+// filter evaluates in).
 func TestScheduler_ValidationRefusesBeforeFilter(t *testing.T) {
 	bus := events.NewBus()
 	defer bus.Close()
@@ -168,7 +168,7 @@ func TestScheduler_ValidationRefusesBeforeFilter(t *testing.T) {
 	auto := &Automation{
 		Name:    "deployGated",
 		Args:    deployArgsSchema(),
-		Trigger: &TriggerConfig{Event: "deploy.requested", Filter: `args.environment == "staging"`},
+		Trigger: &TriggerConfig{Event: "deploy.requested", Filter: `row => args.environment == "staging"`},
 		Steps:   []*Step{{ID: "gate", Type: StepTypeFunction}},
 	}
 	s.automations[auto.Name] = auto

@@ -1,7 +1,7 @@
 package memql
 
 import (
-	"encoding/json"
+	"context"
 	"strings"
 	"testing"
 
@@ -47,6 +47,19 @@ import (
 // TestLogicCondBareIdentifier_LiveTreeStillLoads is the canary for that: it
 // loads the whole unified DSL tree, so a rule that rejects any shipped logic
 // fails here rather than at boot.
+//
+// # In edition 2026
+//
+// cond() is retired (`p ? a : b`), and a logic body that returns an
+// expression runs on the LogicRunner, which evaluates it with EvalExpr over
+// the arguments, the statements' locals and the ambient envelope
+// (logic_body_v1.go). Residual 1 has no edition-2026 path: the runner's scope
+// resolves a bare DECLARED argument, as the pre-2026 multi-step tier did, and
+// refuses any other unknown name as unknown_name when it runs -- a loud
+// refusal, never a silent constant -- so the load-time rejection and its test
+// went with the path that needed them. Residual 2 is what the tests below pin:
+// an ambient predicate discriminates over the canonical envelope the runner
+// binds (buildAmbientEnvelope), and the absent actor denies.
 
 // loadCondBarePredicateProbe loads a SINGLE-STATEMENT logic whose cond
 // predicate is `pred`. Single-statement is the shape #3024 reports: no
@@ -61,45 +74,12 @@ func loadCondBarePredicateProbe(pred string) error {
 		"    role string @required",
 		"  }",
 		"  body {",
-		"    return cond(" + pred + ", \"elevated\", \"plain\")",
+		"    return (" + pred + ") ? \"elevated\" : \"plain\"",
 		"  }",
 		"}",
 	}, "\n")
 	_, err := tryParseNewFunctionSyntax("condBarePredProbe", "logic", src, "common.logic.memql", dotAccessLoadRegistry())
 	return err
-}
-
-// TestLogicCondBareIdentifierPredicate_RejectedAtLoad is residual 1.
-//
-// Against the unfixed loader every one of these loads green and then returns
-// the else branch for every input.
-func TestLogicCondBareIdentifierPredicate_RejectedAtLoad(t *testing.T) {
-	for name, pred := range map[string]string{
-		"eq":         `role == "owner"`,
-		"ne":         `role != "owner"`,
-		"undeclared": `somethingNobodyDeclared == "x"`,
-	} {
-		t.Run(name, func(t *testing.T) {
-			err := loadCondBarePredicateProbe(pred)
-			require.Errorf(t, err,
-				"cond(%s, ...) loaded green. In a single-statement body there is no local of "+
-					"that name, so the bare identifier resolves against a nil scope and the "+
-					"comparison is a CONSTANT -- the else branch for every input, silently. "+
-					"That is memql#2962's mechanism in the spelling authors reach for first "+
-					"(memql#3024).", pred)
-			require.Containsf(t, err.Error(), "3024",
-				"the rejection must cite the issue so the reason is findable, got: %v", err)
-		})
-	}
-
-	// The diagnostic has to name the actual fix, or the author is told their
-	// code is wrong without being told what to write. `args.` is the fix for
-	// a declared arg, which is the overwhelmingly common case.
-	err := loadCondBarePredicateProbe(`role == "owner"`)
-	require.Error(t, err)
-	require.Containsf(t, err.Error(), "args.role",
-		"the error must name the corrected spelling `args.role`; a diagnostic that only says "+
-			"'this is wrong' costs the author the same debugging session the silent constant did. got: %v", err)
 }
 
 // TestLogicCondBareIdentifierPredicate_LeavesLegitimateShapesAlone is the
@@ -119,7 +99,7 @@ func TestLogicCondBareIdentifierPredicate_LeavesLegitimateShapesAlone(t *testing
 		"  }",
 		"  body {",
 		"    role := actor.role ?? \"\"",
-		"    allowed := cond(role == \"owner\", true, false)",
+		"    allowed := role == \"owner\" ? true : false",
 		"    return allowed",
 		"  }",
 		"}",
@@ -189,81 +169,65 @@ func condAmbientProbeSource(name, pred string) string {
 		"    a string @required",
 		"  }",
 		"  body {",
-		"    return cond(" + pred + ", \"elevated\", \"plain\")",
+		"    return (" + pred + ") ? \"elevated\" : \"plain\"",
 		"  }",
 		"}",
 	}, "\n")
 }
 
-// TestExecute_CondAmbientPredicate_RunsAndDiscriminates is residual 2, and
-// #3024's definition-of-done item 4 taken literally: driven through
-// MemQLEngine.Execute rather than evalCollScalar.
-//
-// That distinction is not pedantry. #2962's first cut worked at the seam and
-// failed end to end, because Execute substitutes args during expansion and then
-// evaluates the plan root with NO args map at all. A seam test cannot see that.
-//
-// Postgres-gated, like its #2962 sibling.
-func TestExecute_CondAmbientPredicate_RunsAndDiscriminates(t *testing.T) {
-	eng, _, baseCtx := sharedReadMergeEngine(t)
-
-	fn, err := tryParseNewFunctionSyntax(
-		"ambientRoleGate", "logic",
-		condAmbientProbeSource("ambientRoleGate", `actor.role == "owner"`),
-		"memql#3024-test", memorynodes.DefaultRegistry())
-	require.NoError(t, err,
-		"an ambient cond predicate must LOAD -- #3024 replaces the load-time refusal with "+
-			"evaluation")
-	require.NoError(t, eng.Functions().Upsert(fn))
-
-	call := func(role string) any {
-		ctx := auth.ContextWithAccess(baseCtx, &auth.AccessContext{
-			UserId: "u-" + role,
-			Role:   auth.Role(role),
-		})
-		raw, mErr := json.Marshal("ignored")
-		require.NoError(t, mErr)
-		res, eErr := eng.Execute(ctx, "logic ambientRoleGate(a: "+string(raw)+")")
-		require.NoErrorf(t, eErr, "ambientRoleGate must run to completion for role %q", role)
-		require.NotNil(t, res)
-		return res.OutputPayload()
+// evalOverTheEnvelope evaluates a probe logic's returned expression the way
+// the LogicRunner evaluates it for the ambient roots: with EvalExpr, over the
+// engine's canonical envelope for ctx (buildAmbientEnvelope -- the source the
+// runner binds config and partition from, and whose actor is the same
+// auth.ActorEnvelopeMap the runner binds) beside the call's arguments.
+func evalOverTheEnvelope(t *testing.T, eng *MemQLEngine, ctx context.Context, name, pred string, args map[string]any) any {
+	t.Helper()
+	fn, err := tryParseNewFunctionSyntax(name, "logic", condAmbientProbeSource(name, pred), "memql#3024-test", memorynodes.DefaultRegistry())
+	require.NoErrorf(t, err, "an ambient predicate must LOAD: %s", pred)
+	ret, ok := fn.Expr.(*PlanConstExpression)
+	require.Truef(t, ok, "fn.Expr = %T, want the returned expression as a *PlanConstExpression", fn.Expr)
+	scope := MapScope{"args": args}
+	for k, v := range eng.AmbientEnvelope(ctx) {
+		scope[k] = v
 	}
-
-	owner, reader := call("owner"), call("reader")
-
-	require.Equal(t, "elevated", owner, "an owner actor must take the then branch")
-	require.Equal(t, "plain", reader, "a reader actor must take the else branch")
-
-	// The load-bearing assertion. Both branches being reachable is what makes
-	// this a gate rather than a constant.
-	require.NotEqualf(t, owner, reader,
-		"ambientRoleGate returned %#v for BOTH actors through Execute -- the predicate is not "+
-			"evaluated against the resolved actor envelope, so the gate is open or closed by "+
-			"accident rather than by the role (memql#3024).", owner)
+	got, err := EvalExpr(ctx, ret.Expr, scope, EvalOptions{})
+	require.NoErrorf(t, err, "evaluating %s", pred)
+	return got
 }
 
-// TestExecute_CondAmbientPredicate_AbsentActorDenies pins the fail-closed
-// direction.
+// TestCondAmbientPredicate_DiscriminatesOverTheEnvelope is residual 2: an
+// ambient predicate is evaluated against the resolved actor, so an owner and a
+// reader take different branches. (Before edition 2026 this was driven through
+// MemQLEngine.Execute, because the pre-2026 path expanded the arguments and
+// then evaluated the plan root with no arguments at all; an edition-2026 body
+// runs on the LogicRunner, which component/automations provides and drives
+// end to end in its logic corpus.)
+func TestCondAmbientPredicate_DiscriminatesOverTheEnvelope(t *testing.T) {
+	eng := &MemQLEngine{}
+	call := func(role string) any {
+		ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "u-" + role, Role: auth.Role(role)})
+		return evalOverTheEnvelope(t, eng, ctx, "ambientRoleGate", `actor.role == "owner"`, map[string]any{"a": "ignored"})
+	}
+	owner, reader := call("owner"), call("reader")
+	require.Equal(t, "elevated", owner, "an owner actor must take the then branch")
+	require.Equal(t, "plain", reader, "a reader actor must take the else branch")
+	require.NotEqualf(t, owner, reader,
+		"ambientRoleGate returned %#v for BOTH actors -- the predicate is not evaluated against the "+
+			"resolved actor envelope, so the gate is open or closed by accident (memql#3024).", owner)
+}
+
+// TestCondAmbientPredicate_AbsentActorDeniesOverTheEnvelope pins the
+// fail-closed direction.
 //
 // buildAmbientEnvelope is built UNCONDITIONALLY (memql#2801): an absent auth
 // context yields the DENYING envelope with every key present, rather than an
 // empty map whose absent keys make a negated predicate evaluate true. A gate
 // that opens when authentication is missing is worse than one that never fires.
-func TestExecute_CondAmbientPredicate_AbsentActorDenies(t *testing.T) {
-	eng, _, baseCtx := sharedReadMergeEngine(t)
-
-	fn, err := tryParseNewFunctionSyntax(
-		"ambientDenyGate", "logic",
-		condAmbientProbeSource("ambientDenyGate", `actor.isClusterOwner == true`),
-		"memql#3024-test", memorynodes.DefaultRegistry())
-	require.NoError(t, err)
-	require.NoError(t, eng.Functions().Upsert(fn))
-
-	// baseCtx carries no AccessContext, so the envelope is the denying default.
-	res, eErr := eng.Execute(baseCtx, `logic ambientDenyGate(a: "x")`)
-	require.NoError(t, eErr)
-	require.NotNil(t, res)
-	require.Equal(t, "plain", res.OutputPayload(),
+func TestCondAmbientPredicate_AbsentActorDeniesOverTheEnvelope(t *testing.T) {
+	// context.Background() carries no AccessContext, so the envelope is the
+	// denying default.
+	got := evalOverTheEnvelope(t, &MemQLEngine{}, context.Background(), "ambientDenyGate", `actor.isClusterOwner == true`, map[string]any{"a": "x"})
+	require.Equal(t, "plain", got,
 		"with no resolved actor the owner gate must DENY. An envelope that omits keys instead "+
 			"of defaulting them is the memql#2801 fail-open: the predicate compares against a "+
 			"missing value and a gate written this way opens for an unauthenticated caller.")

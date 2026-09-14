@@ -70,7 +70,7 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 	// Runtime variables keep fork overrides in the work instruction while
 	// the validated semantic output choices remain in the stored template.
 	const inputHeading = "\n\nGoal input (JSON):\n"
-	x := workDraftExpressions(langparser.DefaultOptions.ExpressionsV1)
+	x := workDraftExpressions()
 	delivery := func(statement, draft string) string {
 		instruction := x.join(langparser.QuoteString(statement+inputHeading), x.goalInput)
 		if nativeFile {
@@ -115,13 +115,10 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 
 // workDraftText is the expression text a work draft's step arguments are
 // written in: the run's goal input, the completed sections, and joining text
-// onto them. A draft is parsed as the engine parses every construct, with
-// langparser.DefaultOptions, so it is written in that grammar -- the legacy
-// one's concat() and field(), or edition 2026's `+` and toString(). The
-// prompt a step passes is the same text in both: each writes a map or a list
-// as its JSON, which is what the draft's "Goal input (JSON)" heading says.
+// onto them, in edition 2026's `+` and toString(). The prompt a step passes
+// writes a map or a list as its JSON, which is what the draft's "Goal input
+// (JSON)" heading says.
 type workDraftText struct {
-	v1 bool
 	// goalInput is the run's goal input, as text.
 	goalInput string
 	// sections is the parallel section step's result, as a join operand.
@@ -130,25 +127,18 @@ type workDraftText struct {
 	sectionsText string
 }
 
-func workDraftExpressions(v1 bool) workDraftText {
-	if v1 {
-		// The goal input is the run's trigger payload (adopt.go). The draft
-		// declares no args block, so it reads it as `payload`, the
-		// envelope's key read bare -- a dotted `event.payload` is refused at
-		// load (G5), which the legacy field(event, "payload") never met.
-		// toString(), not the bare value: `+` over an absent operand is
-		// absent, and toString() reads absent as "".
-		return workDraftText{v1: true, goalInput: "toString(payload)", sections: "toString(steps.sections.result)", sectionsText: "toString(steps.sections.result)"}
-	}
-	return workDraftText{goalInput: `field(event, "payload")`, sections: "steps.sections.result", sectionsText: `concat("", steps.sections.result)`}
+func workDraftExpressions() workDraftText {
+	// The goal input is the run's trigger payload (adopt.go). The draft
+	// declares no args block, so it reads it as `payload`, the envelope's key
+	// read bare -- a dotted `event.payload` is refused at load (G5).
+	// toString(), not the bare value: `+` over an absent operand is absent,
+	// and toString() reads absent as "".
+	return workDraftText{goalInput: "toString(payload)", sections: "toString(steps.sections.result)", sectionsText: "toString(steps.sections.result)"}
 }
 
 // join is text operands joined in order.
 func (x workDraftText) join(parts ...string) string {
-	if x.v1 {
-		return strings.Join(parts, " + ")
-	}
-	return "concat(" + strings.Join(parts, ", ") + ")"
+	return strings.Join(parts, " + ")
 }
 
 // A compile draft is durable and bound to one run, never globally activated.

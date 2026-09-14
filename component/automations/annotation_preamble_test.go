@@ -351,7 +351,7 @@ automation withBlank ` + bodyStub,
 func TestCommentedOutPreconditionIsNotLive(t *testing.T) {
 	src := `/*
 precondition envIsStaging {
-  check: $config.MEMQL_ENV == "staging"
+  check: config.MEMQL_ENV == "staging"
   literal: MEMQL_ENV
   description: "Only drive the staging deploy spine in staging."
 }
@@ -379,7 +379,7 @@ func TestRealPreconditionStillLoads(t *testing.T) {
 @trigger(event="node.created", concept="v1:cluster:node")
 automation live {
   precondition envIsStaging {
-    check: $config.MEMQL_ENV == "staging"
+    check: config.MEMQL_ENV == "staging"
     literal: MEMQL_ENV
     description: "Only drive the staging deploy spine in staging."
   }
@@ -484,10 +484,10 @@ func TestCommentedOutPreconditionFieldDoesNotWin(t *testing.T) {
 @trigger(event="node.created", concept="v1:cluster:node")
 automation live {
   precondition p {
-    check: $config.MEMQL_ENV == "staging"
+    check: config.MEMQL_ENV == "staging"
     description: "live"
     /*
-    check: $config.MEMQL_ENV == "PARKED"
+    check: config.MEMQL_ENV == "PARKED"
     description: "parked"
     */
   }

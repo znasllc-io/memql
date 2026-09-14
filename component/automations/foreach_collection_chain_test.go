@@ -3,10 +3,9 @@ package automations
 import "testing"
 
 // TestForEachSourceCollectionChain locks Story 4 (#2302 / ADR §2.2)
-// forEach support: a forEach source that is a collection-method chain is
-// resolved by EvaluateStepReference -- the chain's base receiver (a step
-// result here) is resolved through the standard evaluator and the
-// in-memory chain runs over it.
+// forEach support: a forEach source that is a collection-method chain
+// evaluates over the run -- the chain's base receiver (a step result here)
+// resolves and the chain runs over it.
 func TestForEachSourceCollectionChain(t *testing.T) {
 	e := NewEvaluator()
 	e.SetStepResult("loadUsers", &StepResult{
@@ -18,7 +17,7 @@ func TestForEachSourceCollectionChain(t *testing.T) {
 	})
 
 	// where(active) over the step result -> 2 active users.
-	val, err := e.EvaluateStepReference(`loadUsers.result.where(u => u.active)`)
+	val, err := evalV1(e, `loadUsers.result.where(u => u.active)`)
 	if err != nil {
 		t.Fatalf("evaluate chain source: %v", err)
 	}
@@ -31,7 +30,7 @@ func TestForEachSourceCollectionChain(t *testing.T) {
 	}
 
 	// A plain step path (no chain) still resolves normally.
-	plain, err := e.EvaluateStepReference(`loadUsers.result`)
+	plain, err := evalV1(e, `loadUsers.result`)
 	if err != nil {
 		t.Fatalf("evaluate plain source: %v", err)
 	}

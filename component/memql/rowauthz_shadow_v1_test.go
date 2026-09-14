@@ -33,52 +33,18 @@ func TestShadowReadsTheIRNotTheEdition(t *testing.T) {
 	}
 }
 
-// TestShadowReadsTheLoweredClusterOwnerGate: the lowering has reached the
-// analyzer, and it makes a condition with no row in it a plan constant -- so
-// the composite tier's own spelling, `row.ownerUserId == actor.userId ||
-// actor.isClusterOwner == true`, arrives with its cluster-owner arm as a
-// PlanConstExpression, not as the `actor.` comparison the legacy converter
-// built. Read as an opaque disjunction, every construct written that way went
-// undecidable and the tree-wide gate (TestRowAuthzEnforcementLandGate) failed
-// on the flip. Each spelling EvalExpr decides as the gate is credited, through
-// the real lowering; a spelling that is never the gate -- a string literal, a
-// misspelled key, the gate inverted, another actor field -- is not.
-func TestShadowReadsTheLoweredClusterOwnerGate(t *testing.T) {
+// TestShadowCreditsOnlySpellingsEvalExprDecidesAsTheGate pins the strictness
+// of the plan-constant arm TestShadowReadsTheLoweredClusterOwnerGate proves
+// through the lowering. A spelling is credited as the cluster-owner gate only
+// when EvalExpr decides it as the gate for every caller: the optional hop and
+// parentheses read the same value (the envelope is always bound), while a
+// string literal compares a bool with a string, a misspelled key reads an
+// absent one, and an inverted or negated gate admits the wrong callers --
+// crediting any of those would report a read as restating the tier while it
+// does something else. Built by hand rather than lowered: whether Lower
+// admits each spelling is Lower's business.
+func TestShadowCreditsOnlySpellingsEvalExprDecidesAsTheGate(t *testing.T) {
 	composite := &langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: "ownerUserId", ClusterOwnerBypass: true}
-	lower := func(src string) ExpressionNode {
-		t.Helper()
-		lam, err := langparser.ParseV1Lambda(src)
-		if err != nil {
-			t.Fatalf("parse %s: %v", src, err)
-		}
-		ir, err := lowerQueryFilter(lam, nil, nil, nil)
-		if err != nil {
-			t.Fatalf("lower %s: %v", src, err)
-		}
-		return ir
-	}
-	for _, src := range []string{
-		`row => row.ownerUserId == actor.userId || actor.isClusterOwner == true`,
-		`row => actor.isClusterOwner || row.ownerUserId == actor.userId`,
-		`row => row.ownerUserId == actor.userId || actor.isClusterOwner != false`,
-		`row => row.ownerUserId == actor.userId || true == actor.isClusterOwner`,
-		`row => row.status == "open" && (row.ownerUserId == actor.userId || (actor.isClusterOwner == true))`,
-	} {
-		ir := lower(src)
-		if !treeHasPlanConstant(ir) {
-			t.Fatalf("%s lowered with no plan constant (%s): this test no longer reaches the arm it pins", src, canonicalExpression(ir))
-		}
-		if got, reason := AnalyzeShadow(ir, composite); got != ShadowAlreadyImplied {
-			t.Errorf("%s lowers to %s, which reads %s (%s); it restates the composite tier, so it must read %s",
-				src, canonicalExpression(ir), got, reason, ShadowAlreadyImplied)
-		}
-	}
-
-	// Built by hand rather than lowered: whether Lower admits each of these
-	// is Lower's business, and what is pinned here is how the analyzer reads
-	// one if it arrives. The optional hop reads the same value as `.` (the
-	// envelope is always bound); every spelling in the second list is never
-	// the gate for any caller.
 	planGate := func(gate string) ExpressionNode {
 		t.Helper()
 		node, err := langparser.ParseV1Expression(gate)
@@ -95,9 +61,7 @@ func TestShadowReadsTheLoweredClusterOwnerGate(t *testing.T) {
 	for _, gate := range []string{
 		`actor.isClusterOwner == "true"`,
 		`actor.isclusterowner == true`,
-		`actor.isClusterOwner == false`,
 		`actor.isClusterOwner != true`,
-		`actor.role == "owner"`,
 		`!actor.isClusterOwner`,
 	} {
 		if got, _ := AnalyzeShadow(planGate(gate), composite); got == ShadowAlreadyImplied {

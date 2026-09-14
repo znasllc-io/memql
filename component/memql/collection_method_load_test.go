@@ -1,22 +1,28 @@
 package memql
 
 import (
+	"context"
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
-func collectionLoadRegistry() memoryNodes.Registry {
+func collectionLoadRegistry(t *testing.T) memoryNodes.Registry {
 	return newMemoryRegistry(map[string]*memoryNodes.Concept{
-		"v1:common:thing": {Name: "v1:common:thing"},
+		"v1:common:thing": fixtureConcept(t, "v1:common:thing", "concept thing {\n  tags  []string\n}\n"),
 	})
 }
 
 // TestLogicCollectionMethodLoads proves a single-statement logic body using
-// the Story 4 (#2302 / ADR §2.2) collection surface loads end-to-end
-// through the real function loader (struct rewriter -> langparser -> AST
-// converter) into a CollectionMethodExpression fn.Expr.
+// the Story 4 (#2302 / ADR §2.2) collection surface loads end-to-end through
+// the real function loader. An edition-2026 body that returns an expression
+// runs on the LogicRunner, which evaluates it with EvalExpr (logic_body_v1.go):
+// its fn.Expr is the expression itself, as a PlanConstExpression, and that
+// expression answers the count the collection surface promises.
 func TestLogicCollectionMethodLoads(t *testing.T) {
 	src := strings.Join([]string{
 		"@enabled",
@@ -31,70 +37,43 @@ func TestLogicCollectionMethodLoads(t *testing.T) {
 		"}",
 	}, "\n")
 
-	fn, err := tryParseNewFunctionSyntax("logicCountActiveMembers", "logic", src, "common.logic.memql", collectionLoadRegistry())
-	if err != nil {
-		t.Fatalf("load logic with collection method: %v", err)
-	}
-	if fn == nil || fn.Expr == nil {
-		t.Fatalf("expected fn.Expr to be set")
-	}
-	if _, ok := fn.Expr.(*CollectionMethodExpression); !ok {
-		t.Fatalf("fn.Expr = %T, want *CollectionMethodExpression", fn.Expr)
-	}
+	fn, err := tryParseNewFunctionSyntax("logicCountActiveMembers", "logic", src, "common.logic.memql", collectionLoadRegistry(t))
+	require.NoError(t, err, "load logic with collection method")
+	require.NotNil(t, fn.LogicSteps, "a body returning an expression runs on the LogicRunner")
+	pc, ok := fn.Expr.(*PlanConstExpression)
+	require.Truef(t, ok, "fn.Expr = %T, want the returned expression as a *PlanConstExpression", fn.Expr)
+	require.Equal(t, "args.members.where(m => m.active).count()", ast.FormatExpr(pc.Expr))
+
+	members := []any{map[string]any{"active": true}, map[string]any{"active": false}, map[string]any{"active": true}}
+	got, err := EvalExpr(context.Background(), pc.Expr, MapScope{"args": map[string]any{"members": members}}, EvalOptions{})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), got)
 }
 
-// TestQueryFilterCollectionMethodRejected proves the scope rule end-to-end,
-// as edition 2026 draws it. The legacy converter refused the Story 4
-// collection surface in a query filter outright. Edition 2026 splits it by
-// what the method reads (memql#5366): over the ROW's list, a method with no
-// SQL form runs in process, and a filter that would run it per row is refused
-// at load, naming the lowering that does exist; over an ARGUMENT it reads no
-// row, so it is a plan constant, evaluated once per call, and loads.
-func TestQueryFilterCollectionMethodRejected(t *testing.T) {
-	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
-		"v1:common:thing": declaredConcept(t, "v1:common:thing", "  tags  []string"),
-	})
-	query := func(filter string) string {
-		return strings.Join([]string{
-			"use common.concepts.{ thing }",
-			"",
-			"@enabled",
-			"@description(\"collection query\")",
-			"query thing queryCollection {",
-			// `members` is declared so the SCOPE rule is what this fixture
-			// exercises. Undeclared, it trips the used-requires-declared args
-			// check first (memql#3626) and the test would pass on the wrong
-			// rejection; declared and unread, it trips the other half.
-			"  args {",
-			"    members []object",
-			"  }",
-			"  filter " + filter,
-			"  paginate 20",
-			"}",
-		}, "\n")
-	}
-
-	_, err := tryParseNewFunctionSyntax("queryCollection", "query",
-		query(`row => row.tags.where(t => t == "urgent").count() > 0 && args.members != nil`), "common.queries.memql", registry)
-	if err == nil {
-		t.Fatalf("expected a query filter running a collection method over the row to be rejected")
-	}
-	for _, want := range []string{
-		"does not lower in a query filter",
-		"`.where()` runs in process over the row's list",
-		"`row.tags.any(t => t == \"urgent\")`",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("unexpected error %q; want the lowering refusal naming %q", err.Error(), want)
+// TestQueryFilterCollectionMethodScope proves the scope rule end-to-end, as
+// the edition-2026 tier manifest draws it: a query filter pushes down, so a
+// collection method that runs in process over the ROW's list is refused at
+// load, naming the pushdown spelling -- while the methods that lower over a
+// row array (any, all, count) load, and a method over an argument is a plan
+// constant, evaluated once per call. (Before the flip every collection
+// method was refused in a filter, whatever it read.)
+func TestQueryFilterCollectionMethodScope(t *testing.T) {
+	load := func(args, filter string) error {
+		lines := []string{"use common.concepts.{ thing }", "", "@enabled", "@description(\"probe\")", "query thing queryCollectionScope {"}
+		if args != "" {
+			lines = append(lines, "  args {", "    "+args, "  }")
 		}
+		lines = append(lines, "  filter "+filter, "  shape thing", "}")
+		_, err := tryParseNewFunctionSyntax("queryCollectionScope", "query", strings.Join(lines, "\n"), "common.queries.memql", collectionLoadRegistry(t))
+		return err
 	}
 
-	fn, err := tryParseNewFunctionSyntax("queryCollection", "query",
-		query(`row => args.members.any(m => m.active) && row.tags.any(t => t == "urgent")`), "common.queries.memql", registry)
-	if err != nil {
-		t.Fatalf("a collection method over an argument is a plan constant and must load: %v", err)
-	}
-	if !treeHasPlanConstant(fn.Expr) {
-		t.Fatalf("the argument's collection method did not lower to a plan constant: %s", canonicalExpression(unwrapToFilter(fn.Expr)))
-	}
+	err := load("", `row => row.tags.where(t => t == "x").count() > 0`)
+	require.Error(t, err, "an in-process collection method over the row must not load in a filter")
+	require.Contains(t, err.Error(), "does not lower in a query filter")
+	require.Contains(t, err.Error(), "runs in process")
+
+	require.NoError(t, load("", `row => row.tags.any(t => t == "x")`), "any() over a row array lowers to SQL")
+	require.NoError(t, load("members  []object", `row => args.members.any(m => m.active)`),
+		"a method over an argument is a plan constant, evaluated once per call")
 }

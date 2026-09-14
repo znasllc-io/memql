@@ -69,22 +69,6 @@ func TestSectionableBundleCompilesInEdition2026(t *testing.T) {
 	}
 }
 
-// TestWorkDraftLegacyTextIsUnchanged: with the legacy grammar the default,
-// the draft is written exactly as it was.
-func TestWorkDraftLegacyTextIsUnchanged(t *testing.T) {
-	if langparser.DefaultOptions.ExpressionsV1 {
-		t.Skip("the tree parses edition 2026 by default")
-	}
-	for name, src := range workDraftVariants(t) {
-		if !strings.Contains(src, `, field(event, "payload")`) || !strings.Contains(src, "concat(") {
-			t.Fatalf("%s: the legacy draft lost its concat(..., field(event, \"payload\")):\n%s", name, src)
-		}
-		if strings.Contains(src, "toString(") || strings.Contains(src, " + ") {
-			t.Fatalf("%s: the legacy draft carries edition-2026 text:\n%s", name, src)
-		}
-	}
-}
-
 // TestWorkDraftFollowsEdition2026: with edition 2026 the default, every draft
 // shape passes Gate 1 and loads as the engine loads a validated headline --
 // and the prompt a step passes evaluates to the statement, the heading and
@@ -109,8 +93,8 @@ func TestWorkDraftFollowsEdition2026(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load: %v\n%s", err, src)
 			}
-			if !auto.IsV1() {
-				t.Fatal("the draft did not load as an edition-2026 automation")
+			if len(auto.Steps) == 0 || auto.Steps[0].Exprs == nil {
+				t.Fatal("the draft did not load as an edition-2026 automation: its steps carry no parsed expressions")
 			}
 			if name != "turn" {
 				return

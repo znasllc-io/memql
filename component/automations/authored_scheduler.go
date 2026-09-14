@@ -282,8 +282,8 @@ func (s *AuthoredScheduler) Stop() {
 //
 // THE @filter DECIDES WHETHER THE EVENT FIRES THE AUTOMATION AT ALL, and it
 // is asked here exactly as the core scheduler's subscriber asks it: the args
-// contract is bound first, then the filter -- a v1 `row => ...` lambda or a
-// legacy condition -- through the one evaluateTriggerFilter. This subscriber
+// contract is bound first, then the filter -- a `row => ...` lambda --
+// through the one evaluateTriggerFilter. This subscriber
 // used to run every event matching the trigger pattern with the filter
 // unread, so an email rule's "only when" condition changed nothing: a rule
 // for the users at one domain mailed on every user change.

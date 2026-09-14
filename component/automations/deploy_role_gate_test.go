@@ -9,21 +9,17 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
 // memql#2818: the shipped deploy role gates denied EVERY role, owner included.
 //
-// `role := actor.role ?? ""` inside a logic body resolved to the coalesce
-// fallback rather than the actor's role, so every downstream `cond(role ==
-// "owner", ...)` compared against "" and the gate returned false for everyone.
-//
-// The existing coverage could not see it: it exercises
-// `EvaluateValue("$actor.role")`, which takes the $-form path. A logic STEP
-// assignment takes a third path -- the runner's own coalesce-argument resolver
-// -- and that one gated on a hardcoded root list omitting `actor`. So the
-// gate's own spelling was the one shape nothing tested.
+// `role := actor.role ?? ""` inside a logic body resolved to the `??`
+// fallback rather than the actor's role, so every downstream `role ==
+// "owner"` compared against "" and the gate returned false for everyone. The
+// string evaluator resolved a logic STEP assignment through its own
+// coalesce-argument resolver, which gated on a hardcoded root list omitting
+// `actor` -- so the gate's own spelling was the one shape nothing tested.
 //
 // These run the SHIPPED gate bodies verbatim through RunLogic with a real
 // AccessContext, because that is the only level at which the bug is visible.
@@ -47,13 +43,13 @@ func runShippedGate(t *testing.T, name, body string, role auth.Role) any {
 // The body is copied verbatim from dsl/deployment/logic.memql
 // deploymentForwardAllowed.
 const forwardGateBody = `    role := actor.role ?? ""
-    isElevated := cond(role == "admin", true, cond(role == "owner", true, false))
-    allowed := cond(role == "developer", true, isElevated)
+    isElevated := role == "admin" ? true : role == "owner" ? true : false
+    allowed := role == "developer" ? true : isElevated
     return allowed`
 
 // And from deploymentRollbackAllowed -- owner-only, not even admin.
 const rollbackGateBody = `    role := actor.role ?? ""
-    allowed := cond(role == "owner", true, false)
+    allowed := role == "owner" ? true : false
     return allowed`
 
 func TestDeploymentForwardAllowed_ResolvesActorRole(t *testing.T) {
@@ -115,16 +111,18 @@ func TestDeployGates_NoActorDeniesWithEmptyRole(t *testing.T) {
 	}
 }
 
-// A step may shadow an ambient root, and the step must win.
+// A step does NOT shadow an ambient root: in edition 2026 a name that is a
+// reserved root reads the root, never a step (args_resolution_v1.go; an
+// automation naming a step after one is refused at load). `actor` is the one
+// root security gates are written against, so it is the worst name for a
+// step to capture. The string evaluator once let a step named `actor` hijack
+// the root at some sites and not others -- `actor.first().id` returned the
+// leftover accessor text "().id", a TRUTHY string.
 //
-// isCustomVarRoot was widened to accept any seeded root, which made `actor` a
-// resolvable root everywhere it is checked. At the two sites that had no step
-// guard, that hijacked a step named `actor`: the $-form path cannot see step
-// results, so `actor.first().id` returned the leftover accessor text "().id"
-// -- not nil, not an error, a TRUTHY string that flows onward. Nothing in the
-// shipped tree names a step `actor`, but `actor` is the one root security
-// gates are written against, so it is the worst name to leave exposed.
-func TestLogicStepShadowsAmbientRoot(t *testing.T) {
+// Here the read of `actor` is the actor envelope: `actor.first()` is not the
+// step's rows, so `??` takes its fallback, and nothing read as a truthy
+// string along the way.
+func TestLogicStepDoesNotShadowAmbientRoot(t *testing.T) {
 	src := `@description("step named after an ambient root")
 logic stepShadowsActor {
   args {
@@ -148,26 +146,8 @@ logic stepShadowsActor {
 	if err != nil {
 		t.Fatalf("RunLogic: %v", err)
 	}
-	if out != "r1" {
-		t.Errorf("step-shadowed `actor` resolved to %#v, want \"r1\" -- the step must win over the ambient root, and leftover accessor text like \"().id\" is truthy", out)
-	}
-}
-
-// The equivalent coalesce() spelling must resolve identically. #2766 migrated
-// the corpus to `??`, and the two forms must not diverge -- a resolver that
-// understands only one of them is how a migration silently changes behaviour.
-func TestDeployGate_CoalesceAndShorthandAgree(t *testing.T) {
-	shorthand := runShippedGate(t, "gateShorthand", forwardGateBody, auth.RoleOwner)
-	longhandBody := `    role := coalesce(actor.role, "")
-    isElevated := cond(role == "admin", true, cond(role == "owner", true, false))
-    allowed := cond(role == "developer", true, isElevated)
-    return allowed`
-	longhand := runShippedGate(t, "gateLonghand", longhandBody, auth.RoleOwner)
-	if shorthand != longhand {
-		t.Errorf("`??` gave %#v but coalesce() gave %#v; the two spellings must agree", shorthand, longhand)
-	}
-	if shorthand != true {
-		t.Errorf("owner must pass the forward gate; got %#v", shorthand)
+	if out != "FALLBACK" {
+		t.Errorf("`actor.first().id ?? \"FALLBACK\"` = %#v, want the fallback: `actor` reads the actor root, never the step named after it", out)
 	}
 }
 
@@ -175,17 +155,17 @@ func TestDeployGate_CoalesceAndShorthandAgree(t *testing.T) {
 // is exactly the "correct in two places" shape this fix was about, so pin it:
 // if the shipped gate changes, these tests must be updated rather than
 // silently continuing to pass against a stale duplicate.
-//
-// THE SHIPPED FILE IS IN ONE EDITION OR THE OTHER until the edition-2026 flip
-// (epic memql#5363): the expressions codemod rewrites `cond(p, a, b)` to
-// `p ? a : b`, and a pin that knew only the legacy spelling would fail on a
-// correct migration -- or, worse, be "fixed" by pinning the new spelling and
-// stop noticing the copy here going stale. So the pin holds against the
-// legacy body's lines, or against the lines the codemod's own engine makes of
-// that body; a shipped gate that changed in any OTHER way fails in both.
 func TestDeployGateBodiesMatchShippedDSL(t *testing.T) {
-	for _, e := range staleGateCopies(t, shippedDeployLogic(t)) {
+	for _, e := range staleGateCopies(shippedDeployLogic(t)) {
 		t.Error(e)
+	}
+	// The pin must be able to fail: a changed shipped gate is caught.
+	tampered := strings.Replace(shippedDeployLogic(t), `allowed := role == "owner" ? true : false`, `allowed := role == "admin" ? true : false`, 1)
+	if tampered == shippedDeployLogic(t) {
+		t.Fatal("the shipped rollback gate is not spelled as expected; the tamper below changed nothing")
+	}
+	if errs := staleGateCopies(tampered); len(errs) == 0 {
+		t.Error("a changed gate in the shipped file passed the pin")
 	}
 }
 
@@ -199,49 +179,18 @@ func shippedDeployLogic(t *testing.T) string {
 }
 
 // staleGateCopies returns one message per gate body this file carries that
-// src contains in neither edition's spelling.
-func staleGateCopies(t *testing.T, src string) []string {
-	t.Helper()
+// src does not contain.
+func staleGateCopies(src string) []string {
 	var out []string
 	for _, tc := range []struct{ name, body string }{
 		{"deploymentForwardAllowed", forwardGateBody},
 		{"deploymentRollbackAllowed", rollbackGateBody},
 	} {
-		legacyMissing := missingLines(src, tc.body)
-		if len(legacyMissing) == 0 {
-			continue
-		}
-		migrated := migratedGateBody(t, tc.name, tc.body)
-		if migratedMissing := missingLines(src, migrated); len(migratedMissing) != 0 {
-			out = append(out, fmt.Sprintf("%s: dsl/deployment/logic.memql no longer contains %q (nor, in its edition-2026 spelling, %q); the copy in this file has gone stale -- update it so these tests keep testing the shipped gate", tc.name, legacyMissing, migratedMissing))
+		if missing := missingLines(src, tc.body); len(missing) != 0 {
+			out = append(out, fmt.Sprintf("%s: dsl/deployment/logic.memql no longer contains %q; the copy in this file has gone stale -- update it so these tests keep testing the shipped gate", tc.name, missing))
 		}
 	}
 	return out
-}
-
-// TestDeployGatePinHoldsOnTheMigratedFile runs the pin over the shipped file
-// as the expressions codemod leaves it: it must pass there (the migration
-// changes spelling, not the gate), and it must still fail once the migrated
-// gate itself is changed.
-func TestDeployGatePinHoldsOnTheMigratedFile(t *testing.T) {
-	out, err := langparser.RewriteExpressions([]byte(shippedDeployLogic(t)), nil)
-	if err != nil {
-		t.Fatalf("migrating dsl/deployment/logic.memql: %v", err)
-	}
-	migrated := string(out)
-	if migrated == shippedDeployLogic(t) {
-		t.Fatal("the codemod changed nothing in dsl/deployment/logic.memql, so this would compare the legacy file with itself")
-	}
-	if errs := staleGateCopies(t, migrated); len(errs) != 0 {
-		t.Errorf("the pin fails on a correctly migrated file: %v", errs)
-	}
-	tampered := strings.Replace(migrated, `allowed := role == "owner" ? true : false`, `allowed := role == "admin" ? true : false`, 1)
-	if tampered == migrated {
-		t.Fatal("the migrated rollback gate is not spelled as expected; the tamper below changed nothing")
-	}
-	if errs := staleGateCopies(t, tampered); len(errs) == 0 {
-		t.Error("a changed gate in the migrated file passed the pin")
-	}
 }
 
 // missingLines returns the non-blank lines of body that src does not contain.
@@ -253,32 +202,4 @@ func missingLines(src, body string) []string {
 		}
 	}
 	return out
-}
-
-// migratedGateBody is a gate body as the edition-2026 expressions codemod
-// rewrites it, computed with the codemod's own engine rather than written out
-// by hand -- a hand-written second copy is the drift this pin exists to catch.
-func migratedGateBody(t *testing.T, name, body string) string {
-	t.Helper()
-	src := "logic " + name + " {\n  body {\n" + body + "\n  }\n}\n"
-	out, err := langparser.RewriteExpressions([]byte(src), nil)
-	if err != nil {
-		t.Fatalf("%s: the expressions codemod refused the gate body: %v", name, err)
-	}
-	lines := strings.Split(string(out), "\n")
-	if len(lines) < 5 {
-		t.Fatalf("%s: unexpected codemod output %q", name, out)
-	}
-	return strings.Join(lines[2:len(lines)-3], "\n")
-}
-
-// TestMigratedGateBodyIsTheCodemodsSpelling pins what the pin above compares
-// against, so a change in the codemod's output is seen here rather than as a
-// pin that silently compares against something else.
-func TestMigratedGateBodyIsTheCodemodsSpelling(t *testing.T) {
-	got := migratedGateBody(t, "deploymentRollbackAllowed", rollbackGateBody)
-	want := "    role := actor.role ?? \"\"\n    allowed := role == \"owner\" ? true : false\n    return allowed"
-	if got != want {
-		t.Errorf("migrated body = %q\nwant %q", got, want)
-	}
 }

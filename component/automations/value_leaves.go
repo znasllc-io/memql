@@ -1,9 +1,9 @@
 package automations
 
-// value_leaves.go -- the string-typed step fields a v1 automation carries as
+// value_leaves.go -- the string-typed step fields an automation carries as
 // VALUE LEAVES (memql#5367).
 //
-// A v1 automation encodes every value position with one rule
+// A compiled automation encodes every value position with one rule
 // (compiler.EncodeValueLeaf): a literal is plain JSON, an expression is
 // `{"$expr": "<canonical v1 source>"}`. That covers the args and payload maps
 // and also the string-typed fields that hold a value: an event's `topic`, a
@@ -13,11 +13,7 @@ package automations
 // number) into, so each config type below decodes through
 // unmarshalWithLeaves: a field whose JSON value is not a string is lifted into
 // the config's unexported `leaves`, where PrepareExpressions reads it, and a
-// field that is a string decodes into the Go field exactly as before. A legacy
-// automation's compiled JSON only ever holds strings there, so its decoding is
-// unchanged -- and PrepareExpressions refuses a legacy automation that carries
-// a lifted leaf, rather than letting the string evaluator read an empty
-// field.
+// field that is a string decodes into the Go field: a string literal.
 //
 // Marshalling writes the lifted leaves back, so a config round-trips to the
 // JSON it was compiled as.
@@ -25,8 +21,6 @@ package automations
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -135,16 +129,6 @@ func marshalWithLeaves(v any, leaves leafFields) ([]byte, error) {
 	return json.Marshal(raw)
 }
 
-// leafKeys lists a config's lifted leaves, sorted, for a refusal message.
-func (l leafFields) keys() []string {
-	out := make([]string, 0, len(l))
-	for k := range l {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // UnmarshalJSON decodes the config, lifting a non-string `topic`.
 func (c *EventStepConfig) UnmarshalJSON(data []byte) error {
 	type plain EventStepConfig
@@ -221,62 +205,4 @@ func (c *EmitConceptCardStepConfig) UnmarshalJSON(data []byte) error {
 func (c EmitConceptCardStepConfig) MarshalJSON() ([]byte, error) {
 	type plain EmitConceptCardStepConfig
 	return marshalWithLeaves(plain(c), c.leaves)
-}
-
-// stepLeaves returns the lifted value leaves of a step's config, if any.
-func stepLeaves(s *Step) leafFields {
-	switch {
-	case s.Event != nil:
-		return s.Event.leaves
-	case s.Webhook != nil:
-		return s.Webhook.leaves
-	case s.Mutation != nil:
-		return s.Mutation.leaves
-	case s.EmitConceptCard != nil:
-		return s.EmitConceptCard.leaves
-	}
-	return nil
-}
-
-// refuseLegacyLeaves refuses a legacy automation whose compiled JSON carries a
-// value leaf the string evaluator cannot read (an `{"$expr"}` object, or a
-// number where a string belongs), naming the first one. Without it the Go
-// field would decode empty and the step would run with, say, an empty topic.
-func refuseLegacyLeaves(a *Automation) error {
-	var walk func(steps []*Step) error
-	walk = func(steps []*Step) error {
-		for _, s := range steps {
-			if s == nil {
-				continue
-			}
-			if l := stepLeaves(s); len(l) > 0 {
-				return fmt.Errorf("automation %q: step %q carries a v1 value leaf in %s, but the automation is not marked `\"expressions\": \"v1\"`", a.Name, s.ID, strings.Join(l.keys(), ", "))
-			}
-			if s.ForEach != nil {
-				if err := walk(s.ForEach.Do); err != nil {
-					return err
-				}
-			}
-			if s.Parallel != nil {
-				if err := walk(s.Parallel.Branches); err != nil {
-					return err
-				}
-			}
-			if s.Switch != nil {
-				for _, k := range sortedCaseKeys(s.Switch.Cases) {
-					if err := walk(caseSteps(s.Switch.Cases[k])); err != nil {
-						return err
-					}
-				}
-				if err := walk(caseSteps(s.Switch.Default)); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	if err := walk(a.Steps); err != nil {
-		return err
-	}
-	return walk([]*Step{a.OnComplete, a.OnError})
 }

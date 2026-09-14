@@ -41,15 +41,13 @@ func TestExtractConceptFromTopic(t *testing.T) {
 	}
 }
 
-// TestExtractConceptFromFilter covers both editions (epic memql#5363): a
-// legacy raw-text filter, and an edition-2026 lambda filter, which reaches the
-// loader as its canonical source.
+// TestExtractConceptFromFilter: an edition-2026 lambda filter, which reaches
+// the loader as its canonical source, is read as a tree; legacy raw text is
+// not read at all (it is refused at load, epic memql#5363).
 func TestExtractConceptFromFilter(t *testing.T) {
 	for _, tc := range []struct{ filter, want string }{
-		{`concept=="v1:cognition:participant"`, "v1:cognition:participant"},
-		{`concept==v1:cognition:participant;status=="x"`, "v1:cognition:participant"},
-		// The `&&` AND read its value as "X && y".
-		{`concept==v1:cognition:participant && status=="x"`, "v1:cognition:participant"},
+		{`concept=="v1:cognition:participant"`, ""},
+		{`concept==v1:cognition:participant && status=="x"`, ""},
 		{`row => row.concept == "v1:cognition:participant" && row.status == "x"`, "v1:cognition:participant"},
 		// A concept test that does not narrow is not the filter's concept.
 		{`row => row.concept == "v1:a:b" || row.status == "x"`, ""},

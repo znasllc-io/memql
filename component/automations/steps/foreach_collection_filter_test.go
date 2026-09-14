@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
 // collectingExecutor records the `item.id` of every item whose nested step
@@ -14,8 +15,8 @@ type collectingExecutor struct {
 	seen []string
 }
 
-func (e *collectingExecutor) Execute(_ context.Context, step *automations.Step, stepCtx *Context) (*automations.StepResult, error) {
-	if v, err := stepCtx.Evaluator.EvaluateStepReference("item.id"); err == nil {
+func (e *collectingExecutor) Execute(ctx context.Context, step *automations.Step, stepCtx *Context) (*automations.StepResult, error) {
+	if v, err := v1Value(ctx, stepCtx.Evaluator, &ast.MemberExpr{Object: &ast.IdentExpr{Name: "item"}, Field: "id"}); err == nil {
 		if s, ok := v.(string); ok {
 			e.seen = append(e.seen, s)
 		}
@@ -42,13 +43,16 @@ func runForEachWithFilter(t *testing.T, eval *automations.Evaluator, items []any
 		ID:   "loop",
 		Type: automations.StepTypeForEach,
 		ForEach: &automations.ForEachStepConfig{
-			Source: "$input",
+			Source: "input",
 			As:     "item",
 			Filter: filter,
 			Do: []*automations.Step{
 				{ID: "do", Type: automations.StepType("collect")},
 			},
 		},
+	}
+	if err := automations.PrepareExpressions(&automations.Automation{Name: "probe", Steps: []*automations.Step{step}}); err != nil {
+		t.Fatalf("prepare: %v", err)
 	}
 	if _, err := exec.Execute(context.Background(), step, &Context{Evaluator: eval}); err != nil {
 		t.Fatalf("forEach execute: %v", err)
@@ -57,9 +61,8 @@ func runForEachWithFilter(t *testing.T, eval *automations.Evaluator, items []any
 }
 
 // TestForEachFilter_CollectionChain pins gap 3a (#2318): a forEach filter that
-// is a genuine collection / lambda chain over the bound item routes through the
-// in-memory collection surface; only items whose chain predicate is truthy
-// survive.
+// is a collection / lambda chain over the bound item decides per item; only
+// items whose chain predicate holds survive.
 func TestForEachFilter_CollectionChain(t *testing.T) {
 	items := []any{
 		map[string]any{"id": "a", "tags": []any{"vip", "x"}},
@@ -90,10 +93,9 @@ func TestForEachFilter_CollectionChainOuterArg(t *testing.T) {
 	}
 }
 
-// TestForEachFilter_LegacyStringConditionUnchanged pins that an ordinary
-// string-condition filter keeps the legacy EvaluateCondition path -- #2318 must
-// not regress existing forEach filters.
-func TestForEachFilter_LegacyStringConditionUnchanged(t *testing.T) {
+// TestForEachFilter_PlainComparison pins that an ordinary comparison filter
+// decides per item too -- #2318 must not regress existing forEach filters.
+func TestForEachFilter_PlainComparison(t *testing.T) {
 	items := []any{
 		map[string]any{"id": "a", "env": "development"},
 		map[string]any{"id": "b", "env": "staging"},

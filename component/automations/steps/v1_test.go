@@ -436,8 +436,8 @@ func TestV1SwitchSubject(t *testing.T) {
 }
 
 // TestRenderMemQLDataQuotesReferenceText: an evaluated value is DATA. A
-// string that reads like a reference is quoted -- renderMemQLValue would pass
-// it through bare, and the engine would re-read it as a reference.
+// string that reads like a reference is quoted -- the legacy renderer passed
+// it through bare, and the engine re-read it as a reference.
 func TestRenderMemQLDataQuotesReferenceText(t *testing.T) {
 	for _, s := range []string{"event.payload.x", "steps.a.result", "$args.x", "item", "concat(a, b)"} {
 		if got := renderMemQLData(s); got != langparser.QuoteString(s) {
@@ -446,11 +446,6 @@ func TestRenderMemQLDataQuotesReferenceText(t *testing.T) {
 		if got := renderMemQLData(map[string]any{"k": []any{s}}); !strings.Contains(got, langparser.QuoteString(s)) {
 			t.Errorf("renderMemQLData nested %q = %s, want it quoted", s, got)
 		}
-	}
-	// The control: the legacy renderer passes reference text through bare,
-	// which is right for compiled reference text and why v1 needs its own.
-	if got := renderMemQLValue("event.payload.x"); got != "event.payload.x" {
-		t.Fatalf("control: renderMemQLValue quoted reference text (%s); the test no longer shows the difference", got)
 	}
 	for v, want := range map[any]string{int64(3): "3", float64(2.5): "2.5", true: "true"} {
 		if got := renderMemQLData(v); got != want {

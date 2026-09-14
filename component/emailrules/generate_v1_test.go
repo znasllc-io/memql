@@ -143,8 +143,8 @@ func loadsThroughTheRealCompiler(t *testing.T, src string) {
 	if err != nil {
 		t.Fatalf("the authoring pipeline's load refused the construct: %v\n%s", err, src)
 	}
-	if !authored.IsV1() || authored.Trigger == nil || authored.Trigger.FilterLambda == nil {
-		t.Fatalf("the authoring pipeline did not load a v1 automation with its lambda filter: v1=%v trigger=%+v", authored.IsV1(), authored.Trigger)
+	if authored.Trigger == nil || authored.Trigger.FilterLambda == nil {
+		t.Fatalf("the authoring pipeline did not load the construct with its lambda filter: trigger=%+v", authored.Trigger)
 	}
 	normalised, err := langparser.NormaliseAll(src)
 	if err != nil {
@@ -169,8 +169,8 @@ func loadsThroughTheRealCompiler(t *testing.T, src string) {
 	if err := automations.PrepareExpressions(&a); err != nil {
 		t.Fatalf("the runtime refused the compiled construct: %v", err)
 	}
-	if !a.IsV1() || a.Trigger.FilterLambda == nil {
-		t.Fatal("the runtime did not load the construct as v1 with its lambda filter")
+	if a.Trigger == nil || a.Trigger.FilterLambda == nil {
+		t.Fatal("the runtime did not load the construct with its lambda filter")
 	}
 }
 
@@ -272,23 +272,23 @@ func TestGeneratedAutomationIsV1(t *testing.T) {
 	if err := automations.PrepareExpressions(&a); err != nil {
 		t.Fatalf("the runtime refused the compiled construct: %v", err)
 	}
-	if !a.IsV1() || a.Trigger.FilterLambda == nil {
-		t.Fatal("the runtime did not load the construct as v1 with its lambda filter")
+	if a.Trigger == nil || a.Trigger.FilterLambda == nil {
+		t.Fatal("the runtime did not load the construct with its lambda filter")
 	}
 }
 
 // TestGeneratedAutomationLoadsThroughTheAuthoringPipeline: the authoring
 // pipeline -- the loader activation arms a rule through, with its own parse
 // options rather than the explicit ones TestGeneratedAutomationIsV1 passes --
-// loads the construct as a v1 automation whose filter is the lambda it
-// generated.
+// loads the construct, and its filter is the lambda it generated, parsed at
+// load.
 func TestGeneratedAutomationLoadsThroughTheAuthoringPipeline(t *testing.T) {
 	src := generate(t, `row.role == "admin"`)
 	a, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(src, "authored:emailrules")
 	if err != nil {
 		t.Fatalf("the authoring pipeline refused the construct: %v\n%s", err, src)
 	}
-	if !a.IsV1() || a.Trigger == nil || a.Trigger.FilterLambda == nil {
-		t.Fatalf("v1=%v trigger=%+v: want a v1 automation whose lambda filter was parsed", a.IsV1(), a.Trigger)
+	if a.Trigger == nil || a.Trigger.FilterLambda == nil {
+		t.Fatalf("trigger=%+v: want the lambda filter parsed at load", a.Trigger)
 	}
 }

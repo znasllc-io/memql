@@ -18,24 +18,15 @@ import (
 // offsets) before any header detection runs. These tests pin that a
 // comment-embedded receiver token no longer breaks the load.
 
-func bug1074Registry() memoryNodes.Registry {
+func bug1074Registry(t *testing.T) memoryNodes.Registry {
 	return newMemoryRegistry(map[string]*memoryNodes.Concept{
-		"v1:cognition:space": {Name: "v1:cognition:space"},
-	})
-}
-
-// bug1074QueryRegistry is the same concept declared (declaredConcept): a
-// query's filter is lowered at load against its fields, and the stub declares
-// none. The mutation cases keep the stub -- a mutation's template is not
-// lowered.
-func bug1074QueryRegistry(t *testing.T) memoryNodes.Registry {
-	return newMemoryRegistry(map[string]*memoryNodes.Concept{
-		"v1:cognition:space": declaredConcept(t, "v1:cognition:space", "  status  string"),
+		"v1:cognition:space": fixtureConcept(t, "v1:cognition:space",
+			"concept space {\n  name    string\n  status  string\n}\n"),
 	})
 }
 
 func TestLoader_QueryWithFuncTokenInLineComment(t *testing.T) {
-	registry := bug1074QueryRegistry(t)
+	registry := bug1074Registry(t)
 	src := "use cognition.concepts.{ space }\n\n" +
 		"// Migrated from the legacy `func (Query)` procedural form -- see memql#1074.\n" +
 		"@description(\"recent active spaces\")\n" +
@@ -52,7 +43,7 @@ func TestLoader_QueryWithFuncTokenInLineComment(t *testing.T) {
 }
 
 func TestLoader_QueryWithFuncTokenInBlockComment(t *testing.T) {
-	registry := bug1074QueryRegistry(t)
+	registry := bug1074Registry(t)
 	src := "use cognition.concepts.{ space }\n\n" +
 		"/*\n" +
 		" * Was once `func (Query) queryRecentSpaces(ctx any) (any, error)`.\n" +
@@ -70,7 +61,7 @@ func TestLoader_QueryWithFuncTokenInBlockComment(t *testing.T) {
 }
 
 func TestLoader_MutationWithFuncTokenInLineComment(t *testing.T) {
-	registry := bug1074Registry()
+	registry := bug1074Registry(t)
 	src := "use cognition.concepts.{ space }\n\n" +
 		"// Replaces the retired `func (Mutation)` author form (memql#1074).\n" +
 		"@description(\"create a space\")\n" +
@@ -96,7 +87,7 @@ func TestLoader_MutationWithFuncTokenInLineComment(t *testing.T) {
 }
 
 func TestLoader_MutationWithFuncTokenInBlockComment(t *testing.T) {
-	registry := bug1074Registry()
+	registry := bug1074Registry(t)
 	src := "use cognition.concepts.{ space }\n\n" +
 		"/* legacy: func (Mutation) mutationCreateSpace(ctx any) error { ... } */\n" +
 		"@actor\n" +

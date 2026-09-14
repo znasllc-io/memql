@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/tiers"
 )
 
 // temporal_access_test.go proves the temporal-access (`asOf`) visibility
@@ -15,15 +17,9 @@ import (
 //     is deterministic and is NOT marked;
 //   - `asOf` used outside a query (a spec body here) is a load error.
 
-// temporalLoadRegistry holds the one concept the fixture queries bind. It is
-// built from a declaration rather than as a bare {Name} stub: the filter is an
-// edition-2026 lambda, lowered at load against the bound concept's declared
-// fields (memql#5366), and a stub has none to read -- the load would refuse
-// for that, not for anything temporal.
 func temporalLoadRegistry(t *testing.T) memoryNodes.Registry {
-	t.Helper()
 	return newMemoryRegistry(map[string]*memoryNodes.Concept{
-		"v1:cluster:node": declaredConcept(t, "v1:cluster:node", "  active  bool"),
+		"v1:cluster:node": fixtureConcept(t, "v1:cluster:node", "concept node {\n  active  bool\n}\n"),
 	})
 }
 
@@ -80,33 +76,32 @@ func TestQueryNoAsOfNotMarked(t *testing.T) {
 }
 
 // TestSpecRejectsAsOf: a spec body is an atomic boolean predicate, not a
-// temporal read -- `asOf` is a load error. Driven through the path every spec
-// loads through, which for an edition-2026 body ends in the lowering at Init
-// (memql#5366): the parser takes `asOf(...)` as a call like any other, and it
-// is Lower that knows the name is a query clause. The refusal says so, rather
-// than calling it a predicate of the wrong arity and suggesting `asOf(row)`.
+// temporal read -- `asOf` is a load error. Driven through the path every v1
+// spec loads through: the shared parser, specDeclToSpec, and the Init pass's
+// Lower at the spec-body position, which is where an edition-2026 body is
+// checked (a v1 spec body is a lambda, and nothing before Lower reads it).
+// The legacy body's validator worded the refusal "not allowed inside a spec";
+// Lower names asOf for what it is, a query clause and not a function, rather
+// than refusing it as a predicate of the wrong arity with `asOf(row)` as the
+// fix.
 func TestSpecRejectsAsOf(t *testing.T) {
-	eng, err := bootLowerTree(t, map[string]string{
-		"concepts.memql": lowerInitConcepts,
-		"specs.memql": `use lowerinit.concepts.{ ticket }
-
-/// Boom: asOf in a spec body.
-spec ticket specReadsAsOf = row => asOf(row.status == "open", latest)
-`,
+	src := `@description("Boom: asOf in a spec body.")
+spec thing specReadsAsOf = row => asOf(row.active == true, latest)`
+	decl, err := languageParser.ParseSpecDecl(src)
+	require.NoError(t, err)
+	spec, err := specDeclToSpec(decl, "test.memql")
+	require.NoError(t, err)
+	require.NotNil(t, spec.Lambda, "a v1 spec body is a lambda")
+	_, err = Lower(spec.Lambda.Body, LowerEnv{
+		Position:  tiers.PositionSpecBody,
+		Param:     spec.Lambda.Params[0],
+		Predicate: (&MemQLEngine{specs: newSpecRegistry()}).predicateLookup(),
 	})
-	if err == nil {
-		t.Fatal("expected a load error for asOf in a spec body, got a clean boot")
-	}
-	skips := strings.Join(lowerInitSkips(eng), "\n")
-	for _, want := range []string{
-		"specReadsAsOf",
-		"does not lower in a spec or trait body: `asOf` is a query clause, not a function",
-		"`asOf args.at`",
-	} {
-		if !strings.Contains(skips, want) {
-			t.Fatalf("expected the spec body refusal naming %q, got:\n%s", want, skips)
-		}
-	}
+	require.Error(t, err, "asOf in a spec body must not lower")
+	require.Contains(t, err.Error(), "does not lower in a spec or trait body")
+	require.Contains(t, err.Error(), "asOf(")
+	require.Contains(t, err.Error(), "`asOf` is a query clause, not a function")
+	require.Contains(t, err.Error(), "`asOf args.at`", "the fix is the query's own clause")
 }
 
 // The ruling that authorised `asOf args.X ?? latest` rested on one property:

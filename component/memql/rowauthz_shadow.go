@@ -460,17 +460,15 @@ func isRowIdName(f FieldReference) bool {
 // isClusterOwnerLeaf reports whether a conjunct is the cluster-owner gate,
 // written either as `actor.isClusterOwner` or `actor.isClusterOwner==true`.
 //
-// An edition-2026 filter carries the gate as a PLAN CONSTANT: Lower makes a
-// condition with no row in it a PlanConstExpression that argument expansion
-// evaluates once per call (expr_plan_const.go), so `actor.isClusterOwner ==
-// true` reaches this analyzer as the v1 AST inside one, not as the `actor.`
-// comparison the legacy converter built. Without this arm every composite
-// tier's own spelling, `row.ownerUserId == actor.userId ||
-// actor.isClusterOwner == true`, read as an opaque disjunction and the
-// tree-wide measurement went undecidable for every construct written in it.
+// An edition-2026 filter lowers the gate -- a comparison that reads no row
+// field -- to a plan constant carrying its expression (Lower's planConstPred),
+// which argument expansion evaluates per call; the pre-2026 converter produced
+// a comparison on the actor path. Both are the gate, and a matcher that knew
+// only one would report every composite read undecidable the day the tree
+// changed spelling.
 func isClusterOwnerLeaf(node ExpressionNode) bool {
 	if pc, ok := node.(*PlanConstExpression); ok {
-		return isClusterOwnerGateV1(pc.Expr)
+		return pc != nil && isClusterOwnerGateAST(pc.Expr)
 	}
 	cmp, ok := node.(*ComparisonExpression)
 	if !ok {
@@ -495,39 +493,26 @@ func isClusterOwnerLeaf(node ExpressionNode) bool {
 	}
 }
 
-// isClusterOwnerGateV1 reads the cluster-owner gate in a plan constant's v1
-// AST: `actor.isClusterOwner` alone, `== true` or `!= false`, with the
-// operands in either order, through `.` or `.?` (the envelope is always
-// bound, so the two hops read the same value). It is STRICTER than the legacy
-// arm above, and on purpose, because each form it admits must be one EvalExpr
-// decides as the gate: the field name is matched exactly (the envelope's keys
-// are case-sensitive, so `actor.isclusterowner` reads an absent key -- false
-// for every caller), and only a BOOLEAN literal counts (`== "true"` compares a
-// bool with a string, which is never true, where the legacy compiler coerced
-// it). A spelling credited here that is never true would report a read as
-// restating the tier while it returns nothing to anyone.
-func isClusterOwnerGateV1(n ast.ExpressionNode) bool {
-	isGateField := func(n ast.ExpressionNode) bool {
-		m, ok := ast.Unparen(n).(*ast.MemberExpr)
-		if !ok || m.Field != "isClusterOwner" {
-			return false
-		}
-		root, ok := ast.Unparen(m.Object).(*ast.IdentExpr)
-		return ok && root.Name == "actor"
-	}
+// isClusterOwnerGateAST reads the edition-2026 spelling of the cluster-owner
+// gate: `actor.isClusterOwner` alone, compared `== true` from either side, or
+// `!= false` -- the same forms the comparison arm above accepts.
+func isClusterOwnerGateAST(n ast.ExpressionNode) bool {
 	switch e := ast.Unparen(n).(type) {
 	case *ast.MemberExpr:
-		return isGateField(e)
+		return isActorClusterOwnerMember(e)
 	case *ast.BinaryExpr:
-		field, other := e.Left, e.Right
-		if !isGateField(field) {
-			field, other = other, field
-		}
-		if !isGateField(field) {
+		if e == nil {
 			return false
 		}
+		other := e.Right
+		if !isActorClusterOwnerMember(e.Left) {
+			if !isActorClusterOwnerMember(e.Right) {
+				return false
+			}
+			other = e.Left
+		}
 		lit, ok := ast.Unparen(other).(*ast.LiteralExpr)
-		if !ok {
+		if !ok || lit == nil {
 			return false
 		}
 		b, isBool := lit.Value.(bool)
@@ -539,6 +524,17 @@ func isClusterOwnerGateV1(n ast.ExpressionNode) bool {
 		}
 	}
 	return false
+}
+
+// isActorClusterOwnerMember reports whether n is the member
+// `actor.isClusterOwner`.
+func isActorClusterOwnerMember(n ast.ExpressionNode) bool {
+	m, ok := ast.Unparen(n).(*ast.MemberExpr)
+	if !ok || m == nil || m.Field != "isClusterOwner" {
+		return false
+	}
+	root, ok := ast.Unparen(m.Object).(*ast.IdentExpr)
+	return ok && root != nil && root.Name == "actor"
 }
 
 func isFalseLiteral(v any) bool {
@@ -643,6 +639,12 @@ func firstOpaqueConjunct(conjuncts []ExpressionNode) string {
 		case *ArrayPredicateExpression:
 			return fmt.Sprintf("the collection predicate %s", canonicalExpression(n))
 		case *PlanConstExpression:
+			// The cluster-owner gate lowers to one, and it is as transparent
+			// as the comparison it used to be: its value is the caller's
+			// flag, not something expansion could make scope the read.
+			if isClusterOwnerGateAST(n.Expr) {
+				continue
+			}
 			return "an unevaluated plan constant"
 		default:
 			return fmt.Sprintf("a %T the analyzer does not understand", c)

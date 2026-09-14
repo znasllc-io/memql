@@ -15,11 +15,9 @@ import (
 // the wiring, `@cache` was parsed onto fn.CacheTTL but never stamped onto
 // the executable expression, so caching never engaged on any struct query.
 
-// cacheLoadRegistry holds the concept the fixture query binds, declared
-// (declaredConcept): the filter is lowered at load against its fields.
 func cacheLoadRegistry(t *testing.T) memoryNodes.Registry {
 	return newMemoryRegistry(map[string]*memoryNodes.Concept{
-		"v1:agents:agentRole": declaredConcept(t, "v1:agents:agentRole", "  active  bool"),
+		"v1:agents:agentRole": fixtureConcept(t, "v1:agents:agentRole", "concept agentRole {\n  active  bool\n}\n"),
 	})
 }
 

@@ -18,7 +18,7 @@ func TestFunctionLoader_CapturesDocComment(t *testing.T) {
 		"    a string @required",
 		"  }",
 		"  body {",
-		"    return coalesce(args.a, \"\")",
+		"    return args.a ?? \"\"",
 		"  }",
 		"}",
 	}, "\n")

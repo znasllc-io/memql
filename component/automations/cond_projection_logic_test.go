@@ -40,7 +40,7 @@ logic condReturn {
   }
   body {
     active := args.members.where(m => m.active)
-    return active.any() ? active.count() : 0
+    return active.count() > 0 ? active.count() : 0
   }
 }
 `
@@ -70,7 +70,7 @@ logic condElse {
   }
   body {
     active := args.members.where(m => m.active)
-    return active.any() ? "some-active" : "none-active"
+    return active.count() > 0 ? "some-active" : "none-active"
   }
 }
 `
@@ -95,7 +95,7 @@ logic condStep {
   }
   body {
     active := args.members.where(m => m.active)
-    label := active.any() ? "has-active" : "no-active"
+    label := active.count() > 0 ? "has-active" : "no-active"
     return label
   }
 }
@@ -211,44 +211,32 @@ logic condChainCmpStep {
 	}
 }
 
-// TestEvaluateLocalExpr_CondComparisonOverChainString drives the item-2
-// headline shape -- a cond whose predicate is a comparison over a
-// collection-chain aggregate -- at the EvaluateLocalExpr altitude with the
-// serialized string form the compiler emits. Wave 3 landed the AUTHORING parse
-// (parseExpressionArg now consumes ONE relational comparison; the wave-2 pin
-// memql.TestCondComparisonOverChain_ParseGap was flipped to
-// TestCondComparisonOverChain_ParsesAndEvaluates), so the end-to-end source
-// path is exercised by TestRunLogic_CondComparisonOverChain_TerminalReturn
-// below; this unit test keeps the direct string-form coverage.
-func TestEvaluateLocalExpr_CondComparisonOverChainString(t *testing.T) {
+// TestTernaryComparisonOverChain pins the headline shape -- a ternary whose
+// predicate is a comparison over a collection-chain aggregate -- evaluated
+// over the run. The end-to-end source path is exercised by
+// TestRunLogic_CondComparisonOverChain_TerminalReturn above.
+func TestTernaryComparisonOverChain(t *testing.T) {
 	eval := NewEvaluator()
 	eval.SetStepResult("rows", &StepResult{StepId: "rows", Status: "success", Result: []any{
 		map[string]any{"active": true},
 		map[string]any{"active": false},
 		map[string]any{"active": true},
 	}})
-	out, handled, err := EvaluateLocalExpr(`cond(rows.where(r => r.active).count() > 0, rows.count(), 0)`, eval)
+	out, err := evalV1(eval, `rows.where(r => r.active).count() > 0 ? rows.count() : 0`)
 	if err != nil {
-		t.Fatalf("EvaluateLocalExpr: %v", err)
-	}
-	if !handled {
-		t.Fatalf("cond over a chain-comparison predicate was not handled locally")
+		t.Fatalf("true case: %v", err)
 	}
 	if !numericEquals(out, 3) {
 		t.Errorf("out = %#v, want 3 (predicate true -> rows.count())", out)
 	}
 
-	// FALSE case: the aggregate must be RESOLVED, not left as raw text -- 2
-	// active is NOT > 5, so the else branch (0) is chosen. This pins the fix for
-	// the spurious-lexicographic bug: EvaluateFilterValue left `rows.where(...)`
-	// un-evaluated so the ordering degraded to `"rows..." > "5"` (letter-led
-	// string, constant-true), which would have wrongly returned rows.count().
-	falseOut, handled, err := EvaluateLocalExpr(`cond(rows.where(r => r.active).count() > 5, rows.count(), 0)`, eval)
+	// FALSE case: the aggregate must be RESOLVED -- 2 active is NOT > 5, so
+	// the else branch (0) is chosen. The string evaluator once left
+	// `rows.where(...)` unevaluated, so the ordering degraded to a
+	// lexicographic `"rows..." > "5"` (constant-true).
+	falseOut, err := evalV1(eval, `rows.where(r => r.active).count() > 5 ? rows.count() : 0`)
 	if err != nil {
-		t.Fatalf("EvaluateLocalExpr false case: %v", err)
-	}
-	if !handled {
-		t.Fatalf("false chain-comparison predicate was not handled locally")
+		t.Fatalf("false case: %v", err)
 	}
 	if !numericEquals(falseOut, 0) {
 		t.Errorf("false predicate out = %#v, want 0 (2 active is not > 5 -> else branch)", falseOut)
@@ -319,72 +307,80 @@ logic projCount {
 	}
 }
 
-// The per-group accuracy PERCENT (`good * 100 / total`) is the idiomatic
-// integer-arithmetic projection ratio -- it round-trips cleanly through the
-// compile/re-parse boundary (all operands stay integers, so no float-literal
-// precision is lost) and is exactly the repeat-rate / first-pass-yield percent
-// shape the issue calls out. The true fractional (float) ratio via a `* 1.0`
-// operand is pinned END-TO-END through the same boundary by
+// The per-group share PERCENT (`count * 100 / total`) is the idiomatic
+// integer-arithmetic projection ratio: all operands stay integers, so the
+// compiled source carries no float literal to lose. The true fractional
+// (float) ratio via a `* 1.0` operand is pinned by
 // TestRunLogic_GroupByProjection_FloatRatio below.
+//
+// A ratio over a per-group FILTERED count -- `g.items.where(...).count()`
+// inside the select -- is a collection scan nested in another over lists
+// the loader cannot size, which edition 2026 refuses at load (D11,
+// tiers.MaxStaticCost; TestPrepareExpressionsRefuses). The denominator is
+// therefore an argument here, and the arithmetic in the projection value is
+// what is under test.
 func TestRunLogic_GroupByProjection_ArithmeticRatioPercent(t *testing.T) {
 	src := `@enabled
-@description("per-group accuracy percent in a projection (#2542 item 3)")
+@description("per-group share percent in a projection (#2542 item 3)")
 logic accuracy {
   args {
     scans []object @required
+    total int @required
   }
   body {
     rows := args.scans.where(s => s.done)
-    return rows.groupBy(s => s.worker).select(g => {worker: g.key, pct: g.items.where(i => i.good).count() * 100 / g.items.count()})
+    return rows.groupBy(s => s.worker).select(g => {worker: g.key, pct: g.items.count() * 100 / args.total})
   }
 }
 `
 	out, _ := runProjectionLogic(t, src, "accuracy", map[string]any{
 		"scans": []any{
-			map[string]any{"worker": "w1", "done": true, "good": true},
-			map[string]any{"worker": "w1", "done": true, "good": false},
-			map[string]any{"worker": "w1", "done": true, "good": true},
-			map[string]any{"worker": "w2", "done": true, "good": true},
+			map[string]any{"worker": "w1", "done": true},
+			map[string]any{"worker": "w1", "done": true},
+			map[string]any{"worker": "w1", "done": true},
+			map[string]any{"worker": "w2", "done": true},
 		},
+		"total": 4,
 	})
 	rows := out.([]any)
 	w1 := rows[0].(map[string]any)
-	if !numericEquals(w1["pct"], 66) {
-		t.Errorf("w1 pct = %#v, want 66 (2 good * 100 / 3)", w1["pct"])
+	if !numericEquals(w1["pct"], 75) {
+		t.Errorf("w1 pct = %#v, want 75 (3 * 100 / 4)", w1["pct"])
 	}
 	w2 := rows[1].(map[string]any)
-	if !numericEquals(w2["pct"], 100) {
-		t.Errorf("w2 pct = %#v, want 100 (1 good * 100 / 1)", w2["pct"])
+	if !numericEquals(w2["pct"], 25) {
+		t.Errorf("w2 pct = %#v, want 25 (1 * 100 / 4)", w2["pct"])
 	}
 }
 
 // TestRunLogic_GroupByProjection_FloatRatio pins the FRACTIONAL (float) ratio
-// idiom -- `good / (total * 1.0)` -- END-TO-END through the compile/serialize/
-// re-parse boundary. The `* 1.0` operand is a whole-valued float64 literal; the
-// serializer must keep its decimal marker (`* 1.0`, not `* 1`), else it
-// re-parses as int64 and the division silently collapses to INTEGER division,
-// yielding 0 instead of ~0.6667 -- the memqllint-green/runtime-wrong class #2542
-// eliminates. Regression guard for the float-literal serialization fix.
+// idiom -- `count / (total * 1.0)` -- END-TO-END through the compile/re-parse
+// boundary. The `* 1.0` operand is a whole-valued float literal; the compiled
+// source must keep it a float, else it re-parses as an integer and the
+// division silently collapses to INTEGER division, yielding 0 instead of 0.75
+// -- the memqllint-green/runtime-wrong class #2542 eliminates.
 func TestRunLogic_GroupByProjection_FloatRatio(t *testing.T) {
 	src := `@enabled
-@description("per-group fractional accuracy ratio via a float operand (#2542 item 3)")
+@description("per-group fractional ratio via a float operand (#2542 item 3)")
 logic accuracyRatio {
   args {
     scans []object @required
+    total int @required
   }
   body {
     rows := args.scans.where(s => s.done)
-    return rows.groupBy(s => s.worker).select(g => {worker: g.key, acc: g.items.where(i => i.good).count() / (g.items.count() * 1.0)})
+    return rows.groupBy(s => s.worker).select(g => {worker: g.key, acc: g.items.count() / (args.total * 1.0)})
   }
 }
 `
 	out, _ := runProjectionLogic(t, src, "accuracyRatio", map[string]any{
 		"scans": []any{
-			map[string]any{"worker": "w1", "done": true, "good": true},
-			map[string]any{"worker": "w1", "done": true, "good": false},
-			map[string]any{"worker": "w1", "done": true, "good": true},
-			map[string]any{"worker": "w2", "done": true, "good": true},
+			map[string]any{"worker": "w1", "done": true},
+			map[string]any{"worker": "w1", "done": true},
+			map[string]any{"worker": "w1", "done": true},
+			map[string]any{"worker": "w2", "done": true},
 		},
+		"total": 4,
 	})
 	rows := out.([]any)
 	w1 := rows[0].(map[string]any)
@@ -392,40 +388,42 @@ logic accuracyRatio {
 	if !ok {
 		t.Fatalf("w1 acc = %#v (%T), want float64 (integer division would yield int 0)", w1["acc"], w1["acc"])
 	}
-	if acc < 0.6666 || acc > 0.6667 {
-		t.Errorf("w1 acc = %v, want ~0.6667 (2 good / (3 total * 1.0))", acc)
+	if acc != 0.75 {
+		t.Errorf("w1 acc = %v, want 0.75 (3 / (4 * 1.0))", acc)
 	}
 	w2 := rows[1].(map[string]any)
-	if acc2, ok := w2["acc"].(float64); !ok || acc2 != 1.0 {
-		t.Errorf("w2 acc = %#v, want 1.0 (1 good / (1 total * 1.0))", w2["acc"])
+	if acc2, ok := w2["acc"].(float64); !ok || acc2 != 0.25 {
+		t.Errorf("w2 acc = %#v, want 0.25 (1 / (4 * 1.0))", w2["acc"])
 	}
 }
 
-// Division by a zero group aggregate surfaces cleanly through the full logic
-// path (never a panic).
+// Division by zero in a projection value surfaces cleanly through the full
+// logic path (never a panic).
 func TestRunLogic_GroupByProjection_DivisionByZero(t *testing.T) {
 	src := `@enabled
-@description("projection division by a zero group aggregate")
+@description("projection division by zero")
 logic ratioZero {
   args {
     scans []object @required
+    zero int @required
   }
   body {
     rows := args.scans.where(s => s.done)
-    return rows.groupBy(s => s.worker).select(g => {worker: g.key, r: g.items.count() / g.items.where(i => i.bad).count()})
+    return rows.groupBy(s => s.worker).select(g => {worker: g.key, r: g.items.count() / args.zero})
   }
 }
 `
 	body := parseLogicBody(t, src)
 	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
 	_, err := r.RunLogic(context.Background(), "ratioZero", body, map[string]any{
-		"scans": []any{map[string]any{"worker": "w1", "done": true, "bad": false}},
+		"scans": []any{map[string]any{"worker": "w1", "done": true}},
+		"zero":  0,
 	})
 	if err == nil {
 		t.Fatalf("projection division by zero must surface an error")
 	}
-	if !strings.Contains(err.Error(), "division by zero") {
-		t.Errorf("error = %q, want it to name division by zero", err.Error())
+	if !strings.Contains(err.Error(), "division_by_zero") {
+		t.Errorf("error = %q, want the division_by_zero refusal", err.Error())
 	}
 }
 
@@ -442,8 +440,8 @@ func TestRunLogic_CompileRoundTrip_CondAndProjection(t *testing.T) {
 	}{
 		{
 			name: "cond_over_chain",
-			body: "active := args.members.where(m => m.active)\n    return cond(active.any(), active.count(), 0)",
-			want: []string{"cond(active.any(), active.count(), 0)"},
+			body: "active := args.members.where(m => m.active)\n    return active.count() > 0 ? active.count() : 0",
+			want: []string{"active.count() > 0 ? active.count() : 0"},
 		},
 		{
 			name: "lambda_chain_return",

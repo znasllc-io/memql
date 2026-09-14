@@ -1,43 +1,45 @@
 package automations
 
-// run_scope.go -- an automation run's state as edition-2026 expressions read
-// it (epic memql#5363, memql#5367).
+// run_scope.go -- an automation run's state as its expressions read it (epic
+// memql#5363, memql#5367).
 //
-// RunScope is a memql.ExprScope over the SAME *Evaluator the legacy string
-// evaluator reads, so a v1 automation and a legacy one see one run: the
-// executor, resume, the forEach clone and the LogicRunner seed that Evaluator
-// exactly as before, and a v1 step asks it for values through RunScope
-// instead of through resolvePath.
+// RunScope is a memql.ExprScope over the run's *Evaluator (run_state.go),
+// which the executor, resume, the forEach clone and the LogicRunner seed.
+// Every expression of a run -- a condition, an argument, a source, a filter --
+// is evaluated by EvalExpr over it.
 //
-// Name resolution reproduces what the string evaluator served, root by root
-// (resolvePath, EvaluateFilterValue, resolveBareForArgsAutomation /
-// ResolveBareArg / ResolveArgsPath, conditionRootSegment, explicitPathRoots),
-// in this order:
+// Name resolution follows the order the automations runtime has always
+// served, root by root:
 //
 //  1. the forEach loop variable, under its own name (`item`, or `as`);
-//  2. the fixed roots: `item` (the current item; nil outside a loop, as
-//     resolvePath answered), `steps`, `input`, `automation` (its `errors`),
-//     and `var` / `systemVar` / `secret` / `systemSecret` (`var.NAME` reads
-//     the resolver, and an unresolved one is absent, memql#2851);
+//  2. the fixed roots: `item` (the current item; nil outside a loop),
+//     `steps`, `input`, `automation` (its `errors`), and `var` / `systemVar`
+//     / `secret` / `systemSecret` (`var.NAME` reads the resolver, and an
+//     unresolved one is absent, memql#2851);
 //  3. every root the run seeded: `event` (the envelope), `ctx`, `args`,
 //     `actor`, `config`, `timestamp`, `error` (onError), `index` (forEach),
 //     `partition` / `now` (the LogicRunner's ambient envelope);
-//  4. a step id -- a bare step name stands for the step's RESULT, and its
+//  4. `actor`, when the run seeded none, is the DENYING envelope -- the one a
+//     request with no auth context binds (auth.ActorEnvelopeMap(nil)): owner
+//     bits false, identity empty. Absent would make `actor.isClusterOwner !=
+//     false` true under the absence table, the fail-open memql#2801 closed.
+//     It is answered here, before any later tier can bind the name: the
+//     event envelope carries an `actor` key of its own (`{id}`, the
+//     emitter's stamp), and reading that as the actor would be the same
+//     fail-open;
+//  5. a step id -- a bare step name stands for the step's RESULT, and its
 //     members are the step accessors (`result`, `status`, `error`,
 //     `metadata`, `count`, `nodes`, `empty`, `first`, `last`, `Ran`),
-//     exactly as `stepId.x` meant `steps.stepId.x`;
-//  5. the G2 bare-args tier (memql#2364): an args field, and a declared but
+//     exactly as `stepId.x` means `steps.stepId.x`;
+//  6. the G2 bare-args tier (memql#2364): an args field, and a declared but
 //     absent optional field as nil;
-//  6. the implicit `event.` retry for any other root: a key of the event
-//     envelope (`payload`, `topic`, ...), as EvaluateFilterValue prefixed
-//     `event.` onto an unprefixed path;
-//  7. a reserved root the run did not seed (`args` with no args block, `error`
-//     outside onError) is absent, as an unresolvable explicit-root path was
-//     to the string evaluator (memql#2851).
+//  7. the implicit envelope read for any other root: a key of the event
+//     envelope (`payload`, `topic`, ...);
+//  8. any other reserved root the run did not seed (`args` with no args
+//     block, `error` outside onError) is absent (memql#2851).
 //
 // Anything else is an unknown name, which EvalExpr refuses (unknown_name)
-// instead of reading the name as its own text -- the literal fallback is the
-// silent-wrong-value class v1 retires.
+// instead of reading the name as its own text.
 //
 // A step's value: a result with a flat output (an object literal or a scalar
 // `return`) is that value (UnwrapStepResult, #2271); a Bundle-backed query or
@@ -52,6 +54,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/memql"
@@ -103,6 +106,11 @@ func (s *RunScope) Lookup(name string) (any, bool) {
 	if v, ok := e.custom[name]; ok {
 		return v, true
 	}
+	// No actor seeded: the denying envelope, never absent and never a later
+	// tier's `actor` (see the file comment).
+	if name == "actor" {
+		return auth.ActorEnvelopeMap(nil), true
+	}
 	if sr, ok := e.steps[name]; ok && sr != nil {
 		return &runStep{scope: s, id: name, result: sr, asResult: true}, true
 	}
@@ -119,12 +127,10 @@ func (s *RunScope) Lookup(name string) (any, bool) {
 			return v, true
 		}
 	}
-	// A reserved root this run did not seed -- `args` in an automation with
-	// no args block, `error` outside an onError hook -- is ABSENT, not an
-	// unknown name: the string evaluator answered an unresolvable
-	// explicit-root path as absent (memql#2851), so `args.limit ?? 10` reaches
-	// its fallback in both grammars. `now` is left to EvalExpr, which answers
-	// it from the run clock.
+	// Any other reserved root this run did not seed -- `args` in an automation
+	// with no args block, `error` outside an onError hook -- is ABSENT, not an
+	// unknown name (memql#2851), so `args.limit ?? 10` reaches its fallback.
+	// `now` is left to EvalExpr, which answers it from the run clock.
 	if reservedAutomationRoots[name] && name != "now" {
 		return memql.Absent, true
 	}
@@ -151,10 +157,10 @@ func (s *RunScope) stepResultValue(id string, sr *StepResult) any {
 		return nodes
 	}
 	// A Bundle-backed result GetStepNodes finds no node list in is a result
-	// with no rows: an empty bundle's JSON omits `nodes`. The string
-	// evaluator's accessors read it as zero rows (resolvePath), and so does
-	// an expression -- `rows.nodes()`, `rows.empty()` and `rows.first()` over
-	// an empty read are [], true and absent, never the envelope itself.
+	// with no rows: an empty bundle's JSON omits `nodes`. The step accessors
+	// read it as zero rows, and so does an expression -- `rows.nodes()`,
+	// `rows.empty()` and `rows.first()` over an empty read are [], true and
+	// absent, never the envelope itself.
 	if bundleEnvelope(raw) {
 		return []any{}
 	}
@@ -190,8 +196,7 @@ func (s *RunScope) stepNodes(id string) ([]any, bool) {
 
 // runStep is one step as an expression reads it: its members are the step
 // accessors, and -- read by its bare name -- it stands for its result.
-// Reached through `steps.<id>` it stands for the step record itself, as
-// `$steps.<id>` did.
+// Reached through `steps.<id>` it stands for the step record itself.
 type runStep struct {
 	scope    *RunScope
 	id       string
@@ -199,8 +204,8 @@ type runStep struct {
 	asResult bool
 }
 
-// ExprMember answers the step accessors resolvePath answered. A name it does
-// not know is read from the value the step stands for.
+// ExprMember answers the step accessors. A name it does not know is read from
+// the value the step stands for.
 func (v *runStep) ExprMember(field string) (any, bool) {
 	sr := v.result
 	switch field {
@@ -357,6 +362,10 @@ func (e *Evaluator) variableResolverFor(kind string) VariableResolver {
 // bodies as v1 lambdas; a predicate application then fails as an unknown
 // function rather than meaning something by accident.
 func (e *Evaluator) ExprOptions() memql.EvalOptions {
+	if e == nil {
+		// No run: a literal evaluates, and every name is unknown.
+		return memql.EvalOptions{}
+	}
 	opts := memql.EvalOptions{
 		Now: e.runClock(),
 		Vars: func(ctx context.Context, kind, name string) (string, error) {
@@ -401,20 +410,44 @@ func (e *Evaluator) EvalV1Condition(ctx context.Context, n ast.ExpressionNode) (
 	return memql.EvalCondition(ctx, n, e.RunScope(), e.ExprOptions())
 }
 
-// StepCondition decides whether a step runs: through EvalCondition for a v1
-// step, through the string evaluator for a legacy one. A step without a
-// condition runs.
+// StepCondition decides whether a step runs: its condition, parsed at load,
+// through EvalCondition over the run. A step without a condition runs, and
+// a condition its automation never prepared is refused -- there is nothing
+// else to read its text with.
 func (e *Evaluator) StepCondition(ctx context.Context, step *Step) (bool, error) {
 	if step == nil {
 		return true, nil
 	}
-	if step.Exprs != nil {
-		if step.Exprs.Condition == nil {
-			return true, nil
-		}
+	if step.Exprs != nil && step.Exprs.Condition != nil {
 		return e.EvalV1Condition(ctx, step.Exprs.Condition)
 	}
-	return e.EvaluateCondition(step.Condition)
+	if strings.TrimSpace(step.Condition) != "" {
+		return false, fmt.Errorf("step %q: its condition was never prepared (automations.PrepareExpressions)", step.ID)
+	}
+	return true, nil
+}
+
+// InProcessQuery evaluates a query step whose expression runs in process --
+// anything but a construct call: a logic body's `total := a + b`,
+// `rows.where(r => ...)`, `return {ok: true}` -- over the run, with absent
+// read as nil (one notion of unset for a step's value). inProcess is false
+// for a construct call (`query activeUsers(...)`), which is the engine's to
+// run, and for a step that is not a prepared query step.
+func (e *Evaluator) InProcessQuery(ctx context.Context, step *Step) (value any, inProcess bool, err error) {
+	if step == nil || step.Exprs == nil || step.Exprs.Query == nil {
+		return nil, false, nil
+	}
+	if call, isCall := ast.Unparen(step.Exprs.Query).(*ast.CallExpr); isCall && call.Kind != "" {
+		return nil, false, nil
+	}
+	v, err := e.EvalV1(ctx, step.Exprs.Query)
+	if err != nil {
+		return nil, true, err
+	}
+	if v == memql.Absent {
+		v = nil
+	}
+	return v, true, nil
 }
 
 // ResolveV1Value resolves a v1 value: an *ExprLeaf evaluates, a map or list

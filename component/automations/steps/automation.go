@@ -114,16 +114,15 @@ func (e *AutomationExecutor) Execute(ctx context.Context, step *automations.Step
 	// args, dispatch via TriggerAutomationWithArgs so the
 	// sub-automation sees the call args as its input envelope
 	// (matching how event-triggered invocations see the event
-	// payload). Without args, the no-args path preserves the legacy
-	// "manual trigger" behaviour.
+	// payload). Without args, the no-args path is a manual trigger.
 	var (
 		execResult *automations.AutomationExecution
 		err        error
 	)
 	callArgs := step.Automation.Args
-	if step.Exprs != nil && len(callArgs) > 0 {
-		// A v1 step hands the sub-automation evaluated VALUES (memql#5367),
-		// never its own reference text.
+	if len(callArgs) > 0 {
+		// The sub-automation gets evaluated VALUES (memql#5367), never
+		// the step's own expression text.
 		callArgs, err = stepCtx.Evaluator.ResolveV1Map(ctx, callArgs)
 		if err != nil {
 			result.Status = "failed"

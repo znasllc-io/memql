@@ -37,16 +37,19 @@ func TestForEachExecutor_EvaluatesNestedStepCondition(t *testing.T) {
 		ID:   "forEach_test",
 		Type: automations.StepTypeForEach,
 		ForEach: &automations.ForEachStepConfig{
-			Source: "$input",
+			Source: "input",
 			As:     "item",
 			Do: []*automations.Step{
 				{
 					ID:        "doIt",
 					Type:      automations.StepType("fake"),
-					Condition: "$index == 1", // index will be 0 for the only item -> should skip
+					Condition: "index == 1", // index will be 0 for the only item -> should skip
 				},
 			},
 		},
+	}
+	if err := automations.PrepareExpressions(&automations.Automation{Name: "probe", Steps: []*automations.Step{step}}); err != nil {
+		t.Fatalf("prepare: %v", err)
 	}
 
 	res, err := exec.Execute(context.Background(), step, &Context{

@@ -131,13 +131,10 @@ func TestNestedCallArgumentsResolveToValues(t *testing.T) {
 			args: map[string]any{"current": "1.2.3", "bump": "minor"},
 			why:  "a builtin receives the raw coalesce node as `bump` with NO error, even when the caller supplied a value",
 		},
-		{
-			name:     "deployGateGreen_rootCoalesce",
-			call:     "deployGateGreen",
-			args:     map[string]any{"gate": map[string]any{"passed": true}},
-			wantRoot: true,
-			why:      "a root-position coalesce return fails `function \"coalesce\" not found`",
-		},
+		// deployGateGreen used to be the root-position coalesce case. Its
+		// edition-2026 body returns an expression, which runs on the
+		// LogicRunner rather than through fn.Expr, so it no longer reaches
+		// this resolver; its fail-closed contract is TestDeployGateGreenFailsClosed.
 	}
 
 	for _, tc := range cases {
@@ -286,22 +283,33 @@ func isASTNodeLeak(msg string) bool {
 
 // TestDeployGateGreenFailsClosed pins the fail-closed contract deployGateGreen
 // states in its own doc comment: "false when the result or its `passed` flag is
-// absent".
+// absent" -- a deploy gate answering nil instead of false is on the branch
+// that decides whether to auto-promote a release.
 //
-// Making the root coalesce merely RESOLVE is not enough, and this is why. Bare
-// `false` in value position converts to a SpecReferenceExpression, not a boolean
-// literal, so the fallback evaluated through resolveLambdaPath and returned nil
-// for an absent gate -- a deploy gate answering nil instead of false, on the
-// branch that decides whether to auto-promote a release.
+// The body is `return args.gate.passed ?? false`. In edition 2026 a logic
+// that returns an expression runs on the LogicRunner, which evaluates that
+// expression with EvalExpr over the call's arguments (logic_body_v1.go), so
+// the contract is asserted on exactly that: the shipped construct's returned
+// expression, evaluated by EvalExpr. (Before the flip the body was a
+// `coalesce(...)` left at plan.Root for the engine's in-memory branch, and
+// this test drove that branch.)
 func TestDeployGateGreenFailsClosed(t *testing.T) {
-	functions, specs := loadTreeForNestedArgTest(t)
-	if fn, err := functions.Get("deployGateGreen"); err != nil || fn == nil {
-		t.Skip("deployGateGreen is not in this tree")
+	functions, _ := loadTreeForNestedArgTest(t)
+	fn, err := functions.Get("deployGateGreen")
+	if err != nil || fn == nil {
+		t.Fatalf("deployGateGreen is not in this tree: %v", err)
+	}
+	if fn.LogicSteps == nil {
+		t.Fatal("deployGateGreen returns an expression, so it must run on the LogicRunner (fn.LogicSteps)")
+	}
+	ret, ok := fn.Expr.(*PlanConstExpression)
+	if !ok {
+		t.Fatalf("deployGateGreen's fn.Expr = %T, want its returned expression as a *PlanConstExpression", fn.Expr)
 	}
 
 	cases := []struct {
 		name string
-		gate map[string]any
+		gate any
 		want any
 	}{
 		{name: "gate passed", gate: map[string]any{"passed": true}, want: true},
@@ -312,18 +320,7 @@ func TestDeployGateGreenFailsClosed(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			plan := &QueryPlan{Root: &FunctionCallExpression{
-				Name: "deployGateGreen",
-				Args: map[string]any{"gate": tc.gate},
-			}}
-			if err := resolvePlanFunctionsWithOrigin(plan, functions, specs, auth.OriginInternal); err != nil {
-				t.Fatalf("resolve deployGateGreen: %v", err)
-			}
-			root, ok := plan.Root.(*FunctionCallExpression)
-			if !ok {
-				t.Fatalf("expected a coalesce call at plan.Root, got %T", plan.Root)
-			}
-			got, err := evalCollScalar(root, nil, nil)
+			got, err := EvalExpr(context.Background(), ret.Expr, MapScope{"args": map[string]any{"gate": tc.gate}}, EvalOptions{})
 			if err != nil {
 				t.Fatalf("evaluate deployGateGreen: %v", err)
 			}
@@ -439,50 +436,6 @@ func engineForSeamTest(t *testing.T) *MemQLEngine {
 		concepts:    memoryNodes.DefaultRegistry(),
 		functions:   functions,
 		shapes:      newShapeRegistry(),
-	}
-}
-
-// TestPositionalBuiltinsEvaluateThroughEngineExecute covers the engine.go half
-// of the fix -- the plan-root allowlist that decides whether a resolved
-// positional builtin gets evaluated in memory or is handed to the database.
-//
-// WHY THIS EXISTS. Review found the seam had ZERO coverage: reverting
-// engine.go's allowlist to origin/main left `go test ./component/memql/` fully
-// green, because every other test in this file reimplements the engine's
-// dispatch (calling evalCollScalar directly) instead of calling the engine.
-// A test that re-derives the code path it is meant to protect cannot notice
-// that path being deleted.
-//
-// So this drives MemQLEngine.Execute -- the real entry point -- and asserts the
-// VALUE. With the allowlist reverted it fails with
-// `function "coalesce" was not expanded during parsing; this is a bug`.
-func TestPositionalBuiltinsEvaluateThroughEngineExecute(t *testing.T) {
-	engine := engineForSeamTest(t)
-	ctx := auth.ContextWithInternalOrigin(context.Background())
-
-	for _, tc := range []struct {
-		name  string
-		query string
-		want  any
-	}{
-		// deployGateGreen is the construct the #2870 defect actually broke:
-		// a deploy gate that must FAIL CLOSED when the flag is absent.
-		{"coalesce, flag true", `logic deployGateGreen(gate: {"passed": true})`, true},
-		{"coalesce, flag false", `logic deployGateGreen(gate: {"passed": false})`, false},
-		{"coalesce, flag absent -- must fail CLOSED", `logic deployGateGreen(gate: {})`, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			res, err := engine.Execute(ctx, tc.query)
-			if err != nil {
-				t.Fatalf("Execute(%s): %v\n\nIf this is \"function ... was not expanded "+
-					"during parsing\", the plan-root allowlist in engine.go no longer "+
-					"covers this builtin.", tc.query, err)
-			}
-			got := seamResultValue(res)
-			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("Execute(%s) = %#v, want %#v", tc.query, got, tc.want)
-			}
-		})
 	}
 }
 

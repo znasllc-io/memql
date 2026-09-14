@@ -15,24 +15,23 @@ package conformance
 //   - refuse_parse: the edition's front end plus the edition's grammar refuse
 //     the file (corpusParseEdition).
 //   - load_ok / refuse_load: the file parses -- in the grammar the loaders use
-//     today (compiler.ParseFileSource) AND in the edition's -- and the
+//     (compiler.ParseFileSource) AND in the edition's -- and the
 //     engine's own boot-time validation -- MemQLEngine.Init over the embedded
 //     tree with the case mounted as an overlay domain, via
 //     memql.LintUnifiedTree, plus the automations loader for an automation --
 //     accepts it, or refuses it.
 //
-// THE TWO GRAMMARS, until the tree flips. Edition 2026's expression grammar
-// arrives behind parser.Options.ExpressionsV1, off in parser.DefaultOptions
-// until the embedded tree is migrated: the loaders still read the retired
-// spellings, so the edition's refusals of them (a filter with no lambda
-// header, a spec's `{ return }` body, a raw-text @filter) are the edition's
-// grammar, not yet the loaders'. The corpus is written in the edition, so a
-// refusal is judged by the edition's grammar, and a case that loads must parse
-// in both -- the one the loaders read it with today, and the one they will
-// read it with once the option flips -- so the flip cannot turn a cell that
-// loads into one that does not parse. When the option is removed,
-// corpusParseEdition becomes compiler.ParseFileSource and the two parses are
-// one.
+// ONE GRAMMAR, pinned twice. Since the flip, parser.DefaultOptions turns the
+// edition-2026 expression grammar (parser.Options.ExpressionsV1) on, so the
+// loaders read the corpus in the edition it is written in, and refuse the
+// retired spellings (a filter with no lambda header, a spec's `{ return }`
+// body, a raw-text @filter) as the edition does. A case is still parsed both
+// ways -- through compiler.ParseFileSource, which reads DefaultOptions, and
+// through corpusParseEdition, which turns the option on itself -- so while the
+// option exists a default switched back off shows as a load case that no
+// longer parses rather than as cells silently read in the older grammar.
+// When the option is removed, corpusParseEdition becomes
+// compiler.ParseFileSource and the two parses are one.
 //   - lower / evaluate: the expression lowers to SQL containing the expected
 //     text, or evaluates against a row to the expected value, through the
 //     adapter in engine_adapter_test.go.
@@ -175,7 +174,7 @@ func TestCorpusVerdicts(t *testing.T) {
 			r.file, r.parseErr = corpusParseFile(r.line.Edition, r.src)
 			if r.parseErr == nil {
 				if err := corpusParseEdition(r.line.Edition, r.src); err != nil {
-					r.parseErr = fmt.Errorf("parses in the grammar the loaders read today, but not in the edition's (parser.Options.ExpressionsV1), which they flip to: %w", err)
+					r.parseErr = fmt.Errorf("parses with parser.DefaultOptions, but not in the edition's grammar (parser.Options.ExpressionsV1 on), which the corpus is written in: %w", err)
 				}
 			}
 		}
@@ -306,9 +305,9 @@ func corpusParse(edition, src string) error {
 // corpusParseEdition parses a file the way the edition reads it: the
 // edition's front end, the struct-form rewrite chain every loader applies
 // (compiler.ParseFileSource's), and the parser with the edition-2026
-// expression grammar on (parser.Options.ExpressionsV1). It differs from
-// corpusParse only until that option is the loaders' default; when the option
-// is removed it becomes corpusParse.
+// expression grammar on (parser.Options.ExpressionsV1). The option is the
+// loaders' default since the flip, so it differs from corpusParse only if that
+// default changes; when the option is removed it becomes corpusParse.
 func corpusParseEdition(edition, src string) error {
 	fe, err := langparser.FrontEndFor(edition)
 	if err != nil {

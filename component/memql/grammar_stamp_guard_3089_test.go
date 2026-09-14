@@ -48,27 +48,20 @@ func stampTestEngine(t *testing.T) *MemQLEngine {
 	// survives-a-bump assertion below unable to distinguish "the stamp guard
 	// blocked it" from "the harness has no registry".
 	eng.specs = newSpecRegistry()
-	// The promote lowers the spec against the shared registries, resolving its
-	// binding first (memql#5366), so the core @actor shape the stored spec
-	// binds must be there too -- or the valid row would be refused for a
-	// missing binding, which the stamp guard has nothing to do with.
-	eng.shapes = coreShapesForTest(t)
 	return eng
 }
 
-// A stored spec whose source is VALID under the current grammar: a context
-// spec over the core @actor shape.
-const validStoredSpecSource = "spec actorEnvelope storedValidSpec = actor => actor.role == \"admin\"\n"
+// A stored trait whose source is VALID under the current grammar. A trait
+// binds nothing, so the recompile depends on no shape or concept the harness
+// would have to register.
+const validStoredSpecSource = "trait storedValidSpec = row => row.status == \"active\"\n"
 
-// A stored spec whose source does NOT compile under the current grammar -- the
-// "row predates a grammar move" rot case: a pre-2026 body, valid when it was
-// written, which edition 2026 refuses. Legacy on purpose, so the fixture tool
-// leaves it: memqlmigrate:keep
-const rottedStoredSpecSource = "spec actorEnvelope storedRottedSpec {\n  return role == \"admin\"\n}\n"
-
-// A stored spec that does not compile under ANY grammar -- a defect in its own
-// source, which no migration fixes.
-const brokenStoredSpecSource = "spec actorEnvelope storedBrokenSpec = actor => actor.role ==== \"x\"\n"
+// A stored trait whose source does NOT compile under the current grammar --
+// the "row predates a grammar move" rot case. It is written in the current
+// grammar's own spelling with a broken body, so the compile error is the
+// body's and names no migration of its own: the migration command in a
+// quarantine reason is the stamp guard's diagnosis, never the parser's.
+const rottedStoredSpecSource = "trait storedRottedSpec = row => row.status ==== \"x\" &&&& true\n"
 
 // TestStampGuard_ValidStoredConstructSurvivesABump is the destructive-bump
 // regression, and it is the reason the ordering was inverted rather than worked
@@ -81,7 +74,7 @@ func TestStampGuard_ValidStoredConstructSurvivesABump(t *testing.T) {
 	eng := stampTestEngine(t)
 
 	row := AuthoringConstructRow{
-		Kind:        "spec",
+		Kind:        "trait",
 		Name:        "storedValidSpec",
 		BundleId:    "authoring:bundle:stamp1",
 		OwnerUserId: "u-owner",
@@ -112,7 +105,7 @@ func TestStampGuard_FiresOnAStaleStampWithRottedSource(t *testing.T) {
 	eng := stampTestEngine(t)
 
 	row := AuthoringConstructRow{
-		Kind:           "spec",
+		Kind:           "trait",
 		Name:           "storedRottedSpec",
 		BundleId:       "authoring:bundle:stamp2",
 		OwnerUserId:    "u-owner",
@@ -164,11 +157,11 @@ func TestStampGuard_CurrentStampKeepsItsOwnError(t *testing.T) {
 	eng := stampTestEngine(t)
 
 	err := eng.recompileAndPromoteRow(context.Background(), AuthoringConstructRow{
-		Kind:           "spec",
-		Name:           "storedBrokenSpec",
+		Kind:           "trait",
+		Name:           "storedRottedSpec",
 		BundleId:       "authoring:bundle:stamp3",
 		OwnerUserId:    "u-owner",
-		Source:         brokenStoredSpecSource,
+		Source:         rottedStoredSpecSource,
 		Status:         "active",
 		GrammarVersion: languageParser.GrammarVersion,
 	})
@@ -190,7 +183,7 @@ func TestStampGuard_UnstampedLegacyRowIsNotBlamed(t *testing.T) {
 	eng := stampTestEngine(t)
 
 	err := eng.recompileAndPromoteRow(context.Background(), AuthoringConstructRow{
-		Kind:        "spec",
+		Kind:        "trait",
 		Name:        "storedRottedSpec",
 		BundleId:    "authoring:bundle:stamp4",
 		OwnerUserId: "u-owner",
@@ -208,7 +201,7 @@ func TestStampGuard_UnstampedLegacyRowIsNotBlamed(t *testing.T) {
 	// And an unstamped row whose source is VALID must register, unchanged.
 	eng2 := stampTestEngine(t)
 	if err := eng2.recompileAndPromoteRow(context.Background(), AuthoringConstructRow{
-		Kind:        "spec",
+		Kind:        "trait",
 		Name:        "storedValidSpec",
 		BundleId:    "authoring:bundle:stamp5",
 		OwnerUserId: "u-owner",

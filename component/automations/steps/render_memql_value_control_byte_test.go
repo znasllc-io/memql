@@ -4,8 +4,8 @@ package steps
 // the memql#3035 defect on the automation step path.
 //
 // A function step's resolved args are stringified into query text by
-// renderMemQLValue and re-parsed by engine.Execute. The string case rendered
-// with fmt.Sprintf("%q"), and Go's %q does not agree with the escape set
+// renderMemQLData and re-parsed by engine.Execute. The string case once
+// rendered with fmt.Sprintf("%q"), and Go's %q does not agree with the escape set
 // scanString implements. scanString knows the JSON escapes and only those --
 // `" \ / b f n r t u` -- and anything else is a HARD ERROR, `invalid escape
 // character %q at position %d`. %q emits `\x00`, `\a` and `\v`.
@@ -31,11 +31,11 @@ import (
 // both encoders handle, so a regression cannot hide behind them.
 const controlByteFixture = "boom \x00 \a \v \t\n end"
 
-// TestRenderMemQLValue_ControlByteLexes drives renderMemQLValue's output
+// TestRenderMemQLData_ControlByteLexes drives renderMemQLData's output
 // through the REAL lexer. Against %q this fails with `invalid escape
 // character 'x'`.
-func TestRenderMemQLValue_ControlByteLexes(t *testing.T) {
-	rendered := renderMemQLValue(controlByteFixture)
+func TestRenderMemQLData_ControlByteLexes(t *testing.T) {
+	rendered := renderMemQLData(controlByteFixture)
 
 	toks, err := langparser.NewLexer(rendered).Tokenize()
 	if err != nil {
@@ -58,10 +58,10 @@ func TestRenderMemQLValue_ControlByteLexes(t *testing.T) {
 	}
 }
 
-// TestRenderFunctionArgs_ControlByteParses pins the serialize->re-parse
+// TestRenderV1CallArgs_ControlByteParses pins the serialize->re-parse
 // boundary the step executor actually crosses: the query text a function step
 // builds for a logic call whose string arg carries a control byte must PARSE.
-func TestRenderFunctionArgs_ControlByteParses(t *testing.T) {
+func TestRenderV1CallArgs_ControlByteParses(t *testing.T) {
 	args := map[string]any{
 		"message": controlByteFixture,
 		"tags":    []string{"a\vb"},
@@ -70,7 +70,7 @@ func TestRenderFunctionArgs_ControlByteParses(t *testing.T) {
 		"row": map[string]any{"note": "x\x00y", "k\vey": 1},
 	}
 
-	query := "logicStampError(" + renderFunctionArgs(args) + ")"
+	query := "logicStampError(" + renderV1CallArgs(args) + ")"
 	parsed, err := langparser.ParseExpression(query)
 	if err != nil {
 		t.Fatalf("re-parse of the rendered logic call failed (the #3192 defect): %v\nquery: %#v", err, query)
@@ -92,25 +92,24 @@ func TestRenderFunctionArgs_ControlByteParses(t *testing.T) {
 	}
 }
 
-// TestRenderPositionalArg_ControlByteParses covers the positional-storage
-// branch (S9/#2407): a builtin call whose args compiled to numeric keys goes
-// through renderPositionalArg, which is a second entry point into the same
-// string rendering.
-func TestRenderPositionalArg_ControlByteParses(t *testing.T) {
+// TestRenderV1CallArgs_PositionalControlByteParses covers the positional
+// branch: a call whose args are stored under numeric keys renders them in
+// index order, a second entry point into the same string rendering.
+func TestRenderV1CallArgs_PositionalControlByteParses(t *testing.T) {
 	args := map[string]any{"0": "plain", "1": controlByteFixture, "2": "tail"}
 
-	query := "cond(" + renderFunctionArgs(args) + ")"
+	query := "probe(" + renderV1CallArgs(args) + ")"
 	if _, err := langparser.ParseExpression(query); err != nil {
 		t.Fatalf("re-parse of the rendered positional call failed: %v\nquery: %#v", err, query)
 	}
 }
 
-// TestRenderMemQLValue_MatchesQuoteString pins the single-definition rule: the
+// TestRenderMemQLData_MatchesQuoteString pins the single-definition rule: the
 // step renderer must not carry its own idea of the MemQL escape set. There is
 // exactly one correct definition -- langparser.QuoteString, which lives beside
 // the lexer whose escape set it targets -- and a renderer that reimplements it
 // drifts the moment that set changes. That drift is what #3035 cost.
-func TestRenderMemQLValue_MatchesQuoteString(t *testing.T) {
+func TestRenderMemQLData_MatchesQuoteString(t *testing.T) {
 	for _, s := range []string{
 		controlByteFixture,
 		"",
@@ -119,8 +118,8 @@ func TestRenderMemQLValue_MatchesQuoteString(t *testing.T) {
 		"unicode    café",
 		strings.Repeat("\x1b", 8),
 	} {
-		if got, want := renderMemQLValue(s), langparser.QuoteString(s); got != want {
-			t.Errorf("renderMemQLValue(%#v):\n  got:  %#v\n  want: %#v", s, got, want)
+		if got, want := renderMemQLData(s), langparser.QuoteString(s); got != want {
+			t.Errorf("renderMemQLData(%#v):\n  got:  %#v\n  want: %#v", s, got, want)
 		}
 	}
 }

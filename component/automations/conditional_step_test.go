@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // memql#1366 -- conditional steps in the struct-form automation grammar.
@@ -64,7 +66,7 @@ automation gather {
 // resolver only tried the `event.` prefix and fell back to the literal path
 // string, so `steps.x.status == "success"` was constant-false and a gated
 // layer either never ran or (truthy form) always ran.
-func TestEvaluateCondition_StepStatusReference(t *testing.T) {
+func TestStepCondition_StepStatusReference(t *testing.T) {
 	e := NewEvaluator()
 	e.SetStepResult("fetchA", &StepResult{StepId: "fetchA", Status: "success"})
 	e.SetStepResult("fetchB", &StepResult{StepId: "fetchB", Status: "failed"})
@@ -81,51 +83,39 @@ func TestEvaluateCondition_StepStatusReference(t *testing.T) {
 		{`steps.fetchA.status == "success" && steps.fetchA.status != "skipped"`, true},
 	}
 	for _, tc := range cases {
-		got, err := e.EvaluateCondition(tc.cond)
+		got, err := evalV1Cond(t, e, tc.cond)
 		if err != nil {
-			t.Errorf("EvaluateCondition(%q) errored: %v", tc.cond, err)
+			t.Errorf("%s errored: %v", tc.cond, err)
 			continue
 		}
 		if got != tc.want {
-			t.Errorf("EvaluateCondition(%q) = %v, want %v", tc.cond, got, tc.want)
+			t.Errorf("%s = %v, want %v", tc.cond, got, tc.want)
 		}
 	}
 }
 
-// TestEvaluateFilterValue_UnknownStepIsAbsent replaces
-// TestEvaluateFilterValue_UnknownStepKeepsLiteralFallthrough, which asserted
-// the OPPOSITE and was itself the memql#2851 defect written down as a contract.
-//
-// That test's own comment explains how it got there: "no behavior change for
-// non-step literals". It was a compatibility assertion added alongside `steps.`
-// support, guarding that ordinary literals were not disturbed. But
-// `steps.nosuch.status` is not an ordinary literal -- it is a path with an
-// explicit root that fails to resolve, and returning its own source text made
-// it non-empty and therefore TRUTHY (the #2380 hazard). coalesce read that as a
-// present value and skipped its fallback.
-//
-// Nothing depended on the pass-through. In a COMPARISON the verdict is
-// unchanged -- "steps.nosuch.status" == "success" was false and nil ==
-// "success" is false -- which is asserted below so the replacement is provably
-// not a weakening. What changes is the value slot, where the old behaviour was
-// simply wrong.
-//
-// A dotted token that is NOT an explicit root is still a literal; that is
-// TestNonPathLiteralsStillPassThrough in coalesce_root_softness_test.go.
-func TestEvaluateFilterValue_UnknownStepIsAbsent(t *testing.T) {
+// TestUnknownStepReadIsAbsent: a read of a step that did not run is ABSENT,
+// never its own path text (memql#2851). The string evaluator once returned
+// `steps.nosuch.status` as the string "steps.nosuch.status" -- non-empty and
+// therefore TRUTHY (the #2380 hazard) -- so a `??` read it as a present value
+// and skipped its fallback. The comparison verdicts are the absence table's
+// (expr_eval.go exprEqual): unset is not "success", and `!=` is the exact
+// negation.
+func TestUnknownStepReadIsAbsent(t *testing.T) {
 	e := NewEvaluator()
-	val, err := e.EvaluateFilterValue("steps.nosuch.status")
+	val, err := evalV1(e, "steps.nosuch.status")
 	if err != nil {
-		t.Fatalf("EvaluateFilterValue: %v", err)
+		t.Fatalf("steps.nosuch.status: %v", err)
 	}
-	if val != nil {
-		t.Fatalf("an unresolved `steps.` path returned %#v; want nil. Returning the path's own "+
-			"text makes it truthy, so a coalesce fallback is skipped and a predicate fails OPEN "+
+	if !memql.IsAbsent(val) {
+		t.Fatalf("an unresolved `steps.` path returned %#v; want absent. Returning the path's own "+
+			"text makes it truthy, so a `??` fallback is skipped and a predicate fails OPEN "+
 			"(memql#2851 / #2380).", val)
 	}
+	if got, err := evalV1(e, `steps.nosuch.status ?? "fallback"`); err != nil || got != "fallback" {
+		t.Fatalf("steps.nosuch.status ?? \"fallback\" = %#v (err %v), want the fallback", got, err)
+	}
 
-	// The comparison verdicts this replaces must be identical, or the change
-	// is a behaviour regression dressed up as a fix.
 	for _, tc := range []struct {
 		cond string
 		want bool
@@ -133,14 +123,13 @@ func TestEvaluateFilterValue_UnknownStepIsAbsent(t *testing.T) {
 		{`steps.nosuch.status == "success"`, false},
 		{`steps.nosuch.status != "success"`, true},
 	} {
-		got, err := e.EvaluateCondition(tc.cond)
+		got, err := evalV1Cond(t, e, tc.cond)
 		if err != nil {
-			t.Errorf("EvaluateCondition(%q): %v", tc.cond, err)
+			t.Errorf("%s: %v", tc.cond, err)
 			continue
 		}
 		if got != tc.want {
-			t.Errorf("EvaluateCondition(%q) = %v, want %v -- the comparison verdict must be "+
-				"unchanged from the literal-fallthrough era.", tc.cond, got, tc.want)
+			t.Errorf("%s = %v, want %v (the absence table)", tc.cond, got, tc.want)
 		}
 	}
 }

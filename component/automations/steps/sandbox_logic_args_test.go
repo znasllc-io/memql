@@ -1,25 +1,25 @@
 package steps
 
-// sandbox_logic_args_test.go -- white-box coverage for resolveLogicCallArgs, the
+// sandbox_logic_args_test.go -- white-box coverage for stepCallArgs, the
 // dry-run sandbox's forwarded-logic-call arg resolver (memql#1727).
 //
-// The regression: an authored wrapper forwards the triggering event as the bare
-// runtime-reference token `event` inside a SINGLE positional object arg
-// ({"0": {event: "event"}}). The pre-#1727 sandbox resolved that through the
-// mutation-style evaluateValue, which (a) treated bare `event` as a literal
-// string and (b) never unwrapped the positional object -- so RunLogic received
-// {"0": {event: "event"}} and args["event"] was nil. resolveLogicCallArgs must
-// resolve the bare `event` to the seeded envelope AND flatten the positional
-// object, exactly like the live FunctionExecutor.
+// The regression: an authored wrapper forwards the triggering event as
+// `logic autoJoinAI ( event: event )`. The pre-#1727 sandbox resolved that
+// through the mutation-style evaluator, which treated bare `event` as a
+// literal string -- so RunLogic received args["event"] = "event" and every
+// nested `args.event.payload.X` navigated into a string. stepCallArgs must
+// resolve the argument to the seeded envelope, exactly like the live
+// FunctionExecutor.
 
 import (
 	"reflect"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/automations"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-func TestResolveLogicCallArgs_BindsBareEventAndUnwrapsPositional(t *testing.T) {
+func TestStepCallArgs_BindsTheEventEnvelope(t *testing.T) {
 	envelope := map[string]any{
 		"topic":   "node.created",
 		"kind":    "NodeCreated",
@@ -31,21 +31,19 @@ func TestResolveLogicCallArgs_BindsBareEventAndUnwrapsPositional(t *testing.T) {
 	reg := newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test", "", "")
 	stepCtx := &automations.StepContext{Evaluator: evaluator}
 
-	// The compiled shape of `logic autoJoinAI { event: event }`: a single
-	// positional object arg whose `event` value is the bare runtime-reference
-	// token "event".
-	fn := &automations.FunctionStepConfig{
+	// The compiled shape of `logic autoJoinAI ( event: event )`: a named
+	// argument whose value is the expression leaf `event`.
+	node, err := langparser.ParseV1Expression("event")
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := &automations.Step{ID: "join", Type: automations.StepTypeFunction, Function: &automations.FunctionStepConfig{
 		Name: "logicAutoJoinAI",
-		Args: map[string]any{"0": map[string]any{"event": "event"}},
-	}
+		Args: map[string]any{"event": &automations.ExprLeaf{Src: "event", Node: node}},
+	}}
 
-	got := reg.resolveLogicCallArgs(fn, stepCtx)
+	got := reg.stepCallArgs(step, stepCtx)
 
-	// Must be flattened to {event: <envelope>} -- NOT {"0": {...}} -- so the
-	// LogicRunner's newEvaluatorForLogic reads args["event"].
-	if _, wrapped := got["0"]; wrapped {
-		t.Fatalf("positional object not unwrapped: %#v", got)
-	}
 	bound, ok := got["event"].(map[string]any)
 	if !ok {
 		t.Fatalf("event did not resolve to the envelope object; got %T: %#v", got["event"], got["event"])
@@ -61,14 +59,14 @@ func TestResolveLogicCallArgs_BindsBareEventAndUnwrapsPositional(t *testing.T) {
 	}
 }
 
-// TestResolveLogicCallArgs_EmptyArgs returns an empty map (no panic) when the
-// call carries no args -- the cron/no-arg logic shape.
-func TestResolveLogicCallArgs_EmptyArgs(t *testing.T) {
+// TestStepCallArgs_EmptyArgs returns an empty map (no panic) when the call
+// carries no args -- the cron/no-arg logic shape.
+func TestStepCallArgs_EmptyArgs(t *testing.T) {
 	reg := newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test", "", "")
 	stepCtx := &automations.StepContext{Evaluator: automations.NewEvaluator()}
 
-	got := reg.resolveLogicCallArgs(&automations.FunctionStepConfig{Name: "serviceVersionProbe"}, stepCtx)
-	if len(got) != 0 {
+	step := &automations.Step{ID: "probe", Type: automations.StepTypeFunction, Function: &automations.FunctionStepConfig{Name: "serviceVersionProbe"}}
+	if got := reg.stepCallArgs(step, stepCtx); len(got) != 0 {
 		t.Fatalf("expected empty args, got %#v", got)
 	}
 }
