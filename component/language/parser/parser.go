@@ -3132,19 +3132,13 @@ func (p *Parser) parseIfStatement() (*IfStmt, error) {
 
 	stmt := &IfStmt{}
 
-	// Parse condition (until '{') -- canonicalised by parseConditionExpression
-	// so the runtime evaluator sees the same shape that step.Condition
-	// strings carry elsewhere. With ExpressionsV1 on the condition is the v1
-	// node itself, which ifStatementToSteps stamps as a node.
-	condStr, condExpr, err := p.parseStepCondition()
+	// Parse the condition (until '{'): the v1 node itself, which
+	// ifStatementToSteps stamps onto each step the if gates.
+	_, condExpr, err := p.parseStepCondition()
 	if err != nil {
 		return nil, err
 	}
-	if condExpr != nil {
-		stmt.Condition = condExpr
-	} else {
-		stmt.Condition = &LiteralExpr{Value: condStr}
-	}
+	stmt.Condition = condExpr
 
 	// Parse then block
 	if err := p.expect(TokenBraceOpen); err != nil {

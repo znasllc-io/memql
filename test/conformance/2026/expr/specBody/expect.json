@@ -192,14 +192,14 @@
       "verdict": "refuse_parse",
       "code": "retired_spec_return_body",
       "message": "spec <bound> <name> { return <predicate> } is retired in edition 2026: write spec <bound> <name> = row => <predicate>",
-      "note": "Refused by the edition's grammar (parser.Options.ExpressionsV1); the loaders still read it until the tree flips."
+      "note": "Refused by the edition's grammar, the only one the loaders read."
     },
     {
       "file": "trait-return-body.memql",
       "verdict": "refuse_parse",
       "code": "retired_trait_return_body",
       "message": "trait <name> { return <predicate> } is retired in edition 2026: write trait <name> = row => <predicate>",
-      "note": "Refused by the edition's grammar (parser.Options.ExpressionsV1); the loaders still read it until the tree flips."
+      "note": "Refused by the edition's grammar, the only one the loaders read."
     },
     {
       "file": "args-in-a-spec.memql",

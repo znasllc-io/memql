@@ -117,7 +117,7 @@ package parser
 // # 2026.09-dsl-v1-expressions (memql#5364)
 //
 // The edition-2026 predicate positions, accepted BESIDE the legacy spellings
-// until parser.Options.ExpressionsV1 flips with the tree's migration: a struct
+// until the flip that came with the tree's migration: a struct
 // query's `filter row => ...`, `spec <bound> <name> = row => ...`,
 // `trait <name> = row => ...`, `@filter(row => ...)` (also inline on a terse
 // automation header, and as @trigger's filter=), and the new `refine <lambda>`
@@ -137,10 +137,11 @@ package parser
 //
 // # The edition-2026 flip (memql#5364, memql#5368)
 //
-// parser.DefaultOptions turned Options.ExpressionsV1 on with the tree's
-// migration, so every authored position parses the edition-2026 expression
-// grammar. The internal query form -- ParseExpression, the string an SDK
-// sends to Execute -- keeps its grammar; nothing below reaches it.
+// The tree's migration made the edition-2026 expression grammar the only
+// authoring grammar, so every authored position parses it; the switch that
+// chose between the two grammars while the tree migrated is gone. The
+// internal query form -- ParseExpression, the string an SDK sends to Execute
+// -- keeps its grammar; nothing below reaches it.
 //
 // NARROWINGS. Each parsed on the authored path before the flip and is refused
 // now, naming its replacement. The tree used them, and was migrated in the

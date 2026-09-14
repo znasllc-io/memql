@@ -3,12 +3,11 @@
 // memql#5363, memql#5368), with the rewrite `memqlmigrate
 // --rewrite=expressions` runs over .memql files (langparser.RewriteExpressions).
 //
-// The flip that turns the v1 grammar on (parser.DefaultOptions) makes every
-// legacy predicate form a parse error, so every fixture that still writes one
-// -- a struct query's `filter status == "x"`, a `spec ... { return ... }`
-// body, an `@filter(payload.x == 1)`, a `cond(...)` in a logic body -- stops
-// loading at the same moment. memqlmigrate cannot reach those: they are Go
-// string literals, not .memql files. This tool is memqlmigrate for them.
+// Edition 2026 refuses every legacy predicate form at parse, so a fixture that
+// still writes one -- a struct query's `filter status == "x"`, a
+// `spec ... { return ... }` body, an `@filter(payload.x == 1)`, a `cond(...)`
+// in a logic body -- does not load. memqlmigrate cannot reach those: they are
+// Go string literals, not .memql files. This tool is memqlmigrate for them.
 //
 // What it does, per *_test.go file:
 //

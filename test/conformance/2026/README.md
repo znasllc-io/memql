@@ -82,9 +82,9 @@ constructs carry the annotation's name for that reason (`openTicketsCache`,
 | `lower` | lower the expression to SQL containing `sql`. |
 | `evaluate` | evaluate the expression against `row` to `expect`. |
 
-The edition's grammar is the expression grammar of edition 2026, which is the
-loaders' default (`parser.DefaultOptions` has `ExpressionsV1` on): a case is
-judged by the grammar a node boots with. Every spelling edition 2026 retires is
+The edition's grammar is the expression grammar of edition 2026, the only
+grammar the loaders read: a case is judged by the grammar a node boots with.
+Every spelling edition 2026 retires is
 a parse refusal, the predicate positions' old forms included -- a filter with
 no lambda header, a spec or trait `{ return }` body, a raw-text `@filter`.
 The cells were written before the flip to mean the same thing after it, and

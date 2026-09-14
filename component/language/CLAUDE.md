@@ -78,8 +78,8 @@ body) are refused at parse time with a migration hint. They survive only in
 you see one in an old diff. The retired expression spellings (`;`/`,` as
 connectives, `has`, `?.`, `when(...)`, `cond(`, `null`, a filter with no
 lambda header, ...) are refused at parse wherever a `.memql` file writes them:
-`parser.DefaultOptions` has `ExpressionsV1` on, so every file is read in
-edition 2026. The refusal names `memqlmigrate --rewrite=expressions` as the
+edition 2026 is the only grammar a file is read in. The refusal names
+`memqlmigrate --rewrite=expressions` as the
 fix, and the language server offers the same rewrite as a quick fix
 (`cmd/memql-lsp/codeaction.go`).
 
