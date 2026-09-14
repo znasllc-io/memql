@@ -173,6 +173,7 @@ somebody's mistake.
 |---|---|
 | `go_pack_not_deployable` | A `bff/` with a `go.mod`. The rest of the package deploys |
 | `deployable_target_not_offered` | `kind` is one the target model knows and does not offer yet (`ios`, `android`, `macos`). Scoped to that app -- reported with "iOS is not offered on this cluster yet", skipped with the build plan "skipped -- not offered on this cluster yet", and recorded on the deployment row with no site id, while the rest of the package deploys around it |
+| `dsl_language_line_unread` | A `memql.toml` at the root of `dsl/`. No mount reads a root file -- each domain declares its line in its own `dsl/<domain>/memql.toml` -- so boot ignores it, and the package deploys. Scoped to `dsl/memql.toml`, and never under `dsl_refuses_boot` |
 
 ### Raised during the run
 

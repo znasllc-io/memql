@@ -304,9 +304,11 @@ func TestLanguageLine_LanguageLineForReturnsTheDeclaration(t *testing.T) {
 	}
 }
 
-// A memql.toml at the root of a tree no mount reads reaches the author as a
-// diagnostic from both offline passes -- memqllint's and a package deploy's
-// -- rather than as a log line neither shows (review of memql#5357).
+// A memql.toml at the root of a tree no mount reads reaches the author from
+// both offline passes rather than as a log line neither shows (review of
+// memql#5357): memqllint's as a diagnostic, a package deploy's as a warning of
+// its own and NOT among the problems that would refuse boot -- boot ignores
+// the file, so the deploy must not refuse it (memql#5356).
 func TestLanguageLine_OfflinePassesReportAnUnreadRootManifest(t *testing.T) {
 	root := func() fstest.MapFS {
 		return fstest.MapFS{
@@ -337,8 +339,11 @@ func TestLanguageLine_OfflinePassesReportAnUnreadRootManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AnalyzePackageDSL: %v", err)
 	}
-	if unread(result.Diagnostics) != 1 || len(result.Diagnostics) != 1 {
-		t.Errorf("AnalyzePackageDSL: want exactly the unread root manifest, got %+v", result.Diagnostics)
+	if len(result.Diagnostics) != 0 {
+		t.Errorf("AnalyzePackageDSL: the unread root manifest refuses nothing at boot, so it is no diagnostic; got %+v", result.Diagnostics)
+	}
+	if w := result.UnreadRootManifest; w == nil || unread([]LintDiagnostic{*w}) != 1 {
+		t.Errorf("AnalyzePackageDSL: want the unread root manifest as its own warning, got %+v", w)
 	}
 }
 

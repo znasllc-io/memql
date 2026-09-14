@@ -44,7 +44,7 @@ The file is a strict subset of TOML: blank lines, `#` comments, and exactly thos
 
 ### Where it lives: in every domain directory
 
-**Every domain directory carries its own `<domain>/memql.toml`.** A domain directory is the only thing that reaches a node: a bundle image copies domain directories into `MEMQL_DSL_PATH`, a package deploy stages each domain on its own, and every mount reads domain directories and skips the files at its root. A declaration at the root of a bundle would never arrive, so there is no inheritance from one — a `memql.toml` at the root of `MEMQL_DSL_PATH`, of a bundle `memqllint` lints, or of a package's `dsl/` is never read. `memqllint` and a package deploy report one as a diagnostic (`language_line_unread`), and the `MEMQL_DSL_PATH` mount logs a warning; each says the line belongs inside each domain directory.
+**Every domain directory carries its own `<domain>/memql.toml`.** A domain directory is the only thing that reaches a node: a bundle image copies domain directories into `MEMQL_DSL_PATH`, a package deploy stages each domain on its own, and every mount reads domain directories and skips the files at its root. A declaration at the root of a bundle would never arrive, so there is no inheritance from one — a `memql.toml` at the root of `MEMQL_DSL_PATH`, of a bundle `memqllint` lints, or of a package's `dsl/` is never read. `memqllint` reports one as a diagnostic (`language_line_unread`), a package deploy reports it as a warning that does not stop the deploy (`dsl_language_line_unread`), and the `MEMQL_DSL_PATH` mount logs a warning; each says the line belongs inside each domain directory.
 
 ```
 bundle/

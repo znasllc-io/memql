@@ -195,6 +195,13 @@ const (
 	// deployable_kind_unknown, which stays fatal, because the two say
 	// opposite things to an author -- "not yet" versus "not a thing".
 	CodeDeployableTargetNotOffered = "deployable_target_not_offered"
+	// CodeDslLanguageLineUnread (epic memql#5356): a memql.toml at the root of
+	// the package's dsl/ directory. No mount reads a root file -- each domain
+	// declares its language line in its own dsl/<domain>/memql.toml -- so boot
+	// ignores it and the package deploys. Reported so the author learns the
+	// file governs nothing; never fatal, and never under dsl_refuses_boot,
+	// because it refuses nothing at boot.
+	CodeDslLanguageLineUnread = "dsl_language_line_unread"
 
 	// -- recorded on an outcome, not fatal (epic memql#4885, D8) --
 	//

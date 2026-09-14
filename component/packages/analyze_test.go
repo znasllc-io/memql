@@ -362,6 +362,55 @@ func TestDslThatWouldRefuseBootIsAnAnalysisRefusal(t *testing.T) {
 	}
 }
 
+// TestAnUnreadRootManifestIsReportedAndThePackageDeploys (memql#5356): a
+// memql.toml at the root of dsl/ is read by no mount -- each domain carries
+// its own -- so boot ignores it. The analysis reports it under its own code,
+// NOT fatal and NOT under dsl_refuses_boot, and a package whose only finding
+// it is deploys. It used to refuse the deploy, saying the DSL "would refuse
+// boot" over a file boot never reads.
+func TestAnUnreadRootManifestIsReportedAndThePackageDeploys(t *testing.T) {
+	p := validPackage()
+	p["dsl/memql.toml"] = file(languageLine)
+
+	rep, err := Analyze(p, Options{})
+	if err != nil {
+		t.Fatalf("an unread root manifest must not refuse the package: %v (problems: %+v)", err, rep.Problems)
+	}
+	if !rep.OK {
+		t.Fatalf("the package must still deploy: %+v", rep.Problems)
+	}
+	var unread []Problem
+	for _, pr := range rep.Problems {
+		switch pr.Code {
+		case CodeDslLanguageLineUnread:
+			unread = append(unread, pr)
+		case CodeDslRefusesBoot:
+			t.Errorf("an unread root manifest must not sit under %s: %+v", CodeDslRefusesBoot, pr)
+		}
+	}
+	if len(unread) != 1 {
+		t.Fatalf("want exactly one %s problem, got %+v", CodeDslLanguageLineUnread, rep.Problems)
+	}
+	if unread[0].Fatal {
+		t.Errorf("the unread root manifest is reported, not fatal: %+v", unread[0])
+	}
+	if unread[0].Scope != "dsl/memql.toml" || !strings.Contains(unread[0].Message, "[language_line_unread]") {
+		t.Errorf("the problem must name the file it is about and carry the engine's sentence: %+v", unread[0])
+	}
+
+	// Control: the same package without the root file carries no such problem,
+	// so the one above is about the file and not about the fixture.
+	rep, err = Analyze(validPackage(), Options{})
+	if err != nil {
+		t.Fatalf("control failed: %v", err)
+	}
+	for _, pr := range rep.Problems {
+		if pr.Code == CodeDslLanguageLineUnread {
+			t.Errorf("a package with no root memql.toml reported %+v", pr)
+		}
+	}
+}
+
 func TestReservedDslDomainRefusesRatherThanBeingSkipped(t *testing.T) {
 	rep, err := Analyze(reservedDomainPackage(), Options{})
 	if err == nil {
