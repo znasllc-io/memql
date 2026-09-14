@@ -24,7 +24,11 @@ package worker
 //     because a harness can produce one and still exit non-zero;
 //   - an unknown harness word leaves the descriptor unused rather than
 //     refusing the registration, which is the same rule the closed app-id set
-//     already follows.
+//     already follows;
+//   - a level arrives as the engine's word, and the model and effort the app
+//     REPORTED come back as their own fields whose absence reads as unknown,
+//     because the served-model record must never be filled from the request
+//     (memql#5393).
 
 import (
 	"testing"
@@ -203,6 +207,87 @@ func TestAppSessionStartCarriesAResponseSchema(t *testing.T) {
 
 	if got.GetResponseSchemaJson() != `{"type":"object","required":["summary"]}` {
 		t.Errorf("response_schema_json: got %q", got.GetResponseSchemaJson())
+	}
+}
+
+// The LEVEL travels as the engine's own word (design D8 of the 2026-09-13
+// recording-and-learning record, memql#5393). The cockpit translates it into
+// the app's knobs from a table that lives on the machine, so what crosses the
+// wire is the level and never a model name the engine picked for an app it
+// cannot see.
+func TestAppSessionStartCarriesTheLevel(t *testing.T) {
+	got := roundTrip(t, &memqlv1.AppSessionStart{
+		SessionId: "s1",
+		App:       AppIdClaudeCode,
+		Kind:      AppSessionKindRun,
+		Level:     "reasoning",
+	}, &memqlv1.AppSessionStart{})
+
+	if got.GetLevel() != "reasoning" {
+		t.Errorf("level: want the engine's word verbatim, got %q", got.GetLevel())
+	}
+}
+
+// What the app SERVED comes back beside the answer (design D9), and a cockpit
+// that predates the fields sends neither. Silence has to decode as the empty
+// string -- "the app did not say" -- rather than as anything the engine could
+// mistake for a report, which is the whole of this task's acceptance.
+func TestAppSessionEndCarriesTheReportedModelAndEffort(t *testing.T) {
+	got := roundTrip(t, &memqlv1.AppSessionEnd{
+		SessionId: "s1",
+		Model:     "claude-sonnet-5",
+		Effort:    "high",
+	}, &memqlv1.AppSessionEnd{})
+	if got.GetModel() != "claude-sonnet-5" || got.GetEffort() != "high" {
+		t.Errorf("model/effort: want the app's report, got %q / %q", got.GetModel(), got.GetEffort())
+	}
+
+	older := roundTrip(t, &memqlv1.AppSessionEnd{SessionId: "s1", ExitCode: 0}, &memqlv1.AppSessionEnd{})
+	if older.GetModel() != "" || older.GetEffort() != "" {
+		t.Errorf("an older cockpit's silence must read as unknown, got %q / %q",
+			older.GetModel(), older.GetEffort())
+	}
+}
+
+// A model call carries the level too. The router has already chosen the model
+// from the machine's advertisement, so for a local runtime the level is a
+// ledger and log fact -- which is exactly why it must arrive intact rather
+// than be reconstructed on the far side.
+func TestModelCallStartCarriesTheLevel(t *testing.T) {
+	got := roundTrip(t, &memqlv1.ModelCallStart{
+		RequestId: "r1",
+		Model:     "qwen3.5:9b",
+		Kind:      "chat",
+		Level:     "strong",
+	}, &memqlv1.ModelCallStart{})
+
+	if got.GetLevel() != "strong" {
+		t.Errorf("level: got %q", got.GetLevel())
+	}
+	if got.GetModel() != "qwen3.5:9b" {
+		t.Error("the level must not displace the model the router selected on")
+	}
+}
+
+// A model call's served-model report already lives on its usage, so the
+// effort sits BESIDE it there rather than in a second place on the end
+// message. A runtime that states no effort leaves it empty, and that silence
+// survives the wire as silence.
+func TestModelCallUsageCarriesTheReportedEffortBesideTheModel(t *testing.T) {
+	got := roundTrip(t, &memqlv1.ModelCallEnd{
+		RequestId: "r1",
+		Usage:     &memqlv1.ModelCallUsage{Known: true, Model: "gpt-oss:20b", Effort: "low"},
+	}, &memqlv1.ModelCallEnd{})
+	if got.GetUsage().GetModel() != "gpt-oss:20b" || got.GetUsage().GetEffort() != "low" {
+		t.Errorf("usage: want the runtime's report, got %+v", got.GetUsage())
+	}
+
+	silent := roundTrip(t, &memqlv1.ModelCallEnd{
+		RequestId: "r1",
+		Usage:     &memqlv1.ModelCallUsage{Known: true, Model: "qwen3.5:9b"},
+	}, &memqlv1.ModelCallEnd{})
+	if silent.GetUsage().GetEffort() != "" {
+		t.Errorf("a runtime that stated no effort must read as unknown, got %q", silent.GetUsage().GetEffort())
 	}
 }
 

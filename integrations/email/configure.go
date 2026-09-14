@@ -184,9 +184,10 @@ func (i *Integration) handleConfigure(ctx context.Context, args map[string]any, 
 	// person can make every node rewrite rows in a loop, and widening it to
 	// match this one caller would trade that for a mark that refreshes a few
 	// minutes sooner. So a developer's write lands correctly and the mark
-	// catches up on the next providers reload or restart.
+	// catches up on this node's next readiness safety-net pass (at most ten
+	// minutes, jittered) or the next providers reload, whichever comes first.
 	if _, err := writer.Execute(ctx, "builtin readinessRecompute()"); err != nil {
-		i.logger.Info("email.configure: readiness not recomputed here; the module mark updates on the next providers reload or restart", "reason", err)
+		i.logger.Info("email.configure: readiness not recomputed here; the module mark updates on the next readiness safety-net pass or providers reload", "reason", err)
 	}
 
 	return configureResult(map[string]any{

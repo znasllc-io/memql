@@ -3,13 +3,15 @@
 // gRPC connection setup, TLS configuration, auth-token plumbing,
 // and the bidi stream opener.
 //
-// Scope. The SDK owns transport; the protocol (Register /
-// RegisterAck / Heartbeat / ToolResult / ToolCall / ...) stays
-// exposed via the underlying *memqlv1.WorkerService_StreamClient
-// returned by Connection.Stream. Wrapping the full envelope set
-// in SDK-owned types is a separate effort -- the goal of this
-// package is to stop the cockpit (and any future worker host) from
-// re-implementing the dial code per consumer.
+// Scope. The SDK owns transport and the stream. The protocol (Register /
+// RegisterAck / Heartbeat / ToolResult / ToolCall / ...) is expressed in
+// the wire messages a caller passes to Connection.Send and reads from
+// Connection.Recv; the stream itself is not handed out, because every
+// write on it must go through the one lock Send holds (see Connection,
+// and TestConnectionHandsOutNoRawStream). Wrapping the full envelope set
+// in SDK-owned types is a separate effort -- the goal of this package is
+// to stop the cockpit (and any future worker host) from re-implementing
+// the dial code per consumer.
 //
 // Typical use:
 //
@@ -22,8 +24,8 @@
 //	if err != nil { ... }
 //	defer conn.Close()
 //
-//	stream := conn.Stream()
-//	// ...regular Send / Recv against the worker protocol...
+//	// conn.Send(register) / conn.Recv() -- the worker protocol, from as
+//	// many goroutines as the host needs; Send is serialized inside.
 //
 // Surfaced by memql#117 (the issue requesting this SDK module) and
 // the SDK-only rule in memql/sdk/go/CLAUDE.md.
@@ -31,8 +33,10 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -94,18 +98,45 @@ type DialConfig struct {
 }
 
 // Connection wraps a gRPC client conn + an open WorkerService bidi
-// stream. Caller drives the worker protocol via Stream (or the
-// Send / Recv pass-throughs); Close shuts both down.
+// stream. Callers drive the worker protocol through Send / Recv; Close
+// shuts both down.
+//
+// EVERY WRITE GOES THROUGH sendMu. grpc-go's contract (stream.go,
+// ClientStream): "it is not safe to call SendMsg on the same stream in
+// different goroutines. It is also not safe to call CloseSend
+// concurrently with SendMsg." A worker host writes from many goroutines
+// at once -- the cockpit's heartbeat ticker, its recv loop answering a
+// Ping, one goroutine per tool dispatch, a model call's content and
+// keepalive deltas, a pull's progress, an app session's chunks -- and
+// this lock is the one place they are serialized. It is the client half
+// of component/worker.streamSession.send's sendMu on the agent. Recv is
+// deliberately outside it: one goroutine in SendMsg and another in
+// RecvMsg is the one combination grpc-go permits.
 type Connection struct {
 	conn   *grpc.ClientConn
 	client memqlv1.WorkerServiceClient
 	stream memqlv1.WorkerService_StreamClient
+
+	sendMu sync.Mutex
+	// sendErr is the first error the stream answered a Send with, and
+	// every later Send answers it without touching the stream: on error
+	// SendMsg has aborted the stream, and a second writer learning that
+	// from the same error is simpler than each writer learning it from a
+	// different one. Mirrors streamSession.sendErr on the agent.
+	sendErr error
+	// closed is set by Close under sendMu, so a Send that lost the race
+	// to Close answers errClosed rather than reaching a half-closed
+	// stream.
+	closed bool
 }
+
+// errClosed is what Send and Recv answer on a nil or closed Connection.
+var errClosed = errors.New("sdk/worker: connection is closed")
 
 // Dial opens the gRPC connection, attaches the auth token to the
 // stream metadata, and starts the WorkerService bidi stream. The
 // caller is responsible for sending the initial Register message
-// against the returned stream -- the SDK does not assume the worker
+// through the returned connection -- the SDK does not assume the worker
 // protocol's lifecycle. See memql-cockpit's internal/worker/
 // connect.go for the reference register / heartbeat / tool-result
 // loop.
@@ -177,43 +208,66 @@ func Dial(ctx context.Context, cfg DialConfig) (*Connection, error) {
 	}, nil
 }
 
-// Stream returns the underlying bidi stream. Caller drives the
-// worker protocol against it (Register, Heartbeat, ToolResult,
-// etc.).
-func (c *Connection) Stream() memqlv1.WorkerService_StreamClient {
-	if c == nil {
-		return nil
-	}
-	return c.stream
-}
-
-// Send is a pass-through to Stream().Send(msg). Convenience method
-// so the consumer doesn't have to grab the stream explicitly for
-// each call.
+// Send writes one message on the worker side of the stream, serialized
+// against every other Send and against Close. Safe from any goroutine.
 func (c *Connection) Send(msg *memqlv1.WorkerClientMessage) error {
 	if c == nil || c.stream == nil {
-		return fmt.Errorf("sdk/worker: connection is closed")
+		return errClosed
 	}
-	return c.stream.Send(msg)
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.closed {
+		return errClosed
+	}
+	if c.sendErr != nil {
+		return c.sendErr
+	}
+	if err := c.stream.Send(msg); err != nil {
+		c.sendErr = err
+		return err
+	}
+	return nil
 }
 
-// Recv is a pass-through to Stream().Recv().
+// Recv blocks until the next inbound message lands. Not under sendMu:
+// grpc-go permits one goroutine in SendMsg beside one in RecvMsg, and a
+// Recv that waited on a writer would stall the cockpit's whole inbound
+// loop behind a slow tool result.
 func (c *Connection) Recv() (*memqlv1.WorkerServerMessage, error) {
 	if c == nil || c.stream == nil {
-		return nil, fmt.Errorf("sdk/worker: connection is closed")
+		return nil, errClosed
 	}
 	return c.stream.Recv()
 }
 
-// Close terminates the stream (CloseSend) and the underlying gRPC
-// connection. Safe to call on a nil receiver and idempotent.
+// Close half-closes the stream (CloseSend) and closes the underlying
+// gRPC connection. Safe to call on a nil receiver, idempotent, and safe
+// to call while other goroutines are in Send: CloseSend is taken under
+// sendMu, so it waits for an in-flight Send to return rather than
+// running beside it -- ordinarily one frame's write.
+//
+// KEEPALIVE DOES NOT BOUND THAT WAIT. A Send blocked on flow control
+// returns only when the peer reads again or the stream ends: the context
+// passed to Dial is cancelled, the server ends the stream, or the
+// transport fails. Keepalive (DefaultKeepaliveTime +
+// DefaultKeepaliveTimeout) catches only the last, for a peer that stops
+// answering altogether; a peer that is alive but has stopped reading this
+// stream still acks pings, so it never fires. A caller that needs Close to
+// return promptly cancels the Dial context first. The ClientConn is closed
+// after the half-close, outside the lock, so the server sees a clean end
+// of the send direction before the transport goes.
 func (c *Connection) Close() {
 	if c == nil {
 		return
 	}
-	if c.stream != nil {
-		_ = c.stream.CloseSend()
+	c.sendMu.Lock()
+	if !c.closed {
+		c.closed = true
+		if c.stream != nil {
+			_ = c.stream.CloseSend()
+		}
 	}
+	c.sendMu.Unlock()
 	if c.conn != nil {
 		_ = c.conn.Close()
 	}

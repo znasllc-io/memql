@@ -201,17 +201,25 @@ func TestIntegrationEvaluator(t *testing.T) {
 	}
 }
 
-// An integration that answers with an error is notApplicable rather than
-// unconfigured: a probe that failed says nothing about whether a person did
-// the setup, and unconfigured would send them to a form they do not need.
-func TestIntegrationEvaluatorErrorIsNotApplicable(t *testing.T) {
+// An integration that answers with an ERROR is unknown: a probe that failed
+// says nothing about whether a person did the setup, so it is neither
+// unconfigured (which would send them to a form they may not need) nor
+// notApplicable -- the word for "not hosted here", behind which a failed
+// probe on a node that DOES host the integration used to hide. An integration
+// that is not registered (no error) stays notApplicable; that case is in
+// TestIntegrationEvaluator.
+func TestIntegrationEvaluatorErrorIsUnknown(t *testing.T) {
 	mod := envregistry.Module{Name: "email", Core: true, Description: "d", Evaluator: "integration:email"}
 	r := fakeResolvers(nil, nil, nil)
 	r.IntegrationState = func(context.Context, string) (string, bool, bool, error) {
 		return "", false, true, errors.New("probe failed")
 	}
-	if got := evalOne(t, r, mod); got.State != readiness.NotApplicable {
-		t.Fatalf("got %s", got.State)
+	got := evalOne(t, r, mod)
+	if got.State != readiness.Unknown {
+		t.Fatalf("got %s, want unknown", got.State)
+	}
+	if got.Reason != readiness.ReasonIntegrationProbeFailed {
+		t.Fatalf("reason %q, want %q", got.Reason, readiness.ReasonIntegrationProbeFailed)
 	}
 }
 

@@ -75,12 +75,90 @@ export function markToneFor(gate: Gate): DotTone | null {
   return null;
 }
 
-/** Sentence-case words for a verdict, the Set up group's vocabulary. */
+/**
+ * Sentence-case words for a verdict, the Set up group's vocabulary.
+ *
+ * `partial` HAS TWO CAUSES AND THEY GET TWO NAMES (memql#5259). Some nodes
+ * set up and others not is a difference BETWEEN nodes, and "Partly set up"
+ * sent the owner looking for a half-filled form that did not exist; it reads
+ * "Set up on some nodes". A lane every node agrees is half-filled keeps
+ * "Partly set up", which is what it is.
+ *
+ * `unreported` HAS TWO CAUSES TOO. Nobody answered is "Not reported"; nodes
+ * answered and none of them could finish the check (a fleet read that failed,
+ * say) is "Could not check" -- a different thing to go and look at, and
+ * never a reason to send anybody to a form.
+ *
+ * What never gets a word here is a node the fold SET ASIDE as behind the
+ * cluster: a verdict with stale nodes reads exactly as it would without them,
+ * because they do not change it. The Cluster app names them.
+ */
 export function stateWords(v: Verdict | null): string {
-  if (v === null || v.state === "unreported") return "Not reported";
+  if (v === null) return "Not reported";
+  if (v.state === "unreported") return v.unknown.length > 0 ? "Could not check" : "Not reported";
   if (v.state === "configured") return "Set up";
-  if (v.state === "partial") return "Partly set up";
+  if (v.state === "partial") return setUpOnSomeNodes(v) ? "Set up on some nodes" : "Partly set up";
   return "Not set up";
+}
+
+/** Whether a partial verdict is nodes that DIFFER, some of them set up. */
+function setUpOnSomeNodes(v: Verdict): boolean {
+  const configured = v.nodes.filter((n) => n.state === "configured").length;
+  return configured > 0 && configured < v.nodes.length;
+}
+
+/**
+ * The nodes behind a verdict, in one quiet line for the operator who hovers:
+ * which nodes differ, which are catching up, which could not check. Empty when
+ * there is nothing beyond the words -- every node agrees and every one voted.
+ *
+ * A TITLE, NOT A CAPTION. The Set up group and the Modules list are where a
+ * person reads the answer; the nodes behind it are the Cluster app's Modules
+ * detail, which lists every one with its time and reason. Printing the node
+ * list into the row is how the raw `bff-b=unconfigured, bff-a=configured`
+ * pairs came to sit beside every mark.
+ */
+export function verdictDetail(v: Verdict | null): string {
+  if (v === null) return "";
+  const parts: string[] = [];
+  const notSetUp = v.nodes.filter((n) => n.state !== "configured").map((n) => n.nodeId);
+  if (v.state === "partial" && notSetUp.length > 0 && notSetUp.length < v.nodes.length) {
+    parts.push(`Not set up on ${nodeList(notSetUp)}.`);
+  }
+  if (v.stale.length > 0) {
+    parts.push(`${countNodes(v.stale.length)} catching up: ${nodeList(v.stale)}. Not counted until each re-checks, which it does on its own.`);
+  }
+  if (v.unknown.length > 0) {
+    parts.push(`${countNodes(v.unknown.length)} could not check: ${nodeList(v.unknown)}. Not counted; each retries on its own.`);
+  }
+  return parts.join(" ");
+}
+
+/**
+ * The ONE quiet label a list row carries when the fold set nodes aside, or
+ * "" when it set none aside -- or when the verdict's own words already say it
+ * ("Could not check" needs no "2 could not check" beside it).
+ *
+ * One label, not two: a row's state cluster is a glance, and the nodes that
+ * could not check outrank the ones catching up -- a failed read is something
+ * an operator may need to act on, a node behind the cluster re-checks by
+ * itself. Both are in the title and in the detail.
+ */
+export function setAsideLabel(v: Verdict | null): string {
+  if (v === null || v.state === "unreported") return "";
+  if (v.unknown.length > 0) return `${v.unknown.length} could not check`;
+  if (v.stale.length > 0) return `${v.stale.length} catching up`;
+  return "";
+}
+
+function countNodes(n: number): string {
+  return n === 1 ? "1 node" : `${n} nodes`;
+}
+
+/** Up to three names, then how many more: a title is one line, not a table. */
+function nodeList(ids: readonly string[]): string {
+  if (ids.length <= 3) return ids.join(", ");
+  return `${ids.slice(0, 3).join(", ")} and ${ids.length - 3} more`;
 }
 
 export function SurfaceUnconfigured({
@@ -266,12 +344,11 @@ export function SetupGroup({
             return (
               <div key={id} className="os-setup-row">
                 <span className="os-setup-name">{MODULE_NAMES[id]}</span>
-                <span className="os-setup-state">
+                <span className="os-setup-state" title={verdictDetail(v) || undefined}>
                   {tone ? (
                     <ProvenanceDot tone={tone} label={`${MODULE_NAMES[id]}: ${stateWords(v)}`} />
                   ) : null}
                   {stateWords(v)}
-                  {v && v.disagreement.length > 0 ? ` (${v.disagreement.join(", ")})` : ""}
                 </span>
                 {act.kind === "none" ? (
                   <span className="os-setup-act" />

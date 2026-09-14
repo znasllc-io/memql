@@ -1,0 +1,37 @@
+{
+  "name": "a stale row, an unknown row and a dead replica's row in one module: each is set aside by its own rule",
+  "now": "2026-09-13T12:01:00Z",
+  "reports": [
+    {"module": "ai", "nodeId": "agent-a", "nodeType": "agent", "state": "configured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": true, "slots": [{"name": "live", "present": true}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-13T12:00:10Z"},
+    {"module": "ai", "nodeId": "bff-a", "nodeType": "bff", "state": "configured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": true, "slots": [{"name": "live", "present": false}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-13T11:58:00Z"},
+    {"module": "ai", "nodeId": "bff-b", "nodeType": "bff", "state": "unknown", "reason": "fleetReadFailed", "core": true, "lanes": [], "reportedAt": "2026-09-13T12:00:20Z"},
+    {"module": "ai", "nodeId": "edge-a", "nodeType": "edge", "state": "unconfigured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-13T09:00:00Z"},
+    {"module": "ai", "nodeId": "edge-gone", "nodeType": "edge", "state": "unconfigured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-12T20:00:00Z"}
+  ],
+  "nodes": [
+    {"nodeId": "agent-a", "health": "healthy", "lastSeen": "2026-09-13T12:00:40Z"},
+    {"nodeId": "bff-a", "health": "healthy", "lastSeen": "2026-09-13T12:00:40Z"},
+    {"nodeId": "bff-b", "health": "healthy", "lastSeen": "2026-09-13T12:00:40Z"},
+    {"nodeId": "edge-a", "health": "degraded", "lastSeen": "2026-09-13T12:00:40Z"},
+    {"nodeId": "edge-gone", "health": "stopped", "lastSeen": "2026-09-12T20:05:00Z"}
+  ],
+  "expect": [
+    {"module": "ai", "state": "configured", "disagreement": [], "unknown": ["bff-b"], "stale": ["edge-a"]}
+  ]
+}
