@@ -40,6 +40,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -103,29 +104,35 @@ func (l *ExprLeaf) MarshalJSON() ([]byte, error) {
 
 // PrepareExpressions parses every expression of a v1 automation once and
 // caches the nodes (see the file comment for where). A legacy automation is
-// left as it is -- unless its JSON carries a v1 value leaf, which is refused. Every path that turns compiled JSON into an executable
+// left as it is, with two exceptions: a v1 value leaf in its JSON is refused,
+// and a trigger filter written as a lambda is parsed as one. Every path that turns compiled JSON into an executable
 // Automation calls it -- the tree loader, CompileSource and the LogicRunner's
 // body compile -- and the executor refuses a v1 automation that skipped it.
 //
 // An error names the step and the position: a parse error, or an expression
 // whose static cost estimate exceeds tiers.MaxStaticCost.
 func PrepareExpressions(a *Automation) error {
-	if !a.IsV1() {
-		return refuseLegacyLeaves(a)
-	}
 	p := &exprPreparer{automation: a.Name}
-	if a.Trigger != nil && strings.TrimSpace(a.Trigger.Filter) != "" {
-		lam, err := languageParser.ParseV1Lambda(a.Trigger.Filter)
-		if err != nil {
-			return fmt.Errorf("automation %q: trigger filter: %w", a.Name, err)
-		}
-		if len(lam.Params) != 1 {
-			return fmt.Errorf("automation %q: trigger filter %q must be a one-parameter lambda, as in row => row.status == \"active\"", a.Name, a.Trigger.Filter)
-		}
-		if err := p.checkCost("trigger filter", lam.Body); err != nil {
+	if !a.IsV1() {
+		if err := refuseLegacyLeaves(a); err != nil {
 			return err
 		}
-		a.Trigger.FilterLambda = lam
+		// The trigger filter is a pushdown position: the parser accepts its
+		// edition-2026 spelling, `@filter(row => ...)`, beside the legacy one
+		// whatever the grammar of the body, because no legacy filter opens
+		// with a lambda header. So a LEGACY automation may carry a lambda
+		// filter, and it is evaluated as one -- parsed here, decided by
+		// EvalExpr over the triggering row -- rather than handed to the
+		// string evaluator as text it cannot read.
+		if a.Trigger != nil && lambdaFilterHead.MatchString(a.Trigger.Filter) {
+			return p.triggerFilter(a.Trigger)
+		}
+		return nil
+	}
+	if a.Trigger != nil && strings.TrimSpace(a.Trigger.Filter) != "" {
+		if err := p.triggerFilter(a.Trigger); err != nil {
+			return err
+		}
 	}
 	for _, pc := range a.Preconditions {
 		if pc == nil {
@@ -148,6 +155,28 @@ func PrepareExpressions(a *Automation) error {
 		}
 	}
 	a.exprsPrepared = true
+	return nil
+}
+
+// lambdaFilterHead recognises a trigger filter that opens with a lambda
+// header -- `row =>` or `(row) =>` -- which is what makes it edition 2026 in
+// either grammar.
+var lambdaFilterHead = regexp.MustCompile(`^\s*(?:[A-Za-z_][A-Za-z0-9_]*|\(\s*[A-Za-z_][A-Za-z0-9_]*\s*\))\s*=>`)
+
+// triggerFilter parses a trigger filter as the one-parameter lambda it must
+// be, checks its cost, and caches it on the trigger.
+func (p *exprPreparer) triggerFilter(t *TriggerConfig) error {
+	lam, err := languageParser.ParseV1Lambda(t.Filter)
+	if err != nil {
+		return fmt.Errorf("automation %q: trigger filter: %w", p.automation, err)
+	}
+	if len(lam.Params) != 1 {
+		return fmt.Errorf("automation %q: trigger filter %q must be a one-parameter lambda, as in row => row.status == \"active\"", p.automation, t.Filter)
+	}
+	if err := p.checkCost("trigger filter", lam.Body); err != nil {
+		return err
+	}
+	t.FilterLambda = lam
 	return nil
 }
 

@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // generatedHeader is stamped on every emitted file. The wording matters: the
@@ -29,8 +31,17 @@ func generatedHeader(version string) string {
 `
 }
 
-// EmitConceptFile renders one type's .memql file.
+// EmitConceptFile renders one type's .memql file, its filter clauses in the
+// expression grammar the engine parses with (langparser.DefaultOptions): the
+// tree this generator writes must load under the same switch as every other
+// file, so the generated reads flip to edition 2026 with that one switch.
 func EmitConceptFile(version string, p *TypePlan) string {
+	return emitConceptFile(version, p, langparser.DefaultOptions.ExpressionsV1)
+}
+
+// emitConceptFile is EmitConceptFile with the expression grammar chosen
+// explicitly; expressionsV1 selects the edition-2026 filter spellings.
+func emitConceptFile(version string, p *TypePlan, expressionsV1 bool) string {
 	var b strings.Builder
 	b.WriteString(generatedHeader(version))
 	b.WriteString("//\n")
@@ -74,7 +85,7 @@ func EmitConceptFile(version string, p *TypePlan) string {
 	b.WriteString("}\n\n")
 
 	b.WriteString(emitShape(p))
-	b.WriteString(emitReads(p))
+	b.WriteString(emitReads(p, expressionsV1))
 	return b.String()
 }
 
@@ -175,17 +186,39 @@ func conceptField(f FieldPlan) string {
 // default projection, and the two reads reconciliation and the
 // compliance export walk.
 
+// The two reads' filter clauses, in each grammar. The edition-2026 spellings
+// are BYTE FOR BYTE what `memqlmigrate --rewrite=expressions` writes over the
+// legacy ones -- the lambda header, `row.` on every payload field, the trait
+// applied to its row, the `when(args.since)` guard as the value its `&&`
+// ignores, and the long clause broken one `&&` operand per line under its
+// first operand -- so a regenerated tree and a migrated one cannot differ
+// (TestEmitReadsV1IsTheExpressionsRewrite).
+const (
+	byGidFilterLegacy = "  filter  storeId==args.storeId && gid==args.gid && actor.isClusterOwner==true\n"
+	byGidFilterV1     = "  filter  row => row.storeId == args.storeId && row.gid == args.gid && actor.isClusterOwner == true\n"
+
+	forStoreFilterLegacy = "  filter    storeId==args.storeId && isNotDeleted && actor.isClusterOwner==true && when(args.since) { updatedAt>=args.since }\n"
+	forStoreFilterV1     = "  filter    row => row.storeId == args.storeId\n" +
+		"                && isNotDeleted(row)\n" +
+		"                && actor.isClusterOwner == true\n" +
+		"                && (args.since == nil || row.updatedAt >= args.since)\n"
+)
+
 // emitReads renders the two reads every mirrored domain needs: one row by
 // GID, and a store's live rows. Reconciliation walks the second to find what
 // the origin no longer returns, and the compliance export walks it to collect
 // everything referencing a customer.
-func emitReads(p *TypePlan) string {
+func emitReads(p *TypePlan, expressionsV1 bool) string {
+	byGidFilter, forStoreFilter := byGidFilterLegacy, forStoreFilterLegacy
+	if expressionsV1 {
+		byGidFilter, forStoreFilter = byGidFilterV1, forStoreFilterV1
+	}
 	var b strings.Builder
 	b.WriteString(wrapDoc(fmt.Sprintf("One mirrored Shopify %s by store and GID.", p.GraphQLType)))
 	b.WriteString("@actor\n")
 	fmt.Fprintf(&b, "query %s %s {\n", p.Concept, byGidName(p))
 	b.WriteString("  args {\n    storeId  string!\n    gid      string!\n  }\n")
-	b.WriteString("  filter  storeId==args.storeId && gid==args.gid && actor.isClusterOwner==true\n")
+	b.WriteString(byGidFilter)
 	fmt.Fprintf(&b, "  shape   %s\n", shapeName(p))
 	b.WriteString("}\n\n")
 
@@ -196,7 +229,7 @@ func emitReads(p *TypePlan) string {
 	b.WriteString("@actor\n")
 	fmt.Fprintf(&b, "query %s %s {\n", p.Concept, forStoreName(p))
 	b.WriteString("  args {\n    storeId  string!\n    since    datetime\n  }\n")
-	b.WriteString("  filter    storeId==args.storeId && isNotDeleted && actor.isClusterOwner==true && when(args.since) { updatedAt>=args.since }\n")
+	b.WriteString(forStoreFilter)
 	b.WriteString("  sort      \"updatedAt\", \"desc\"\n")
 	b.WriteString("  paginate  100\n")
 	fmt.Fprintf(&b, "  shape     %s\n", shapeName(p))
@@ -206,9 +239,9 @@ func emitReads(p *TypePlan) string {
 
 // Construct names. Prefix-first so every generated name sorts together and
 // nothing collides with a hand-written construct in another domain.
-func shapeName(p *TypePlan) string     { return p.Concept + "Mirror" }
-func byGidName(p *TypePlan) string     { return "shopify" + title(p.Concept) + "ByGid" }
-func forStoreName(p *TypePlan) string  { return "shopify" + title(p.Concept) + "ForStore" }
+func shapeName(p *TypePlan) string    { return p.Concept + "Mirror" }
+func byGidName(p *TypePlan) string    { return "shopify" + title(p.Concept) + "ByGid" }
+func forStoreName(p *TypePlan) string { return "shopify" + title(p.Concept) + "ForStore" }
 
 func title(s string) string {
 	if s == "" {
