@@ -67,8 +67,10 @@ func TestArgsBlockAndAttributeClassifiersAgree(t *testing.T) {
 		{`@x({ "k": 1 })`, annotations.Use{Name: "x", Form: annotations.FormObject}},
 		{`@x(!"a")`, annotations.Use{Name: "x", Form: annotations.FormExclude}},
 		{`@x(!"a", !"b")`, annotations.Use{Name: "x", Form: annotations.FormExclude}},
+		// @filter's one form since the edition-2026 flip: its string and bare
+		// predicate arguments are refused at parse (retired_filter_annotation),
+		// so parseAttribute produces neither for this table to classify.
 		{"@filter(row => row.a == 1)", annotations.Use{Name: "filter", Form: annotations.FormExpression}},
-		{`@filter(row => row.a == 1)`, annotations.Use{Name: "filter", Form: annotations.FormString}},
 		{`@x(k="v")`, annotations.Use{Name: "x", Form: annotations.FormKeywords, Keys: []annotations.WrittenKey{valued("k")}}},
 		{"@x(k)", annotations.Use{Name: "x", Form: annotations.FormKeywords, Keys: []annotations.WrittenKey{bare("k")}}},
 		{`@x(zz="v", aa, mm=3)`, annotations.Use{Name: "x", Form: annotations.FormKeywords, Keys: []annotations.WrittenKey{valued("zz"), bare("aa"), valued("mm")}}},

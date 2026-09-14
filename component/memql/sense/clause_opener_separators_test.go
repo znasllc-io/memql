@@ -112,16 +112,17 @@ func engineAcceptsQuery(t *testing.T, src string) bool {
 func TestFilterClauseOpenerSeesEveryUnicodeSpaceSeparator(t *testing.T) {
 	for _, tc := range clauseSeparators {
 		t.Run(tc.name, func(t *testing.T) {
-			src := "query w q {\n  filter" + tc.sep + "id == args.x"
+			src := "query w q {\n  filter" + tc.sep + "row => id == args.x"
 			if tc.sep == "(" {
 				src += ")"
 			}
 			src += "\n  shape s\n}\n"
 
 			// The engine-acceptance probe uses the `row.`-namespaced form so it
-			// tests the SEPARATOR, not the gate; `src` above is the BARE form,
-			// which is what the scanner must flag. Both parse.
-			legal := "query w q {\n  filter" + tc.sep + "row.id == args.x"
+			// tests the SEPARATOR, not the gate; `src` above reads the intrinsic
+			// BARE inside the lambda, which is what the scanner must flag. Both
+			// parse.
+			legal := "query w q {\n  filter" + tc.sep + "row => row.id == args.x"
 			if tc.sep == "(" {
 				legal += ")"
 			}

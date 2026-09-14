@@ -134,6 +134,49 @@ package parser
 // not `concept==<id>;<filter>`. The `;` bound at `&&` level, so a filter whose
 // top level was an `||` split around it; every such filter in the tree was
 // already parenthesised, so no shipped query changes meaning.
+//
+// # The edition-2026 flip (memql#5364, memql#5368)
+//
+// parser.DefaultOptions turned Options.ExpressionsV1 on with the tree's
+// migration, so every authored position parses the edition-2026 expression
+// grammar. The internal query form -- ParseExpression, the string an SDK
+// sends to Execute -- keeps its grammar; nothing below reaches it.
+//
+// NARROWINGS. Each parsed on the authored path before the flip and is refused
+// now, naming its replacement. The tree used them, and was migrated in the
+// same change, so this bump owes a rewrite mode and ships it: memqlmigrate
+// --rewrite=expressions (dsl/ and the product bundles), with
+// scripts/migrations/expressions_go_fixtures for Go test fixtures.
+// V1RetiredForms (v1_refusals.go) is the list with rule ids; by position:
+//
+//   - the predicate positions' legacy spellings: a `filter` with no lambda
+//     header, a spec or trait `{ return ... }` body, a raw-text @filter, and
+//     @trigger's filter= written as a string;
+//   - in a logic statement, a mutation value, a step's arguments and its
+//     condition: the calls an operator or a method replaces -- cond(),
+//     concat(), coalesce(), exists(), len(), count(), mean(), first(), last(),
+//     and(), or(), lt(), gt(), lte(), gte() -- and `null`, `.contains(...)`, a
+//     key-less map entry (`{ args.x }`), the `;` connective and `has`;
+//   - two spellings the v1 grammar refuses outside that table: a named
+//     argument written `name=value` (it is `name: value`) and a quoted map key
+//     (`{"k": 1}`, authoring rule 18);
+//   - a canonical id written bare in an expression (`concept == v1:crm:lead`):
+//     it is a string, and is written quoted.
+//
+// Not narrowings, because the legacy grammar refused them too: not(),
+// timestamp(), now() and `$args.x`. The #2707 builtins, caller() and an
+// `asOf` outside a query keep the refusals the legacy grammar gave them; the
+// v1 call parser repeats each, so none reads as a call to an undefined
+// function.
+//
+// WIDENINGS. A step's right-hand side is any expression -- `n := 5` is a
+// query step the runtime evaluates, where the legacy grammar required a call
+// or a collection chain -- and a member read may be optional, `x.?field`.
+//
+// A durably-promoted `v1:authoring:construct` row written in a retired
+// spelling stops recompiling at this version; the inverted stamp guard names
+// the stale stamp as the reason, and memqlmigrate --rewrite=expressions is
+// the way back.
 
 import (
 	"crypto/sha256"
@@ -148,7 +191,7 @@ import (
 // The digest suffix is not decoration: TestGrammarVersionCarriesTheSurfaceDigest
 // recomputes it and requires this string to end with it, which is what makes a
 // grammar move impossible to land without editing this line (memql#3089).
-const GrammarVersion = "2026.09-dsl-v1-expressions-4485b389"
+const GrammarVersion = "2026.09-dsl-v1-expressions-52d9aeb1"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test

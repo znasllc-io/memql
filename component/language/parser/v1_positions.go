@@ -150,6 +150,39 @@ func (p *Parser) refuseCommaAfterLambda() error {
 	return nil
 }
 
+// refuseAfterPredicate refuses a token left on the line of a spec's or
+// trait's lambda. The lambda is the one predicate clause no bracket or brace
+// closes: it is parsed mid-stream and stops at the first token that cannot
+// extend it, so a word the grammar does not know (`row => row.a == 1 or
+// row.b == 2`) would end the predicate early and everything after it would be
+// dropped -- the declaration would load meaning less than its author wrote.
+// A declaration that follows starts on a line of its own. what names the
+// predicate for the message.
+func (p *Parser) refuseAfterPredicate(what string) error {
+	if p.check(TokenEOF) || p.pos == 0 || p.current.Line != p.tokens[p.pos-1].Line {
+		return nil
+	}
+	return p.v1Trailing(what)
+}
+
+// v1Trailing refuses the token at the cursor, left over after what: a known
+// mistake by its fix, an English connective by the operator that replaces
+// it, anything else as unexpected.
+func (p *Parser) v1Trailing(what string) error {
+	if err := p.v1RefuseMistake(); err != nil {
+		return err
+	}
+	if p.check(TokenIdentifier) {
+		switch p.current.Literal {
+		case "or":
+			return v1Errorf(p.current, "`or` is not an operator: write `||`")
+		case "and":
+			return v1Errorf(p.current, "`and` is not an operator: write `&&`")
+		}
+	}
+	return v1Errorf(p.current, "unexpected %s after %s", v1Describe(p.current), what)
+}
+
 // v1FilterLambdaAhead reports whether the cursor opens a lambda: `x =>`, or a
 // parenthesised parameter list and `=>`.
 func (p *Parser) v1FilterLambdaAhead() bool {

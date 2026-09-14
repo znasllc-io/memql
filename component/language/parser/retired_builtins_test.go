@@ -45,13 +45,15 @@ func TestRetiredExprBuiltinsRejectWithHint(t *testing.T) {
 }
 
 // TestRetiredExprBuiltinsRejectedInConditionPositions pins the second gate:
-// conditions are canonicalised to raw strings (parseConditionExpression)
-// that never reach the callable dispatch, so without this gate a retired
-// builtin in an if-condition would be load-green and silently constant-false
-// at evaluation -- the exact class the retirement must not reintroduce.
+// a condition never reaches the legacy callable dispatch -- the legacy
+// grammar canonicalised it to a raw string (parseConditionExpression), and
+// edition 2026 parses it with the v1 call parser (parseV1FunctionCall) -- so
+// without a gate at each a retired builtin in an if-condition would be
+// load-green and silently constant-false at evaluation, the exact class the
+// retirement must not reintroduce.
 func TestRetiredExprBuiltinsRejectedInConditionPositions(t *testing.T) {
 	body := func(cond string) string {
-		return "logic probe {\n  args {\n    a string @required\n  }\n  body {\n    x := coalesce(args.a, \"\")\n    if " + cond + " {\n      y := concat(x, \"!\")\n    }\n    return x\n  }\n}\n"
+		return "logic probe {\n  args {\n    a string @required\n  }\n  body {\n    x := args.a ?? \"\"\n    if " + cond + " {\n      y := x + \"!\"\n    }\n    return x\n  }\n}\n"
 	}
 	src := body("year(args.a) == 2026")
 	normalised, err := NormaliseAll(src)
@@ -62,13 +64,38 @@ func TestRetiredExprBuiltinsRejectedInConditionPositions(t *testing.T) {
 		t.Fatalf("retired builtin in an if-condition must fail parse with the migration hint, got: %v", err)
 	}
 	// A live builtin in the same position still parses.
-	src = body(`coalesce(args.a, "") == "x"`)
+	src = body(`lower(args.a) == "x"`)
 	normalised, err = NormaliseAll(src)
 	if err != nil {
 		t.Fatalf("normalise: %v", err)
 	}
 	if _, err := ParseFile(normalised); err != nil {
 		t.Fatalf("live builtin in an if-condition must keep parsing: %v", err)
+	}
+}
+
+// TestRetiredCallsRefusedAtEveryV1Position: the edition-2026 call parser
+// keeps the legacy dispatch's refusals at every in-process position, not only
+// in an if-condition -- a #2707 builtin and caller() anywhere, and `asOf`
+// outside a query -- each with the legacy message, where it would otherwise
+// read as a call to a function nothing defines.
+func TestRetiredCallsRefusedAtEveryV1Position(t *testing.T) {
+	logic := func(stmt string) string {
+		return "logic probe {\n  args {\n    a string\n  }\n  body {\n    " + stmt + "\n  }\n}\n"
+	}
+	for _, tc := range []struct{ name, src, want string }{
+		{"a #2707 builtin in a logic return", logic("return month(args.a)"), "#2707"},
+		{"caller() in a logic statement", logic("x := caller()\n    return x"), "caller.X is retired"},
+		{"asOf in a logic return", logic("return asOf(things, latest)"), "query-only clause and cannot appear in a logic body"},
+		{"a #2707 builtin in a mutation value", "mutate thing probe {\n  args {\n    a string\n  }\n  insert {\n    id: args.a\n    n: memqlVersion()\n  }\n}\n", "#2707"},
+		{"a #2707 builtin in a step argument", "@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  step run {\n    logic f(x: quarter(event.payload.at))\n  }\n}\n", "#2707"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := parseV1Authored(t, tc.src, DefaultOptions)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want a refusal saying %q, got %v", tc.want, err)
+			}
+		})
 	}
 }
 

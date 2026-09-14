@@ -135,7 +135,7 @@ func TestAsOf_CallerInstantStaysQueryOnly(t *testing.T) {
 	for _, body := range []string{"Logic", "Automation"} {
 		t.Run(body, func(t *testing.T) {
 			src := "func (" + body + ") xReadsAsOf(ctx any) (any, error) {\n" +
-				"  return asOf(concept==v1:cluster:node, args.at ?? latest)\n" +
+				"  return asOf(concept == \"v1:cluster:node\", args.at ?? latest)\n" +
 				"}"
 			_, err := ParseFile(src)
 			if err == nil {

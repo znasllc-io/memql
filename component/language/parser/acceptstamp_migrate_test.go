@@ -1,5 +1,10 @@
 package parser
 
+// memqlmigrate:keep-file -- these are the accept/stamp rewrite's own inputs,
+// each a mutation spelled the way the case needs it (a multi-line field that
+// stays longhand, an escaped quote before it); the expressions codemod
+// rewriting them would change what each case tests.
+
 import (
 	"strings"
 	"testing"
@@ -141,10 +146,10 @@ func TestRewriteAcceptStamp(t *testing.T) {
     agentId string @required
   }
   insert {
-    id: ("si-" + hash(
-      canonicalId(args.agentId, "agent") + ":" +
-      canonicalId(args.spaceId, "space")
-    ))
+    id: concat("si-", hash(concat(
+      canonicalId(args.agentId, agent), ":",
+      canonicalId(args.spaceId, space)
+    )))
     args.spaceId
     args.agentId
   }
@@ -163,8 +168,11 @@ func TestRewriteAcceptStamp(t *testing.T) {
   insert {
     args.a
     args.b
-    q: "say \")(" + args.a
-    c: args.a ?? args.b
+    q: concat("say \")(", args.a)
+    c: coalesce(
+      args.a,
+      args.b
+    )
   }
 }`,
 		},

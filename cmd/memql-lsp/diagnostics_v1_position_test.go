@@ -60,13 +60,14 @@ func TestPublishDiagnostics_RetiredFilterSquigglesItsClause(t *testing.T) {
 	s := newTestServerWithSense(t, sense.New(nil))
 	notify, got := capturingNotify()
 
+	// memqlmigrate:keep -- the legacy filter is the case.
 	src := `use probe.concepts.{ thing }
 
 query thing openThings {
   args {
     status string
   }
-  filter  row => row.status == args.status
+  filter  status == args.status
   paginate 10
 }
 `
