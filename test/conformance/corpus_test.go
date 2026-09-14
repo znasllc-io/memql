@@ -29,13 +29,14 @@ package conformance
 // annotation_unknown). The wording is part of the contract: a refusal is how
 // the language tells an author, or a model, what to write instead.
 //
-// Cases are loaded in batches -- one engine boot for the cases that must load,
-// one for the cases that must be refused at load, one for every expression
-// case -- because a boot costs over a second and the corpus holds hundreds of
-// cases. Each case gets its own overlay domain, so a problem is attributed to
-// the case by the domain it names. A boot error no domain claims (a whole-tree
-// failure) makes the runner fall back to one boot per case for that batch, so
-// attribution never guesses.
+// Cases are loaded in batches -- boots for the cases that must load, boots for
+// the cases that must be refused at load, one for every expression case --
+// because a boot costs over a second and the corpus holds hundreds of cases.
+// Each case gets its own overlay domain, so a problem is attributed to the
+// case by the domain it names, and no two cases of one directory share a boot,
+// since each mounts the directory's fixture (corpusRounds). A boot error no
+// domain claims (a whole-tree failure) makes the runner fall back to one boot
+// per case for that batch, so attribution never guesses.
 //
 // Some refusals STOP Init where they are found (an invalid @relationship
 // type, an unresolvable connector, a CQS violation), and every check Init
@@ -514,8 +515,31 @@ func corpusLoad(t *testing.T, runs []*corpusRun) {
 		}
 	}
 
-	corpusLoadUntilSettled(t, accepting)
-	corpusLoadUntilSettled(t, refusing)
+	for _, round := range corpusRounds(accepting) {
+		corpusLoadUntilSettled(t, round)
+	}
+	for _, round := range corpusRounds(refusing) {
+		corpusLoadUntilSettled(t, round)
+	}
+}
+
+// corpusRounds splits runs so that no two cases of one directory share a
+// boot. A directory's fixture is mounted beside each of its cases, so two of
+// them in one boot declare every construct in the fixture twice, and a bare
+// name two domains declare is ambiguous to every lookup by bare name -- the
+// boot would refuse the fixture rather than the case.
+func corpusRounds(runs []*corpusRun) [][]*corpusRun {
+	seen := map[string]int{}
+	var rounds [][]*corpusRun
+	for _, r := range runs {
+		i := seen[r.dir]
+		seen[r.dir]++
+		for len(rounds) <= i {
+			rounds = append(rounds, nil)
+		}
+		rounds[i] = append(rounds[i], r)
+	}
+	return rounds
 }
 
 // corpusLoadUntilSettled loads a group, then loads the cases that drew no
