@@ -1,0 +1,19 @@
+// automations.memql -- safety namespace.
+
+use platform.queries.{ globalVariable }
+
+/// Daily sweep: identifies classification rows past retention.
+@trigger(schedule="0 35 2 * * *")
+automation purgeExpiredClassifications {
+  // memqlmigrate: the statements of logic purgeExpiredClassifications, which published and so could not stay a logic (D14) (memql#5373)
+  // Observes the classification rows past retention, and says so.
+  allRows := query allSafetyClassifications()
+  retentionDays := query globalVariable(name: "RETENTION_DAYS")
+
+  publish "safety.classification.retention.observed" {
+    candidateCount: allRows.count(),
+    retentionDays: retentionDays.first().value ?? "90"
+  }
+
+  return allRows.count()
+}

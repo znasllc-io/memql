@@ -162,6 +162,7 @@ func (rw *bodiesRewrite) planInlining() {
 func (rw *bodiesRewrite) rewriteFile(p, src string) (string, error) {
 	cs := findConstructs(src)
 	var imports map[string]string
+	var removed []string // the text of each logic moved out of this file
 	for k := len(cs) - 1; k >= 0; k-- {
 		c := cs[k]
 		switch {
@@ -184,6 +185,7 @@ func (rw *bodiesRewrite) rewriteFile(p, src string) (string, error) {
 			src = src[:c.start] + text + src[c.close:]
 		case c.kind == "logic" && rw.deleted[p][c.name]:
 			start, end := declarationRegion(src, c)
+			removed = append(removed, src[start:end])
 			src = src[:start] + src[end:]
 		case c.kind == "automation" && isLegacyAutomation(src[c.open+1:c.close]),
 			c.kind == "logic" && isLegacyLogic(src[c.open+1:c.close]):
@@ -195,6 +197,7 @@ func (rw *bodiesRewrite) rewriteFile(p, src string) (string, error) {
 			src = src[:c.start] + text + src[c.close+1:]
 		}
 	}
+	src = pruneImports(src, strings.Join(removed, "\n"))
 	return addImports(src, imports), nil
 }
 

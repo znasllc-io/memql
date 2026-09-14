@@ -245,6 +245,57 @@ func addImports(src string, need map[string]string) string {
 	return src
 }
 
+// pruneImports drops from src's use lines every name that removed -- the text
+// of the logic moved out of src -- referenced and nothing left in src does,
+// and a use line left with no name. Those are the imports only a moved logic
+// needed; kept, the import gate refuses each as never referenced.
+func pruneImports(src, removed string) string {
+	if removed == "" {
+		return src
+	}
+	body := useLine.ReplaceAllString(codeView(src), "")
+	gone := map[string]bool{}
+	removedView := codeView(removed)
+	for name := range useImports(src) {
+		if containsWord(removedView, name) && !containsWord(body, name) {
+			gone[name] = true
+		}
+	}
+	if len(gone) == 0 {
+		return src
+	}
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(src, "\n") {
+		m := useLine.FindStringSubmatch(strings.TrimRight(line, "\n"))
+		if m == nil {
+			b.WriteString(line)
+			continue
+		}
+		var keep []string
+		dropped := false
+		for _, n := range strings.Split(m[2], ",") {
+			switch n = strings.TrimSpace(n); {
+			case gone[n]:
+				dropped = true
+			case n != "":
+				keep = append(keep, n)
+			}
+		}
+		if !dropped {
+			b.WriteString(line)
+			continue
+		}
+		if len(keep) == 0 {
+			continue
+		}
+		b.WriteString("use " + m[1] + ".{ " + strings.Join(keep, ", ") + " }")
+		if strings.HasSuffix(line, "\n") {
+			b.WriteString("\n")
+		}
+	}
+	return b.String()
+}
+
 // afterFileHeader returns the offset just past a file's opening block of `//`
 // comment lines and the blank lines after it -- where an import belongs. A
 // `///` doc comment belongs to the construct below it and ends the header.
