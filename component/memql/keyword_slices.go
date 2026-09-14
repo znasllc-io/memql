@@ -96,15 +96,20 @@ func ExtractKeywordSlices(source, keyword string) []KeywordSlice {
 
 // constructDeclarationSlices returns every top-level declaration of one
 // keyword in source, in source order: the braced `<keyword> [CONCEPT] NAME {
-// ... }` form, and -- for `spec` and `trait` -- edition 2026's brace-less
-// `spec <Bound> <Name> = row => ...` / `trait <Name> = row => ...` (epic
-// memql#5363), whose extent is its expression rather than a brace pair.
+// ... }` form, and -- for `spec` and `trait` -- the brace-less `spec <Bound>
+// <Name> = row => ...` / `trait <Name> = row => ...` (epic memql#5363), whose
+// extent is its expression rather than a brace pair.
 //
 // Every slicing site asks this rather than the brace slicer alone. A braced
 // header regexp sees no brace-less declaration at all, so each site that used
 // one -- the spec loader, the duplicate detector, the construct catalog, the
-// authoring bundle splitter -- lost every spec and trait of a migrated tree in
-// silence: a construct that is not sliced is not a skip anything reports.
+// authoring bundle splitter -- lost every spec and trait in silence: a
+// construct that is not sliced is not a skip anything reports.
+//
+// A spec or trait still in the retired braced form (`{ return ... }`) is
+// sliced too, deliberately. Its parse refuses it with the retired-form
+// message and the replacement; a slicer that dropped it would turn that
+// refusal into a construct that silently does not exist.
 func constructDeclarationSlices(source, keyword string) []languageParser.DeclarationSlice {
 	slices := languageParser.ExtractDeclarationSlices(source, keywordHeaderRegexp(keyword))
 	if keyword != "spec" && keyword != "trait" {

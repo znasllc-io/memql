@@ -248,21 +248,20 @@ func projectedFields(name string, shapes map[string]*shapeInfo, seen map[string]
 // caller -- with an actor predicate, a context-spec, or `@serverOnly` --
 // regardless of what its filter selects on.
 func TestPiiProjectionRequiresCallerGate(t *testing.T) {
-	// Both editions: the clearance reads the filter's boolean structure, and a
-	// v1 filter is a lambda (epic memql#5363).
-	bothCorpora(t, checkPiiProjectionRequiresCallerGate)
+	// The clearance reads the filter's boolean structure (clauseGuarantees).
+	onTree(t, checkPiiProjectionRequiresCallerGate)
 }
 
 func checkPiiProjectionRequiresCallerGate(t *testing.T, c corpus) {
 	flagged, seen, scanned := piiProjectionFindings(t, c)
-	// Measured when the floor was set: 21 in each edition.
+	// Measured when the floor was set: 21.
 	if scanned < 15 {
 		t.Fatalf("scanned %d queries projecting a PII-bearing shape -- the detector is not measuring what its name says; check piiQueryDeclRe and piiShapeClauseRe against dsl/identity/queries.memql", scanned)
 	}
 	t.Logf("scanned %d queries projecting a PII-bearing shape", scanned)
 
 	for _, f := range flagged {
-		t.Errorf("%s\n\tThe projection carries personally-identifying fields, so the filter is not the only question -- `searchUsers` returned every user in the cluster behind a `when()` guard that vanishes when its arg is absent (memql#2883). Scope it to actor.*, gate it with a context-spec such as requiresOwnerOrAdmin, mark it @serverOnly if its only caller is server-side, or project a PII-free shape.", f)
+		t.Errorf("%s\n\tThe projection carries personally-identifying fields, so the filter is not the only question -- `searchUsers` returned every user in the cluster behind an optional-argument guard that admits every row when its arg is absent (memql#2883). Scope it to actor.*, gate it with a context-spec such as requiresOwnerOrAdmin, mark it @serverOnly if its only caller is server-side, or project a PII-free shape.", f)
 	}
 
 	for _, mp := range []struct {

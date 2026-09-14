@@ -48,7 +48,7 @@ import (
 var (
 	// crossDomainDeclRe ends a declaration at `{` or, for edition 2026's
 	// brace-less `spec b n = row => ...` / `trait n = row => ...` (epic
-	// memql#5363), at `=` -- without which every spec and trait of a migrated
+	// memql#5363), at `=` -- without which every spec and trait in the tree
 	// tree is declared nowhere and every use of one is skipped as
 	// runtime-delivered.
 	crossDomainDeclRe   = regexp.MustCompile(`(?m)^(trait|spec|shape)\s+([A-Za-z_][\w.-]*)(?:\s+([A-Za-z_][\w.-]*))?\s*[{=]`)
@@ -65,7 +65,7 @@ type crossDomainDecl struct {
 }
 
 func TestCrossDomainReferencesAreImported(t *testing.T) {
-	bothCorpora(t, checkCrossDomainReferencesAreImported)
+	onTree(t, checkCrossDomainReferencesAreImported)
 }
 
 func checkCrossDomainReferencesAreImported(t *testing.T, c corpus) {
@@ -154,7 +154,7 @@ func checkCrossDomainReferencesAreImported(t *testing.T, c corpus) {
 	// The reachable positive: references this resolved to a declaration it
 	// then had to judge (imported ones are counted before this, so the count
 	// is of references that reached the domain check). Measured when the
-	// floor was set: 224 in each edition.
+	// floor was set: 224.
 	if resolved < 150 {
 		t.Errorf("resolved %d trait/spec/shape references to a declaration -- the declaration or reference read has stopped matching and this gate would pass on anything", resolved)
 	}

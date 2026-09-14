@@ -133,10 +133,11 @@ func TestBootContractGatesStillRunThePerFileRules(t *testing.T) {
 	report := newLoadReport()
 	corpus := []baseloader.RawFile{{
 		Path: "cognition/queries.memql",
+		// The retired `;` is the subject. memqlmigrate:keep
 		Content: `use cognition.concepts.{ space }
 
 query space listSpaces {
-  filter  row => row.status == "active" && row.ownerUserId == actor.userId
+  filter  row => row.status == "active"; row.ownerUserId == actor.userId
 }
 `,
 	}}

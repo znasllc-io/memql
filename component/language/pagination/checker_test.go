@@ -43,7 +43,7 @@ query widget queryAllWidgetsUnmarked {
 }
 
 // TestSingleRowReadIsExempt: a query filtered by the unique-key
-// equality `id == args.x` reads at most one row and is NOT a list.
+// equality `row.id == args.x` reads at most one row and is NOT a list.
 func TestSingleRowReadIsExempt(t *testing.T) {
 	src := `query space querySpaceMeta {
   args { partitionId string @required }
@@ -56,8 +56,8 @@ func TestSingleRowReadIsExempt(t *testing.T) {
 	}
 }
 
-// TestSingleRowReadWithSpacedEquality: `id == x` with surrounding
-// whitespace also reads as single-row.
+// TestSingleRowReadWithSpacedEquality: the id equality beside another
+// conjunct still reads as single-row -- a conjunct only narrows.
 func TestSingleRowReadWithSpacedEquality(t *testing.T) {
 	src := `query space querySpaceMetaSpaced {
   filter  row => row.id == args.partitionId && isActiveRecord(row)
@@ -69,8 +69,8 @@ func TestSingleRowReadWithSpacedEquality(t *testing.T) {
 	}
 }
 
-// TestPayloadIdSubfieldIsNotSingleRow: a filter on `payload.threadId`
-// (or any payload sub-field whose name ends in "id") is NOT the
+// TestPayloadIdSubfieldIsNotSingleRow: a filter on `row.threadId`
+// (or any payload field whose name ends in "id") is NOT the
 // primary-intrinsic id equality, so the query stays a list.
 func TestPayloadIdSubfieldIsNotSingleRow(t *testing.T) {
 	src := `query message queryThreadMessages {
@@ -80,7 +80,7 @@ func TestPayloadIdSubfieldIsNotSingleRow(t *testing.T) {
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "queryThreadMessages")
 	if f.Class != UnmarkedList {
-		t.Fatalf("classified as %s, want unmarked-list (payload.threadId is not the primary id)", f.Class)
+		t.Fatalf("classified as %s, want unmarked-list (row.threadId is not the primary id)", f.Class)
 	}
 }
 
@@ -142,9 +142,9 @@ query provider queryAllProviders {
 	}
 }
 
-// TestGuardedIdFilterStaysList: a `when(args.x) { id==... }` guard is
-// conditional, so the query can still return the full set when the arg
-// is omitted -- it must NOT be treated as a single-row read.
+// TestGuardedIdFilterStaysList: a `(args.x == nil || row.id == ...)`
+// guard is conditional, so the query can still return the full set when
+// the arg is omitted -- it must NOT be treated as a single-row read.
 func TestGuardedIdFilterStaysList(t *testing.T) {
 	src := `query space queryMaybeOneSpace {
   args { partitionId string }
@@ -157,11 +157,10 @@ func TestGuardedIdFilterStaysList(t *testing.T) {
 	}
 }
 
-// TestV1Filters: an edition-2026 filter (epic memql#5363) is read as a tree.
-// The codemod writes the optional-argument guard as `(args.x == nil ||
-// row.id == args.x)`, which a text match for `row.id ==` reads as an
-// unconditional equality -- exempting a query that returns the full set when
-// the argument is omitted.
+// TestV1Filters: the filter is read as a tree (epic memql#5363). The
+// optional-argument guard is `(args.x == nil || row.id == args.x)`, which a
+// text match for `row.id ==` would read as an unconditional equality --
+// exempting a query that returns the full set when the argument is omitted.
 func TestV1Filters(t *testing.T) {
 	for _, tc := range []struct {
 		name, filter string
@@ -178,6 +177,9 @@ func TestV1Filters(t *testing.T) {
 		{"id equality beside a guard", "row => row.id == args.x && (args.y == nil || row.status == args.y)", SingleRow},
 		// A payload field ending in `id` is not the intrinsic.
 		{"payload threadId", "row => row.threadId == args.x", UnmarkedList},
+		// A pre-2026 clause is not read at all: the loader refuses it, and
+		// this rule's conservative direction demands a bound.
+		{"pre-2026 clause", "id == args.x", UnmarkedList},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "query thing q {\n  args { x string }\n  filter  " + tc.filter + "\n  shape   thingFull\n}\n"
@@ -191,7 +193,7 @@ func TestV1Filters(t *testing.T) {
 // TestFilterClauseSpansABlankLine: the clause is the normaliser's fold, which
 // skips a blank line inside a wrapped clause rather than ending it there.
 func TestFilterClauseSpansABlankLine(t *testing.T) {
-	src := "query thing q {\n  filter  row => row.status == \"open\"\n              && row.id == args.x\n  shape   thingFull\n}\n"
+	src := "query thing q {\n  filter  row => row.status == \"open\"\n\n              && row.id == args.x\n  shape   thingFull\n}\n"
 	if f := findingFor(t, ScanSource("f.memql", src), "q"); f.Class != SingleRow {
 		t.Errorf("classified %s, want single-row: the id equality after the blank line is part of the clause", f.Class)
 	}

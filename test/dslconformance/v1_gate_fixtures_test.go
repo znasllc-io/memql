@@ -2,9 +2,9 @@ package dslconformance
 
 // v1_gate_fixtures_test.go -- a CATCH and a PASS fixture in the edition-2026
 // forms for each gate in this package that reads expression text (epic
-// memql#5363, task memql#5368). The corpus runs (bothCorpora) prove a gate
-// still reads the migrated tree; these prove it still FAILS on it, which a
-// clean corpus cannot.
+// memql#5363, task memql#5368). The corpus runs (onTree) prove a gate still
+// reads the tree; these prove it still FAILS on a violation, which a clean
+// corpus cannot.
 
 import (
 	"regexp"
@@ -51,7 +51,7 @@ query user catchById {
   shape   userFixtureCard
 }
 
-/// Operands reversed: the legacy regex reads id==args left to right only.
+/// Operands reversed: the comparison is found in either order.
 query user catchByIdReversed {
   args {
     userId  string

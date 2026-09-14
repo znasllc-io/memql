@@ -65,7 +65,7 @@ automation probe {
 // memql#3093.
 func TestCheckFile_ReachesBodilessAutomationFilter(t *testing.T) {
 	src := `@trigger(event="node.created", concept="v1:data:record", partition="*")
-@filter(coalesce(payload.kind, "regular") == "daily")
+@filter(row => (row.kind ?? "regular") == "daily")
 automation conflictDetection @trigger(schedule="0 0 2 * * *") => logic conflictDetection
 `
 
@@ -90,7 +90,7 @@ automation conflictDetection @trigger(schedule="0 0 2 * * *") => logic conflictD
 // tree's layout, not a synthetic one.
 func TestSplitConstructs_AttributesAnnotationsToTheRightAutomation(t *testing.T) {
 	src := `@trigger(schedule="0 5 9 * * *")
-@filter(coalesce(payload.kind, "regular") == "daily")
+@filter(row => (row.kind ?? "regular") == "daily")
 automation firstBodiless @trigger(schedule="0 5 9 * * *") => logic firstBodiless
 
 @trigger(event="node.created", concept="v1:identity:user", partition="*")

@@ -158,9 +158,7 @@ func selfMirrorFields(t *testing.T, sources map[string]string) map[string]map[st
 // intrinsic is authoritative, the copy is only as good as every writer that
 // maintains it, and a drift between them returns zero rows silently.
 func TestByIdQueriesFilterTheRowIdNotASelfMirror(t *testing.T) {
-	// Both editions (epic memql#5363): a v1 filter reads the mirror as
-	// `row.deploymentId`, which the bare-name read below cannot see.
-	bothCorpora(t, func(t *testing.T, c corpus) {
+	onTree(t, func(t *testing.T, c corpus) {
 		flagged, seen, examined := rowIdMirrorFindings(t, c)
 		// The reachable positive: queries bound to a self-mirroring concept
 		// whose filter this read. Measured when the floor was set: 13.
@@ -220,12 +218,9 @@ func rowIdMirrorFindings(t *testing.T, c corpus) (flagged []string, seen map[str
 			examined++
 
 			for field, mutation := range fields {
-				// The mirror read BARE (`deploymentId == args.x`) in a legacy
-				// clause, where `row.id` is the fix and a payload field is
-				// never written `row.<field>` -- so requiring the bare
-				// spelling cannot match the fixed form. In an edition-2026
-				// clause every field is `row.<field>`, and the mirror is told
-				// from the fix by its NAME on the tree (rowFieldComparedToArg).
+				// Every field is `row.<field>`, so the mirror is told from
+				// the fix (`row.id`) by its NAME on the tree
+				// (rowFieldComparedToArg).
 				if !rowFieldComparedToArg(clause, field, false) {
 					continue
 				}

@@ -34,30 +34,16 @@ var (
 	adminGateMentionRe = dslgate.AdminGateMentionRe
 )
 
-// maxPredicateNesting bounds the local predicate splitter's recursion, and is
-// shared with dslgate's clause walker so the two agree about what is too deep
-// to reason about.
-const maxPredicateNesting = dslgate.MaxPredicateNesting
-
 func blankComments(s string) string        { return dslgate.BlankComments(s) }
 func structureOf(line string) string       { return dslgate.StructureOf(line) }
 func rowSelectionSurface(b string) string  { return dslgate.RowSelectionSurface(b) }
 func filterClauseOf(body string) string    { return dslgate.FilterClauseOf(body) }
 func isClauseEndKeyword(trim string) bool  { return dslgate.IsClauseEndKeyword(trim) }
-func delimitersBalanced(s string) bool     { return dslgate.DelimitersBalanced(s) }
-func hasTopLevelComma(s string) bool       { return dslgate.HasTopLevelComma(s) }
 func ownerScopeLeaf(pred string) bool      { return dslgate.OwnerScopeLeaf(pred) }
 func adminGateLeaf(pred string) bool       { return dslgate.AdminGateLeaf(pred) }
 func mentionsAdminGate(clause string) bool { return dslgate.MentionsAdminGate(clause) }
 
 func matchingClose(src string, openIdx int) int { return dslgate.MatchingClose(src, openIdx) }
-
-func splitTopLevelOn(s string, conn byte) []string     { return dslgate.SplitTopLevelOn(s, conn) }
-func splitTopLevelSingle(s string, conn byte) []string { return dslgate.SplitTopLevelSingle(s, conn) }
-
-func stripLeadingNot(p string) (string, bool)  { return dslgate.StripLeadingNot(p) }
-func stripOuterParens(p string) (string, bool) { return dslgate.StripOuterParens(p) }
-func unwrapWhenPredicate(p string) string      { return dslgate.UnwrapWhenPredicate(p) }
 
 func clauseGuarantees(clause string, leaf func(string) bool) bool {
 	return dslgate.ClauseGuarantees(clause, leaf)

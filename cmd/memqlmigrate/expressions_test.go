@@ -106,10 +106,13 @@ func TestExpressionsRewriteThroughTheCLI(t *testing.T) {
 	}
 }
 
-// The real tree migrates without a refusal. The run is read-only: the tree is
-// loaded into memory the way the CLI loads it and nothing is written back.
-// After the tree is migrated (memql#5368's next task) the rewrite is a no-op
-// here and this stays green.
+// The real tree is written in edition 2026, so it is a fixed point of the
+// rewrite: no refusal, and no file changes. A file that did change would be a
+// legacy spelling the migration left behind, or a rewrite that is not
+// idempotent -- the second run seeing its own output as something to redo. The
+// run is read-only: the tree is loaded into memory the way the CLI loads it and
+// nothing is written back. The rewrite itself is pinned on legacy fixtures
+// (xmTree and the bundle cases above).
 func TestExpressionsRewriteTheRealTree(t *testing.T) {
 	root := filepath.Join("..", "..", "dsl")
 	files := map[string][]byte{}
@@ -130,6 +133,9 @@ func TestExpressionsRewriteTheRealTree(t *testing.T) {
 	out, err := rewriteExpressions(root, files)
 	if err != nil {
 		t.Fatalf("the real tree refuses:\n%v", err)
+	}
+	for p := range out {
+		t.Errorf("%s changes under the rewrite: the migrated tree must be a fixed point", p)
 	}
 	t.Logf("%d of %d files would change", len(out), len(files))
 }
