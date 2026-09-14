@@ -1,0 +1,5 @@
+@trigger(schedule="0 0 * * * *")
+automation boundTwice {
+  a := 1
+  a := 2
+}

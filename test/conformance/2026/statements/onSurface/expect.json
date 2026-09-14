@@ -1,0 +1,10 @@
+{
+  "cases": [
+    {
+      "file": "surface-on-a-builtin.memql",
+      "verdict": "refuse_parse",
+      "code": "body_surface_placement",
+      "message": "`on surface(...)` applies to an `action` call"
+    }
+  ]
+}

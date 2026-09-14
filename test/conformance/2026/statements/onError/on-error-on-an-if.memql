@@ -1,0 +1,6 @@
+@trigger(schedule="0 0 * * * *")
+automation onErrorIf {
+  if now != "" {
+    builtin one()
+  } on error continue
+}

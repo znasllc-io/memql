@@ -1,0 +1,4 @@
+@trigger(schedule="0 0 * * * *")
+automation onErrorStop {
+  builtin one() on error stop
+}

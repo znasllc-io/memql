@@ -1,0 +1,3 @@
+@trigger(schedule="0 0 * * * *")
+automation nothingToDo {
+}

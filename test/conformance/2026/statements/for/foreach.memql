@@ -1,0 +1,6 @@
+@trigger(schedule="0 0 * * * *")
+automation forEachStatement {
+  forEach item in args.items {
+    builtin touch(item: item)
+  }
+}

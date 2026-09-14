@@ -1,0 +1,8 @@
+@trigger(schedule="0 0 * * * *")
+automation waitAll {
+  parallel {
+    branch one {
+      builtin one()
+    }
+  } wait all
+}

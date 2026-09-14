@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "file": "two-statements-on-one-line.memql",
+      "verdict": "refuse_parse",
+      "code": "body_one_statement_per_line",
+      "message": "one statement per line: `y` starts a second statement on line 3"
+    },
+    {
+      "file": "no-statement.memql",
+      "verdict": "refuse_parse",
+      "code": "body_empty",
+      "message": "automation nothingToDo has no statement: an automation has at least one"
+    }
+  ]
+}

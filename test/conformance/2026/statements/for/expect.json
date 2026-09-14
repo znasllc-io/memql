@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "file": "for-range.memql",
+      "verdict": "refuse_parse",
+      "code": "body_for_range_retired",
+      "message": "`for x := range <source>` is retired in edition 2026: write `for x in <source>`"
+    },
+    {
+      "file": "foreach.memql",
+      "verdict": "refuse_parse",
+      "code": "body_foreach_retired",
+      "message": "`forEach` is retired in edition 2026: write `for <x> in <source> if <cond> { }`"
+    }
+  ]
+}
