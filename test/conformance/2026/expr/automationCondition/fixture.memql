@@ -31,9 +31,7 @@ logic joinedNodeType {
   args {
     event  object!
   }
-  body {
-    return args.event.payload.nodeType
-  }
+  return args.event.payload.nodeType
 }
 
 /// When the node the triggering event is about was last seen.
@@ -41,7 +39,5 @@ logic joinedNodeLastSeen {
   args {
     event  object!
   }
-  body {
-    return args.event.payload.lastSeen
-  }
+  return args.event.payload.lastSeen
 }

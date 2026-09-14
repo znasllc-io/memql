@@ -6,7 +6,5 @@ automation raiseTicketTitledByComparison {
     title  string!
   }
 
-  step raise {
-    mutation raiseTicketFromStep (title: args.title == "Urgent")
-  }
+  raise := mutation raiseTicketFromStep(title: args.title == "Urgent")
 }

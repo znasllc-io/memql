@@ -42,6 +42,7 @@ const (
 	codeBodyCaseLabel                = "body_case_label"
 	codeBodyWaitValue                = "body_wait_value"
 	codeBodyEmpty                    = "body_empty"
+	codeBodyMissingExpression        = "body_missing_expression"
 	codeTriggerPartitionRetired      = "trigger_partition_retired"
 	codeTriggerScheduleRetired       = "trigger_schedule_synonym_retired"
 )
@@ -56,7 +57,7 @@ func BodyRefusalCodes() []string {
 		codeBodyPositionalArgument, codeBodyCallInExpression, codeBodyOneStatementPerLine,
 		codeBodyElsePlacement, codeBodyRetryPlacement, codeBodyOnErrorPlacement,
 		codeBodySurfacePlacement, codeBodyClauseOrder, codeBodyDefaultClause,
-		codeBodyCaseLabel, codeBodyWaitValue, codeBodyEmpty,
+		codeBodyCaseLabel, codeBodyWaitValue, codeBodyEmpty, codeBodyMissingExpression,
 		codeTriggerPartitionRetired, codeTriggerScheduleRetired,
 	}
 	sort.Strings(out)

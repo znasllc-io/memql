@@ -707,6 +707,19 @@ func (p *Parser) parseV1Block(kind, construct, what string) ([]ast.BodyStatement
 	return stmts, nil
 }
 
+// parseV1ExpressionBefore parses the expression a statement's header takes
+// before its block -- an if's condition, a for's source and filter, a
+// switch's subject -- and refuses a missing one by name. Unchecked, the
+// block's `{` would open a map literal and the refusal would name the block's
+// first statement instead; as in Go, a map literal in one of these places
+// goes in parentheses.
+func (p *Parser) parseV1ExpressionBefore(after, what, form string) (ast.ExpressionNode, error) {
+	if p.check(TokenBraceOpen) {
+		return nil, bodyRefuse(p.current, codeBodyMissingExpression, "missing %s between `%s` and `{`: write `%s`", what, after, form)
+	}
+	return p.parseV1BodyExpression()
+}
+
 // parseV1If parses `if c { } else if d { } else { }`. `else` sits on the
 // line of the brace it follows.
 func (p *Parser) parseV1If(kind, construct string) (ast.BodyStatement, error) {
@@ -714,7 +727,7 @@ func (p *Parser) parseV1If(kind, construct string) (ast.BodyStatement, error) {
 	stmt := &ast.IfStatement{}
 	branchStart := ifTok
 	for {
-		cond, err := p.parseV1BodyExpression()
+		cond, err := p.parseV1ExpressionBefore("if", "condition", "if <condition> { ... }")
 		if err != nil {
 			return nil, err
 		}
@@ -765,14 +778,14 @@ func (p *Parser) parseV1For(kind, construct string) (ast.BodyStatement, error) {
 		return nil, p.v1Expected("`in` after the loop variable: for <x> in <source> { }")
 	}
 	p.v1Take()
-	src, err := p.parseV1BodyExpression()
+	src, err := p.parseV1ExpressionBefore("in", "source", "for <x> in <source> { ... }")
 	if err != nil {
 		return nil, err
 	}
 	var filter ast.ExpressionNode
 	if p.check(TokenKeywordIf) {
 		p.v1Take()
-		if filter, err = p.parseV1BodyExpression(); err != nil {
+		if filter, err = p.parseV1ExpressionBefore("if", "condition", "for <x> in <source> if <condition> { ... }"); err != nil {
 			return nil, err
 		}
 	}
@@ -793,7 +806,7 @@ func (p *Parser) parseV1For(kind, construct string) (ast.BodyStatement, error) {
 // parseV1Switch parses `switch <subject> { case "a", "b" { } default { } }`.
 func (p *Parser) parseV1Switch(kind, construct string) (ast.BodyStatement, error) {
 	swTok := p.v1Take()
-	subject, err := p.parseV1BodyExpression()
+	subject, err := p.parseV1ExpressionBefore("switch", "subject", "switch <subject> { case ... }")
 	if err != nil {
 		return nil, err
 	}

@@ -1,7 +1,5 @@
 /// The user a ticket taken now is assigned to: the caller.
 @actor
 logic ticketAssigneeActor {
-  body {
-    return actor.userId
-  }
+  return actor.userId
 }

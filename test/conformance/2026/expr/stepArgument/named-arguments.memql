@@ -5,7 +5,5 @@ automation saNoteChangedGoal {
     id           string
     closeReason  string
   }
-  step note {
-    mutation saNoteGoal(goalId: args.id, note: args.closeReason ?? "changed")
-  }
+  note := mutation saNoteGoal(goalId: args.id, note: args.closeReason ?? "changed")
 }

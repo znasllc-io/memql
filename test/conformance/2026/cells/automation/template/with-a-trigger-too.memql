@@ -1,13 +1,11 @@
 /// A work-spine template that also fires on every node that joins.
 @template
-@trigger(event="node.created", concept="v1:cluster:node", partition="*")
+@trigger(event="node.created", concept="v1:cluster:node")
 automation raiseRequestedTicketTriggered {
   args {
     /// The ticket's title.
     title  string!
   }
 
-  step raise {
-    mutation raiseTicketTemplate (title: args.title)
-  }
+  raise := mutation raiseTicketTemplate(title: args.title)
 }
