@@ -106,6 +106,23 @@ type LowerError struct {
 	Position tiers.Position
 	Reason   string
 	Fix      string
+	// Span locates the refused node in the source it was parsed from, when
+	// the node carries one (a v1 node the parser built). It is what lets an
+	// authoring diagnostic point at the author's line and column rather than
+	// at the construct as a whole; the zero Span means "no position", never
+	// line 1.
+	Span ast.Span
+	// Clause and Anchor place a refusal inside a struct query's clause
+	// ("filter" or "refine"). The struct rewriter folds a clause -- every
+	// continuation line of it -- into the one `return` line the parser reads,
+	// so Span there is a column on a line the author never wrote. Anchor is
+	// the span of the clause's lambda BODY on that same line, which makes the
+	// refusal's offset into the body independent of what the rewriter put in
+	// front of it (the concept binding, the directive wrappers), and the
+	// authoring diagnostic maps that offset back through the clause's own
+	// fold onto the author's line and column.
+	Clause string
+	Anchor ast.Span
 }
 
 // Error prints the refusal as one sentence:
@@ -226,7 +243,7 @@ func newLowerer(env LowerEnv, outer []string) (*lowerer, error) {
 
 // refuse builds a LowerError for n.
 func (l *lowerer) refuse(n ast.ExpressionNode, reason, fix string) error {
-	return &LowerError{Node: ast.FormatExpr(n), Position: l.env.Position, Reason: reason, Fix: fix}
+	return &LowerError{Node: ast.FormatExpr(n), Position: l.env.Position, Reason: reason, Fix: fix, Span: nodeSpan(n)}
 }
 
 // rowParam is the parameter of this lowerer's row.

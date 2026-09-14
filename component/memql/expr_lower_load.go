@@ -128,13 +128,21 @@ func lowerQueryFilter(lam *languageParser.LambdaExpr, concept *memoryNodes.Conce
 	if lam == nil || len(lam.Params) != 1 {
 		return nil, fmt.Errorf("a query filter is a lambda of one parameter, the row: filter row => <predicate>")
 	}
-	return Lower(lam.Body, LowerEnv{
+	ir, err := Lower(lam.Body, LowerEnv{
 		Position:  tiers.PositionQueryFilter,
 		Param:     lam.Params[0],
 		Concept:   concept,
 		Args:      args,
 		Predicate: predicate,
 	})
+	var lerr *LowerError
+	if errors.As(err, &lerr) && lerr.Clause == "" {
+		// The filter reaches the parser folded into the struct query's
+		// `return` line; anchor the refusal to the lambda body there so an
+		// authoring diagnostic can find the author's column again.
+		lerr.Clause, lerr.Anchor = "filter", nodeSpan(lam.Body)
+	}
+	return ir, err
 }
 
 // LowerQueryFilter lowers an edition-2026 query-filter lambda over the
@@ -217,70 +225,20 @@ func specLowerEnv(spec *Spec, shapes *ShapeRegistry, concepts memoryNodes.Regist
 	return env, nil
 }
 
-// lowerAllPushdownPositions is the Init pass: every v1 spec and trait body is
-// lowered into its Expr, every v1 query filter is lowered again with the
-// predicate registry in hand, every lowered tree is dry-compiled, and every
-// refine lambda is validated. Failures land on the report (strict boot); a
-// spec that fails to lower keeps a nil Expr, which every executor path
-// refuses by name rather than guessing a body for.
+// lowerAllPushdownPositions is the Init pass: lowerPushdownSet
+// (expr_lower_scope.go) over every registered spec, trait and query of the
+// tree, against the engine's own registries. Failures land on the report
+// (strict boot refuses them); a spec that fails to lower keeps a nil Expr,
+// which every executor path refuses by name rather than guessing a body for.
 func (e *MemQLEngine) lowerAllPushdownPositions(report *LoadReport, specs *SpecRegistry, shapes *ShapeRegistry, functions *FunctionRegistry) []error {
-	var problems []error
-	record := func(component, keyword, name, file, phase string, err error) {
-		problems = append(problems, fmt.Errorf("%s %q: %w", keyword, name, err))
-		if report != nil {
-			report.AddSkip(baseloader.Skip{Component: component, Keyword: keyword, Name: name, File: file, Phase: phase, Err: err.Error()})
-		}
-	}
-	lookup := e.predicateLookup()
-
+	var specList []*Spec
 	if specs != nil {
-		list := specs.List()
-		sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
-		for _, spec := range list {
-			if spec == nil || spec.Lambda == nil {
-				continue
-			}
-			keyword := "spec"
-			if spec.IsTrait {
-				keyword = "trait"
-			}
-			env, err := specLowerEnv(spec, shapes, e.concepts)
-			if err == nil {
-				env.Predicate = lookup
-				var ir ExpressionNode
-				ir, err = Lower(spec.Lambda.Body, env)
-				if err == nil {
-					spec.Expr = ir
-					spec.ExprSource = canonicalExpression(ir)
-					err = specs.Upsert(QualifyConstruct(ConstructNamespaceForOrigin(spec.Origin), spec.Name), spec)
-				}
-			}
-			if err != nil {
-				record("memql.lower", keyword, spec.Name, spec.Origin, "lower", err)
-			}
-		}
-		// Dry-compile after EVERY body is lowered, so a spec that references
-		// another is compiled against a registry holding both.
-		for _, spec := range specs.List() {
-			if spec == nil || spec.Lambda == nil || spec.Expr == nil || spec.Kind == SpecKindContext {
-				continue
-			}
-			conceptContext := ""
-			if !spec.IsTrait {
-				if c, err := resolveConceptByTrailingSegment(e.concepts, spec.BoundName); err == nil && c != nil {
-					conceptContext = c.Name
-				}
-			}
-			if err := e.checkLoweredTree(spec.Expr, conceptContext, nil, tiers.PositionSpecBody); err != nil {
-				keyword := "spec"
-				if spec.IsTrait {
-					keyword = "trait"
-				}
-				record("memql.lower", keyword, spec.Name, spec.Origin, "lower:dry-compile", err)
-			}
-		}
+		// The registry hands out clones, so each lowered spec is written back
+		// below, under its QUALIFIED key as the binding resolver writes it.
+		specList = specs.List()
+		sort.Slice(specList, func(i, j int) bool { return specList[i].Name < specList[j].Name })
 	}
-
+	var queries []*Function
 	if functions != nil {
 		snapshot := functions.Snapshot()
 		keys := make([]string, 0, len(snapshot))
@@ -290,41 +248,54 @@ func (e *MemQLEngine) lowerAllPushdownPositions(report *LoadReport, specs *SpecR
 		sort.Strings(keys)
 		seen := map[*Function]bool{}
 		for _, key := range keys {
-			fn := snapshot[key]
-			if fn == nil || seen[fn] {
-				continue
+			if fn := snapshot[key]; fn != nil && !seen[fn] {
+				seen[fn] = true
+				queries = append(queries, fn)
 			}
-			seen[fn] = true
-			if fn.V1Filter != nil {
-				var concept *memoryNodes.Concept
-				if e.concepts != nil && fn.BoundConcept != "" {
-					if c, err := e.concepts.Get(fn.BoundConcept); err == nil {
-						concept = c
-					}
-				}
-				args := argTypesFromSchema(fn.ArgsSchema)
-				if _, err := lowerQueryFilter(fn.V1Filter, concept, args, lookup); err != nil {
-					record("memql.lower", "query", fn.Name, fn.Origin, "lower", err)
-				} else if err := e.checkLoweredTree(fn.Expr, fn.BoundConcept, args, tiers.PositionQueryFilter); err != nil {
-					record("memql.lower", "query", fn.Name, fn.Origin, "lower:dry-compile", err)
-				}
+		}
+	}
+
+	// A body applying another spec reads only that spec's kind, which the
+	// binding resolver has already written into the registry the scope's
+	// predicate lookup reads.
+	failures := lowerPushdownSet(specList, queries, e.engineScope(shapes))
+
+	refused := map[*Spec]bool{}
+	var problems []error
+	for _, f := range failures {
+		keyword, name, origin := "query", "", ""
+		if f.spec != nil {
+			keyword, name, origin = specKeyword(f.spec), f.spec.Name, f.spec.Origin
+			if f.phase == "lower" {
+				refused[f.spec] = true
 			}
-			if refine := refineIn(fn.Expr); refine != nil {
-				if err := e.validateRefine(fn, refine); err != nil {
-					record("memql.lower", "query", fn.Name, fn.Origin, "lower:refine", err)
-				}
-			}
+		} else if f.fn != nil {
+			name, origin = f.fn.Name, f.fn.Origin
+		}
+		problems = append(problems, fmt.Errorf("%s %q: %w", keyword, name, f.err))
+		if report != nil {
+			report.AddSkip(baseloader.Skip{Component: "memql.lower", Keyword: keyword, Name: name, File: origin, Phase: f.phase, Err: f.err.Error()})
+		}
+	}
+	for _, spec := range specList {
+		if spec == nil || spec.Lambda == nil || spec.Expr == nil || refused[spec] {
+			continue
+		}
+		if err := specs.Upsert(QualifyConstruct(ConstructNamespaceForOrigin(spec.Origin), spec.Name), spec); err != nil {
+			problems = append(problems, fmt.Errorf("%s %q: %w", specKeyword(spec), spec.Name, err))
 		}
 	}
 	return problems
 }
 
-// checkLoweredTree is the Init pass's backstop over one lowered tree: every
-// comparison dry-compiled with placeholders, every negation checked for a
-// traversal behind a spec reference. conceptContext is the concept the tree
-// is bound to ("" for a trait or a traversal's row), args the declared
-// argument types the placeholders are typed by.
-func (e *MemQLEngine) checkLoweredTree(expr ExpressionNode, conceptContext string, args map[string]ArgType, position tiers.Position) error {
+// checkLoweredTree is the backstop over one lowered tree: every comparison
+// dry-compiled with placeholders, every negation checked for a traversal
+// behind a spec reference. conceptContext is the concept the tree is bound to
+// ("" for a trait or a traversal's row), args the declared argument types the
+// placeholders are typed by, and ps the scope the tree was lowered in -- its
+// concepts are what a `concept == <id>` literal is checked against and its
+// predicates what a spec reference is looked through.
+func checkLoweredTree(expr ExpressionNode, conceptContext string, args map[string]ArgType, position tiers.Position, ps pushdownScope) error {
 	var errs []error
 	var walk func(n ExpressionNode, concept string, scope *sqlElementScope)
 	walk = func(n ExpressionNode, concept string, scope *sqlElementScope) {
@@ -334,7 +305,7 @@ func (e *MemQLEngine) checkLoweredTree(expr ExpressionNode, conceptContext strin
 			walk(x.Left, concept, scope)
 			walk(x.Right, concept, scope)
 		case *NotExpression:
-			if e.treeReachesRelationship(x.Target, map[string]struct{}{}) {
+			if treeReachesRelationshipVia(x.Target, ps.predicate, map[string]struct{}{}) {
 				errs = append(errs, &LowerError{Node: canonicalExpression(x), Position: position,
 					Reason: "the negation reaches a relationship traversal through a spec, and the executor does not compute the complement of a row set",
 					Fix:    "Move the negation inside the traversal's predicate, or select the complement with the query's own filter"})
@@ -368,7 +339,7 @@ func (e *MemQLEngine) checkLoweredTree(expr ExpressionNode, conceptContext strin
 		case *RefineExpression:
 			walk(x.Target, concept, scope)
 		case *ComparisonExpression:
-			if err := e.dryCompileComparison(x, concept, args, scope); err != nil {
+			if err := dryCompileComparison(x, concept, args, scope, ps.concepts); err != nil {
 				errs = append(errs, &LowerError{Node: canonicalExpression(x), Position: position, Reason: err.Error(),
 					Fix: "Rewrite the comparison with a value the column or field takes, as in `row.status == \"open\"`"})
 			}
@@ -382,7 +353,8 @@ func (e *MemQLEngine) checkLoweredTree(expr ExpressionNode, conceptContext strin
 // value -- an argument, an actor reference, a plan constant -- replaced by a
 // placeholder of the type it will have, so what is checked is the comparison's
 // SHAPE: the operator against the field, the value's kind against the column.
-func (e *MemQLEngine) dryCompileComparison(cmp *ComparisonExpression, conceptContext string, args map[string]ArgType, scope *sqlElementScope) error {
+// concepts is the registry a `concept == <id>` literal is checked against.
+func dryCompileComparison(cmp *ComparisonExpression, conceptContext string, args map[string]ArgType, scope *sqlElementScope, concepts memoryNodes.Registry) error {
 	probe := *cmp
 	if fo, ok := cmp.Value.(*FieldOperand); ok {
 		_, err := compileFieldOperandComparison(&probe, fo, scope)
@@ -420,7 +392,7 @@ func (e *MemQLEngine) dryCompileComparison(cmp *ComparisonExpression, conceptCon
 		_, err := compileElementComparison(&probe, scope)
 		return err
 	}
-	_, err := e.compileComparisonExpressionWithContext(&probe, conceptContext)
+	_, err := compileComparisonIn(concepts, &probe, conceptContext)
 	return err
 }
 
