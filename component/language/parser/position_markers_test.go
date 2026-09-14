@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // authoredAt is where the nth (1-based) occurrence of needle starts in src,
@@ -363,12 +364,11 @@ func TestV1RefusalsNameTheAuthorsPosition(t *testing.T) {
 }
 
 // TestV1RefusalCoversTheOffendingToken: a refusal's end is the offending
-// token's end, so an editor's squiggle covers exactly it.
+// token's end, so an editor's squiggle covers exactly it -- and a legacy
+// filter's refusal covers its whole predicate, the clause the rewrite
+// converts, on the filter's own line.
 func TestV1RefusalCoversTheOffendingToken(t *testing.T) {
 	for _, c := range v1PositionCases {
-		if c.needle == "a == 1" {
-			continue // the refusal of a whole legacy filter is at its first token
-		}
 		t.Run(c.name, func(t *testing.T) {
 			_, err := parseV1Authored(t, c.src, c.opts)
 			var pe *ParseError
@@ -451,8 +451,14 @@ func TestPositionLoweringKeepsEveryToken(t *testing.T) {
 	var files, marked int
 	var spent time.Duration
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".memql") {
+		if err != nil {
 			return err
+		}
+		if d.IsDir() && repowalk.SkipDir(d.Name()) {
+			return filepath.SkipDir
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".memql") {
+			return nil
 		}
 		raw, err := os.ReadFile(path)
 		if err != nil {

@@ -178,14 +178,21 @@ func (p *Parser) checkV1QueryFilter(body ExpressionNode, from int) error {
 	if _, isLambda := and.Right.(*ast.LambdaExpr); isLambda {
 		return nil
 	}
-	return v1Retired(p.v1FilterStart(from), ruleFilterWithoutLambda)
+	first, last := p.v1FilterExtent(from)
+	err := v1Retired(first, ruleFilterWithoutLambda)
+	// The refusal covers the whole predicate the rewrite converts, so an
+	// editor's squiggle -- and the quick fix keyed on it -- is that clause on
+	// its own line(s), not one token of it.
+	err.(*RetiredFormError).Parse.setEnd(last)
+	return err
 }
 
-// v1FilterStart is the first token of the filter a struct-form query joins as
-// `concept==<id> && (<filter>)`, searched from the body's first token: the
-// refusal of a filter belongs on the author's text, and every token before
-// the filter is the rewriter's. The body's first token is the fallback.
-func (p *Parser) v1FilterStart(from int) Token {
+// v1FilterExtent is the first and last token of the filter a struct-form
+// query joins as `concept==<id> && (<filter>)`, searched from the body's
+// first token: the refusal of a filter belongs on the author's text, and every
+// token around the filter is the rewriter's. The body's first token is the
+// fallback for both.
+func (p *Parser) v1FilterExtent(from int) (first, last Token) {
 	for i := from; i+5 < len(p.tokens); i++ {
 		t := p.tokens[i]
 		if t.Type == TokenBraceClose {
@@ -193,13 +200,28 @@ func (p *Parser) v1FilterStart(from int) Token {
 		}
 		if t.Type == TokenIdentifier && t.Literal == "concept" && p.tokens[i+1].Literal == "==" &&
 			p.tokens[i+3].Type == TokenAmpAmp && p.tokens[i+4].Type == TokenParenOpen {
-			return p.tokens[i+5]
+			depth := 0
+			for j := i + 5; j < len(p.tokens); j++ {
+				switch p.tokens[j].Type {
+				case TokenParenOpen, TokenBracketOpen, TokenBraceOpen:
+					depth++
+				case TokenParenClose, TokenBracketClose, TokenBraceClose:
+					if depth == 0 {
+						return p.tokens[i+5], p.tokens[max(j-1, i+5)]
+					}
+					depth--
+				case TokenEOF:
+					return p.tokens[i+5], p.tokens[i+5]
+				}
+			}
+			return p.tokens[i+5], p.tokens[i+5]
 		}
 	}
+	fallback := p.current
 	if from < len(p.tokens) {
-		return p.tokens[from]
+		fallback = p.tokens[from]
 	}
-	return p.current
+	return fallback, fallback
 }
 
 // unwrapQueryDirectives strips the directive wrappers a struct-form query's

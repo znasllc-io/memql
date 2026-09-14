@@ -89,6 +89,17 @@ func (e *ParseError) setToken(tok Token) {
 	e.AuthoredEndColumn = tok.AuthoredEndCol
 }
 
+// setEnd ends e's extent where tok ends, for a refusal that covers a run of
+// tokens rather than one.
+func (e *ParseError) setEnd(tok Token) {
+	e.EndLine = tok.EndLine
+	e.EndColumn = tok.EndCol
+	if e.AuthoredLine > 0 && tok.AuthoredLine > 0 {
+		e.AuthoredEndLine = tok.AuthoredEndLine
+		e.AuthoredEndColumn = tok.AuthoredEndCol
+	}
+}
+
 // newParseError creates a new ParseError.
 func newParseError(msg string, tok *Token) *ParseError {
 	err := &ParseError{
