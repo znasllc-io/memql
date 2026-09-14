@@ -76,25 +76,26 @@ func TestQueryNoAsOfNotMarked(t *testing.T) {
 }
 
 // TestSpecRejectsAsOf: a spec body is an atomic boolean predicate, not a
-// temporal read -- `asOf` is a load error. Driven through the path every v1
-// spec loads through: the shared parser, specDeclToSpec, and the Init pass's
-// Lower at the spec-body position, which is where an edition-2026 body is
-// checked (a v1 spec body is a lambda, and nothing before Lower reads it).
-// The legacy body's validator worded the refusal "not allowed inside a spec";
-// Lower names asOf for what it is, a query clause and not a function, rather
-// than refusing it as a predicate of the wrong arity with `asOf(row)` as the
-// fix.
+// temporal read -- `asOf` is a load error. The path every v1 spec loads
+// through, the shared parser, refuses it with the query-only message a logic
+// body gets, at the author's `asOf` (memql#5364). Lower at the spec-body
+// position stays the backstop for a lambda no declaration parsed -- the
+// context-free parse this test builds one with -- and names asOf for what it
+// is there too, a query clause and not a function, rather than refusing it as
+// a predicate of the wrong arity with `asOf(row)` as the fix.
 func TestSpecRejectsAsOf(t *testing.T) {
 	src := `@description("Boom: asOf in a spec body.")
 spec thing specReadsAsOf = row => asOf(row.active == true, latest)`
-	decl, err := languageParser.ParseSpecDecl(src)
+	_, err := languageParser.ParseSpecDecl(src)
+	require.Error(t, err, "asOf in a spec body must not parse")
+	require.Contains(t, err.Error(), "`asOf` is a query-only clause and cannot appear in a spec body")
+	require.Contains(t, err.Error(), "line 2, column 35:")
+
+	lam, err := languageParser.ParseV1Lambda("row => asOf(row.active == true, latest)")
 	require.NoError(t, err)
-	spec, err := specDeclToSpec(decl, "test.memql")
-	require.NoError(t, err)
-	require.NotNil(t, spec.Lambda, "a v1 spec body is a lambda")
-	_, err = Lower(spec.Lambda.Body, LowerEnv{
+	_, err = Lower(lam.Body, LowerEnv{
 		Position:  tiers.PositionSpecBody,
-		Param:     spec.Lambda.Params[0],
+		Param:     lam.Params[0],
 		Predicate: (&MemQLEngine{specs: newSpecRegistry()}).predicateLookup(),
 	})
 	require.Error(t, err, "asOf in a spec body must not lower")

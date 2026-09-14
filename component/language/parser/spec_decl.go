@@ -92,7 +92,15 @@ func (p *Parser) parseSpecDecl(attrs []*ast.Attribute, isTrait bool) (*ast.SpecD
 	// Edition 2026: `= <lambda>`.
 	if p.check(TokenOperator) && p.current.Literal == "=" {
 		p.advance()
+		// The body is a predicate over one row, never a time-travel read: an
+		// `asOf(...)` in it is refused as the query-only clause it is, at the
+		// author's `asOf`, as it is in a logic or automation body
+		// (asOfOutsideQuery). Unrefused, the engine read it as a predicate
+		// applied to the wrong number of arguments.
+		prev := p.currentFuncType
+		p.currentFuncType = FunctionType(keyword)
 		lam, err := p.parseOneParamLambda(keyword + " " + strconv.Quote(decl.Name))
+		p.currentFuncType = prev
 		if err != nil {
 			return nil, err
 		}
