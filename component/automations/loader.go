@@ -337,6 +337,15 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 		return nil, fmt.Errorf("invalid steps: %w", err)
 	}
 
+	// A v1 automation's expressions are parsed ONCE, here, and cached on the
+	// steps (memql#5367): a parse error or an expression over the M tier's
+	// static cost limit refuses the automation at load rather than at its
+	// first run. Before the args-resolution gate, which reads the parsed
+	// nodes of a v1 automation.
+	if err := PrepareExpressions(&automation); err != nil {
+		return nil, err
+	}
+
 	// G2 (memql#2364, ADR Decision 3): for args-block automations, reject
 	// shadowing and unresolvable bare identifiers at compile time -- both the
 	// tree loader and the authoring-sandbox hook flow through here, so
@@ -838,6 +847,12 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 	// Validate steps
 	if err := l.validateSteps(automation.Steps); err != nil {
 		return nil, fmt.Errorf("invalid steps: %w", err)
+	}
+
+	// The same one-time parse compileMemQL runs, for a body compiled from
+	// the v1 grammar (memql#5367).
+	if err := PrepareExpressions(&automation); err != nil {
+		return nil, err
 	}
 
 	// Validate trigger for potential misconfigurations

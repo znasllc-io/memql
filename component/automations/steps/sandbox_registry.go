@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -192,6 +193,19 @@ func (s *sandboxStepRegistry) isWriteBearingQuery(step *automations.Step, stepCt
 	if step.Query == nil || strings.TrimSpace(step.Query.Query) == "" {
 		return false
 	}
+	// A v1 step's query is a parsed expression (memql#5367), so the answer is
+	// read off the node rather than sniffed from text. An in-process
+	// expression cannot write: EvalExpr refuses a construct call nested in it.
+	// A construct call writes unless it is a `query` -- a mutation does, and a
+	// logic or builtin may, so both count as write-bearing (the same
+	// conservative direction as the text sniff below).
+	if x := step.Exprs; x != nil && x.Query != nil {
+		call, isCall := ast.Unparen(x.Query).(*ast.CallExpr)
+		if !isCall || call.Kind == "" {
+			return false
+		}
+		return call.Kind != "query"
+	}
 	text := step.Query.Query
 	if stepCtx != nil && stepCtx.Evaluator != nil {
 		evaluated, err := stepCtx.Evaluator.EvaluateString(step.Query.Query)
@@ -261,7 +275,7 @@ func (s *sandboxStepRegistry) interceptLogicFunction(ctx context.Context, step *
 
 	started := time.Now()
 	s.note(step.ID, "logic "+name+" run in sandbox (nested side effects intercepted)")
-	args := s.resolveLogicCallArgs(step.Function, stepCtx)
+	args := s.stepCallArgs(step, stepCtx, s.resolveLogicCallArgs)
 	runner := automations.NewLogicRunner(s.engine, s, nil)
 	out, err := runner.RunLogic(ctx, name, fn.LogicSteps, args)
 	now := time.Now()
@@ -290,7 +304,18 @@ func (s *sandboxStepRegistry) interceptLogicFunction(ctx context.Context, step *
 func (s *sandboxStepRegistry) interceptDirectMutation(step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
 	started := time.Now()
 	rec := memql.RecordedMutation{StepId: step.ID, Partition: s.partition}
-	if step.Mutation != nil {
+	if step.Mutation != nil && step.Exprs != nil {
+		// A v1 step: the same evaluation the real executor's v1 half runs
+		// (MutationExecutor.executeV1), so the recorded write is faithful.
+		rec.Concept = step.Mutation.Concept
+		rec.Payload = step.Mutation.Payload
+		if id, err := v1Text(context.Background(), stepCtx.Evaluator, step.Exprs.ID); err == nil {
+			rec.Id = id
+		}
+		if payload, err := stepCtx.Evaluator.ResolveV1Map(context.Background(), step.Mutation.Payload); err == nil {
+			rec.Payload = payload
+		}
+	} else if step.Mutation != nil {
 		rec.Concept = step.Mutation.Concept
 		rec.Id = step.Mutation.ID
 		// Evaluate the payload through the SAME evaluator path the real
@@ -321,7 +346,7 @@ func (s *sandboxStepRegistry) interceptMutationFunction(step *automations.Step, 
 	// reflects the values the mutation would have written. A single positional
 	// object arg ({"0": {...}}) is the common authored shape; surface its fields
 	// directly so the manifest reads naturally.
-	resolved := s.resolveFunctionArgs(step.Function, stepCtx)
+	resolved := s.stepCallArgs(step, stepCtx, s.resolveFunctionArgs)
 	if len(resolved) == 1 {
 		if obj, ok := resolved["0"].(map[string]any); ok {
 			resolved = obj
@@ -332,6 +357,24 @@ func (s *sandboxStepRegistry) interceptMutationFunction(step *automations.Step, 
 	s.recordMutation(rec)
 	s.note(step.ID, "mutation function "+step.Function.Name+" isolated to sandbox partition "+s.partition)
 	return s.syntheticSuccess(step.ID, started, rec.Payload), nil
+}
+
+// stepCallArgs resolves a function step's arguments for the sandbox: a v1
+// step's through the same evaluation the real FunctionExecutor's v1 half runs
+// (memql#5367) -- values, never reference text -- and a legacy step's
+// through the legacy resolver the call site names. An argument that fails to
+// evaluate leaves the v1 map unresolved rather than half-resolved, as the
+// legacy resolvers fall back to the raw args.
+func (s *sandboxStepRegistry) stepCallArgs(step *automations.Step, stepCtx *automations.StepContext, legacy func(*automations.FunctionStepConfig, *automations.StepContext) map[string]any) map[string]any {
+	fn := step.Function
+	if step.Exprs == nil || fn == nil || len(fn.Args) == 0 || stepCtx == nil || stepCtx.Evaluator == nil {
+		return legacy(fn, stepCtx)
+	}
+	resolved, err := stepCtx.Evaluator.ResolveV1Map(context.Background(), fn.Args)
+	if err != nil {
+		return fn.Args
+	}
+	return resolved
 }
 
 // resolveFunctionArgs resolves a function step's args to concrete values via the
@@ -407,7 +450,23 @@ func (s *sandboxStepRegistry) resolveLogicCallArgs(fn *automations.FunctionStepC
 func (s *sandboxStepRegistry) interceptWebhook(step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
 	started := time.Now()
 	captured := memql.BlockedWebhook{StepId: step.ID, Method: "POST"}
-	if step.Webhook != nil {
+	if step.Webhook != nil && step.Exprs != nil {
+		// A v1 step: URL and body evaluate as the real executor's v1 half
+		// evaluates them, so the captured request is the one it would send.
+		captured.Url = step.Webhook.URL
+		if url, err := v1Text(context.Background(), stepCtx.Evaluator, step.Exprs.URL); err == nil {
+			captured.Url = url
+		}
+		if m := strings.ToUpper(strings.TrimSpace(step.Webhook.Method)); m != "" {
+			captured.Method = m
+		}
+		if step.Webhook.Body != nil {
+			captured.Body = step.Webhook.Body
+			if body, err := stepCtx.Evaluator.ResolveV1Map(context.Background(), step.Webhook.Body); err == nil {
+				captured.Body = body
+			}
+		}
+	} else if step.Webhook != nil {
 		if url, err := stepCtx.Evaluator.EvaluateString(step.Webhook.URL); err == nil {
 			captured.Url = url
 		} else {
@@ -507,7 +566,7 @@ func (s *sandboxStepRegistry) meterRead(step *automations.Step, stepCtx *automat
 // documented heuristic the approver reads as an upper-bound order of magnitude,
 // not a billed figure.
 func (s *sandboxStepRegistry) meterAiCall(step *automations.Step, stepCtx *automations.StepContext) {
-	resolved := s.resolveFunctionArgs(step.Function, stepCtx)
+	resolved := s.stepCallArgs(step, stepCtx, s.resolveFunctionArgs)
 	promptTokens := estimateTokens(resolved)
 	outputTokens := defaultAiOutputTokens
 	cost := estimateAiCostUsd(promptTokens, outputTokens)
@@ -526,7 +585,7 @@ func (s *sandboxStepRegistry) meterAiCall(step *automations.Step, stepCtx *autom
 // meterWebCall records a web read (similarTo / webSearch / fetchUrl) with the
 // resolved target where one is discernible from the args (a url / query field).
 func (s *sandboxStepRegistry) meterWebCall(step *automations.Step, name string, stepCtx *automations.StepContext) {
-	resolved := s.resolveFunctionArgs(step.Function, stepCtx)
+	resolved := s.stepCallArgs(step, stepCtx, s.resolveFunctionArgs)
 	target := webCallTarget(resolved)
 	s.mu.Lock()
 	s.webCalls = append(s.webCalls, memql.RecordedWebCall{

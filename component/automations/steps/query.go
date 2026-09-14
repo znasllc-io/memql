@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -27,6 +28,49 @@ func (e *QueryExecutor) Execute(ctx context.Context, step *automations.Step, ste
 		return result, fmt.Errorf("query configuration is required")
 	}
 
+	// A v1 step's query is a parsed expression (memql#5367). A construct
+	// call runs on the engine below, with its arguments evaluated; any other
+	// expression -- a logic body's `total := a + b`, `rows.where(r => ...)`,
+	// `return {ok: true}` -- is evaluated in process, and its value is the
+	// step's result. No engine round trip, so nothing to record.
+	var v1Call *ast.CallExpr
+	if x := step.Exprs; x != nil && x.Query != nil {
+		call, isCall := ast.Unparen(x.Query).(*ast.CallExpr)
+		if !isCall || call.Kind == "" {
+			val, err := stepCtx.Evaluator.EvalV1(ctx, x.Query)
+			if err != nil {
+				result.Status = "failed"
+				result.Error = fmt.Sprintf("failed to evaluate %s: %v", ast.FormatExpr(x.Query), err)
+				result.CompletedAt = time.Now()
+				result.Duration = result.CompletedAt.Sub(result.StartedAt)
+				return result, fmt.Errorf("failed to evaluate %s: %w", ast.FormatExpr(x.Query), err)
+			}
+			if val == memql.Absent {
+				// One notion of unset: the step's value is nil, which every
+				// later read takes as absent.
+				val = nil
+			}
+			result.Status = "success"
+			result.Result = val
+			result.CompletedAt = time.Now()
+			result.Duration = result.CompletedAt.Sub(result.StartedAt)
+			return result, nil
+		}
+		switch call.Kind {
+		case "query", "mutation", "logic", "builtin":
+		default:
+			// automation / action / capability calls have their own step
+			// types; the compiler never emits one as a query.
+			err := fmt.Errorf("a %s call cannot run as a query step (%s)", call.Kind, ast.FormatExpr(call))
+			result.Status = "failed"
+			result.Error = err.Error()
+			result.CompletedAt = time.Now()
+			result.Duration = result.CompletedAt.Sub(result.StartedAt)
+			return result, err
+		}
+		v1Call = call
+	}
+
 	if stepCtx.Engine == nil {
 		result.Status = "failed"
 		result.Error = "MemQL engine not configured"
@@ -37,7 +81,13 @@ func (e *QueryExecutor) Execute(ctx context.Context, step *automations.Step, ste
 
 	// Evaluate $ expressions in the query, using query-aware formatting
 	// that properly quotes strings containing operator characters (like UUIDs)
-	query, err := stepCtx.Evaluator.EvaluateStringForQuery(step.Query.Query)
+	var query string
+	var err error
+	if v1Call != nil {
+		query, err = v1ConstructCallText(ctx, stepCtx.Evaluator, v1Call)
+	} else {
+		query, err = stepCtx.Evaluator.EvaluateStringForQuery(step.Query.Query)
+	}
 	if err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("failed to evaluate query: %v", err)

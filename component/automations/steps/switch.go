@@ -43,21 +43,37 @@ func (e *SwitchExecutor) Execute(ctx context.Context, step *automations.Step, st
 	// for EvaluateValue to RESOLVE it -- un-prefixed it echoed back as its
 	// own literal text, so every steps.-rooted switch silently took the
 	// default branch (#2380; forge's "queued" case never fired).
-	subject := switchCfg.Expression
-	if isRuntimeReference(subject) && !strings.HasPrefix(subject, "$") {
-		subject = "$" + subject
-	}
-	exprValue, err := stepCtx.Evaluator.EvaluateValue(subject)
-	if err != nil {
-		result.Status = "failed"
-		result.Error = fmt.Sprintf("failed to evaluate expression: %v", err)
-		result.CompletedAt = time.Now()
-		result.Duration = result.CompletedAt.Sub(result.StartedAt)
-		return result, fmt.Errorf("failed to evaluate expression: %w", err)
-	}
+	//
+	// A v1 step's subject is an expression parsed at load (memql#5367); its
+	// value is matched against the case labels by the same text rendering.
+	var exprStr string
+	if x := step.Exprs; x != nil {
+		text, err := v1Text(ctx, stepCtx.Evaluator, x.Subject)
+		if err != nil {
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("failed to evaluate expression: %v", err)
+			result.CompletedAt = time.Now()
+			result.Duration = result.CompletedAt.Sub(result.StartedAt)
+			return result, fmt.Errorf("failed to evaluate expression: %w", err)
+		}
+		exprStr = text
+	} else {
+		subject := switchCfg.Expression
+		if isRuntimeReference(subject) && !strings.HasPrefix(subject, "$") {
+			subject = "$" + subject
+		}
+		exprValue, err := stepCtx.Evaluator.EvaluateValue(subject)
+		if err != nil {
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("failed to evaluate expression: %v", err)
+			result.CompletedAt = time.Now()
+			result.Duration = result.CompletedAt.Sub(result.StartedAt)
+			return result, fmt.Errorf("failed to evaluate expression: %w", err)
+		}
 
-	// Convert to string for case matching
-	exprStr := automations.FormatValue(exprValue)
+		// Convert to string for case matching
+		exprStr = automations.FormatValue(exprValue)
+	}
 
 	if stepCtx.Logger != nil {
 		stepCtx.Logger.Debug("executing switch step",

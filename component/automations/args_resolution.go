@@ -118,6 +118,12 @@ var quotedSegmentPattern = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)
 // their bare-identifier semantics (including the literal-string fallback)
 // are unchanged, so the existing tree cannot regress.
 func validateArgsResolution(a *Automation) error {
+	// A v1 automation's expressions are parsed nodes, checked on the nodes
+	// (args_resolution_v1.go): the token scan below cannot read the v1
+	// grammar (a lambda parameter is an "unknown" token to it).
+	if a.IsV1() {
+		return validateArgsResolutionV1(a)
+	}
 	fields := declaredArgsSet(a)
 	if fields == nil {
 		return nil

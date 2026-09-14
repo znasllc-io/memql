@@ -68,7 +68,12 @@ func (e *FunctionExecutor) Execute(ctx context.Context, step *automations.Step, 
 	// predicates, quoted literals, nested calls) -- pre-resolving them via
 	// resolveArgsRefs both evaluated nested builtins out of order and
 	// re-quoted already-quoted literals.
-	if isExpressionBuiltinName(funcName) {
+	//
+	// Legacy only: a v1 automation has no string builtins to lower here --
+	// its in-process calls are catalog functions inside expressions, which
+	// the query executor evaluates -- so a v1 function step is always a
+	// construct call for the engine.
+	if step.Exprs == nil && isExpressionBuiltinName(funcName) {
 		query := funcName + "(" + joinRawPositionalArgs(step.Function.Args) + ")"
 		val, everr := sharedArgEvaluator.evaluateValue(stepCtx.Evaluator, query)
 		if everr != nil {
@@ -87,7 +92,19 @@ func (e *FunctionExecutor) Execute(ctx context.Context, step *automations.Step, 
 
 	// Execute the function as a query (functions are called with parentheses)
 	query := funcName + "()"
-	if len(step.Function.Args) > 0 {
+	if step.Exprs != nil {
+		// A v1 step's arguments are evaluated over the run and rendered as
+		// literals (memql#5367): a value is data, never reference text.
+		args, resolveErr := stepCtx.Evaluator.ResolveV1Map(ctx, step.Function.Args)
+		if resolveErr != nil {
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("function %q argument resolution failed: %v", funcName, resolveErr)
+			result.CompletedAt = time.Now()
+			result.Duration = result.CompletedAt.Sub(result.StartedAt)
+			return result, fmt.Errorf("function %q argument resolution failed: %w", funcName, resolveErr)
+		}
+		query = funcName + "(" + renderV1CallArgs(args) + ")"
+	} else if len(step.Function.Args) > 0 {
 		args := step.Function.Args
 		if stepCtx.Evaluator != nil {
 			resolved, resolveErr := resolveArgsRefs(args, stepCtx.Evaluator)
