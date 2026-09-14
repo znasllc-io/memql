@@ -95,7 +95,11 @@ name, duplicate ids refused, position-based sort) onto `2caaa3953`.
   (goldens: the seven moved logic's deleted, the new logic's written, seven
   automation goldens gain the `output` the moved-logic rule left out and
   nothing else changes).
-- **F2, uncommitted in the worktree when this was written: the corpus.**
+- **F1's fallout, `b4a13d4b0`:** deploy/fleet's two sweep gates walk the
+  parsed statement body (every `for` in a scheduled sweep carries an `if`
+  filter; `requestInstanceTeardown` has one caller, now checked across every
+  fleet file); `embed_inventory_test.go`'s dsl count 424 -> 422.
+- **F2, `a96483e12`: the corpus.**
   `test/conformance/2026` through the rewrite (62 files, `mutation` headers
   put back), three refused cells by hand (`keyless-map-entry` returns its map,
   a logic may not publish; the two object-literal cells keep their refused
@@ -120,9 +124,19 @@ name, duplicate ids refused, position-based sort) onto `2caaa3953`.
     `@schedule` on an automation in every form, so in F4 the registry's
     `schedule` placement on Automation goes and the family with it (the
     completeness gate says so), `an-invalid-cron` moving to the trigger cell.
-  - Also in F2: `embed_inventory_test.go`'s `dsl` count 424 -> 422 (F1's two
-    deleted files).
-- **F3: Go fixtures.** `memqlmigrate --rewrite=bodies --go-fixtures` finds 315
+- **F3, `3bf10ffdd` + `0a848a2de` + `c82004950`: the Go fixtures.**
+  `3bf10ffdd`: the rewrite converts `@schedule("...")` as well as
+  `@schedule(cron=)`. `0a848a2de`: three boot gates that went blind at F1
+  read the parsed statement body -- dslgate unresolved-sub-automation and
+  builtin-step-args (a named call, `x := automation y(...)`, opens no line
+  with the keyword) and callgraph P4 (a loop's `if` filter, `} else if`, a
+  one-line `if`). `c82004950`: the fixtures, as its message lists (kept with
+  `memqlmigrate:keep`, reverted for deletion with their code, or ported --
+  RunLogic -> RunLogicBody, the sweeps and the authored for/parallel through
+  the executor). Verified: the DB-free tree at `c82004950`, 200 packages
+  green, `TestArchitectureModelIsNotStale` the one failure (stale on the base
+  too; Task 16 regenerates it).
+  Measurements and method, for F4: `memqlmigrate --rewrite=bodies --go-fixtures` found 315
   literals to change in 112 files, 82 refused and 65 fragments (measured
   after F2). Run it with the keyword rename left out, since that is F6: build
   a scratch binary with `go build -overlay` replacing
@@ -134,6 +148,22 @@ name, duplicate ids refused, position-based sort) onto `2caaa3953`.
   `memqlmigrate:keep` marker, and tests of the rewriter's logic/automation/
   terse stages, the legacy compiler and the legacy runtime are not migrated
   but deleted with their code in F4/F5.
+  **What F3 left for F4:** 61 test files still hold the retired grammar -- 79
+  literals the rewrite refuses (a callee declared nowhere, an object-literal
+  argument), 63 fragments split across Go string literals, and the 16 files
+  reverted on purpose. List them with the dry run of the scratch binary
+  (`memqlmigrate-norename --rewrite=bodies --go-fixtures .` from the worktree
+  root). Each is migrated by hand or deleted with the code it tests before
+  the parser can refuse the retired forms.
+- **Next: take main.** Epic 1 merged to main at `66d6ba208`, epic 2 (#5427)
+  at `a0e44069a` (its second parent `5693fe164` holds the fleet fix this
+  branch took plus epic 2's DB timing fixes, arch model and epic 1's tip).
+  memql-10 deleted `epic/dsl-v1-expressions` and `dslv1/*`. Merge
+  `origin/main` into `tmp/dsl-v1-bodies-flip2` (a merge, as the epic-2 merges
+  were; the history already holds merges), resolve, rerun the DB-free tree.
+- **The owner's instruction (2026-09-14):** land everything -- the PR merged
+  to main -- and close the epic's GitHub issues, then report. That overrides
+  "do not push" for this branch once the flip is complete and verified.
 - **F4:** the parser refuses the retired forms (delete the transitional
   dispatch and the rewriter's logic/automation/terse stages; empty
   `statementRetiredAtTheFlip` and add the three retired cells; the `schedule`
