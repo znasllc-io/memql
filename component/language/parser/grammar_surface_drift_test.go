@@ -197,6 +197,45 @@ concept probe {
     id: args.id
   }
 }`},
+	// ---- the annotation registry's parse-time narrowings (memql#5359) -----
+	// The registry became the one annotation gate, at PARSE time, for every
+	// construct and field list. Each of these parsed on this path before it:
+	// the field lists accepted any annotation, the four function kinds were
+	// checked only by a load-time text scan of their names, an action had no
+	// check at all, and no check looked at an annotation's arguments.
+	{"unknown annotation on a prompt field (memql#5359)", false, `prompt probe {
+  topic string @bogusFieldAnnotation
+}`},
+	{"unknown annotation on a builtin field (memql#5359)", false, `builtin probe {
+  topic string @bogusFieldAnnotation
+}`},
+	{"a flag annotation given an argument (memql#5359)", false, `@serverOnly("yes")
+query thing probe {
+  filter row.id!=""
+}`},
+	{"unknown annotation on a query, refused at parse (memql#5359)", false, `@bogusAnnotation
+query thing probe {
+  filter row.id!=""
+}`},
+	{"unknown annotation on an action (memql#5359)", false, `@bogusAnnotation
+action probe {
+  capability script(script: "x")
+}`},
+	{"unknown keyword key on @trigger (memql#5359)", false, `@trigger(evnt="node.created")
+automation probe {
+  step run {
+    mutation createThing (id: "x")
+  }
+}`},
+	{"a non-repeatable annotation written twice (memql#5359)", false, `@description("one")
+@description("two")
+query thing probe {
+  filter row.id!=""
+}`},
+	{"@when() with empty parentheses on a rule", true, `@when()
+@policy("localFirst")
+rule probe { }`},
+
 	// NOT in this corpus: the retired procedural `func (Query) name(ctx any)`
 	// author-side form. It is refused, but NOT by NormaliseAll + ParseFile --
 	// measured here, it parses clean at this layer, so an entry asserting
