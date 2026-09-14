@@ -77,14 +77,10 @@ package dslconformance
 
 import (
 	"fmt"
-	"github.com/znasllc-io/memql/dsl"
-	"io"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
-
-	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 var (
@@ -252,25 +248,44 @@ func projectedFields(name string, shapes map[string]*shapeInfo, seen map[string]
 // caller -- with an actor predicate, a context-spec, or `@serverOnly` --
 // regardless of what its filter selects on.
 func TestPiiProjectionRequiresCallerGate(t *testing.T) {
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
+	// Both editions: the clearance reads the filter's boolean structure, and a
+	// v1 filter is a lambda (epic memql#5363).
+	bothCorpora(t, checkPiiProjectionRequiresCallerGate)
+}
+
+func checkPiiProjectionRequiresCallerGate(t *testing.T, c corpus) {
+	flagged, seen, scanned := piiProjectionFindings(t, c)
+	// Measured when the floor was set: 21 in each edition.
+	if scanned < 15 {
+		t.Fatalf("scanned %d queries projecting a PII-bearing shape -- the detector is not measuring what its name says; check piiQueryDeclRe and piiShapeClauseRe against dsl/identity/queries.memql", scanned)
+	}
+	t.Logf("scanned %d queries projecting a PII-bearing shape", scanned)
+
+	for _, f := range flagged {
+		t.Errorf("%s\n\tThe projection carries personally-identifying fields, so the filter is not the only question -- `searchUsers` returned every user in the cluster behind a `when()` guard that vanishes when its arg is absent (memql#2883). Scope it to actor.*, gate it with a context-spec such as requiresOwnerOrAdmin, mark it @serverOnly if its only caller is server-side, or project a PII-free shape.", f)
 	}
 
-	sources := make(map[string]string, len(paths))
-	for _, p := range paths {
-		f, openErr := tree.Open(p)
-		if openErr != nil {
-			t.Fatalf("open %s: %v", p, openErr)
+	for _, mp := range []struct {
+		name    string
+		entries map[string]string
+	}{
+		{"piiProjectionExemptions", piiProjectionExemptions},
+		{"piiProjectionAccepted", piiProjectionAccepted},
+	} {
+		for key := range mp.entries {
+			if !seen[key] {
+				t.Errorf("%s has a stale entry %q -- the construct no longer matches this detector (renamed, fixed, gated, or deleted). Remove the entry.", mp.name, key)
+			}
 		}
-		raw, readErr := io.ReadAll(f)
-		f.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", p, readErr)
-		}
-		sources[p] = string(raw)
 	}
+}
+
+// piiProjectionFindings runs the gate over one corpus and returns what it
+// flagged, every exemption key it reached, and how many PII-projecting queries
+// it examined.
+func piiProjectionFindings(t *testing.T, c corpus) (flagged []string, seen map[string]bool, scanned int) {
+	t.Helper()
+	paths, sources := c.paths, c.files
 
 	pii := piiFieldsByConcept(t, sources)
 	if len(pii) == 0 {
@@ -301,7 +316,7 @@ func TestPiiProjectionRequiresCallerGate(t *testing.T) {
 		t.Fatal("found 0 PII-bearing shapes -- with @pii present on a concept this means the shape->concept join or the projection parse is broken, not that the tree is clean")
 	}
 
-	contextSpecs := actorBoundSpecNames(t)
+	contextSpecs := actorBoundSpecNames(t, c)
 	specRefs := make(map[string]*regexp.Regexp, len(contextSpecs))
 	for name := range contextSpecs {
 		specRefs[name] = regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
@@ -323,9 +338,7 @@ func TestPiiProjectionRequiresCallerGate(t *testing.T) {
 		return false
 	}
 
-	var flagged []string
-	seen := map[string]bool{}
-	scanned := 0
+	seen = map[string]bool{}
 
 	for _, p := range paths {
 		src := sources[p]
@@ -385,26 +398,6 @@ func TestPiiProjectionRequiresCallerGate(t *testing.T) {
 		}
 	}
 
-	if scanned == 0 {
-		t.Fatal("scanned 0 queries projecting a PII-bearing shape -- the detector is not measuring what its name says; check piiQueryDeclRe and piiShapeClauseRe against dsl/identity/queries.memql")
-	}
-
 	sort.Strings(flagged)
-	for _, f := range flagged {
-		t.Errorf("%s\n\tThe projection carries personally-identifying fields, so the filter is not the only question -- `searchUsers` returned every user in the cluster behind a `when()` guard that vanishes when its arg is absent (memql#2883). Scope it to actor.*, gate it with a context-spec such as requiresOwnerOrAdmin, mark it @serverOnly if its only caller is server-side, or project a PII-free shape.", f)
-	}
-
-	for _, mp := range []struct {
-		name    string
-		entries map[string]string
-	}{
-		{"piiProjectionExemptions", piiProjectionExemptions},
-		{"piiProjectionAccepted", piiProjectionAccepted},
-	} {
-		for key := range mp.entries {
-			if !seen[key] {
-				t.Errorf("%s has a stale entry %q -- the construct no longer matches this detector (renamed, fixed, gated, or deleted). Remove the entry.", mp.name, key)
-			}
-		}
-	}
+	return flagged, seen, scanned
 }
