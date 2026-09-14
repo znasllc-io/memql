@@ -14,14 +14,14 @@ import (
 	"github.com/znasllc-io/memql/core/num"
 )
 
-// tool_handler_v1.go -- a tool's query handler in edition 2026 (epic
-// memql#5363, memql#5367).
+// tool_handler_v1.go -- a tool's handler in edition 2026 (epic memql#5363,
+// memql#5367).
 //
 // A query handler is ONE construct call -- `query todos(done: args.done)`,
 // `mutation updateNote(noteId: args.noteId, payload: args.payload)` -- or that
 // call inside the one directive a handler carries,
 // `paginate(query searchUsers(active: args.active), args.limit)`. It is
-// parsed ONCE, when the tool loads (parseToolQueryV1), and checked there: the
+// parsed ONCE, when the tool loads (prepareToolQueryV1), and checked there: the
 // shape, the construct it calls, and every argument expression. At execution
 // each named argument evaluates through EvalExpr with `args` bound to the
 // tool's arguments -- defaulted, coerced and schema-validated by then -- and
@@ -42,14 +42,15 @@ import (
 // wrote the literal `null` there, and `"null"` -- a four-character string --
 // for a placeholder written inside quotes.
 //
-// TRANSITION. A handler that still carries the retired `$args.` placeholder is
-// legacy and keeps substituteArgsInMemqlQuery until the tree is migrated; the
-// flip deletes that path. Every other query handler is read as v1, and one
-// that does not parse as a handler is refused at load.
+// The retired `$args.` placeholder is refused wherever it appears in a
+// handler, a quoted `"$args.x"` included: read as v1, the quoted form is a
+// string literal, so a handler that still carried it would load and hand the
+// construct the eleven characters "$args.slug" instead of the caller's value.
 //
-// Webhook handlers are untouched: no tool in the tree declares one, so their
-// url and body keep the `$args.` substitution until a v1 spelling for them is
-// written against a real caller.
+// A webhook handler's url and body are expressions too (webhookURL,
+// webhookBody below): the url one expression that renders the address, the
+// body a map whose string leaves are expressions. Nothing is substituted into
+// either.
 
 // toolQueryHandlerKinds are the construct kinds a handler may call: the ones
 // validateToolHandlerTargets resolves against the function registry, so every
@@ -89,24 +90,26 @@ type toolQueryV1 struct {
 	count ast.ExpressionNode
 }
 
-// toolQueryIsLegacy reports whether a query handler still carries the
-// retired `$args.` placeholder, and so keeps the substitution path until the
-// tree is migrated.
-func toolQueryIsLegacy(query string) bool {
-	return strings.Contains(query, "$args.")
-}
+// toolDollarArgsRetired is the refusal for the retired placeholder, naming
+// the spelling that replaces it and the migration that writes it.
+const toolDollarArgsRetired = "$args.x is retired in edition 2026: write args.x -- a quoted \"$args.x\" is args.x too, without the quotes (memqlmigrate --rewrite=expressions rewrites both)"
 
-// prepareToolQueryV1 parses a query handler at load: nil for a legacy
-// handler, the parsed handler for a v1 one, or the refusal.
-func prepareToolQueryV1(query string) (*toolQueryV1, error) {
-	if toolQueryIsLegacy(query) {
-		return nil, nil
+// refuseDollarArgs refuses a handler source that still carries the retired
+// placeholder anywhere, inside a string literal included.
+func refuseDollarArgs(what, src string) error {
+	if strings.Contains(src, "$args.") {
+		return fmt.Errorf("%s `%s`: %s", what, strings.TrimSpace(src), toolDollarArgsRetired)
 	}
-	return parseToolQueryV1(query)
+	return nil
 }
 
-// parseToolQueryV1 parses and checks a v1 query handler.
-func parseToolQueryV1(src string) (*toolQueryV1, error) {
+// prepareToolQueryV1 parses and checks a query handler: at load for a tool
+// declared in `.memql` (toolDeclToTool), and on each call for a tool built in
+// Go, which was never loaded (renderToolQuery).
+func prepareToolQueryV1(src string) (*toolQueryV1, error) {
+	if err := refuseDollarArgs("query handler", src); err != nil {
+		return nil, err
+	}
 	n, err := languageParser.ParseV1Expression(src)
 	if err != nil {
 		return nil, fmt.Errorf("query handler `%s` does not parse: %w", strings.TrimSpace(src), err)
@@ -323,24 +326,137 @@ func memqlCallLiteral(v any) (string, error) {
 }
 
 // renderToolQuery returns the query a query handler executes for args: the
-// legacy substitution for a handler that still carries `$args.`, otherwise
-// the parsed handler rendered from the values of its arguments. A handler
-// loaded from `.memql` was parsed when it loaded; one built in Go is parsed
-// here, on each call, and refused if it is not a handler.
+// parsed handler rendered from the values of its arguments. A handler loaded
+// from `.memql` was parsed when it loaded; one built in Go is parsed here, on
+// each call, and refused if it is not a handler.
 func (h *ToolHandler) renderToolQuery(ctx context.Context, args map[string]any) (string, error) {
-	query := strings.TrimSpace(h.Query)
-	if toolQueryIsLegacy(query) {
-		if args != nil {
-			query = substituteArgsInMemqlQuery(query, args)
-		}
-		return query, nil
-	}
 	plan := h.queryV1
 	if plan == nil {
 		var err error
-		if plan, err = parseToolQueryV1(query); err != nil {
+		if plan, err = prepareToolQueryV1(strings.TrimSpace(h.Query)); err != nil {
 			return "", err
 		}
 	}
 	return plan.render(ctx, args)
+}
+
+// ---------------------------------------------------------------------------
+// webhook url and body
+// ---------------------------------------------------------------------------
+
+// webhookValueCheck is the load-time check of a webhook's url and body
+// expressions: the same rule set as a query handler's arguments -- the tool's
+// arguments and the clock, no construct call -- for the same reason.
+var webhookValueCheck = &inProcessExprCheck{
+	where:    "a webhook handler's url or body",
+	position: tiers.PositionMutationValue,
+	roots:    map[string]bool{"args": true},
+}
+
+// prepareWebhookURL parses and checks a webhook url expression: at load for a
+// tool declared in `.memql`, on each call for one built in Go. The url is ONE
+// expression rendering the address -- a fixed address is a quoted string, and
+// a caller's value is joined with +, as in "https://api.example.com/items/" +
+// args.id -- so it is refused, with that spelling, when it is written as a
+// bare address.
+func prepareWebhookURL(src string) (ast.ExpressionNode, error) {
+	if err := refuseDollarArgs("webhook url", src); err != nil {
+		return nil, err
+	}
+	n, err := languageParser.ParseV1Expression(src)
+	if err != nil {
+		if strings.Contains(src, "://") && !strings.Contains(src, `"`) {
+			return nil, fmt.Errorf("webhook url `%s` is an expression in edition 2026: quote a fixed address, as in %s, and join a caller's value with +, as in %s + args.id",
+				strings.TrimSpace(src), languageParser.QuoteString(strings.TrimSpace(src)), languageParser.QuoteString("https://api.example.com/items/"))
+		}
+		return nil, fmt.Errorf("webhook url `%s` does not parse: %w", strings.TrimSpace(src), err)
+	}
+	if err := webhookValueCheck.check(n); err != nil {
+		return nil, fmt.Errorf("webhook url `%s`: %w", strings.TrimSpace(src), err)
+	}
+	return n, nil
+}
+
+// webhookURL renders the handler's url for args: the expression parsed at
+// load, or -- for a tool built in Go -- the url parsed here. It must render
+// as text.
+func (h *ToolHandler) webhookURL(ctx context.Context, args map[string]any) (string, error) {
+	n := h.urlV1
+	if n == nil {
+		var err error
+		if n, err = prepareWebhookURL(h.URL); err != nil {
+			return "", err
+		}
+	}
+	v, err := EvalExpr(ctx, n, MapScope{"args": args}, EvalOptions{Now: time.Now().UTC()})
+	if err != nil {
+		return "", fmt.Errorf("webhook url: %w", err)
+	}
+	s, ok := v.(string)
+	if !ok || strings.TrimSpace(s) == "" {
+		return "", fmt.Errorf("webhook url `%s` is %s, not an address", ast.FormatExpr(n), exprValueForMessage(v))
+	}
+	return s, nil
+}
+
+// webhookBody renders a webhook's body template for args. The template is a
+// Go map (a `.memql` handler declares no body): each string leaf is an
+// expression over args, a nested map or list is rendered leaf by leaf, and
+// any other leaf is the value it is. A leaf whose argument the caller did not
+// supply is absent and omits its key or element, the container rule a
+// mutation's values follow. Nothing is substituted into text, so a caller's
+// value -- a `$args.` of its own included -- is data.
+func webhookBody(ctx context.Context, body map[string]any, args map[string]any) (map[string]any, error) {
+	out := make(map[string]any, len(body))
+	for _, k := range sortedAnyKeys(body) {
+		v, absent, err := webhookBodyValue(ctx, body[k], args)
+		if err != nil {
+			return nil, fmt.Errorf("webhook body %q: %w", k, err)
+		}
+		if !absent {
+			out[k] = v
+		}
+	}
+	return out, nil
+}
+
+func webhookBodyValue(ctx context.Context, v any, args map[string]any) (any, bool, error) {
+	switch t := v.(type) {
+	case string:
+		if err := refuseDollarArgs("expression", t); err != nil {
+			return nil, false, err
+		}
+		n, err := languageParser.ParseV1Expression(t)
+		if err != nil {
+			return nil, false, fmt.Errorf("`%s` does not parse -- a body leaf is an expression, and fixed text is quoted, as in %s: %w", t, languageParser.QuoteString(t), err)
+		}
+		if err := webhookValueCheck.check(n); err != nil {
+			return nil, false, fmt.Errorf("`%s`: %w", t, err)
+		}
+		ev, err := EvalExpr(ctx, n, MapScope{"args": args}, EvalOptions{Now: time.Now().UTC()})
+		if err != nil {
+			return nil, false, err
+		}
+		if _, absent := ev.(absentValue); absent {
+			return nil, true, nil
+		}
+		nv, err := exprNormalize(ev)
+		return nv, false, err
+	case map[string]any:
+		m, err := webhookBody(ctx, t, args)
+		return m, false, err
+	case []any:
+		out := make([]any, 0, len(t))
+		for i, el := range t {
+			ev, absent, err := webhookBodyValue(ctx, el, args)
+			if err != nil {
+				return nil, false, fmt.Errorf("[%d]: %w", i, err)
+			}
+			if !absent {
+				out = append(out, ev)
+			}
+		}
+		return out, false, nil
+	}
+	return v, false, nil
 }
