@@ -31,6 +31,7 @@ import (
 	identitycomp "github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/adminops"
 	"github.com/znasllc-io/memql/component/identity/verifier"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/sense"
 	nodeMetadata "github.com/znasllc-io/memql/component/metadata"
@@ -1877,6 +1878,14 @@ func (s *streamSession) handleClientHello(envelope *memqlv1.MemqlClientMessage, 
 		// one clients are told to render as unknown -- see the field comment in
 		// memql.proto for why a release's revision cannot ride EngineVersion.
 		EngineCommit: buildinfo.ShortCommit(),
+		// The language this node speaks (memql#5362, D25), read from the
+		// parser's own constants: they ARE the grammar this binary parses, so
+		// there is nothing to plumb and nothing a deployment could override.
+		// An editor compares them with the language it was built from, and
+		// EditorRelease is the release it is told to install when it is older.
+		Edition:        langparser.Edition,
+		GrammarVersion: langparser.GrammarVersion,
+		EditorRelease:  langparser.EditorRelease,
 	}
 	return s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{
 		Payload: &memqlv1.MemqlServerMessage_ServerHello{
