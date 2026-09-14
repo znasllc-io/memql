@@ -84,7 +84,76 @@ func (s *Service) expressionHover(source string, line, col int) (*HoverResult, b
 		}
 		return card(catalogCard(f, ctx.Position, a, ctx.Param, site))
 	}
+	if info, ok := s.predicateAt(toks, idx, ctx); ok {
+		return card(predicateCard(info, ctx.Position))
+	}
 	return nil, false
+}
+
+// ---- Predicates ----
+
+// predicateAt returns the spec or trait the token at idx applies: its name,
+// called, at an expression position. The catalog is consulted first, as the
+// evaluator does, so a spec never takes a function's card.
+func (s *Service) predicateAt(toks []parser.Token, idx int, ctx CursorContext) (*SpecInfo, bool) {
+	t := toks[idx]
+	if s.registries == nil || ctx.Position == "" || t.Type != parser.TokenIdentifier || strings.ContainsAny(t.Literal, ".:") {
+		return nil, false
+	}
+	if idx+1 >= len(toks) || toks[idx+1].Type != parser.TokenParenOpen {
+		return nil, false
+	}
+	if _, isFunction := functions.Lookup(t.Literal); isFunction {
+		return nil, false
+	}
+	info, ok := s.registries.SpecGet(t.Literal)
+	return info, ok && info != nil
+}
+
+// predicateCard renders a spec or trait application: the application as its
+// signature, what it reads, where it runs at the position, and the spellings
+// it replaced -- the same shape as a catalog entry's card.
+func predicateCard(info *SpecInfo, pos tiers.Position) string {
+	receiver, kind := "row", "spec"
+	if info.Kind == "context" {
+		receiver = "actor"
+	}
+	if info.Trait {
+		kind = "trait"
+	}
+	sentence := firstSentence(strings.TrimSpace(info.Description))
+	switch {
+	case sentence != "":
+	case info.Trait:
+		sentence = "A trait: a predicate over any row, applied to the row it reads."
+	case receiver == "actor":
+		sentence = "A spec over " + info.Bound + ", applied to the actor."
+	default:
+		sentence = "A spec over " + info.Bound + ", applied to the row it reads."
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "```memql\n%s(%s) bool\n```\n\n%s\n\n%s", info.Name, receiver, sentence, predicateRunsLine(receiver, pos))
+	if tiers.PredicateAdmission(pos) == tiers.Refused {
+		fmt.Fprintf(&b, "\n\nNot allowed in %s, which applies no spec or trait.", positionPhrase(pos))
+	}
+	fmt.Fprintf(&b, "\n\nReplaces `%s` written bare and `%s %s`.", info.Name, kind, info.Name)
+	return b.String()
+}
+
+// predicateRunsLine says where an application runs at a position: a row
+// predicate is compiled into the filter's SQL, a predicate over the actor is
+// decided in process from the caller before the query, and every in-process
+// position runs both in process.
+func predicateRunsLine(receiver string, pos tiers.Position) string {
+	switch {
+	case tiers.TierOf(pos) == tiers.TierP && receiver == "actor":
+		return "Runs in process before the query, against the caller."
+	case tiers.TierOf(pos) == tiers.TierP:
+		return "Pushed down to SQL."
+	case pos == tiers.PositionQueryRefine && receiver == "row":
+		return "Runs in process, over the rows of the page the query read."
+	}
+	return "Runs in process."
 }
 
 // tokenIndexAt returns the index of the token under a 1-based cursor, or -1.

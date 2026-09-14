@@ -458,8 +458,8 @@ func catalogDetail(f functions.Function, a tiers.Admission, mayReadRow bool) str
 // predicateItems offers the registry's specs and traits, each applied to the
 // receiver it predicates over: a trait or a row spec to the position's row
 // parameter, a context spec to `actor`. A row spec bound to a DIFFERENT
-// concept than the position's is not offered: applied to this row it is a
-// load refusal.
+// concept than the position's is not offered: its body reads that concept's
+// fields, not this row's.
 func (s *Service) predicateItems(ctx CursorContext) []CompletionItem {
 	if s.registries == nil {
 		return nil

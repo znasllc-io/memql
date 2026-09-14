@@ -184,57 +184,8 @@
       ]
     },
     "ternary": {
-      "begin": "\\?",
-      "end": ":",
-      "beginCaptures": {
-        "0": {
-          "name": "keyword.operator.ternary.memql"
-        }
-      },
-      "endCaptures": {
-        "0": {
-          "name": "keyword.operator.ternary.memql"
-        }
-      },
-      "patterns": [
-        {
-          "include": "#ternary-groups"
-        },
-        {
-          "include": "$self"
-        }
-      ]
-    },
-    "ternary-groups": {
-      "patterns": [
-        {
-          "begin": "\\(",
-          "end": "\\)",
-          "patterns": [
-            {
-              "include": "$self"
-            }
-          ]
-        },
-        {
-          "begin": "\\[",
-          "end": "\\]",
-          "patterns": [
-            {
-              "include": "$self"
-            }
-          ]
-        },
-        {
-          "begin": "\\{",
-          "end": "\\}",
-          "patterns": [
-            {
-              "include": "$self"
-            }
-          ]
-        }
-      ]
+      "name": "keyword.operator.ternary.memql",
+      "match": "\\?"
     },
     "unary-not": {
       "name": "keyword.operator.logical.memql",

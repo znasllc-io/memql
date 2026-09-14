@@ -300,14 +300,17 @@ reach the list anywhere.
 
 ### Hover
 
-Hover over an operator, a catalog function or method, or a retired spelling
-shows a card with one shape, plain text in sentence case:
+Hover over an operator, a catalog function or method, a spec or trait applied
+in an expression, or a retired spelling shows a card with one shape, plain text
+in sentence case:
 
 1. A `memql` code block with the signature (`lower(value string) string`), the
-   operator in use (`a ?? b`), or -- for a retired spelling -- its
+   operator in use (`a ?? b`), the application (`isActiveRecord(row) bool`,
+   `requiresOwner(actor) bool`), or -- for a retired spelling -- its
    replacement.
-2. One sentence saying what it does: the first sentence of the catalog entry,
-   or the operator's description followed by its absence rule.
+2. One sentence saying what it does: the first sentence of the catalog entry
+   or of the spec's description, or the operator's description followed by
+   its absence rule.
 3. Where it runs at the cursor's position: "Pushed down to SQL.", "Runs in
    process.", "Runs in process before the query, on values that do not read
    the row.", or, in a refine clause, "Runs in process, over the rows of the
@@ -319,7 +322,14 @@ shows a card with one shape, plain text in sentence case:
    not read the row is a plan constant, legal where it stands, and gets no
    legality line.
 5. For an entry that replaces retired spellings, the ones it replaces:
-   "Replaces `len(x)` and `count(x)`."
+   "Replaces `len(x)` and `count(x)`." A spec or trait replaces its bare name
+   and its `spec <name>` / `trait <name>` reference.
+
+A spec or trait's card says where the application runs: a row predicate in a
+filter or spec body is compiled into the SQL, a spec over the actor is decided
+in process from the caller before the query, and every in-process position runs
+both in process. The catalog is consulted before the registry, as the
+evaluator does, so a spec never takes a function's card.
 
 Operator cards come from the one operator table, `functions.Operators()`. The
 same glyphs outside an expression keep their own meaning and get no operator
@@ -337,6 +347,16 @@ the live traversal and `count` alone on a line is the query's count clause, so
 neither is flagged. `TestRetiredHoverIsTheParsersTable` fails when the parser retires a
 form Sense neither hovers nor names as unhoverable; the comma connective is the
 one it names, because a comma also separates arguments.
+
+The predicate positions' legacy spellings -- a filter with no lambda header, a
+spec or trait with a `{ return ... }` body, an `@filter` whose argument is not a
+lambda -- are hovered on the `filter` keyword, the body's `return` or the
+`spec` / `trait` keyword of its header, and `@filter`. Their card shows the
+author's own construct as `memqlmigrate --rewrite=expressions` would write it,
+because Sense runs that rewrite over the construct under the cursor:
+`filter status == args.owner && isActiveRecord` shows
+`filter row => row.status == args.owner && isActiveRecord(row)`. Where the
+rewrite refuses the construct, the card shows the table's form.
 
 ### Signature help
 
