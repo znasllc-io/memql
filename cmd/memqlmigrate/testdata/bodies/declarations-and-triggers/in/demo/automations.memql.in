@@ -18,3 +18,10 @@ automation demoSchedule {
     builtin routingEvidenceFold ( )
   }
 }
+
+@schedule("0 0 */6 * * *")
+automation demoScheduleString {
+  step go {
+    builtin routingEvidenceFold ( )
+  }
+}

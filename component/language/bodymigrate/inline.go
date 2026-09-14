@@ -329,12 +329,14 @@ func afterFileHeader(src string) int {
 var (
 	mutateDecl  = regexp.MustCompile(`(?m)^([ \t]*)mutate([ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{)`)
 	triggerOpen = regexp.MustCompile(`@trigger[ \t]*\(`)
-	scheduleSyn = regexp.MustCompile(`@schedule[ \t]*\([ \t]*cron[ \t]*=[ \t]*("(?:[^"\\]|\\.)*")[ \t]*\)`)
+	// Both spellings the registry accepted: the keyword form and the one string.
+	scheduleSyn = regexp.MustCompile(`@schedule[ \t]*\([ \t]*(?:cron[ \t]*=[ \t]*)?("(?:[^"\\]|\\.)*")[ \t]*\)`)
 )
 
 // rewriteDeclarationsAndTriggers renames `mutate` declarations, drops
-// `partition=` from every @trigger and spells `@schedule(cron=)` as
-// `@trigger(schedule=)`. Located on the code view; commented text is left alone.
+// `partition=` from every @trigger and spells `@schedule(cron=)` and
+// `@schedule("...")` as `@trigger(schedule=)`. Located on the code view;
+// commented text is left alone.
 func rewriteDeclarationsAndTriggers(src string) string {
 	view := codeView(src)
 	// mutate -> mutation, from the end so offsets hold.
@@ -345,7 +347,7 @@ func rewriteDeclarationsAndTriggers(src string) string {
 		src = src[:kw] + "mutation" + src[kw+len("mutate"):]
 	}
 	view = codeView(src)
-	// @schedule(cron=X) -> @trigger(schedule=X).
+	// @schedule(cron=X) and @schedule(X) -> @trigger(schedule=X).
 	for _, m := range reverse(scheduleSyn.FindAllStringSubmatchIndex(src, -1)) {
 		if strings.TrimSpace(view[m[0]:m[0]+len("@schedule")]) == "" {
 			continue // inside a comment or a string

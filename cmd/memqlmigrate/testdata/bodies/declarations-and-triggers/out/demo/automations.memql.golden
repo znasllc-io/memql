@@ -12,3 +12,8 @@ automation demoMiddle {
 automation demoSchedule {
   go := builtin routingEvidenceFold()
 }
+
+@trigger(schedule="0 0 */6 * * *")
+automation demoScheduleString {
+  go := builtin routingEvidenceFold()
+}
