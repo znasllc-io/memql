@@ -23,9 +23,13 @@ import (
 // editor drives them: initialize over a workspace on disk, open a legacy
 // document, take the diagnostic the server publishes, ask for code actions at
 // it, apply the edit. The expected text is the CLI's: memqlmigrate
-// --rewrite=expressions is CollectPredicates over the tree's .memql files and
-// RewriteExpressions over the file (cmd/memqlmigrate/expressions.go), which
+// --rewrite=expressions is the tree's .memql files resolved over the core tree
+// and RewriteExpressions over the file (cmd/memqlmigrate/expressions.go), which
 // cliRewrite repeats.
+//
+// Every MemQL document here is legacy on purpose -- the rewrite of a legacy
+// document is the subject -- so the Go-fixture migration leaves the file as it
+// is: memqlmigrate:keep-file.
 
 // codemodWorkspace is a bundle domain whose query names a spec over an @actor
 // shape declared in two OTHER files: `isAdmin` becomes `isAdmin(actor)` only
@@ -195,7 +199,20 @@ func cliRewrite(t *testing.T, root, rel string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	preds, err := langparser.CollectPredicates(files)
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	local := make([]langparser.PredicateDeclarations, 0, len(paths))
+	for _, p := range paths {
+		local = append(local, langparser.ScanPredicateDeclarations(p, files[p]))
+	}
+	core, err := corePredicates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	preds, err := langparser.ResolvePredicatesOver(core, local)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,6 +587,33 @@ func TestCodeAction_CorePredicatesResolve(t *testing.T) {
 	}
 	if got := applyEdits(t, text, all[0], uri); !strings.Contains(got, "filter  row => isActiveRecord(row) && row.status == \"open\"") {
 		t.Errorf("rewrote:\n%s", got)
+	}
+}
+
+// A bundle's spec over the core @actor shape actorEnvelope, which the bundle
+// does not declare, is rewritten as an actor predicate -- the workspace
+// resolves over the core tree, as memqlmigrate does.
+func TestCodeAction_SpecOverACoreActorShape(t *testing.T) {
+	expressionsV1(t)
+	const rel = "fylo/specs.memql"
+	root := writeWorkspace(t, map[string]string{
+		"fylo/concepts.memql": "@namespace(\"fylo\")\nconcept order {\n  status  string\n}\n",
+		rel:                   "use common.shapes.{ actorEnvelope }\n\nspec actorEnvelope isAdmin {\n  return role == \"admin\"\n}\n\nquery order adminOrders {\n  filter  isAdmin\n}\n",
+	})
+	s := workspaceServer(t, root)
+	uri, text, _ := openWorkspaceDoc(t, s, root, rel)
+	all := actionsOfKind(codeActions(t, s, uri, protocol.Range{}, nil, "source.fixAll.memql"), "source.fixAll.memql")
+	if len(all) != 1 {
+		t.Fatal("no fix-all for a spec over the core actorEnvelope")
+	}
+	got := applyEdits(t, text, all[0], uri)
+	if want := cliRewrite(t, root, rel); got != want {
+		t.Errorf("fix-all wrote:\n%s\nmemqlmigrate writes:\n%s", got, want)
+	}
+	for _, line := range []string{"spec actorEnvelope isAdmin = actor => actor.role == \"admin\"\n", "  filter  row => isAdmin(actor)\n"} {
+		if !strings.Contains(got, line) {
+			t.Errorf("the rewrite lacks %q:\n%s", line, got)
+		}
 	}
 }
 

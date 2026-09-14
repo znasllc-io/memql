@@ -292,20 +292,22 @@ func TestDiagnose_RetiredFormCarriesItsRule(t *testing.T) {
 		rules[f.Rule] = true
 	}
 	svc := New(nil)
+	// The sources are legacy on purpose -- a retired form is the subject -- so
+	// each carries memqlmigrate:keep for the Go-fixture migration.
 	for _, tc := range []struct{ name, src, want string }{
-		{"query filter", "query thing things {\n  filter  status == args.status\n}\n", "retired_filter_without_lambda"},
-		{"trigger filter", "@trigger(event=\"node.updated\", concept=\"v1:x:thing\", partition=\"*\")\n@filter(payload.status == \"archived\")\n" +
-			"automation onArchived {\n  step s {\n    logic doIt ( event )\n  }\n}\n", "retired_filter_annotation"},
-		{"spec body", "spec thing isOpen {\n  return status == \"open\"\n}\n", "retired_spec_return_body"},
-		{"trait body", "trait isOpen {\n  return status == \"open\"\n}\n", "retired_trait_return_body"},
-		{"cond call", "logic doIt {\n  args {\n    x string\n  }\n  body {\n    return cond(args.x == \"a\", 1, 2)\n  }\n}\n", "retired_cond_call"},
-		{"null", "logic doIt {\n  args {\n    x string\n  }\n  body {\n    return args.x == null\n  }\n}\n", "retired_null"},
+		{"query filter", "query thing things {\n  filter  status == args.status\n}\n", "retired_filter_without_lambda"}, // memqlmigrate:keep
+		{"trigger filter", "@trigger(event=\"node.updated\", concept=\"v1:x:thing\", partition=\"*\")\n@filter(payload.status == \"archived\")\n" + // memqlmigrate:keep
+			"automation onArchived {\n  step s {\n    logic doIt ( event )\n  }\n}\n", "retired_filter_annotation"}, // memqlmigrate:keep
+		{"spec body", "spec thing isOpen {\n  return status == \"open\"\n}\n", "retired_spec_return_body"},                                          // memqlmigrate:keep
+		{"trait body", "trait isOpen {\n  return status == \"open\"\n}\n", "retired_trait_return_body"},                                             // memqlmigrate:keep
+		{"cond call", "logic doIt {\n  args {\n    x string\n  }\n  body {\n    return cond(args.x == \"a\", 1, 2)\n  }\n}\n", "retired_cond_call"}, // memqlmigrate:keep
+		{"null", "logic doIt {\n  args {\n    x string\n  }\n  body {\n    return args.x == null\n  }\n}\n", "retired_null"},                        // memqlmigrate:keep
 		// The legacy object literal's key-less entry is a retired form: its
 		// refusal writes the entry out, the fix the codemod makes.
-		{"key-less map entry", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a: 1, args.x.y }\n  }\n}\n", "retired_keyless_map_entry"},
+		{"key-less map entry", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a: 1, args.x.y }\n  }\n}\n", "retired_keyless_map_entry"}, // memqlmigrate:keep
 		// Not a retired form: the plain code stays. A dotted KEY is refused
 		// with "nest a map", which no rewrite performs.
-		{"dotted map key", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a.b: 1 }\n  }\n}\n", "parse-error"},
+		{"dotted map key", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a.b: 1 }\n  }\n}\n", "parse-error"}, // memqlmigrate:keep
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			errs := errorDiags(svc.Diagnose(tc.src, "test.memql"))

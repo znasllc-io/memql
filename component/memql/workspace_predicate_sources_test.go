@@ -6,16 +6,18 @@ import (
 	"testing/fstest"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
-// A bundle workspace resolves its own predicates and the core tree's: its
-// filter naming a core trait rewrites the way the engine's flat registry
-// resolves it once the bundle loads over the core tree.
-func TestWorkspacePredicateSources_BundleSeesTheCoreTree(t *testing.T) {
+// A bundle workspace is its own .memql files -- every one under the DSL tree,
+// none under a directory the repository walkers skip -- and, resolved over the
+// core tree the way memqlmigrate resolves it, a spec the bundle declares over
+// the core @actor shape is an actor predicate and the core trait resolves.
+func TestWorkspacePredicateSources_BundleResolvesOverTheCoreTree(t *testing.T) {
 	root := fstest.MapFS{
-		"fylo/traits.memql":              {Data: []byte("trait isShipped {\n  return status == \"shipped\"\n}\n")},
+		"fylo/specs.memql":               {Data: []byte("spec actorEnvelope isAdmin {\n  return role == \"admin\"\n}\n")},
 		"fylo/node_modules/stray.memql":  {Data: []byte("trait strayTrait {\n  return x == 1\n}\n")},
-		"fylo/queries.memql":             {Data: []byte("query order orders {\n  filter  isShipped\n}\n")},
+		"fylo/queries.memql":             {Data: []byte("query order orders {\n  filter  isAdmin\n}\n")},
 		"fylo/prompts/readme.txt":        {Data: []byte("not a memql file")},
 		"fylo/nested/more/deeper.memql":  {Data: []byte("trait isDeep {\n  return deep == true\n}\n")},
 		"other/unrelated/ignored.memql":  {Data: []byte("trait isOther {\n  return other == true\n}\n")},
@@ -25,21 +27,36 @@ func TestWorkspacePredicateSources_BundleSeesTheCoreTree(t *testing.T) {
 	if dir != "" {
 		t.Errorf("dir = %q, want the root itself", dir)
 	}
-	for _, want := range []string{"fylo/traits.memql", "fylo/nested/more/deeper.memql", "other/unrelated/ignored.memql", "common/traits.memql"} {
-		if _, ok := files[want]; !ok {
-			t.Errorf("missing %s", want)
-		}
-	}
+	var got []string
 	for p := range files {
+		got = append(got, p)
 		if strings.Contains(p, "node_modules") || !strings.HasSuffix(p, ".memql") {
 			t.Errorf("read %s", p)
 		}
 	}
-	preds, err := langparser.CollectPredicates(files)
+	if len(files) != 5 {
+		t.Errorf("read %v, want the five workspace .memql files", got)
+	}
+	if _, ok := files["common/traits.memql"]; ok {
+		t.Error("the core tree leaked into the workspace's own sources")
+	}
+
+	base, err := langparser.ScanPredicateTree(memqldsl.Tree())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"isShipped", "isDeep", "isActiveRecord"} {
+	var local []langparser.PredicateDeclarations
+	for p, b := range files {
+		local = append(local, langparser.ScanPredicateDeclarations(p, b))
+	}
+	preds, err := langparser.ResolvePredicatesOver(base, local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preds["isAdmin"] != (langparser.PredicateInfo{Actor: true}) {
+		t.Errorf("isAdmin = %+v, want an actor predicate through the core actorEnvelope", preds["isAdmin"])
+	}
+	for _, name := range []string{"isDeep", "isActiveRecord"} {
 		if _, ok := preds[name]; !ok {
 			t.Errorf("predicate %s is not in the set", name)
 		}
@@ -49,10 +66,8 @@ func TestWorkspacePredicateSources_BundleSeesTheCoreTree(t *testing.T) {
 	}
 }
 
-// A workspace that carries a core domain answers for it: the engine
-// repository's own dsl/ replaces the embedded copy of every domain it holds,
-// and the embedded tree still answers for the rest.
-func TestWorkspacePredicateSources_WorkspaceDomainReplacesTheCoreCopy(t *testing.T) {
+// The engine repository's own dsl/ is found below the workspace root.
+func TestWorkspacePredicateSources_FindsTheDSLTree(t *testing.T) {
 	mine := []byte("trait onlyMine {\n  return mine == true\n}\n")
 	root := fstest.MapFS{
 		"dsl/common/traits.memql": {Data: mine},
@@ -63,25 +78,7 @@ func TestWorkspacePredicateSources_WorkspaceDomainReplacesTheCoreCopy(t *testing
 	if dir != "dsl" {
 		t.Fatalf("dir = %q, want dsl", dir)
 	}
-	if got := string(files["common/traits.memql"]); got != string(mine) {
-		t.Errorf("common/traits.memql is the embedded copy, not the workspace's:\n%s", got)
-	}
-	for p := range files {
-		if strings.HasPrefix(p, "common/") && p != "common/traits.memql" {
-			t.Errorf("the embedded %s leaked into a workspace that carries common", p)
-		}
-	}
-	if _, ok := files["identity/concepts.memql"]; !ok {
-		t.Error("a core domain the workspace does not carry is missing")
-	}
-	preds, err := langparser.CollectPredicates(files)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := preds["isActiveRecord"]; ok {
-		t.Error("isActiveRecord comes from the embedded common domain the workspace replaced")
-	}
-	if _, ok := preds["onlyMine"]; !ok {
-		t.Error("the workspace's own trait is missing")
+	if len(files) != 2 || string(files["common/traits.memql"]) != string(mine) {
+		t.Errorf("files = %v, want the two files of dsl/", files)
 	}
 }
