@@ -13,7 +13,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
 	}{
 		{
 			name: "mirrors plus literals collapse into accept and stamp",
-			in: `mutate role createRole {
+			in: `mutation role createRole {
   args {
     slug string @required
     name string @required
@@ -27,7 +27,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
     id: makeId(args.slug)
   }
 }`,
-			want: `mutate role createRole {
+			want: `mutation role createRole {
   args {
     slug string @required
     name string @required
@@ -44,7 +44,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
 		},
 		{
 			name: "all mirrors, no stamp block emitted",
-			in: `mutate widget addWidget {
+			in: `mutation widget addWidget {
   args {
     label string @required
     kind string
@@ -54,7 +54,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
     args.kind
   }
 }`,
-			want: `mutate widget addWidget {
+			want: `mutation widget addWidget {
   args {
     label string @required
     kind string
@@ -66,7 +66,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
 		},
 		{
 			name: "update block migrates too (form shipped by #2593)",
-			in: `mutate widget renameWidget {
+			in: `mutation widget renameWidget {
   args {
     id string @required
     label string @required
@@ -78,7 +78,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
     args.kind
   }
 }`,
-			want: `mutate widget renameWidget {
+			want: `mutation widget renameWidget {
   args {
     id string @required
     label string @required
@@ -91,7 +91,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
 		},
 		{
 			name: "single mirror is not worth the sugar",
-			in: `mutate widget touchWidget {
+			in: `mutation widget touchWidget {
   args {
     id string @required
   }
@@ -103,7 +103,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
 		},
 		{
 			name: "already migrated is idempotent",
-			in: `mutate role createRole {
+			in: `mutation role createRole {
   args {
     slug string @required
     name string @required
@@ -118,7 +118,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
 		},
 		{
 			name: "comments in the block are preserved by skipping",
-			in: `mutate role createRole {
+			in: `mutation role createRole {
   args {
     slug string @required
     name string @required
@@ -135,7 +135,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
 			// -- otherwise the codemod reflows the expression with its
 			// indentation frozen as space runs.
 			name: "paren-continued multi-line field stays longhand",
-			in: `mutate space addAgentToSpace {
+			in: `mutation space addAgentToSpace {
   args {
     spaceId string @required
     agentId string @required
@@ -155,7 +155,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
 			// not desync hasMultilineField's depth -- the multi-line
 			// coalesce below must still be detected and skipped.
 			name: "escaped quote before a multi-line field stays longhand",
-			in: `mutate widget addWidget {
+			in: `mutation widget addWidget {
   args {
     a string @required
     b string @required
@@ -173,7 +173,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
 		},
 		{
 			name: "nested object value stays longhand",
-			in: `mutate identity addCredential {
+			in: `mutation identity addCredential {
   args {
     userId string @required
     secret string @required
@@ -187,7 +187,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
 		},
 		{
 			name: "mirror of an undeclared arg stays longhand",
-			in: `mutate widget addWidget {
+			in: `mutation widget addWidget {
   args {
     label string @required
   }
@@ -199,7 +199,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
 		},
 		{
 			name: "key collision between mirror and stamp stays longhand",
-			in: `mutate widget addWidget {
+			in: `mutation widget addWidget {
   args {
     label string @required
     kind string
@@ -213,7 +213,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
 		},
 		{
 			name: "verbose mirror with a different key is a stamp field",
-			in: `mutate widget addWidget {
+			in: `mutation widget addWidget {
   args {
     label string @required
     kind string
@@ -224,7 +224,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
     displayKind: args.kind
   }
 }`,
-			want: `mutate widget addWidget {
+			want: `mutation widget addWidget {
   args {
     label string @required
     kind string
@@ -267,7 +267,7 @@ func TestRewriteAcceptStamp(t *testing.T) {
 // emitter must produce the same procedural text (payload order-
 // insensitive) for both spellings.
 func TestRewriteAcceptStamp_EmitEquivalence(t *testing.T) {
-	src := `mutate role createRole {
+	src := `mutation role createRole {
   args {
     slug string @required
     name string @required
@@ -308,7 +308,7 @@ func TestRewriteAcceptStamp_EmitEquivalence(t *testing.T) {
 // (the #2658 lesson): a multibyte char before the write block must not
 // skew the splice.
 func TestRewriteAcceptStamp_MultibyteUpstream(t *testing.T) {
-	src := "// clause § 4\nmutate widget addWidget {\n  args {\n    label string @required\n    kind string\n  }\n  insert {\n    args.label\n    args.kind\n  }\n}"
+	src := "// clause § 4\nmutation widget addWidget {\n  args {\n    label string @required\n    kind string\n  }\n  insert {\n    args.label\n    args.kind\n  }\n}"
 	got, err := RewriteAcceptStamp([]byte(src))
 	if err != nil {
 		t.Fatal(err)

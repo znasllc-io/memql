@@ -347,7 +347,7 @@ query space queryArchivedSpaces {
 `)
 	writeFixture(t, core, "mutations/createSpace.memql", `
 @description("Create a space")
-mutate space mutationCreateSpace {
+mutation space mutationCreateSpace {
   args {
     name  string  @required
   }

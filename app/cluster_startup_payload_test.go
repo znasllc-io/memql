@@ -75,7 +75,11 @@ func declaredArgTypes(t *testing.T, path, mutation string) map[string]string {
 	}
 
 	block := regexp.MustCompile(
-		`(?s)mutate\s+\w+\s+` + regexp.QuoteMeta(mutation) + `\s*\{.*?args\s*\{(.*?)\n  \}`,
+		// `mutation`, not `mutate`: the declaration keyword changed in
+		// memql#5375. The t.Fatalf below is what caught it -- a header scan
+		// that finds nothing reports a renamed mutation rather than passing
+		// while examining an empty block.
+		`(?s)mutation\s+\w+\s+` + regexp.QuoteMeta(mutation) + `\s*\{.*?args\s*\{(.*?)\n  \}`,
 	).FindStringSubmatch(string(body))
 	if block == nil {
 		t.Fatalf("%s: no args block found for %q -- the mutation was renamed or reshaped, "+

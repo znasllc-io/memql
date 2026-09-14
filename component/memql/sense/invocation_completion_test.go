@@ -81,7 +81,7 @@ func TestInvocation_MutateWriteBlockSuppressed(t *testing.T) {
 		},
 		concepts: map[string]*ConceptInfo{"v1:orders:order": {Name: "v1:orders:order"}},
 	}
-	if firedInvocation(completeAtEnd(New(rp), "mutate order place {\n  insert {\n    query ")) {
+	if firedInvocation(completeAtEnd(New(rp), "mutation order place {\n  insert {\n    query ")) {
 		t.Error("invocation fired in a mutate insert block")
 	}
 }

@@ -365,7 +365,7 @@ func TestAMutationNeitherVotesNorBlocks(t *testing.T) {
   shape   noteFull
 }
 `,
-		"notes/mutations.memql": `mutate note updateNote {
+		"notes/mutations.memql": `mutation note updateNote {
   args {
     noteId  string!
   }

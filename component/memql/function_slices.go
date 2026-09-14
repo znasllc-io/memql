@@ -31,7 +31,7 @@ type FunctionSlice struct {
 // functionDeclHeader matches every top-level function-style header
 // at column 0 we care about:
 //
-//   - struct-form: `query NAME {`, `mutate NAME {`, `logic NAME {`
+//   - struct-form: `query NAME {`, `mutation NAME {`, `logic NAME {`
 //   - procedural: `func (Query) NAME`, `func (Mutation) NAME`, ...
 //
 // Captures the (keyword, name) for the slice. We don't match

@@ -122,7 +122,7 @@ automation sweepBare {
   step decide { logic decideRows { event: event } }
   step apply {
     forEach item in decide.nodes() {
-      mutate markRow { rowId: item.id, label: item.payload.label }
+      mutation markRow { rowId: item.id, label: item.payload.label }
     }
   }
 }`
@@ -164,7 +164,7 @@ automation sweepConditional {
   step apply {
     forEach item in decide.nodes() {
       if item.payload.label == "expired" {
-        mutate retireRow { rowId: item.id }
+        mutation retireRow { rowId: item.id }
       }
     }
   }

@@ -90,7 +90,7 @@ query user userById {
   shape   userFull
 }
 
-mutate user archiveUser {
+mutation user archiveUser {
   args {
     userId  string  @required
   }

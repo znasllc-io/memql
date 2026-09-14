@@ -1737,7 +1737,7 @@ Mutations:
 use library.concepts.{ folder }
 
 @description("Create a Library folder")
-mutate folder mutationCreateFolder {
+mutation folder mutationCreateFolder {
   args {
     folderId  string  @required
     name      string  @required
@@ -1808,7 +1808,7 @@ Base providers carry vendor-level auth + type.
 
 ```memql
 @base
-@type("OpenAI")
+@vendor("OpenAI")
 provider openai {
   auth {
     identityProviderId  env("MEMQL_AI_OPENAI_IDENTITY_PROVIDER_ID")

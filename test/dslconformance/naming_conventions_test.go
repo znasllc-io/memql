@@ -287,7 +287,7 @@ func TestNoKindPrefixGateIsLive(t *testing.T) {
 		},
 		{
 			name:    "indented prefixed mutation -- regex version anchored at column 0",
-			src:     "  mutate user mutationArchiveUser {\n  update { id: args.id }\n}\n",
+			src:     "  mutation user mutationArchiveUser {\n  update { id: args.id }\n}\n",
 			want:    "mutationArchiveUser",
 			wantHit: true,
 		},
@@ -311,7 +311,7 @@ func TestNoKindPrefixGateIsLive(t *testing.T) {
 		},
 		{
 			name:    "the keyword itself as prefix -- `mutate`, not just the documented `mutation`",
-			src:     "mutate user mutateArchiveUser {\n  update { id: args.id }\n}\n",
+			src:     "mutation user mutateArchiveUser {\n  update { id: args.id }\n}\n",
 			want:    "mutateArchiveUser",
 			wantHit: true,
 		},
@@ -333,7 +333,7 @@ func TestNoKindPrefixGateIsLive(t *testing.T) {
 		},
 		{
 			name:    "commented-out example must not be reported",
-			src:     "// query user queryFooBar {\n/// mutate user mutationFooBar {\nquery user userById {\n  filter id == args.id\n}\n",
+			src:     "// query user queryFooBar {\n/// mutation user mutationFooBar {\nquery user userById {\n  filter id == args.id\n}\n",
 			wantHit: false,
 		},
 		{

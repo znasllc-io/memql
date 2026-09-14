@@ -42,7 +42,7 @@ func TestBlockSpecificCompletion(t *testing.T) {
 		}
 	}
 
-	write := blockLabels(t, rp, "mutate todo createTodo {\n  insert {\n    ")
+	write := blockLabels(t, rp, "mutation todo createTodo {\n  insert {\n    ")
 	for _, want := range []string{"accept", "stamp", "title"} {
 		if !write[want] {
 			t.Errorf("write block must offer %q, got %v", want, write)
@@ -60,7 +60,7 @@ func TestBlockSpecificCompletion(t *testing.T) {
 func TestWriteBlockOffersOnlyShortForms(t *testing.T) {
 	rp := &fakeRegistry{concepts: []string{"v1:todos:todo"}}
 	s := New(rp)
-	src := "mutate todo createTodo {\n  insert {\n    "
+	src := "mutation todo createTodo {\n  insert {\n    "
 	lines := strings.Split(src, "\n")
 	items := s.Complete(src, len(lines), len(lines[len(lines)-1])+1, "probe.memql")
 

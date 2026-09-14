@@ -208,7 +208,7 @@ func sortedDeclaredArgsNames(set map[string]bool) []string {
 // `func (Query|Mutation|Automation|Logic) name(...) { ... }`. The
 // snapshot every caller feeds this (`rawSourceForUsage` in
 // function_loader.go) is taken AFTER NormaliseAll, so the
-// author-facing struct-form headers (`query NAME {` / `mutate NAME {`
+// author-facing struct-form headers (`query NAME {` / `mutation NAME {`
 // / `logic NAME {` / `automation NAME {`) have already been rewritten
 // into that shape and cannot reach here -- the same reasoning
 // precededByBodyOpener records below, corrected here to match
@@ -307,7 +307,7 @@ func extractFunctionBody(source string) string {
 //   - `func (Receiver) name(<args>) <returns> {`
 //
 // The author-facing struct-form headers (`query NAME {` /
-// `mutate NAME {` / `logic NAME {` / `automation NAME {` --
+// `mutation NAME {` / `logic NAME {` / `automation NAME {` --
 // parser.StructFormKeywords) cannot reach here: the snapshot every
 // caller of extractFunctionBody is fed (`rawSourceForUsage` in
 // function_loader.go) is taken AFTER NormaliseAll, which has already

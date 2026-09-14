@@ -89,7 +89,7 @@ func TestTokenize_ColorsUseAndInKeywords(t *testing.T) {
 // (constructKeywords) rather than hand-listed, and excludes the unnamed `use`
 // import.
 func TestConstructHeaderRe_DerivedFromDslspec(t *testing.T) {
-	for _, decl := range []string{"query Foo q {", "mutate Foo m {", "concept foo {", "shape Foo s {"} {
+	for _, decl := range []string{"query Foo q {", "mutation Foo m {", "concept foo {", "shape Foo s {"} {
 		if !constructHeaderRe.MatchString(decl) {
 			t.Errorf("constructHeaderRe should match %q", decl)
 		}

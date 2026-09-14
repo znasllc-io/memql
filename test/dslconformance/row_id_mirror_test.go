@@ -5,7 +5,7 @@ package dslconformance
 // Two concepts stamped their own row id into a payload field and then filtered
 // QUERIES on the copy rather than on the id:
 //
-//	mutate deployment createDeployment {
+//	mutation deployment createDeployment {
 //	  insert {
 //	    id:           args.deploymentId
 //	    deploymentId: args.deploymentId   // <- the mirror

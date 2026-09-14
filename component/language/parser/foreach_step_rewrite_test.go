@@ -28,7 +28,7 @@ automation pruneStaleNodes {
   }
   step prune {
     forEach node in decide.result {
-      mutate updateNodeHealth { id: node.id, health: "stopped" }
+      mutation updateNodeHealth { id: node.id, health: "stopped" }
     }
   }
 }`
@@ -59,7 +59,7 @@ func TestNormaliseAutomationSource_ForRangeStep(t *testing.T) {
 	src := `automation sweep {
   step prune {
     for n := range decide.result {
-      mutate retire { id: n.id }
+      mutation retire { id: n.id }
     }
   }
 }`
@@ -81,7 +81,7 @@ func TestNormaliseAutomationSource_ForEachStep_ItemVarPassthrough(t *testing.T) 
 	src := `automation sweep {
   step prune {
     forEach item in decide.result {
-      mutate retire { id: item.id }
+      mutation retire { id: item.id }
     }
   }
 }`
@@ -100,8 +100,8 @@ func TestNormaliseAutomationSource_ForEachStep_MultipleInnerCalls(t *testing.T) 
 	src := `automation sweep {
   step prune {
     forEach node in decide.result {
-      mutate retire { id: node.id }
-      mutate audit { nodeId: node.id }
+      mutation retire { id: node.id }
+      mutation audit { nodeId: node.id }
     }
   }
 }`
@@ -123,7 +123,7 @@ func TestNormaliseAutomationSource_ForEachStep_Filter(t *testing.T) {
 	src := `automation sweep {
   step prune {
     forEach node in decide.result where node.health == "stale" {
-      mutate retire { id: node.id }
+      mutation retire { id: node.id }
     }
   }
 }`
@@ -144,12 +144,12 @@ func TestNormaliseAutomationSource_ForEachStep_Errors(t *testing.T) {
 	}{
 		{
 			name:    "missing in keyword",
-			body:    `forEach node decide.result { mutate y { } }`,
+			body:    `forEach node decide.result { mutation y { } }`,
 			wantErr: "expected `in`",
 		},
 		{
 			name:    "missing range keyword",
-			body:    `for n := decide.result { mutate y { } }`,
+			body:    `for n := decide.result { mutation y { } }`,
 			wantErr: "expected `range`",
 		},
 		{
@@ -164,7 +164,7 @@ func TestNormaliseAutomationSource_ForEachStep_Errors(t *testing.T) {
 		},
 		{
 			name:    "empty where filter",
-			body:    `forEach node in decide.result where { mutate y { } }`,
+			body:    `forEach node in decide.result where { mutation y { } }`,
 			wantErr: "empty `where` filter",
 		},
 	}

@@ -46,7 +46,7 @@ query participant untrainedQuery {
 }
 
 @description("Loaded from disk at boot -- seeded.")
-mutate participant seededMutation {
+mutation participant seededMutation {
   insert {
     id: args.id
   }

@@ -108,8 +108,8 @@ func TestLiveMutateSpellingSplits(t *testing.T) {
 		name   string
 		header string
 	}{
-		{"with bound concept", "mutate node twoWrites {"},
-		{"without bound concept", "mutate twoWrites {"},
+		{"with bound concept", "mutation node twoWrites {"},
+		{"without bound concept", "mutation twoWrites {"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "use cluster.concepts.{ node }\n" + tc.header + `
@@ -135,7 +135,7 @@ func TestLiveMutateSpellingSplits(t *testing.T) {
 func TestEveryRestrictedKindSplitsItsLiveForm(t *testing.T) {
 	for _, tc := range []struct{ kind, src string }{
 		{"query", "query node q {\n  filter row.id == args.id\n}"},
-		{"mutation", "mutate node m {\n  insert { id: args.id }\n}"},
+		{"mutation", "mutation node m {\n  insert { id: args.id }\n}"},
 		{"logic", "logic decide {\n  body { return true }\n}"},
 		{"action", "action run {\n  args { x string }\n}"},
 	} {

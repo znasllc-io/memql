@@ -123,7 +123,7 @@ func TestNegative_BodyRule(t *testing.T) {
 			"must not declare a `body { }` block", "reserved for `logic`")
 	})
 	t.Run("mutation-with-body", func(t *testing.T) {
-		_, err := NormaliseAll("use cognition.concepts.{ space }\nmutate space m {\n  args { x string @required }\n  body { return 1 }\n}\n")
+		_, err := NormaliseAll("use cognition.concepts.{ space }\nmutation space m {\n  args { x string @required }\n  body { return 1 }\n}\n")
 		assertParseErr(t, "mutation with body{}", err,
 			"must not declare a `body { }` block")
 	})
@@ -143,7 +143,7 @@ func TestNegative_SignatureArity(t *testing.T) {
 		assertParseErr(t, "query missing concept binding", err, "missing concept binding")
 	})
 	t.Run("mutation-missing-concept", func(t *testing.T) {
-		_, err := NormaliseAll("mutate m {\n  args { x string @required }\n  insert { name: args.x }\n}\n")
+		_, err := NormaliseAll("mutation m {\n  args { x string @required }\n  insert { name: args.x }\n}\n")
 		assertParseErr(t, "mutation missing concept binding", err, "missing concept binding")
 	})
 	t.Run("shape-too-many-idents", func(t *testing.T) {

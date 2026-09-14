@@ -44,7 +44,7 @@ func parseToFunctionDef(t *testing.T, src string) *FunctionDef {
 // TestMutateVerb_RewritesToProceduralForm proves the `mutate` verb rewrites
 // cleanly to the internal `func (Mutation)` procedural form.
 func TestMutateVerb_RewritesToProceduralForm(t *testing.T) {
-	src := `mutate space createSpace {
+	src := `mutation space createSpace {
   args {
     spaceId string @required
     name    string @required
@@ -67,7 +67,7 @@ func TestMutateVerb_RewritesToProceduralForm(t *testing.T) {
 // TestMutateVerb_ParsesToReceiverMutation proves `mutate` parses to the
 // ReceiverMutation AST kind.
 func TestMutateVerb_ParsesToReceiverMutation(t *testing.T) {
-	mutateSrc := `mutate space createSpace {
+	mutateSrc := `mutation space createSpace {
   insert {
     id:   args.spaceId
     name: args.name
@@ -85,7 +85,7 @@ func TestMutateVerb_ParsesToReceiverMutation(t *testing.T) {
 // TestMutateVerb_SignatureConceptStillBinds proves the rewriter still
 // derives the write target from the `mutate <Concept> <name>` signature.
 func TestMutateVerb_SignatureConceptStillBinds(t *testing.T) {
-	src := `mutate space createSpace {
+	src := `mutation space createSpace {
   insert {
     id:   args.spaceId
     name: args.name

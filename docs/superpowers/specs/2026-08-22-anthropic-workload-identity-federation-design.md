@@ -170,7 +170,7 @@ clusters, where the blast radius is one developer's laptop.
 
 ```memql
 @base
-@type("Anthropic")
+@vendor("Anthropic")
 provider anthropic {
   auth {
     apiKey             env("MEMQL_AI_ANTHROPIC_API_KEY")

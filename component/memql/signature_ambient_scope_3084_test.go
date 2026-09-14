@@ -74,7 +74,7 @@ const nestedForeignOrigin = "agents/tools/probe.memql"
 func TestSignatureAmbientBind_NestedOriginUsesItsOwnNamespace(t *testing.T) {
 	reg := stubRegistry{ids: []string{"v1:tools:widget", "v1:agents/tools:widget"}}
 
-	src := `mutate widget probeWrite {
+	src := `mutation widget probeWrite {
   args {
     widgetId string @required
   }
@@ -115,7 +115,7 @@ func TestSignatureAmbientBind_ForeignNamespaceIsRefused(t *testing.T) {
 	// Only the FOREIGN concept exists. `agents` never declared a widget.
 	reg := stubRegistry{ids: []string{"v1:tools:widget"}}
 
-	src := `mutate widget probeWrite {
+	src := `mutation widget probeWrite {
   args {
     widgetId string @required
   }
@@ -203,7 +203,7 @@ func TestSignatureAmbientBind_ExplicitImportStillWins(t *testing.T) {
 
 	src := `use tools.concepts.{ widget as toolsWidget }
 
-mutate toolsWidget probeWrite {
+mutation toolsWidget probeWrite {
   args {
     widgetId string @required
   }
@@ -240,7 +240,7 @@ mutate toolsWidget probeWrite {
 func TestSignatureAmbientBind_OriginlessAuthoredConstructUngated(t *testing.T) {
 	reg := stubRegistry{ids: []string{"v1:tools:widget"}}
 
-	src := `mutate widget probeWrite {
+	src := `mutation widget probeWrite {
   args {
     widgetId string @required
   }

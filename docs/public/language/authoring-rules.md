@@ -41,7 +41,7 @@ Right -- one bare insert. The target concept comes from the
 ```memql
 use library.concepts.{ folder }
 
-mutate folder createFolder {
+mutation folder createFolder {
   args { name string @required }
   insert {
     name: args.name
@@ -55,7 +55,7 @@ mutate folder createFolder {
 Wrong -- two writes in one body. The parser rejects it.
 
 ```memql retired
-mutate folder createFolderAndGrantOwner {
+mutation folder createFolderAndGrantOwner {
   args { name string @required }
   insert { ... }                  // ERROR -- only one write allowed
   insert { ... }
@@ -82,7 +82,7 @@ use identity.mutations.{ grantPartitionAccess }
 
 // 1. The product calls this mutation. (`@default` is not valid on
 //    an args field -- apply defaults in the body via `??`.)
-mutate partition createPartition {
+mutation partition createPartition {
   args {
     name      string  @required
     type      string
@@ -572,7 +572,7 @@ by a read the writer hopes was fresh.
 
 ```memql fragment
 @actor
-mutate desktop saveMyDesktop {
+mutation desktop saveMyDesktop {
   args {
     revision  int!
     document  object!
@@ -1676,7 +1676,7 @@ use library.concepts.{ artifact, folder }
 use common.traits.{ isActiveRecord }
 
 /// Insert a Library artifact
-mutate artifact recordArtifact {
+mutation artifact recordArtifact {
   args {
     folderId  string  @required
     title     string  @required
@@ -1727,7 +1727,7 @@ func (Spec) example(ctx any) bool {
 }
 
 // args.X is the only way to reach caller-passed fields.
-mutate folder example {
+mutation folder example {
   args { x string @required }
   insert {
     field: ctx.x   // ctx is not in scope inside struct-form bodies

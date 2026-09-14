@@ -112,7 +112,7 @@ concept item {
 }`)},
 		"demo/mutations.memql": &fstest.MapFile{Data: []byte(`use demo.concepts.{ item }
 
-mutate ghostConcept touchGhost {
+mutation ghostConcept touchGhost {
   args { id  string!  }
   update {
     id: args.id

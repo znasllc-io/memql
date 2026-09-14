@@ -13,7 +13,7 @@ import (
 // rest of the rewriter (id hoist, payload translation) is unchanged.
 
 func TestNormaliseMutation_AcceptStamp_AutoBinds(t *testing.T) {
-	src := `mutate space createSpace {
+	src := `mutation space createSpace {
   args {
     id          string @required
     name        string @required
@@ -51,7 +51,7 @@ func TestNormaliseMutation_AcceptStamp_AutoBinds(t *testing.T) {
 }
 
 func TestNormaliseMutation_AcceptOnly_NoStamp(t *testing.T) {
-	src := `mutate space createSpace {
+	src := `mutation space createSpace {
   args {
     id   string @required
     name string @required
@@ -69,7 +69,7 @@ func TestNormaliseMutation_AcceptOnly_NoStamp(t *testing.T) {
 
 func TestNormaliseMutation_Accept_RequiresMatchingArg(t *testing.T) {
 	// `description` is accepted but never declared in args -> error.
-	src := `mutate space createSpace {
+	src := `mutation space createSpace {
   args {
     id   string @required
     name string @required
@@ -87,7 +87,7 @@ func TestNormaliseMutation_Accept_RequiresMatchingArg(t *testing.T) {
 
 func TestNormaliseMutation_Accept_RejectsKeyValueEntry(t *testing.T) {
 	// A `key: value` pair in accept is a mistake -- it belongs in stamp.
-	src := `mutate space createSpace {
+	src := `mutation space createSpace {
   args { id string @required }
   accept { id, status: "active" }
 }`
@@ -101,7 +101,7 @@ func TestNormaliseMutation_Accept_RejectsKeyValueEntry(t *testing.T) {
 }
 
 func TestNormaliseMutation_Accept_RejectsMixWithInsert(t *testing.T) {
-	src := `mutate space createSpace {
+	src := `mutation space createSpace {
   args { id string @required }
   accept { id }
   insert { id: args.id }
@@ -124,7 +124,7 @@ func TestNormaliseMutation_Accept_RejectsMixWithInsert(t *testing.T) {
 // use accept/stamp at all -- and a nested attempt tripped the mix guard.
 
 func TestNormaliseMutation_AcceptStamp_UpdateForm(t *testing.T) {
-	src := `mutate conversation setConversationInsight {
+	src := `mutation conversation setConversationInsight {
   args {
     conversationId string @required
     summary        string @required
@@ -157,7 +157,7 @@ func TestNormaliseMutation_AcceptStamp_UpdateForm(t *testing.T) {
 }
 
 func TestNormaliseMutation_AcceptStamp_InsertFormNested(t *testing.T) {
-	src := `mutate space createSpace {
+	src := `mutation space createSpace {
   args {
     id   string @required
     name string @required
@@ -182,7 +182,7 @@ func TestNormaliseMutation_AcceptStamp_InsertFormNested(t *testing.T) {
 func TestNormaliseMutation_AcceptStamp_BareFormStillInserts(t *testing.T) {
 	// Regression: the #2035 bare form spells no kind and must keep meaning
 	// insert. #2592 must not silently retarget it.
-	src := `mutate space createSpace {
+	src := `mutation space createSpace {
   args { id string @required }
   accept { id }
 }`
@@ -196,7 +196,7 @@ func TestNormaliseMutation_AcceptStamp_BareFormStillInserts(t *testing.T) {
 }
 
 func TestNormaliseMutation_AcceptStamp_UpdateRequiresId(t *testing.T) {
-	src := `mutate conversation setConversationInsight {
+	src := `mutation conversation setConversationInsight {
   args { summary string @required }
   update {
     accept { summary }
@@ -214,7 +214,7 @@ func TestNormaliseMutation_AcceptStamp_UpdateRequiresId(t *testing.T) {
 func TestNormaliseMutation_AcceptStamp_NestedRejectsStrayFields(t *testing.T) {
 	// A stray `key: value` beside a nested accept/stamp would be silently
 	// dropped by the desugar, so it is rejected rather than lost.
-	src := `mutate message notify {
+	src := `mutation message notify {
   args { conversationId string @required, text string @required }
   insert {
     accept { conversationId, text }
@@ -240,7 +240,7 @@ func TestNormaliseMutation_AcceptStamp_SameLineBlocksBothApply(t *testing.T) {
 	// clean body. Guard and desugar must never disagree about what exists.
 	for _, src := range []string{
 		// nested form
-		`mutate widget createWidget {
+		`mutation widget createWidget {
   args {
     name string @required
   }
@@ -249,14 +249,14 @@ func TestNormaliseMutation_AcceptStamp_SameLineBlocksBothApply(t *testing.T) {
   }
 }`,
 		// bare form
-		`mutate widget createWidget {
+		`mutation widget createWidget {
   args {
     name string @required
   }
   accept { name } stamp { status: "active", createdBy: actor.userId }
 }`,
 		// stamp written first
-		`mutate widget createWidget {
+		`mutation widget createWidget {
   args {
     name string @required
   }
@@ -289,7 +289,7 @@ func TestNormaliseMutation_AcceptStamp_RejectsSplitAcrossBoundary(t *testing.T) 
 	// unnoticed outer `accept` yields a write with an EMPTY payload (an update
 	// that writes nothing), which is the worst possible failure mode.
 	cases := map[string]string{
-		"accept nested, stamp outside": `mutate space createSpace {
+		"accept nested, stamp outside": `mutation space createSpace {
   args {
     id   string @required
     name string @required
@@ -297,7 +297,7 @@ func TestNormaliseMutation_AcceptStamp_RejectsSplitAcrossBoundary(t *testing.T) 
   insert { accept { name } }
   stamp { id: args.id }
 }`,
-		"stamp nested, accept outside": `mutate space createSpace {
+		"stamp nested, accept outside": `mutation space createSpace {
   args {
     id   string @required
     name string @required
@@ -305,7 +305,7 @@ func TestNormaliseMutation_AcceptStamp_RejectsSplitAcrossBoundary(t *testing.T) 
   insert { stamp { id: args.id } }
   accept { name }
 }`,
-		"update, stamp nested, accept outside": `mutate conversation setConversationInsight {
+		"update, stamp nested, accept outside": `mutation conversation setConversationInsight {
   args {
     conversationId string @required
     summary        string @required
@@ -316,14 +316,14 @@ func TestNormaliseMutation_AcceptStamp_RejectsSplitAcrossBoundary(t *testing.T) 
 		// Same-line placement: the stray sits on the write block's own line, so
 		// it carries no leading newline for the block headers to anchor on.
 		// The excision must not consume that anchor either.
-		"update, accept outside on the same line": `mutate conversation setConversationInsight {
+		"update, accept outside on the same line": `mutation conversation setConversationInsight {
   args {
     conversationId string @required
     summary        string @required
   }
   update { stamp { id: args.conversationId } } accept { summary }
 }`,
-		"insert, accept outside on the same line": `mutate space createSpace {
+		"insert, accept outside on the same line": `mutation space createSpace {
   args {
     id   string @required
     name string @required
@@ -346,7 +346,7 @@ func TestNormaliseMutation_AcceptStamp_RejectsSplitAcrossBoundary(t *testing.T) 
 
 func TestNormaliseMutation_AcceptStamp_UpdateRequiresMatchingArg(t *testing.T) {
 	// The accept auto-bind guard must fire on the update path too.
-	src := `mutate conversation setConversationInsight {
+	src := `mutation conversation setConversationInsight {
   args { conversationId string @required }
   update {
     accept { summary }
@@ -372,7 +372,7 @@ func TestNormaliseMutation_AcceptStamp_StrayOnArgsCloseLine(t *testing.T) {
 	// Round 4: a top-level `accept` sharing the args block's closing-brace line,
 	// beside a nested write. The regex approach never anchored this and emitted
 	// a silent no-op; it must be rejected as a mix.
-	src := `mutate space createSpace {
+	src := `mutation space createSpace {
   args {
     id   string @required
     name string @required
@@ -393,7 +393,7 @@ func TestNormaliseMutation_AcceptStamp_BraceInStampStringLiteral(t *testing.T) {
 	// scanner nets it against a real `}` and truncates the construct. Only a
 	// string-aware frame -- both the outer construct frame (rewriteEachBlock)
 	// AND the inner scan -- survives this.
-	src := `mutate widget createWidget {
+	src := `mutation widget createWidget {
   args {
     id   string @required
     name string @required
@@ -417,7 +417,7 @@ func TestNormaliseMutation_AcceptStamp_BraceInStampStringLiteral(t *testing.T) {
 func TestNormaliseMutation_AcceptStamp_SlashSlashInStringValue(t *testing.T) {
 	// A `//` inside a value string (a URL) must not be read as a line comment
 	// that truncates the line and drops the fields after it.
-	src := `mutate widget createWidget {
+	src := `mutation widget createWidget {
   args {
     id     string @required
     name   string @required
@@ -440,7 +440,7 @@ func TestNormaliseMutation_AcceptStamp_SlashSlashInStringValue(t *testing.T) {
 
 func TestNormaliseMutation_AcceptStamp_BraceInComment(t *testing.T) {
 	// A `}` or block keyword inside a comment must not affect framing.
-	src := `mutate widget createWidget {
+	src := `mutation widget createWidget {
   args {
     id   string @required
     name string @required
@@ -463,7 +463,7 @@ func TestNormaliseMutation_AcceptStamp_BraceInComment(t *testing.T) {
 func TestNormaliseMutation_LegacyObjectLiteralValue(t *testing.T) {
 	// A legacy insert body whose value is an object literal must NOT be
 	// mistaken for a nested block, and must pass through verbatim.
-	src := `mutate widget createWidget {
+	src := `mutation widget createWidget {
   args {
     id   string @required
     meta object @required
@@ -484,7 +484,7 @@ func TestNormaliseMutation_LegacyObjectLiteralValue(t *testing.T) {
 
 func TestNormaliseMutation_AcceptStamp_RejectsTopLevelStrayBareForm(t *testing.T) {
 	// #2594: the bare form silently dropped a stray field beside the blocks.
-	src := `mutate message notify {
+	src := `mutation message notify {
   args { conversationId string @required, text string @required }
   accept { conversationId, text }
   stamp  { who: "agent" }
@@ -505,7 +505,7 @@ func TestNormaliseMutation_ArgsDefaultStringWithBrace(t *testing.T) {
 	// A `}` inside an args `@default("...")` string must not truncate the args
 	// block. The outer/mutation scans are string-aware; the args extractor must
 	// agree with them (else it frames a different, corrupt block).
-	src := `mutate widget createWidget {
+	src := `mutation widget createWidget {
   args {
     id  string @required
     tpl string @default("a}b")

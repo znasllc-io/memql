@@ -32,7 +32,7 @@ func TestMutationTemplate_BareNowRendersTimestamp(t *testing.T) {
 	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
 		"v1:notes:note": {Name: "v1:notes:note"},
 	})
-	src := `mutate note mutationCreateNoteProbe {
+	src := `mutation note mutationCreateNoteProbe {
   args {
     noteId  string  @required
     body    string  @required
@@ -78,7 +78,7 @@ func TestMutationTemplate_QuotedNowStaysLiteral(t *testing.T) {
 	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
 		"v1:notes:note": {Name: "v1:notes:note"},
 	})
-	src := `mutate note mutationQuotedNowProbe {
+	src := `mutation note mutationQuotedNowProbe {
   args {
     noteId  string  @required
   }

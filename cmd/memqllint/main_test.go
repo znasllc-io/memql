@@ -124,7 +124,7 @@ query item queryItems {
 
 @enabled
 @description("Writes an undeclared field.")
-mutate item createItem {
+mutation item createItem {
   args {
     itemId  string  @required
   }
@@ -223,7 +223,7 @@ concept widget {
 
 @enabled
 @description("Create a widget; declares an arg the body never references.")
-mutate widget createWidget {
+mutation widget createWidget {
   args {
     widgetId   string  @required
     label      string  @required
@@ -257,7 +257,7 @@ concept gizmo {
 
 @enabled
 @description("Create a gizmo.")
-mutate gizmo createGizmo {
+mutation gizmo createGizmo {
   args {
     gizmoId  string  @required
     label    string  @required

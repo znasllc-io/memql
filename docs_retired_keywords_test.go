@@ -275,7 +275,12 @@ func retiredDeclGateExempt(rel string) bool {
 // here at all. That is arm 2, and it is not a second table; see
 // retiredReceiverFormRef.
 var retiredDeclarationKeywords = []struct{ keyword, replacement, ref string }{
-	{"mutation", "mutate", "memql#2041"},
+	// THE DIRECTION REVERSED. memql#2041 renamed `mutation` to `mutate`;
+	// memql#5375 (D17) renamed it back, because `mutate` declared the
+	// construct while `mutation` called it, so one construct answered to two
+	// words and a reader grepping for either found part of the tree. One
+	// keyword, in both positions.
+	{"mutate", "mutation", "memql#5375"},
 }
 
 // retiredReceiverFormRef names the ruling arm 2 enforces, for the diagnostic.
@@ -416,15 +421,19 @@ func TestRetiredKeywordGateMatchesADeclarationAndNotProse(t *testing.T) {
 			r.replacement + " space createSpace {",       // the live form
 			"The mutation writes exactly one aggregate.", // prose
 			"Mutations:", // a heading
-			"| `mutation` | retired, use `mutate` | ",          // a table quoting the keyword
-			"a `mutation` declaration used to look like this:", // teaching against it
-			"  ev: mutation createSpawnEvent(nodeId: args.id)", // a CALL, not a declaration
-			"mutation {", // not the two-identifier shape
+			"| `mutate` | retired, use `mutation` | ",        // a table quoting the keyword
+			"a `mutate` declaration used to look like this:", // teaching against it
+			// A kind-prefixed CALL, not a declaration. It reads `mutation`
+			// now, which is the same word the declaration uses -- the `\{`
+			// anchor is the only thing keeping the two apart, so this
+			// fixture carries more weight after memql#5375 than before it.
+			"  ev: mutation createSpawnEvent(nodeId: args.id)",
+			"mutate {", // not the two-identifier shape
 			// The two with real discriminating power. Every fixture above
 			// survives an anchor being "simplified" away; these do not --
 			// dropping `\{` makes the first fire, dropping `^` the second.
-			"the mutation space handler runs first",   // no brace: needs the `\{` anchor
-			"see `x.mutation space createSpace {` in", // mid-line: needs the `^` anchor
+			"the mutate space handler runs first",   // no brace: needs the `\{` anchor
+			"see `x.mutate space createSpace {` in", // mid-line: needs the `^` anchor
 		} {
 			if re.MatchString(ok) {
 				t.Errorf("the %s gate fires on a legitimate line, which is how a gate gets "+
@@ -472,7 +481,7 @@ func TestRetiredReceiverGateMatchesADeclarationAndNotProse(t *testing.T) {
 	}
 
 	for _, ok := range []string{
-		"mutate space createSpace {",                             // the live form
+		"mutation space createSpace {",                           // the live form
 		"query participant spaceParticipants {",                  // the live form
 		"The `func (Mutation)` receiver form is retired.",        // prose
 		"| `func (Shape)` | retired, use `shape <C> <n>` |",      // a table quoting it

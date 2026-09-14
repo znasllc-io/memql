@@ -280,7 +280,7 @@ func docsDeclaredConstructs(t *testing.T) map[string]string {
 	t.Helper()
 
 	declHeader := regexp.MustCompile(
-		`(?m)^(query|mutate|logic)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
+		`(?m)^(query|mutation|logic)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
 	)
 
 	declared := map[string]string{}
@@ -344,7 +344,9 @@ func docsResolvePrefixed(written string, declared map[string]string) (name, orig
 	case strings.HasPrefix(written, "query"):
 		kind, rest = "query", written[len("query"):]
 	case strings.HasPrefix(written, "mutation"):
-		kind, rest = "mutate", written[len("mutation"):]
+		// The kind label and the declaration keyword are the same word
+		// since memql#5375; this arm used to map one to the other.
+		kind, rest = "mutation", written[len("mutation"):]
 	case strings.HasPrefix(written, "logic"):
 		kind, rest = "logic", written[len("logic"):]
 	default:

@@ -773,7 +773,7 @@ Base providers (vendor-level auth + type) use the same form:
 
 ```memql
 @base
-@type("Anthropic")
+@vendor("Anthropic")
 provider anthropic {
   auth {
     federationRuleId   env("MEMQL_AI_ANTHROPIC_FEDERATION_RULE_ID")
@@ -1035,7 +1035,7 @@ Named mutations live in `dsl/<namespace>/mutations.memql`. The concept binding l
 use library.concepts.{ folder }
 
 /// Insert a new version of a folder record (typically used to archive a folder).
-mutate folder archiveFolder {
+mutation folder archiveFolder {
   args {
     folderId  string  @required
     payload   object  @required
@@ -2152,7 +2152,7 @@ query artifact x {
   shape artifactFull
 }
 
-mutate folder createFolder {
+mutation folder createFolder {
   args {
     folderId string @required
     name string @required

@@ -94,7 +94,7 @@ func TestAllSnippetItemsWellFormed(t *testing.T) {
 	sources := []string{
 		"qu", "mu", "lo", "au", "co",
 		"query todo todos {\n  ",
-		"mutate todo createTodo {\n  ",
+		"mutation todo createTodo {\n  ",
 		"logic compute {\n  ",
 		"@trigger(event=\"x.y\")\nautomation onThing {\n  ",
 		"mutate ",

@@ -315,7 +315,7 @@ Mutations write exactly one row of their signature-bound concept.
 use library.concepts.{ folder }
 
 @description("Create a Library folder")
-mutate folder createFolder {
+mutation folder createFolder {
   args {
     folderId  string  @required
     name      string  @required
@@ -693,7 +693,7 @@ Base providers carry vendor-level auth and type; children inherit via
 
 ```memql
 @base
-@type("Anthropic")
+@vendor("Anthropic")
 provider anthropic {
   auth {
     federationRuleId   env("MEMQL_AI_ANTHROPIC_FEDERATION_RULE_ID")

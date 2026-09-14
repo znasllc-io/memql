@@ -30,7 +30,7 @@ import (
 //	additionalProperties 'deleted' not allowed
 const softDeleteWorkerInvocationMutationSource = `use worker.concepts.{ invocation }
 
-mutate invocation softDeleteWorkerInvocation {
+mutation invocation softDeleteWorkerInvocation {
   args {
     invocationId  string  @required
   }

@@ -33,7 +33,7 @@ query participant spaceParticipants {
 }
 
 @description("Create a cognition space")
-mutate space mutationCreateSpace {
+mutation space mutationCreateSpace {
   args {
     spaceId  string  @required
     name     string  @required
@@ -418,7 +418,7 @@ logic brokenLogic {
 }
 
 @description("Also healthy")
-mutate space healthyMutation {
+mutation space healthyMutation {
   args {
     spaceId  string  @required
   }
@@ -481,7 +481,7 @@ query participant firstQuery {
 }
 
 @description("Créer un espace")
-mutate space secondMutation {
+mutation space secondMutation {
   args {
     spaceId  string  @required
   }

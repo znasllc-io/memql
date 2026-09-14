@@ -142,7 +142,7 @@ func MisplacedConstructAnnotation(name string) (string, bool) {
 
 func ValidateConstructAnnotations(source, kindLabel string, allowed map[string]bool) error {
 	// The header keyword IS the kind label. It was not until memql#5375:
-	// a mutation slice spelled its header `mutate NAME {` while the kind
+	// a mutation slice spelled its header `mutation NAME {` while the kind
 	// label was "mutation", so this function had to remap one to the other
 	// or the header scan ran past the body open and inspected body lines
 	// too. One keyword per construct removes the remap.

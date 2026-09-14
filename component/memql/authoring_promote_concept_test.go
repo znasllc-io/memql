@@ -44,7 +44,7 @@ const trainedWidgetId = "v1:trainingns:trainedWidget"
 const trainedWidgetMutationSrc = `use trainingns.concepts.{ trainedWidget }
 
 @description("Create a trained widget")
-mutate trainedWidget mutationCreateTrainedWidget {
+mutation trainedWidget mutationCreateTrainedWidget {
   args {
     widgetId  string  @required
   }

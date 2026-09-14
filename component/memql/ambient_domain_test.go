@@ -48,7 +48,7 @@ func TestResolveCanonicalIdConceptRefs_AmbientDomain(t *testing.T) {
 	}
 	resolver := NewConceptResolver(memoryNodes.DefaultRegistry())
 
-	src := `mutate invocation probe {
+	src := `mutation invocation probe {
   insert {
     id: canonicalId(args.invocationId, invocation)
   }
@@ -77,7 +77,7 @@ func TestResolveCanonicalIdConceptRefs_AmbientDomain(t *testing.T) {
 
 	// Cross-domain without an import still errors -- ambient scope is
 	// same-domain ONLY, so the import discipline stays lint-enforceable.
-	cross := `mutate widget probe {
+	cross := `mutation widget probe {
   insert {
     id: canonicalId(args.spaceId, space)
   }

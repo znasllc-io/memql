@@ -35,7 +35,7 @@ var structFormSamples = map[string]structFormSample{
 		bodyMarker: "spaceCard",
 	},
 	"mutate": {
-		source: `mutate space sampleMutation {
+		source: `mutation space sampleMutation {
   args {
     id string @required
   }

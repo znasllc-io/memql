@@ -152,7 +152,7 @@ func TestTokenize_ConstructKeywordsColored(t *testing.T) {
 		"action tagRelease {\n" +
 		"  capability script(script: \"deploy.tag\")\n" +
 		"}\n" +
-		"mutate space recordDeploy { insert { id: \"x\" } }"
+		"mutation space recordDeploy { insert { id: \"x\" } }"
 	tokens := svc.Tokenize(src)
 
 	// Construct keywords render as `keyword`.

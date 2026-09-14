@@ -245,7 +245,7 @@ func NewEngineSiteStore(engine Engine) SiteStore {
 //
 // The invocation keyword is "mutation", not "mutate": "mutate" is the
 // DECLARATION verb used when authoring the .memql construct
-// (`mutate site updateSiteBundle { ... }`); in call position the invocation
+// (`mutation site updateSiteBundle { ... }`); in call position the invocation
 // noun is "mutation" (component/campaigns/store.go's call() helper uses the
 // same keyword for exactly this reason, and the parser rejects the
 // declaration verb written in call position rather than silently dropping

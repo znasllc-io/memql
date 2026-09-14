@@ -162,7 +162,7 @@ func TestConstructConceptQueryImportToggle(t *testing.T) {
 // NOT hijack completion inside a body where these words mean something else.
 func TestConstructConceptNotFiredInBody(t *testing.T) {
 	// Inside an unmatched brace -- should not be ContextConstructConcept.
-	ctx := analyzeCursorContext("mutate space mk {\n  mutate ", 2, 9)
+	ctx := analyzeCursorContext("mutation space mk {\n  mutate ", 2, 9)
 	if ctx.Kind == ContextConstructConcept {
 		t.Errorf("construct-concept context must not fire inside a body block")
 	}

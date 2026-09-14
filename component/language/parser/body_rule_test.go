@@ -136,7 +136,7 @@ query participant queryParticipants {
 func TestBodyRule_MutationWithBody_Rejected(t *testing.T) {
 	src := `use cognition.concepts.{ space }
 @description("bad mutation")
-mutate space mutateSpace {
+mutation space mutateSpace {
   args {
     spaceId string @required
   }

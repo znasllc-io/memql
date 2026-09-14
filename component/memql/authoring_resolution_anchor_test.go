@@ -174,7 +174,7 @@ func TestMutationSignatureUsesTheMutateKeyword(t *testing.T) {
 	c := SandboxConstruct{
 		Name:   "createThing",
 		Kind:   "mutation",
-		Source: "@description(\"c\")\nmutate thing createThing {\n  insert { id: args.id }\n}\n",
+		Source: "@description(\"c\")\nmutation thing createThing {\n  insert { id: args.id }\n}\n",
 	}
 	if got := signatureLineOffset(c); got != 1 {
 		t.Errorf("offset = %d, want 1 (the `mutate` line, not the @description above it). "+

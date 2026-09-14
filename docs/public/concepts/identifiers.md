@@ -248,7 +248,7 @@ Most mutations pass a **bare shortId** in the `insert` block (the target
 concept comes from the `mutate <Concept> <name>` signature):
 
 ```memql
-mutate artifact createArtifact {
+mutation artifact createArtifact {
   args {
     artifactId  string  @required
   }

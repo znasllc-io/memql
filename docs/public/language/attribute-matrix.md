@@ -460,7 +460,7 @@ would otherwise wipe sibling keys (memql#1339).
 
 ```memql fragment
 @mergeFields("preferences")
-mutate user toggleComputerUseEnabled { ... }
+mutation user toggleComputerUseEnabled { ... }
 ```
 
 #### `@appendFields("...")`
@@ -475,7 +475,7 @@ element yields a duplicate).
 
 ```memql fragment
 @appendFields("attachmentIds")
-mutate request attachToRequest { ... }
+mutation request attachToRequest { ... }
 ```
 
 #### `@addToSet("...")` / `@removeFromSet("...")`
@@ -486,10 +486,10 @@ stored array rather than replacing it (memql#4951).
 
 ```memql fragment
 @addToSet("disabledDeployables")
-mutate package disablePackageDeployables { ... }
+mutation package disablePackageDeployables { ... }
 
 @removeFromSet("disabledDeployables")
-mutate package enablePackageDeployables { ... }
+mutation package enablePackageDeployables { ... }
 ```
 
 **They are the pair `@appendFields` is not.** Append has no counterpart that
@@ -539,7 +539,7 @@ row, so a create-only field could never be written).
 
 ```memql fragment
 @createOnly("status", "attempts")
-mutate outboundRequest stageOutboundRequest { ... }
+mutation outboundRequest stageOutboundRequest { ... }
 ```
 
 #### `@noUnset("...")`
@@ -566,7 +566,7 @@ array/object -- never a numeric or boolean zero, which are real values.
 
 ```memql fragment
 @noUnset("bootstrappedAt")
-mutate clusterSettings updateClusterSettings { ... }
+mutation clusterSettings updateClusterSettings { ... }
 ```
 
 ---
@@ -650,7 +650,7 @@ query artifact activeDocumentArtifacts {
 use library.concepts.{ folder }
 
 @description("Create a Library folder")
-mutate folder createFolder {
+mutation folder createFolder {
   args {
     folderId  string  @required
     name      string  @required

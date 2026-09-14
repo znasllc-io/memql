@@ -103,7 +103,7 @@ var grammarSurfaceCorpus = []struct {
   filter row.id!=""
   asOf args.at ?? latest
 }`},
-	{"struct mutation: insert", true, `mutate thing probe {
+	{"struct mutation: insert", true, `mutation thing probe {
   args {
     id string @required
   }
@@ -112,7 +112,7 @@ var grammarSurfaceCorpus = []struct {
     createdAt: now
   }
 }`},
-	{"struct mutation: update", true, `mutate thing probe {
+	{"struct mutation: update", true, `mutation thing probe {
   args {
     id string @required
   }
@@ -121,7 +121,7 @@ var grammarSurfaceCorpus = []struct {
     updatedAt: now
   }
 }`},
-	{"struct mutation: accept + stamp sugar", true, `mutate thing probe {
+	{"struct mutation: accept + stamp sugar", true, `mutation thing probe {
   args {
     name string @required
   }
@@ -178,7 +178,7 @@ concept probe {
   filter row.id!=""
   project name
 }`},
-	{"named write block `insert <Concept> { }` (memql#988)", false, `mutate thing probe {
+	{"named write block `insert <Concept> { }` (memql#988)", false, `mutation thing probe {
   args {
     id string @required
   }
@@ -186,7 +186,7 @@ concept probe {
     id: args.id
   }
 }`},
-	{"two write blocks in one mutation", false, `mutate thing probe {
+	{"two write blocks in one mutation", false, `mutation thing probe {
   args {
     id string @required
   }

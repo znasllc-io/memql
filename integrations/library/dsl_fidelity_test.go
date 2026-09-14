@@ -169,7 +169,7 @@ func deriveArtifactFullShapeFields(src []byte) ([]string, error) {
 }
 
 // deriveArtifactEnumValues parses every `<field> enum(<values>)` argument
-// declared inside the REAL `mutate artifact createArtifact { args { ... } }`
+// declared inside the REAL `mutation artifact createArtifact { args { ... } }`
 // block in dsl/library/mutations.memql. Returns an error -- never an
 // empty map, and never a field mapped to zero values -- when the mutation,
 // its args block, or any individual enum's value list cannot be found.

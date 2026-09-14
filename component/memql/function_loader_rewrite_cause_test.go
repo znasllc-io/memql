@@ -30,7 +30,7 @@ func TestNamedInsertFormSurfacesRewriteCause(t *testing.T) {
 	// canonical; restating the concept after `insert` must be rejected.
 	src := `use exampleapp.concepts.{ canvasState }
 
-mutate canvasState mutationCreateCanvasState {
+mutation canvasState mutationCreateCanvasState {
   args {
     stateId  string  @required
     kind     string  @required
@@ -67,7 +67,7 @@ func TestBareInsertFormLoadsClean(t *testing.T) {
 
 	src := `use exampleapp.concepts.{ canvasState }
 
-mutate canvasState mutationCreateCanvasState {
+mutation canvasState mutationCreateCanvasState {
   args {
     stateId  string  @required
     kind     string  @required

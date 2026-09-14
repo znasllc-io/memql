@@ -34,7 +34,7 @@ func TestUndeclaredArgsReferenceIsRefusedAtLoad(t *testing.T) {
 	src := `use identity.concepts.{ user }
 
 @description("probe")
-mutate user zzargProbeUndecl {
+mutation user zzargProbeUndecl {
   args {
     userId string!
   }
@@ -64,7 +64,7 @@ func TestTypodArgsReferenceIsRefusedAtLoad(t *testing.T) {
 	src := `use identity.concepts.{ user }
 
 @description("probe")
-mutate user zzargProbeTypo {
+mutation user zzargProbeTypo {
   args {
     userId string!
   }
@@ -91,7 +91,7 @@ func TestArgsReferenceWithNoArgsBlockIsRefused(t *testing.T) {
 	src := `use identity.concepts.{ user }
 
 @description("probe")
-mutate user zzargProbeNoBlock {
+mutation user zzargProbeNoBlock {
   insert {
     id: args.userId
     active: true
@@ -114,7 +114,7 @@ func TestFullyDeclaredArgsStillLoad(t *testing.T) {
 	src := `use identity.concepts.{ user }
 
 @description("probe")
-mutate user zzargProbeOk {
+mutation user zzargProbeOk {
   args {
     userId string!
     name   string
@@ -134,7 +134,7 @@ func TestDeclaredButUnusedArgIsStillRefused(t *testing.T) {
 	src := `use identity.concepts.{ user }
 
 @description("probe")
-mutate user zzargProbeUnused {
+mutation user zzargProbeUnused {
   args {
     userId string!
     unused string
@@ -161,7 +161,7 @@ func TestCommentAndStringMentionsAreNotReferences(t *testing.T) {
 	src := `use identity.concepts.{ user }
 
 @description("probe")
-mutate user zzargProbeProse {
+mutation user zzargProbeProse {
   args {
     userId string!
   }

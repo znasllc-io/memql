@@ -1076,7 +1076,7 @@ func LooksLikeStructMutation(source string) bool {
 	return mutationStructHeader.MatchString(source)
 }
 
-// NormaliseMutationSource rewrites every `mutate NAME { ... }`
+// NormaliseMutationSource rewrites every `mutation NAME { ... }`
 // block to the procedural form.
 func NormaliseMutationSource(source string) (string, error) {
 	return rewriteEachBlock(source, mutationStructHeader, "struct-form mutation", true, emitMutation)

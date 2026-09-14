@@ -65,7 +65,7 @@ func TestLoader_MutationWithFuncTokenInLineComment(t *testing.T) {
 		"// Replaces the retired `func (Mutation)` author form (memql#1074).\n" +
 		"@description(\"create a space\")\n" +
 		"@actor\n" +
-		"mutate space mutationCreateSpaceLineComment {\n" +
+		"mutation space mutationCreateSpaceLineComment {\n" +
 		"  args {\n" +
 		"    partitionId  string  @required\n" +
 		"    name     string  @required\n" +
@@ -90,7 +90,7 @@ func TestLoader_MutationWithFuncTokenInBlockComment(t *testing.T) {
 	src := "use cognition.concepts.{ space }\n\n" +
 		"/* legacy: func (Mutation) mutationCreateSpace(ctx any) error { ... } */\n" +
 		"@actor\n" +
-		"mutate space mutationCreateSpaceBlockComment {\n" +
+		"mutation space mutationCreateSpaceBlockComment {\n" +
 		"  args {\n" +
 		"    partitionId  string  @required\n" +
 		"    name     string  @required\n" +
@@ -120,7 +120,7 @@ func TestExtractFunctionSlices_IgnoresFuncTokenInComment(t *testing.T) {
 		"  shape   space\n" +
 		"}\n\n" +
 		"/* func (Mutation) legacyWrite(ctx any) error */\n" +
-		"mutate space mutationWriteSpaceSlice {\n" +
+		"mutation space mutationWriteSpaceSlice {\n" +
 		"  args { partitionId string @required }\n" +
 		"  insert { id: args.partitionId status: \"active\" createdAt: now createdBy: actor.userId }\n" +
 		"}"

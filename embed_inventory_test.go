@@ -103,7 +103,7 @@ var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql/examples/deploypack":    3,   // all:dsl
 	"github.com/znasllc-io/memql/examples/referencepack": 5,   // all:dsl
 	"github.com/znasllc-io/memql/examples/reviewspack":   5,   // all:dsl (memql#4139)
-	"github.com/znasllc-io/memql/examples/shopifypack":   6,   // all:dsl -- memql#4138 attach/secrets/sync
+	"github.com/znasllc-io/memql/examples/shopifypack":   7,   // all:dsl -- memql#4138 attach/secrets/sync; +1 for dsl/namespace.pin (memql#5375). The pack declares its concepts under "shopifypack" from a directory called `dsl`, so retiring @namespace needed the pin or every id it declares would have moved. MEASURED from the gate, never derived.
 	"github.com/znasllc-io/memql/integrations":           1,   // *.json
 	"github.com/znasllc-io/memql/scripts/install/graph":  5,   // install.json uninstall.json (memql#3369; +rebuild.json memql#4245; +install-main.json memql#4430; +update-rebuild.json memql#4578)
 }

@@ -481,7 +481,7 @@ func TestStampBeatsAcceptOnAKeyCollision(t *testing.T) {
 	// Both blocks name the declared owner field. accept binds it from the
 	// CALLER's arg; stamp sets it from the actor.
 	src := `@actor
-mutate note collisionProbe {
+mutation note collisionProbe {
   args {
     noteId       string  @required
     ownerUserId  string  @required
@@ -565,7 +565,7 @@ func TestARenderedTemplateIsMarkedAsComingFromATemplate(t *testing.T) {
 	if _, err := LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
 	}
-	src := `mutate note templateFlagProbe {
+	src := `mutation note templateFlagProbe {
   args {
     noteId  string  @required
     body    string  @required

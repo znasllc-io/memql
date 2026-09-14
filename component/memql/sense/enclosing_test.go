@@ -28,7 +28,7 @@ func TestResolveEnclosingConstruct(t *testing.T) {
 		{
 			name: "mutate insert stamp chain", wantKeyword: "mutate", wantReceiver: "Mutation",
 			wantBlocks: []string{"insert", "stamp"},
-			src:        "mutate todo createTodo {\n  insert {\n    stamp {\n      ",
+			src:        "mutation todo createTodo {\n  insert {\n    stamp {\n      ",
 		},
 		{
 			name: "automation step", wantKeyword: "automation", wantReceiver: "Automation",
@@ -80,7 +80,7 @@ func TestPreambleAnnotationReceiver(t *testing.T) {
 	}
 
 	// Second construct below: the NEAREST header wins.
-	src2 := "query todo a {\n}\n\n@\nmutate todo b {\n}\n"
+	src2 := "query todo a {\n}\n\n@\nmutation todo b {\n}\n"
 	ctx = analyzeCursorContext(src2, 4, 2)
 	if ctx.ReceiverType != "Mutation" {
 		t.Errorf("nearest header below must win, got %q", ctx.ReceiverType)
@@ -113,7 +113,7 @@ func TestAnnotationFilterEngaged(t *testing.T) {
 	}
 
 	// The mutation side still gets its own set.
-	src = "@\nmutate todo createTodo {\n  insert {\n    accept { title }\n  }\n}\n"
+	src = "@\nmutation todo createTodo {\n  insert {\n    accept { title }\n  }\n}\n"
 	items = s.Complete(src, 1, 2, "probe.memql")
 	got = map[string]bool{}
 	for _, it := range items {

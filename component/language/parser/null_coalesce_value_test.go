@@ -79,17 +79,17 @@ func TestNullCoalesce_WriteBlockIdSlot(t *testing.T) {
 	cases := []struct{ name, src string }{
 		{
 			name: "id falls back to another arg",
-			src: "mutate role probe {\n  args {\n    roleId string\n    slug string!\n  }\n" +
+			src: "mutation role probe {\n  args {\n    roleId string\n    slug string!\n  }\n" +
 				"  insert {\n    id: args.roleId ?? args.slug\n  }\n}\n",
 		},
 		{
 			name: "id falls back to a call",
-			src: "mutate node probe {\n  args {\n    id string\n    nodeType string!\n  }\n" +
+			src: "mutation node probe {\n  args {\n    id string\n    nodeType string!\n  }\n" +
 				"  insert {\n    id: args.id ?? concat(\"node-\", args.nodeType)\n  }\n}\n",
 		},
 		{
 			name: "sibling payload fields still parse alongside",
-			src: "mutate role probe {\n  args {\n    roleId string\n    slug string!\n    active bool\n  }\n" +
+			src: "mutation role probe {\n  args {\n    roleId string\n    slug string!\n    active bool\n  }\n" +
 				"  insert {\n    id: args.roleId ?? args.slug\n    active: args.active ?? true\n  }\n}\n",
 		},
 	}

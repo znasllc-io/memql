@@ -11,7 +11,7 @@ func TestRewriteAttributes(t *testing.T) {
 	}{
 		{
 			name: "mutate becomes mutation",
-			in:   "mutate folder createFolder {\n  insert { id: args.id }\n}\n",
+			in:   "mutation folder createFolder {\n  insert { id: args.id }\n}\n",
 			want: "mutation folder createFolder {\n  insert { id: args.id }\n}\n",
 		},
 		{
@@ -129,7 +129,7 @@ func TestRewriteAttributesLeavesCommentProseAlone(t *testing.T) {
 // same bytes as running it once, or a repeated `-w` pass over a tree that is
 // already migrated starts corrupting it.
 func TestRewriteAttributesIsIdempotent(t *testing.T) {
-	src := "@enabled\n@nocache\n@cache(ttl=\"300\")\nmutate folder f {\n  insert { id: args.id }\n}\n"
+	src := "@enabled\n@nocache\n@cache(ttl=\"300\")\nmutation folder f {\n  insert { id: args.id }\n}\n"
 	once, err := rewriteAttributes([]byte(src))
 	if err != nil {
 		t.Fatalf("first pass: %v", err)

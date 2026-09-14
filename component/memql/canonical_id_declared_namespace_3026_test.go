@@ -118,7 +118,7 @@ func TestCanonicalId_AmbiguousRemappedPackAgreesWithTheSameDomainGate(t *testing
 	//    cross-namespace `use zcluster.concepts.{ widget }` remains available
 	//    and is asserted elsewhere -- this step is about the spelling the gate
 	//    bans, not about a count.)
-	withImport := []byte("use zdeploy.concepts.{ widget }\n\nmutate widget doThing {\n  insert {\n    id: args.x\n  }\n}\n")
+	withImport := []byte("use zdeploy.concepts.{ widget }\n\nmutation widget doThing {\n  insert {\n    id: args.x\n  }\n}\n")
 	stripped, err := languageParser.RewriteSameDomainUse(domain, withImport)
 	if err != nil {
 		t.Fatalf("RewriteSameDomainUse: %v", err)
@@ -132,7 +132,7 @@ func TestCanonicalId_AmbiguousRemappedPackAgreesWithTheSameDomainGate(t *testing
 	// 3. And the gate positively PERMITS the working spelling: a file with no
 	//    same-domain import passes through byte-identical. A gate that mangled
 	//    it would leave the pack with no spelling at all again.
-	ambient := []byte("mutate widget doThing {\n  insert {\n    id: canonicalId(args.x, widget)\n  }\n}\n")
+	ambient := []byte("mutation widget doThing {\n  insert {\n    id: canonicalId(args.x, widget)\n  }\n}\n")
 	permitted, err := languageParser.RewriteSameDomainUse(domain, ambient)
 	if err != nil {
 		t.Fatalf("RewriteSameDomainUse on the ambient spelling: %v", err)
@@ -427,7 +427,7 @@ func TestCanonicalId_NestedFileMustImportItsParentsConcept(t *testing.T) {
 		"v1:cluster:deployment": {Name: "v1:cluster:deployment"},
 	})
 	const src = `@description("A nested file referencing its PARENT domain's concept.")
-mutate deployment nestedAmbientRef {
+mutation deployment nestedAmbientRef {
   args {
     x  string  @required
   }
@@ -471,7 +471,7 @@ func TestCanonicalId_NestedFileDoesNotBindItsSubdirectorysBareName(t *testing.T)
 	const origin = "agents/tools/askSpecialist.memql"
 
 	src := `@description("A nested file naming a foreign domain's concept.")
-mutate widget nestedForeignRef {
+mutation widget nestedForeignRef {
   args {
     x  string  @required
   }

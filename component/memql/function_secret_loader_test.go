@@ -60,7 +60,7 @@ func TestLoader_StampsSecretFromBoundConcept(t *testing.T) {
 	})
 
 	src := `use identity.concepts.{ credential }
-mutate credential storeCredential {
+mutation credential storeCredential {
 	args {
 		apiKey  string  @required
 		label   string
@@ -96,7 +96,7 @@ func TestLoader_SecretRedactionEndToEnd(t *testing.T) {
 	})
 
 	src := `use identity.concepts.{ credential }
-mutate credential storeCredential {
+mutation credential storeCredential {
 	args {
 		apiKey  string  @required  @enum("tok_a", "tok_b")
 		label   string  @enum("x", "y")
@@ -143,7 +143,7 @@ concept plain {
 	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{conceptID: plain})
 
 	src := `use identity.concepts.{ plain }
-mutate plain storePlain {
+mutation plain storePlain {
 	args {
 		apiKey  string  @required
 	}
@@ -192,7 +192,7 @@ func TestLoader_StampsSecretOnArrayElements(t *testing.T) {
 	})
 
 	src := `use identity.concepts.{ credential }
-mutate credential storeCredentials {
+mutation credential storeCredentials {
 	args {
 		apiKey  []string  @required
 		label   string
