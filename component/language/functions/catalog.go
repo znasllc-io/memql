@@ -468,7 +468,7 @@ func entries() []Function {
 		{
 			Name:     "includes",
 			Receiver: TypeString,
-			Doc:      "Reports whether sub occurs in the string. An absent string or an absent sub answers false.",
+			Doc:      "Reports whether sub occurs in the string. A blank sub matches nothing, as a blank prefix does for startsWith, and an absent string or sub answers false.",
 			Params:   []Param{{Name: "sub", Type: TypeString}},
 			Returns:  TypeBool,
 			Tier:     TierP,
