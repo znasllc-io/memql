@@ -939,7 +939,7 @@ func bodyBlocksForConstruct(enc EnclosingConstruct) []string {
 // construct's verbs.
 func invocationKeywordsForConstruct(enc EnclosingConstruct) []string {
 	switch enc.Keyword {
-	case "mutate":
+	case "mutation":
 		return []string{"insert", "update"}
 	case "logic", "automation", "action":
 		return []string{"query", "mutation", "logic"}

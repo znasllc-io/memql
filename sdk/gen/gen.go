@@ -360,7 +360,7 @@ func CollectConstructs(root string) ([]Construct, error) {
 		for _, m := range matches {
 			// m: [headStart, headEnd, kindStart, kindEnd, conceptStart, conceptEnd, nameStart, nameEnd]
 			kind := src[m[2]:m[3]]
-			if kind == "mutate" {
+			if kind == "mutation" {
 				kind = "mutation" // canonical kind label (surface keyword is `mutate`)
 			}
 			concept := ""

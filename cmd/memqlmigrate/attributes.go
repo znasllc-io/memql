@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -208,12 +210,48 @@ func rewriteAttributes(src []byte) ([]byte, error) {
 }
 
 // rewriteAttributesNamespace is the path-aware half: whether a @namespace
-// annotation is redundant depends on the directory it sits in (its
-// namespace.pin, else the domain directory), so it cannot be decided from
-// the file's own bytes. Delegates to the engine package's rewrite -- the
-// same one `--rewrite=namespace-default` runs and the dsl/ conformance gate
-// checks, reused rather than reimplemented, so the two can never disagree
-// about which annotations are safe to drop.
+// annotation is redundant depends on the directory it sits in, so it cannot
+// be decided from the file's own bytes.
+//
+// THE EFFECTIVE NAMESPACE IS THE PIN WHEN THERE IS ONE, else the domain
+// directory -- exactly what ast.AssembleConceptIdFromDeclInDir uses. Passing
+// the directory alone would leave dsl/deployment's @namespace("cluster")
+// standing, because it restates a namespace.pin rather than its directory;
+// the rewrite would then look like it had finished while two annotations
+// survived to be refused at load with no explanation attached.
+//
+// A @namespace that survives the strip restates NEITHER, so it is the one
+// case that changes a canonical id. That refuses, loudly, naming the pin as
+// the fix: this epic's global constraint is that no id moves, and silently
+// leaving an id-bearing annotation behind for the load gate to reject is how
+// that constraint gets broken by a migration that reported success.
 func rewriteAttributesNamespace(path string, src []byte) ([]byte, error) {
-	return langparser.RewriteRedundantNamespace(domainForDSLPath(path), src)
+	effective := namespacePinFor(path)
+	if effective == "" {
+		effective = domainForDSLPath(path)
+	}
+	out, err := langparser.RewriteRedundantNamespace(effective, src)
+	if err != nil {
+		return nil, err
+	}
+	if m := survivingNamespaceRe.FindSubmatch(out); m != nil {
+		return nil, fmt.Errorf("%s: @namespace(%q) restates neither the domain directory %q nor a namespace.pin, so stripping it would CHANGE this concept's canonical id -- add a one-line %s/namespace.pin containing %q and re-run, or move the file to the domain it declares (#2614)",
+			path, string(m[1]), domainForDSLPath(path), filepath.Dir(path), string(m[1]))
+	}
+	return out, nil
+}
+
+// survivingNamespaceRe finds a @namespace the redundancy strip left behind.
+var survivingNamespaceRe = regexp.MustCompile(`(?m)^@namespace\("([^"]*)"\)`)
+
+// namespacePinFor reads the one-line namespace.pin beside the file, or ""
+// when the directory has none. The pin is the #2614 escape hatch for a
+// deliberate id-preserving divergence between a file's directory and the
+// namespace its concepts assemble under.
+func namespacePinFor(path string) string {
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(path), "namespace.pin"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }

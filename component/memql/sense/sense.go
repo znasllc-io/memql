@@ -31,7 +31,11 @@ type FunctionInfo struct {
 	ArgsDoc     string    // leading documentation comment block
 	Args        []ArgInfo // declared args from the function's `args { ... }` block
 	Enabled     bool
-	Deprecated  string
+
+	// Deprecated was a field here until memql#5375. It carried
+	// @deprecated's message into the hover status, and @deprecated was
+	// refused by every allow-list -- so the editor advertised a status the
+	// engine could not produce.
 }
 
 // ArgInfo is one declared argument of a function, projected for signature help.

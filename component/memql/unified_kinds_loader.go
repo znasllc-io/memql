@@ -888,15 +888,15 @@ func providerDeclToProviderConfig(decl *ast.ProviderDecl) (*ProviderConfig, erro
 	if decl == nil {
 		return nil, fmt.Errorf("provider declaration is nil")
 	}
-	if decl.Type == "" && decl.Extends == "" && !decl.IsBase {
-		return nil, fmt.Errorf("provider %q: @type is required", decl.Name)
+	if decl.Vendor == "" && decl.Extends == "" && !decl.IsBase {
+		return nil, fmt.Errorf("provider %q: @vendor is required -- name the vendor (\"OpenAI\" or \"Anthropic\"), or @extends a base provider that does", decl.Name)
 	}
 	if decl.Model == "" && !decl.IsBase {
 		return nil, fmt.Errorf("provider %q: @model is required", decl.Name)
 	}
 	return &ProviderConfig{
 		Name:        decl.Name,
-		Type:        decl.Type,
+		Type:        decl.Vendor,
 		Model:       decl.Model,
 		Auth:        decl.Auth,
 		Params:      decl.Params,

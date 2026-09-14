@@ -132,7 +132,7 @@ type RunnableTrigger struct {
 // RunnableConstruct.Kind for why it is exactly these five.
 var runnableKeywords = map[string]bool{
 	"query":      true,
-	"mutate":     true,
+	"mutation":   true,
 	"logic":      true,
 	"tool":       true,
 	"automation": true,

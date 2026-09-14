@@ -110,7 +110,7 @@ func didYouMean(name string, candidates []string) string {
 // typo'd `quer` should suggest `query` even though the parser never dispatches
 // `query` itself. Kept as an explicit list so TestDeclarationKeywordNamesInSync
 // can prove declarationKeywordNames = TopLevelDeclKeywords + this family.
-var rewriterHandledDeclKeywords = []string{"automation", "logic", "mutate", "query"}
+var rewriterHandledDeclKeywords = []string{"automation", "logic", "mutation", "query"}
 
 // declarationKeywordNames is the flat, sorted, hand-maintained literal of every
 // author-facing top-level DECLARATION keyword: the contextual constructs
@@ -128,7 +128,7 @@ var rewriterHandledDeclKeywords = []string{"automation", "logic", "mutate", "que
 // compile-time derivation.
 var declarationKeywordNames = []string{
 	"action", "automation", "builtin", "capability", "concept", "logic",
-	"mutate", "policy", "prompt", "provider", "query", "rule", "seed",
+	"mutation", "policy", "prompt", "provider", "query", "rule", "seed",
 	"shape", "spec", "tool", "trait",
 }
 

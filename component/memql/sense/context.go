@@ -523,7 +523,7 @@ var behavioralConstruct = map[string]bool{
 // a construct added to the grammar cannot silently inherit a default
 // classification. When adding a construct, put it in exactly one of these.
 var nonBehavioralConstruct = map[string]bool{
-	"concept": true, "query": true, "mutate": true, "capability": true,
+	"concept": true, "query": true, "mutation": true, "capability": true,
 	"spec": true, "trait": true, "shape": true, "tool": true, "prompt": true,
 	"provider": true, "builtin": true, "policy": true, "seed": true, "use": true,
 	// A rule's body is EMPTY -- every part of it is a leading annotation --

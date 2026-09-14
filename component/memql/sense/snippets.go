@@ -71,7 +71,7 @@ var constructSkeletons = []struct {
 		body: "query ${1:Concept} ${2:name} {\n\tfilter ${1:Concept}.${3:field} == args.${4:arg}\n\t$0\n}",
 	},
 	{
-		keyword: "mutate", label: "mutate <Concept> <name> { ... }",
+		keyword: "mutation", label: "mutation <Concept> <name> { ... }",
 		doc:  "A write construct: args plus one insert/update block using the accept/stamp form.",
 		body: "mutate ${1:Concept} ${2:name} {\n\targs {\n\t\t${3:field} string!\n\t}\n\tinsert {\n\t\taccept { ${3:field} }\n\t\t$0\n\t}\n}",
 	},

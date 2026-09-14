@@ -39,7 +39,6 @@ func (a *SenseAdapter) FunctionGet(name string) (*sense.FunctionInfo, bool) {
 		ArgsDoc:     fn.UsageDoc,
 		Args:        senseArgsFromSchema(fn.ArgsSchema),
 		Enabled:     fn.Enabled,
-		Deprecated:  fn.Deprecated,
 	}, true
 }
 

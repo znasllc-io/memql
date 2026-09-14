@@ -182,7 +182,7 @@ func scanCrossNamespaceImports(files []SourceFile, opts Options) []Violation {
 	for _, p := range paths {
 		for _, m := range declLineRe.FindAllStringSubmatch(code[p], -1) {
 			kind := m[1]
-			if kind == "mutate" {
+			if kind == "mutation" {
 				kind = "mutation"
 			}
 			name := m[2]

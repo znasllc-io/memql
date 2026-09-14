@@ -104,7 +104,7 @@ func specNextRule(context string) *dslspec.NextRule {
 // afterShapeKeyword). Returns "" for keywords with no such rule.
 func specConstructConceptContextLabel(keyword string) string {
 	switch keyword {
-	case "mutate":
+	case "mutation":
 		return "afterMutationKeyword"
 	case "query":
 		return "afterQueryKeyword"

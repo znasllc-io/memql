@@ -39,7 +39,7 @@ func constructs() []Construct {
 			BodyBlocks:         []string{"args", "filter", "shape"},
 		},
 		{
-			Keyword:            "mutate",
+			Keyword:            "mutation",
 			Category:           CategoryFunction,
 			Doc:                "Write function on a bound concept: declared `mutate <Concept> <name>` with exactly one insert{} OR update{} block. (`mutate` is the declaration keyword -- rewriter.go mutationStructHeader / memql#2041; `mutation` is the invocation-step prefix only.)",
 			AnnotationReceiver: "Mutation",

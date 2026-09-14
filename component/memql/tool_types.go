@@ -153,10 +153,10 @@ func (t *Tool) clone() *Tool {
 	}
 
 	cloned := &Tool{
-		Name:            t.Name,
-		Description:     t.Description,
-		MCPExposed:      t.MCPExposed,
-		Origin:          t.Origin,
+		Name:        t.Name,
+		Description: t.Description,
+		MCPExposed:  t.MCPExposed,
+		Origin:      t.Origin,
 	}
 
 	if t.InputSchema != nil {

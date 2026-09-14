@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/core/baseparser"
 	"github.com/znasllc-io/memql/core/num"
 )
 
@@ -48,8 +49,10 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 			continue
 		}
 		switch attr.Name {
-		case ast.AttrEnabled:
-			// Accepted no-op: enabled is the default (lifecycle ruling, #2606).
+		// @enabled was an accepted no-op here (lifecycle ruling, #2606) until
+		// memql#5375 retired it: it read like a switch and flipped nothing.
+		// It now falls through to the retired-ledger check below, which names
+		// @disabled as what an author actually wants.
 		case ast.AttrDisabled:
 			decl.Disabled = true
 		case "description":
@@ -88,31 +91,16 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 			if v := attrArgString(attr, "method"); v != "" {
 				decl.HandlerMethod = strings.ToUpper(v)
 			}
-		case "rateLimit":
-			if err := rejectUnknownAttrArgs(&p.current, decl.Name, "rateLimit", attr, toolRateLimitArgNames); err != nil {
-				return nil, err
-			}
-			// A non-integer value was silently discarded here too, which is the
-			// same defect one annotation over: the author declared a ceiling and
-			// got none (memql#3625).
-			if v := attrArgString(attr, "maxCalls"); v != "" {
-				n, err := strconv.Atoi(v)
-				if err != nil {
-					return nil, newParseErrorf(&p.current, "tool %q: @rateLimit(maxCalls=%q) is not an integer -- a non-integer was discarded, leaving the tool with no rate limit at all", decl.Name, v)
-				}
-				decl.RateLimitMaxCalls = n
-			}
-			if v := attrArgString(attr, "periodSeconds"); v != "" {
-				n, err := strconv.Atoi(v)
-				if err != nil {
-					return nil, newParseErrorf(&p.current, "tool %q: @rateLimit(periodSeconds=%q) is not an integer -- a non-integer was discarded, leaving the tool with no rate limit period at all", decl.Name, v)
-				}
-				decl.RateLimitPeriod = n
-			}
+		// @allowedRoles is the AGENT-role gate and it STAYS. D17 proposed
+		// replacing it with @requiresRank + @requiresCapability, but those
+		// gate the human actor's catalog rank and their grants over a
+		// resource -- a different axis. This one is enforced on every path
+		// (Tool.AllowedRoles in component/memql/tool_types.go, applied by
+		// component/grpc/server.go and tool_execution.go), and substituting
+		// rank for agent role would let every specialist call the
+		// assistant-only tools. Re-verified live in memql#5375 and kept.
 		case "allowedRoles":
 			decl.AllowedRoles = attrStringListValue(attr)
-		case "scopes":
-			decl.Scopes = attrStringListValue(attr)
 		case "mcp":
 			decl.MCPExposed = true
 
@@ -128,7 +116,18 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 			return nil, newParseErrorf(&p.current, "tool %q: @clientExecution is retired -- it dispatched the tool to the connected browser over the client-tool relay, which was removed with the cognition node (epic memql#4988). Every tool now needs a server-side @handler", decl.Name)
 
 		default:
-			return nil, newParseErrorf(&p.current, "tool %q: unknown annotation @%s -- supported: @allowedRoles, @description, @destructive, @disabled, @enabled, @executionTime, @handler, @mcp, @rateLimit, @requiresConfirmation, @scopes", decl.Name, attr.Name)
+			// @rateLimit, @scopes and @enabled reach here (memql#5375). The
+			// first two were parsed into typed ToolDecl fields, cloned onto
+			// the runtime Tool and advertised on the gRPC tool descriptor,
+			// and enforced NOWHERE -- so each read as a ceiling or an
+			// authorization gate while being neither, which is worse for a
+			// reader than their absence. The ledger in core/baseparser holds
+			// the hint, so the refusal names the rewrite and says what to
+			// write instead.
+			if hint, retired := baseparser.RetiredConstructAnnotation(attr.Name); retired {
+				return nil, newParseErrorf(&p.current, "tool %q: @%s is retired -- %s", decl.Name, attr.Name, hint)
+			}
+			return nil, newParseErrorf(&p.current, "tool %q: unknown annotation @%s -- supported: @allowedRoles, @description, @destructive, @disabled, @executionTime, @handler, @mcp, @requiresConfirmation", decl.Name, attr.Name)
 		}
 	}
 

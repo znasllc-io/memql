@@ -3817,59 +3817,69 @@ func getAttrArgString(attr *Attribute, key string) string {
 	return ""
 }
 
-// processFunctionAttributes processes attributes for a function definition
+// processFunctionAttributes folds a function's attributes into its
+// FunctionDef.
+//
+// The six attributes this used to fold -- @deprecated, @version, @timeout,
+// @retry, @idempotent and @audit -- are deleted with their fields
+// (memql#5375). Each was parsed here, copied into the runtime Function,
+// rendered by help() and by editor hover, and refused by every allow-list:
+// the only reachable value was the zero value, and the render made a field
+// that COULD NOT be set look like one that was. @enabled and @nocache go
+// for their own reasons -- an explicit no-op, and the losing spelling of
+// @cache(0). Every refusal lives in core/baseparser's retirement ledger,
+// so each names `memqlmigrate --rewrite=attributes`.
+//
+// @version survives as a CONCEPT and SEED annotation, where it is the "v1"
+// of every canonical id; it was only ever dead on a function.
 func (p *Parser) processFunctionAttributes(d *FunctionDef, attributes []*Attribute) {
 	for _, attr := range attributes {
 		switch attr.Name {
-		case AttrEnabled:
-			d.Enabled = true
 		case AttrDisabled:
 			d.Enabled = false
-		case AttrDeprecated:
-			d.Deprecated = "deprecated"
-			if v := getAttrString(attr); v != "" {
-				d.Deprecated = v
-			}
-		case AttrVersion:
-			d.Version = getAttrString(attr)
 		case AttrDescription:
 			d.Description = getAttrString(attr)
-		case AttrTimeout:
-			d.Timeout = getAttrString(attr)
 		case AttrCache:
-			if v := getAttrArgString(attr, "ttl"); v != "" {
+			// ONE spelling (D17): the positional seconds, @cache(300),
+			// with @cache(0) meaning never. A single-argument annotation
+			// has no ambiguity for a keyword to resolve, so `ttl=` only
+			// gave the same value a second name -- and a reader had to
+			// know both spellings to grep for either.
+			if v := attrNumericString(attr); v != "" {
 				d.CacheTTL = v
-			} else if v := getAttrString(attr); v != "" {
-				d.CacheTTL = v
-			} else if v := attrNumericString(attr); v != "" {
-				// Positional numeric form (#2618): @cache(300). The
-				// registry's single ttl arg makes position unambiguous.
+			} else if v := getAttrString(attr); isAllDigits(v) {
 				d.CacheTTL = v
 			}
-		case AttrNocache:
-			// @nocache is the clearer opt-out alias for @cache(ttl="0")
-			// (5.6 / memql#1970): force "never cache", overriding default-on.
-			d.CacheTTL = "0"
-		case AttrRetry:
-			if v := getAttrArgString(attr, "count"); v != "" {
-				d.Retry, _ = strconv.Atoi(v)
-			} else if v := getAttrString(attr); v != "" {
-				d.Retry, _ = strconv.Atoi(v)
-			}
-		case AttrIdempotent:
-			d.Idempotent = true
-		case AttrAudit:
-			d.Audit = true
 		}
 	}
+}
+
+// isAllDigits reports whether s is a non-empty run of ASCII digits.
+//
+// @cache(300) reaches the attribute layer as a number or as the string
+// "300" depending on how the value was written, so both readings are
+// accepted -- but only for a plain count. Anything else is not a TTL and
+// is left for the allow-list to refuse rather than silently coerced into
+// one: the retired `@cache(ttl="300")` form arrives here as a keyword
+// argument with an EMPTY positional value, and accepting a bare
+// getAttrString would have kept it working by accident, which is the one
+// outcome that makes a retirement untestable.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // processAutomationAttributes processes attributes for an automation
 func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Attribute) {
 	for _, attr := range attributes {
 		switch attr.Name {
-		case AttrEnabled:
-			d.Enabled = true
 		case AttrDisabled:
 			d.Enabled = false
 		case AttrDescription:
@@ -3877,14 +3887,15 @@ func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Att
 		// @deprecated / @version / @timeout / @retry / @audit / @async folded
 		// into AutomationDef fields the automation runtime never read (audited
 		// in #2712); the #2712 load gate rejects them on automations, so this
-		// fold is now dead. Deleted with those fields (#2724). They remain live
-		// on functions via processFunctionAttributes.
-		case AttrSchedule:
-			if v := getAttrArgString(attr, "cron"); v != "" {
-				d.Schedule = v
-			} else {
-				d.Schedule = getAttrString(attr)
-			}
+		// fold is now dead. Deleted with those fields (#2724). memql#5375
+		// deleted the same six from the FUNCTION fold for the same reason,
+		// plus @enabled, an explicit no-op.
+		//
+		// @schedule(cron=...) is retired in memql#5375: @trigger(schedule=...)
+		// below is the ONE spelling, which keeps "how is this automation
+		// reached" a single annotation -- and is what lets the @template gate
+		// refuse "triggered AND called" coherently instead of having to check
+		// two annotations that mean the same thing.
 		case AttrTrigger:
 			if d.Trigger == nil {
 				d.Trigger = &TriggerDef{}

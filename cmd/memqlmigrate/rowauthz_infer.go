@@ -40,7 +40,7 @@ import (
 // test's own header regex (which makes it a non-capturing optional
 // group) this requires it: a construct with no signature concept binds
 // nothing and cannot be evidence about a concept.
-var constructHeaderRe = regexp.MustCompile(`(?m)^[ \t]*(query|mutate)[ \t]+([\p{L}_][\p{L}\p{Nd}_]*)[ \t]+([\p{L}_][\p{L}\p{Nd}_]*)[ \t]*\{`)
+var constructHeaderRe = regexp.MustCompile(`(?m)^[ \t]*(query|mutation)[ \t]+([\p{L}_][\p{L}\p{Nd}_]*)[ \t]+([\p{L}_][\p{L}\p{Nd}_]*)[ \t]*\{`)
 
 // useConceptsRe matches a file-top concepts import,
 // `use <ns>.concepts.{ a, b }`, capturing the namespace and the brace
@@ -386,7 +386,7 @@ func classifyConstruct(kind, preamble, body, rawBody string) vote {
 	// one: this inference reads queries, so a concept whose mutations
 	// contradict its queries is not detected here. Recorded in the
 	// report and in the audit doc; measuring it is Phase 2's job.
-	if kind == "mutate" {
+	if kind == "mutation" {
 		return vote{Kind: verdictExempt}
 	}
 

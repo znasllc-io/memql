@@ -126,11 +126,18 @@ var runnableConstructKinds = map[string]bool{
 }
 
 // constructKeyword maps a reported kind to the keyword it is AUTHORED under, so
-// the source index slices on the right token. Only `mutation` differs.
+// the source index slices on the right token.
+//
+// Every entry is now an identity mapping. It was not until memql#5375: a
+// mutation was AUTHORED as `mutate` and REPORTED as `mutation`, and this map
+// existed for that one divergence. The map is kept rather than deleted
+// because a future construct could diverge again, and a caller reaching for
+// the authored keyword should ask rather than assume the two are the same
+// word.
 var constructKeyword = map[string]string{
 	ConstructKindConcept:    "concept",
 	ConstructKindQuery:      "query",
-	ConstructKindMutation:   "mutate",
+	ConstructKindMutation:   "mutation",
 	ConstructKindLogic:      "logic",
 	ConstructKindTool:       "tool",
 	ConstructKindAutomation: "automation",

@@ -174,29 +174,18 @@ type Function struct {
 	// and holds strictly fewer principal verbs. Both together require both.
 	RequiresCapability CapabilityRequirement
 
-	// Deprecated contains deprecation message if set (empty = not deprecated)
-	Deprecated string
-
-	// Version is the function version tag
-	Version string
-
-	// Timeout is the maximum execution time
-	Timeout string
-
-	// CacheTTL is the cache duration for query results (queries only)
+	// CacheTTL is the cache duration for query results (queries only),
+	// from @cache(N). "0" means never cache.
 	CacheTTL string
 
-	// RateLimitRequests is the number of requests allowed
-	RateLimitRequests int
-
-	// RateLimitPer is the rate limit window (e.g., "1m", "1h")
-	RateLimitPer string
-
-	// Retry is the number of retry attempts (mutations only)
-	Retry int
-
-	// Idempotent indicates the mutation is safe to retry (mutations only)
-	Idempotent bool
+	// Deprecated / Version / Timeout / RateLimitRequests / RateLimitPer /
+	// Retry / Idempotent / Audit were fields here until memql#5375. The
+	// registry hands out CLONES, so a field this struct's Clone does not
+	// name is a field every registered construct loses -- which is how the
+	// RequiresRank note above came to be written. These went the other
+	// way: they were cloned faithfully, rendered by help() and by editor
+	// hover, and populated by annotations every allow-list refused, so the
+	// only value any of them ever held was the zero value.
 
 	// Audit indicates all calls should be logged (mutations only)
 	Audit bool
@@ -260,15 +249,7 @@ func (f *Function) clone() *Function {
 		// everywhere -- a gate that parsed, validated and gated nothing.
 		RequiresRank:       f.RequiresRank,
 		RequiresCapability: f.RequiresCapability,
-		Deprecated:         f.Deprecated,
-		Version:            f.Version,
-		Timeout:            f.Timeout,
 		CacheTTL:           f.CacheTTL,
-		RateLimitRequests:  f.RateLimitRequests,
-		RateLimitPer:       f.RateLimitPer,
-		Retry:              f.Retry,
-		Idempotent:         f.Idempotent,
-		Audit:              f.Audit,
 		MCPPromoted:        f.MCPPromoted,
 		LatestMode:         f.LatestMode,
 	}

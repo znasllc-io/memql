@@ -506,4 +506,3 @@ func snippet(s string) string {
 	}
 	return s
 }
-

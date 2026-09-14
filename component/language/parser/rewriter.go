@@ -38,6 +38,7 @@ package parser
 
 import (
 	"fmt"
+	"github.com/znasllc-io/memql/core/baseparser"
 	"regexp"
 	"strconv"
 	"strings"
@@ -601,7 +602,11 @@ var structFormSteps = []structFormStep{
 	// C1/memql#2041); `mutation` is the invocation-step prefix only. The step
 	// name IS the author-facing keyword StructFormKeywords reports, so it must
 	// be `mutate` -- the #2124 drift test pins dslspec's construct keyword to it.
-	{"mutate", LooksLikeStructMutation, NormaliseMutationSource},
+	// The retired keyword refuses BEFORE the live one is tried, so the
+	// refusal names `mutation` instead of the parser reporting an
+	// unexpected token at a word that was correct last release.
+	{"retired mutate keyword", LooksLikeRetiredMutate, RefuseRetiredMutate},
+	{"mutation", LooksLikeStructMutation, NormaliseMutationSource},
 	{"logic", LooksLikeStructLogic, NormaliseLogicSource},
 	// Terse single-step automation lowering (memql#2215) MUST run before
 	// the struct-form automation stage: it expands `automation NAME
@@ -616,7 +621,7 @@ var structFormSteps = []structFormStep{
 
 // StructFormKeywords is the set of author-facing construct keywords the
 // struct-form rewriter recognises and expands to the internal func
-// form, in declaration order: query / mutate / logic / automation.
+// form, in declaration order: query / mutation / logic / automation.
 // It is the single source the #2124 drift test compares dslspec's
 // "function" category constructs against. Derived from structFormSteps
 // (excluding the non-construct "file-top args" stage) so the list
@@ -630,7 +635,13 @@ var StructFormKeywords = func() []string {
 		// `automation` keyword. Neither contributes a new keyword to the
 		// recognised construct set (#2124 drift test compares this list
 		// against dslspec's "function" category constructs).
-		if s.name == "file-top args" || s.name == "terse automation" {
+		// "file-top args" and "terse automation" are rewrite stages, not
+		// author-facing construct keywords, and "retired mutate keyword"
+		// is a REFUSAL stage (memql#5375) -- it exists to name `mutation`
+		// when an author writes `mutate`, and offering it here would put
+		// a retired word back into the recognised construct set and into
+		// every did-you-mean pool derived from it.
+		if s.name == "file-top args" || s.name == "terse automation" || s.name == "retired mutate keyword" {
 			continue
 		}
 		out = append(out, s.name)
@@ -1018,7 +1029,46 @@ func buildStructQueryExpr(conceptId, filter, shape, sort, paginate, asOf string,
 // the internal ReceiverMutation kind. The transitional `mutation` noun
 // alias was dropped by C6 (memql#2036) once the .memql tree was swept to
 // `mutate`.
-var mutationStructHeader = regexp.MustCompile(`(?m)^[ \t]*mutate[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+// The author keyword is `mutation` (memql#5375). It was `mutate`, with
+// `mutation` serving as the invocation-step prefix only, so one construct
+// answered to two words and a reader grepping for either found part of the
+// tree. D17 collapsed them onto `mutation` in BOTH positions.
+//
+// The trailing `{` is what keeps the two positions apart: a declaration is
+// `mutation <Concept> <name> {` and a call is `mutation <name>(...)`, so this
+// header cannot match a kind-prefixed call.
+var mutationStructHeader = regexp.MustCompile(`(?m)^[ \t]*mutation[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+
+// retiredMutateHeader matches the keyword this construct used to answer to.
+// It gets its own rewriter stage rather than being left to fall through: an
+// unrecognised leading identifier parses as a SpecReferenceExpr and the
+// author is told they have an unexpected token, which is the least useful
+// thing that could be said about a word that was correct last release.
+var retiredMutateHeader = regexp.MustCompile(`(?m)^[ \t]*mutate[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+
+// LooksLikeRetiredMutate reports whether the source declares a mutation
+// with the retired `mutate` keyword.
+func LooksLikeRetiredMutate(source string) bool {
+	return retiredMutateHeader.MatchString(source)
+}
+
+// RefuseRetiredMutate is the rewriter stage for the retired keyword. It runs
+// BEFORE the `mutation` stage, so an author who wrote the old word gets the
+// new one named rather than a parse error about an unexpected token.
+func RefuseRetiredMutate(source string) (string, error) {
+	m := retiredMutateHeader.FindStringSubmatch(source)
+	name := "<name>"
+	concept := "<Concept>"
+	if m != nil {
+		if m[1] != "" {
+			concept, name = m[1], m[2]
+		} else {
+			name = m[2]
+		}
+	}
+	return "", fmt.Errorf("`mutate` is retired -- write `mutation %s %s { ... }`. One keyword per construct (memql#5375): `mutate` declared it and `mutation` called it, so a reader grepping for either found part of the tree. %s",
+		concept, name, baseparser.AttributeRewriteHint)
+}
 
 // LooksLikeStructMutation reports whether the source declares a
 // struct-form mutation.
@@ -2627,7 +2677,7 @@ func kindPrefix(name string) bool {
 	// `builtin` lets a builtin step carry its kind prefix too. The kind is a
 	// readability/validation tag here -- finishCall strips it and the bare name
 	// resolves at runtime regardless of kind.
-	case "logic", "mutate", "mutation", "query", "builtin", "automation":
+	case "logic", "mutation", "query", "builtin", "automation":
 		return true
 	}
 	return false
