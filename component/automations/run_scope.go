@@ -150,7 +150,29 @@ func (s *RunScope) stepResultValue(id string, sr *StepResult) any {
 	if nodes, ok := s.stepNodes(id); ok {
 		return nodes
 	}
+	// A Bundle-backed result GetStepNodes finds no node list in is a result
+	// with no rows: an empty bundle's JSON omits `nodes`. The string
+	// evaluator's accessors read it as zero rows (resolvePath), and so does
+	// an expression -- `rows.nodes()`, `rows.empty()` and `rows.first()` over
+	// an empty read are [], true and absent, never the envelope itself.
+	if bundleEnvelope(raw) {
+		return []any{}
+	}
 	return raw
+}
+
+// bundleEnvelope reports whether a step result is an engine result whose
+// value is its rows: an ExecuteResult without a flat output (the caller has
+// already taken a flat one), or the same envelope decoded into a map.
+func bundleEnvelope(raw any) bool {
+	switch x := raw.(type) {
+	case *memql.ExecuteResult:
+		return x != nil
+	case map[string]any:
+		_, ok := x["Bundle"]
+		return ok
+	}
+	return false
 }
 
 // stepNodes is GetStepNodes, cached for this scope's life.

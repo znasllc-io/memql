@@ -683,6 +683,17 @@ func (v *functionValidator) substituteArgRefsAndCallArgs(expr ExpressionNode, ar
 		// the first place. No shipped logic currently returns a mutation leaf,
 		// so this is not a live failure; it is the next instance of the class,
 		// pre-empted rather than left for whoever writes that construct.
+		if pc, isV1 := val.(*PlanConstExpression); isV1 {
+			// A v1 logic body's argument expression (logic_body_v1.go).
+			value, present, err := evaluateLogicArgumentV1(pc, args, v.ambient)
+			if err != nil {
+				return nil, fmt.Errorf("argument %q of mutation-leaf call %q: %w", k, call.Name, err)
+			}
+			if present {
+				newArgs[k] = value
+			}
+			continue
+		}
 		folded, err := foldArgExpression(substituteArgRefValue(val, args, v.ambient), args)
 		if err != nil {
 			return nil, fmt.Errorf("argument %q of mutation-leaf call %q: %w", k, call.Name, err)
@@ -1117,6 +1128,18 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		if args != nil && len(node.Args) > 0 {
 			folded := make(map[string]any, len(node.Args))
 			for k, val := range node.Args {
+				if pc, isV1 := val.(*PlanConstExpression); isV1 {
+					// A v1 logic body's argument expression, evaluated here
+					// where the call's arguments are known (logic_body_v1.go).
+					value, present, err := evaluateLogicArgumentV1(pc, args, v.ambient)
+					if err != nil {
+						return nil, fmt.Errorf("argument %q of call %q: %w", k, node.Name, err)
+					}
+					if present {
+						folded[k] = value
+					}
+					continue
+				}
 				fv, err := foldArgExpression(val, args)
 				if err != nil {
 					return nil, fmt.Errorf("argument %q of call %q: %w", k, node.Name, err)

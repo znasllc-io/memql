@@ -671,6 +671,21 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				if err != nil {
 					return nil, fmt.Errorf("function %q: %w", expectedName, err)
 				}
+				// An edition-2026 body (memql#5367) is bridged onto the same
+				// two runners by logic_body_v1.go; everything below is the
+				// legacy conversion, unchanged.
+				if funcDef.ExpressionsV1 {
+					engineExpr, onRunner, err := loadLogicBodyV1(auto, retExpr)
+					if err != nil {
+						return nil, fmt.Errorf("function %q body: %w", expectedName, err)
+					}
+					fn.Expr = engineExpr
+					fn.ExprSource = extractExpressionFromContent(content)
+					if onRunner {
+						fn.LogicSteps = auto
+					}
+					break
+				}
 				// Logic bodies admit the Story 4 collection-method + lambda
 				// surface (ADR §2.2). Specs and query filters use the default
 				// converter, which rejects it.
