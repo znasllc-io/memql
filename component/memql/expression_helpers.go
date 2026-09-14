@@ -176,6 +176,15 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 			clone.Limit = &limit
 		}
 		return clone
+	case *RefineExpression:
+		// The lambda is a parsed v1 AST, never mutated, so clones share it;
+		// the bindings are replaced wholesale by expansion, never written
+		// into, so the map is shared too.
+		return &RefineExpression{
+			Target:   cloneExpressionNode(node.Target),
+			Lambda:   node.Lambda,
+			Bindings: node.Bindings,
+		}
 	case *SelectExpression:
 		return &SelectExpression{
 			Target: cloneExpressionNode(node.Target),

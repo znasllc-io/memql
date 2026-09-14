@@ -114,10 +114,11 @@ func TestGrammarCoversKeywordsAndOperators(t *testing.T) {
 				t.Errorf("operators-word missing %q", o.Symbol)
 			}
 		case rule == "ternary":
-			// The ternary's two halves open and close a region.
+			// The ternary's `?` has a rule of its own; its `:` is shared with a
+			// map entry and a named argument, so no rule claims it.
 			r := g.Repository[rule]
-			if !regexp.MustCompile(`^(?:`+r.Begin+`)$`).MatchString("?") || !regexp.MustCompile(`^(?:`+r.End+`)$`).MatchString(":") {
-				t.Errorf("the ternary region does not open on ? and close on :, got begin %q end %q", r.Begin, r.End)
+			if !regexp.MustCompile(`^(?:` + r.Match + `)$`).MatchString("?") {
+				t.Errorf("the ternary rule does not match ?, got %q", r.Match)
 			}
 		case rule != "":
 			// A symbol with a rule of its own is covered by that rule, whole.
@@ -158,6 +159,7 @@ func TestGrammarScopesTheV1Forms(t *testing.T) {
 		"arrow":             "keyword.operator.arrow.memql",
 		"optional-accessor": "punctuation.accessor.optional.memql",
 		"unary-not":         "keyword.operator.logical.memql",
+		"ternary":           "keyword.operator.ternary.memql",
 	} {
 		if got := rule(name).Name; got != want {
 			t.Errorf("rule %s scopes %q, want %q", name, got, want)
@@ -167,10 +169,21 @@ func TestGrammarScopesTheV1Forms(t *testing.T) {
 		t.Errorf("optional-accessor matched %q", m[0])
 	}
 
-	// The ternary's two halves.
+	// The ternary's `?` is one mark, not a region: a region opened on `?`
+	// would run to the next `:` anywhere below it -- a map key's, after a
+	// `?` the author is still typing -- and the `:` is left unscoped because
+	// a map entry and a named argument write it too.
 	tern := rule("ternary")
-	if tern.BeginCaptures["0"].Name != "keyword.operator.ternary.memql" || tern.EndCaptures["0"].Name != "keyword.operator.ternary.memql" {
-		t.Errorf("ternary halves scope %+v / %+v", tern.BeginCaptures, tern.EndCaptures)
+	if tern.Begin != "" || tern.End != "" {
+		t.Errorf("the ternary is a region (begin %q, end %q); it should match its `?` alone", tern.Begin, tern.End)
+	}
+	if m := captures(tern.Match, "p ? a : b"); m[0] != "?" {
+		t.Errorf("ternary matched %q in `p ? a : b`, want the `?` alone", m[0])
+	}
+	for name, r := range g.Repository {
+		if r.Match != "" && regexp.MustCompile(`^(?:`+r.Match+`)$`).MatchString(":") {
+			t.Errorf("rule %s scopes a lone `:`, which a map entry and a named argument share with the ternary", name)
+		}
 	}
 
 	// Lambda parameters, one and two of them.
@@ -218,6 +231,7 @@ func TestGrammarScopesTheV1Forms(t *testing.T) {
 	for _, pair := range [][2]string{
 		{"operators-symbol", "unary-not"},       // `!=` before `!`
 		{"operators-symbol", "ternary"},         // `??` before `?`
+		{"optional-accessor", "ternary"},        // `.?` before its `?`
 		{"lambda-parameters", "reserved-words"}, // the `actor` of `actor =>` is a parameter
 		{"lambda-parameters", "arrow"},          // a parameter takes its arrow with it
 		{"optional-accessor", "accessor"},       // `.?` before `.`

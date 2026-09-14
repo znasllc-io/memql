@@ -1253,6 +1253,23 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 			Limit:  node.Limit,
 		}, nil
 
+	case *RefineExpression:
+		// The refine clause (memql#5366). Its target expands like any other;
+		// its lambda is evaluated in process at execution, per row, and what
+		// it may read besides the row -- the call's arguments, the actor,
+		// the clock, config -- is captured HERE, the one point the arguments
+		// are known, with the same bindings a plan constant is evaluated
+		// against (planConstantBindings), so the two read one envelope.
+		target, err := v.expandExpressionWithArgs(node.Target, args)
+		if err != nil {
+			return nil, err
+		}
+		return &RefineExpression{
+			Target:   target,
+			Lambda:   node.Lambda,
+			Bindings: planConstantBindings(args, v.ambient),
+		}, nil
+
 	case *SelectExpression:
 		target, err := v.expandExpressionWithArgs(node.Target, args)
 		if err != nil {
@@ -1735,6 +1752,8 @@ func boundConceptForPlanRoot(expr ExpressionNode, functions *FunctionRegistry) s
 		return boundConceptForPlanRoot(node.Target, functions)
 	case *PaginateExpression:
 		return boundConceptForPlanRoot(node.Target, functions)
+	case *RefineExpression:
+		return boundConceptForPlanRoot(node.Target, functions)
 	case *SelectExpression:
 		return boundConceptForPlanRoot(node.Target, functions)
 	case *TimestampExpression:
@@ -1787,6 +1806,8 @@ func queryFunctionNameForPlanRoot(expr ExpressionNode, functions *FunctionRegist
 		return queryFunctionNameForPlanRoot(node.Target, functions)
 	case *PaginateExpression:
 		return queryFunctionNameForPlanRoot(node.Target, functions)
+	case *RefineExpression:
+		return queryFunctionNameForPlanRoot(node.Target, functions)
 	case *SelectExpression:
 		return queryFunctionNameForPlanRoot(node.Target, functions)
 	case *TimestampExpression:
@@ -1820,6 +1841,8 @@ func hasFunctionCalls(expr ExpressionNode) bool {
 	case *SortExpression:
 		return hasFunctionCalls(node.Target)
 	case *PaginateExpression:
+		return hasFunctionCalls(node.Target)
+	case *RefineExpression:
 		return hasFunctionCalls(node.Target)
 	case *SelectExpression:
 		return hasFunctionCalls(node.Target)

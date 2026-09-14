@@ -161,7 +161,7 @@ query widget widgetsFine {
   shape   widgetCard
 }
 `)}
-	loaded, err := Load(tree)
+	loaded, err := Load(withLanguageLines(tree))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

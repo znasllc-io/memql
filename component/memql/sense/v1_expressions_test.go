@@ -527,6 +527,24 @@ func hoverOn(t *testing.T, s *Service, src, needle string) string {
 	return res.Contents
 }
 
+// hoverFirst returns the hover contents with the cursor on the first
+// occurrence of needle anywhere in src (one column into it), for a construct
+// that has to be complete to be read.
+func hoverFirst(t *testing.T, s *Service, src, needle string) string {
+	t.Helper()
+	at := strings.Index(src, needle)
+	if at < 0 {
+		t.Fatalf("fixture %q does not contain %q", src, needle)
+	}
+	line := strings.Count(src[:at], "\n") + 1
+	col := at - (strings.LastIndex(src[:at], "\n") + 1) + 2
+	res := s.Hover(src, line, col, "dsl/todos/specs.memql")
+	if res == nil {
+		return ""
+	}
+	return res.Contents
+}
+
 // hoverStyle holds a card to the design direction: plain text, the signature
 // first, sentence case -- no bold labels, no decorative separators, no
 // middle-dot meta strings.
@@ -729,19 +747,41 @@ func TestRetiredHoverIsTheParsersTable(t *testing.T) {
 	s := New(v1Registry())
 	logic := func(expr string) string { return "logic compute {\n  body {\n    return " + expr }
 	filter := func(expr string) string { return v1Query + "  filter " + expr }
-	type sample struct{ src, needle string }
+	type sample struct {
+		src, needle string
+		// example is the author's own construct as the rewrite writes it, for
+		// the predicate positions, whose card shows it in place of the table's
+		// placeholder form. Their needle is found anywhere in src.
+		example string
+	}
 
 	samples := map[string]sample{
-		"retired_when_guard":           {filter("when(args.owner) { status == args.owner }"), "when"},
-		"retired_conditional_prefix":   {filter("?.status == args.owner"), "?."},
-		"retired_semicolon_connective": {filter("status == args.owner; done == false"), ";"},
-		"retired_has":                  {filter("tags has args.tag"), "has"},
-		"retired_not_in":               {filter("status not in [\"a\", \"b\"]"), "not"},
-		"retired_null":                 {logic("args.a == null"), "null"},
-		"retired_dollar_args":          {filter("status == $args.owner"), "$"},
-		"retired_spec_reference":       {filter("done == false && spec isOverdue"), "spec"},
-		"retired_trait_reference":      {filter("trait isActiveRecord"), "trait"},
-		"retired_contains_method":      {logic("args.xs.contains(args.v)"), "contains"},
+		"retired_when_guard":           {src: filter("when(args.owner) { status == args.owner }"), needle: "when"},
+		"retired_conditional_prefix":   {src: filter("?.status == args.owner"), needle: "?."},
+		"retired_semicolon_connective": {src: filter("status == args.owner; done == false"), needle: ";"},
+		"retired_has":                  {src: filter("tags has args.tag"), needle: "has"},
+		"retired_not_in":               {src: filter("status not in [\"a\", \"b\"]"), needle: "not"},
+		"retired_null":                 {src: logic("args.a == null"), needle: "null"},
+		"retired_dollar_args":          {src: filter("status == $args.owner"), needle: "$"},
+		"retired_spec_reference":       {src: filter("done == false && spec isOverdue"), needle: "spec"},
+		"retired_trait_reference":      {src: filter("trait isActiveRecord"), needle: "trait"},
+		"retired_contains_method":      {src: logic("args.xs.contains(args.v)"), needle: "contains"},
+		"retired_filter_without_lambda": {
+			src: filter("status == args.owner && isActiveRecord\n}"), needle: "filter",
+			example: "filter row => row.status == args.owner && isActiveRecord(row)",
+		},
+		"retired_spec_return_body": {
+			src: "use todos.concepts.{ todo }\n\nspec todo isOverdue {\n  return done == false\n}", needle: "return",
+			example: "spec todo isOverdue = row => row.done == false",
+		},
+		"retired_trait_return_body": {
+			src: "trait isOpen {\n  return status == \"open\"\n}", needle: "return",
+			example: "trait isOpen = row => row.status == \"open\"",
+		},
+		"retired_filter_annotation": {
+			src:    "@trigger(event=\"graph.node.updated.v1:todos:todo\")\n@filter(payload.status == \"archived\")\nautomation onTodo {\n}",
+			needle: "@filter", example: "@filter(row => row.status == \"archived\")",
+		},
 	}
 	unhoverable := map[string]string{
 		// A comma also separates arguments and list elements. The parser tells
@@ -758,13 +798,18 @@ func TestRetiredHoverIsTheParsersTable(t *testing.T) {
 		smp, ok := samples[form.Rule]
 		if name, isCall := strings.CutSuffix(strings.TrimPrefix(form.Rule, "retired_"), "_call"); isCall && !ok {
 			// Every retired call has one shape: its name, applied.
-			smp, ok = sample{logic(name + "(args.a, args.b)"), name}, true
+			smp, ok = sample{src: logic(name + "(args.a, args.b)"), needle: name}, true
 		}
 		if !ok {
 			t.Errorf("the parser retires %s (%s) and Sense has no sample for it: hover it, or name it in unhoverable with the reason", form.Rule, form.Spelling)
 			continue
 		}
-		card := hoverOn(t, s, smp.src, smp.needle)
+		card := ""
+		if smp.example != "" {
+			card = hoverFirst(t, s, smp.src, smp.needle)
+		} else {
+			card = hoverOn(t, s, smp.src, smp.needle)
+		}
 		if card == "" {
 			t.Errorf("%s: no hover on %q in %q", form.Rule, smp.needle, smp.src)
 			continue
@@ -776,11 +821,14 @@ func TestRetiredHoverIsTheParsersTable(t *testing.T) {
 			spelling = "`" + glyph + "` as a connective"
 		}
 		want := []string{spelling + " is retired in edition 2026.", "`" + migrator + "` rewrites it."}
-		if form.Rule == "retired_contains_method" {
+		switch {
+		case form.Rule == "retired_contains_method":
 			// The one replacement the table writes as a choice.
 			want = append(want, "```memql\nv in <list>\ns.includes(sub)\n```",
 				"Write `v in <list>` for membership or `s.includes(sub)` for a substring;")
-		} else {
+		case smp.example != "":
+			want = append(want, "```memql\n"+smp.example+"\n```", "Write `"+form.Replacement+"` instead;")
+		default:
 			want = append(want, "```memql\n"+form.Replacement+"\n```", "Write `"+form.Replacement+"` instead;")
 		}
 		for _, w := range want {
@@ -791,6 +839,103 @@ func TestRetiredHoverIsTheParsersTable(t *testing.T) {
 	}
 	if want := len(forms) - len(unhoverable); checked != want {
 		t.Errorf("hovered %d retired forms, want %d: the parser's table is %d forms", checked, want, len(forms))
+	}
+}
+
+// A spec or trait applied in an expression gets the card a catalog function
+// gets: the application as its signature, what it reads, where it runs at the
+// cursor's position, and the spellings it replaced.
+func TestHoverOnAPredicate(t *testing.T) {
+	s := New(v1Registry())
+	for _, c := range []struct {
+		name, src, needle string
+		want              []string
+	}{
+		{"a trait in a query filter", v1Query + "  filter row => row.status == args.owner && isActiveRecord(row)", "isActiveRecord", []string{
+			"```memql\nisActiveRecord(row) bool\n```",
+			"A trait: a predicate over any row, applied to the row it reads.",
+			"Pushed down to SQL.",
+			"Replaces `isActiveRecord` written bare and `trait isActiveRecord`.",
+		}},
+		{"a row spec in a query filter", v1Query + "  filter row => isOverdue(row)", "isOverdue", []string{
+			"```memql\nisOverdue(row) bool\n```",
+			"A spec over todo, applied to the row it reads.",
+			"Pushed down to SQL.",
+			"Replaces `isOverdue` written bare and `spec isOverdue`.",
+		}},
+		{"a context spec in a query filter", v1Query + "  filter row => requiresOwner(actor) && row.done == false", "requiresOwner", []string{
+			"```memql\nrequiresOwner(actor) bool\n```",
+			"A spec over actorEnvelope, applied to the actor.",
+			"Runs in process before the query, against the caller.",
+			"Replaces `requiresOwner` written bare and `spec requiresOwner`.",
+		}},
+		{"a spec in a logic body", "logic compute {\n  body {\n    return isOverdue(args.todo)", "isOverdue", []string{
+			"```memql\nisOverdue(row) bool\n```",
+			"Runs in process.",
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			card := hoverOn(t, s, c.src, c.needle)
+			hoverStyle(t, card)
+			for _, w := range c.want {
+				if !strings.Contains(card, w) {
+					t.Errorf("the card should contain %q, got:\n%s", w, card)
+				}
+			}
+		})
+	}
+
+	// A predicate named without being applied is not an application.
+	if card := hoverOn(t, s, v1Query+"  filter isActiveRecord", "isActiveRecord"); strings.Contains(card, "```memql\nisActiveRecord(row) bool") {
+		t.Errorf("a bare name is not an application, got:\n%s", card)
+	}
+}
+
+// The predicate positions' legacy spellings are hovered on every token an
+// author meets them by, and the card shows the author's own construct as the
+// rewrite writes it -- or the table's form, when the rewrite refuses it.
+func TestRetiredPredicateHover(t *testing.T) {
+	s := New(v1Registry())
+	spec := "use todos.concepts.{ todo }\n\nspec todo isOverdue {\n  return done == false\n}"
+	for _, c := range []struct {
+		name, src, needle, code string
+	}{
+		{"the header of a brace-bodied spec", spec, "spec", "spec todo isOverdue = row => row.done == false"},
+		{"the header of a brace-bodied trait", "trait isOpen { return status == \"open\" }", "trait", "trait isOpen = row => row.status == \"open\""},
+		// requiresOwner is a loaded context spec: its parameter is the actor.
+		{"a spec the registry knows reads the actor", "use common.shapes.{ actorEnvelope }\n\nspec actorEnvelope requiresOwner {\n  return role == \"owner\"\n}",
+			"return", "spec actorEnvelope requiresOwner = actor => actor.role == \"owner\""},
+		// isAdmin is not loaded, but a loaded context spec binds actorEnvelope.
+		{"a new spec over an @actor shape reads the actor", "spec actorEnvelope isAdmin {\n  return role == \"admin\"\n}",
+			"return", "spec actorEnvelope isAdmin = actor => actor.role == \"admin\""},
+		{"the @ of a lambda-less @filter", "@filter(payload.done == true)\nautomation onTodo {\n}", "@", "@filter(row => row.done == true)"},
+		// The rewrite keeps the author's line breaks; the card keeps its lines.
+		{"a filter continued over several lines", v1Query + "  filter status == args.owner\n    && isActiveRecord\n}", "filter",
+			"filter row => row.status == args.owner\n           && isActiveRecord(row)"},
+		// notAPredicate is neither a spec nor a trait, so the rewrite refuses
+		// the clause and the card falls back to the table's form.
+		{"a filter the rewrite refuses", v1Query + "  filter status == args.owner && notAPredicate\n}", "filter", "filter row => <predicate>"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			card := hoverFirst(t, s, c.src, c.needle)
+			hoverStyle(t, card)
+			if !strings.Contains(card, "```memql\n"+c.code+"\n```") || !strings.Contains(card, "is retired in edition 2026") {
+				t.Errorf("the card should show %q and the retirement, got:\n%s", c.code, card)
+			}
+		})
+	}
+
+	// The v1 forms, and the same words anywhere else, are not retired.
+	for name, c := range map[string]struct{ src, needle string }{
+		"a lambda filter":          {v1Query + "  filter row => row.status == args.owner\n}", "filter"},
+		"a lambda spec":            {"spec todo isOverdue = row => row.done == false", "spec"},
+		"a lambda @filter":         {"@filter(row => row.done == true)\nautomation onTodo {\n}", "@filter"},
+		"a return in a logic body": {"logic compute {\n  body {\n    return args.a\n  }\n}", "return"},
+		"a filter not yet written": {v1Query + "  filter \n}", "filter"},
+	} {
+		if card := hoverFirst(t, s, c.src, c.needle); strings.Contains(card, "retired") {
+			t.Errorf("%s is not a retired form, got:\n%s", name, card)
+		}
 	}
 }
 

@@ -73,9 +73,9 @@ func TestBootWritesOneRowPerModuleAndAnUnchangedSweepWritesNone(t *testing.T) {
 		if r.NodeId == nodeId {
 			mine++
 			switch r.State {
-			case readiness.Configured, readiness.Partial, readiness.Unconfigured, readiness.NotApplicable:
+			case readiness.Configured, readiness.Partial, readiness.Unconfigured, readiness.NotApplicable, readiness.Unknown:
 			default:
-				t.Errorf("%s: state %q is not one of the four", r.Module, r.State)
+				t.Errorf("%s: state %q is not one of the five", r.Module, r.State)
 			}
 		}
 	}

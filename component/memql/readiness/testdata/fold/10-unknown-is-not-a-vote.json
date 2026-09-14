@@ -1,0 +1,20 @@
+{
+  "name": "unknown is not a vote: excluded from the verdict, listed by node; all-unknown is unreported",
+  "now": "2026-09-13T12:00:00Z",
+  "reports": [
+    {"module": "storage", "nodeId": "bff-a", "nodeType": "bff", "state": "configured", "core": true, "lanes": [], "reportedAt": "2026-09-13T11:58:00Z"},
+    {"module": "storage", "nodeId": "bff-b", "nodeType": "bff", "state": "unknown", "reason": "fleetReadFailed", "core": true, "lanes": [], "reportedAt": "2026-09-13T11:58:00Z"},
+    {"module": "storage", "nodeId": "agent-dead", "nodeType": "agent", "state": "unknown", "reason": "fleetReadFailed", "core": true, "lanes": [], "reportedAt": "2026-09-13T11:58:00Z"},
+    {"module": "email", "nodeId": "bff-a", "nodeType": "bff", "state": "unknown", "reason": "integrationProbeFailed", "core": true, "lanes": [], "reportedAt": "2026-09-13T11:58:00Z"},
+    {"module": "email", "nodeId": "bff-b", "nodeType": "bff", "state": "unknown", "reason": "integrationProbeFailed", "core": true, "lanes": [], "reportedAt": "2026-09-13T11:58:00Z"}
+  ],
+  "nodes": [
+    {"nodeId": "bff-a", "health": "healthy", "lastSeen": "2026-09-13T11:59:40Z"},
+    {"nodeId": "bff-b", "health": "healthy", "lastSeen": "2026-09-13T11:59:40Z"},
+    {"nodeId": "agent-dead", "health": "stopped", "lastSeen": "2026-09-13T11:00:00Z"}
+  ],
+  "expect": [
+    {"module": "email", "state": "unreported", "disagreement": [], "unknown": ["bff-a", "bff-b"]},
+    {"module": "storage", "state": "configured", "disagreement": [], "unknown": ["bff-b"]}
+  ]
+}
