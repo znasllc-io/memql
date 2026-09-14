@@ -65,10 +65,13 @@ func TestForEachStepIDsSurviveUpstreamEdits(t *testing.T) {
 	// Each edit changes the byte count and/or line numbers ABOVE the
 	// loop while leaving the loop itself untouched.
 	for name, edited := range map[string]string{
-		"comment added above":  "// a newly added explanatory comment\n" + forEachFixture,
-		"comment lengthened":   strings.Replace(forEachFixture, "// substantially longer prose than was here before\n@enabled", 1),
+		"comment added above": "// a newly added explanatory comment\n" + forEachFixture,
+		// The anchors were `@enabled` until epic memql#5375 retired it. Any
+		// edit ABOVE the loop serves: the point is that the loop's id must
+		// depend on the loop's own construct and on nothing upstream of it.
+		"comment lengthened":   strings.Replace(forEachFixture, "func (Automation) sweepThings", "// substantially longer prose than was here before\nfunc (Automation) sweepThings", 1),
 		"step renamed above":   strings.Replace(forEachFixture, "q := query", "queryResults := query", 1),
-		"blank lines inserted": strings.Replace(forEachFixture, "\n\n@enabled", 1),
+		"blank lines inserted": strings.Replace(forEachFixture, "func (Automation) sweepThings", "\n\nfunc (Automation) sweepThings", 1),
 	} {
 		got := forEachIDs(t, strings.Replace(edited, "q.result", replacementFor(edited), 1))
 		if len(got) != 1 || got[0] != base[0] {

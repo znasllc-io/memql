@@ -773,7 +773,7 @@ concept order {
   ownerUserId  string  @required
   sku          string
   status       enum("draft", "placed", "shipped")
-}`, ns)
+}`)
 
 	querySrc := fmt.Sprintf(`use %s.concepts.{ order }
 
@@ -830,7 +830,7 @@ mutation order createOrder%s {
 concept order {
   ownerUserId  string  @required
   status       enum("draft", "placed", "shipped")
-}`, ns)
+}`)
 
 	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, "", false)
 	if err == nil {
@@ -892,7 +892,7 @@ func TestConceptRowCount_NarrowedEnumCountsOnlyTheValuesThatStoppedBeingLegal(t 
 concept ticket {
   ownerUserId  string  @required
   status       enum("open", "closed", "archived")
-}`, ns)
+}`)
 	mutationSrc := fmt.Sprintf(`use %s.concepts.{ ticket }
 
 @actor
@@ -927,7 +927,7 @@ mutation ticket createTicket%s {
 concept ticket {
   ownerUserId  string  @required
   status       enum("open", "closed")
-}`, ns)
+}`)
 
 	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, "", false)
 	if err == nil {
