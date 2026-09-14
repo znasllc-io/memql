@@ -41,7 +41,10 @@ epic-2 base:
 | `daa0f0d99` | #5371: memql-10's three load gaps: a `trace` read (CheckBody, `body_unknown_name`), a `config.<key>` outside the allow-list (dslgate `statement-config-key`, `body_config_unknown`, shown by Sense too), and an unknown bare call (dslgate `statement-unknown-call`, `body_call_unknown`) |
 | `2596afda7` | #5371: the two statement-body gates report their coverage (`dslgate.StatementBodiesRead`), and the migrated tree passes them |
 | `6daca7fcc` | #5374: the scenario suites (`test/conformance/scenarios_db_test.go`, `test/conformance/2026/scenarios/<suite>/scenario.json`): decide-and-apply, forge, deployment; 8 scenarios, each live plus dryRun and resume variants over a real database |
-| the commit after `0a419fbad` | #5374: the campaigns suite, a generated event-email automation run under its author, with its redelivery claimed |
+| `c6339c968` | #5374: the campaigns suite, a generated event-email automation run under its author, with its redelivery claimed |
+| `45340627a` | #5371: the body language documented: memql.md's Bodies section, Logic and Automations rewritten; authoring rules 1, 11b, 11c, 13, 14, 15, 17, 18, 21, 21c; the root and component/language CLAUDE.md |
+| `5cdc8ad02` | #5371: G5's refusal says `args.<field>` and names `memqlmigrate --rewrite=bodies` |
+| `d48e527bc` | #3803 (found on the way): the cross-namespace import gate's hint names the declaring file, where it spelled `querys` / `logics` |
 
 The migrated tree passes the two statement-body gates, and the gates read
 all 85 of its bodies (58 automations, 27 logic):
@@ -49,7 +52,8 @@ all 85 of its bodies (58 automations, 27 logic):
 as the gates' coverage.
 
 Verified: the DB-free tree (`go test -count=1 github.com/znasllc-io/memql/...`)
-at `6707f4ad5`; for the load gaps, `component/config`, `component/memql/dslgate`,
+at `d48e527bc`, 200 packages green with `TestArchitectureModelIsNotStale` the
+only failure (below); for the load gaps, `component/config`, `component/memql/dslgate`,
 `component/memql/sense` and `component/language/compiler`, plus the db-gated
 conformance and `component/automations/...` trees and `go test -count=1 . ./scripts/...`.
 Negative controls were run on each new check and restored.
@@ -89,15 +93,29 @@ Negative controls were run on each new check and restored.
 
 ## Next, in order
 
-1. **Take memql-10's flip** when its SHA arrives. Measured on 2026-09-14
-   against `dslv1/flip` at `0fe1bfcdb`: 102 commits past `f03fc3fc3`, 33 files
-   changed on both sides. `git merge-tree --write-tree dslv1/flip epic/dsl-v1-bodies`
-   finds textual conflicts in only 7:
-   - `component/automations/{args_resolution,evaluator,types}.go`
-   - `component/automations/steps/sandbox_registry.go`
-   - `component/emailrules/generate_v1_test.go`
-   - `component/memql/negative_load_test.go`
-   - `test/conformance/2026/README.md`
+1. **Take memql-10's flip** when its SHA arrives. Measured again on
+   2026-09-14 against `dslv1/flip` at `f507402bb`:
+   `git merge-tree --write-tree dslv1/flip epic/dsl-v1-bodies` finds textual
+   conflicts in 9 files. The resolutions, read off the conflict hunks:
+   - `component/automations/types.go`: their flip deletes the `Expressions`
+     dialect field (everything is v1). Take that deletion, keep this branch's
+     `Body`, `Binds`, `Returns`, `Expression`, `Return` and `Block`, and drop
+     "v1 too" from the comments.
+   - `component/automations/args_resolution.go`: theirs is
+     `return validateArgsResolutionV1(a)`. Keep this branch's early `nil` for
+     a statement body above it. At this branch's flip every automation is a
+     statement body, and G2 goes.
+   - `component/automations/steps/sandbox_registry.go`: keep the
+     `fn.LogicBody` -> `RunLogicBody` branch, and reconcile `stepCallArgs`'
+     signature. This branch passes `s.resolveLogicCallArgs`.
+   - `test/conformance/corpus_test.go` (memql-b1's file): keep the `call`
+     hook (`r.c.Call != ""`) on their `corpusParse`.
+   - `component/automations/evaluator.go`,
+     `component/automations/steps/logic_v1_corpus_test.go`,
+     `component/emailrules/generate_v1_test.go`,
+     `component/memql/negative_load_test.go` and
+     `test/conformance/2026/README.md`: read each hunk; neither side's
+     intent is known in advance.
 
    Re-measure when the SHA arrives. The peers merge rather than rebase
    (`Merge branch 'dslv1/eval' into dslv1/flip`), and a merge resolves those
@@ -122,6 +140,14 @@ Negative controls were run on each new check and restored.
      anything once the parser refuses the retired forms. Replace it with the
      parser's refusal, or delete it. The comments in `statement_bodies.go` and
      Sense's `diagnose_body_scope.go` that say "until the flip" change with it.
+   - Docs owed at the flip:
+     - every `mutate <Concept> <name> {` in markdown becomes `mutation` (D13);
+     - `partition="*"` goes from authoring-rules rule 10's sentence, the
+       memql.md example near the Mutations section, and the root CLAUDE.md
+       Automations example with its #56 caveat, because the native parser
+       refuses the kwarg (`trigger_partition_retired`);
+     - component/language/CLAUDE.md's "Until the flip ..." sentence becomes
+       the parser's refusal.
    - Scenarios: they run over the statement bodies from the flip on. The
      runner then refuses the `legacy` entries in
      `scenarios/forge-state-machine/scenario.json`; delete them, and delete
@@ -133,8 +159,21 @@ Negative controls were run on each new check and restored.
    automations. The campaigns suite covers the operational lane (cluster
    roles). The marketing lanes (audience, row address) go through the
    campaigns worker, which the rig does not wire, so no scenario reaches them.
-4. **Tasks 14, 15 and 16:** the gates port, the docs, then ship. Open the PR
-   only after epics 1 and 2 merge, with one `Closes #n` line per issue.
+4. **Task 14, the gates port.** These read body text or the legacy step AST:
+   - `test/dslconformance`: `bootstrap_forwards_every_field`,
+     `agentauthz_stamped_userid`, `callgraph_contract`,
+     `identity_login_form_field_contract`, `conformance`,
+     `no_longhand_single_step` (it runs the terse-automation rewrite; delete
+     it with that rewrite), `local_first_policies`, `server_only_parsed`,
+     `prompt_levels`, `naming_conventions`;
+   - `component/memql/dslgate`: `builtin_step_args.go`,
+     `subautomation_calls.go`, `dslgate.go`.
+
+   Each must still reach a positive over statement bodies.
+5. **Task 15 is done** (`45340627a`) apart from the flip's items above.
+   **Task 16, ship:** the PR body is drafted in the plan (Task 16, "PR body
+   draft"). Open the PR only after epics 1 and 2 merge, with one `Closes #n`
+   line per issue.
 
 ## Facts not in the code
 

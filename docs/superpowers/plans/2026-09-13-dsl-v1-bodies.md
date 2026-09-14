@@ -855,3 +855,64 @@ Rule, as in epic 2: a gate that matched text now walks the parsed `ast.Body`, an
 - [ ] **Step 3:** Delete this plan file and its checkpoint (`2026-09-13-dsl-v1-bodies-checkpoint.md`).
 - [ ] **Step 4:** Push; open the PR (one `Closes #n` line per issue; the behaviour changes listed above; the census of reordered bodies; the frontend note: none, the wire is unchanged); watch CI; enqueue with `gh pr merge <n> --repo znasllc-io/memql` only after epics 1 and 2 have merged.
 - [ ] **Step 5:** After merge: close any issue the merge did not, delete the local branch and the worktree, prune refs.
+
+**PR body draft** (2026-09-14; the census comes from running
+`memqlmigrate --rewrite=expressions,bodies` over copies of the trees; re-measure
+at delivery, and end the body with the Claude Code attribution line):
+
+    ## DSL v1 body language (epic memql#5370)
+
+    A `logic` and an `automation` are written in one body language: statements that run in the order written. Every call is a statement, and every statement is a step the run journals, previews and retries. The tree is migrated in this PR by `memqlmigrate --rewrite=bodies`, and the retired forms are refused at parse, each refusal naming its replacement.
+
+    Closes #5370
+    Closes #5371
+    Closes #5372
+    Closes #5373
+    Closes #5374
+
+    ### What changes for an author
+
+    - Statements: `x := <call>`, `if` / `else`, `for x in xs if c`, `switch`, `parallel { branch ... } [wait any]`, `publish "t" { ... }`, `return`. Trailing clauses: `on surface(...)`, `retry(n)`, `on error continue`.
+    - Names are bound before they are read. A block that runs at most once shares its scope, and a loop body or a parallel branch has its own. `args.x` is the only way to read an argument.
+    - A logic calls queries, mutations, logic and builtins, and ends with `return`. Publishing, calling an automation and dispatching an action are an automation's.
+    - Retired, refused at parse, rewritten by `memqlmigrate --rewrite=bodies`:
+      - `body { }`;
+      - `step` blocks;
+      - the terse `=> logic` header;
+      - `steps.x.result` and `x.result`;
+      - the argument pun;
+      - a bare argument read;
+      - `for item := range`;
+      - the configured parallel;
+      - `publishEvent(...)`;
+      - `partition=` on `@trigger`;
+      - `mutate` as the declaration keyword (now `mutation`, D13).
+
+    ### Behaviour changes
+
+    - `dsl/forge` `recordTransition`: an update that leaves a request's status unchanged is no longer recorded as a transition. The legacy compiler read `transitionEventKind`'s `old == st` as a comparison with the literal text `"st"`. The logic goldens record it as a legacy defect, and the scenario `unchanged-status-records-nothing` shows it on real rows.
+    - `examples/deploypack` `driveDeploymentInProgress` and `recordReconciledState`: four statements used to run before the values they read (undotted references were invisible to the old sort), so they read nothing. They now run after them.
+    - The seven logic bodies that published (`dsl/identity` x4, `dsl/safety` x2, `dsl/data` x1) move into the one automation each was called from. The logic constructs are deleted, and `dsl/data/logic.memql` and `dsl/safety/logic.memql` go with them.
+    - `dsl/workbench` `releaseWorkspaceOnRunTerminal` keeps its old order, `teardown` first, with a comment. The order is now written down where it used to be accidental.
+    - An action statement's value is its capability's result. `x := mutation m(...)` names the written row. A `switch` compares with typed equality, and every switch in the tree compares strings.
+
+    ### Census of the rewrite's comments
+
+    | Tree | Comments | What |
+    |---|---|---|
+    | `dsl/` | 8 | 7 publishing logic inlined into their automations; 1 order kept (workbench teardown) |
+    | `examples/` | 4 | deploypack: statements that ran before what they read now run after it |
+    | `deploy/fleet/dsl` | 0 | |
+
+    ### Verification
+
+    (Fill in at delivery: the plan's Task 16 step 2 matrix, every output read.)
+
+    - Scenario suites, on a real database (`test/conformance/scenarios_db_test.go`): decide-and-apply, forge, deployment and campaigns, each with live, dry-run and resume variants. They ran against the legacy bodies before the flip and against the statement bodies after it.
+    - Logic corpus: every statement body against the goldens.
+    - Automation corpus: 58 automations, 344 runs.
+
+    ### Frontend
+
+    None. The wire is unchanged.
+
