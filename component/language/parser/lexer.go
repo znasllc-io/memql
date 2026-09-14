@@ -68,6 +68,13 @@ const (
 	TokenKeywordHas        // has (containment operator)
 	TokenKeywordNot        // not (negation, used in "not in")
 	TokenKeywordStartsWith // startsWith (string-prefix comparison operator, memql#4208)
+
+	// TokenDotQuestion is `.?`, edition 2026's optional member access
+	// (`row.?lineage.planId`, memql#5364). It is appended rather than grouped
+	// with the punctuation above so no existing token's numeric value moves.
+	// `?.` stays TokenQuestionDot: the two glyph orders are different tokens,
+	// and the legacy grammar still reads the second.
+	TokenDotQuestion
 )
 
 // Token represents a lexical token.
@@ -207,6 +214,8 @@ func (t TokenType) String() string {
 		return "not"
 	case TokenKeywordStartsWith:
 		return "startsWith"
+	case TokenDotQuestion:
+		return "'.?'"
 	default:
 		return fmt.Sprintf("unknown-token(%d)", int(t))
 	}
@@ -440,6 +449,16 @@ func (l *Lexer) NextToken() (Token, error) {
 		// The refusal is narrow by construction. It fires only where `.` STARTS
 		// a token; a numeric segment INSIDE a path (`args.items.0`) is scanned
 		// by scanIdentifier's own dot arm and is untouched.
+		//
+		// `.?` is one token (memql#5364). It needs no arm in scanIdentifier:
+		// that scanner already stops before a `.` that is not followed by an
+		// identifier character, so `row.?a` reaches here as `row`, then `.?`,
+		// then `a`.
+		if l.hasNext() && l.peekNext() == '?' {
+			l.advance()
+			l.advance()
+			return makeToken(TokenDotQuestion, ".?"), nil
+		}
 		if l.hasNext() && isDigit(l.peekNext()) {
 			return Token{}, fmt.Errorf(
 				"a number cannot start with '.' at line %d, column %d: a decimal literal needs a leading digit (write \"0.5\", not \".5\")",

@@ -75,6 +75,12 @@ type Parser struct {
 	// swallow the comparison into the coalesce arm (the JS-loose shape) --
 	// precedence must not depend on the operand's token type.
 	suppressComparisonFold bool
+
+	// v1Depth is how deeply the edition-2026 expression parser (v1_expr.go)
+	// is nested right now. It bounds recursion so a pathological input -- ten
+	// thousand `(` -- is a parse error, not a goroutine stack overflow, which
+	// Go cannot recover and which would take the whole engine down.
+	v1Depth int
 }
 
 // NewParser creates a new parser for the given tokens.
