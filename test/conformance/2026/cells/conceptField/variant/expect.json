@@ -2,7 +2,8 @@
   "cases": [
     {
       "file": "keyword-arguments.memql",
-      "verdict": "load_ok"
+      "verdict": "load_ok",
+      "note": "The discriminator is a SIBLING of the variant field, an enum, required: the engine ties each branch to its value with an if/then on the owning concept (memql#3623). Measured against the concept's schema: {replyVia: \"phone\", replyTo: {address: ...}} is refused, and so is replyVia \"fax\". Declared inside each branch instead, the discriminator names no sibling and the ties never fire: {kind: \"phone\", address: ...} validates as the email branch."
     },
     {
       "file": "with-a-positional-value.memql",

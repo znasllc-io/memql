@@ -106,12 +106,13 @@ var scaffoldAnnotations = map[string]string{
 	"ConceptField/description": `@description("The ticket's one-line summary.")`,
 	"ConceptField/maximum":     `@maximum(100)`,
 	"ConceptField/pattern":     `@pattern("^[a-z][a-z0-9-]*$")`,
+	"ConceptField/variant":     `@variant(discriminator="replyVia")`,
 	"ArgsField/maximum":        `@maximum(5)`,
 	"ArgsField/minimum":        `@minimum(1)`,
 	"ArgsField/pattern":        `@pattern("^[A-Z]{2}$")`,
 	"ToolField/default":        `@default("20")`,
 	"ToolField/description":    `@description("The most tickets to return.")`,
-	"ToolField/enum":           `@enum("newest", "oldest")`,
+	"ToolField/enum":           `@enum("open", "closed")`,
 	"PromptField/default":      `@default("en")`,
 	"PromptField/description":  `@description("The language to answer in.")`,
 	"PromptField/enum":         `@enum("short", "long")`,
@@ -307,12 +308,7 @@ func scaffoldSkeleton(p annotations.Placement, ann string) (fixture, src string,
 	case annotations.Capability:
 		// A verb the Go vocabulary classifies and the embedded catalog does
 		// not declare yet: the catalog refuses a name declared twice.
-		v := map[string][3]string{
-			"description": {"fs.list", "read", "path"},
-			"enabled":     {"fs.exists", "read", "path"},
-			"disabled":    {"fs.glob", "read", "pattern"},
-			"sideEffect":  {"fs.mkdir", "write", "path"},
-		}[p.Name]
+		v := scaffoldCapabilityVerbs[p.Name]
 		verb, class, arg := v[0], v[1], v[2]
 		se := `@sideEffect("` + class + `")` + "\n"
 		if p.Name == "sideEffect" {
@@ -400,16 +396,17 @@ func scaffoldSkeleton(p annotations.Placement, ann string) (fixture, src string,
 		case "fallback":
 			tail = ""
 		}
+		name := "localThenApp"
+		if p.Name == "primary" {
+			name = "strongestLocalOnly" // no fallback: the name says so
+		}
 		return "", scaffoldDoc(p, "The strongest local model first, then any signed-in app.") + head + line + tail +
-			"policy localThenApp" + s + " { }\n", nil
+			"policy " + name + s + " { }\n", nil
 
 	case annotations.Rule:
 		// Every rule a boot loads is ordered against every other of the same
 		// locked-ness, and a tie is a load error: each cell has its own.
-		precedence := map[string]string{
-			"description": "11", "enabled": "12", "disabled": "13", "exclude": "14", "level": "15",
-			"locked": "16", "onUnavailable": "17", "policy": "18", "when": "20",
-		}[p.Name]
+		precedence := scaffoldRulePrecedence[p.Name]
 		head := `@when(tag="background")` + "\n" + `@policy("localFirst")` + "\n" + "@precedence(" + precedence + ")\n"
 		switch p.Name {
 		case "when":
@@ -441,8 +438,12 @@ func scaffoldSkeleton(p annotations.Placement, ann string) (fixture, src string,
 		return "", "use identity.concepts.{ user }\n\n/// A support ticket, owned by the user who raised it.\nconcept ticket {\n  ownerUserId  string\n  title        string\n\n  " + ann + "\n}\n", nil
 
 	case annotations.ConceptField:
-		name, rest := scaffoldConceptField(p.Name, ann)
-		return "", "/// A support ticket.\nconcept ticket {\n" + scaffoldColumns("  ", [][2]string{{"title", "string"}, {"status", "string"}, {name, rest}}) + "}\n", nil
+		doc := "A support ticket."
+		if p.Name == "variant" {
+			doc = "A support ticket, and where to reply: an email address or a phone number, whichever replyVia names."
+		}
+		fields := append([][2]string{{"title", "string"}, {"status", "string"}}, scaffoldConceptField(p.Name, ann)...)
+		return "", "/// " + doc + "\nconcept ticket {\n" + scaffoldColumns("  ", fields) + "}\n", nil
 
 	case annotations.ArgsField:
 		arg, filter := [2]string{"status", "string  " + ann}, "status == args.status"
@@ -461,18 +462,36 @@ func scaffoldSkeleton(p annotations.Placement, ann string) (fixture, src string,
 				"\n  sort \"row.createdAt\", \"desc\"\n  paginate 20\n}\n", nil
 
 	case annotations.ToolField:
+		// A query handler reads a tool field only through a $args.<field>
+		// placeholder, and a function handler receives every field as an
+		// argument, so each skeleton forwards every field its tool declares.
+		// The list handler is the shipped form: an outer paginate() driven
+		// by the caller, over a query that sorts and does not paginate itself
+		// (dsl/memql/tools.memql, searchUsers).
+		fixture := scaffoldTicket + "\n/// The tickets in one status, newest first; every status when none is named.\nquery ticket ticketsToList" + s + " {\n" +
+			scaffoldArgs([2]string{"status", "string"}) + "  filter when(args.status) { status == args.status }\n  sort \"row.createdAt\", \"desc\"\n}\n"
 		field := [2]string{"limit", "integer  " + ann + `  @description("The most tickets to return.")`}
+		handler := "paginate(query ticketsToList" + s + "(), $args.limit)"
 		switch p.Name {
-		case "autoInjected":
-			field = [2]string{"requestedBy", "string  " + ann + `  @description("The agent asking; stamped by the runtime, never by the model.")`}
 		case "description":
 			field = [2]string{"limit", "integer  " + ann}
-		case "enum":
-			field = [2]string{"order", "string  " + ann + `  @description("Which tickets come first.")`}
+		case "enum", "required":
+			field = [2]string{"status", "string  " + ann + `  @description("Which tickets to list.")`}
+			handler = "paginate(query ticketsToList" + s + "(status: $args.status), 20)"
+		case "autoInjected":
+			// The runtime stamps agentId (with ownerUserId and partitionId)
+			// over whatever the model sent; the function handler receives it
+			// as an argument like any other field.
+			fixture = scaffoldTicketWith([2]string{"openedByAgentId", "string"}) + "\n/// Open a ticket, recording which agent opened it.\nmutate ticket openTicket" + s + " {\n" +
+				scaffoldArgs([2]string{"title", "string!"}, [2]string{"agentId", "string"}) +
+				"  insert {\n    title: args.title\n    status: \"open\"\n    openedByAgentId: args.agentId\n  }\n}\n"
+			return fixture, "/// Open a support ticket; the runtime records which agent opened it.\n@handler(type=\"function\", name=\"openTicket" + s + "\")\ntool openSupportTicket" + s + " {\n" +
+				scaffoldColumns("  ", [][2]string{
+					{"title", `string!  @description("The ticket's one-line title.")`},
+					{"agentId", "string   " + ann + `  @description("The agent opening the ticket; stamped by the runtime, never by the model.")`},
+				}) + "}\n", nil
 		}
-		fixture := scaffoldTicket + "\n/// The open tickets, newest first.\nquery ticket ticketsToList" + s +
-			" {\n  filter status == \"open\"\n  sort \"row.createdAt\", \"desc\"\n  paginate 20\n}\n"
-		return fixture, "/// List the open tickets.\n@handler(type=\"query\", query=\"query ticketsToList" + s + "()\")\ntool listTickets" + s +
+		return fixture, "/// List the tickets, newest first.\n@handler(type=\"query\", query=\"" + handler + "\")\ntool listTickets" + s +
 			" {\n" + scaffoldColumns("  ", [][2]string{field}) + "}\n", nil
 
 	case annotations.PromptField:
@@ -573,21 +592,7 @@ func scaffoldAutomation(p annotations.Placement, s, ann string) (string, string,
 // declares a concept of its own and that mutation beside it: a cell an author
 // copies seeds a row, not just a registry entry.
 func scaffoldSeed(p annotations.Placement, line string) (string, string, map[string]string) {
-	type seedCell struct {
-		concept string
-		fields  [][2]string // concept fields beyond the id
-		seed    string
-		body    [][2]string // seed body, field -> literal
-	}
-	c := map[string]seedCell{
-		"description":  {"ticketCategory", [][2]string{{"name", "string!"}}, "billingCategory", [][2]string{{"name", `"Billing"`}}},
-		"enabled":      {"cannedReply", [][2]string{{"text", "string!"}}, "thanksReply", [][2]string{{"text", `"Thanks for reaching out -- we are on it."`}}},
-		"disabled":     {"queueBanner", [][2]string{{"message", "string!"}}, "maintenanceBanner", [][2]string{{"message", `"The queue is paused for maintenance."`}}},
-		"namespace":    {"helpArticle", [][2]string{{"title", "string!"}}, "gettingStarted", [][2]string{{"title", `"Getting started with the support queue"`}}},
-		"scope":        {"personalQueue", [][2]string{{"ownerUserId", "string!"}, {"name", "string!"}}, "myTickets", [][2]string{{"name", `"My tickets"`}}},
-		"templateFile": {"supportAssistant", [][2]string{{"name", "string!"}, {"systemPrompt", "string"}}, "triageAssistant", [][2]string{{"name", `"Triage"`}}},
-		"version":      {"escalationRule", [][2]string{{"name", "string!"}, {"afterHours", "int"}}, "urgentEscalation", [][2]string{{"name", `"Urgent"`}, {"afterHours", "4"}}},
-	}[p.Name]
+	c := scaffoldSeedCells[p.Name]
 	idArg := c.concept + "Id"
 	conceptFields := [][2]string{}
 	for _, f := range c.fields {
@@ -613,30 +618,110 @@ func scaffoldSeed(p annotations.Placement, line string) (string, string, map[str
 	return fixture, scaffoldDoc(p, "") + line + "seed " + c.concept + " " + c.seed + " {\n" + body.String() + "}\n", side
 }
 
-// scaffoldConceptField is a field the annotation means something on, as its
-// name and the rest of its line.
-func scaffoldConceptField(name, ann string) (string, string) {
+// ---- the per-name tables -----------------------------------------------------
+//
+// Three receivers cannot be written from a generic skeleton, because each cell
+// needs something no other cell may share: a capability verb the embedded
+// catalog does not declare yet (the catalog refuses a verb declared twice), a
+// rule precedence no other unlocked rule holds (a tie is a load error), a seed
+// concept of its own (a seed writes through its concept's create<Concept>,
+// found by bare name). A placement these tables do not name is an error in
+// scaffoldCell, naming the table to extend, rather than a skeleton with an
+// empty verb, precedence or concept in it.
+
+// scaffoldCapabilityVerbs is the capability verb, class and argument each
+// capability cell declares.
+var scaffoldCapabilityVerbs = map[string][3]string{
+	"description": {"fs.list", "read", "path"},
+	"enabled":     {"fs.exists", "read", "path"},
+	"disabled":    {"fs.glob", "read", "pattern"},
+	"sideEffect":  {"fs.mkdir", "write", "path"},
+}
+
+// scaffoldRulePrecedence is the precedence each rule cell's rule holds.
+// @precedence's own cell writes the registry's example (60) instead.
+var scaffoldRulePrecedence = map[string]string{
+	"description": "11", "enabled": "12", "disabled": "13", "exclude": "14", "level": "15",
+	"locked": "16", "onUnavailable": "17", "policy": "18", "precedence": "60", "when": "20",
+}
+
+// scaffoldSeedCell is one seed cell's concept and seed.
+type scaffoldSeedCell struct {
+	concept string
+	fields  [][2]string // concept fields beyond the id
+	seed    string
+	body    [][2]string // seed body, field -> literal
+}
+
+// scaffoldSeedCells is the concept and seed each seed cell declares.
+var scaffoldSeedCells = map[string]scaffoldSeedCell{
+	"description":  {"ticketCategory", [][2]string{{"name", "string!"}}, "billingCategory", [][2]string{{"name", `"Billing"`}}},
+	"enabled":      {"cannedReply", [][2]string{{"text", "string!"}}, "thanksReply", [][2]string{{"text", `"Thanks for reaching out -- we are on it."`}}},
+	"disabled":     {"queueBanner", [][2]string{{"message", "string!"}}, "maintenanceBanner", [][2]string{{"message", `"The queue is paused for maintenance."`}}},
+	"namespace":    {"helpArticle", [][2]string{{"title", "string!"}}, "gettingStarted", [][2]string{{"title", `"Getting started with the support queue"`}}},
+	"scope":        {"personalQueue", [][2]string{{"ownerUserId", "string!"}, {"name", "string!"}}, "myTickets", [][2]string{{"name", `"My tickets"`}}},
+	"templateFile": {"supportAssistant", [][2]string{{"name", "string!"}, {"systemPrompt", "string"}}, "triageAssistant", [][2]string{{"name", `"Triage"`}}},
+	"version":      {"escalationRule", [][2]string{{"name", "string!"}, {"afterHours", "int"}}, "urgentEscalation", [][2]string{{"name", `"Urgent"`}, {"afterHours", "4"}}},
+}
+
+// scaffoldUnmapped is the error for a placement one of the per-name tables
+// must name and does not, "" when the placement needs no table or has an
+// entry.
+func scaffoldUnmapped(p annotations.Placement) string {
+	var table string
+	var ok bool
+	switch p.Receiver {
+	case annotations.Capability:
+		_, ok = scaffoldCapabilityVerbs[p.Name]
+		table = "scaffoldCapabilityVerbs (a verb the Go vocabulary classifies and the embedded catalog does not declare)"
+	case annotations.Rule:
+		_, ok = scaffoldRulePrecedence[p.Name]
+		table = "scaffoldRulePrecedence (a precedence no other cell's rule holds)"
+	case annotations.Seed:
+		_, ok = scaffoldSeedCells[p.Name]
+		table = "scaffoldSeedCells (a concept of the cell's own, with its create<Concept>)"
+	default:
+		return ""
+	}
+	if ok {
+		return ""
+	}
+	return fmt.Sprintf("no skeleton for @%s on %s: add an entry for %q to %s", p.Name, p.Receiver.Phrase(), p.Name, table)
+}
+
+// scaffoldConceptField is the field (or fields) the annotation means
+// something on, as name/rest-of-line pairs.
+func scaffoldConceptField(name, ann string) [][2]string {
 	switch name {
 	case "default":
-		return "priority", "string  " + ann
+		return [][2]string{{"priority", "string  " + ann}}
 	case "immutable", "unique":
-		return "ticketNumber", "string  " + ann
+		return [][2]string{{"ticketNumber", "string  " + ann}}
 	case "internal":
-		return "triageScore", "int  " + ann
+		return [][2]string{{"triageScore", "int  " + ann}}
 	case "maximum", "minimum":
-		return "progress", "int  " + ann
+		return [][2]string{{"progress", "int  " + ann}}
 	case "open":
-		return "details", "object  " + ann + " {\n    source  string\n  }"
+		return [][2]string{{"details", "object  " + ann + " {\n    source  string\n  }"}}
 	case "pattern":
-		return "slug", "string  " + ann
+		return [][2]string{{"slug", "string  " + ann}}
 	case "pii":
-		return "reporterEmail", "string  " + ann
+		return [][2]string{{"reporterEmail", "string  " + ann}}
 	case "secret":
-		return "webhookToken", "string  " + ann
+		return [][2]string{{"webhookToken", "string  " + ann}}
 	case "serverSet":
-		return "closedAt", "datetime  " + ann
+		return [][2]string{{"closedAt", "datetime  " + ann}}
 	case "variant":
-		return "channel", "object  " + ann + " {\n    email {\n      kind     string\n      address  string\n    }\n    phone {\n      kind    string\n      number  string\n    }\n  }"
+		// The discriminator is a SIBLING of the variant field, on the object
+		// that owns it: the engine ties each branch to the discriminator's
+		// value with an if/then on the owner (memql#3623), and a discriminator
+		// declared inside the branches names no sibling, so those ifs never
+		// fire. An enum, required, so a value naming no branch is refused too
+		// (dsl/_reference/_concept.memql, section 9).
+		return [][2]string{
+			{"replyVia", `enum("email", "phone")!`},
+			{"replyTo", "object!  " + ann + " {\n    email {\n      address  string!\n    }\n    phone {\n      number  string!\n    }\n  }"},
+		}
 	}
-	return "summary", "string  " + ann
+	return [][2]string{{"summary", "string  " + ann}}
 }

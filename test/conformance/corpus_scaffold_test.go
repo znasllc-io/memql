@@ -20,6 +20,7 @@ package conformance
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -75,6 +76,9 @@ func TestScaffoldCorpusCells(t *testing.T) {
 
 // scaffoldCell renders one placement's cell as file name -> content.
 func scaffoldCell(p annotations.Placement) (map[string]string, error) {
+	if msg := scaffoldUnmapped(p); msg != "" {
+		return nil, errors.New(msg)
+	}
 	mistake := scaffoldMistakeFor(p)
 	ref := annotations.Check(p.Receiver, mistake.use)
 	if ref == nil {
@@ -252,4 +256,27 @@ func upperFirst(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// TestScaffoldRefusesAPlacementItHasNoSkeletonFor: a capability, rule or seed
+// placement the per-name tables do not name is an error naming the placement
+// and the table to extend -- not a skeleton with an empty verb, precedence or
+// concept in it. Runs without -scaffold and writes nothing.
+func TestScaffoldRefusesAPlacementItHasNoSkeletonFor(t *testing.T) {
+	for _, r := range []annotations.Receiver{annotations.Capability, annotations.Rule, annotations.Seed} {
+		p := annotations.Placement{Receiver: r, Name: "zzUnmapped", Forms: annotations.FormFlag, Example: "@zzUnmapped"}
+		files, err := scaffoldCell(p)
+		if err == nil {
+			t.Errorf("%s: scaffoldCell wrote %d file(s) for a placement it has no skeleton for", r, len(files))
+			continue
+		}
+		if !strings.Contains(err.Error(), "@zzUnmapped on "+r.Phrase()) {
+			t.Errorf("%s: the error does not name the placement: %v", r, err)
+		}
+	}
+	for _, p := range annotations.Placements() {
+		if msg := scaffoldUnmapped(p); msg != "" {
+			t.Errorf("a registry placement has no skeleton: %s", msg)
+		}
+	}
 }

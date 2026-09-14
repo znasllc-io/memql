@@ -1,5 +1,5 @@
-/// List the open tickets.
-@handler(type="query", query="query ticketsToListRequired()")
+/// List the tickets, newest first.
+@handler(type="query", query="paginate(query ticketsToListRequired(status: $args.status), 20)")
 tool listTicketsRequired {
-  limit  integer  @required  @description("The most tickets to return.")
+  status  string  @required  @description("Which tickets to list.")
 }

@@ -12,9 +12,11 @@ package conformance
 // authors happened to write, and a rule nobody wrote a case for is a rule the
 // engine may stop keeping without anything turning red.
 //
-// Both read the corpus through the runner's own reader (discoverCorpus), so a
+// Both read the corpus through the runner's own reader (readCorpusDir), so a
 // file the runner refuses is refused here, and a case the gate counts is a
-// case the runner runs.
+// case the runner runs. Each reads ONLY its own subtree -- cells/ for one,
+// expr/ for the other -- so a malformed file elsewhere in the edition (another
+// case group's directory) fails the runner once rather than every gate too.
 
 import (
 	"fmt"
@@ -28,6 +30,7 @@ import (
 	"github.com/znasllc-io/memql/component/language/annotations"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/language/tiers"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // The verdicts a completeness gate counts on each side. A case that lowers or
@@ -53,29 +56,49 @@ func corpusCellDir(p annotations.Placement) string {
 }
 
 // corpusVerdictSides counts, per directory relative to the edition, whether a
-// case that is accepted and a case that is refused exist -- read from the runs
-// the runner itself discovers.
+// case that is accepted and a case that is refused exist.
 type corpusVerdictSides struct{ accepted, refused int }
 
-func corpusSidesByDir(t *testing.T, edition string) map[string]*corpusVerdictSides {
+// corpusSidesUnder reads the case directories under one subtree of the
+// edition (cells, expr) with the runner's reader, and counts each directory's
+// sides. A subtree that does not exist reads as nothing.
+func corpusSidesUnder(t *testing.T, edition, subtree string) map[string]*corpusVerdictSides {
 	t.Helper()
+	root := os.DirFS(".")
+	start := edition + "/" + subtree
+	if _, err := fs.Stat(root, start); err != nil {
+		return nil
+	}
+	vm := readCorpusManifest(t, root, edition)
+	line := dslfs.Manifest{Language: vm.Language, Edition: vm.Edition}
+	domains := map[string]string{}
 	out := map[string]*corpusVerdictSides{}
-	for _, r := range discoverCorpus(t) {
-		if r.edition != edition {
-			continue
+	err := fs.WalkDir(root, start, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return werr
 		}
-		dir := strings.TrimPrefix(r.dir, edition+"/")
-		s := out[dir]
-		if s == nil {
-			s = &corpusVerdictSides{}
-			out[dir] = s
+		if d.IsDir() || path.Base(p) != "expect.json" {
+			return nil
 		}
-		switch {
-		case corpusAcceptingVerdicts[r.c.Verdict]:
-			s.accepted++
-		case corpusRefusingVerdicts[r.c.Verdict]:
-			s.refused++
+		dir := path.Dir(p)
+		for _, r := range readCorpusDir(t, root, edition, dir, line, domains) {
+			rel := strings.TrimPrefix(r.dir, edition+"/")
+			s := out[rel]
+			if s == nil {
+				s = &corpusVerdictSides{}
+				out[rel] = s
+			}
+			switch {
+			case corpusAcceptingVerdicts[r.c.Verdict]:
+				s.accepted++
+			case corpusRefusingVerdicts[r.c.Verdict]:
+				s.refused++
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", start, err)
 	}
 	return out
 }
@@ -100,7 +123,7 @@ func corpusMissingSides(s *corpusVerdictSides) string {
 // placement names. It fails once, listing every gap.
 func TestCorpusCoversEveryRegistryCell(t *testing.T) {
 	edition := langparser.Edition
-	sides := corpusSidesByDir(t, edition)
+	sides := corpusSidesUnder(t, edition, "cells")
 
 	var problems []string
 	want := map[string]bool{}
@@ -183,7 +206,7 @@ func corpusStrayCellEntries(t *testing.T, edition string, receivers, cells map[s
 // function, and each such case is still a case at the position.
 func TestCorpusCoversEveryTierPosition(t *testing.T) {
 	edition := langparser.Edition
-	sides := corpusSidesByDir(t, edition)
+	sides := corpusSidesUnder(t, edition, "expr")
 
 	byPosition := map[string]*corpusVerdictSides{}
 	for dir, s := range sides {

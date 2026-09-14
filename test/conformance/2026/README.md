@@ -32,11 +32,15 @@ directory -- a prompt's or a seed's `@templateFile`, a `namespace.pin` -- is
 mounted beside every case in it under the same name, as it would sit beside a
 domain's `.memql` files.
 
-Each case loads as its own domain, and the load cases share boots, so the
-names a case declares must be unique across the corpus: a bare name two
-domains declare is ambiguous to every lookup by bare name (a tool's handler, an
-automation's step). A cell's constructs carry the annotation's name for that
-reason (`openTicketsCache`, `retitleTicketServerOnly`).
+Each case loads as its own domain, and the load cases share boots. A concept
+is qualified by its domain (`v1:<domain>:ticket`), so a concept's name may
+repeat -- most cells declare a `ticket`. Every other construct is found by its
+bare name somewhere: a tool's handler, an automation's step, a seed's
+`create<Concept>`, the tool the engine registers for every function, the rule
+and policy registries. Those names must be unique across the corpus, because a
+bare name two domains declare is ambiguous to every such lookup. A cell's
+constructs carry the annotation's name for that reason (`openTicketsCache`,
+`retitleTicketServerOnly`).
 
 `cells/query/cache/expect.json`:
 
@@ -93,7 +97,8 @@ here.
 ## The completeness gates
 
 Two gates (`test/conformance/corpus_gates_test.go`) hold the corpus to the
-language, reading it through the runner's own reader:
+language, each reading only its own subtree through the runner's own reader
+(a malformed file elsewhere fails the runner, once):
 
 - `TestCorpusCoversEveryRegistryCell`: every placement in the annotation
   registry has its cell, with a case that loads (`load_ok`, `lower` or
@@ -111,7 +116,9 @@ go test ./test/conformance -run TestScaffoldCorpusCells -scaffold
 
 writes a skeleton for every placement with no cell -- a fixture, the
 placement's accepted form, a form the registry refuses, and the refusal's code
-and opening words. It never touches a cell that exists. A skeleton that loads
+and opening words. It never touches a cell that exists, and a capability, rule
+or seed placement its tables do not name is an error naming the table to
+extend rather than a skeleton with a hole in it. A skeleton that loads
 is not yet a case: read what it wrote as an author would, and give the cell
 the refusals that show what the annotation means as well as how it is spelled.
 

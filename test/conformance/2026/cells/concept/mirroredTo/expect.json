@@ -2,7 +2,8 @@
   "cases": [
     {
       "file": "a-string.memql",
-      "verdict": "load_ok"
+      "verdict": "load_ok",
+      "note": "Not evidence that the connector name is checked: this test binary links no integrations package, so no connector is declared and the boot check warns instead of refusing (component/memql/origin_boot_check.go). Every node binary serves shopify (app/plugins_core.go), where the same line is checked and resolves."
     },
     {
       "file": "with-an-unquoted-value.memql",

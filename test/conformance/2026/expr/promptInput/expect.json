@@ -2,13 +2,14 @@
   "cases": [
     {
       "file": "declared-inputs.memql",
-      "verdict": "load_ok"
+      "verdict": "load_ok",
+      "note": "The position (tiers.PositionPromptInput: a value bound into a prompt's input) has no MemQL expression to seed today: no shipped construct binds a prompt input from DSL, and ai(...) written in a logic body loads but fails when it runs (\"ai() cannot be evaluated in this context; use it only in projection expressions\"), so it cannot be a case an author copies. The template's load gate -- every variable a prompt's template reads is declared (E6 of the record, kept by D7) -- is where a prompt's input meets its values today, and stands in for the position. dsl-v1-expressions replaces these seeds when the position gets its per-node-kind entries."
     },
     {
       "file": "an-undeclared-input.memql",
       "verdict": "refuse_load",
       "message": "template reads 1 undeclared input(s): priority",
-      "note": "A prompt's input is bound into its template (E6 of the record: prose with holes, kept as a template language), and the template's load gate is that every variable it reads is declared. The input schema refuses anything undeclared before the template renders, so the hole could never be filled."
+      "note": "The input schema refuses a key it does not declare before the template renders, so a hole the prompt does not declare could never be filled."
     }
   ]
 }

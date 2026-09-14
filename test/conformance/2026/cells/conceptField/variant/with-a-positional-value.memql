@@ -1,15 +1,14 @@
-/// A support ticket.
+/// A support ticket, and where to reply: an email address or a phone number, whichever replyVia names.
 concept ticket {
-  title    string
-  status   string
-  channel  object  @variant("kind") {
+  title     string
+  status    string
+  replyVia  enum("email", "phone")!
+  replyTo   object!  @variant("replyVia") {
     email {
-      kind     string
-      address  string
+      address  string!
     }
     phone {
-      kind    string
-      number  string
+      number  string!
     }
   }
 }

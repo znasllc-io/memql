@@ -5,9 +5,11 @@ concept ticket {
   status       string
 }
 
-/// The open tickets, newest first.
+/// The tickets in one status, newest first; every status when none is named.
 query ticket ticketsToListEnum {
-  filter status == "open"
+  args {
+    status  string
+  }
+  filter when(args.status) { status == args.status }
   sort "row.createdAt", "desc"
-  paginate 20
 }
