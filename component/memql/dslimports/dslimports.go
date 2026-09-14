@@ -19,6 +19,7 @@ import (
 	languageCompiler "github.com/znasllc-io/memql/component/language/compiler"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/dslfs"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // Compile-time guarantee that the ast alias still exists.
@@ -91,7 +92,34 @@ func Load(root fs.FS) (*Tree, error) {
 	var diagnostics []error
 	rawByFile := make(map[string][]dslfs.RawImport, len(paths))
 
+	// Each file is parsed through the front end of the edition its domain
+	// declares (memql#5358), exactly as the engine reads it at boot, so a
+	// tree written in another edition lints as it loads.
+	//
+	// A domain whose language line the engine refuses refuses boot, so Load
+	// reports it: one LanguageLineError per problem the resolver found,
+	// carrying the resolver's message and code. A caller that runs Load alone
+	// -- memql-cockpit's `memql lint` -- would otherwise be told a tree that
+	// refuses boot is clean. (memqllint also runs the engine-parity pass,
+	// which reports the same refusal, and prints it once.)
+	//
+	// The refused domain is read by no loader at boot, so it is not parsed
+	// here either: its files enter the tree OPAQUE -- present, importing
+	// nothing, defining nothing, marked ImportsOnly -- with no diagnostic of
+	// their own. An importer in another domain still resolves the module
+	// rather than cascading a "does not exist" off a file that is merely
+	// unread.
+	lines, lineProblems := languageParser.ResolveLanguageLines(root, memqldsl.EmbeddedTree{})
+	for _, p := range lineProblems {
+		diagnostics = append(diagnostics, &LanguageLineError{Problem: p})
+	}
+
 	for _, p := range paths {
+		if line, ok := lines.For(p); ok && line.Refused {
+			tree.Files[p] = &languageAst.File{Path: p}
+			tree.ImportsOnly[p] = true
+			continue
+		}
 		f, openErr := root.Open(p)
 		if openErr != nil {
 			diagnostics = append(diagnostics, fmt.Errorf("%s: open: %w", p, openErr))
@@ -102,6 +130,22 @@ func Load(root fs.FS) (*Tree, error) {
 		if readErr != nil {
 			diagnostics = append(diagnostics, fmt.Errorf("%s: read: %w", p, readErr))
 			continue
+		}
+		content, prepErr := lines.Prepare(p, content)
+		if prepErr != nil {
+			diagnostics = append(diagnostics, fmt.Errorf("%s: %w", p, prepErr))
+			continue
+		}
+
+		// A top-level statement no construct keyword opens -- a typo'd
+		// `qurey`, the retired `import ( ... )` block, which the parser
+		// still reads -- loads as nothing, and boot refuses it (the
+		// construct-keyword gate, dslgate). Load runs the same check over
+		// the same text, so a caller that runs Load alone (memql-cockpit's
+		// `memql lint`) sees what boot refuses.
+		unknown := languageParser.FindUnknownConstructKeywords(string(content))
+		for _, u := range unknown {
+			diagnostics = append(diagnostics, &ConstructKeywordError{File: p, Refusal: u})
 		}
 
 		// Run the full rewriter chain (struct-form spec / trait /
@@ -139,15 +183,22 @@ func Load(root fs.FS) (*Tree, error) {
 			// can name a bad file's importers; without that, a single
 			// malformed file would mask import errors in unrelated
 			// files.
+			//
+			// The parser raises the construct-keyword refusal too, for the
+			// first such statement it meets; that copy is the one above
+			// again, so it is not reported twice.
 			treatAsDedicatedParserFile := errors.Is(parseErr, languageParser.ErrEmptyInput)
+			echo := refusedAbove(parseErr, unknown)
 
 			importsOnly, importsErr := languageParser.ExtractImports(string(content))
 			if importsErr != nil {
-				diagnostics = append(diagnostics, fmt.Errorf("%s: parse: %w", p, parseErr))
+				if !echo {
+					diagnostics = append(diagnostics, &FileParseError{File: p, Err: parseErr})
+				}
 				continue
 			}
-			if !treatAsDedicatedParserFile {
-				diagnostics = append(diagnostics, fmt.Errorf("%s: parse: %w", p, parseErr))
+			if !treatAsDedicatedParserFile && !echo {
+				diagnostics = append(diagnostics, &FileParseError{File: p, Err: parseErr})
 			}
 			importsOnly.Path = p
 			tree.Files[p] = importsOnly
@@ -215,6 +266,64 @@ func Load(root fs.FS) (*Tree, error) {
 	}
 	return tree, nil
 }
+
+// LanguageLineError is one refusal of a domain's language line
+// (memql#5357): the domain declares none, a malformed one, one newer or
+// older than this engine speaks, or an edition it has no front end for. Its
+// text is the resolver's message, which names the file to fix and ends with
+// the stable code ("[language_line_missing]"); Problem carries the domain,
+// the file and the code for a caller that wants them without reading text.
+type LanguageLineError struct {
+	Problem languageParser.LanguageLineProblem
+}
+
+func (e *LanguageLineError) Error() string { return e.Problem.Message }
+
+// ConstructKeywordError is one top-level statement of a file opened by a word
+// no construct is spelled with (parser.FindUnknownConstructKeywords), which
+// boot refuses. Its text names the file and the statement's line, then the
+// refusal, which ends with its code ("[construct_unknown]").
+type ConstructKeywordError struct {
+	File    string
+	Refusal languageParser.UnknownConstructKeyword
+}
+
+func (e *ConstructKeywordError) Error() string {
+	return fmt.Sprintf("%s: line %d: %s", e.File, e.Refusal.Line, e.Refusal.Message)
+}
+
+// Unwrap exposes the refusal for errors.As.
+func (e *ConstructKeywordError) Unwrap() error { return &e.Refusal }
+
+// refusedAbove reports whether parseErr is the parser's copy of one of the
+// file's construct-keyword refusals: the same word, refused on the same line.
+func refusedAbove(parseErr error, unknown []languageParser.UnknownConstructKeyword) bool {
+	var u *languageParser.UnknownConstructKeyword
+	if !errors.As(parseErr, &u) {
+		return false
+	}
+	for _, k := range unknown {
+		if k.Keyword == u.Keyword && k.Line == u.Line {
+			return true
+		}
+	}
+	return false
+}
+
+// FileParseError is one file of the tree the parser refused. Its text is the
+// one Load has always printed ("<file>: parse: <the parser's error>"), whose
+// position is the file's own line (compiler.ParseFileSource); the type lets a
+// caller read the file, and reach the parser's own error and its cause,
+// without taking the text apart.
+type FileParseError struct {
+	File string
+	Err  error
+}
+
+func (e *FileParseError) Error() string { return e.File + ": parse: " + e.Err.Error() }
+
+// Unwrap exposes the parser's error for errors.Is / errors.As.
+func (e *FileParseError) Unwrap() error { return e.Err }
 
 // LoadError aggregates every per-file diagnostic from a single Load
 // pass. The validator CLI prints these to the user; the engine

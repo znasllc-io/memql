@@ -86,8 +86,7 @@ func parseLogicBody(t *testing.T, src string) *languageParser.AutomationDef {
 // its own `_return` step on the output side) and the steps must
 // arrive in topological dependency order.
 func TestLogicRunner_CompilesMultiStepBody(t *testing.T) {
-	src := `@useQuery(queryFoo, queryBar)
-@description("test")
+	src := `@description("test")
 logic doStuff {
   args {
     partitionId  string  @required
@@ -153,9 +152,7 @@ logic doStuff {
 // string. The runner's step loop evaluates the condition before
 // dispatching, mirroring the automation executor's behaviour.
 func TestLogicRunner_HandlesConditionalSteps(t *testing.T) {
-	src := `@useQuery(queryThing)
-@useMutation(mutationCreateThing)
-@description("test")
+	src := `@description("test")
 logic provisionThing {
   args {
     name  string  @required
@@ -314,9 +311,7 @@ func TestLogicRunner_EventBindingSeededWhenAbsent(t *testing.T) {
 // have received it and the value was dropped. This fixture is about the
 // _return step, so the argument name only has to be a legal one.
 func TestLogicRunner_PreservesReturnStep(t *testing.T) {
-	src := `@useQuery(queryFoo)
-@useMutation(mutationBar)
-@description("repro")
+	src := `@description("repro")
 logic logicSweep {
   args {
     asOf string @required

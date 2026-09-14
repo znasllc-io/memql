@@ -1,0 +1,17 @@
+{
+  "cases": [
+    {
+      "file": "row-namespace.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "payload-field.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "bare-intrinsic.memql",
+      "verdict": "refuse_load",
+      "message": "sort key names the row intrinsic \"createdAt\" bare -- write \"row.createdAt\""
+    }
+  ]
+}

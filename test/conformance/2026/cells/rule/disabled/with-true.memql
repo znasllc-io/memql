@@ -1,0 +1,6 @@
+/// Background calls resolve through the local-first chain. Switched off: not loaded while @disabled stays.
+@when(tag="background")
+@policy("localFirst")
+@precedence(13)
+@disabled(true)
+rule backgroundLocalDisabled { }

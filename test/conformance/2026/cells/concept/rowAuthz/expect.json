@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {
+      "file": "keyword-arguments.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_form",
+      "message": "@rowAuthz on a concept takes keyword arguments"
+    },
+    {
+      "file": "a-misspelled-key.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_key",
+      "message": "@rowAuthz on a concept has no key ownr -- did you mean owner?"
+    },
+    {
+      "file": "a-flag-given-a-value.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_key",
+      "message": "@rowAuthz on a concept: clusterOwner is a flag and takes no value -- write it bare (clusterOwner)"
+    }
+  ]
+}

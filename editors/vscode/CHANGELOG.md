@@ -3,6 +3,34 @@
 The Marketplace renders this file on the extension's page, so it is written for
 someone deciding whether to install rather than for someone reading the repo.
 
+## 0.4.0
+
+**The MemQL it speaks, and the cluster's**
+- This release speaks MemQL edition 2026, grammar
+  `2026.09-dsl-v1-foundations-7c878a05`: its
+  highlighting, completion and diagnostics are that grammar's.
+- When you connect to a cluster, the extension compares the cluster's MemQL
+  with its own. A cluster on a newer grammar raises a notice naming the release
+  of this extension to install, with a button that opens it in the Extensions
+  view. A cluster on an older grammar raises a notice that completion may offer
+  forms the cluster refuses until the cluster is updated. Each cluster is
+  mentioned once per grammar in a session, and the details are in the MemQL
+  Connection output channel.
+- A cluster whose engine predates the comparison does not report its MemQL, and
+  the extension says nothing about it.
+
+**Writing MemQL**
+- **The language line.** Each domain declares the language it is written in, in
+  a `memql.toml` beside its `.memql` files. A domain without one is flagged on
+  its files with a quick fix that writes it. Until then the workspace does not
+  load: hover is off, and completion offers keywords, annotations and snippets
+  but no loaded concepts, fields or functions. A notification says why.
+- **The parse-time refusals.** Annotations are checked as you type against one
+  registry of where each may be written and with what arguments. A misplaced,
+  mis-argued or retired annotation is an error that names the fix.
+- Closing a file now clears its diagnostics, because the language server
+  analyzes open files only.
+
 ## 0.3.1
 
 First published release. The extension has been built and installed from source

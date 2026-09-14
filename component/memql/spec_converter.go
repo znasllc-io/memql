@@ -2,31 +2,23 @@ package memql
 
 // spec_converter.go bridges the langparser's *ast.SpecDecl AST node
 // (introduced by memql#334 / sub-epic #329 / #310 Stage 1C) to the
-// memql package's *Spec registry type. The hand-rolled parseSpecMemQL
-// (spec_parser.go) is unreferenced from production after this child
-// lands but kept for its tests until sub-epic #329's cleanup PR.
+// memql package's *Spec registry type. The hand-rolled spec parser it
+// replaced was deleted with memql#5359, which made the annotation registry
+// the one list of what a spec takes.
 //
-// Semantics mirror parseSpecMemQL one-for-one, except the annotation
-// surface now derives from the single source of truth in
-// component/language/annotations (the same registry the function
-// load-gate + editor derive from) so the converter, the load gate, and
-// the editor can never drift (#1031):
+// Semantics mirror the retired hand-rolled parser one-for-one, except the
+// annotation surface: which annotations a spec or trait takes is decided at parse time
+// by the annotation registry (component/language/annotations, memql#5359),
+// which also carries the migration hints for the retired @shape, @row,
+// @actor and @use* forms. The converter reads what the legal ones mean:
 //
-//   * Annotation surface: specs + traits accept @description (carries a
-//     value), @shape (optionally pins the shape the predicate reads -- a
-//     no-op, since the eval strategy is derived from the body's field
-//     references, not the pin), and @enabled / @disabled (author-surface
-//     lifecycle no-ops -- the engine controls spec lifecycle). Anything
-//     else is a hard error so a typo'd or stale annotation surfaces
-//     instead of the construct being silently dropped at load. The
-//     retired @useConcept / @useShape annotations keep an explicit
-//     migration hint (sub-epic #301 retired them; specs + traits now
-//     bind their concept context via the file-top `use ...` import).
+//   * Annotations: @description (carries a value) and @enabled / @disabled
+//     (author-surface lifecycle; @disabled skips registration).
 //   * Body conversion: NewASTConverter().ConvertExpression on the
 //     pre-parsed ast.ExpressionNode -> normalizeSpecCallsToReferences
 //     -> ensureBooleanExpression -> classifySpecKind.
 //   * Spec.ExprSource is set to canonicalExpression(engineExpr) --
-//     parseSpecMemQL captured the raw author body; the canonical
+//     the hand-rolled parser captured the raw author body; the canonical
 //     form serves the only downstream consumer (Spec.clone) without
 //     introducing a source-string capture pass on the langparser side.
 
@@ -34,13 +26,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/znasllc-io/memql/component/language/annotations"
 	"github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // specDeclToSpec converts a langparser SpecDecl into the engine's
-// *Spec registry type. Returns an error matching parseSpecMemQL's
+// *Spec registry type. Returns an error matching the retired parser's
 // surface so the loader's diagnostic messages stay identical across
 // the migration.
 func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error) {
@@ -56,29 +47,9 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 		kindLabel = "trait"
 	}
 
-	// The accepted annotation surface for specs + traits is the single
-	// physical registry (component/language/annotations): description /
-	// enabled / disabled. The @shape pin is removed (epic #2281, Story 5)
-	// -- the binding moved to the signature -- and @row / @actor are
-	// shape-only ambient gateways (Story 4); a spec/trait carrying them is
-	// rejected with a migration hint.
-	allowed := annotations.Set("Spec")
-
 	var description string
 	var disabled bool
 	for _, attr := range decl.Attributes {
-		switch attr.Name {
-		case "useConcept", "useShape":
-			// Retired @use* family (#301) keeps an explicit migration hint.
-			return nil, fmt.Errorf("%s: @%s is retired (#301) -- bind via file-top `use <namespace>.{ %s }` imports", origin, attr.Name, decl.Name)
-		case "shape":
-			return nil, fmt.Errorf("%s: @shape is removed (epic #2281) -- a spec binds its shape/concept in the signature: `spec <boundName> %s { return <bool> }` (boundName resolves via the file-top `use` import)", origin, decl.Name)
-		case "row", "actor":
-			return nil, fmt.Errorf("%s: @%s is a shape-only marker (epic #2281) -- a %s may not carry it. To predicate on %s data, bind a @%s shape in the signature and read its projected key by bare name", origin, attr.Name, kindLabel, ambientWord(attr.Name), attr.Name)
-		}
-		if !allowed[attr.Name] {
-			return nil, fmt.Errorf("%s: unknown %s annotation @%s (supported: %s)", origin, kindLabel, attr.Name, strings.Join(annotations.ByReceiver["Spec"], " / "))
-		}
 		switch attr.Name {
 		case "description":
 			val, ok := attr.Value.(string)
@@ -148,15 +119,6 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 		BoundName:   decl.BoundName,
 		IsTrait:     decl.IsTrait,
 	}, nil
-}
-
-// ambientWord maps the shape-kind marker to the ambient surface it
-// unlocks, for the spec-carries-@row/@actor migration message.
-func ambientWord(marker string) string {
-	if marker == "actor" {
-		return "caller / auth-envelope"
-	}
-	return "row-metadata"
 }
 
 // rejectPrefixedSpecFields walks the spec/trait body and rejects any

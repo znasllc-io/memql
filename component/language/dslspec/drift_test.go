@@ -9,14 +9,15 @@ package dslspec
 // grammar (the parser's top-level dispatch + the struct-form rewriter)
 // or the annotations registry moves ahead of the spec.
 //
-// A _test.go file may import component/language/parser and
-// component/language/annotations without a production import cycle:
-// dslspec's PRODUCTION code imports only annotations (a leaf), and the
-// parser does NOT import dslspec. The exported parser vars
-// (parser.TopLevelDeclKeywords, parser.StructFormKeywords) are the
-// authoritative, introspectable lists the live switch/rewriter
-// reference -- this test compares the spec against THEM, not against a
-// hand-copied literal.
+// dslspec imports component/language/parser and
+// component/language/annotations without an import cycle: the parser does
+// NOT import dslspec. Since memql#5359 the construct set, the body clauses
+// and the clause keywords are DERIVED from the parser's exported tables
+// (parser.ConstructKeywords -- itself parser.TopLevelDeclKeywords,
+// parser.StructFormKeywords and `use` -- and parser.BodyClauses), so this
+// test pins the hand-authored remainder -- constructCatalog, clauseDocs,
+// the next-rules -- to those tables, and asserts the derived projections
+// against them by name.
 //
 // Each assertion names the exact drifted symbol so a future failure is
 // self-explaining ("add X to dslspec constructs()" / "remove Y").
@@ -34,7 +35,9 @@ import (
 // author-facing construct in dslspec but is handled by the parser
 // BEFORE parseDefinition (so it is not in TopLevelDeclKeywords) and is
 // not a struct-form rewrite stage (so it is not in StructFormKeywords).
-// The drift test adds it explicitly to the expected union.
+// The drift test adds it explicitly to the expected union, which it builds
+// on its own rather than reading parser.ConstructKeywords, the table
+// dslspec's construct set comes from.
 const useImportKeyword = "use"
 
 // specConstructKeywords returns the set of construct keywords dslspec
@@ -98,6 +101,182 @@ func TestConstructsMatchParserGrammar(t *testing.T) {
 	}
 }
 
+// TestConstructCatalogCoversTheParserExactly: the construct SET is derived
+// from the parser, so what can drift is the hand-authored catalog beside it.
+// Every keyword the parser recognises must have an entry with a doc and a
+// category, and the catalog may not describe a keyword the parser has
+// dropped.
+func TestConstructCatalogCoversTheParserExactly(t *testing.T) {
+	parserSet := map[string]bool{useImportKeyword: true}
+	for _, kw := range parser.StructFormKeywords {
+		parserSet[kw] = true
+	}
+	for _, kw := range parser.TopLevelDeclKeywords {
+		parserSet[kw] = true
+	}
+	catalog := map[string]Construct{}
+	for _, c := range constructCatalog() {
+		if _, dup := catalog[c.Keyword]; dup {
+			t.Errorf("constructCatalog lists %q twice", c.Keyword)
+		}
+		catalog[c.Keyword] = c
+	}
+	for kw := range parserSet {
+		c, ok := catalog[kw]
+		if !ok || c.Doc == "" || c.Category == "" {
+			t.Errorf("DRIFT: the parser recognises construct %q but constructCatalog "+
+				"(component/language/dslspec/constructs.go) has no entry with a doc and a category for it", kw)
+		}
+	}
+	for kw := range catalog {
+		if !parserSet[kw] {
+			t.Errorf("DRIFT: constructCatalog describes %q, which no parser surface recognises -- delete the entry", kw)
+		}
+	}
+}
+
+// TestBodyBlocksCarryTheFactsTheHandListGotWrong (memql#5359): BodyBlocks is
+// projected from parser.BodyClauses, and the parser's own tests pin that table
+// to the switch each body parser dispatches on and to what the parsers accept
+// and refuse (component/language/parser/body_clauses_test.go). What is checked
+// HERE is the published spec: the facts the hand list it replaced got wrong,
+// derived by hand rather than read back from the table the spec was built
+// from.
+func TestBodyBlocksCarryTheFactsTheHandListGotWrong(t *testing.T) {
+	has := func(kw, clause string) bool {
+		for _, b := range Build().ConstructByKeyword(kw).BodyBlocks {
+			if b == clause {
+				return true
+			}
+		}
+		return false
+	}
+	if has("automation", "body") {
+		t.Error("an automation has no body block -- its body is step blocks (emitAutomation refuses `body { }`)")
+	}
+	for _, clause := range []string{"args", "step", "precondition"} {
+		if !has("automation", clause) {
+			t.Errorf("automation BodyBlocks lack %q", clause)
+		}
+	}
+	for _, clause := range []string{"sort", "paginate", "asOf", "count"} {
+		if !has("query", clause) {
+			t.Errorf("query BodyBlocks lack %q", clause)
+		}
+	}
+	for _, clause := range []string{"accept", "stamp"} {
+		if !has("mutate", clause) {
+			t.Errorf("mutate BodyBlocks lack %q", clause)
+		}
+	}
+}
+
+// TestClauseKeywordsMatchTheParserClauseTables: the lexicon's clause keywords
+// are exactly the clauses some construct body accepts, each with a doc, and
+// clauseDocs describes nothing else.
+func TestClauseKeywordsMatchTheParserClauseTables(t *testing.T) {
+	want := map[string]bool{}
+	for _, c := range constructs() {
+		for _, clause := range c.BodyBlocks {
+			want[clause] = true
+		}
+	}
+	got := map[string]bool{}
+	for _, k := range keywords() {
+		if k.Kind != "clause" {
+			continue
+		}
+		got[k.Name] = true
+		if k.Doc == "" {
+			t.Errorf("clause keyword %q has no doc -- add it to clauseDocs (lexicon.go)", k.Name)
+		}
+	}
+	if !sameStringSet(got, want) {
+		t.Errorf("DRIFT: clause keywords = %s, the parser's clause tables name %s", sortedKeys(got), sortedKeys(want))
+	}
+	for clause := range clauseDocs {
+		if !want[clause] {
+			t.Errorf("clauseDocs documents %q, which no construct body accepts", clause)
+		}
+	}
+}
+
+// TestFieldAnnotationsFollowTheFieldLists: every field receiver the registry
+// has is reached by at least one construct, and each construct's
+// FieldAnnotations is the field list its body actually has -- facts derived
+// by hand: a concept's fields take @pii, a tool's @autoInjected, a prompt's
+// @default, a builtin's exactly @description and @required, and every
+// construct with an args block its args-field set; a construct with no field
+// list has none.
+func TestFieldAnnotationsFollowTheFieldLists(t *testing.T) {
+	reached := map[annotations.Receiver]bool{}
+	for _, c := range constructs() {
+		if r := fieldReceiverFor(c); r != "" {
+			reached[r] = true
+		}
+	}
+	for _, r := range []annotations.Receiver{annotations.ConceptField, annotations.ArgsField, annotations.ToolField, annotations.PromptField, annotations.BuiltinField} {
+		if !reached[r] {
+			t.Errorf("field receiver %s is reached by no construct", r)
+		}
+	}
+	spec := Build()
+	carries := func(kw, name string) bool {
+		c := spec.ConstructByKeyword(kw)
+		if c == nil {
+			return false
+		}
+		for _, a := range c.FieldAnnotations {
+			if a == name {
+				return true
+			}
+		}
+		return false
+	}
+	for kw, name := range map[string]string{
+		"concept": "pii", "tool": "autoInjected", "prompt": "default",
+		"query": "maxLength", "mutate": "required", "logic": "enum", "automation": "pattern",
+		"action": "minimum", "capability": "maximum",
+	} {
+		if !carries(kw, name) {
+			t.Errorf("%s fields take @%s, but FieldAnnotations lacks it", kw, name)
+		}
+	}
+	if got := strings.Join(spec.ConstructByKeyword("builtin").FieldAnnotations, ","); got != "description,required" {
+		t.Errorf("builtin FieldAnnotations = [%s], want [description,required]", got)
+	}
+	for _, kw := range []string{"shape", "spec", "trait", "policy", "rule", "seed", "provider", "use"} {
+		if c := spec.ConstructByKeyword(kw); c != nil && len(c.FieldAnnotations) != 0 {
+			t.Errorf("%s has no field list, but FieldAnnotations = %v", kw, c.FieldAnnotations)
+		}
+	}
+}
+
+// TestTopLevelNextRuleNamesEveryConstruct: the top-level rule's keyword list
+// is derived from the construct set; the hand list it replaced never offered
+// `rule`.
+func TestTopLevelNextRuleNamesEveryConstruct(t *testing.T) {
+	var doc string
+	for _, r := range nextRules() {
+		if r.Context == "topLevel" {
+			doc = r.Doc
+		}
+	}
+	if doc == "" {
+		t.Fatal("no topLevel next-rule")
+	}
+	for _, c := range constructs() {
+		if !strings.Contains(doc, c.Keyword) {
+			t.Errorf("the topLevel next-rule does not name construct %q: %s", c.Keyword, doc)
+		}
+	}
+	for _, r := range nextRules() {
+		if r.Context == "inFilterClause" && strings.Contains(r.Doc, "/ !") {
+			t.Errorf("the inFilterClause rule offers `!` as a filter joiner; the filter grammar refuses it: %s", r.Doc)
+		}
+	}
+}
+
 // TestStructFormConstructsAreFunctionCategory asserts the rewriter's
 // recognised keywords are exactly the constructs dslspec buckets as
 // CategoryFunction. This pins the categorisation: a construct the
@@ -130,18 +309,41 @@ func TestStructFormConstructsAreFunctionCategory(t *testing.T) {
 	}
 }
 
+// receiverKeyToConstructKeywords maps an annotations-registry receiver key to
+// the author-facing construct keyword(s) it governs, derived from
+// constructs(): a construct receiver governs the constructs naming it as
+// their AnnotationReceiver (the "Spec" receiver backs both `spec` and
+// `trait`); a field receiver governs the constructs whose field list it
+// checks; ConceptBody governs the concept. A key no construct names, and no
+// construct's field list is checked by, maps to nothing. Only this test
+// needs the mapping, so it lives here rather than in the spec.
+func receiverKeyToConstructKeywords(receiverKey string) []string {
+	set := map[string]bool{}
+	if receiverKey == string(annotations.ConceptBody) {
+		set["concept"] = true
+	}
+	for _, c := range constructs() {
+		if c.AnnotationReceiver == receiverKey && receiverKey != "" {
+			set[c.Keyword] = true
+		}
+		if string(fieldReceiverFor(c)) == receiverKey && receiverKey != "" {
+			set[c.Keyword] = true
+		}
+	}
+	return sortedSet(set)
+}
+
 // TestAnnotationsProjectRegistryFromRegistrySide asserts -- from the
 // REGISTRY side (#2124 assertion 2) -- that dslspec's Annotations is an
 // exact projection of annotations.ByReceiver + annotations.Docs:
 //
 //   - every annotation name in the registry appears exactly once in the
 //     spec, with its registry doc,
-//   - every receiver key in the registry maps (via
-//     receiverKeyToConstructKeywords) to at least one REAL construct
-//     keyword dslspec declares,
-//   - and -- the new-receiver guard -- no receiver key falls through
-//     receiverKeyToConstructKeywords' default branch (which would surface
-//     the raw key as a fake "construct").
+//   - and -- the new-receiver guard -- every receiver key in the registry
+//     maps (receiverKeyToConstructKeywords, above) to at least one REAL
+//     construct keyword dslspec declares. The mapping reads constructs(),
+//     so a receiver key no construct names and no construct's field list
+//     is checked by maps to nothing, and fails here by name.
 //
 // The spec_test.go side already checks the projection from the spec
 // side; this checks it from the registry side and additionally fails on
@@ -151,22 +353,23 @@ func TestAnnotationsProjectRegistryFromRegistrySide(t *testing.T) {
 
 	// New-receiver guard: every registry receiver key must map to
 	// construct keywords dslspec actually declares. A new key added to
-	// annotations.ByReceiver that receiverKeyToConstructKeywords does not
-	// handle falls through to its default branch (returns the raw key),
-	// which is NOT a construct keyword -- caught here.
+	// annotations.ByReceiver that no construct names as its
+	// AnnotationReceiver, and that fieldReceiverFor gives to no construct,
+	// maps to nothing -- caught here.
 	for receiverKey := range annotations.ByReceiver {
 		mapped := receiverKeyToConstructKeywords(receiverKey)
 		if len(mapped) == 0 {
-			t.Errorf("DRIFT: annotations.ByReceiver receiver key %q maps to no construct keywords", receiverKey)
+			t.Errorf("DRIFT: annotations.ByReceiver receiver key %q maps to no construct keywords -- "+
+				"name it as a construct's AnnotationReceiver, or give fieldReceiverFor "+
+				"(component/language/dslspec/constructs.go) the construct whose fields it checks", receiverKey)
 			continue
 		}
 		for _, kw := range mapped {
 			if !specConstructs[kw] {
-				t.Errorf("DRIFT: annotations.ByReceiver has a NEW receiver key %q that "+
-					"receiverKeyToConstructKeywords maps to %q, which is not a dslspec construct keyword -- "+
-					"add a case for %q in receiverKeyToConstructKeywords "+
-					"(component/language/dslspec/spec.go) mapping it to its construct keyword(s)",
-					receiverKey, kw, receiverKey)
+				t.Errorf("DRIFT: annotations.ByReceiver receiver key %q maps to %q, which is not a dslspec "+
+					"construct keyword -- fix the mapping in receiverKeyToConstructKeywords (drift_test.go) "+
+					"or the construct catalog (component/language/dslspec/constructs.go)",
+					receiverKey, kw)
 			}
 		}
 	}
@@ -199,10 +402,10 @@ func TestAnnotationsProjectRegistryFromRegistrySide(t *testing.T) {
 			t.Errorf("DRIFT: annotation %q doc diverges -- spec=%q registry=%q "+
 				"(dslspec must project annotations.Docs verbatim)", n, a.Doc, annotations.Docs[n])
 		}
-		if len(a.Receivers) == 0 {
-			t.Errorf("annotation %q projects with no receivers", n)
+		if len(a.Receivers) == 0 && len(a.Fields) == 0 {
+			t.Errorf("annotation %q projects with no receivers and no fields", n)
 		}
-		for _, r := range a.Receivers {
+		for _, r := range append(append([]string(nil), a.Receivers...), a.Fields...) {
 			if !specConstructs[r] {
 				t.Errorf("DRIFT: annotation %q lists receiver %q which is not a dslspec construct keyword", n, r)
 			}

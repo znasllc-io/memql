@@ -2,6 +2,8 @@ package parser
 
 import (
 	"testing"
+
+	"github.com/znasllc-io/memql/component/language/annotations"
 )
 
 func TestLexer_SimpleQuery(t *testing.T) {
@@ -1493,51 +1495,28 @@ func (Automation) myAutomation(_ any) {
 	}
 }
 
+// TestParser_ArgsAttribute pins the object-literal ARGUMENT form of the
+// annotation grammar: `@name({...})` parses to a map Value. No receiver takes
+// the form (memql#5359: the registry refuses it everywhere, the builtin @args
+// included, whose converter reads keyword arguments only), so it is parsed
+// here directly rather than on a construct that would refuse it.
 func TestParser_ArgsAttribute(t *testing.T) {
-	input := `
-@enabled
-@args({ "userId": { "type": "string", "required": true }, "limit": { "type": "number", "default": 10 } })
-func (Query) searchUsers(args any) (any, error) {
-  return concept==v1:user; ?.payload.userId==args.userId, nil
-}
-`
+	input := `@args({ "userId": { "type": "string", "required": true }, "limit": { "type": "number", "default": 10 } })`
 	lexer := NewLexer(input)
 	tokens, err := lexer.Tokenize()
 	if err != nil {
 		t.Fatalf("Lexer error: %v", err)
 	}
 
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
+	argsAttr, err := NewParser(tokens).parseAttribute()
 	if err != nil {
 		t.Fatalf("Parser error: %v", err)
 	}
-
-	file, ok := ast.(*File)
-	if !ok {
-		t.Fatalf("Expected File, got %T", ast)
+	if argsAttr == nil || argsAttr.Name != "args" {
+		t.Fatalf("Expected an @args attribute, got %+v", argsAttr)
 	}
-
-	funcDef, ok := file.Definitions[0].(*FunctionDef)
-	if !ok {
-		t.Fatalf("Expected FunctionDef, got %T", file.Definitions[0])
-	}
-
-	// Should have 2 attributes
-	if len(funcDef.Attributes) != 2 {
-		t.Fatalf("Expected 2 attributes, got %d", len(funcDef.Attributes))
-	}
-
-	// Find args attribute
-	var argsAttr *Attribute
-	for _, attr := range funcDef.Attributes {
-		if attr.Name == "args" {
-			argsAttr = attr
-			break
-		}
-	}
-	if argsAttr == nil {
-		t.Fatal("Expected to find @args attribute")
+	if u := AnnotationUse(argsAttr); u.Form != annotations.FormObject {
+		t.Errorf("AnnotationUse(@args({...})).Form = %s, want %s", u.Form, annotations.FormObject)
 	}
 
 	// Check that it has a Value (the object)

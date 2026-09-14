@@ -1,0 +1,12 @@
+/// A work-spine template whose step passes the ticket's time under a reserved name.
+@template
+automation raiseTicketAtNow {
+  args {
+    /// The ticket's title.
+    title  string!
+  }
+
+  step raise {
+    mutation raiseTicketFromStep (title: args.title, now: "2026-09-14T00:00:00Z")
+  }
+}

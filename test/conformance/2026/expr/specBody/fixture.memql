@@ -1,0 +1,7 @@
+/// A support ticket, the row the spec cases here decide.
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+  priority     int
+}

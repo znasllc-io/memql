@@ -1,0 +1,4 @@
+@description
+spec ticket isOpenTicketDescription {
+  return status == "open"
+}

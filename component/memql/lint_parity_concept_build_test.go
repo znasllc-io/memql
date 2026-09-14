@@ -114,7 +114,7 @@ concept gadget {
 }
 `)},
 	}
-	diags, _, err := LintUnifiedTree(nil, root)
+	diags, _, err := LintUnifiedTree(nil, withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("LintUnifiedTree: %v", err)
 	}
@@ -939,7 +939,7 @@ concept gadget {
 }
 `)},
 	}
-	diags, _, err := LintUnifiedTree(nil, root)
+	diags, _, err := LintUnifiedTree(nil, withLanguageLines(root))
 	if err == nil {
 		t.Fatal("the fixture must still produce a hard load error, or this proves nothing")
 	}

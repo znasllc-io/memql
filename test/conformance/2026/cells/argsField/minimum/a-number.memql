@@ -1,0 +1,9 @@
+/// The tickets that match, newest first.
+query ticket matchingTicketsMinimum {
+  args {
+    priority  int  @minimum(1)
+  }
+  filter priority >= args.priority
+  sort "row.createdAt", "desc"
+  paginate 20
+}

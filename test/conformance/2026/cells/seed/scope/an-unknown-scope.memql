@@ -1,0 +1,5 @@
+/// A queue seeded once per team -- a scope seeds do not have.
+@scope("perTeam")
+seed personalQueue teamTickets {
+  name: "Team tickets"
+}

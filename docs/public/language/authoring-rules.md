@@ -2232,33 +2232,53 @@ If a rule starts feeling like architecture (rather than a trap),
 promote it to `docs/public/concepts/architecture.md` or `docs/public/language/memql.md` and leave
 a stub here pointing to it.
 
-## Grammar versioning + the migration channel (S6, memql#2361)
+## Grammar versioning and the migration channel
 
-The engine grammar has an explicit epoch: `parser.GrammarVersion`
-(`component/language/parser/grammar_version.go`), printable via
-`memqlmigrate --grammar-version`. It is stamped into:
+Three labels name the language a tree is written in, coarse to fine
+(`component/language/parser/edition.go` and `grammar_version.go`; epic
+memql#5356):
 
-- **authored-construct rows** (`v1:authoring:construct.grammarVersion`) at
-  promote time -- re-hydration on a NEWER engine quarantines a mismatched
-  row with an error naming the migration command, instead of the stale
-  source degrading into an arbitrary parse warning;
-- **release lockfiles** (`releases/<ver>.yaml` `grammarVersion:`), so a
-  pack or deploy consumer can detect which grammar a release's DSL was
-  authored under.
+- **The language line** -- `memql = "1.0"` in each domain's `memql.toml`
+  (see [The language line](memql.md#the-language-line)). The engine refuses
+  a domain that declares none, or a newer line than it speaks, and later
+  versions of the language key meaning on the line a tree declares.
+- **The edition** -- `edition = "2026"` beside it, naming the parser front
+  end the tree is written for. An edition never forks the parser: there is
+  one lexer, one parser, one AST and one compiler, and a front end is a thin
+  source-to-source step that brings one edition's spelling to that core. The
+  current edition's step is the identity; a later edition that changes a
+  spelling registers a front end that rewrites the old spelling into the new.
+- **`parser.GrammarVersion`** -- the fine label, printable with
+  `memqlmigrate --grammar-version`. It moves on every change to the authored
+  surface inside an edition, and it ends with the 8-hex digest of that
+  surface: `TestGrammarVersionCarriesTheSurfaceDigest`
+  (`grammar_surface_drift_test.go`) recomputes the digest from a behavioural
+  accept/reject corpus, the struct-body parsers' clause arms and the
+  invocation keywords, so a change to what an author may write cannot land
+  without editing the constant. It is stamped on authored-construct rows
+  (`v1:authoring:construct.grammarVersion`) at promote; re-hydration recompiles
+  a stored row first and uses a stale stamp only to explain a failure, so a
+  bump never unregisters a construct whose source still parses.
 
-**The migration channel is the codemod-per-epic pattern.** Every grammar
-epic (a change that retires or reshapes an authored form) MUST:
+**The migration channel is `memqlmigrate`.** Every rewrite is registered in
+one registry, keyed by the edition it moves a tree onto and the epic that
+shipped it (`cmd/memqlmigrate/rewrites.go`), and reached with `--edition`
+(default: the edition this engine writes) and `--rewrite=<name>`;
+`--rewrite=language-line` is the one that declares the line in every domain
+that has none.
 
-1. bump `parser.GrammarVersion` (the pinned keyword-fingerprint test
-   forces this when the invocation surface changes);
-2. ship a `memqlmigrate --rewrite=<epic>` mode that mechanically migrates
-   authored source (precedents: `scripts/migrations/construct_invocation/`,
-   `scripts/migrations/event_payload_args/`);
-3. reject the retired form at parse time with a hint naming that command.
+A rewrite is **required** when a narrowing can strand source someone else
+holds: the retired form has in-tree usage, or plausible usage in a
+`MEMQL_DSL_PATH` bundle or a durably-promoted authored row. The epic that
+narrows the language then ships the rewrite in the same PR and rejects the
+retired form at parse time with a hint naming the command. A rewrite is not
+required for a narrowing with no usage and no stored-row exposure, nor for a
+widening. Both still bump `GrammarVersion`: the version records what the
+grammar is, not whether anyone was inconvenienced.
 
-A stale pack or bundle is therefore always detectable (version stamp),
-diagnosable (rejection-with-hint), and mechanically fixable (the rewrite
-mode) -- never a silent soft-skip.
+A stale bundle is therefore detectable (the line it declares, and the refusal
+naming it), diagnosable (a rejection with a hint), and mechanically fixable
+(the rewrite) -- never a silent soft-skip.
 
 ## Reserved args-field names
 
@@ -2600,7 +2620,10 @@ naming complaint would be the larger defect.
 sending blank, that is `@noUnset("field")` on the mutation (memql#3415)
 — the targeted opt-out. It drops a named field from the delta when the
 incoming value is empty and the stored one is not, which is exactly the
-"do not let a blank overwrite this" rule that `??` does not express.
+"do not let a blank overwrite this" rule that `??` does not express. Empty
+means nil, a blank or whitespace-only string, or an empty array or object;
+a numeric or boolean zero is a value, so `0` and `false` still write (see
+[`@noUnset`](attribute-matrix.md#nounset)).
 
 **One rule, one implementation.** Both spellings resolve through
 `coalesceSelect` in `component/memql/mutation_templates.go`: the FINAL

@@ -34,6 +34,50 @@ modelled in the graph, and the `v1:cluster:deployment` timeline is still the
 record of evidence. Read it for that; do not read it for commands to run. The
 DSL lifecycle automations (memql#4490) are what replace the design.
 
+## Upgrading to an engine that reads the language line
+
+This section is current, unlike the rest of this document. It applies to any
+product DSL a node mounts at `MEMQL_DSL_PATH`, whether a bundle image or a
+package delivers it.
+
+Every domain directory of a product's DSL declares the language it is written
+in, in its own `<domain>/memql.toml`
+([the language line](../language/memql.md#the-language-line)): two lines,
+`memql = "1.0"` and `edition = "2026"`. An engine that reads the language line
+refuses to boot on a domain without one, and strict boot refuses the node
+rather than skipping the domain. An engine from before the language line
+ignores the file.
+
+`memqlmigrate` writes the file into every domain that has none. Point it at the
+directory that holds the domains:
+
+```bash
+memqlmigrate --rewrite=language-line -w <root>
+```
+
+Or write the two lines by hand in each `<domain>/memql.toml`.
+
+Do it in this order:
+
+1. Add `memql.toml` to every domain, in the repository.
+2. Ship the copy the nodes read. A node reads the DSL it was delivered, never
+   the repository: the tree a bundle image copies into `MEMQL_DSL_PATH`, or a
+   package's staged copy. For a bundle, build the image and pin its new digest
+   in the overlay. The image carries the file when it copies each domain
+   directory whole, as the fleet bundle's `COPY dsl/ /bundle/` does, and the
+   init container copies the image's tree whole. For a package, redeploy it
+   ([packages.md](packages.md#upgrading-to-an-engine-that-reads-the-language-line)).
+   The engine still running ignores the file.
+3. Roll the engine.
+
+If the engine rolled first and the nodes crash-loop on
+`language_line_missing`, set the break-glass, `MEMQL_DSL_ALLOW_SKIPS=1`. It is
+a bootstrap variable, a key on the `memql-secrets` Secret
+([env-vars.md](env-vars.md)), so the pods see it when they restart; the nodes
+then boot and skip each refused domain whole. Ship the copy that carries the
+file, then remove the break-glass and restart the nodes: while it is set, a
+construct that fails to load is logged and dropped instead of refusing boot.
+
 ## What the bundle did
 
 Every phase -- authorize, record, clone, build, place, gate, outcome, finalize,

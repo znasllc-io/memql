@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // temporal_access_test.go proves the temporal-access (`asOf`) visibility
@@ -74,18 +75,27 @@ func TestQueryNoAsOfNotMarked(t *testing.T) {
 }
 
 // TestSpecRejectsAsOf: a spec body is an atomic boolean predicate, not a
-// temporal read -- `asOf` is a load error.
+// temporal read -- `asOf` is a load error. Driven through the struct-form
+// path every spec loads through (the shared parser, then specDeclToSpec);
+// the hand-rolled spec parser this test used to call was unreferenced from
+// production and is deleted (memql#5359).
 func TestSpecRejectsAsOf(t *testing.T) {
-	src := []byte(`@description("Boom: asOf in a spec body.")
-spec specReadsAsOf {
-  asOf(payload.active == true, latest)
-}`)
-	_, err := parseSpecMemQL("test.memql", src)
+	src := `@description("Boom: asOf in a spec body.")
+spec thing specReadsAsOf {
+  return asOf(active == true, latest)
+}`
+	decl, err := languageParser.ParseSpecDecl(src)
+	if err == nil {
+		_, err = specDeclToSpec(decl, "test.memql")
+	}
 	if err == nil {
 		t.Fatal("expected a load error for asOf in a spec body, got nil")
 	}
-	if !strings.Contains(err.Error(), "query-only") {
-		t.Fatalf("expected query-only error, got: %v", err)
+	// The live path refuses the temporal node when it validates the body as
+	// a boolean predicate; the retired hand-rolled parser worded it as
+	// "query-only".
+	if !strings.Contains(err.Error(), "not allowed inside a spec") {
+		t.Fatalf("expected the spec body refusal, got: %v", err)
 	}
 }
 

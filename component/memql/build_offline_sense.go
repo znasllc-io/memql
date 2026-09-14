@@ -70,6 +70,20 @@ var offlineSenseBuildMu sync.Mutex
 // the workspace tripping the strict-boot gate) is returned as-is, so the LSP can
 // surface it; the embedded core tree loads clean.
 func BuildOfflineSense(root fs.FS) (*sense.Service, error) {
+	svc, _, err := BuildOfflineSenseWithLanguageLines(root)
+	return svc, err
+}
+
+// BuildOfflineSenseWithLanguageLines is BuildOfflineSense, answering as well
+// the language lines of the domains it mounted from root, as its own Init
+// resolved them (workspace_language_lines.go). An editor shows a refused line
+// on its domain's files from these (memql#5362). Being the build's own, they
+// cannot disagree with its error about a memql.toml written while it ran,
+// which a second resolution beside the build could.
+//
+// When the build fails before Init runs, the lines are resolved over the same
+// mounted tree instead, so they are never missing.
+func BuildOfflineSenseWithLanguageLines(root fs.FS) (*sense.Service, WorkspaceLanguageLines, error) {
 	// The workspace graph is built from the file tree (dslimports.Load returns a
 	// partial tree even on error), independent of the engine's strict-boot
 	// validation. Build it first so a service backed by it survives an Init
@@ -77,14 +91,14 @@ func BuildOfflineSense(root fs.FS) (*sense.Service, error) {
 	// broken-reference workspace that trips boot.
 	graph := buildWorkspaceGraph(root)
 
-	adapter, err := buildOfflineSenseAdapter(nil, root)
+	adapter, lines, err := buildOfflineSenseParts(nil, root)
 	if err != nil {
 		// A workspace construct tripped the strict-boot gate. Return a service
 		// that still carries the workspace graph (registry-less) and surface the
 		// error for logging, rather than dropping to a graph-less fallback.
-		return sense.NewWithWorkspace(nil, graph), err
+		return sense.NewWithWorkspace(nil, graph), lines, err
 	}
-	return sense.NewWithWorkspace(adapter, graph), nil
+	return sense.NewWithWorkspace(adapter, graph), lines, nil
 }
 
 // buildOfflineSenseAdapter performs the DB-free construction and returns the
@@ -92,6 +106,14 @@ func BuildOfflineSense(root fs.FS) (*sense.Service, error) {
 // to assert directly on the built registries (the *sense.Service does not
 // expose them). logger nil discards all build/init logging.
 func buildOfflineSenseAdapter(logger *slog.Logger, root fs.FS) (*SenseAdapter, error) {
+	adapter, _, err := buildOfflineSenseParts(logger, root)
+	return adapter, err
+}
+
+// buildOfflineSenseParts is buildOfflineSenseAdapter, answering as well the
+// language lines of the mounted domains: Init's, or -- when the build fails
+// before Init runs -- the resolver's over the same mounted tree.
+func buildOfflineSenseParts(logger *slog.Logger, root fs.FS) (*SenseAdapter, WorkspaceLanguageLines, error) {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 	}
@@ -106,10 +128,11 @@ func buildOfflineSenseAdapter(logger *slog.Logger, root fs.FS) (*SenseAdapter, e
 	// as a domain and every concept beneath it fails namespace validation,
 	// taking the whole registry down. Resolving first mounts from where the
 	// real domains live: in the engine repo they all collide with core
-	// embedded domains and are correctly skipped, and a product bundle whose
-	// domains sit at the top level resolves to the root unchanged.
-	overlayRoot, _ := resolveDSLRoot(root)
-	_, _, unmount := memqldsl.MountOverlayDomains(logger, overlayRoot)
+	// embedded domains and are correctly skipped, a product repository's one
+	// domain under dsl/ mounts from dsl/, and a product bundle whose domains
+	// sit at the top level resolves to the root unchanged.
+	overlayRoot, prefix := resolveDSLRoot(root)
+	mounted, _, unmount := memqldsl.MountOverlayDomains(logger, overlayRoot)
 	defer func() {
 		unmount()
 		// LoadUnifiedConcepts is additive (MergeAll). Restore a clean
@@ -121,8 +144,16 @@ func buildOfflineSenseAdapter(logger *slog.Logger, root fs.FS) (*SenseAdapter, e
 		_, _ = LoadUnifiedConcepts(logger)
 	}()
 
+	// The lines when Init never runs: resolved over the tree it would have
+	// read, while the overlay is still mounted (a deferred call runs after a
+	// return statement's values are evaluated).
+	linesWithoutInit := func() WorkspaceLanguageLines {
+		lines, problems := ResolveLanguageLines(memqldsl.Tree())
+		return mountedLanguageLines(prefix, mounted, lines, problems)
+	}
+
 	if _, err := LoadUnifiedConcepts(logger); err != nil {
-		return nil, fmt.Errorf("loading concepts from merged tree: %w", err)
+		return nil, linesWithoutInit(), fmt.Errorf("loading concepts from merged tree: %w", err)
 	}
 
 	// Snapshot the merged (embedded core + workspace overlay) concept registry
@@ -136,13 +167,17 @@ func buildOfflineSenseAdapter(logger *slog.Logger, root fs.FS) (*SenseAdapter, e
 	// through eng.Logger, set below.
 	eng, err := New(nil, (&component.Component{}).WithLoggerWriter(io.Discard))
 	if err != nil {
-		return nil, fmt.Errorf("constructing offline sense engine: %w", err)
+		return nil, linesWithoutInit(), fmt.Errorf("constructing offline sense engine: %w", err)
 	}
 	eng.Logger = logger
 
-	if err := eng.Init(registry); err != nil {
-		return nil, fmt.Errorf("initializing offline sense engine: %w", err)
+	// Init resolves the lines as its first step, so they are its own whether
+	// or not it goes on to refuse the tree.
+	initErr := eng.Init(registry)
+	lines := initLanguageLines(eng, prefix, mounted)
+	if initErr != nil {
+		return nil, lines, fmt.Errorf("initializing offline sense engine: %w", initErr)
 	}
 
-	return NewSenseAdapter(eng), nil
+	return NewSenseAdapter(eng), lines, nil
 }

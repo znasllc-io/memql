@@ -28,9 +28,8 @@ import (
 // memql#333 (sub-epic #329 / Stage 1C of #310) migrated the parsing
 // half off the hand-rolled parsePolicyMemQL onto
 // languageParser.ParsePolicyDecl + the in-package
-// policyDeclToPolicyConfig converter. The hand-rolled parser is
-// unreferenced from production after this child; tests in
-// policy_parser_test.go still exercise it pending #329's cleanup PR.
+// policyDeclToPolicyConfig converter. The hand-rolled parser, reached
+// by nothing but its own tests after that, is deleted (memql#5359).
 func LoadUnifiedPolicies(logger *slog.Logger, registry *PolicyRegistry, report ...*LoadReport) (int, error) {
 	if registry == nil {
 		return 0, fmt.Errorf("policy registry is nil")

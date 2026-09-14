@@ -43,7 +43,7 @@ builtin probeExplicitDisabled {
 }
 `)}}
 	const domain = "builtinlifecyclehonest"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := newFunctionRegistry()

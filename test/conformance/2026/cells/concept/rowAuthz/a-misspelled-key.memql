@@ -1,0 +1,7 @@
+/// A support ticket raised by a customer, its owner key misspelled.
+@rowAuthz(ownr="ownerUserId", clusterOwner)
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}

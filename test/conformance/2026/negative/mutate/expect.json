@@ -1,0 +1,9 @@
+{
+  "cases": [
+    {
+      "file": "two-write-blocks.memql",
+      "verdict": "refuse_parse",
+      "message": "mutation body must contain exactly one write block"
+    }
+  ]
+}

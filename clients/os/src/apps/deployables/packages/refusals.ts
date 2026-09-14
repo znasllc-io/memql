@@ -121,6 +121,15 @@ const COPY: Record<string, RefusalCopy> = {
     title: "The Go pack was not deployed",
     next: "",
   },
+  dsl_language_line_unread: {
+    // A WARNING, NOT A REFUSAL (epic memql#5356): the package deploys. A
+    // memql.toml at the root of dsl/ is read by no mount -- each domain
+    // carries its own -- so boot ignores it. The server's sentence says where
+    // the line belongs; this says the one thing it does not, that nothing was
+    // held back because of it.
+    title: "A memql.toml at the root of dsl/ is never read",
+    next: "The deploy goes ahead: boot ignores this file.",
+  },
   dsl_requires_authoring: {
     // Owner or developer, and admin deliberately NOT: admin is
     // user-management authority, developer is engineering authority, and

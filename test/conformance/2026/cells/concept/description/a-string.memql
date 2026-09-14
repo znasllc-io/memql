@@ -1,0 +1,6 @@
+@description("A support ticket raised by a customer.")
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}

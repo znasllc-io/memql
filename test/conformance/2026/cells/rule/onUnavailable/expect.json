@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-an-unquoted-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@onUnavailable on a rule takes one string"
+    },
+    {
+      "file": "an-unknown-mode.memql",
+      "verdict": "refuse_parse",
+      "message": "@onUnavailable(\"retry\") is not one of degrade, park"
+    }
+  ]
+}

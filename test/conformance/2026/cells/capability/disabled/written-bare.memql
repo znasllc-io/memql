@@ -1,0 +1,8 @@
+/// The paths on the runner's workspace that match a pattern. Switched off: declared, and refused to any action that calls it.
+@sideEffect("read")
+@disabled
+capability fs.glob {
+  args {
+    pattern  string!
+  }
+}

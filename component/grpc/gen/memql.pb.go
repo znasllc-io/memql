@@ -2679,7 +2679,24 @@ type ServerHello struct {
 	// Additive, and additive in the SAFE direction, for the reason engine_version
 	// states above: this travels server -> client, and both client stacks ignore
 	// unknown fields on that leg.
-	EngineCommit  string `protobuf:"bytes,4,opt,name=engine_commit,json=engineCommit,proto3" json:"engine_commit,omitempty"`
+	EngineCommit string `protobuf:"bytes,4,opt,name=engine_commit,json=engineCommit,proto3" json:"engine_commit,omitempty"`
+	// The edition this node speaks: the coarse label a tree declares as
+	// `edition = "2026"` (component/language/parser.Edition). Editions are
+	// years, so two of them order as numbers; that orders two languages ACROSS
+	// editions.
+	Edition string `protobuf:"bytes,5,opt,name=edition,proto3" json:"edition,omitempty"`
+	// The fine label inside the edition (component/language/parser.
+	// GrammarVersion), `<year>.<month>-<slug>-<8 hex>`. It is a LABEL, not a
+	// number: two grammar versions compare equal or different, never older or
+	// newer. Inside one edition the order comes from editor_release below.
+	GrammarVersion string `protobuf:"bytes,6,opt,name=grammar_version,json=grammarVersion,proto3" json:"grammar_version,omitempty"`
+	// The first release of MemQL for VS Code that carries grammar_version
+	// (component/language/parser.EditorRelease), e.g. "0.4.0". An editor newer
+	// than this knows the grammar; an older one has never heard of it, and this
+	// is the release it is told to install. It is what orders two grammars
+	// INSIDE one edition, where their labels cannot: it compares with the
+	// extension's own version as semver.
+	EditorRelease string `protobuf:"bytes,7,opt,name=editor_release,json=editorRelease,proto3" json:"editor_release,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2738,6 +2755,27 @@ func (x *ServerHello) GetEngineVersion() string {
 func (x *ServerHello) GetEngineCommit() string {
 	if x != nil {
 		return x.EngineCommit
+	}
+	return ""
+}
+
+func (x *ServerHello) GetEdition() string {
+	if x != nil {
+		return x.Edition
+	}
+	return ""
+}
+
+func (x *ServerHello) GetGrammarVersion() string {
+	if x != nil {
+		return x.GrammarVersion
+	}
+	return ""
+}
+
+func (x *ServerHello) GetEditorRelease() string {
+	if x != nil {
+		return x.EditorRelease
 	}
 	return ""
 }
@@ -9529,11 +9567,15 @@ func (x *DslSpecMsg) GetRequestId() string {
 //
 // `spec_json` is the indented JSON produced by dslspec.(*Spec).JSON() -- the
 // portable form a Monaco/CodeMirror grammar is generated from. Its top-level
-// shape is { version, constructs[], annotations[], keywords[], operators[],
-// fieldTypes[], nextRules[] } (see component/language/dslspec/spec.go for the
-// per-element schemas). `version` mirrors the embedded spec.version
-// (dslspec.SpecVersion) at the envelope level so a consumer can check the
-// contract version WITHOUT parsing the document.
+// shape is { version, edition, grammarVersion, constructs[], annotations[],
+// keywords[], operators[], fieldTypes[], nextRules[], builtins[] } (see
+// component/language/dslspec/spec.go for the per-element schemas). `edition`
+// and `grammarVersion` name the language the document describes, the same two
+// facts ServerHello carries (memql#5362), so a client that is not the VS Code
+// extension can compare its own grammar with the cluster's from this export.
+// `version` mirrors the embedded spec.version (dslspec.SpecVersion) at the
+// envelope level so a consumer can check the contract version WITHOUT parsing
+// the document.
 type DslSpecResult struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
@@ -17453,12 +17495,15 @@ const file_memql_proto_rawDesc = "" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12\x19\n" +
 	"\bsdk_name\x18\x02 \x01(\tR\asdkName\x12\x1f\n" +
 	"\vsdk_version\x18\x03 \x01(\tR\n" +
-	"sdkVersion\"\x8c\x01\n" +
+	"sdkVersion\"\xf6\x01\n" +
 	"\vServerHello\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12%\n" +
 	"\x0eengine_version\x18\x03 \x01(\tR\rengineVersion\x12#\n" +
-	"\rengine_commit\x18\x04 \x01(\tR\fengineCommit\":\n" +
+	"\rengine_commit\x18\x04 \x01(\tR\fengineCommit\x12\x18\n" +
+	"\aedition\x18\x05 \x01(\tR\aedition\x12'\n" +
+	"\x0fgrammar_version\x18\x06 \x01(\tR\x0egrammarVersion\x12%\n" +
+	"\x0eeditor_release\x18\a \x01(\tR\reditorRelease\":\n" +
 	"\fHeartbeatMsg\x12*\n" +
 	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"2\n" +
 	"\x06AckMsg\x12(\n" +

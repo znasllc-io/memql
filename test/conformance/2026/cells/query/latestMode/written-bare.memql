@@ -1,0 +1,8 @@
+/// The live tip of every open ticket, newest first: what it returns depends on when it is read.
+@latestMode
+query ticket openTicketsLatestMode {
+  filter status == "open"
+  sort "row.createdAt", "desc"
+  paginate 20
+  asOf latest
+}

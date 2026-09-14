@@ -1,0 +1,5 @@
+/// List the tickets, newest first.
+@handler(type="query", query="paginate(query ticketsToListDefault(), $args.limit)")
+tool listTicketsDefault {
+  limit  integer  @default("20")  @description("The most tickets to return.")
+}

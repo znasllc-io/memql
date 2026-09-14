@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "step-result-comparison.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "a-retired-function.memql",
+      "verdict": "refuse_parse",
+      "message": "year() is retired under the 2026.08 grammar epoch",
+      "note": "A retired expression function is refused wherever the parser reads a body. Nothing else about a condition is checked at load today: an unknown step, a step read before it runs, `and`, `;` and a single `=` all load, and the condition is decided by the runtime string evaluator when the automation fires, which the expression epic (dsl-v1-expressions) retires."
+    },
+    {
+      "file": "no-condition.memql",
+      "verdict": "refuse_parse",
+      "message": "conditional step: missing condition between `if` and `{`"
+    }
+  ]
+}

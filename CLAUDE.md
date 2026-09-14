@@ -1175,10 +1175,14 @@ unset. Layout mirrors the embedded tree, one directory per product namespace:
 ```
 $MEMQL_DSL_PATH/
   <productDomain>/
-    concepts.memql  queries.memql  mutations.memql  tools.memql  ...
+    memql.toml      concepts.memql  queries.memql  mutations.memql  ...
     prompts/*.tmpl
 ```
 
+- **Every domain declares its language line** in its own `memql.toml`
+  (`memql = "1.0"`, `edition = "2026"`); one at the root is never read. A
+  domain with none, or one newer than the engine, refuses boot and is read by
+  no loader (`memqlmigrate --rewrite=language-line -w <root>` adds it).
 - **Adds new domains.** A directory colliding with a core embedded domain (e.g.
   `library`) is skipped -- the embedded tree owns that namespace.
 - **Fail-loud.** The mounted tree loads through the same strict-boot gate as the
@@ -1998,7 +2002,7 @@ Go integration named by `@executor`.
 @enabled
 @description("Run one command on a per-run workbench workspace")
 @executor("integration.workbench.dispatchHost")
-@args(environment="object")
+@args(profile="object")
 builtin workbenchDispatchHost {
   runId    string  @required
   action   string  @required

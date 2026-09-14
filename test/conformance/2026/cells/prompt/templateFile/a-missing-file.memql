@@ -1,0 +1,6 @@
+/// Summarise a ticket in one sentence, from a template that is not there.
+@level("fast")
+@templateFile("summariseTicketBriefly.tmpl")
+prompt summariseTicketBriefly {
+  title  string!  @description("The ticket's title.")
+}

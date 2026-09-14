@@ -1,0 +1,4 @@
+/// Matches the open tickets that are urgent.
+spec ticket isUrgentOpenTicket {
+  return status == "open" && priority > 3
+}

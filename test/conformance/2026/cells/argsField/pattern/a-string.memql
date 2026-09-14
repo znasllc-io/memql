@@ -1,0 +1,9 @@
+/// The tickets that match, newest first.
+query ticket matchingTicketsPattern {
+  args {
+    region  string  @pattern("^[A-Z]{2}$")
+  }
+  filter region == args.region
+  sort "row.createdAt", "desc"
+  paginate 20
+}

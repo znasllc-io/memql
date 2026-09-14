@@ -47,10 +47,13 @@ func NewClient(dispatcher *client.Dispatcher) *Client {
 // Spec is the fetched DSL spec: the portable JSON document plus its schema
 // version. JSON is the indented JSON produced by the engine's
 // dslspec.(*Spec).JSON() -- the form a Monaco/CodeMirror grammar is generated
-// from; its top-level shape is { version, constructs[], annotations[],
-// keywords[], operators[], fieldTypes[], nextRules[] }. Version mirrors the
-// embedded spec.version so a consumer can check the contract version without
-// parsing the document.
+// from; its top-level shape is { version, edition, grammarVersion,
+// constructs[], annotations[], keywords[], operators[], fieldTypes[],
+// nextRules[], builtins[] }. `edition` and `grammarVersion` (spec version
+// 1.1.0, memql#5362) name the language the document describes, so an editor
+// can compare the grammar it was built from with the cluster's. Version
+// mirrors the embedded spec.version so a consumer can check the contract
+// version without parsing the document.
 type Spec struct {
 	JSON    string
 	Version string

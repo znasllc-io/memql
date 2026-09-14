@@ -1,0 +1,6 @@
+/// Close a ticket for good. Destructive: the tool loop confirms before it runs.
+@handler(type="function", name="closeTicketDestructive")
+@destructive(true)
+tool closeSupportTicketDestructive {
+  ticketId  string!  @description("The ticket to close.")
+}

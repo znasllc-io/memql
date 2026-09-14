@@ -34,7 +34,10 @@ import (
 // loadMemFS runs the full lint pipeline over a single in-memory file and
 // returns the aggregate error (nil on clean load).
 func loadMemFS(name, body string) error {
-	_, err := dslimports.Load(fstest.MapFS{name: {Data: []byte(body)}})
+	// The fixture's domain declares its line: Load, like boot, reads no file
+	// of a domain without one, and a negative case must fail for its own
+	// defect (memql#5357).
+	_, err := dslimports.Load(withLanguageLines(fstest.MapFS{name: {Data: []byte(body)}}))
 	return err
 }
 
@@ -106,7 +109,7 @@ func TestNegativeLoad_TypoTopLevelKeyword(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load accepted a typo'd top-level keyword `conept`")
 	}
-	if !strings.Contains(err.Error(), "did you mean 'concept'") {
+	if !strings.Contains(err.Error(), "did you mean concept?") {
 		t.Errorf("expected a did-you-mean hint for `conept`; got: %v", err)
 	}
 }

@@ -1,0 +1,6 @@
+/// The open tickets, most urgent first: a payload field sorts by its bare name.
+query ticket mostUrgentOpenTickets {
+  filter status == "open"
+  sort "priority", "desc"
+  paginate 20
+}

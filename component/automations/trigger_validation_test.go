@@ -149,31 +149,32 @@ func TestTrigger_NoReachableTriggerIsRefused(t *testing.T) {
 	cases := []struct {
 		name     string
 		preamble string
-		// want is the substring the refusal must carry. The issue's own
-		// `evnt=` example ALSO carries a stray concept=, so it is caught one
-		// gate earlier -- still a refusal, different (and more specific)
-		// wording.
+		// want is the substring the refusal must carry. A mistyped kwarg
+		// and an empty @trigger() are refused at PARSE time now, by the
+		// annotation registry's closed key set and form (memql#5359) --
+		// naming the key it did not recognise and the one it meant -- one
+		// gate before the wiring check below ever runs.
 		want string
 	}{
 		{
 			name:     "typoed-event-kwarg",
 			preamble: `@trigger(evnt="node.created")`,
-			want:     "neither an event trigger nor a schedule",
+			want:     "@trigger on an automation has no key evnt -- did you mean event?",
 		},
 		{
 			name:     "typoed-event-kwarg-with-concept",
 			preamble: `@trigger(evnt="node.created", concept="v1:cluster:node")`,
-			want:     "dropped",
+			want:     "has no key evnt",
 		},
 		{
 			name:     "typoed-schedule-kwarg",
 			preamble: `@trigger(cron="0 0 4 * * *")`,
-			want:     "neither an event trigger nor a schedule",
+			want:     "@trigger on an automation has no key cron",
 		},
 		{
 			name:     "empty-trigger",
 			preamble: `@trigger()`,
-			want:     "neither an event trigger nor a schedule",
+			want:     "[annotation_form]",
 		},
 		{
 			name:     "no-trigger-at-all",
@@ -248,7 +249,8 @@ func TestTrigger_NonexistentConceptIsRefused(t *testing.T) {
 
 // TestTrigger_DuplicateTriggerIsRefused pins that the first @trigger is no
 // longer discarded in silence. The parser folds attributes in order, so an
-// automation carrying two triggers wired itself to whichever came second.
+// automation carrying two triggers wired itself to whichever came second. The
+// refusal is the annotation registry's repeat rule (memql#5359).
 func TestTrigger_DuplicateTriggerIsRefused(t *testing.T) {
 	loader := triggerTestLoaderWithRegistry(t)
 
@@ -272,7 +274,7 @@ func TestTrigger_DuplicateTriggerIsRefused(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected a refusal: all but the last @trigger are discarded")
 			}
-			if !strings.Contains(err.Error(), "exactly one is allowed") {
+			if !strings.Contains(err.Error(), "@trigger is written more than once on an automation") {
 				t.Errorf("error must state the one-trigger rule, got: %v", err)
 			}
 		})

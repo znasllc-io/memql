@@ -1,0 +1,7 @@
+/// A one-sentence digest of a ticket, for a reader who asked for one.
+@level("fast")
+@templateFile("ticketDigest.tmpl")
+prompt ticketDigestEnum {
+  title   string!  @description("The ticket's title.")
+  length  string  @enum(short, long)  @description("How long the digest is.")
+}

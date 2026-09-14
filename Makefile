@@ -86,9 +86,10 @@ edge:
 memql-lsp:
 	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/memql-lsp ./cmd/memql-lsp
 
-## Regenerate the VS Code TextMate grammar from dslspec (run on GrammarVersion bump)
+## Regenerate the VS Code TextMate grammar and language configuration from dslspec (run on GrammarVersion bump)
 vscode-grammar: memql-lsp
 	$(BIN_DIR)/memql-lsp gen-grammar editors/vscode/syntaxes/memql.tmLanguage.json
+	$(BIN_DIR)/memql-lsp gen-language-config editors/vscode/language-configuration.json
 
 ## Package the VS Code extension into a .vsix (bundles the host-platform binary by default)
 vscode-package:
@@ -573,6 +574,28 @@ concept-snapshot:
 concept-snapshot-check:
 	$(GO) test -count=1 -run TestConceptFieldSnapshotIsNotStale .
 
+## Regenerate the attribute matrix (docs/public/language/attribute-matrix.md)
+## from the annotation registry in component/language/annotations.
+##
+## The page is GENERATED (memql#5360): every annotation, where each construct
+## and kind of field accepts it, its forms, keys, examples and docs, and every
+## retirement come from the registry the parsers check annotations against. It
+## replaced a hand page that went on listing three policy annotations after the
+## parser refused them. Change the registry, then run this; never hand-edit the
+## page.
+docs-matrix:
+	$(GO) run ./cmd/attributematrix
+
+## CI gate: fail when the committed attribute matrix differs from what the
+## registry renders, or lists an annotation the registry refuses. Pair with
+## `make docs-matrix` locally to fix.
+##
+## Also enforced by TestAttributeMatrixIsGenerated and
+## TestAttributeMatrixListsWhatTheParserAccepts so it runs in the ordinary
+## `make test` lane, which needs no workflow change.
+docs-matrix-check:
+	$(GO) test -count=1 -run 'TestAttributeMatrix' .
+
 ## DSL lint: load the embedded DSL tree through the same
 ## dslimports.Load pipeline the engine runs at boot and fail on any
 ## parse / import / build diagnostics. Mirrors the CI gate so authors
@@ -681,7 +704,7 @@ test-cover:
 # ---------------------------------------------------------------------------
 
 ##@ Quality & codegen
-.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check concept-snapshot concept-snapshot-check
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check concept-snapshot concept-snapshot-check docs-matrix docs-matrix-check
 
 ## Run go vet on all packages
 vet:

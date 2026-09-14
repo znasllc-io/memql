@@ -192,11 +192,18 @@ type mutBodyBlock struct {
 // block's `}`, or contains a brace inside a string literal). A `{` in value
 // position (after a `:` or inside `(...)`) is an object literal, matched and
 // skipped, never mistaken for a block.
-func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fieldSample string, err error) {
+//
+// It also returns strayLine: the first depth-0 line that carries words but is
+// neither a `key: value` field nor a block header -- a line no reader above
+// consumes (`filter x == 1` at the mutation top level). The top-level caller
+// refuses it; inside a write block a field's value may continue onto the next
+// line, so the write block's caller does not.
+func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fieldSample string, strayLine string, err error) {
 	blanked := BlankComments(body)
 	n := len(blanked)
 	var idents []string
 	identStart := -1
+	lineFirst := -1 // where the current line's first word starts
 	inValue := false
 	parenDepth := 0
 	isIdent := func(c byte) bool {
@@ -206,6 +213,13 @@ func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fie
 		if identStart >= 0 {
 			idents = append(idents, blanked[identStart:at])
 			identStart = -1
+		}
+	}
+	// noteStray records the current line as stray when it carried words that
+	// were neither a field key nor a block header.
+	noteStray := func() {
+		if strayLine == "" && !inValue && parenDepth == 0 && len(idents) > 0 && lineFirst >= 0 {
+			strayLine = lineOfIndex(body, blanked, lineFirst)
 		}
 	}
 	lineOf := func(at int) string {
@@ -231,8 +245,10 @@ func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fie
 		case c == '\n' || c == '\r':
 			endIdent(i)
 			if parenDepth == 0 {
+				noteStray()
 				inValue = false
 				idents = nil
+				lineFirst = -1
 			}
 			i++
 		case c == '(':
@@ -266,7 +282,7 @@ func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fie
 			endIdent(i)
 			closeIdx := matchBraceStrAware(blanked, i)
 			if closeIdx < 0 {
-				return nil, false, "", fmt.Errorf("mutation body: `{` has no matching `}`")
+				return nil, false, "", "", fmt.Errorf("mutation body: `{` has no matching `}`")
 			}
 			if inValue || parenDepth > 0 {
 				// Object-literal value (`field: { ... }`), not a block.
@@ -278,17 +294,21 @@ func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fie
 				case 2:
 					blocks = append(blocks, mutBodyBlock{keyword: idents[0], named: idents[1], inner: body[i+1 : closeIdx]})
 				case 0:
-					return nil, false, "", fmt.Errorf("mutation body: `{ ... }` block with no keyword")
+					return nil, false, "", "", fmt.Errorf("mutation body: `{ ... }` block with no keyword")
 				default:
-					return nil, false, "", fmt.Errorf("mutation body: block header `%s ...` has too many words", idents[0])
+					return nil, false, "", "", fmt.Errorf("mutation body: block header `%s ...` has too many words", idents[0])
 				}
 				i = closeIdx + 1
 			}
 			idents = nil
 			inValue = false
+			lineFirst = -1
 		case isIdent(c):
 			if identStart < 0 {
 				identStart = i
+				if lineFirst < 0 {
+					lineFirst = i
+				}
 			}
 			i++
 		default:
@@ -297,7 +317,24 @@ func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fie
 			i++
 		}
 	}
-	return blocks, hasFields, fieldSample, nil
+	endIdent(n)
+	noteStray()
+	return blocks, hasFields, fieldSample, strayLine, nil
+}
+
+// lineOfIndex returns the trimmed line of body containing offset at, located
+// on the blanked view (comments are blank there, so a comment is never taken
+// for a line's content) and sliced from the original.
+func lineOfIndex(body, blanked string, at int) string {
+	start := at
+	for start > 0 && blanked[start-1] != '\n' {
+		start--
+	}
+	end := at
+	for end < len(blanked) && blanked[end] != '\n' {
+		end++
+	}
+	return strings.TrimSpace(body[start:end])
 }
 
 // rewriteEachBlock walks every struct-form construct in `source`
@@ -764,20 +801,19 @@ func emitQuery(name, conceptId, body, preamble string) (string, error) {
 // enumerate why each bypass is legitimate.
 var unboundedReasonRe = regexp.MustCompile(`@unbounded\s*\(\s*"((?:[^"\\]|\\.)*)"\s*\)`)
 
-// unboundedBareRe matches a bare `@unbounded` (no argument list), which
-// is rejected -- the reason is required.
-var unboundedBareRe = regexp.MustCompile(`@unbounded\b`)
-
 // unboundedReason inspects a construct's preamble for the
-// `@unbounded("reason")` annotation. Returns the captured reason, a
-// presence flag, and an error if the annotation is present but
-// malformed (bare, or empty/whitespace reason).
+// `@unbounded("reason")` annotation. Returns the captured reason and a
+// presence flag.
+//
+// An @unbounded written in any other form -- bare, a number, a list -- is
+// reported ABSENT here, not refused: the annotation line stays in the source,
+// and the parser's annotation check refuses its form against the registry
+// (memql#5359), which says what @unbounded takes and shows the example. A
+// second, text-scanning form check here answered first with an uncoded
+// message, so the registry was not the one gate for this annotation.
 func unboundedReason(preamble string) (string, bool, error) {
 	if m := unboundedReasonRe.FindStringSubmatch(preamble); m != nil {
 		return strings.TrimSpace(m[1]), true, nil
-	}
-	if unboundedBareRe.MatchString(preamble) {
-		return "", true, fmt.Errorf("`@unbounded` requires a reason string: @unbounded(\"why this query reads the full set\")")
 	}
 	return "", false, nil
 }
@@ -1110,7 +1146,7 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 	// disagree about which blocks exist -- the property that retires the
 	// same-line / boundary-anchoring class of bugs the regex approach kept
 	// reintroducing.
-	blocks, topFields, topFieldSample, err := scanMutationBlocks(body)
+	blocks, topFields, topFieldSample, topStray, err := scanMutationBlocks(body)
 	if err != nil {
 		return nil, err
 	}
@@ -1169,12 +1205,18 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 	if topFields {
 		return nil, fmt.Errorf("mutation body: unexpected field %q at the top level -- put write fields inside the `insert`/`update` block (or a `stamp { ... }` block)", topFieldSample)
 	}
+	// ...and neither is a line of words: until memql#5359 a top-level
+	// `filter x == 1` (or any clause a mutation does not take) was dropped
+	// without a word.
+	if topStray != "" {
+		return nil, fmt.Errorf("mutation body: unexpected %q at the top level -- a mutation body takes %s", topStray, clauseSpellings("mutate"))
+	}
 
 	// Nested accept/stamp live inside the write block; scan its inner with the
 	// same single source.
 	var nestAccept, nestStamp *mutBodyBlock
 	if haveWrite {
-		wblocks, wFields, wFieldSample, werr := scanMutationBlocks(writeInner)
+		wblocks, wFields, wFieldSample, _, werr := scanMutationBlocks(writeInner)
 		if werr != nil {
 			return nil, werr
 		}
@@ -1414,8 +1456,140 @@ func emitLogic(name, _conceptId, body, _preamble string) (string, error) {
 	if !containsTrailingReturn(bodyText) {
 		return "", fmt.Errorf("logic %q body must end with a `return <expr>` terminator", name)
 	}
+	// Everything but the args and body blocks is refused, not dropped
+	// (memql#5359). Run last, so the pointed messages above keep answering
+	// the mistakes they were written for.
+	if err := refuseUnknownBodyClauses("a logic", "logic", name, body, logicBodyClause); err != nil {
+		return "", err
+	}
 	sb.WriteString("}")
 	return sb.String(), nil
+}
+
+// logicBodyClause reports whether word opens a clause of a logic body: its
+// `args { }` block and its `body { }` block. bodyClauseTable
+// (body_clauses.go) lists the same set for the editor and is pinned to this
+// switch.
+func logicBodyClause(word string) bool {
+	switch word {
+	case "args", "body":
+		return true
+	}
+	return false
+}
+
+// automationBodyClause reports whether word opens a clause of an automation
+// body: its `args { }` block, its `step <name> { }` blocks and its
+// `precondition <name> { }` blocks. component/automations extracts the
+// preconditions before the rewriter runs; one that reaches the rewriter (an
+// editor lowering the file) is a known clause the emitter skips.
+// bodyClauseTable lists the same set and is pinned to this switch.
+func automationBodyClause(word string) bool {
+	switch word {
+	case "args", "step", "precondition":
+		return true
+	}
+	return false
+}
+
+// refuseUnknownBodyClauses walks a block-only construct body -- a logic's or
+// an automation's -- at its top level and refuses anything that is not one of
+// the construct's clauses: each is a `<clause> { ... }` block, or for a named
+// block `<clause> <name> { ... }`, and an unnamed block is written at most
+// once. The emitters extract the clauses they know; until memql#5359 they
+// dropped everything else in silence, so a `filter` line in an automation or
+// a `step` block in a logic loaded and did nothing.
+//
+// article is the construct with its article ("a logic"), keyword the
+// construct keyword whose clause table the message lists.
+func refuseUnknownBodyClauses(article, keyword, name, text string, isClause func(string) bool) error {
+	scan := BlankComments(text)
+	seen := map[string]bool{}
+	takes := article + " body takes " + clauseSpellings(keyword)
+	for i := 0; ; {
+		i = skipBodyBlank(scan, i)
+		if i >= len(scan) {
+			return nil
+		}
+		word := bodyIdentAt(scan, i)
+		if word == "" {
+			return fmt.Errorf("%s %q: unexpected %q in the body -- %s", keyword, name, bodyLineAt(text, i), takes)
+		}
+		if !isClause(word) {
+			return fmt.Errorf("%s %q: unknown clause %q in the body -- %s", keyword, name, word, takes)
+		}
+		j := i + len(word)
+		if IsNamedBlock(word) {
+			j = skipBodyBlank(scan, j)
+			blockName := bodyIdentAt(scan, j)
+			if blockName == "" {
+				return fmt.Errorf("%s %q: a `%s` block needs a name -- write `%s <name> { ... }`", keyword, name, word, word)
+			}
+			j += len(blockName)
+		} else if seen[word] {
+			return fmt.Errorf("%s %q: more than one `%s { ... }` block -- write it once", keyword, name, word)
+		}
+		seen[word] = true
+		j = skipBodyBlank(scan, j)
+		if j >= len(scan) || scan[j] != '{' {
+			return fmt.Errorf("%s %q: `%s` opens a block -- %s", keyword, name, word, takes)
+		}
+		closeIdx := matchBraceInBody(text, j)
+		if closeIdx < 0 {
+			return fmt.Errorf("%s %q: `%s { ... }` block missing closing brace", keyword, name, word)
+		}
+		i = closeIdx + 1
+	}
+}
+
+// clauseSpellings lists a construct's clauses the way they are written:
+// "args { }, step <name> { } and precondition <name> { }".
+func clauseSpellings(keyword string) string {
+	clauses := BodyClauses(keyword)
+	out := make([]string, 0, len(clauses))
+	for _, c := range clauses {
+		if IsNamedBlock(c) {
+			out = append(out, "`"+c+" <name> { }`")
+		} else {
+			out = append(out, "`"+c+" { }`")
+		}
+	}
+	if len(out) <= 1 {
+		return strings.Join(out, "")
+	}
+	return strings.Join(out[:len(out)-1], ", ") + " and " + out[len(out)-1]
+}
+
+// skipBodyBlank returns the index of the first non-blank byte at or after i.
+func skipBodyBlank(s string, i int) int {
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
+		i++
+	}
+	return i
+}
+
+// bodyIdentAt returns the identifier that starts at i, or "".
+func bodyIdentAt(s string, i int) string {
+	j := i
+	for j < len(s) {
+		c := s[j]
+		if c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (j > i && c >= '0' && c <= '9') {
+			j++
+			continue
+		}
+		break
+	}
+	return s[i:j]
+}
+
+// bodyLineAt returns the trimmed source line containing offset i.
+func bodyLineAt(s string, i int) string {
+	start := strings.LastIndexByte(s[:i], '\n') + 1
+	end := strings.IndexByte(s[i:], '\n')
+	if end < 0 {
+		return strings.TrimSpace(s[start:])
+	}
+	return strings.TrimSpace(s[start : i+end])
 }
 
 // containsTrailingReturn reports whether the last non-blank,
@@ -1620,6 +1794,12 @@ func emitAutomation(name, _conceptId, body, _preamble string) (string, error) {
 	}
 	if len(steps) == 0 {
 		return "", fmt.Errorf("at least one `step` is required")
+	}
+	// Everything but the args, step and precondition blocks is refused, not
+	// dropped (memql#5359). Run last, so the pointed messages above keep
+	// answering the mistakes they were written for.
+	if err := refuseUnknownBodyClauses("an automation", "automation", name, body, automationBodyClause); err != nil {
+		return "", err
 	}
 	var sb strings.Builder
 	emitFuncHeader(&sb, "Automation", name, argsText, "")

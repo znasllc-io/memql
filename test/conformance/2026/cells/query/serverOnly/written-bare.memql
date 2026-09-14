@@ -1,0 +1,7 @@
+/// The open tickets, newest first, for server-side callers only.
+@serverOnly
+query ticket openTicketsServerOnly {
+  filter status == "open"
+  sort "row.createdAt", "desc"
+  paginate 20
+}

@@ -637,7 +637,12 @@ func checkConceptDefContext(tokens []parser.Token, prefix string) (CursorContext
 			braceDepth--
 			if braceDepth < 0 {
 				// Inside unmatched brace. Check if preceded by concept Name.
-				if i >= 2 && tokens[i-2].Type == parser.TokenKeywordConcept {
+				// The lexer reads `concept` as an IDENTIFIER (it is a field
+				// name too, lexer.go), so matching only TokenKeywordConcept --
+				// which it never produces -- left this context unreachable and
+				// a concept body completing as a function body (memql#5359).
+				if i >= 2 && (tokens[i-2].Type == parser.TokenKeywordConcept ||
+					(tokens[i-2].Type == parser.TokenIdentifier && tokens[i-2].Literal == "concept")) {
 					return CursorContext{Kind: ContextConceptDef, Prefix: prefix}, true
 				}
 			}

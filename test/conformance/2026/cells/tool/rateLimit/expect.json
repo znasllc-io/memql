@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "file": "keyword-arguments.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@rateLimit on a tool takes keyword arguments"
+    },
+    {
+      "file": "keys-written-bare.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_key",
+      "message": "@rateLimit on a tool: maxCalls takes a value -- write maxCalls=<number>",
+      "note": "The dangerous shape: a key written bare reads as true, and a reader wanting its value reads nothing -- a tool with no limit at all."
+    }
+  ]
+}

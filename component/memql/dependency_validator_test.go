@@ -44,7 +44,7 @@ query guide byId {
 }
 `)},
 	}
-	if err := validateDependencyTree(tree); err != nil {
+	if err := validateDependencyTree(withLanguageLines(tree)); err != nil {
 		t.Fatalf("prefix-free same-concept reference must resolve, got: %v", err)
 	}
 }
@@ -70,7 +70,7 @@ query guide listGuides {
 }
 `)},
 	}
-	if err := validateDependencyTree(tree); err != nil {
+	if err := validateDependencyTree(withLanguageLines(tree)); err != nil {
 		t.Fatalf("qualified cross-concept reference must resolve, got: %v", err)
 	}
 }
@@ -94,7 +94,7 @@ query guide listGuides {
 }
 `)},
 	}
-	err := validateDependencyTree(tree)
+	err := validateDependencyTree(withLanguageLines(tree))
 	if err == nil {
 		t.Fatal("unqualified cross-concept shape reference must fail")
 	}
@@ -132,7 +132,7 @@ query guide whoAmI {
 }
 `)},
 	}
-	if err := validateDependencyTree(tree); err != nil {
+	if err := validateDependencyTree(withLanguageLines(tree)); err != nil {
 		t.Fatalf("@actor-only shape must be universally referenceable, got: %v", err)
 	}
 }
@@ -158,7 +158,7 @@ shape guide card {
 }
 `)},
 	}
-	err := validateDependencyTree(tree)
+	err := validateDependencyTree(withLanguageLines(tree))
 	if err == nil {
 		t.Fatal("unqualified cross-concept include must fail")
 	}
@@ -183,7 +183,7 @@ func TestValidateDependencyTree_NoReferencePathsWalked(t *testing.T) {
 	// The invalid _reference/ files would make validation fail IF they
 	// were walked. They are not, so validation succeeds -- which is the
 	// whole reason the skip branch was dead.
-	if err := validateDependencyTree(tree); err != nil {
+	if err := validateDependencyTree(withLanguageLines(tree)); err != nil {
 		t.Fatalf("validation must not touch _reference/ files (walker skips them): %v", err)
 	}
 }

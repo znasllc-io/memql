@@ -1,0 +1,8 @@
+/// A support ticket.
+concept ticket {
+  title    string
+  status   string
+  details  object  @open {
+    source  string
+  }
+}

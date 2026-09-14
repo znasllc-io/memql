@@ -1,0 +1,7 @@
+/// A support ticket raised by a customer.
+@displayCard(primary="title", secondary="status")
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}

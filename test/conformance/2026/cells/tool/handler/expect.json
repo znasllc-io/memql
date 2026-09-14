@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "keyword-arguments.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@handler on a tool takes keyword arguments"
+    },
+    {
+      "file": "names-nothing.memql",
+      "verdict": "refuse_load",
+      "message": "@handler names \"openTicketNobodyWrote\", which is not a registered function, query, mutation or builtin"
+    }
+  ]
+}

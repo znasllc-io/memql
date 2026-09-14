@@ -1,0 +1,5 @@
+/// Tickets that are not open, written with the unary `!` the filter grammar refuses.
+query ticket notOpenTickets {
+  filter !(status == "open")
+  paginate 20
+}

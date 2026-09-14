@@ -50,6 +50,10 @@ func mountBundleFixture(t *testing.T, body string) error {
 	if err := os.WriteFile(filepath.Join(dir, "concepts.memql"), []byte(body), 0o644); err != nil {
 		t.Fatalf("write bundle fixture: %v", err)
 	}
+	// A bundle domain declares its language line, as any real one must (memql#5357).
+	if err := os.WriteFile(filepath.Join(dir, "memql.toml"), []byte(currentLanguageLine()), 0o644); err != nil {
+		t.Fatalf("write bundle language line: %v", err)
+	}
 
 	before := concept.All()
 	t.Cleanup(func() { concept.ReplaceAll(before) })

@@ -1,0 +1,5 @@
+@when(tag="background")
+@policy("localFirst")
+@precedence(11)
+@description("Background calls resolve through the local-first chain.")
+rule backgroundLocalDescription { }

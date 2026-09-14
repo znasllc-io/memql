@@ -1,0 +1,9 @@
+/// The tickets that match, newest first.
+query ticket matchingTicketsEnum {
+  args {
+    status  string  @enum("open", "closed")
+  }
+  filter status == args.status
+  sort "row.createdAt", "desc"
+  paginate 20
+}

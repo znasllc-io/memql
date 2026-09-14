@@ -1,0 +1,26 @@
+{
+  "cases": [
+    {
+      "file": "an-args-reference.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "a-retired-function.memql",
+      "verdict": "refuse_parse",
+      "message": "year() is retired under the 2026.08 grammar epoch",
+      "note": "A malformed expression in a step argument: a retired function is refused where the parser reads the argument. What does not refuse there today: an args.x the automation's args block does not declare, and a steps.<id> no step defines, both load (E5, the step-argument string resolver, reads them when the step runs)."
+    },
+    {
+      "file": "a-comparison.memql",
+      "verdict": "refuse_parse",
+      "message": "expected ')', got \"==\"",
+      "note": "A step argument's value is a literal, a reference or a call today, not a comparison: the parser stops at the operator. D7 makes step arguments expressions parsed once."
+    },
+    {
+      "file": "a-reserved-name.memql",
+      "verdict": "refuse_parse",
+      "message": "\"now\" is a reserved engine name (now / actor / partition / config / trace) and cannot be an argument name",
+      "note": "Refuses the argument's NAME rather than its value: kept because a call site is where the reserved names are refused (memql#3626)."
+    }
+  ]
+}

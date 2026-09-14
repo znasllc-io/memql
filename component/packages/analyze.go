@@ -224,6 +224,14 @@ func analyzeDSL(tree fs.FS, rep *Report, logger *slog.Logger) {
 		rep.DslDomains = append(rep.DslDomains, dr)
 	}
 
+	// A memql.toml at the root of dsl/ is read by no mount, so boot ignores
+	// it: reported under its own code, and the package deploys. Refusing the
+	// deploy for it, or listing it under "would refuse boot", would say
+	// something untrue about a file nothing reads.
+	if w := result.UnreadRootManifest; w != nil {
+		rep.add(problemFrom(refuseScoped(CodeDslLanguageLineUnread, path.Join(DslRoot, w.File), "%s", w.Message), false))
+	}
+
 	if len(result.Diagnostics) > 0 {
 		var b strings.Builder
 		b.WriteString("this package's DSL would refuse boot. ")

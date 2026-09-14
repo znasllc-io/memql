@@ -1,0 +1,7 @@
+/// A support ticket raised by a customer.
+@origin(memql)
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}
