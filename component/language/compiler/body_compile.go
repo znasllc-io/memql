@@ -34,9 +34,10 @@ package compiler
 // Expressions are written in the encoding epic memql#5363 fixed: a field that
 // is always an expression (condition, forEach source and filter, expression,
 // return value) holds canonical v1 source, printed by ast.FormatExpr; a value
-// inside an argument or payload map is a literal when it is one and
-// {"$expr": "<source>"} otherwise, so a string can never be mistaken for a
-// reference.
+// inside an argument or payload map is EncodeValueLeaf's -- a literal when it
+// is one and {"$expr": "<source>"} otherwise, so a string can never be
+// mistaken for a reference. One encoder serves this compile and the
+// expression epic's, so the runtime decodes one shape.
 
 import (
 	"fmt"
@@ -300,7 +301,7 @@ func compileStatement(s ast.BodyStatement) map[string]any {
 	case *ast.PublishStatement:
 		ev := map[string]any{"topic": t.Topic}
 		if t.Payload != nil {
-			ev["payload"] = encodeValueLeaf(t.Payload)
+			ev["payload"] = EncodeValueLeaf(t.Payload)
 		}
 		return map[string]any{"type": "event", "event": ev}
 	case *ast.ReturnStatement:
@@ -366,32 +367,7 @@ func encodeNamedArgs(args []ast.NamedArg) map[string]any {
 	}
 	out := make(map[string]any, len(args))
 	for _, a := range args {
-		out[a.Name] = encodeValueLeaf(a.Value)
+		out[a.Name] = EncodeValueLeaf(a.Value)
 	}
 	return out
-}
-
-// encodeValueLeaf writes a value that sits inside an argument or payload map:
-// a literal as itself, a map or list literal as the structure with each
-// element encoded, and any other expression as {"$expr": "<source>"}.
-func encodeValueLeaf(e ast.ExpressionNode) any {
-	switch v := ast.Unparen(e).(type) {
-	case *ast.LiteralExpr:
-		return v.Value
-	case *ast.NilExpr:
-		return nil
-	case *ast.MapExpr:
-		out := make(map[string]any, len(v.Entries))
-		for _, en := range v.Entries {
-			out[en.Key] = encodeValueLeaf(en.Value)
-		}
-		return out
-	case *ast.ListExpr:
-		out := make([]any, 0, len(v.Elems))
-		for _, el := range v.Elems {
-			out = append(out, encodeValueLeaf(el))
-		}
-		return out
-	}
-	return map[string]any{"$expr": ast.FormatExpr(e)}
 }

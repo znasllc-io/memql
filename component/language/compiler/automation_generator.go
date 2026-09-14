@@ -416,14 +416,14 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 
 	// An edition-2026 statement body compiles in source order through
 	// CompileBody (body_compile.go); nothing below sorts it. For such a body
-	// automation.Steps is empty, so the legacy passes that follow do nothing.
+	// automation.Steps is empty, so the legacy passes that follow do nothing,
+	// and the parser marked it ExpressionsV1, so it carries the v1 marker.
 	if automation.Body != nil {
 		steps, err := compileStatementSteps(def, automation)
 		if err != nil {
 			return nil, err
 		}
 		output["steps"] = steps
-		output["expressions"] = "v1"
 	}
 
 	// Steps -- two-pass compile with topological sort.
