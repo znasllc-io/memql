@@ -38,7 +38,6 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	"github.com/znasllc-io/memql/component/events"
 )
 
 // conceptRbacCapability is the canonical concept id of the capability catalog.
@@ -498,10 +497,11 @@ func (e *MemQLEngine) ReloadCapabilityCatalog(ctx context.Context) error {
 // half worth pinning.
 func (e *MemQLEngine) installCapabilityCatalog(cat *rbacCatalog) error {
 	// capabilityCount is guarded for the SAME reason as roleCount, and it is
-	// the likelier of the two: the reload fires on FOUR topics -- role and
-	// capability, created and updated -- so the first role row to land
-	// triggers a reload that reads the roles it can see and NO capability
-	// rows at all. A role-only snapshot installs cleanly and then answers
+	// the likelier of the two: a reload is requested on FOUR topics -- role
+	// and capability, created and updated -- so the first role row to land
+	// can start a reload that reads the roles it can see and NO capability
+	// rows at all (the settle in rbac_catalog_reload.go makes that rarer, not
+	// impossible). A role-only snapshot installs cleanly and then answers
 	// false for every (verb, resource) pair of every role, which is the
 	// authoring lockout again wearing a different number.
 	if cat == nil || cat.roleCount == 0 || cat.capabilityCount == 0 {
@@ -534,8 +534,8 @@ var rbacCatalogTopics = []string{
 // work on one page and refuse on the next, with both replicas reporting healthy
 // -- the same shape as the provider-auth split that rule exists for.
 //
-// Scoped to the engine lifecycle context: the subscriptions are torn down when
-// ctx is cancelled.
+// Scoped to the engine lifecycle context: when ctx is cancelled the
+// subscriptions are torn down and no further reload starts.
 func (e *MemQLEngine) StartCapabilityCatalog(ctx context.Context) {
 	if e == nil {
 		return
@@ -576,29 +576,15 @@ func (e *MemQLEngine) StartCapabilityCatalog(ctx context.Context) {
 	if e.eventBus == nil {
 		return
 	}
-	unsubscribes := make([]func(), 0, len(rbacCatalogTopics))
-	for _, topic := range rbacCatalogTopics {
-		unsubscribe := e.eventBus.Subscribe(
-			topic,
-			func(events.Event) {
-				if err := e.ReloadCapabilityCatalog(ctx); err != nil && e.Component != nil && e.Logger != nil {
-					e.Logger.Warn("rbac catalog reload failed -- keeping the last good snapshot",
-						"component", "memql.engine", "err", err.Error())
-				}
-			},
-			events.WithSubscriberName("memql:rbacCatalog"),
-		)
-		if unsubscribe != nil {
-			unsubscribes = append(unsubscribes, unsubscribe)
+	// COALESCED, NOT PER EVENT (memql#5252): an event marks the catalog
+	// dirty and at most one reload runs at a time, with the one after the
+	// last event never skipped. rbac_catalog_reload.go says why each half of
+	// that matters.
+	reloads := newCoalescedReloader(ctx, rbacCatalogReloadSettle, func(ctx context.Context) {
+		if err := e.ReloadCapabilityCatalog(ctx); err != nil && e.Component != nil && e.Logger != nil {
+			e.Logger.Warn("rbac catalog reload failed -- keeping the last good snapshot",
+				"component", "memql.engine", "err", err.Error())
 		}
-	}
-	if len(unsubscribes) == 0 {
-		return
-	}
-	go func() {
-		<-ctx.Done()
-		for _, unsubscribe := range unsubscribes {
-			unsubscribe()
-		}
-	}()
+	})
+	subscribeCoalescedReloads(e.eventBus, rbacCatalogTopics, "memql:rbacCatalog", reloads)
 }

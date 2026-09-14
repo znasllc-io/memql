@@ -25,7 +25,7 @@ bar, in exactly two cases:
 | Mark | Meaning |
 |---|---|
 | Red | A module the app needs is **not set up**. Sections that need it show the setup surface |
-| Amber | A module is **partly set up**, or one the app merely wants is missing. Nothing is gated |
+| Amber | A module is **partly set up** or **set up on some nodes** only, or one the app merely wants is missing. Nothing is gated |
 
 **No mark is the normal state, and it is also what you see while MemQL does not
 yet know.** The readiness feed lands a moment after the shell does; until it
@@ -35,40 +35,64 @@ the app and corrects itself if it turns out to be wrong.
 
 ## Not reported is not not-set-up
 
-A module's verdict is folded from what every live node reported. A module no
-live node has reported reads **not reported**, and that is a different answer
-from **not set up**:
+A module's verdict is folded from what every live node reported. Four answers
+say "we do not know" or "it depends", and none of them is **not set up**:
 
 - *Not set up* means the nodes looked and the configuration is absent. There
   is something for you to do.
 - *Not reported* means nobody answered. The nodes that host this module may
   all be down, may have just started, or the module may not be hosted anywhere
   in this cluster. There may be nothing wrong at all.
+- *Could not check* means nodes answered and none of them could finish the
+  check -- the read it depends on failed (a saturated database during a
+  rollout is the usual cause). Each node retries on its own.
+- *Set up on some nodes* means the nodes that checked disagree: some have the
+  configuration and some do not. The Cluster app names which.
 
-Nothing is gated on *not reported*, and no mark is drawn for it. If you see it
-where you expect an answer, check that the node type hosting the module is
-running -- `make status` locally, or the pods in the namespace.
+Nothing is gated on *not reported* or *could not check*, and no mark is drawn
+for either. If you see one where you expect an answer, check that the node type
+hosting the module is running -- `make status` locally, or the pods in the
+namespace -- and read the Cluster app's Modules detail, which lists every node
+with its own answer.
 
 ## Why two replicas can disagree
 
-Every node evaluates every module for itself at boot, after a provider reload,
-and after an integration is configured, and writes its own row. The verdict you
-see is those rows folded:
+Every node evaluates every module for itself and writes its own row: at boot,
+after a provider reload, after an integration is configured, when a machine is
+paired, revoked or re-advertises what it serves, and on a safety-net pass every
+ten minutes or so whether or not anything happened. A pass that could not
+finish is retried on its own, backing off from two seconds to a minute. A row
+is rewritten only when its answer changed, or when it is ten minutes old.
+
+The verdict you see is those rows folded:
 
 1. Reports from nodes that are not live are dropped. A node is live when its
    health is one of healthy, connecting, degraded or draining **and** it was
    seen within the last 60 seconds.
 2. Reports of `notApplicable` -- a node that does not host the module -- are
    dropped.
-3. The worst remaining state wins.
-4. **If the remaining reports disagree, the verdict is `partial` and names
-   every reporter**, as `nodeId=state`, worst first.
+3. Reports of `unknown` -- a node that could not evaluate the module because
+   the read it depends on failed -- are set aside. They cast no vote, and the
+   verdict names them. A module whose live reports are all `unknown` reads
+   *Could not check*, never *Not set up*.
+4. **A report that is behind the cluster is set aside.** Inference's two fleet
+   doors are read from the machine registrations alone, so every node that
+   checks them at the same moment agrees; a node whose answer about them
+   differs from the most recent node's has simply not re-checked since
+   something changed -- a machine paired or revoked. It is named as *catching
+   up* and not counted. Not every node hears about a new machine at once, and
+   the identity nodes never do; each catches up on its own next pass.
+5. The worst remaining state wins.
+6. **If the remaining reports disagree, the verdict is `partial`** and names
+   every reporter. When some of them are set up it reads *Set up on some
+   nodes*.
 
 So mid-rollout, with one replica restarted onto a new configuration and one
-not, you will see *Partly set up* with both nodes named. That is the honest
-answer and it resolves itself as the rollout completes. The Cluster app's
-Modules section shows the same fold beside each module's own inventory row, so
-the operator's inventory and the apps' marks are one reading.
+not, you will see *Set up on some nodes*. That is the honest answer and it
+resolves itself as the rollout completes. The Cluster app's Modules section
+shows the same fold beside each module's own inventory row, and a module's
+detail lists every live node with its own answer, how long ago it checked, and
+-- quieter, and not counted -- the nodes catching up or unable to check.
 
 ## Where each module is configured
 
@@ -103,8 +127,9 @@ restart the node, and the verdict follows within a moment.
 
 The same holds for a developer configuring an integration: the write lands
 immediately, but the recompute that refreshes the mark is owner-or-internal, so
-a developer's mark catches up on the next providers reload or restart rather
-than instantly. Nothing is lost; the configuration is already in effect.
+a developer's mark catches up on the node's next safety-net pass -- within ten
+minutes or so -- or the next providers reload, rather than instantly. Nothing
+is lost; the configuration is already in effect.
 
 ## Adding a module
 

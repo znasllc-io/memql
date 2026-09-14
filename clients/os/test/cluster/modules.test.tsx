@@ -188,9 +188,11 @@ describe("the pack switch", () => {
 
 describe("the cluster-wide readiness column", () => {
   // THE CLUSTER-WIDE READING beside this node's own. The two are different
-  // scopes and may honestly differ mid-rollout, so the column carries the
-  // disagreement rather than a word that hides which node it came from.
-  it("shows the cluster-wide readiness beside a module that has one", async () => {
+  // scopes and may honestly differ mid-rollout, so the column says WHICH kind
+  // of partial it is -- nodes that differ read "Set up on some nodes" -- and
+  // the nodes behind it are one hover away, never the raw nodeId=state pairs
+  // that used to stretch a row into a list of pod names (memql#5259).
+  it("names nodes that differ as set up on some nodes, with the nodes in the title", async () => {
     const readiness = {
       loaded: true,
       state: "live" as const,
@@ -202,14 +204,106 @@ describe("the cluster-wide readiness column", () => {
               state: "partial" as const,
               core: true,
               disagreement: ["bff-b=unconfigured", "bff-a=configured"],
-              nodes: [],
+              nodes: [
+                { nodeId: "bff-b", nodeType: "bff", state: "unconfigured" as const, reportedAt: "2026-09-13T11:58:00Z" },
+                { nodeId: "bff-a", nodeType: "bff", state: "configured" as const, reportedAt: "2026-09-13T11:58:00Z" },
+              ],
               lanes: [],
+              unknown: [],
+              stale: [],
+              aside: [],
             }
           : null,
     };
     mount(fakeConnection({}, { modules: MODULES }), "owner", readiness);
-    expect(await screen.findByText(/Partly set up/)).toBeTruthy();
-    expect(screen.getByText(/bff-b=unconfigured/)).toBeTruthy();
+    const chip = await screen.findByText("Set up on some nodes");
+    expect(chip.getAttribute("title") ?? chip.closest("[title]")?.getAttribute("title")).toMatch(/Not set up on bff-b/);
+    expect(screen.queryByText(/bff-b=unconfigured/)).toBeNull();
+  });
+
+  // A NODE THE FOLD SET ASIDE IS COUNTED, NOT VOTED. The verdict reads as it
+  // would without it -- "Set up" -- and a quiet count says how many nodes are
+  // behind or could not check, so the operator knows there is something to
+  // read in the detail without a warning colour on a working module.
+  it("counts the nodes the fold set aside beside an unchanged verdict", async () => {
+    const readiness = {
+      loaded: true,
+      state: "live" as const,
+      reseed: () => {},
+      of: (id: string) =>
+        id === "storage"
+          ? {
+              module: "storage",
+              state: "configured" as const,
+              core: true,
+              disagreement: [],
+              nodes: [{ nodeId: "agent-a", nodeType: "agent", state: "configured" as const, reportedAt: "2026-09-13T11:58:00Z" }],
+              lanes: [],
+              unknown: ["bff-b"],
+              stale: ["edge-a", "identity-a"],
+              aside: [],
+            }
+          : null,
+    };
+    mount(fakeConnection({}, { modules: MODULES }), "owner", readiness);
+    expect(await screen.findByText("Set up")).toBeTruthy();
+    // ONE label, the more actionable of the two; the rest is in the title.
+    const label = screen.getByText("1 could not check");
+    expect(label.getAttribute("title")).toMatch(/2 nodes catching up: edge-a, identity-a/);
+    expect(screen.queryByText("2 catching up")).toBeNull();
+  });
+
+  // THE DETAIL OPENS THE FOLD UP (memql#5259): the module on every live
+  // node, voters first, then -- quieter -- the node catching up with the time
+  // it last checked, and the node that could not check with the reason.
+  it("lists the module on every live node in the detail, set-aside nodes included", async () => {
+    const readiness = {
+      loaded: true,
+      state: "live" as const,
+      reseed: () => {},
+      of: (id: string) =>
+        id === "storage"
+          ? {
+              module: "storage",
+              state: "configured" as const,
+              core: true,
+              disagreement: [],
+              nodes: [{ nodeId: "agent-a", nodeType: "agent", state: "configured" as const, reportedAt: new Date().toISOString() }],
+              lanes: [],
+              unknown: ["bff-b"],
+              stale: ["edge-a"],
+              aside: [
+                { nodeId: "edge-a", nodeType: "edge", state: "unconfigured" as const, reportedAt: new Date(Date.now() - 3 * 3600_000).toISOString(), why: "stale" as const },
+                { nodeId: "bff-b", nodeType: "bff", state: "unknown" as const, reportedAt: new Date().toISOString(), reason: "fleetReadFailed", why: "unknown" as const },
+              ],
+            }
+          : null,
+    };
+    mount(fakeConnection({}, { modules: MODULES }), "owner", readiness);
+    await click(await screen.findByText("storage"));
+
+    expect(await screen.findByText("Across the cluster")).toBeTruthy();
+    expect(screen.getByText("Set up. The one node that counts says so.")).toBeTruthy();
+    const list = screen.getByRole("list", { name: "storage on each live node" });
+    const rows = Array.from(list.querySelectorAll(".os-cluster-readiness-row"));
+    expect(rows.map((r) => r.querySelector(".os-cluster-readiness-node")?.textContent)).toEqual(["agent-a", "edge-a", "bff-b"]);
+    // Counted and set aside are told apart in the markup, not only the words.
+    expect(rows.map((r) => r.hasAttribute("data-aside"))).toEqual([false, true, true]);
+    expect(within(rows[1] as HTMLElement).getByText("Catching up")).toBeTruthy();
+    expect(within(rows[1] as HTMLElement).getByText(/last checked 3h ago/)).toBeTruthy();
+    expect(within(rows[2] as HTMLElement).getByText(/the fleet could not be read/)).toBeTruthy();
+  });
+
+  it("draws no cluster reading in the detail of a module readiness does not know", async () => {
+    mount(fakeConnection({}, { modules: MODULES }), "owner", {
+      loaded: true,
+      state: "live" as const,
+      reseed: () => {},
+      of: () => null,
+    });
+    await click(await screen.findByText("identity"));
+    await screen.findByRole("heading", { name: "identity" });
+    expect(screen.queryByText("Across the cluster")).toBeNull();
   });
 
   // Most registry modules have no readiness counterpart, and drawing an

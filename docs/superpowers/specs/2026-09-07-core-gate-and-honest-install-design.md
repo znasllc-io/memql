@@ -165,6 +165,18 @@ stop is unsettled, which is the honest answer to "where did it go".
 
 ### D5 -- Readiness recomputes on the events that change it, with one delayed boot re-write
 
+> **AMENDED on 2026-09-14.** The premise that the registration broadcast reaches
+> every replica is false: identity is excluded from every broadcast, a node
+> nobody dials receives no mesh event, and a peer whose connection is absent at
+> that moment is skipped (memql#5259). D2 of
+> `2026-09-14-readiness-convergence-design.md` adds a jittered exponential retry
+> after a failed or unknown pass and a 10-minute jittered safety-net pass, so
+> "not a timer" no longer holds as stated and `TestNothingRewritesWithoutAnEvent`
+> became `TestASafetyNetPassRunsWithoutAnEvent`; its S1 sets aside a row whose
+> cluster-scoped lanes lag the freshest one, so the verdict does not wait for
+> the lagging row. The event subscription, the debounce and the 30 s boot
+> re-write stand, and the boot write goes through the same loop.
+
 Chosen over a timer (too slow after a change, wasteful when nothing changed) and over
 the four existing triggers alone. A per-node subscriber rewrites the rows, debounced two
 seconds, on `graph.node.created|updated|deleted` for `v1:worker:registration` (a

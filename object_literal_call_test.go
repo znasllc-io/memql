@@ -61,6 +61,12 @@ package main
 // so its Sprintf argument is a strings.Join or a Builder, never `string(x)`
 // where x came out of json.Marshal.
 //
+// BY CONCATENATION TOO (memql#5368): `"name(" + string(x) + ")"` is the same
+// substitution without Sprintf, and three authoring writes had it --
+// setConstructStatus, catalogueConstruct and dependentsOfConstruct. The Sprintf
+// match could not see them, and the first of the three refused every
+// authored-bundle activation, email rules included.
+//
 // It reports the SHAPE and does not resolve the name, so it flags the two
 // primitive-builtin sites too. That is the right trade in this direction: the
 // shape is a reliable signal that somebody reached for the wrapper, the fix
@@ -172,11 +178,23 @@ func marshalledIdents(body *ast.BlockStmt) map[string]bool {
 	return out
 }
 
-// objectLiteralSites finds the Sprintf calls that put one of those variables
-// whole inside a rendered call's parentheses.
+// objectLiteralSites finds the Sprintf calls and the concatenations that put
+// one of those variables whole inside a rendered call's parentheses.
 func objectLiteralSites(body *ast.BlockStmt, marshalled map[string]bool) []ast.Node {
 	var out []ast.Node
 	ast.Inspect(body, func(n ast.Node) bool {
+		// `"name(" + string(x)`: the left-hand literal opens the call and the
+		// right-hand operand is the marshalled value, whole. The closing ")"
+		// is the outer operand, so the inner sum is the one to match.
+		if sum, ok := n.(*ast.BinaryExpr); ok && sum.Op == token.ADD {
+			if lit, ok := sum.X.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+				opened, uerr := strconv.Unquote(lit.Value)
+				if uerr == nil && strings.HasSuffix(strings.TrimSpace(opened), "(") && isMarshalledString(sum.Y, marshalled) {
+					out = append(out, sum)
+				}
+			}
+			return true
+		}
 		call, ok := n.(*ast.CallExpr)
 		if !ok || !isSelector(call.Fun, "fmt", "Sprintf") || len(call.Args) < 2 {
 			return true
@@ -207,6 +225,19 @@ func objectLiteralSites(body *ast.BlockStmt, marshalled map[string]bool) []ast.N
 		return true
 	})
 	return out
+}
+
+// isMarshalledString reports whether e is `string(x)` for a marshalled x.
+func isMarshalledString(e ast.Expr, marshalled map[string]bool) bool {
+	conv, ok := e.(*ast.CallExpr)
+	if !ok || len(conv.Args) != 1 {
+		return false
+	}
+	if fnIdent, ok := conv.Fun.(*ast.Ident); !ok || fnIdent.Name != "string" {
+		return false
+	}
+	arg, ok := conv.Args[0].(*ast.Ident)
+	return ok && marshalled[arg.Name]
 }
 
 func isSelector(e ast.Expr, pkg, name string) bool {

@@ -74,6 +74,9 @@ func (s *Service) expressionHover(source string, line, col int) (*HoverResult, b
 	if form, ok := retiredAt(toks, idx, col, ctx.Position); ok {
 		return card(retiredCard(form))
 	}
+	if form, example, ok := s.retiredPredicateAt(source, toks, idx); ok {
+		return card(retiredCardWith(form, example))
+	}
 	if f, site, ok := s.catalogEntryAt(toks, idx, line, col, ctx); ok {
 		a := tiers.Admitted
 		if ctx.Position != "" {
@@ -81,7 +84,76 @@ func (s *Service) expressionHover(source string, line, col int) (*HoverResult, b
 		}
 		return card(catalogCard(f, ctx.Position, a, ctx.Param, site))
 	}
+	if info, ok := s.predicateAt(toks, idx, ctx); ok {
+		return card(predicateCard(info, ctx.Position))
+	}
 	return nil, false
+}
+
+// ---- Predicates ----
+
+// predicateAt returns the spec or trait the token at idx applies: its name,
+// called, at an expression position. The catalog is consulted first, as the
+// evaluator does, so a spec never takes a function's card.
+func (s *Service) predicateAt(toks []parser.Token, idx int, ctx CursorContext) (*SpecInfo, bool) {
+	t := toks[idx]
+	if s.registries == nil || ctx.Position == "" || t.Type != parser.TokenIdentifier || strings.ContainsAny(t.Literal, ".:") {
+		return nil, false
+	}
+	if idx+1 >= len(toks) || toks[idx+1].Type != parser.TokenParenOpen {
+		return nil, false
+	}
+	if _, isFunction := functions.Lookup(t.Literal); isFunction {
+		return nil, false
+	}
+	info, ok := s.registries.SpecGet(t.Literal)
+	return info, ok && info != nil
+}
+
+// predicateCard renders a spec or trait application: the application as its
+// signature, what it reads, where it runs at the position, and the spellings
+// it replaced -- the same shape as a catalog entry's card.
+func predicateCard(info *SpecInfo, pos tiers.Position) string {
+	receiver, kind := "row", "spec"
+	if info.Kind == "context" {
+		receiver = "actor"
+	}
+	if info.Trait {
+		kind = "trait"
+	}
+	sentence := firstSentence(strings.TrimSpace(info.Description))
+	switch {
+	case sentence != "":
+	case info.Trait:
+		sentence = "A trait: a predicate over any row, applied to the row it reads."
+	case receiver == "actor":
+		sentence = "A spec over " + info.Bound + ", applied to the actor."
+	default:
+		sentence = "A spec over " + info.Bound + ", applied to the row it reads."
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "```memql\n%s(%s) bool\n```\n\n%s\n\n%s", info.Name, receiver, sentence, predicateRunsLine(receiver, pos))
+	if tiers.PredicateAdmission(pos) == tiers.Refused {
+		fmt.Fprintf(&b, "\n\nNot allowed in %s, which applies no spec or trait.", positionPhrase(pos))
+	}
+	fmt.Fprintf(&b, "\n\nReplaces `%s` written bare and `%s %s`.", info.Name, kind, info.Name)
+	return b.String()
+}
+
+// predicateRunsLine says where an application runs at a position: a row
+// predicate is compiled into the filter's SQL, a predicate over the actor is
+// decided in process from the caller before the query, and every in-process
+// position runs both in process.
+func predicateRunsLine(receiver string, pos tiers.Position) string {
+	switch {
+	case tiers.TierOf(pos) == tiers.TierP && receiver == "actor":
+		return "Runs in process before the query, against the caller."
+	case tiers.TierOf(pos) == tiers.TierP:
+		return "Pushed down to SQL."
+	case pos == tiers.PositionQueryRefine && receiver == "row":
+		return "Runs in process, over the rows of the page the query read."
+	}
+	return "Runs in process."
 }
 
 // tokenIndexAt returns the index of the token under a 1-based cursor, or -1.
@@ -455,6 +527,13 @@ var retiredChoice = regexp.MustCompile(`^(.+?) for (.+?) or (.+?) for (.+)$`)
 // retiredCard renders a retired form's hover card: the replacement, then the
 // retirement and the rewrite that performs it.
 func retiredCard(f parser.RetiredForm) string {
+	return retiredCardWith(f, "")
+}
+
+// retiredCardWith is retiredCard with the author's own construct, as the
+// rewrite writes it, in the code block in place of the table's placeholder
+// form when there is one.
+func retiredCardWith(f parser.RetiredForm, example string) string {
 	spelling := "`" + f.Spelling + "`"
 	if glyph, ok := strings.CutSuffix(f.Spelling, " as a connective"); ok {
 		spelling = "`" + glyph + "` as a connective"
@@ -463,6 +542,9 @@ func retiredCard(f parser.RetiredForm) string {
 	if m := retiredChoice.FindStringSubmatch(f.Replacement); m != nil {
 		code = m[1] + "\n" + m[3]
 		write = fmt.Sprintf("`%s` for %s or `%s` for %s", m[1], m[2], m[3], m[4])
+	}
+	if example != "" {
+		code = example
 	}
 	return fmt.Sprintf("```memql\n%s\n```\n\n%s is retired in edition 2026. Write %s; `%s` rewrites it.",
 		code, spelling, write, migrator)

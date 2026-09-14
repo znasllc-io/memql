@@ -34,6 +34,8 @@ func findTemporalAccess(expr ExpressionNode) *TimestampExpression {
 		return findTemporalAccess(n.Target)
 	case *PaginateExpression:
 		return findTemporalAccess(n.Target)
+	case *RefineExpression:
+		return findTemporalAccess(n.Target)
 	case *SelectExpression:
 		return findTemporalAccess(n.Target)
 	case *DepthExpression:

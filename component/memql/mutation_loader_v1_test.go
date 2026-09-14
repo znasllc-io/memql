@@ -167,6 +167,7 @@ func mountV1TreeFixture(t *testing.T) {
 	t.Helper()
 	before := memorynodes.All()
 	memqldsl.RegisterTree(v1TreeFixtureDomain, fstest.MapFS{
+		"memql.toml":     languageLineFile(),
 		"concepts.memql": {Data: []byte(v1TreeFixtureConcepts)},
 	})
 	t.Cleanup(func() {

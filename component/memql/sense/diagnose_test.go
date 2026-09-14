@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/repowalk"
 )
 
@@ -273,5 +274,50 @@ func TestDiagnose_EmptyAndWhitespace(t *testing.T) {
 		if diags := svc.Diagnose(src, "empty.memql"); len(diags) != 0 {
 			t.Errorf("Diagnose(%q) = %d diagnostics, want 0", src, len(diags))
 		}
+	}
+}
+
+// TestDiagnose_RetiredFormCarriesItsRule: a refusal of a retired edition-2026
+// form carries its rule id (parser.RetiredForm.Rule) as the diagnostic code,
+// so the language server can key the "Rewrite to edition 2026" quick fix on
+// it and a person sees which rule fired. Any other parse failure keeps
+// "parse-error" (memql#5364).
+func TestDiagnose_RetiredFormCarriesItsRule(t *testing.T) {
+	saved := parser.DefaultOptions
+	t.Cleanup(func() { parser.DefaultOptions = saved })
+	parser.DefaultOptions = parser.Options{ExpressionsV1: true}
+
+	rules := map[string]bool{}
+	for _, f := range parser.V1RetiredForms() {
+		rules[f.Rule] = true
+	}
+	svc := New(nil)
+	for _, tc := range []struct{ name, src, want string }{
+		{"query filter", "query thing things {\n  filter  status == args.status\n}\n", "retired_filter_without_lambda"},
+		{"trigger filter", "@trigger(event=\"node.updated\", concept=\"v1:x:thing\", partition=\"*\")\n@filter(payload.status == \"archived\")\n" +
+			"automation onArchived {\n  step s {\n    logic doIt ( event )\n  }\n}\n", "retired_filter_annotation"},
+		{"spec body", "spec thing isOpen {\n  return status == \"open\"\n}\n", "retired_spec_return_body"},
+		{"trait body", "trait isOpen {\n  return status == \"open\"\n}\n", "retired_trait_return_body"},
+		{"cond call", "logic doIt {\n  args {\n    x string\n  }\n  body {\n    return cond(args.x == \"a\", 1, 2)\n  }\n}\n", "retired_cond_call"},
+		{"null", "logic doIt {\n  args {\n    x string\n  }\n  body {\n    return args.x == null\n  }\n}\n", "retired_null"},
+		// The legacy object literal's key-less entry is a retired form: its
+		// refusal writes the entry out, the fix the codemod makes.
+		{"key-less map entry", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a: 1, args.x.y }\n  }\n}\n", "retired_keyless_map_entry"},
+		// Not a retired form: the plain code stays. A dotted KEY is refused
+		// with "nest a map", which no rewrite performs.
+		{"dotted map key", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a.b: 1 }\n  }\n}\n", "parse-error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			errs := errorDiags(svc.Diagnose(tc.src, "test.memql"))
+			if len(errs) == 0 {
+				t.Fatalf("want a %s diagnostic, got none", tc.want)
+			}
+			if got := errs[0].Code; got != tc.want {
+				t.Errorf("code = %q, want %q (msg: %s)", got, tc.want, errs[0].Message)
+			}
+			if tc.want != "parse-error" && !rules[tc.want] {
+				t.Errorf("%s is not a rule of parser.V1RetiredForms", tc.want)
+			}
+		})
 	}
 }

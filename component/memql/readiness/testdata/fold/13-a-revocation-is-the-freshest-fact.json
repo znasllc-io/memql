@@ -1,0 +1,29 @@
+{
+  "name": "after the only machine is revoked the freshest row decides: rows that still count it are stale",
+  "now": "2026-09-13T12:01:00Z",
+  "reports": [
+    {"module": "ai", "nodeId": "bff-a", "nodeType": "bff", "state": "unconfigured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-13T12:00:30Z"},
+    {"module": "ai", "nodeId": "agent-a", "nodeType": "agent", "state": "configured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": true, "slots": [{"name": "live", "present": true}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-13T11:59:00Z"},
+    {"module": "ai", "nodeId": "edge-a", "nodeType": "edge", "state": "configured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": true, "slots": [{"name": "live", "present": true}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-13T11:50:00Z"}
+  ],
+  "nodes": [
+    {"nodeId": "bff-a", "health": "healthy", "lastSeen": "2026-09-13T12:00:40Z"},
+    {"nodeId": "agent-a", "health": "healthy", "lastSeen": "2026-09-13T12:00:40Z"},
+    {"nodeId": "edge-a", "health": "healthy", "lastSeen": "2026-09-13T12:00:40Z"}
+  ],
+  "expect": [
+    {"module": "ai", "state": "unconfigured", "disagreement": [], "unknown": [], "stale": ["agent-a", "edge-a"]}
+  ]
+}

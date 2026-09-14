@@ -942,3 +942,230 @@ func xmtEvalV1(t *testing.T, n ast.ExpressionNode, env map[string]bool) bool {
 	}
 	return env[xmtLeafKey(legacy)]
 }
+
+// Key-less map-literal entries (epic memql#5363). The legacy object literal
+// keyed a bare dotted path by its terminal segment and a bare name by itself
+// (a pun); the edition-2026 map literal refuses both, so the rewrite writes the
+// key the legacy parse built.
+func TestRewriteExpressions_KeylessMapEntries(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"dsl/identity/logic.memql onDelegationCreated, exactly",
+			"  emitEvent := publishEvent(\n" +
+				"    topic: \"delegation.created\",\n" +
+				"    payload: {\n" +
+				"      delegationId: args.event.payload.id,\n" +
+				"      args.event.payload.identityId,\n" +
+				"      args.event.payload.identitySubject,\n" +
+				"      args.event.payload.identityType,\n" +
+				"      args.event.payload.agentId,\n" +
+				"      args.event.payload.roleCeiling,\n" +
+				"      args.event.payload.scopes,\n" +
+				"      args.event.payload.createdBySubject,\n" +
+				"      timestamp: now\n" +
+				"    }\n" +
+				"  )\n" +
+				"  return emitEvent",
+			"  emitEvent := publishEvent(\n" +
+				"    topic: \"delegation.created\",\n" +
+				"    payload: {\n" +
+				"      delegationId: args.event.payload.id,\n" +
+				"      identityId: args.event.payload.identityId,\n" +
+				"      identitySubject: args.event.payload.identitySubject,\n" +
+				"      identityType: args.event.payload.identityType,\n" +
+				"      agentId: args.event.payload.agentId,\n" +
+				"      roleCeiling: args.event.payload.roleCeiling,\n" +
+				"      scopes: args.event.payload.scopes,\n" +
+				"      createdBySubject: args.event.payload.createdBySubject,\n" +
+				"      timestamp: now\n" +
+				"    }\n" +
+				"  )\n" +
+				"  return emitEvent"},
+		{"a pun",
+			`    r := publishEvent(topic: "x", payload: { allAgents, n: 1 })`,
+			`    r := publishEvent(topic: "x", payload: { allAgents: allAgents, n: 1 })`},
+		{"an assigned map, a returned map, a map in a list, a nested map",
+			"    a := { steps.decide.result.id }\n    b := [{ args.x.y }]\n    return { outer: { args.p.q } }",
+			"    a := { id: steps.decide.result.id }\n    b := [{ y: args.x.y }]\n    return { outer: { q: args.p.q } }"},
+		{"keyed entries and a block are left alone; the legacy `key = value` separator becomes `:`",
+			"    if steps.ok.result == true {\n      r := f(m: { a: args.a.b, c = 1 })\n    }",
+			"    if steps.ok.result == true {\n      r := f(m: { a: args.a.b, c: 1 })\n    }"},
+		{"a collection method's projection body is a map",
+			`    groups := args.rows.groupBy(r => r.kind).select(g => { g.key, n: g.items.count() })`,
+			`    groups := args.rows.groupBy(r => r.kind).select(g => { key: g.key, n: g.items.count() })`},
+		{"a dotted name inside a string or a comment is not an entry",
+			"    r := f(m: { s: \"x.y\" }) // { a.b }",
+			"    r := f(m: { s: \"x.y\" }) // { a.b }"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "logic l {\n  body {\n" + tc.in + "\n  }\n}\n"
+			want := "logic l {\n  body {\n" + tc.want + "\n  }\n}\n"
+			got := xmtRewrite(t, src, nil)
+			if got != want {
+				t.Fatalf("\n got:\n%s\nwant:\n%s", got, want)
+			}
+			// Idempotent: a second run changes nothing.
+			if again := xmtRewrite(t, got, nil); again != got {
+				t.Errorf("a second run changed the output:\n%s", again)
+			}
+		})
+	}
+
+	// An automation step's call arguments hold maps too.
+	auto := "automation a {\n  step s {\n    builtin b ( m: { event.payload.id } )\n  }\n}\n"
+	if got, want := xmtRewrite(t, auto, nil), strings.Replace(auto, "{ event.payload.id }", "{ id: event.payload.id }", 1); got != want {
+		t.Errorf("automation step:\n got:\n%s\nwant:\n%s", got, want)
+	}
+
+	// A mutation's write block is the struct-form rewriter's: left alone, a
+	// nested map inside it included.
+	mut := "mutate thing m {\n  insert {\n    id: args.id\n    meta: { args.a.b }\n  }\n}\n"
+	if got := xmtRewrite(t, mut, nil); got != mut {
+		t.Errorf("a write block was touched:\n%s", got)
+	}
+
+	// The migrated body parses under the edition-2026 grammar.
+	src := "logic l {\n  args {\n    event object!\n  }\n  body {\n" + cases[0].in + "\n  }\n}\n"
+	got := xmtRewrite(t, src, nil)
+	if _, err := ParseV1Expression(strings.TrimSpace(got[strings.Index(got, "publishEvent("):strings.LastIndex(got, "  return")])); err != nil {
+		t.Errorf("the rewritten map does not parse as v1: %v", err)
+	}
+}
+
+// Refused by name: the accessor shorthand, keyed by its ARGUMENT, and two
+// entries that would land on one key -- the legacy map kept the last one in
+// silence, a v1 map refuses the duplicate.
+func TestRewriteExpressions_KeylessMapEntriesRefusals(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{`    r := f(m: { node("a.b") })`, "last segment of its quoted argument"},
+		{`    r := f(m: { args.a.id, args.b.id })`, `land on the key "id"`},
+		{`    r := f(m: { id: 1, args.a.id })`, `land on the key "id"`},
+	} {
+		src := "logic l {\n  body {\n" + tc.in + "\n  }\n}\n"
+		out, err := RewriteExpressions([]byte(src), nil)
+		if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "line 3:") {
+			t.Errorf("%s: err = %v, want a line-3 refusal naming %q", tc.in, err, tc.want)
+		}
+		if string(out) != src {
+			t.Errorf("%s: a refused file must come back unchanged", tc.in)
+		}
+	}
+}
+
+// A bare name in a trigger @filter is a field of the triggering row, as
+// `payload.<field>` is -- unless the filter scope binds it (now, event, actor,
+// args, ...) or the automation's args block declares it, which the G2 tier
+// resolves to the bound argument in both grammars (epic memql#5363).
+func TestRewriteExpressions_TriggerFilterBareNames(t *testing.T) {
+	trigger := "@trigger(event=\"node.updated\", concept=\"v1:x:y\", partition=\"*\")\n"
+	body := "automation a {\n  step s {\n    logic l ( event )\n  }\n}\n"
+	for _, tc := range []struct{ in, want string }{
+		{`@filter(status == "archived")`, `@filter(row => row.status == "archived")`},
+		{`@filter(status == "archived" && payload.kind == "file")`, `@filter(row => row.status == "archived" && row.kind == "file")`},
+		// A row intrinsic takes its canonical spelling.
+		{`@filter(id == "v1:x:y:1")`, `@filter(row => row.id == "v1:x:y:1")`},
+		{`@filter(createdat < now)`, `@filter(row => row.createdAt < now)`},
+		// Names the scope binds keep them; so does a rooted path.
+		{`@filter(event.topic == "t" && actor.userId == "u")`, `@filter(row => event.topic == "t" && actor.userId == "u")`},
+		{`@filter(createdBy == actor.userId)`, `@filter(row => row.createdBy == actor.userId)`},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			src := trigger + tc.in + "\n" + body
+			got := xmtRewrite(t, src, nil)
+			if !strings.Contains(got, "\n"+tc.want+"\n") {
+				t.Errorf("\n got:\n%s\nwant the line %s", got, tc.want)
+			}
+			if again := xmtRewrite(t, got, nil); again != got {
+				t.Errorf("a second run changed the output:\n%s", again)
+			}
+		})
+	}
+
+	// An args-block automation's field keeps its bare name, on either side:
+	// G2 resolves it to the bound argument, before and after.
+	argsAuto := trigger + "@filter(status == \"archived\" && kind == \"file\" && payload.ownerUserId == owner)\n" +
+		"automation a {\n  args {\n    status string\n    owner string\n  }\n  step s {\n    logic l ( status )\n  }\n}\n"
+	if got := xmtRewrite(t, argsAuto, nil); !strings.Contains(got, `@filter(row => status == "archived" && row.kind == "file" && row.ownerUserId == owner)`) {
+		t.Errorf("args-block automation:\n%s", got)
+	}
+
+	// A bare word on the RIGHT is not converted: the legacy evaluator fell
+	// back to the word's own text there, so `== active` compared "active",
+	// and neither reading can be picked for the author.
+	ambiguous := trigger + "@filter(payload.status == active)\n" + body
+	if out, err := RewriteExpressions([]byte(ambiguous), nil); err == nil || string(out) != ambiguous ||
+		!strings.Contains(err.Error(), "the bare word active is a path or a literal") {
+		t.Errorf("want the right-hand bare word refused, got err=%v\n%s", err, out)
+	}
+
+	// A terse automation has no args block, and the braced automation below
+	// it does not lend it one.
+	terse := trigger + "@filter(status == \"archived\")\nautomation t @trigger(event=\"node.created\", concept=\"v1:x:y\", partition=\"*\") => logic l\n\n" +
+		"automation b {\n  args {\n    status string\n  }\n  step s {\n    logic l ( status )\n  }\n}\n"
+	if got := xmtRewrite(t, terse, nil); !strings.Contains(got, `@filter(row => row.status == "archived")`) {
+		t.Errorf("terse automation:\n%s", got)
+	}
+}
+
+// PlanExpressions is RewriteExpressions clause by clause: the edits applied
+// together are the rewrite, and a refused clause comes back with its span and
+// no edit, so an editor can convert the rest and leave it where it is.
+func TestPlanExpressions(t *testing.T) {
+	clean := xmtQuery("  filter  status==args.status") +
+		"\ntrait isOpen {\n  return status == \"open\"\n}\n" +
+		"\n@trigger(event=\"node.updated\", concept=\"v1:x:y\", partition=\"*\")\n@filter(payload.kind == \"file\")\n" +
+		"automation a {\n  step s {\n    logic l ( event )\n  }\n}\n"
+	plan, err := PlanExpressions([]byte(clean), xmtPreds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Refused) != 0 || len(plan.Edits) != 3 {
+		t.Fatalf("want 3 edits and no refusal, got %+v", plan)
+	}
+	var b strings.Builder
+	prev := 0
+	for _, e := range plan.Edits {
+		b.WriteString(clean[prev:e.Start])
+		b.WriteString(e.Text)
+		prev = e.End
+	}
+	b.WriteString(clean[prev:])
+	if want := xmtRewrite(t, clean, xmtPreds); b.String() != want {
+		t.Errorf("the plan's edits applied:\n%s\nRewriteExpressions:\n%s", b.String(), want)
+	}
+
+	// Two refused clauses -- a trait body that is not `return <expression>`
+	// and a trigger filter with an ambiguous bare word -- between two that
+	// convert. RewriteExpressions refuses the file; the plan keeps the two
+	// conversions and spans each refusal over its whole clause.
+	refusedTrait := "trait isOdd {\n  status == \"odd\"\n}\n"
+	refusedFilter := "@filter(payload.status == active)"
+	mixed := xmtQuery("  filter  status==args.status") + "\n" + refusedTrait +
+		"\n@trigger(event=\"node.updated\", concept=\"v1:x:y\", partition=\"*\")\n" + refusedFilter + "\n" +
+		"automation a {\n  step s {\n    logic l ( event )\n  }\n}\n" +
+		"\ntrait isOpen {\n  return status == \"open\"\n}\n"
+	if _, err := RewriteExpressions([]byte(mixed), xmtPreds); err == nil {
+		t.Fatal("RewriteExpressions converted a source holding refused clauses")
+	}
+	plan, err = PlanExpressions([]byte(mixed), xmtPreds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Edits) != 2 || len(plan.Refused) != 2 {
+		t.Fatalf("want 2 edits and 2 refusals, got %+v", plan)
+	}
+	for i, want := range []string{strings.TrimSuffix(refusedTrait, "\n"), refusedFilter} {
+		got := plan.Refused[i]
+		if span := mixed[got.Start:got.End]; span != want {
+			t.Errorf("refusal %d spans %q, want %q (%v)", i, span, want, got.Err)
+		}
+		for _, e := range plan.Edits {
+			if e.Start < got.End && got.Start < e.End {
+				t.Errorf("edit %+v overlaps refused clause %q", e, want)
+			}
+		}
+	}
+	if !strings.Contains(plan.Refused[1].Err.Error(), "the bare word active") {
+		t.Errorf("refusal names %v", plan.Refused[1].Err)
+	}
+}

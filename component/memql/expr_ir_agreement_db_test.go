@@ -91,6 +91,7 @@ func irAgreementFixtures() []irAgreementFixture {
 		{"irTags a b", `{"irTags":["a","b"]}`},
 		{"irTags b c", `{"irTags":["b","c"]}`},
 		{"irTags a non-array scalar", `{"irTags":"a"}`},
+		{"irTags an object", `{"irTags":{"k":"a"}}`},
 		{"irTags blank and null", `{"irTags":["",null]}`},
 		{"irNums empty", `{"irNums":[]}`},
 		{"irNums 1 2 3", `{"irNums":[1,2,3]}`},
@@ -110,6 +111,18 @@ func irAgreementFixtures() []irAgreementFixture {
 		{"irB malformed", `{"irB":"maybe"}`},
 		{"irTags mixed types", `{"irTags":["a",1,true,null]}`},
 		{"irNums strings of digits", `{"irNums":["1","2"]}`},
+		// Two fields of one row, for the field-to-field comparison Lower
+		// emits (expr_field_operand.go): ordered numbers, equal numbers
+		// written two ways, equal strings, the two spellings of unset, one
+		// side absent, a type mismatch, and equal lists.
+		{"irA 1 irZ 2", `{"irA":1,"irZ":2}`},
+		{"irA 2 irZ 2.0", `{"irA":2,"irZ":2.0}`},
+		{"irA x irZ x", `{"irA":"x","irZ":"x"}`},
+		{"irA E irZ a", `{"irA":"E","irZ":"a"}`},
+		{"irA empty irZ null", `{"irA":"","irZ":null}`},
+		{"irA 1 only", `{"irA":1}`},
+		{"irA string 1 irZ 1", `{"irA":"1","irZ":1}`},
+		{"irA list irZ list", `{"irA":[1,"a"],"irZ":[1.0,"a"]}`},
 	}
 }
 

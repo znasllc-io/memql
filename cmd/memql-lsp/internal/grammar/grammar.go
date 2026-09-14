@@ -205,23 +205,13 @@ func build(spec *dslspec.Spec, catalog []functions.Function, grammarVersion stri
 		},
 		// Unary `!`. Listed after operators-symbol, which claims `!=` first.
 		"unary-not": {Name: scopeLogicalNot, Match: `!`},
-		// The ternary `p ? a : b`, as a region from its `?` to its `:` so the
-		// colon is told from a map key's. Listed after operators-symbol, which
-		// claims `??` first; `.?` starts a character earlier and needs no help.
-		// Brackets inside a branch are their own groups, so a map key's or a
-		// named argument's colon inside them does not end the region.
-		"ternary": {
-			Begin:         `\?`,
-			BeginCaptures: map[string]tmCapture{"0": {Name: scopeTernary}},
-			End:           `:`,
-			EndCaptures:   map[string]tmCapture{"0": {Name: scopeTernary}},
-			Patterns:      []tmRule{{Include: "#ternary-groups"}, {Include: "$self"}},
-		},
-		"ternary-groups": {Patterns: []tmRule{
-			{Begin: `\(`, End: `\)`, Patterns: []tmRule{{Include: "$self"}}},
-			{Begin: `\[`, End: `\]`, Patterns: []tmRule{{Include: "$self"}}},
-			{Begin: `\{`, End: `\}`, Patterns: []tmRule{{Include: "$self"}}},
-		}},
+		// The ternary's `?`, as one mark. Listed after operators-symbol, which
+		// claims `??` first; `.?` starts a character earlier, so
+		// optional-accessor takes it whole. The `:` is left unscoped: a map
+		// entry and a named argument write it too, and a region from `?` to
+		// the next `:` would run on through the file after a `?` still being
+		// typed.
+		"ternary": {Name: scopeTernary, Match: `\?`},
 	}
 
 	patterns := []tmInclude{

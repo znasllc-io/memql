@@ -237,13 +237,23 @@ func InferenceLanes(in InferenceInput) []LaneReport {
 	}
 
 	return []LaneReport{
-		inferenceLane(InferenceLaneLocal, "fleet", localConfigured, localLive),
-		inferenceLane(InferenceLaneApp, "fleet", appConfigured, appLive),
+		// The two FLEET doors are read from registration rows alone, so every
+		// node that evaluates them at the same moment answers the same thing:
+		// they are the cluster-scoped lanes the fold judges staleness by
+		// (LaneScopeCluster, memql#5259).
+		inferenceLane(InferenceLaneLocal, "fleet", LaneScopeCluster, localConfigured, localLive),
+		inferenceLane(InferenceLaneApp, "fleet", LaneScopeCluster, appConfigured, appLive),
 		// Federation is set in the DEPLOYMENT (the identity ids), which is
 		// what `configurableFrom` names for every other env-driven lane. It is
 		// configured and live together: there is no machine to be asleep and
 		// no stream to be held.
-		inferenceLane(InferenceLaneFederation, "deployment", in.FederationConfigured, in.FederationConfigured),
+		//
+		// NODE-scoped, deliberately, although it sits beside two cluster
+		// lanes: it is this node's own provider registry answering, and a
+		// replica deployed without the federation configuration genuinely
+		// cannot use the door. That disagreement is real and must still fold
+		// to `partial`, which an unmarked lane guarantees.
+		inferenceLane(InferenceLaneFederation, "deployment", "", in.FederationConfigured, in.FederationConfigured),
 	}
 }
 
@@ -252,10 +262,11 @@ func InferenceLanes(in InferenceInput) []LaneReport {
 // from -- env, a stored variable, a sealed secret -- and this slot carries no
 // value. Spelling it "unset" would say a person had not set something, which
 // is not what a sleeping laptop means.
-func inferenceLane(name, from string, configured, live bool) LaneReport {
+func inferenceLane(name, from, scope string, configured, live bool) LaneReport {
 	return LaneReport{
 		Name:             name,
 		ConfigurableFrom: from,
+		Scope:            scope,
 		Complete:         configured,
 		Slots:            []SlotReport{{Name: InferenceLiveSlot, Present: live}},
 	}

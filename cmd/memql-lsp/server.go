@@ -39,6 +39,10 @@ type server struct {
 	// a workspace compile it has nothing to do with.
 	catalogMu sync.RWMutex
 	catalog   clusterCatalog
+
+	// rewrite is the workspace state behind the "Rewrite to edition 2026"
+	// code actions -- see codeaction.go, which owns it.
+	rewrite rewriteState
 }
 
 func newServer(root string, log commonlog.Logger) *server {
@@ -94,6 +98,9 @@ func (s *server) buildSense() {
 		svc = sense.New(nil)
 	}
 	s.setSense(svc)
+	// The predicate sources the rewrite code actions resolve against change
+	// with the workspace, on the same schedule.
+	s.rewrite.load(s.root)
 }
 
 // handler wires the LSP methods: lifecycle, incremental text sync, push
@@ -113,6 +120,7 @@ func (s *server) handler() *protocol.Handler {
 		TextDocumentHover:              s.hover,
 		TextDocumentDefinition:         s.definition,
 		TextDocumentSignatureHelp:      s.signatureHelp,
+		TextDocumentCodeAction:         s.codeAction,
 		WorkspaceDidChangeWatchedFiles: s.didChangeWatchedFiles,
 	}
 }
@@ -149,6 +157,11 @@ func (s *server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 		DefinitionProvider: true,
 		SignatureHelpProvider: &protocol.SignatureHelpOptions{
 			TriggerCharacters: signatureHelpTriggerChars,
+		},
+		// "Rewrite to edition 2026": a quickfix on a retired form, and
+		// source.fixAll.memql for the whole file. See codeaction.go.
+		CodeActionProvider: protocol.CodeActionOptions{
+			CodeActionKinds: codeActionKinds,
 		},
 		// Custom (non-LSP) requests this server answers, advertised so a client
 		// can feature-detect rather than call blind and handle MethodNotFound.
@@ -216,5 +229,6 @@ func (s *server) didChangeWatchedFiles(ctx *glsp.Context, _ *protocol.DidChangeW
 func (s *server) didClose(_ *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
 	s.diag.cancel(params.TextDocument.URI)
 	s.docs.closeDoc(params.TextDocument.URI)
+	s.rewrite.forget(params.TextDocument.URI)
 	return nil
 }

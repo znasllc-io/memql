@@ -59,15 +59,17 @@ func statusAuthorizedRule(ctx context.Context) error {
 //
 // The cause is the ACTOR. app/run.go's boot write passed context.Background(),
 // the EVALUATION ran on that caller context, statusAuthorized refuses a context
-// with no AccessContext at all, and evaluateModule maps an errored probe to
-// notApplicable -- correctly, because a probe that could not run says nothing
-// about whether a person did the setup.
+// with no AccessContext at all, and evaluateModule mapped an errored probe to
+// notApplicable. The mapping is `unknown` now (D1 of the 2026-09-14
+// readiness-convergence record) -- a probe that could not run says nothing
+// about whether a person did the setup, and "not hosted here" was the wrong
+// word for it -- but the actor half of the bug is unchanged by that.
 //
-// Both halves are pinned here: the mapping is right and stays, and the
-// evaluation context must not be the one that produces it.
+// Both halves are pinned here: an errored probe is never a verdict, and the
+// evaluation context must not be the one that produces the error.
 func TestAnUnauthorizedProbeIsWhatMadeEmailNotApplicable(t *testing.T) {
 	// (1) The old shape. A bare context reaches the probe, the probe refuses,
-	// and the verdict is notApplicable -- on every node, forever.
+	// and the verdict was notApplicable -- on every node, forever.
 	refusing := readinessResolvers{
 		IntegrationState: func(ctx context.Context, _ string) (string, bool, bool, error) {
 			if err := statusAuthorizedRule(ctx); err != nil {
@@ -76,19 +78,20 @@ func TestAnUnauthorizedProbeIsWhatMadeEmailNotApplicable(t *testing.T) {
 			return "configured", true, true, nil
 		},
 	}
-	// A PROBE THAT REFUSES STILL MAPS TO notApplicable, which is the half of
-	// this that is right and stays: a probe that could not run says nothing
-	// about whether a person did the setup, and `unconfigured` would send them
-	// to a form they may not need. Asserted with a resolver that refuses for a
-	// reason no actor can fix, because the ACTOR reason is no longer reachable
-	// through this entry point -- see (2).
+	// A PROBE THAT REFUSES MAPS TO unknown, which is the half of this that is
+	// right: a probe that could not run says nothing about whether a person
+	// did the setup, `unconfigured` would send them to a form they may not
+	// need, and `notApplicable` -- what it used to read -- claimed the node
+	// does not host the integration. Asserted with a resolver that refuses for
+	// a reason no actor can fix, because the ACTOR reason is no longer
+	// reachable through this entry point -- see (2).
 	alwaysRefuses := readinessResolvers{
 		IntegrationState: func(context.Context, string) (string, bool, bool, error) {
 			return "", false, true, errors.New("email.status: the probe itself failed")
 		},
 	}
-	if got := evaluateModule(context.Background(), alwaysRefuses, emailModule(), "n", "bff", inferenceNow); got.State != readiness.NotApplicable {
-		t.Fatalf("a refused probe read %s. The mapping this bug rode in on has changed, so the "+
+	if got := evaluateModule(context.Background(), alwaysRefuses, emailModule(), "n", "bff", inferenceNow); got.State != readiness.Unknown {
+		t.Fatalf("a refused probe read %s. The mapping this test pins has changed, so the "+
 			"regression pinned below can no longer be reproduced -- read evaluateModule's "+
 			"integration arm before touching this test.", got.State)
 	}
@@ -104,10 +107,10 @@ func TestAnUnauthorizedProbeIsWhatMadeEmailNotApplicable(t *testing.T) {
 	// produced notApplicable on every node of every cluster now produces the
 	// right answer, because nothing between here and the probe can forget.
 	got := evaluateModule(context.Background(), refusing, emailModule(), "n", "bff", inferenceNow)
-	if got.State == readiness.NotApplicable {
-		t.Fatal("a node carrying the email plug-in still reports notApplicable after boot. " +
-			"evaluateModule must clear integrations/email's statusAuthorized, which " +
-			"admits owner, admin or developer and nothing else.")
+	if got.State == readiness.Unknown || got.State == readiness.NotApplicable {
+		t.Fatalf("a node carrying the email plug-in reports %s after boot: its own probe refused it. "+
+			"evaluateModule must clear integrations/email's statusAuthorized, which "+
+			"admits owner, admin or developer and nothing else.", got.State)
 	}
 	if got.State != readiness.Configured {
 		t.Fatalf("email reports %s, want configured", got.State)

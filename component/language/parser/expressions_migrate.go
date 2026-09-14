@@ -81,6 +81,8 @@ var (
 
 	xmAnnotation        = regexp.MustCompile(`@([A-Za-z_][A-Za-z0-9_]*)`)
 	xmFilterAnnotation  = regexp.MustCompile(`@filter[ \t]*\(`)
+	xmAutomationHeader  = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+[A-Za-z_][A-Za-z0-9_]*`)
+	xmArgsField         = regexp.MustCompile(`(?m)^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z\[]`)
 	xmTriggerAnnotation = regexp.MustCompile(`@trigger[ \t]*\(`)
 	xmHandlerAnnotation = regexp.MustCompile(`@handler[ \t]*\(`)
 
@@ -123,12 +125,7 @@ func xmIntrinsic(name string) (string, bool) {
 // with nothing to change comes back as the input slice itself. On any refusal
 // the input comes back unchanged with an error naming each refused clause.
 func RewriteExpressions(src []byte, preds map[string]PredicateInfo) ([]byte, error) {
-	r := &xmRewrite{f: newXMFile(string(src)), preds: preds}
-	r.filters()
-	r.predicateBodies()
-	r.triggerFilters()
-	r.handlers()
-	r.inProcessBodies()
+	r := runExpressionRewrite(src, preds)
 	if len(r.errs) > 0 {
 		return src, errors.Join(r.errs...)
 	}
@@ -142,46 +139,147 @@ func RewriteExpressions(src []byte, preds map[string]PredicateInfo) ([]byte, err
 	return []byte(out), nil
 }
 
+func runExpressionRewrite(src []byte, preds map[string]PredicateInfo) *xmRewrite {
+	r := &xmRewrite{f: newXMFile(string(src)), preds: preds}
+	r.filters()
+	r.predicateBodies()
+	r.triggerFilters()
+	r.handlers()
+	r.inProcessBodies()
+	return r
+}
+
+// ExpressionEdit is one clause RewriteExpressions converts: the source bytes
+// [Start, End) become Text.
+type ExpressionEdit struct {
+	Start, End int
+	Text       string
+}
+
+// ExpressionRefusal is one clause RewriteExpressions will not convert: the
+// source bytes [Start, End) the clause spans, and the error naming why, as
+// RewriteExpressions reports it ("line N: ...").
+type ExpressionRefusal struct {
+	Start, End int
+	Err        error
+}
+
+// ExpressionPlan is RewriteExpressions clause by clause, for an editor that
+// applies the conversions it can and leaves a refused clause where it is.
+// Applying every edit of a plan with no refusals is RewriteExpressions.
+type ExpressionPlan struct {
+	// Edits are the conversions, in source order; no two overlap.
+	Edits []ExpressionEdit
+	// Refused are the clauses the rewrite will not convert, in source order.
+	Refused []ExpressionRefusal
+}
+
+// PlanExpressions is RewriteExpressions without the all-or-nothing: every
+// clause it converts comes back as its own edit, every clause it refuses as a
+// refusal with its span. Each edit is computed from src alone, so any subset
+// of them applies cleanly -- but a clause's rewrite can name predicates it
+// resolved through preds, exactly as RewriteExpressions' does. An error means
+// the edits could not be kept apart, which is an internal fault and offers
+// nothing.
+func PlanExpressions(src []byte, preds map[string]PredicateInfo) (ExpressionPlan, error) {
+	r := runExpressionRewrite(src, preds)
+	var plan ExpressionPlan
+	for _, e := range r.edits {
+		plan.Edits = append(plan.Edits, ExpressionEdit{Start: e.start, End: e.end, Text: e.text})
+	}
+	sort.Slice(plan.Edits, func(i, j int) bool { return plan.Edits[i].Start < plan.Edits[j].Start })
+	for i := 1; i < len(plan.Edits); i++ {
+		if plan.Edits[i].Start < plan.Edits[i-1].End {
+			return ExpressionPlan{}, fmt.Errorf("internal: two expression rewrites overlap at byte %d", plan.Edits[i].Start)
+		}
+	}
+	plan.Refused = append(plan.Refused, r.refused...)
+	sort.SliceStable(plan.Refused, func(i, j int) bool { return plan.Refused[i].Start < plan.Refused[j].Start })
+	return plan, nil
+}
+
 // CollectPredicates reads every spec and trait declaration out of a set of
 // sources, in either edition, together with the shapes the specs bind, and
 // answers which of them is an actor predicate. A name declared twice with
 // different answers is refused: the registry is flat, so no clause could say
 // which of the two it means.
 func CollectPredicates(files map[string][]byte) (map[string]PredicateInfo, error) {
-	type specDecl struct{ name, bound, where string }
-
 	paths := make([]string, 0, len(files))
 	for p := range files {
 		paths = append(paths, p)
 	}
 	sort.Strings(paths)
+	decls := make([]PredicateDeclarations, 0, len(paths))
+	for _, p := range paths {
+		decls = append(decls, ScanPredicateDeclarations(p, files[p]))
+	}
+	return ResolvePredicates(decls)
+}
 
+// PredicateDeclarations is what one source contributes to a predicate set: its
+// top-level shape, spec and trait declarations. CollectPredicates is
+// ScanPredicateDeclarations over every source followed by ResolvePredicates;
+// the two are exported apart for a caller that keeps a tree's scans and
+// rescans only the source that changed (the language server, as a file is
+// typed in). Scanning is the expensive half.
+type PredicateDeclarations struct {
+	shapes []xmShapeDeclaration
+	specs  []xmSpecDeclaration
+	traits []xmTraitDeclaration
+}
+
+type xmShapeDeclaration struct {
+	name string
+	xmDecl
+}
+
+type xmSpecDeclaration struct{ name, bound, where string }
+
+type xmTraitDeclaration struct{ name, where string }
+
+// ScanPredicateDeclarations reads one source's declarations. path names the
+// source in ResolvePredicates' errors.
+func ScanPredicateDeclarations(path string, src []byte) PredicateDeclarations {
+	var d PredicateDeclarations
+	f := newXMFile(string(src))
+	where := func(off int) string { return fmt.Sprintf("%s:%d", path, f.line(off)+1) }
+	for _, m := range xmShapeDecl.FindAllStringSubmatchIndex(f.mask, -1) {
+		if f.depthAt(m[0]) != 0 {
+			continue
+		}
+		kinds := xmPreambleAnnotations(f, m[0])
+		d.shapes = append(d.shapes, xmShapeDeclaration{name: f.src[m[2]:m[3]], xmDecl: xmDecl{where: where(m[0]), actor: kinds["actor"] && !kinds["row"]}})
+	}
+	for _, m := range xmSpecDecl.FindAllStringSubmatchIndex(f.mask, -1) {
+		if f.depthAt(m[0]) != 0 {
+			continue
+		}
+		d.specs = append(d.specs, xmSpecDeclaration{name: f.src[m[4]:m[5]], bound: f.src[m[2]:m[3]], where: where(m[0])})
+	}
+	for _, m := range xmTraitDecl.FindAllStringSubmatchIndex(f.mask, -1) {
+		if f.depthAt(m[0]) != 0 {
+			continue
+		}
+		d.traits = append(d.traits, xmTraitDeclaration{name: f.src[m[2]:m[3]], where: where(m[0])})
+	}
+	return d
+}
+
+// ResolvePredicates answers CollectPredicates' question over scanned sources.
+// Pass them in the order CollectPredicates reads them -- sorted by path -- for
+// the same answer: where one name is declared twice, the first declaration is
+// the one the others are compared against.
+func ResolvePredicates(decls []PredicateDeclarations) (map[string]PredicateInfo, error) {
 	shapes := map[string][]xmDecl{}
 	byName := map[string][]xmDecl{}
-	var specs []specDecl
-	for _, p := range paths {
-		f := newXMFile(string(files[p]))
-		where := func(off int) string { return fmt.Sprintf("%s:%d", p, f.line(off)+1) }
-		for _, m := range xmShapeDecl.FindAllStringSubmatchIndex(f.mask, -1) {
-			if f.depthAt(m[0]) != 0 {
-				continue
-			}
-			kinds := xmPreambleAnnotations(f, m[0])
-			name := f.src[m[2]:m[3]]
-			shapes[name] = append(shapes[name], xmDecl{where: where(m[0]), actor: kinds["actor"] && !kinds["row"]})
+	var specs []xmSpecDeclaration
+	for _, d := range decls {
+		for _, s := range d.shapes {
+			shapes[s.name] = append(shapes[s.name], s.xmDecl)
 		}
-		for _, m := range xmSpecDecl.FindAllStringSubmatchIndex(f.mask, -1) {
-			if f.depthAt(m[0]) != 0 {
-				continue
-			}
-			specs = append(specs, specDecl{name: f.src[m[4]:m[5]], bound: f.src[m[2]:m[3]], where: where(m[0])})
-		}
-		for _, m := range xmTraitDecl.FindAllStringSubmatchIndex(f.mask, -1) {
-			if f.depthAt(m[0]) != 0 {
-				continue
-			}
-			name := f.src[m[2]:m[3]]
-			byName[name] = append(byName[name], xmDecl{where: where(m[0])})
+		specs = append(specs, d.specs...)
+		for _, t := range d.traits {
+			byName[t.name] = append(byName[t.name], xmDecl{where: t.where})
 		}
 	}
 
@@ -330,18 +428,22 @@ type xmEdit struct {
 }
 
 type xmRewrite struct {
-	f     *xmFile
-	preds map[string]PredicateInfo
-	edits []xmEdit
-	errs  []error
+	f       *xmFile
+	preds   map[string]PredicateInfo
+	edits   []xmEdit
+	errs    []error
+	refused []ExpressionRefusal
 }
 
 func (r *xmRewrite) edit(start, end int, text string) {
 	r.edits = append(r.edits, xmEdit{start: start, end: end, text: text})
 }
 
-func (r *xmRewrite) fail(pos int, format string, args ...any) {
-	r.errs = append(r.errs, fmt.Errorf("line %d: %s", r.f.line(pos)+1, fmt.Sprintf(format, args...)))
+// fail refuses the clause spanning [lo, hi), naming the line of pos.
+func (r *xmRewrite) fail(lo, hi, pos int, format string, args ...any) {
+	err := fmt.Errorf("line %d: %s", r.f.line(pos)+1, fmt.Sprintf(format, args...))
+	r.errs = append(r.errs, err)
+	r.refused = append(r.refused, ExpressionRefusal{Start: lo, End: hi, Err: err})
 }
 
 // xmApply splices non-overlapping edits into src.
@@ -472,12 +574,12 @@ func (r *xmRewrite) filterClause(query string, lines []xmLine) {
 		return // already edition 2026: this is what makes a second run a no-op
 	}
 	if f.hasComment(exprStart, exprEnd) {
-		r.fail(kw, "query %s: filter %q: a comment inside the clause would be lost; move it above the clause and rerun", query, clause)
+		r.fail(kw, exprEnd, kw, "query %s: filter %q: a comment inside the clause would be lost; move it above the clause and rerun", query, clause)
 		return
 	}
 	expr, err := xmConvertChecked(clause, xmConverter{mode: xmFilter, param: "row", preds: r.preds})
 	if err != nil {
-		r.fail(kw, "query %s: filter %q: %v", query, clause, err)
+		r.fail(kw, exprEnd, kw, "query %s: filter %q: %v", query, clause, err)
 		return
 	}
 	head := "row => "
@@ -501,24 +603,30 @@ func (r *xmRewrite) predicateBodies() {
 		name := f.src[h[4]:h[5]]
 		info, ok := r.preds[name]
 		if !ok {
-			r.fail(h[0], "spec %s is not in the predicate set; collect every spec and trait in the tree (CollectPredicates) before rewriting a file", name)
+			hi := h[1]
+			if end := MatchingCloseBrace(f.code, h[1]-1); end >= 0 {
+				hi = end + 1
+			}
+			r.fail(h[0], hi, h[0], "spec %s is not in the predicate set; collect every spec and trait in the tree (CollectPredicates) before rewriting a file", name)
 			continue
 		}
 		param := "row"
 		if info.Actor {
 			param = "actor"
 		}
-		r.predicateBody("spec", name, param, h[5], h[1]-1)
+		r.predicateBody("spec", name, param, h[0], h[5], h[1]-1)
 	}
 	for _, h := range xmTraitHeader.FindAllStringSubmatchIndex(f.mask, -1) {
 		if f.depthAt(h[0]) != 0 {
 			continue
 		}
-		r.predicateBody("trait", f.src[h[2]:h[3]], "row", h[3], h[1]-1)
+		r.predicateBody("trait", f.src[h[2]:h[3]], "row", h[0], h[3], h[1]-1)
 	}
 }
 
-func (r *xmRewrite) predicateBody(kind, name, param string, nameEnd, open int) {
+// predicateBody converts the declaration whose header starts at hdr, whose
+// name ends at nameEnd and whose body opens at open.
+func (r *xmRewrite) predicateBody(kind, name, param string, hdr, nameEnd, open int) {
 	f := r.f
 	end := MatchingCloseBrace(f.code, open)
 	if end < 0 {
@@ -527,17 +635,17 @@ func (r *xmRewrite) predicateBody(kind, name, param string, nameEnd, open int) {
 	body := strings.TrimSpace(f.code[open+1 : end])
 	rest, ok := strings.CutPrefix(body, "return")
 	if !ok || rest == "" || !unicode.IsSpace(rune(rest[0])) {
-		r.fail(open, "%s %s: the body is not `return <expression>`, the one body form the rewrite converts", kind, name)
+		r.fail(hdr, end+1, open, "%s %s: the body is not `return <expression>`, the one body form the rewrite converts", kind, name)
 		return
 	}
 	if f.hasComment(open+1, end) {
-		r.fail(open, "%s %s: a comment inside the body would be lost; move it above the declaration and rerun", kind, name)
+		r.fail(hdr, end+1, open, "%s %s: a comment inside the body would be lost; move it above the declaration and rerun", kind, name)
 		return
 	}
 	exprText := strings.TrimSpace(rest)
 	expr, err := xmConvertChecked(exprText, xmConverter{mode: xmSpecBody, param: param, preds: r.preds})
 	if err != nil {
-		r.fail(open, "%s %s: return %q: %v", kind, name, exprText, err)
+		r.fail(hdr, end+1, open, "%s %s: return %q: %v", kind, name, exprText, err)
 		return
 	}
 	head := " = " + param + " => "
@@ -559,7 +667,7 @@ func (r *xmRewrite) triggerFilters() {
 		if end < 0 {
 			continue
 		}
-		r.triggerFilter(open, end)
+		r.triggerFilter(m[0], open, end)
 	}
 	// `@trigger(..., filter="...")` carries its filter as a string argument.
 	// No tree carries one; moving it to its own annotation is a structural
@@ -571,19 +679,21 @@ func (r *xmRewrite) triggerFilters() {
 		open := m[1] - 1
 		end := xmMatchParen(f.mask, open)
 		if end >= 0 && xmKeywordAt(f.mask[open+1:end], "filter") >= 0 {
-			r.fail(m[0], "@trigger(..., filter=...) carries its filter as a string argument; move it to its own @filter(...) annotation and rerun")
+			r.fail(m[0], end+1, m[0], "@trigger(..., filter=...) carries its filter as a string argument; move it to its own @filter(...) annotation and rerun")
 		}
 	}
 }
 
-func (r *xmRewrite) triggerFilter(open, end int) {
+// triggerFilter converts the @filter annotation starting at at, whose
+// parentheses are [open, end].
+func (r *xmRewrite) triggerFilter(at, open, end int) {
 	f := r.f
 	inner := strings.TrimSpace(f.code[open+1 : end])
 	if inner == "" || dslclause.OpensLambda(inner) {
 		return
 	}
 	if f.hasComment(open+1, end) {
-		r.fail(open, "@filter(%s): a comment inside the filter would be lost; move it above the annotation and rerun", inner)
+		r.fail(at, end+1, open, "@filter(%s): a comment inside the filter would be lost; move it above the annotation and rerun", inner)
 		return
 	}
 	exprText := inner
@@ -591,14 +701,14 @@ func (r *xmRewrite) triggerFilter(open, end int) {
 		// The quoted form @filter("<expr>") holds the same expression.
 		toks, err := NewLexer(inner).Tokenize()
 		if err != nil || len(toks) != 2 || toks[0].Type != TokenString {
-			r.fail(open, "@filter(%s): a quoted filter must be exactly one string literal", inner)
+			r.fail(at, end+1, open, "@filter(%s): a quoted filter must be exactly one string literal", inner)
 			return
 		}
 		exprText = toks[0].Literal
 	}
-	expr, err := xmConvertChecked(exprText, xmConverter{mode: xmTrigger, param: "row", preds: r.preds})
+	expr, err := xmConvertChecked(exprText, xmConverter{mode: xmTrigger, param: "row", preds: r.preds, argsFields: xmAutomationArgsAfter(f, end)})
 	if err != nil {
-		r.fail(open, "@filter(%s): %v", inner, err)
+		r.fail(at, end+1, open, "@filter(%s): %v", inner, err)
 		return
 	}
 	head := "row => "
@@ -635,7 +745,7 @@ func (r *xmRewrite) handlers() {
 		// does not interpolate, so writing `args.x` there would silently
 		// become literal text: refuse instead.
 		if at := xmPlaceholderInsideString(next); at >= 0 {
-			r.fail(m[0], "@handler query %q: the placeholder at %q sits inside a string literal, which v1 does not interpolate; rewrite it with + by hand", content, next[at:min(at+24, len(next))])
+			r.fail(m[0], end+1, m[0], "@handler query %q: the placeholder at %q sits inside a string literal, which v1 does not interpolate; rewrite it with + by hand", content, next[at:min(at+24, len(next))])
 			continue
 		}
 		next = xmBareArgsSlot.ReplaceAllString(next, "args.$1")
@@ -733,9 +843,9 @@ func (r *xmRewrite) inProcessBodies() {
 		if err != nil {
 			var pe *xmPosError
 			if errors.As(err, &pe) {
-				r.fail(start+pe.pos, "%s", pe.msg)
+				r.fail(start, end+1, start+pe.pos, "%s", pe.msg)
 			} else {
-				r.fail(start, "%v", err)
+				r.fail(start, end+1, start, "%v", err)
 			}
 			continue
 		}
@@ -768,6 +878,10 @@ type xmConverter struct {
 	// need different answers for one value -- and only the tokens know which
 	// spelling the author used.
 	bare map[string]bool
+	// argsFields holds, in trigger mode, the fields the automation's args
+	// block declares: a bare one resolves to the bound argument (G2,
+	// memql#2364) in both grammars, so it keeps its bare name.
+	argsFields map[string]bool
 }
 
 // xmConvertChecked converts src and verifies the result: the conversion is run
@@ -1018,11 +1132,7 @@ func (c xmConverter) field(parts []string) (ast.ExpressionNode, error) {
 	head := parts[0]
 	switch c.mode {
 	case xmTrigger:
-		// `payload` is the triggering row; every other root keeps its name.
-		if head == "payload" && len(parts) > 1 {
-			return xmPath("row", parts[1:]...), nil
-		}
-		return xmPath(head, parts[1:]...), nil
+		return c.triggerPath(parts), nil
 	case xmSpecBody:
 		if len(parts) != 1 {
 			return nil, fmt.Errorf("%s: a spec or trait body reads its bound fields by bare name, and the engine refuses a dotted path there", strings.Join(parts, "."))
@@ -1109,10 +1219,95 @@ func (c xmConverter) path(parts []string) (ast.ExpressionNode, error) {
 			return nil, fmt.Errorf("the path %s has a segment %q that is not an identifier", strings.Join(parts, "."), p)
 		}
 	}
+	if c.mode == xmTrigger {
+		return c.triggerPath(parts), nil
+	}
 	if parts[0] == "payload" && len(parts) > 1 {
 		return xmPath("row", parts[1:]...), nil
 	}
 	return xmPath(parts[0], parts[1:]...), nil
+}
+
+// xmTriggerScopeRoots are the names a trigger filter's scope binds itself --
+// the automation run scope's fixed and seeded roots (component/automations
+// RunScope, reservedAutomationRoots), which this package cannot import. A bare
+// one keeps its name; every other bare name is a field of the triggering row.
+var xmTriggerScopeRoots = map[string]bool{
+	"now": true, "actor": true, "partition": true, "config": true, "trace": true,
+	"event": true, "args": true, "steps": true, "timestamp": true, "ctx": true,
+	"input": true, "item": true, "index": true, "var": true, "systemVar": true,
+	"secret": true, "systemSecret": true, "automation": true, "error": true,
+	"row": true,
+}
+
+// triggerPath converts a path in a trigger @filter (a dotted path's segments
+// are already checked identifiers).
+//
+// `payload.<field>` is the triggering row's field, as it always was
+// (`row.<field>`). A BARE name is too: edition 2026 reads a trigger filter as a
+// lambda over the row, so `status == "archived"` means `row.status ==
+// "archived"` -- unless the name is one the filter scope binds itself
+// (xmTriggerScopeRoots: now, event, actor, args, ...) or a field of the
+// automation's own args block, which the G2 tier resolves to the bound argument
+// in both grammars. A row intrinsic takes its canonical spelling (`id` ->
+// `row.id`). Every other rooted path keeps its root.
+//
+// The legacy string evaluator gave a bare name NO row meaning: with no dot it
+// was not a path, so outside an args-block automation it fell through to its
+// own text -- `status == "archived"` compared the word "status", constant-false
+// -- and inside one it was the args field. The row reading is what the author
+// meant and what edition 2026 can say; a bare args field keeps the meaning it
+// had.
+func (c xmConverter) triggerPath(parts []string) ast.ExpressionNode {
+	head := parts[0]
+	if head == "payload" && len(parts) > 1 {
+		return xmPath("row", parts[1:]...)
+	}
+	if len(parts) == 1 && !xmTriggerScopeRoots[head] && !c.argsFields[head] {
+		if canon, ok := xmIntrinsic(head); ok {
+			return xmPath("row", canon)
+		}
+		return xmPath("row", head)
+	}
+	return xmPath(head, parts[1:]...)
+}
+
+// xmAutomationArgsAfter returns the fields declared by the args block of the
+// automation an annotation ending at pos belongs to: the first top-level
+// automation header after it. A terse automation, or one with no args block,
+// declares none.
+func xmAutomationArgsAfter(f *xmFile, pos int) map[string]bool {
+	loc := xmAutomationHeader.FindStringIndex(f.mask[pos:])
+	if loc == nil {
+		return nil
+	}
+	// A terse automation (`automation x @trigger(...) => logic y`) has no
+	// body, so no args block -- and the next braced header below it belongs
+	// to a different automation.
+	rest := strings.TrimLeft(f.mask[pos+loc[1]:], " \t")
+	if !strings.HasPrefix(rest, "{") {
+		return nil
+	}
+	open := pos + loc[1] + strings.IndexByte(f.mask[pos+loc[1]:], '{')
+	end := MatchingCloseBrace(f.code, open)
+	if end < 0 {
+		return nil
+	}
+	body := f.mask[open+1 : end]
+	args := argsBlockHeader.FindStringIndex(body)
+	if args == nil {
+		return nil
+	}
+	brace := open + 1 + args[0] + strings.LastIndexByte(body[args[0]:args[1]], '{')
+	close := MatchingCloseBrace(f.code, brace)
+	if close < 0 {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, m := range xmArgsField.FindAllStringSubmatch(f.mask[brace+1:close], -1) {
+		out[m[1]] = true
+	}
+	return out
 }
 
 // value converts a comparison's right-hand side, which the legacy parser hands
@@ -1155,9 +1350,16 @@ func (c xmConverter) stringValue(s string) (ast.ExpressionNode, error) {
 	if c.mode == xmTrigger && c.bare[s] {
 		// The trigger evaluator resolved a bare word as a path. A rooted
 		// dotted word keeps that meaning; a colon-bearing one is an id,
-		// which v1 writes as a string; anything else is ambiguous.
+		// which v1 writes as a string; a field of the automation's args
+		// block is the bound argument in both grammars (G2); anything else
+		// is ambiguous -- the legacy evaluator fell back to the word's own
+		// text, so `payload.status == active` compared "active", and
+		// neither reading can be picked for the author.
 		if strings.Contains(s, ":") {
 			return &ast.LiteralExpr{Value: s}, nil
+		}
+		if c.argsFields[s] {
+			return &ast.IdentExpr{Name: s}, nil
 		}
 		if i := strings.IndexByte(s, '.'); i > 0 {
 			switch s[:i] {
@@ -1413,6 +1615,10 @@ var xmInProcessCalls = []string{"cond", "concat", "coalesce", "exists"}
 // original line -- which is what a refusal reports.
 func xmRewriteInProcess(s string) (string, error) {
 	s = xmQuoteCanonicalIdConcepts(s)
+	s, err := xmExpandKeylessMapEntries(s)
+	if err != nil {
+		return "", err
+	}
 	for guard := 0; ; guard++ {
 		if guard > 4096 {
 			return "", xmRefuse(0, "internal: the in-process rewrite did not converge")
@@ -1986,6 +2192,227 @@ func xmTopLevelIndex(mask string, c byte) int {
 		}
 	}
 	return -1
+}
+
+// xmPathEntry is a bare dotted path, the legacy key-less map entry
+// (parseObject's "Shorthand A"): its key is the terminal segment.
+var xmPathEntry = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$`)
+
+// xmAccessorEntry is the legacy key-less accessor entry (parseObject's
+// "Shorthand B"): `node("a.b")` / `var("a.b")`, keyed by the terminal segment
+// of its quoted argument.
+var xmAccessorEntry = regexp.MustCompile(`^(?:node|var)\s*\(`)
+
+// xmNoMapBlocks are the blocks whose braces hold no in-process map literal
+// this rewrite may touch: an args block declares fields, and a mutation's
+// write blocks are expanded by the struct-form rewriter, which owns their
+// shorthands.
+var xmNoMapBlocks = map[string]bool{"args": true, "insert": true, "update": true, "accept": true, "stamp": true}
+
+// xmExpandKeylessMapEntries writes out the key of every key-less map-literal
+// entry in one construct body (epic memql#5363).
+//
+// The legacy object literal accepted two entries with no `key:`, and the
+// edition-2026 map literal refuses both ("a map key is one name" /
+// "a map entry is written key: value"):
+//
+//	{ args.event.payload.identityId }  ->  { identityId: args.event.payload.identityId }
+//	{ allAgents }                      ->  { allAgents: allAgents }
+//
+// -- the first keyed by the path's terminal segment (Shorthand A), the second
+// a pun (G3, #2365). Each is expanded to the entry the legacy parse built, so
+// the map means what it meant.
+//
+// A brace is a map literal where an expression is expected: after `:`, `=`,
+// `(`, `,`, `[` or `return`. Any other brace opens a block, and a block's
+// keyword decides whether maps inside it are this rewrite's (xmNoMapBlocks).
+// Refused by name, rather than guessed at: the accessor shorthand
+// `{ node("a.b") }`, which keys by its ARGUMENT's last segment -- no tree
+// carries one -- and two entries that would land on one key, which the legacy
+// map resolved last-wins in silence and a v1 map refuses.
+func xmExpandKeylessMapEntries(s string) (string, error) {
+	mask := blankCommentsAndStrings(s)
+	type frame struct {
+		open  byte
+		isMap bool
+		skip  bool // inside a block whose maps are not this rewrite's
+	}
+	type edit struct {
+		start, end int
+		text       string
+	}
+	var (
+		stack []frame
+		edits []edit
+	)
+	skipping := func() bool {
+		for _, f := range stack {
+			if f.skip {
+				return true
+			}
+		}
+		return false
+	}
+	for i := 0; i < len(mask); i++ {
+		switch c := mask[i]; c {
+		case '(', '[':
+			stack = append(stack, frame{open: c})
+		case ')', ']':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		case '{':
+			prevCh, prevWord := xmPrevSignificant(mask, i)
+			isMap := strings.ContainsRune(":=(,[?", rune(prevCh)) || prevWord == "return" || xmAfterArrow(mask, i)
+			fr := frame{open: '{', isMap: isMap, skip: !isMap && xmNoMapBlocks[prevWord]}
+			if isMap && !skipping() {
+				close := MatchingCloseBrace(mask, i)
+				if close < 0 {
+					return "", xmRefuse(i, "a map literal here does not close")
+				}
+				es, err := xmMapEntryEdits(s, mask, i, close)
+				if err != nil {
+					return "", err
+				}
+				for _, e := range es {
+					edits = append(edits, edit{e.start, e.end, e.text})
+				}
+			}
+			stack = append(stack, fr)
+		case '}':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	if len(edits) == 0 {
+		return s, nil
+	}
+	sort.Slice(edits, func(a, b int) bool { return edits[a].start < edits[b].start })
+	var b strings.Builder
+	prev := 0
+	for _, e := range edits {
+		b.WriteString(s[prev:e.start])
+		b.WriteString(e.text)
+		prev = e.end
+	}
+	b.WriteString(s[prev:])
+	return b.String(), nil
+}
+
+// xmAfterArrow reports whether the brace at pos follows a lambda arrow, `g =>
+// { ... }` -- a collection method's projection, whose body is a map.
+func xmAfterArrow(mask string, pos int) bool {
+	i := pos - 1
+	for i >= 0 && (mask[i] == ' ' || mask[i] == '\t' || mask[i] == '\n' || mask[i] == '\r') {
+		i--
+	}
+	return i >= 1 && mask[i] == '>' && mask[i-1] == '='
+}
+
+// xmPrevSignificant returns the last non-blank character before pos on the
+// masked view, and the identifier it ends, if it ends one.
+func xmPrevSignificant(mask string, pos int) (byte, string) {
+	i := pos - 1
+	for i >= 0 && (mask[i] == ' ' || mask[i] == '\t' || mask[i] == '\n' || mask[i] == '\r') {
+		i--
+	}
+	if i < 0 {
+		return 0, ""
+	}
+	end := i + 1
+	for i >= 0 && isIdentByte(mask[i]) {
+		i--
+	}
+	return mask[end-1], mask[i+1 : end]
+}
+
+// xmMapEntryEdits returns the edits that key the key-less entries of the map
+// literal whose braces sit at open and close.
+func xmMapEntryEdits(s, mask string, open, close int) ([]struct {
+	start, end int
+	text       string
+}, error) {
+	type ed = struct {
+		start, end int
+		text       string
+	}
+	var out []ed
+	keys := map[string]int{}
+	depth := 0
+	entryStart := open + 1
+	visit := func(lo, hi int) error {
+		// [lo, hi) is one entry, surrounding blanks included.
+		t := strings.TrimSpace(mask[lo:hi])
+		if t == "" {
+			return nil
+		}
+		at := lo + strings.Index(mask[lo:hi], t)
+		raw := s[at : at+len(t)]
+		key, expanded := "", ""
+		switch {
+		case xmEntryKeyed(t):
+			sep := strings.IndexAny(t, ":=")
+			key = strings.TrimSpace(t[:sep])
+			if t[sep] == '=' {
+				// The legacy `key = value` separator: the same entry, which a
+				// v1 map spells `key: value`.
+				value := strings.TrimLeft(raw[sep+1:], " \t")
+				expanded = key + ": " + value
+			}
+		case xmPathEntry.MatchString(t):
+			key = t[strings.LastIndexByte(t, '.')+1:]
+			expanded = key + ": " + raw
+		case xmIdent.MatchString(t):
+			key = t
+			expanded = key + ": " + raw
+		case xmAccessorEntry.MatchString(t):
+			return xmRefuse(at, "the map entry %s has no key: the legacy grammar keyed it by the last segment of its quoted argument, which edition 2026 does not; write the key yourself (key: %s)", raw, raw)
+		default:
+			return nil // not a shorthand: the v1 parser names what it is
+		}
+		if prevAt, dup := keys[key]; dup {
+			return xmRefuse(at, "two entries of one map literal land on the key %q (the entry at byte %d and %s): the legacy map kept only the last one in silence, and an edition-2026 map refuses a duplicate key; write distinct keys", key, prevAt, raw)
+		}
+		keys[key] = at
+		if expanded != "" {
+			out = append(out, ed{start: at, end: at + len(t), text: expanded})
+		}
+		return nil
+	}
+	for i := open + 1; i < close; i++ {
+		switch mask[i] {
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			depth--
+		case ',':
+			if depth == 0 {
+				if err := visit(entryStart, i); err != nil {
+					return nil, err
+				}
+				entryStart = i + 1
+			}
+		}
+	}
+	if err := visit(entryStart, close); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// xmEntryKeyed reports whether a map entry (masked, trimmed) already names
+// its key: `key: value`, or the legacy `key = value`.
+func xmEntryKeyed(t string) bool {
+	i := 0
+	for i < len(t) && (isIdentByte(t[i]) || t[i] == '-') {
+		i++
+	}
+	if i == 0 {
+		return false
+	}
+	rest := strings.TrimLeft(t[i:], " \t\n\r")
+	return strings.HasPrefix(rest, ":") || (strings.HasPrefix(rest, "=") && !strings.HasPrefix(rest, "=="))
 }
 
 // xmNullToNil replaces the bare word `null` with `nil` outside strings and

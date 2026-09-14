@@ -748,9 +748,9 @@ for its hover too.
 | `,` as a connective | `\|\|` |
 | `has` | `<value> in <list>` |
 | `not in` | `!(<value> in <list>)` |
-| `and(...)` | `&&` |
-| `or(...)` | `\|\|` |
-| `not(...)` | `!` |
+| `and(a, b)` | `a && b` |
+| `or(a, b)` | `a \|\| b` |
+| `not(a)` | `!a` |
 | `lt(a, b)` | `a < b` |
 | `gt(a, b)` | `a > b` |
 | `lte(a, b)` | `a <= b` |
@@ -1511,7 +1511,7 @@ A spec or trait is applied, like a call, to the value it predicates over: a row 
 filter  row => row.folderId == args.folderId && isGeneratedOutput(row) && isActiveRecord(row)
 ```
 
-During load the engine resolves every application into the predicate's body over that value, so the resulting query plan behaves exactly as if the body were written inline. Spec dependencies are resolved at load; cycles and duplicates are rejected, and so is a row-spec applied to the row of a query over a different concept.
+During load the engine resolves every application into the predicate's body over that value, so the resulting query plan behaves exactly as if the body were written inline. Spec dependencies are resolved at load; cycles and duplicates are rejected.
 
 > **Retired forms.** The `spec <boundName> <name> { return <bool> }` and `trait <name> { return <bool> }` bodies, a spec named as a bare conjunct (`&& isActiveRecord`) or as `spec <name>`, the receiver-function spec (`func (Spec) name(ctx any) bool { ... }`), the `@shape("name")` pin, the JSON spec format (`specs/v1/*.json` documents with an `expression` string), and runtime inline spec definitions (`name := expr` inside a query string) are all retired and rejected. Declare `spec <boundName> <name> = row => <predicate>` and apply it: `<name>(row)`.
 

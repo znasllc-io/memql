@@ -193,6 +193,11 @@ func canonicalValue(value any) string {
 		// signature carrying a memory address is a different signature on
 		// every load.
 		return canonicalPlanConstant(v)
+	case *FieldOperand:
+		// Rendered as a FIELD, never as the quoted name, so `row.a > row.b`
+		// and `row.a > "payload.b"` cannot share a signature (the fleet
+		// defect expr_field_operand.go records was exactly that confusion).
+		return canonicalFieldOperand(v)
 	case string:
 		return strconv.Quote(v)
 	case bool:

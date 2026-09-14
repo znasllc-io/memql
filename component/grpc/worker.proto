@@ -469,6 +469,24 @@ message AppSessionStart {
   // started without it can still end with a transcript, and only a
   // session that asked can be disappointed.
   string response_schema_json = 13;
+  // level is the call's LEVEL -- one of core/airoute's closed four, "fast",
+  // "strong", "reasoning" or "embeddings" -- which says how much
+  // intelligence the step needs rather than which model serves it (design
+  // D8 of docs/superpowers/specs/2026-09-13-app-session-recording-and-
+  // learning-program-design.md). The COCKPIT owns the translation into the
+  // app's own knobs -- Claude Code's --model and --effort, Codex's model and
+  // model_reasoning_effort -- from one table per app that the machine's
+  // owner may override in policy.yaml, because the knob names are the app's
+  // and only the machine knows which app, at which version, is installed.
+  //
+  // EMPTY MEANS NO LEVEL WAS NAMED, and the app runs at its own defaults --
+  // which is what every session did before this field (a person's `open`,
+  // an engine that predates it). A level the cockpit has no translation for
+  // is REFUSED rather than defaulted: a session run at a level nobody chose
+  // reports a model nobody asked for. "embeddings" is always refused (D10):
+  // an embedding must come from the embedder of the index it is written
+  // into, and no app exposes one.
+  string level = 14;
 }
 
 // AppSessionLimits are the policy ceilings a session runs under.
@@ -534,6 +552,19 @@ message AppSessionEnd {
   // that ends without one still yields its transcript and artifacts,
   // exactly as before.
   string result_json = 7;
+  // model is the model the APP REPORTED serving this session with: Claude
+  // Code's result event (`modelUsage`), Codex's thread settings as its
+  // app-server or mcp-server stated them, replaced by any reroute the app
+  // announced. NOT the model the cockpit asked for -- a request is not a
+  // report, and a servedModel copied from the request would record as
+  // measured something nobody measured (design D9). EMPTY MEANS THE APP DID
+  // NOT SAY, which the engine records as unknown.
+  string model = 8;
+  // effort is the reasoning effort the APP REPORTED running at, under the
+  // same rule. An app that states no effort (Claude Code's headless output
+  // states none) or that ignored the one it was given leaves this EMPTY --
+  // never the requested value, never a guess.
+  string effort = 9;
 }
 
 // AppSessionUsage is what the app REPORTED about its own spend.
@@ -639,6 +670,14 @@ message ModelCallStart {
   // rides `messages`, for the reason on `speech` above. The generation seed is
   // ModelCallParams.seed, reused rather than duplicated here.
   ModelCallImageRequest image = 15;
+  // level is the call's LEVEL (core/airoute's closed four), the same word
+  // AppSessionStart.level carries (design D8). The router has ALREADY chosen
+  // `model` from this machine's advertisement, so a worker serving from a
+  // local runtime reads the level for its ledger and its own logs and never
+  // substitutes another model on the strength of it: a level steers an app,
+  // which has knobs, while a runtime has only the model it was asked for.
+  // Empty means the engine named none.
+  string level = 16;
 }
 
 // ModelCallTool is one function the model may call, as the caller
@@ -906,7 +945,19 @@ message ModelCallUsage {
   // model is what the runtime ACTUALLY ran, which is not always what
   // was asked for (a quantisation alias, a tag resolving to a digest).
   // A token count without the model it was spent on cannot be read.
+  //
+  // It is also the served-model report design D9 asks of ModelCallEnd, so
+  // that report lives HERE rather than in a second `model` on the end
+  // message: two places for one fact are two places for it to disagree.
   string model = 4;
+  // effort is the reasoning effort the RUNTIME REPORTED running at, beside
+  // the model and for the same reason: a count spent at an unknown effort
+  // cannot be compared with one spent at a known one (design D9). Empty
+  // means the runtime stated none -- which is every local runtime a cockpit
+  // serves from today, since neither Ollama nor an OpenAI-compatible
+  // response carries an effort -- and the engine records that as unknown,
+  // never as a guess taken from the request.
+  string effort = 5;
 }
 
 // ModelCallCancel stops a running call. Server -> worker.

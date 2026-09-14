@@ -471,6 +471,10 @@ func rewriteFilterFieldRefs(expr ExpressionNode) error {
 		return rewriteFilterFieldRefs(node.Target)
 	case *ShapeExpression:
 		return rewriteFilterFieldRefs(node.Target)
+	case *RefineExpression:
+		// The target only: the refine lambda is a v1 AST that names every row
+		// read through its parameter, so it has no bare field to rewrite.
+		return rewriteFilterFieldRefs(node.Target)
 	}
 	return nil
 }
@@ -580,6 +584,14 @@ func applyDirectiveWrappers(plan *QueryPlan) (ExpressionNode, error) {
 			}
 			plan.Count = true
 			expr = node.Target
+		case *RefineExpression:
+			// The `refine` clause (memql#5366), peeled like every other
+			// directive; Execute applies it to the page (refine.go).
+			if plan.Refine != nil {
+				return nil, fmt.Errorf("multiple refine() directives are not supported")
+			}
+			plan.Refine = node
+			expr = node.Target
 		case *ShapeExpression:
 			if plan.ShapeTemplate != nil || plan.ShapeTemplateName != "" {
 				return nil, fmt.Errorf("multiple shape() directives are not supported")
@@ -602,7 +614,7 @@ func ensureNoDirectiveNodes(expr ExpressionNode) error {
 		return nil
 	}
 	switch node := expr.(type) {
-	case *SortExpression, *SelectExpression, *PaginateExpression, *TimestampExpression, *DepthExpression, *CountExpression, *ShapeExpression:
+	case *SortExpression, *SelectExpression, *PaginateExpression, *TimestampExpression, *DepthExpression, *CountExpression, *ShapeExpression, *RefineExpression:
 		return fmt.Errorf("directive functions (e.g., paginate()) must be the outermost wrapper around the query expression")
 	case *LogicalExpression:
 		if err := ensureNoDirectiveNodes(node.Left); err != nil {
@@ -1053,6 +1065,8 @@ func collectConceptFields(expr ExpressionNode, acc map[string][]FieldReference) 
 		collectConceptFields(node.Target, acc)
 	case *ShapeExpression:
 		collectConceptFields(node.Target, acc)
+	case *RefineExpression:
+		collectConceptFields(node.Target, acc)
 	case *BuiltinFunctionExpression:
 		// Builtin functions don't have nested expressions to collect from
 	}
@@ -1125,6 +1139,8 @@ func collectCacheHints(expr ExpressionNode, acc map[string]int64) {
 	case *CountExpression:
 		collectCacheHints(node.Target, acc)
 	case *ShapeExpression:
+		collectCacheHints(node.Target, acc)
+	case *RefineExpression:
 		collectCacheHints(node.Target, acc)
 	case *BuiltinFunctionExpression:
 		// Builtin functions don't have nested expressions to collect from

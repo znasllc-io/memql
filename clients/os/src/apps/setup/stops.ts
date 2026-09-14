@@ -1,4 +1,5 @@
 import { nextOpen, type StopState } from "../../kit/Rail";
+import { stateWords } from "../../kit/ReadinessStates";
 import type { Readiness } from "../../live/readiness";
 import { MODULE_DESCRIPTIONS, MODULE_NAMES, READINESS_MODULES, type ModuleId } from "../../system/modules";
 import type { Verdict } from "../../system/readinessFold";
@@ -115,13 +116,19 @@ function moduleStop(id: ModuleId, verdict: Verdict | null): SetupStop {
   const state = verdict?.state ?? "unreported";
   if (state === "configured") return { ...base, state: "done", answer: "Set up" };
   if (state === "notApplicable") return { ...base, state: "skipped", answer: "Not applicable" };
-  if (state === "partial") return { ...base, state: "waiting", answer: "Partly set up" };
+  // THE KIT'S WORDS for the two states that have two causes each -- "Set up
+  // on some nodes" or "Partly set up", "Could not check" or "Not reported" --
+  // so the rail and the Set up group read one vocabulary (rule 7).
+  if (state === "partial") return { ...base, state: "waiting", answer: stateWords(verdict) };
   // `unreported` STAYS WAITING rather than becoming unknown. A module whose
   // hosting node is down has told us nothing, and the wizard says exactly
   // that -- but it keeps drawing, because silencing the whole rail over one
   // quiet node would take the other three stops away from somebody who can
-  // act on them.
-  if (state === "unreported") return { ...base, state: "waiting", answer: "Not reported" };
+  // act on them. The same holds when every node answered and none could
+  // finish the check: the rail says "Could not check" and keeps the stop's
+  // act, because the check failing says nothing about whether the setup was
+  // ever done.
+  if (state === "unreported") return { ...base, state: "waiting", answer: stateWords(verdict) };
   return { ...base, state: "waiting", answer: "Not set up" };
 }
 

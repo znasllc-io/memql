@@ -1,1 +1,0 @@
-DROP INDEX IF EXISTS memory_nodes_concept_id_created_at_desc_idx;

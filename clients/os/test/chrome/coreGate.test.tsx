@@ -142,6 +142,27 @@ describe("the two role variants", () => {
     expect(document.querySelector("[data-os-window]")).toBeNull();
   });
 
+  // THE ONE THING THE VERDICT CANNOT SAY FOR ITSELF (memql#5259). The nodes
+  // that voted found no door; a node that could not read the fleet did not
+  // vote, and the owner looking at a held gate is told so -- one quiet line,
+  // no node ids, and only while the gate holds.
+  it("says quietly when some nodes could not read the fleet", async () => {
+    h.connection = fakeConnection({ passkeysForSelf: [passkeyRow({ id: "v1:identity:identity:pk-1" })] });
+    const feed = UNCONFIGURED();
+    const ai = feed.of("ai")!;
+    ai.unknown = ["bff-a", "edge-a"];
+    render(gate("owner", feed));
+    expect(await screen.findByText(/2 nodes could not read the fleet just now/)).toBeTruthy();
+    expect(screen.queryByText(/bff-a|edge-a/)).toBeNull();
+  });
+
+  it("says nothing extra when every node voted", async () => {
+    h.connection = fakeConnection({ passkeysForSelf: [passkeyRow({ id: "v1:identity:identity:pk-1" })] });
+    render(gate("owner", UNCONFIGURED()));
+    await screen.findByRole("list", { name: "Set up this cluster" });
+    expect(document.querySelector("[data-os-core-gate-unknown]")).toBeNull();
+  });
+
   it("gives a developer the same rail", async () => {
     h.connection = fakeConnection({ passkeysForSelf: [passkeyRow({ id: "v1:identity:identity:pk-1" })] });
     render(gate("developer", UNCONFIGURED()));
