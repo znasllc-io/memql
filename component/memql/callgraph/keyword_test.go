@@ -70,34 +70,40 @@ func TestRestrictedReceiversAreUnambiguous(t *testing.T) {
 // the invocation-step prefix only. A header matcher that accepted the retired
 // spelling would match nothing in the tree -- which is exactly the #3043
 // defect, and is invisible unless asserted from both sides.
-func TestMutationKeywordIsMutate(t *testing.T) {
+func TestMutationKeywordIsMutation(t *testing.T) {
 	keyword, conceptInSignature, ok := kindKeyword("mutation")
 	if !ok {
 		t.Fatal("kind \"mutation\" resolves to no dslspec construct")
 	}
-	if keyword != "mutate" {
-		t.Errorf("mutation declaration keyword = %q, want \"mutate\" (memql#2041)", keyword)
+	if keyword != "mutation" {
+		t.Errorf("mutation declaration keyword = %q, want \"mutation\" (epic memql#5375 collapsed `mutate` and `mutation` onto one word)", keyword)
 	}
 	if !conceptInSignature {
-		t.Error("mutate binds its concept in the signature (`mutate <Concept> <name>`)")
+		t.Error("mutation binds its concept in the signature (`mutation <Concept> <name>`)")
 	}
 }
 
 // The retired spelling must produce NO constructs, so a fixture that drifts
-// back to `mutation node x {` fails loudly instead of silently exercising the
+// back to `mutate node x {` fails loudly instead of silently exercising the
 // rules against a keyword the parser no longer accepts.
+//
+// The retired word is `mutate` now, not `mutation` -- epic memql#5375
+// reversed which of the pair survives. This test is worth keeping in the
+// reversed form rather than deleting: a detector that matches nothing reports
+// a clean tree, and it is what caught six stale exemptions at once when the
+// keyword moved.
 func TestRetiredMutationSpellingSplitsToNothing(t *testing.T) {
 	retired := `use cluster.concepts.{ node }
-mutation node twoWrites {
+mutate node twoWrites {
   args { id string @required }
   insert { id: args.id }
   update { id: args.id, health: "up" }
 }`
 	if got := splitConstructs("mutation", retired); len(got) != 0 {
-		t.Fatalf("retired `mutation` spelling must split to nothing; got %d constructs", len(got))
+		t.Fatalf("retired `mutate` spelling must split to nothing; got %d constructs", len(got))
 	}
 	if fs := CheckFile("dsl/cluster/mutations.memql", retired, nil); len(fs) != 0 {
-		t.Fatalf("retired `mutation` spelling must yield no findings; got %v", rules(fs))
+		t.Fatalf("retired `mutate` spelling must yield no findings; got %v", rules(fs))
 	}
 }
 

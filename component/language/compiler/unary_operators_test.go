@@ -50,8 +50,8 @@ func (Query) testMultiple() {
 @schedule(cron="0 */15 * * * *")
 func (Automation) testAutomation(_ any) {
   step1 := query {
-    concept==v1:hr:flag;
-    payload.status=="open";
+    concept==v1:hr:flag&&
+    payload.status=="open"&&
     payload.slaDeadline!=nil
   }
 
@@ -113,7 +113,7 @@ func (Automation) testAutomation(_ any) {
 func TestUnaryOperatorWithOtherConditions(t *testing.T) {
 	source := `
 func (Query) testCombined() {
-	concept==v1:test&&payload.status=="active"&&payload.optionalField!=nil;payload.count>5
+	concept==v1:test&&payload.status=="active"&&payload.optionalField!=nil&&payload.count>5
 }
 `
 	result, err := CompileSource(source)

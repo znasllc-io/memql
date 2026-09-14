@@ -318,13 +318,16 @@ func TestConstructDocsRejectRetiredForms(t *testing.T) {
 		t.Error("DRIFT: dslspec is missing the `action` construct")
 	}
 
-	// The write-function declaration keyword is `mutate`, not the retired
-	// `mutation` noun (which is the invocation-step prefix only, memql#2041).
-	if Build().ConstructByKeyword("mutation") != nil {
-		t.Error("DRIFT: dslspec still lists a `mutation` construct -- the declaration keyword is `mutate` (memql#2041); `mutation` is the invocation-step prefix only")
+	// THE DIRECTION REVERSED. memql#2041 made `mutate` the declaration
+	// keyword and left `mutation` as the invocation-step prefix; epic
+	// memql#5375 collapsed the pair onto `mutation` in both positions,
+	// because one construct answering to two words meant a reader grepping
+	// for either found part of the tree.
+	if Build().ConstructByKeyword("mutate") != nil {
+		t.Error("DRIFT: dslspec still lists a `mutate` construct -- the keyword is `mutation` in both the declaration and the call since memql#5375")
 	}
-	if Build().ConstructByKeyword("mutate") == nil {
-		t.Error("DRIFT: dslspec is missing the `mutate` construct (the write-function declaration keyword)")
+	if Build().ConstructByKeyword("mutation") == nil {
+		t.Error("DRIFT: dslspec is missing the `mutation` construct (the write-function declaration keyword)")
 	}
 }
 

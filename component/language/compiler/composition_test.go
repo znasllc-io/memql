@@ -282,7 +282,7 @@ func TestValidateFileComposition_ArgsWithoutBlock(t *testing.T) {
 	source := `
 @description("Search users")
 func (Query) searchUsers(args any) {
-  concept==v1:user; ?.payload.role==args.role
+  concept==v1:user && payload.role==args.role
 }
 `
 	ast := mustParse(t, source)
@@ -309,7 +309,7 @@ args {
   status  string
 }
 func (Query) searchUsers(args any) {
-  concept==v1:user; ?.payload.role==args.role
+  concept==v1:user && payload.role==args.role
 }
 `
 	ast := mustParse(t, source)

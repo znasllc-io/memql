@@ -194,8 +194,8 @@ func TestJSONRoundTrips(t *testing.T) {
 	if len(back.Constructs) != len(s.Constructs) {
 		t.Errorf("construct count changed across round-trip: %d != %d", len(back.Constructs), len(s.Constructs))
 	}
-	if c := back.ConstructByKeyword("mutate"); c == nil || !c.ConceptInSignature {
-		t.Error("mutate construct did not survive round-trip with ConceptInSignature")
+	if c := back.ConstructByKeyword("mutation"); c == nil || !c.ConceptInSignature {
+		t.Error("mutation construct did not survive round-trip with ConceptInSignature")
 	}
 }
 

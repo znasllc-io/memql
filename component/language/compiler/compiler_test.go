@@ -11,7 +11,7 @@ import (
 func TestCompileSource_SimpleQuery(t *testing.T) {
 	source := `
 func (Query) activeUsers(role any) {
-	concept==v1:user;?.payload.role==args.role
+	concept==v1:user&&payload.role==args.role
 }`
 
 	result, err := CompileSource(source)
@@ -95,14 +95,14 @@ func TestTranspileAutomation_ForEachBareVarReferencesNotQuoted(t *testing.T) {
 	source := `
 func (Automation) autoJoinAIExample(_ any) {
   getAgents := query {
-    concept==v1:agents:agent;
+    concept==v1:agents:agent&&
     payload.active==true
   }
 
   for item := range getAgents.result.Bundle.nodes {
     checkExisting := query {
-      concept==v1:cognition:participant;
-      payload.agentId==item.id;
+      concept==v1:cognition:participant&&
+      payload.agentId==item.id&&
       payload.status!="left"
     }
   }
@@ -389,7 +389,7 @@ func TestIsAutomationFile(t *testing.T) {
 func TestCompiler_ConditionalFilter(t *testing.T) {
 	source := `
 func (Query) activeUsers(role any) {
-	concept==v1:user;?.payload.role==args.role
+	concept==v1:user&&payload.role==args.role
 }`
 
 	result, err := CompileSource(source)
@@ -402,7 +402,11 @@ func (Query) activeUsers(role any) {
 	}
 
 	// The query should contain the ?. syntax
-	if !strings.Contains(result.Functions[0].Query, "?.") {
+	// `?.` is retired (memql#5375): the optional-chain prefix is gone, and
+	// the compiled query carries the plain path. This asserted the prefix
+	// SURVIVED compilation, which is now the regression rather than the
+	// contract.
+	if strings.Contains(result.Functions[0].Query, "?.") {
 		t.Errorf("Expected query to contain '?.', got %q", result.Functions[0].Query)
 	}
 }

@@ -1228,9 +1228,15 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 	case *parser.LogicalExpr:
 		left := c.expressionToString(e.Left)
 		right := c.expressionToString(e.Right)
-		sep := ";"
+		// `&&` / `||`, not `;` / `,` (memql#5375). This function renders a
+		// parsed expression BACK to source, and the result is re-parsed --
+		// compiler.CompileSource is called from component/automations/loader.go
+		// -- so emitting the retired spellings would make every automation
+		// filter refuse on its own round trip. Parse-identical: each pair sat
+		// at the same precedence level, so the grouping does not move.
+		sep := "&&"
 		if e.Op == parser.LogicalOr {
-			sep = ","
+			sep = "||"
 		}
 		return fmt.Sprintf("%s%s%s", left, sep, right)
 
