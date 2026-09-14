@@ -8,8 +8,8 @@
   approved. Three requirements the owner added during the same brainstorm -- intervention
   on any step with versions and branches, feedback and validation on the AI Fluency
   framework, and decomposition into reusable automations -- were presented as three more
-  sections, approved, and are D18 to D24 and epic E. Issues are filed by the first
-  epic's plan (`superpowers:writing-plans`), not by this record.
+  sections, approved, and are D18 to D24 and epic E. Issues were filed on
+  2026-09-13; the table at the end of section 8 names them.
 - **What it is:** the index and the design for a program of five epics. A coding-agent
   app on a fleet machine (Claude Code or Codex, headless, with MemQL's tools reachable
   over MCP) becomes a full door that a tool-needing step can be handed to (A); every
