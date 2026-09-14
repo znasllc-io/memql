@@ -283,10 +283,6 @@ func TestDiagnose_EmptyAndWhitespace(t *testing.T) {
 // it and a person sees which rule fired. Any other parse failure keeps
 // "parse-error" (memql#5364).
 func TestDiagnose_RetiredFormCarriesItsRule(t *testing.T) {
-	saved := parser.DefaultOptions
-	t.Cleanup(func() { parser.DefaultOptions = saved })
-	parser.DefaultOptions = parser.Options{ExpressionsV1: true}
-
 	rules := map[string]bool{}
 	for _, f := range parser.V1RetiredForms() {
 		rules[f.Rule] = true

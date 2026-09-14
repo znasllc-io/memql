@@ -62,10 +62,10 @@ query missingCapability ` + queryName + ` {
 `
 	owner := "v1:identity:user:authored-probe"
 	reg := NewAuthoredRuntimeRegistry()
-	withExpressionsV1(t, func() {
+	{
 		res, err := eng.DefineSessionBundle(reg, owner, bundle, "")
 		require.NoError(t, err, "%+v", res.Diagnostics)
-	})
+	}
 
 	// It pushes down: the query's lowered filter, with the session spec
 	// inlined as execution inlines it, compiles to SQL whole.

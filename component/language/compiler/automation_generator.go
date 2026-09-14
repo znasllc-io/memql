@@ -254,9 +254,7 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 
 	// Every expression compiles through automation_generator_v1.go: it is
 	// carried as canonical v1 source or a `{"$expr": ...}` value leaf, and
-	// the runtime evaluates it with EvalExpr (memql#5367). The retired
-	// marker is still written, unconditionally (see expressionsV1Key).
-	output[expressionsV1Key] = expressionsV1Value
+	// the runtime evaluates it with EvalExpr (memql#5367).
 
 	// Basic metadata
 	output["name"] = def.Name

@@ -7,16 +7,14 @@ import (
 	"github.com/znasllc-io/memql/component/language/ast"
 )
 
-// mutation_write_block_v1_test.go -- the struct-form mutation rewriter under
-// Options.ExpressionsV1 (epic memql#5363, memql#5367).
+// mutation_write_block_v1_test.go -- the struct-form mutation rewriter and the
+// edition-2026 payload (epic memql#5363, memql#5367).
 //
 // A write block's two sugars -- `accept { a, b }` and the bare-mirror line
 // `args.name` (authoring rule 15) -- are write-block SYNTAX, not expressions,
 // so the rewriter resolves both into explicit `name: args.name` entries before
 // any expression parser sees the payload. The edition-2026 map literal has no
-// key-less entry, so an unexpanded bare mirror would be refused there; the
-// string half's object-literal parser read it as the same explicit entry, so
-// expanding it changes nothing that grammar produces.
+// key-less entry, so an unexpanded bare mirror would be refused there.
 
 // v1MutationPayload normalises a struct-form mutation and parses it with the
 // edition-2026 grammar, returning the payload map literal the statement holds.
@@ -26,16 +24,16 @@ func v1MutationPayload(t *testing.T, src string) (*MutationStmt, *ast.MapExpr) {
 	if err != nil {
 		t.Fatalf("normalise: %v", err)
 	}
-	file, err := ParseFileWithOptions(normalised, Options{ExpressionsV1: true})
+	file, err := ParseFile(normalised)
 	if err != nil {
-		t.Fatalf("parse with ExpressionsV1:\n%s\nerror: %v", normalised, err)
+		t.Fatalf("parse:\n%s\nerror: %v", normalised, err)
 	}
 	if len(file.Definitions) != 1 {
 		t.Fatalf("want one definition, got %d", len(file.Definitions))
 	}
 	fn, ok := file.Definitions[0].(*FunctionDef)
-	if !ok || !fn.ExpressionsV1 {
-		t.Fatalf("want a FunctionDef marked ExpressionsV1, got %#v", file.Definitions[0])
+	if !ok {
+		t.Fatalf("want a FunctionDef, got %#v", file.Definitions[0])
 	}
 	stmt, ok := fn.Body.(*MutationStmt)
 	if !ok {
@@ -130,9 +128,9 @@ func TestV1MutationAcceptStampEmitsExplicitEntries(t *testing.T) {
 	}
 }
 
-// TestBareMirrorExpansionIsTheLegacyEntry: the string half gets the same
-// explicit entry it used to infer, so the legacy mode is unchanged.
-func TestBareMirrorExpansionIsTheLegacyEntry(t *testing.T) {
+// TestBareMirrorExpansionIsAnExplicitEntry: the rewriter's output carries the
+// bare mirror as its explicit entry, the text the payload parser reads.
+func TestBareMirrorExpansionIsAnExplicitEntry(t *testing.T) {
 	out, err := NormaliseMutationSource(`mutate space createSpace {
   args {
     name  string!
@@ -152,8 +150,7 @@ func TestBareMirrorExpansionIsTheLegacyEntry(t *testing.T) {
 
 // TestBareMirrorOfANestedArgIsRefused: rule 15 takes a single-segment arg
 // only; a dotted path has no one key to infer, so the rewriter refuses it,
-// naming the explicit spelling. The string half refused it too, as an invalid
-// object literal.
+// naming the explicit spelling.
 func TestBareMirrorOfANestedArgIsRefused(t *testing.T) {
 	_, err := NormaliseMutationSource(`mutate space createSpace {
   args {

@@ -146,13 +146,6 @@ type Automation struct {
 	// Origin tracks where this automation was loaded from (file path).
 	Origin string `json:"-"`
 
-	// Expressions is the compiled `"expressions"` key, which once marked an
-	// automation compiled from the edition-2026 grammar. Every automation is
-	// now, and nothing here reads it (the compiler still writes it, for a
-	// runtime that keys on it); the field goes with
-	// parser.Options.ExpressionsV1 (epic memql#5363).
-	Expressions string `json:"expressions,omitempty"`
-
 	// exprsPrepared records that PrepareExpressions parsed this automation's
 	// expressions. The executor prepares one that was built in Go before its
 	// first run (ensurePrepared).

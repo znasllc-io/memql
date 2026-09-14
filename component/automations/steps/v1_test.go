@@ -126,25 +126,25 @@ func v1Registry(funcs *recordingFunctions, evs *recordingEvents) *Registry {
 	return r
 }
 
-// parseV1Logic parses a logic source with the edition-2026 grammar on.
+// parseV1Logic parses a logic source and returns its body.
 func parseV1Logic(t *testing.T, src string) *langparser.AutomationDef {
 	t.Helper()
 	normalised, err := langparser.NormaliseAll(src)
 	if err != nil {
 		t.Fatalf("NormaliseAll: %v", err)
 	}
-	f, err := langparser.ParseFileWithOptions(normalised, langparser.Options{ExpressionsV1: true})
+	f, err := langparser.ParseFile(normalised)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	for _, d := range f.Definitions {
 		if fn, ok := d.(*langparser.FunctionDef); ok {
-			if body, ok := fn.Body.(*langparser.AutomationDef); ok && body.ExpressionsV1 {
+			if body, ok := fn.Body.(*langparser.AutomationDef); ok {
 				return body
 			}
 		}
 	}
-	t.Fatal("no v1 logic body in the source")
+	t.Fatal("no logic body in the source")
 	return nil
 }
 
@@ -306,7 +306,6 @@ func TestV1NotEmptyIsTrueWhenThereAreMatches(t *testing.T) {
 // the nested condition are v1 conditions over the same clone.
 func TestV1ForEachDataModel(t *testing.T) {
 	a := prepareV1(t, `{
-		"expressions": "v1",
 		"name": "forEachDataModel",
 		"steps": [{"id": "loop", "type": "forEach", "forEach": {
 			"source": "args.items",
@@ -377,7 +376,7 @@ func TestV1ForEachDataModel(t *testing.T) {
 // construct call is evaluated in process -- no engine is configured here, and
 // none is needed -- and its value is the step's result.
 func TestV1QueryStepEvaluatesInProcess(t *testing.T) {
-	a := prepareV1(t, `{"expressions":"v1","name":"q","steps":[
+	a := prepareV1(t, `{"name":"q","steps":[
 		{"id":"total","type":"query","query":{"query":"args.a + args.b * 2"}},
 		{"id":"absent","type":"query","query":{"query":"args.missing"}}]}`)
 	ev := automations.NewEvaluator()
@@ -397,7 +396,7 @@ func TestV1QueryStepEvaluatesInProcess(t *testing.T) {
 // v1 expression (a literal written as one, or a reference) and its payload
 // leaves are values; an absent leaf is omitted.
 func TestV1EventStepEvaluatesTopicAndPayload(t *testing.T) {
-	a := prepareV1(t, `{"expressions":"v1","name":"e","steps":[
+	a := prepareV1(t, `{"name":"e","steps":[
 		{"id":"pub","type":"event","event":{"topic":{"$expr":"\"app.\" + args.kind"},"payload":{
 			"who":{"$expr":"args.who"},"gone":{"$expr":"args.missing"},"lit":"args.who"}}}]}`)
 	ev := automations.NewEvaluator()
@@ -419,7 +418,7 @@ func TestV1EventStepEvaluatesTopicAndPayload(t *testing.T) {
 
 // TestV1SwitchSubject: a v1 switch subject selects its case by value.
 func TestV1SwitchSubject(t *testing.T) {
-	a := prepareV1(t, `{"expressions":"v1","name":"sw","steps":[
+	a := prepareV1(t, `{"name":"sw","steps":[
 		{"id":"route","type":"switch","switch":{"expression":"args.n > 1 ? \"many\" : \"one\"",
 			"cases":{"many":{"steps":[{"id":"m","type":"function","function":{"name":"many"}}]},
 			         "one":{"steps":[{"id":"o","type":"function","function":{"name":"one"}}]}}}}]}`)

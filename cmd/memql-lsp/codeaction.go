@@ -2,9 +2,9 @@ package main
 
 // codeaction.go -- "Rewrite to edition 2026" (memql#5364).
 //
-// Once the engine parses edition 2026 (langparser.DefaultOptions has
-// ExpressionsV1), every legacy spelling in an open file is a refusal, and every
-// refusal names memqlmigrate --rewrite=expressions as the way out. That codemod
+// The engine parses edition 2026, so every legacy spelling in an open file is a
+// refusal, and every refusal names memqlmigrate --rewrite=expressions as the
+// way out. That codemod
 // is mechanical, so the language server puts it where the squiggle is:
 //
 //   - a quickfix, "Rewrite to edition 2026", on a diagnostic the rewrite clears:
@@ -113,12 +113,6 @@ func kindRequested(only []protocol.CodeActionKind, kind protocol.CodeActionKind)
 }
 
 func (s *server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) (any, error) {
-	if !langparser.DefaultOptions.ExpressionsV1 {
-		// The rewrite targets the grammar the engine parses. Before the flip
-		// the in-process positions read the legacy spellings -- and read some
-		// edition-2026 ones differently -- so the "fix" would break the file.
-		return nil, nil
-	}
 	uri := params.TextDocument.URI
 	text, ok := s.docs.get(uri)
 	if !ok {

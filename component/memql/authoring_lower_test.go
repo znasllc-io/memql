@@ -23,19 +23,7 @@ import (
 // once every row is back.
 //
 // Each test boots the real engine over the embedded tree plus the lowerinit
-// fixture domain (expr_lower_init_test.go), with the edition-2026 grammar
-// switched on around the authoring calls -- the grammar every authored bundle
-// is parsed with after the flip.
-
-// withExpressionsV1 runs fn with the edition-2026 grammar on, as the flip will
-// leave DefaultOptions. No test in this package runs in parallel.
-func withExpressionsV1(t *testing.T, fn func()) {
-	t.Helper()
-	saved := languageParser.DefaultOptions
-	languageParser.DefaultOptions = languageParser.Options{ExpressionsV1: true}
-	defer func() { languageParser.DefaultOptions = saved }()
-	fn()
-}
+// fixture domain (expr_lower_init_test.go).
 
 // bootAuthoringEngine is the lowerinit engine: core ticket concept plus the
 // specs isOpenTicket, owesReport, isUrgentTicket and the context spec
@@ -112,11 +100,11 @@ func positionOf(t *testing.T, src, needle string) (int, int) {
 func TestAuthoringLower_DefineRegistersLoweredForms(t *testing.T) {
 	eng := bootAuthoringEngine(t)
 	reg := NewAuthoredRuntimeRegistry()
-	withExpressionsV1(t, func() {
+	{
 		res, err := eng.DefineSessionBundle(reg, "owner-1", sessionGoodBundle, "")
 		require.NoError(t, err, "%+v", res.Diagnostics)
 		require.True(t, res.OK)
-	})
+	}
 
 	c, ok := reg.Lookup("owner-1", "spec", "isHighTicket")
 	require.True(t, ok)
@@ -138,9 +126,7 @@ func TestAuthoringLower_DefineRefusesWithTheThreePartMessageOnTheAuthorsLine(t *
 	reg := NewAuthoredRuntimeRegistry()
 	var res SessionDefineResult
 	var err error
-	withExpressionsV1(t, func() {
-		res, err = eng.DefineSessionBundle(reg, "owner-1", sessionRefusedBundle, "")
-	})
+	res, err = eng.DefineSessionBundle(reg, "owner-1", sessionRefusedBundle, "")
 	require.Error(t, err, "a bundle that does not lower is refused at define, not at its first call")
 	require.False(t, res.OK)
 	require.Empty(t, reg.ListForOwner("owner-1"), "a refused define registers nothing")
@@ -174,7 +160,7 @@ query ticket misKindedOnly {
   paginate 20
 }
 `
-	withExpressionsV1(t, func() {
+	{
 		// With no engine the kind check is deferred -- the bundle alone cannot
 		// see callerIsOwner -- so the engine-free define accepts it...
 		free, err := AuthorSessionBundle(NewAuthoredRuntimeRegistry(), "owner-1", misKinded, "")
@@ -188,24 +174,22 @@ query ticket misKindedOnly {
 		// So does the engine's validate.
 		rep := eng.ValidateAuthoredBundle(misKinded, "")
 		require.False(t, rep.OK)
-	})
+	}
 }
 
 func TestAuthoringLower_StageRefusesBeforeStagingAnything(t *testing.T) {
 	eng := bootAuthoringEngine(t)
 	store := &fakePromoteStore{}
 	var err error
-	withExpressionsV1(t, func() {
-		_, err = eng.stageBundleDurableWithStore(context.Background(), store, "owner-1", sessionRefusedBundle, "")
-	})
+	_, err = eng.stageBundleDurableWithStore(context.Background(), store, "owner-1", sessionRefusedBundle, "")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "bundle failed validation")
 	require.Empty(t, store.constructs, "a stage that does not lower persists nothing")
 
-	withExpressionsV1(t, func() {
+	{
 		res, err := eng.stageBundleDurableWithStore(context.Background(), store, "owner-1", sessionGoodBundle, "")
 		require.NoError(t, err, "%+v", res.Diagnostics)
-	})
+	}
 	staged, ok := eng.stagedAuthored.Lookup("owner-1", "spec", "isHighTicket")
 	require.True(t, ok)
 	require.Equal(t, `payload.priority>3`, canonicalExpression(staged.Compiled.(*Spec).Expr), "the staged spec is lowered")
@@ -228,12 +212,12 @@ shape ticket ticketBrief {
 /// A spec over the session shape.
 spec ticketBrief briefOpen = row => row.status == "open"
 `
-	withExpressionsV1(t, func() {
+	{
 		_, err := eng.DefineSessionBundle(reg, "owner-1", sessionGoodBundle, "")
 		require.NoError(t, err)
 		res, err := eng.DefineSessionBundle(reg, "owner-1", withShape, "")
 		require.NoError(t, err, "%+v", res.Diagnostics)
-	})
+	}
 
 	// A spec over a concept promotes, lowered against the shared registries.
 	c, ok := reg.Lookup("owner-1", "spec", "isHighTicket")
@@ -309,11 +293,11 @@ query ticket misKindedStored {
 		},
 	}
 	var res RehydrateResult
-	withExpressionsV1(t, func() {
+	{
 		var err error
 		res, err = eng.rehydratePromotedNow(context.Background(), store)
 		require.NoError(t, err)
-	})
+	}
 
 	spec, err := eng.specs.Get("isHighTicket")
 	require.NoError(t, err, "the stored v1 spec is back")
@@ -349,16 +333,14 @@ func TestAuthoringLower_AnUnloweredSessionSpecIsRefusedByNameNeverInlinedAsNothi
 func TestAuthoringLower_ADanglingImportKeepsTheReferenceDiagnostic(t *testing.T) {
 	eng := bootAuthoringEngine(t)
 	var rep SandboxReport
-	withExpressionsV1(t, func() {
-		rep = SandboxCompileBundleWithEngine([]SandboxConstruct{{
-			Kind: "spec",
-			Name: "danglingSpec",
-			Source: `use lowerinit.shapes.{ ghostShape }
+	rep = SandboxCompileBundleWithEngine([]SandboxConstruct{{
+		Kind: "spec",
+		Name: "danglingSpec",
+		Source: `use lowerinit.shapes.{ ghostShape }
 
 /// A spec over a shape nothing declares.
 spec ghostShape danglingSpec = row => row.status == "open"`,
-		}}, eng)
-	})
+	}}, eng)
 	require.False(t, rep.OK)
 	d := diagnosticFor(t, rep.Diagnostics, "spec", "danglingSpec")
 	require.Contains(t, d.Error, "unresolved reference", "the reference check names the import to fix; the lowering runs after it")
@@ -399,9 +381,7 @@ func TestAuthoringLower_ASessionSpecBindsThroughItsImports(t *testing.T) {
 		reg := NewAuthoredRuntimeRegistry()
 		var res SessionDefineResult
 		var err error
-		withExpressionsV1(t, func() {
-			res, err = eng.DefineSessionBundle(reg, "owner-1", src, origin)
-		})
+		res, err = eng.DefineSessionBundle(reg, "owner-1", src, origin)
 		return res, reg, err
 	}
 
@@ -448,10 +428,10 @@ spec ticket isTwinOpen = row => row.state == "open"
 spec ticket isTwinClosed = row => row.state == "closed"
 `
 	persist := &fakePromoteStore{}
-	withExpressionsV1(t, func() {
+	{
 		res, err := eng.promoteBundleDurableWithStore(context.Background(), persist, "owner-1", bundle, "", false)
 		require.NoError(t, err, "%+v", res.Diagnostics)
-	})
+	}
 	require.Len(t, persist.constructs, 2)
 	for _, row := range persist.constructs {
 		require.Contains(t, row.Source, "use lowertwin.concepts.{ ticket }", "%s's stored row carries the import it binds through", row.Name)
@@ -460,14 +440,14 @@ spec ticket isTwinClosed = row => row.state == "closed"
 	// A single construct promoted from a session carries it too.
 	reg := NewAuthoredRuntimeRegistry()
 	single := &fakePromoteStore{}
-	withExpressionsV1(t, func() {
+	{
 		res, err := eng.DefineSessionBundle(reg, "owner-1", `use lowertwin.concepts.{ ticket }
 
 /// Held, in the twin's sense.
 spec ticket isTwinHeld = row => row.state == "held"
 `, "")
 		require.NoError(t, err, "%+v", res.Diagnostics)
-	})
+	}
 	c, ok := reg.Lookup("owner-1", "spec", "isTwinHeld")
 	require.True(t, ok)
 	require.NoError(t, eng.promoteConstructDurableWithStore(context.Background(), single, nil, "owner-1", c))
@@ -493,10 +473,8 @@ spec ticket isTwinHeld = row => row.state == "held"
 		store.constructs[bundleID] = append(store.constructs[bundleID], row)
 	}
 	var res RehydrateResult
-	withExpressionsV1(t, func() {
-		res, err = fresh.rehydratePromotedNow(context.Background(), store)
-		require.NoError(t, err)
-	})
+	res, err = fresh.rehydratePromotedNow(context.Background(), store)
+	require.NoError(t, err)
 	require.Empty(t, res.Failed, "nothing is quarantined: the import binds at boot as it did at promote")
 	require.Equal(t, 3, res.Rehydrated)
 	for name, want := range map[string]string{
@@ -515,11 +493,9 @@ func TestAuthoringLower_AnAmbiguousBindingWithNoImportIsRefusedAtPromote(t *test
 	persist := &fakePromoteStore{}
 	var res PromoteBundleResult
 	var err error
-	withExpressionsV1(t, func() {
-		res, err = eng.promoteBundleDurableWithStore(context.Background(), persist, "owner-1", `/// Open -- but whose ticket?
+	res, err = eng.promoteBundleDurableWithStore(context.Background(), persist, "owner-1", `/// Open -- but whose ticket?
 spec ticket isSomeoneOpen = row => row.state == "open"
 `, "lowertwin/specs.memql", false)
-	})
 	require.Error(t, err, "refused at promote, never passed to be quarantined at the next boot")
 	require.Contains(t, diagnosticFor(t, res.Diagnostics, "spec", "isSomeoneOpen").Error, twinImportMessage)
 	require.Empty(t, persist.constructs, "nothing is persisted")

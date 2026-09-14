@@ -11,28 +11,24 @@ import (
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// logic_body_v1_test.go -- the logic-body bridge (logic_body_v1.go): what a v1
-// body loads into, what load refuses, and the tree migrated by the codemod
-// loading every logic construct with the edition-2026 grammar. The run-time
-// equivalence of the two grammars over the same tree is
-// component/automations/steps' logic_v1_corpus_test.go, which runs what these
-// build on the LogicRunner.
+// logic_body_v1_test.go -- the logic-body bridge (logic_body_v1.go): what a
+// body loads into, what load refuses, and every logic construct of the tree
+// loading. What they do at run time is component/automations/steps'
+// logic_v1_corpus_test.go, which runs what these build on the LogicRunner
+// against its goldens.
 
-// loadLogicV1 builds one logic construct from source with the edition-2026
-// grammar, through the loader's own entry point.
+// loadLogicV1 builds one logic construct from source, through the loader's
+// own entry point.
 func loadLogicV1(t *testing.T, name, src string) (*Function, error) {
 	t.Helper()
-	saved := languageParser.DefaultOptions
-	languageParser.DefaultOptions = languageParser.Options{ExpressionsV1: true}
-	defer func() { languageParser.DefaultOptions = saved }()
 	return BuildFunctionConstruct(src, name, "unified:probe/logic.memql", memorynodes.DefaultRegistry())
 }
 
 // TestLogicBodyV1Routing: the three shapes of a v1 body, and the runner each
 // lands on. A statement before the return, or a return of an expression,
 // runs on the LogicRunner; a return of a construct call runs through fn.Expr
-// as the call node the legacy conversion produces, its expression arguments
-// carried as leaves for argument expansion.
+// as a call node, its expression arguments carried as leaves for argument
+// expansion.
 func TestLogicBodyV1Routing(t *testing.T) {
 	multi, err := loadLogicV1(t, "multi", `logic multi {
   args {
@@ -45,7 +41,6 @@ func TestLogicBodyV1Routing(t *testing.T) {
 }`)
 	require.NoError(t, err)
 	require.NotNil(t, multi.LogicSteps, "a body with a statement before its return runs on the LogicRunner")
-	require.True(t, multi.LogicSteps.ExpressionsV1)
 
 	pure, err := loadLogicV1(t, "pure", `logic pure {
   args {
@@ -152,17 +147,12 @@ func mustParseV1(t *testing.T, src string) languageParser.ExpressionNode {
 	return n
 }
 
-// corpusLogic loads every logic construct of the tree -- edition 2026 since
-// the flip -- with the edition-2026 grammar, through the loader's entry
-// point, keyed by path and name. It fails the test on any construct that
-// does not load.
+// corpusLogic loads every logic construct of the tree through the loader's
+// entry point, keyed by path and name. It fails the test on any construct
+// that does not load.
 func corpusLogic(t *testing.T) map[string]*Function {
 	t.Helper()
 	files := corpusFiles(t, false) // the tree as it is
-
-	saved := languageParser.DefaultOptions
-	languageParser.DefaultOptions = languageParser.Options{ExpressionsV1: true}
-	defer func() { languageParser.DefaultOptions = saved }()
 
 	out := map[string]*Function{}
 	var failures []string
@@ -183,20 +173,14 @@ func corpusLogic(t *testing.T) map[string]*Function {
 	return out
 }
 
-// TestV1CorpusLogicBodiesBuild: every logic construct of the tree loads with
-// the edition-2026 grammar and lands on its runner. A body that is one
+// TestV1CorpusLogicBodiesBuild: every logic construct of the tree loads and
+// lands on its runner. A body that is one
 // `return` of a construct call dispatches through fn.Expr, as a call node
 // naming the construct; every other body -- a statement before the return,
 // or a return of an expression (a ternary, `+`, `??`) -- runs on the
 // LogicRunner, which receives the v1 body. What each of them does at run
 // time is pinned construct by construct by component/automations/steps'
 // TestLogicCorpusRuns, against its goldens.
-//
-// Before the flip this compared the tree as it was, loaded with the legacy
-// grammar, against the codemod's migration of it. The tree is edition 2026
-// now, and the legacy grammar does not read it -- a ternary, a `+` in a call
-// argument and a `name := expr` statement are all refused by it -- so the
-// legacy half is gone with the grammar.
 func TestV1CorpusLogicBodiesBuild(t *testing.T) {
 	_, err := LoadUnifiedConcepts(nil)
 	require.NoError(t, err)
@@ -218,7 +202,6 @@ func TestV1CorpusLogicBodiesBuild(t *testing.T) {
 			calls++
 			continue
 		}
-		require.Truef(t, n.LogicSteps.ExpressionsV1, "%s: the body the runner receives is the v1 body", key)
 		onRunner++
 	}
 	// Both runners must be reached, or one half of this measures nothing.

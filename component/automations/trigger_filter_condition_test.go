@@ -93,7 +93,7 @@ func TestTriggerFilterRefusesANonBooleanField(t *testing.T) {
 
 	// The compiled-JSON path (the LogicRunner's body compile) prepares
 	// through the same preparer and refuses the same filter.
-	_, err := loader.parseJSON([]byte(`{"expressions":"v1","name":"onRow","trigger":{"event":"graph.node.created.`+conditionTicketID+`","filter":"row => row.title"},"steps":[{"id":"s","type":"function","function":{"name":"f"}}]}`), "test:v1")
+	_, err := loader.parseJSON([]byte(`{"name":"onRow","trigger":{"event":"graph.node.created.`+conditionTicketID+`","filter":"row => row.title"},"steps":[{"id":"s","type":"function","function":{"name":"f"}}]}`), "test:v1")
 	if err == nil || !strings.Contains(err.Error(), "`row.title` is a string (declared `string` on "+conditionTicketID+")") {
 		t.Fatalf("parseJSON: want the load refusal, got %v", err)
 	}

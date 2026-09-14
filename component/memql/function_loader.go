@@ -263,10 +263,6 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 
 	p := languageParser.NewParser(tokens)
 	p.SetDocComments(lexer.DocComments())
-	// Record the (fully-rewritten) source so a collection-chain logic step
-	// RHS can be sliced back to its exact span during parsing (#2317). The
-	// tokens were lexed from this same text, so the rune offsets line up.
-	p.SetSource(lexed)
 	ast, err := p.Parse()
 	if err != nil {
 		return nil, withRewriteCause(err, rewriteErr)
@@ -699,41 +695,19 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 				if err != nil {
 					return nil, fmt.Errorf("function %q: %w", expectedName, err)
 				}
-				// An edition-2026 body (memql#5367) is bridged onto the same
-				// two runners by logic_body_v1.go; everything below is the
-				// legacy conversion, unchanged.
-				if funcDef.ExpressionsV1 {
-					engineExpr, onRunner, err := loadLogicBodyV1(auto, retExpr)
-					if err != nil {
-						return nil, fmt.Errorf("function %q body: %w", expectedName, err)
-					}
-					fn.Expr = engineExpr
-					fn.ExprSource = extractExpressionFromContent(content)
-					if onRunner {
-						fn.LogicSteps = auto
-					}
-					break
-				}
-				// Logic bodies admit the Story 4 collection-method + lambda
-				// surface (ADR §2.2). Specs and query filters use the default
-				// converter, which rejects it.
-				converter := NewASTConverter(WithCollectionMethods())
-				engineExpr, err := converter.ConvertExpression(retExpr)
+				// The body is bridged onto the two runners logic has by
+				// logic_body_v1.go (memql#5367): a pure body is fn.Expr, and
+				// one with intermediate steps also runs on the LogicRunner,
+				// which walks the steps in order, binds each result for later
+				// step references, and evaluates the `_return` expression as
+				// the function's return.
+				engineExpr, onRunner, err := loadLogicBodyV1(auto, retExpr)
 				if err != nil {
-					return nil, fmt.Errorf("convert function %q body: %w", expectedName, err)
-				}
-				if boundConcept != "" {
-					engineExpr = resolveBareConcept(engineExpr, boundConcept)
+					return nil, fmt.Errorf("function %q body: %w", expectedName, err)
 				}
 				fn.Expr = engineExpr
 				fn.ExprSource = extractExpressionFromContent(content)
-				// F.5: when the body has intermediate steps, stash the
-				// full AutomationDef on the function so the engine can
-				// dispatch through the wired LogicRunner. The runner
-				// walks the intermediate steps in order, binds each
-				// result for later step references, and evaluates the
-				// `_return` expression as the function's return.
-				if nonReturnStepCount(auto.Steps) > 0 {
+				if onRunner {
 					fn.LogicSteps = auto
 				}
 			} else {

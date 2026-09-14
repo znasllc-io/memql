@@ -50,7 +50,6 @@ func parseLogicBodyForSteps(t *testing.T, src string) *langparser.AutomationDef 
 		t.Fatalf("Tokenize: %v", err)
 	}
 	p := langparser.NewParser(tokens)
-	p.SetSource(normalised)
 	ast, err := p.Parse()
 	if err != nil {
 		t.Fatalf("Parse: %v", err)

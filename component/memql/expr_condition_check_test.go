@@ -142,9 +142,7 @@ query ticket titledSession {
 `
 	var res SessionDefineResult
 	var err error
-	withExpressionsV1(t, func() {
-		res, err = eng.DefineSessionBundle(NewAuthoredRuntimeRegistry(), "owner-1", bundle, "")
-	})
+	res, err = eng.DefineSessionBundle(NewAuthoredRuntimeRegistry(), "owner-1", bundle, "")
 	require.Error(t, err, "a refine whose condition is not boolean is refused at define")
 	d := diagnosticFor(t, res.Diagnostics, "query", "titledSession")
 	require.False(t, d.OK)

@@ -38,15 +38,6 @@ type Parser struct {
 	// construct in parseDefinition.
 	forEachOrdinal int
 
-	// src is the original source the tokens were lexed from, stored as
-	// runes because Token.Pos / Token.EndPos are rune indices (the lexer
-	// scans over a []rune). It is populated by ParseFile and by the
-	// function loader so a collection-chain step RHS (#2317) can be sliced
-	// back to its EXACT source span. Nil for callers that don't set it
-	// (e.g. ad-hoc NewParser(tokens) expression parses) -- the step-RHS
-	// branch falls back to the existing error in that case.
-	src []rune
-
 	// pendingArgs holds a file-top `args { ... }` block parsed
 	// immediately before the next definition. parseFile attaches it
 	// to the resulting FunctionDef and clears the field.
@@ -107,32 +98,6 @@ func NewParser(tokens []Token) *Parser {
 		p.current = tokens[0]
 	}
 	return p
-}
-
-// SetSource records the original source string the tokens were lexed from
-// so byte-exact source spans can be sliced during parsing (#2317). Callers
-// that parse logic bodies (the function loader, ParseFile) set this; it must
-// be the EXACT string handed to NewLexer, since Token.Pos / Token.EndPos are
-// rune indices into it.
-func (p *Parser) SetSource(source string) {
-	p.src = []rune(source)
-}
-
-// sliceSource returns the verbatim source span from rune index start to the
-// end of the most-recently-consumed token, trimmed of surrounding
-// whitespace. Returns "" when no source was recorded (SetSource not called)
-// or the span is degenerate -- callers treat "" as "source unavailable".
-func (p *Parser) sliceSource(start int) string {
-	if p.src == nil || p.pos == 0 {
-		return ""
-	}
-	end := p.tokens[p.pos-1].EndPos
-	if start < 0 || end > len(p.src) || end <= start {
-		return ""
-	}
-	// The span leaves the parser as TEXT (a step's verbatim source), so the
-	// position markers of a marked lowering come out of it.
-	return strings.TrimSpace(StripPositionMarkers(string(p.src[start:end])))
 }
 
 // Parse parses the token stream and returns the root AST node.
@@ -222,7 +187,6 @@ func ParseFile(source string) (*File, error) {
 		return nil, err
 	}
 	parser := NewParser(tokens)
-	parser.SetSource(source)
 	parser.SetDocComments(lexer.DocComments())
 	return parser.parseFile()
 }
@@ -1792,46 +1756,6 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 	}, nil
 }
 
-// arithmeticStepDef wraps an arithmetic expression parsed at step-RHS position
-// (#2542 GAP 2) as a query-typed step. The compiler serializes the operator
-// form (expressionToString's ArithmeticExpr case) and the LogicRunner
-// re-parses + evaluates it against the local Evaluator
-// (tryEvaluateArithmeticLocally) -- the same node, serializer, and runtime
-// evaluator a terminal-return arithmetic uses (#2542 item 1), so the operand
-// vocabulary is at parity by construction.
-func arithmeticStepDef(name string, retryCount int, arith *ArithmeticExpr) *StepDef {
-	return &StepDef{
-		ID:         name,
-		Type:       StepTypeQuery,
-		RetryCount: retryCount,
-		Config:     &QueryStepConfig{Query: arith},
-	}
-}
-
-// rhsLooksArithmetic reports whether the current position begins an arithmetic
-// expression at step-RHS position (#2542 GAP 2): a number, a parenthesised
-// group, a unary minus, or an identifier immediately followed by a binary
-// arithmetic operator. It deliberately excludes an identifier followed by `(`
-// (a function call, handled by the bareCallRHS branch) and a step-type keyword
-// followed by `{` / `if` (an inline block, handled by the step-type switch), so
-// the speculative parse never intercepts a non-arithmetic RHS shape.
-func (p *Parser) rhsLooksArithmetic() bool {
-	switch {
-	case p.check(TokenNumber):
-		return true
-	case p.check(TokenParenOpen):
-		return true
-	case p.check(TokenOperator) && p.current.Literal == "-":
-		return true
-	case p.check(TokenIdentifier):
-		next := p.peekAhead(1)
-		return next.Type == TokenOperator &&
-			(isAdditiveOperatorLiteral(next.Literal) || isMultiplicativeOperatorLiteral(next.Literal))
-	default:
-		return false
-	}
-}
-
 // parseConceptDecl parses a concept declaration:
 //
 //	concept Name {
@@ -3040,76 +2964,6 @@ func attributeToRelationshipDecl(attr *Attribute) (*RelationshipDecl, error) {
 		As:          get("as"),
 		Attribute:   attr,
 	}, nil
-}
-
-// expressionToFunctionCall normalises an expression at step-RHS position
-// into a FunctionCallExpr. Accepts the generic FunctionCallExpr as-is
-// and also every typed expression builtin produced by the parser for
-// well-known helpers (coalesce, cond, concat, hash, first, last,
-// timestamp, lower, upper, trim). Anything else -- literals, ternaries,
-// arithmetic, raw identifiers -- returns false so the caller can emit
-// a specific error.
-//
-// The conversion uses positional argument keys ("0", "1", ...) because
-// every builtin at this layer takes positional arguments; the compiler
-// pipeline already treats both positional-indexed and named arg maps
-// uniformly.
-func expressionToFunctionCall(e ExpressionNode) (*FunctionCallExpr, bool) {
-	switch t := e.(type) {
-	case *FunctionCallExpr:
-		return t, true
-	case *CoalesceExpr:
-		args := make(map[string]any, len(t.Args))
-		for i, a := range t.Args {
-			args[strconv.Itoa(i)] = a
-		}
-		return &FunctionCallExpr{Name: "coalesce", Args: args}, true
-	case *CondExpr:
-		return &FunctionCallExpr{Name: "cond", Args: map[string]any{
-			"0": t.Condition, "1": t.Then, "2": t.Else,
-		}}, true
-	case *ConcatExpr:
-		args := make(map[string]any, len(t.Args))
-		for i, a := range t.Args {
-			args[strconv.Itoa(i)] = a
-		}
-		return &FunctionCallExpr{Name: "concat", Args: args}, true
-	case *HashExpr:
-		return &FunctionCallExpr{Name: "hash", Args: map[string]any{"0": t.Target}}, true
-	case *ShortIdExpr:
-		return &FunctionCallExpr{Name: "shortId", Args: map[string]any{"0": t.Target}}, true
-	case *CanonicalIdExpr:
-		return &FunctionCallExpr{Name: "canonicalId", Args: map[string]any{
-			"0": t.Value, "1": t.Concept,
-		}}, true
-	case *FirstExpr:
-		return &FunctionCallExpr{Name: "first", Args: map[string]any{"0": t.Target}}, true
-	case *LastExpr:
-		return &FunctionCallExpr{Name: "last", Args: map[string]any{"0": t.Target}}, true
-	case *LowerExpr:
-		return &FunctionCallExpr{Name: "lower", Args: map[string]any{"0": t.Target}}, true
-	case *UpperExpr:
-		return &FunctionCallExpr{Name: "upper", Args: map[string]any{"0": t.Target}}, true
-	case *TrimExpr:
-		return &FunctionCallExpr{Name: "trim", Args: map[string]any{"0": t.Target}}, true
-	case *TimestampExpr:
-		return &FunctionCallExpr{Name: "timestamp", Args: map[string]any{}}, true
-	// Date/duration builtins (#2541) -- admitted at step-RHS position so a
-	// logic body can bind one as a step value (`delta := daysBetween(args.a,
-	// args.b)`). The logic runner evaluates the reconstructed positional
-	// call locally (tryEvaluateBuiltinLocally), the same route coalesce
-	// takes.
-	case *AddDurationExpr:
-		return &FunctionCallExpr{Name: "addDuration", Args: map[string]any{
-			"0": t.Timestamp, "1": t.Duration,
-		}}, true
-	case *DaysBetweenExpr:
-		return &FunctionCallExpr{Name: "daysBetween", Args: map[string]any{
-			"0": t.Date1, "1": t.Date2,
-		}}, true
-	default:
-		return nil, false
-	}
 }
 
 // parseForRangeStep parses: for item := range collection [if filter] { ... }
@@ -4772,79 +4626,6 @@ func (p *Parser) parseSwitchStepConfig() (*SwitchStepConfig, error) {
 	}
 
 	return config, nil
-}
-
-// parseConditionExpression parses a condition until '{' is reached.
-// Returns the condition as a properly formatted string with:
-// - String literals wrapped in quotes
-// - No unnecessary whitespace around dots and parentheses
-func (p *Parser) parseConditionExpression() (string, error) {
-	var result strings.Builder
-	depth := 0
-	lastWasOperator := true // Start true to avoid leading space
-
-	for !p.check(TokenEOF) {
-		if p.check(TokenBraceOpen) && depth == 0 {
-			break
-		}
-
-		tok := p.current
-		literal := tok.Literal
-
-		// Conditions are canonicalised to raw strings that never reach
-		// the callable dispatch, so the 2026.08 retirement gate (#2707)
-		// must fire here too: a retired expression builtin in call
-		// position would otherwise fall through the runtime condition
-		// evaluator unrecognised and make the gate silently
-		// constant-false. Only the eight retired EXPR builtins are
-		// rejected -- timestamp() stays a live condition operand (the
-		// automations evaluator resolves it to the run clock).
-		if tok.Type == TokenIdentifier && p.peekAhead(1).Type == TokenParenOpen {
-			if hint, retired := retiredExprBuiltins[strings.ToLower(tok.Literal)]; retired {
-				return "", newParseErrorf(&tok, "%s", retiredExprBuiltinMessage(tok.Literal, hint))
-			}
-		}
-
-		// Handle token type-specific behavior
-		switch tok.Type {
-		case TokenParenOpen:
-			depth++
-		case TokenParenClose:
-			depth--
-		case TokenString:
-			// Wrap string literals in quotes
-			literal = `"` + literal + `"`
-		}
-
-		// Determine if we need a space before this token
-		needsSpace := !lastWasOperator
-		if tok.Type == TokenParenOpen || tok.Type == TokenParenClose {
-			needsSpace = false // No space around parentheses
-		}
-		if tok.Literal == "." {
-			needsSpace = false // No space before dot
-		}
-
-		// Check if this is a token that shouldn't have space after previous
-		if result.Len() > 0 {
-			lastChar := result.String()[result.Len()-1]
-			if lastChar == '(' || lastChar == '.' {
-				needsSpace = false
-			}
-		}
-
-		if needsSpace && result.Len() > 0 {
-			result.WriteString(" ")
-		}
-		result.WriteString(literal)
-
-		// Track if this token is an "operator-like" token (no space after)
-		lastWasOperator = tok.Literal == "." || tok.Type == TokenParenOpen
-
-		p.advance()
-	}
-
-	return result.String(), nil
 }
 
 // parseExpression parses a MemQL expression.

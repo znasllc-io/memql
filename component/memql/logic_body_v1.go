@@ -1,13 +1,11 @@
 package memql
 
-// logic_body_v1.go -- a logic body parsed in the edition-2026 grammar
-// (FunctionDef.ExpressionsV1), bridged onto the two runners logic has today
-// (epic memql#5363, memql#5367).
+// logic_body_v1.go -- a logic body, bridged onto the two runners logic has
+// today (epic memql#5363, memql#5367).
 //
 // # Which runner
 //
-// The loader decides, as it does for a legacy body, and by the same rule
-// wherever the two grammars can share one:
+// The loader decides:
 //
 //   - a body with statements before its `return` runs on the LogicRunner
 //     (fn.LogicSteps). The runner's v1 half already exists: it compiles the
@@ -15,10 +13,9 @@ package memql
 //     (component/automations, expressions_v1.go). The loader stores the body.
 //   - a body that is ONE `return` of a construct call -- `return query
 //     expiredActiveDelegations(asOf: args.asOf)` -- runs through fn.Expr, the
-//     engine IR a top-level call expands. The call becomes the
-//     FunctionCallExpression the legacy conversion produces, so it
-//     dispatches exactly as it did and the caller reads the construct's own
-//     result (`decide.nodes()`). Each argument is a literal value, or for an
+//     engine IR a top-level call expands. The call becomes a
+//     FunctionCallExpression, so it dispatches as a construct call does and
+//     the caller reads the construct's own result (`decide.nodes()`). Each argument is a literal value, or for an
 //     expression a PlanConstExpression -- the IR leaf that carries a v1 AST
 //     -- which argument expansion evaluates with EvalExpr over the call's
 //     arguments and the ambient envelope (evaluateLogicArgumentV1), the one
@@ -29,11 +26,6 @@ package memql
 //     actor, now, config, event). Its fn.Expr is the expression as that same
 //     leaf, which no dispatch evaluates -- the LogicSteps hoist runs first --
 //     and which is there for the walkers that read fn.Expr.
-//
-// The legacy grammar sends that last shape through fn.Expr as well, where the
-// engine folds it at the plan root; the two produce the same result, a flat
-// output carrying the value, and the equivalence corpus
-// (component/automations/steps, logic_v1_corpus_test.go) holds them to it.
 //
 // # What load refuses
 //
@@ -106,10 +98,9 @@ func convertLogicReturnV1(ret ast.ExpressionNode) (ExpressionNode, bool, error) 
 
 // logicReturnCallV1 is the construct call a return makes, or nil when the
 // return is an expression. A call names its kind (`return query x(...)`); a
-// call without one is a construct call too when it names no catalog
-// function, as the legacy conversion read it -- and refused, since the
-// runner reads the same text as an expression: the two runners would
-// disagree about it.
+// call without one that names no catalog function is refused, since fn.Expr
+// would dispatch it as a construct call while the runner reads the same text
+// as an expression: the two runners would disagree about it.
 func logicReturnCallV1(ret ast.ExpressionNode) (*ast.CallExpr, error) {
 	call, ok := ast.Unparen(ret).(*ast.CallExpr)
 	if !ok || call.Receiver != nil {
@@ -131,8 +122,7 @@ func logicReturnCallV1(ret ast.ExpressionNode) (*ast.CallExpr, error) {
 }
 
 // logicArgumentV1 is one argument of a return call: a literal is its value,
-// as the legacy conversion stored a constant argument; anything else is the
-// expression, which argument expansion evaluates.
+// and anything else is the expression, which argument expansion evaluates.
 func logicArgumentV1(n ast.ExpressionNode) any {
 	if v, ok := literalValueV1(n); ok {
 		return v

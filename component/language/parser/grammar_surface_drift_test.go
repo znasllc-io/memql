@@ -368,8 +368,8 @@ automation probe {
 }`},
 
 	// ---- the edition-2026 flip (memql#5364, memql#5368) --------------------
-	// Legal until parser.DefaultOptions turned Options.ExpressionsV1 on with
-	// the tree's migration; each is now refused naming its replacement and
+	// Legal until the tree's migration made edition 2026 the only authoring
+	// grammar; each is now refused naming its replacement and
 	// memqlmigrate --rewrite=expressions, and V1RetiredForms is the full list.
 	// The first five were this corpus's own legal entries, in the spellings
 	// the entries of the same name above replaced.

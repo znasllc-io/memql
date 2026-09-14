@@ -223,7 +223,6 @@ func TestCorpusHasNoUndeclaredArgsReferences(t *testing.T) {
 			}
 			p := languageParser.NewParser(tokens)
 			p.SetDocComments(lexer.DocComments())
-			p.SetSource(src)
 			parsed, perr := p.Parse()
 			if perr != nil {
 				continue

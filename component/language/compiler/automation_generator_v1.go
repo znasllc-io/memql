@@ -39,15 +39,6 @@ import (
 	"github.com/znasllc-io/memql/component/language/parser"
 )
 
-// expressionsV1Key / expressionsV1Value are the retired `"expressions": "v1"`
-// marker. Every automation is edition 2026 and compileAutomation writes the
-// marker unconditionally, for a runtime that still keys on it; it goes once
-// the runtime reads every automation as v1 without it (memql#5367).
-const (
-	expressionsV1Key   = "expressions"
-	expressionsV1Value = "v1"
-)
-
 // exprLeafKey is the one key of a compiled value leaf that is an expression.
 const exprLeafKey = "$expr"
 

@@ -19,12 +19,9 @@ package steps
 // for logic bodies, at run time (the load-time half is component/memql's
 // TestV1CorpusLogicBodiesBuild).
 //
-// After the flip the tree IS edition 2026 -- the flip migrates it and turns
-// on langparser.DefaultOptions.ExpressionsV1 in one change -- so the v1 arm
-// reads the tree's own files, with no codemod step (logicCorpusSources keys on
-// DefaultOptions), and the legacy arm, which has no legacy source left to
-// read, is deleted by deleting its line in TestLogicCorpusRuns. The v1 arm
-// against the goldens is then the whole test.
+// After the flip the tree IS edition 2026, so the v1 arm reads the tree's own
+// files, with no codemod step, and the legacy arm, which had no legacy source
+// left to read, is gone. The v1 arm against the goldens is the whole test.
 //
 // # Arms
 //
@@ -180,13 +177,12 @@ func probeRowPayload(now time.Time, name string, i int, args map[string]any) map
 // fixtures
 // ---------------------------------------------------------------------------
 
-// corpusSource is one .memql file of the tree: as it is, and in edition 2026.
+// corpusSource is one .memql file of the tree.
 type corpusSource struct {
 	Path string
 	// Current is the file as the tree has it.
 	Current string
-	// V1 is the file in edition 2026: Current once the tree is migrated,
-	// and the expressions codemod's rewrite of it before.
+	// V1 is the file in edition 2026: since the flip, Current.
 	V1 string
 }
 
@@ -202,34 +198,15 @@ type logicFixture struct {
 	Label string // the argument variant, for messages
 }
 
-// logicCorpusSources reads the tree the engine loads. The tree is written in
-// the grammar the engine parses it with by default -- the flip migrates the
-// tree and turns on langparser.DefaultOptions.ExpressionsV1 in one change --
-// so once that is edition 2026 the files are their own v1 source; before, the
-// v1 source is memqlmigrate --rewrite=expressions' output, from its own entry
-// points (CollectPredicates over every file, then RewriteExpressions per
-// file).
+// logicCorpusSources reads the tree the engine loads, which is written in
+// edition 2026: each file is its own v1 source.
 func logicCorpusSources(t *testing.T) []*corpusSource {
 	t.Helper()
 	files := baseloader.ReadAll(nil)
 	require.NotEmpty(t, files, "the tree reads no .memql file")
 	out := make([]*corpusSource, 0, len(files))
-	if languageParser.DefaultOptions.ExpressionsV1 {
-		for _, f := range files {
-			out = append(out, &corpusSource{Path: f.Path, Current: f.Content, V1: f.Content})
-		}
-		return out
-	}
-	byPath := make(map[string][]byte, len(files))
 	for _, f := range files {
-		byPath[f.Path] = []byte(f.Content)
-	}
-	preds, err := languageParser.CollectPredicates(byPath)
-	require.NoError(t, err)
-	for _, f := range files {
-		migrated, err := languageParser.RewriteExpressions([]byte(f.Content), preds)
-		require.NoErrorf(t, err, "the codemod refuses %s", f.Path)
-		out = append(out, &corpusSource{Path: f.Path, Current: f.Content, V1: string(migrated)})
+		out = append(out, &corpusSource{Path: f.Path, Current: f.Content, V1: f.Content})
 	}
 	return out
 }
@@ -403,15 +380,9 @@ func todayArm(t *testing.T, name string, v1 bool, sources []*corpusSource) logic
 		if e, ok := cache[key]; ok && e.src == src {
 			return e.fn, nil
 		}
-		saved := languageParser.DefaultOptions
-		languageParser.DefaultOptions = languageParser.Options{ExpressionsV1: v1}
 		fn, err := memql.BuildFunctionConstruct(src, logic, "unified:"+path, memorynodes.DefaultRegistry())
-		languageParser.DefaultOptions = saved
 		if err != nil {
 			return nil, err
-		}
-		if fn.LogicSteps != nil && fn.LogicSteps.ExpressionsV1 != v1 {
-			return nil, fmt.Errorf("%s arm: %s did not build in the arm's grammar", name, logic)
 		}
 		cache[key] = builtEntry{src: src, fn: fn}
 		return fn, nil

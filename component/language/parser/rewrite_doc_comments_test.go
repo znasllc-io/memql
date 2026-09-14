@@ -221,7 +221,6 @@ func TestParseHeuristic_BareConstructKeywordIsFile(t *testing.T) {
 				t.Fatal(err)
 			}
 			p := NewParser(tokens)
-			p.SetSource(src)
 			node, err := p.Parse()
 			if err != nil {
 				t.Fatalf("Parse: %v", err)

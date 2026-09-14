@@ -216,7 +216,6 @@ const probeDataModelArgs = `{
 // model.
 func probeDataModelAutomation(name string) string {
 	return `{
-	"expressions": "v1",
 	"name": "` + name + `",
 	"args": {"fields": [{"name": "x", "type": "string", "optional": true}]},
 	"steps": [
@@ -242,7 +241,6 @@ func probeRegistry() *v1ProbeRegistry {
 // the expression reads the event, the literal is its own text.
 func TestStepArgumentIsAnExpression(t *testing.T) {
 	a := loadV1(t, `{
-		"expressions": "v1",
 		"name": "argIsExpr",
 		"steps": [{"id": "call", "type": "function",
 			"condition": "event.payload.x != nil",
@@ -305,23 +303,23 @@ func TestPrepareExpressionsRefuses(t *testing.T) {
 	}
 	cases := map[string]struct{ js, want string }{
 		"condition parse error": {
-			`{"expressions":"v1","name":"p","steps":[{"id":"s","type":"function","condition":"a ==","function":{"name":"f"}}]}`,
+			`{"name":"p","steps":[{"id":"s","type":"function","condition":"a ==","function":{"name":"f"}}]}`,
 			`step "s" condition`,
 		},
 		"value leaf parse error": {
-			`{"expressions":"v1","name":"p","steps":[{"id":"s","type":"function","function":{"name":"f","args":{"x":{"$expr":"1 +"}}}}]}`,
+			`{"name":"p","steps":[{"id":"s","type":"function","function":{"name":"f","args":{"x":{"$expr":"1 +"}}}}]}`,
 			`step "s" args.x`,
 		},
 		"trigger filter that is not a lambda": {
-			`{"expressions":"v1","name":"p","trigger":{"event":"t","filter":"status == \"a\""},"steps":[{"id":"s","type":"function","function":{"name":"f"}}]}`,
+			`{"name":"p","trigger":{"event":"t","filter":"status == \"a\""},"steps":[{"id":"s","type":"function","function":{"name":"f"}}]}`,
 			`trigger filter`,
 		},
 		"two-parameter trigger filter": {
-			`{"expressions":"v1","name":"p","trigger":{"event":"t","filter":"(a, b) => a == b"},"steps":[{"id":"s","type":"function","function":{"name":"f"}}]}`,
+			`{"name":"p","trigger":{"event":"t","filter":"(a, b) => a == b"},"steps":[{"id":"s","type":"function","function":{"name":"f"}}]}`,
 			`one-parameter lambda`,
 		},
 		"over the static cost limit": {
-			`{"expressions":"v1","name":"p","steps":[{"id":"s","type":"function","condition":` + mustJSONString(scan) + `,"function":{"name":"f"}}]}`,
+			`{"name":"p","steps":[{"id":"s","type":"function","condition":` + mustJSONString(scan) + `,"function":{"name":"f"}}]}`,
 			`tiers.MaxStaticCost`,
 		},
 	}
@@ -378,22 +376,22 @@ func mustJSONString(s string) string {
 // automation is refused; a step named for a reserved root is refused.
 func TestV1NameRules(t *testing.T) {
 	const argsBlock = `"args": {"fields": [{"name": "x", "type": "string", "optional": true}]}`
-	ok := `{"expressions":"v1","name":"n",` + argsBlock + `,"steps":[
+	ok := `{"name":"n",` + argsBlock + `,"steps":[
 		{"id":"rows","type":"function","function":{"name":"f"}},
 		{"id":"g","type":"function","condition":"rows.where(r => r.active).count() > 0 && x != nil","function":{"name":"g","args":{"v":{"$expr":"rows.first().id"}}}}]}`
 	loadV1(t, ok)
 
 	for name, c := range map[string]struct{ js, want string }{
 		"unknown name": {
-			`{"expressions":"v1","name":"n",` + argsBlock + `,"steps":[{"id":"g","type":"function","condition":"typo == 1","function":{"name":"g"}}]}`,
+			`{"name":"n",` + argsBlock + `,"steps":[{"id":"g","type":"function","condition":"typo == 1","function":{"name":"g"}}]}`,
 			`unknown name "typo"`,
 		},
 		"unknown name in a value": {
-			`{"expressions":"v1","name":"n",` + argsBlock + `,"steps":[{"id":"g","type":"function","function":{"name":"g","args":{"v":{"$expr":"typo"}}}}]}`,
+			`{"name":"n",` + argsBlock + `,"steps":[{"id":"g","type":"function","function":{"name":"g","args":{"v":{"$expr":"typo"}}}}]}`,
 			`unknown name "typo"`,
 		},
 		"step named for a root": {
-			`{"expressions":"v1","name":"n","steps":[{"id":"now","type":"function","function":{"name":"g"}}]}`,
+			`{"name":"n","steps":[{"id":"now","type":"function","function":{"name":"g"}}]}`,
 			`reserved root`,
 		},
 	} {
@@ -448,7 +446,6 @@ func TestV1DataModel_OnError(t *testing.T) {
 	probe := probeRegistry()
 	probe.fail = map[string]string{"boom": "kaboom"}
 	a := loadV1(t, `{
-		"expressions": "v1",
 		"name": "dataModelOnError",
 		"args": {"fields": [{"name": "x", "type": "string", "optional": true}]},
 		"steps": [
@@ -524,24 +521,20 @@ func TestV1DataModel_Resume(t *testing.T) {
 	}
 }
 
-// parseV1Logic parses a logic source with the edition-2026 grammar on and
-// returns the body RunLogic receives.
+// parseV1Logic parses a logic source and returns the body RunLogic receives.
 func parseV1Logic(t *testing.T, src string) *languageParser.AutomationDef {
 	t.Helper()
 	normalised, err := languageParser.NormaliseAll(src)
 	if err != nil {
 		t.Fatalf("NormaliseAll: %v", err)
 	}
-	f, err := languageParser.ParseFileWithOptions(normalised, languageParser.Options{ExpressionsV1: true})
+	f, err := languageParser.ParseFile(normalised)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	for _, d := range f.Definitions {
 		if fn, ok := d.(*languageParser.FunctionDef); ok {
 			if body, ok := fn.Body.(*languageParser.AutomationDef); ok {
-				if !body.ExpressionsV1 {
-					t.Fatal("the body did not parse as v1")
-				}
 				return body
 			}
 		}
@@ -731,7 +724,6 @@ func graphCreatedEvent(concept, id string, payload map[string]any) events.Event 
 func TestTriggerFilterStartsWithLoadsAndFires(t *testing.T) {
 	const concept = "v1:probe:thing"
 	a := loadV1(t, `{
-		"expressions": "v1",
 		"name": "archivedOnly",
 		"trigger": {
 			"event": "graph.node.created.`+concept+`",
@@ -769,7 +761,6 @@ func TestTriggerFilterStartsWithLoadsAndFires(t *testing.T) {
 func TestTriggerFilterScope(t *testing.T) {
 	const concept = "v1:probe:thing"
 	a := loadV1(t, `{
-		"expressions": "v1",
 		"name": "scoped",
 		"args": {"fields": [{"name": "status", "type": "string", "optional": true}]},
 		"trigger": {
@@ -815,27 +806,26 @@ func TestTriggerRow(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// the marker and the legacy spellings
+// the legacy spellings
 // ---------------------------------------------------------------------------
 
-// TestUnmarkedAutomationIsPreparedAsV1: every automation is edition 2026, so
-// one compiled without the retired `"expressions": "v1"` marker is prepared
-// exactly like one carrying it -- its conditions parse at load -- and a
-// spelling only the string evaluator read is refused at load rather than run:
-// a bare word is an unknown name (the string evaluator compared it as its
-// own text), and a `$`-prefixed reference does not parse.
-func TestUnmarkedAutomationIsPreparedAsV1(t *testing.T) {
+// TestEveryAutomationIsPreparedAsV1: every automation is edition 2026 -- its
+// conditions parse at load -- and a spelling only the string evaluator read
+// is refused at load rather than run: a bare word is an unknown name (the
+// string evaluator compared it as its own text), and a `$`-prefixed reference
+// does not parse.
+func TestEveryAutomationIsPreparedAsV1(t *testing.T) {
 	a, err := NewLoader(LoaderOptions{}).parseJSON([]byte(`{
-		"name": "unmarkedGate",
+		"name": "gate",
 		"steps": [
 			{"id": "gate", "type": "function", "condition": "event.payload.status == \"active\"", "function": {"name": "f"}}
 		]
-	}`), "test:unmarked")
+	}`), "test:gate")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	if a.Steps[0].Exprs == nil || a.Steps[0].Exprs.Condition == nil {
-		t.Fatal("an unmarked automation's condition was not parsed at load")
+		t.Fatal("the automation's condition was not parsed at load")
 	}
 
 	for name, cond := range map[string]string{
@@ -869,7 +859,7 @@ func strconvQuote(s string) string {
 // a literal node for a literal, the parsed expression for an expression. A
 // legacy automation carrying one is refused.
 func TestV1StringFieldsAreValueLeaves(t *testing.T) {
-	const js = `{"expressions":"v1","name":"leaves","steps":[
+	const js = `{"name":"leaves","steps":[
 		{"id":"pub","type":"event","event":{"topic":{"$expr":"\"app.\" + args.kind"},"payload":{"a":1}}},
 		{"id":"lit","type":"event","event":{"topic":"app.static"}},
 		{"id":"hook","type":"webhook","webhook":{"url":"https://example.invalid/x",
@@ -935,14 +925,6 @@ func TestV1StringFieldsAreValueLeaves(t *testing.T) {
 		t.Errorf("header = %#v, %v", v, err)
 	}
 
-	// Without the retired marker, the same leaves load the same way.
-	unmarked, err := NewLoader(LoaderOptions{}).parseJSON([]byte(`{"name":"unmarkedLeaf","steps":[{"id":"pub","type":"event","event":{"topic":{"$expr":"args.kind"}}}]}`), "test:unmarked")
-	if err != nil {
-		t.Fatalf("an unmarked automation's value leaf was refused: %v", err)
-	}
-	if got := ast.FormatExpr(unmarked.Steps[0].Exprs.Topic); got != "args.kind" {
-		t.Errorf("unmarked topic node = %s, want args.kind", got)
-	}
 }
 
 // TestTriggerFilterMustBeALambda: a trigger filter is a one-parameter lambda

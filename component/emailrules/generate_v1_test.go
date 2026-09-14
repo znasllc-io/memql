@@ -150,9 +150,9 @@ func loadsThroughTheRealCompiler(t *testing.T, src string) {
 	if err != nil {
 		t.Fatalf("normalise: %v", err)
 	}
-	file, err := langparser.ParseFileWithOptions(normalised, langparser.Options{ExpressionsV1: true})
+	file, err := langparser.ParseFile(normalised)
 	if err != nil {
-		t.Fatalf("the construct does not parse with ExpressionsV1 on: %v\n%s", err, src)
+		t.Fatalf("the construct does not parse: %v\n%s", err, src)
 	}
 	res, err := compiler.NewDefault().CompileFile(file)
 	if err != nil {
@@ -227,9 +227,9 @@ func TestGeneratedAutomationIsV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalise: %v", err)
 	}
-	file, err := langparser.ParseFileWithOptions(normalised, langparser.Options{ExpressionsV1: true})
+	file, err := langparser.ParseFile(normalised)
 	if err != nil {
-		t.Fatalf("the generated construct does not parse with ExpressionsV1 on: %v\n%s", err, src)
+		t.Fatalf("the generated construct does not parse: %v\n%s", err, src)
 	}
 	var def *langparser.FunctionDef
 	for _, d := range file.Definitions {
@@ -238,8 +238,8 @@ func TestGeneratedAutomationIsV1(t *testing.T) {
 		}
 	}
 	body, ok := def.Body.(*langparser.AutomationDef)
-	if !ok || !body.ExpressionsV1 || body.Trigger == nil || body.Trigger.FilterLambda == nil {
-		t.Fatalf("parsed %T %+v: want a v1 automation with a lambda trigger filter", def.Body, def.Body)
+	if !ok || body.Trigger == nil || body.Trigger.FilterLambda == nil {
+		t.Fatalf("parsed %T %+v: want an automation with a lambda trigger filter", def.Body, def.Body)
 	}
 
 	res, err := compiler.NewDefault().CompileFile(file)

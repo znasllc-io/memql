@@ -758,19 +758,16 @@ type MutationStmt struct {
 	// produced before update() landed.
 	Kind    MutationKind
 	Concept string
-	// IDTemplate preserves the id=... expression (string literal, args.X, concat(...), etc.)
-	// for later runtime evaluation by mutation/function execution. Parsed with
-	// the edition-2026 grammar (parser.Options.ExpressionsV1) it -- and the
-	// three templates below -- hold the v1 ExpressionNode itself.
+	// IDTemplate preserves the id=... expression for later runtime evaluation
+	// by mutation/function execution: the v1 ExpressionNode itself, as are the
+	// three templates below.
 	IDTemplate any
 	// CreatedAtTemplate preserves createdAt=... expression for optional CreatedAt overrides.
 	// It should evaluate to an RFC3339/RFC3339Nano timestamp string at runtime.
 	CreatedAtTemplate any
 	PayloadRaw        string
-	// PayloadExpr is the payload parsed as an edition-2026 map literal
-	// (parser.Options.ExpressionsV1); PayloadRaw then holds its canonical
-	// source (ast.FormatExpr). Nil when the payload was parsed as today's
-	// raw text.
+	// PayloadExpr is the payload, a map literal; PayloadRaw holds its
+	// canonical source (ast.FormatExpr).
 	PayloadExpr ExpressionNode
 	// ParentTemplate and AliasOfTemplate preserve relationship hints for later evaluation.
 	ParentTemplate  any
@@ -1227,13 +1224,6 @@ type FunctionDef struct {
 	// ArgsSchema is the function's input schema, populated from the
 	// file-top `args { ... }` block.
 	ArgsSchema *ArgsSchema
-
-	// ExpressionsV1 records that the definition was parsed with the
-	// edition-2026 expression grammar in its in-process positions
-	// (parser.Options.ExpressionsV1, memql#5364), so its expression strings
-	// hold canonical v1 source and its expression fields hold v1 nodes.
-	// Consumers key their v1 path on it until the tree flips as one unit.
-	ExpressionsV1 bool
 }
 
 // RateLimitConfig holds rate limiting configuration.
@@ -1294,14 +1284,6 @@ type AutomationDef struct {
 	// automation runtime (audited in #2712) and are load-rejected on
 	// automations by the #2712 gate; the dead fields were removed in #2724.
 	Enabled bool // from @enabled
-
-	// ExpressionsV1 records that the automation (or logic) body was parsed
-	// with the edition-2026 expression grammar (parser.Options.ExpressionsV1,
-	// memql#5364): step conditions, forEach sources and filters, switch
-	// subjects, step arguments and the trigger filter hold canonical v1
-	// source, and their *Expr fields hold the parsed nodes. The compiler and
-	// the automation runtime key their v1 path on it.
-	ExpressionsV1 bool
 }
 
 func (*AutomationDef) node() {}
@@ -1378,9 +1360,8 @@ type StepDef struct {
 	OnError    string // error handling strategy (e.g., "continue", "fail")
 	Config     any    // Step-type-specific configuration
 
-	// ConditionExpr is Condition parsed with the edition-2026 grammar
-	// (parser.Options.ExpressionsV1); Condition then holds its canonical
-	// source. Nil when the condition is today's canonicalised string.
+	// ConditionExpr is Condition parsed; Condition holds its canonical
+	// source. Nil when the step has no condition.
 	ConditionExpr ExpressionNode
 }
 
@@ -1433,9 +1414,8 @@ type ForEachStepConfig struct {
 	Concurrency int
 	Do          []StepDef
 
-	// SourceExpr and FilterExpr are Source and Filter parsed with the
-	// edition-2026 grammar (parser.Options.ExpressionsV1); the string fields
-	// then hold their canonical source. Nil otherwise.
+	// SourceExpr and FilterExpr are Source and Filter parsed; the string
+	// fields hold their canonical source. FilterExpr is nil with no filter.
 	SourceExpr ExpressionNode
 	FilterExpr ExpressionNode
 }
@@ -1453,9 +1433,8 @@ type SwitchStepConfig struct {
 	Cases      map[string]*SwitchCase
 	Default    *SwitchCase
 
-	// ExpressionExpr is Expression parsed with the edition-2026 grammar
-	// (parser.Options.ExpressionsV1); Expression then holds its canonical
-	// source. Nil otherwise.
+	// ExpressionExpr is Expression parsed; Expression holds its canonical
+	// source.
 	ExpressionExpr ExpressionNode
 }
 

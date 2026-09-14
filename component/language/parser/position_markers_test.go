@@ -110,7 +110,6 @@ func TestStripPositionMarkers(t *testing.T) {
 var v1PositionCases = []struct {
 	name   string
 	src    string
-	opts   Options
 	needle string
 	nth    int
 	want   string // in the message
@@ -186,7 +185,7 @@ query thing second {
 		needle: "row.total-used", nth: 1, want: "write `row.total - row.used`",
 	},
 	{
-		name: "a legacy filter, with the option on",
+		name: "a legacy filter",
 		src: `query thing legacy {
   args {
     a string
@@ -195,7 +194,7 @@ query thing second {
   paginate 5
 }
 `,
-		opts: v1On, needle: "a == 1", nth: 1, want: "filter <predicate> is retired",
+		needle: "a == 1", nth: 1, want: "filter <predicate> is retired",
 	},
 	{
 		name: "@filter on an automation below a query",
@@ -271,7 +270,7 @@ trait isB = row => row.b == null
 		needle: "null", nth: 1, want: "null is retired",
 	},
 	{
-		name: "a mutation value, with the option on",
+		name: "a mutation value",
 		src: `mutate thing probe {
   args {
     id string @required
@@ -282,10 +281,10 @@ trait isB = row => row.b == null
   }
 }
 `,
-		opts: v1On, needle: "null", nth: 1, want: "null is retired",
+		needle: "null", nth: 1, want: "null is retired",
 	},
 	{
-		name: "a logic return, with the option on",
+		name: "a logic return",
 		src: `logic probe {
   args {
     a bool
@@ -295,10 +294,10 @@ trait isB = row => row.b == null
   }
 }
 `,
-		opts: v1On, needle: "cond", nth: 1, want: "cond(p, a, b) is retired",
+		needle: "cond", nth: 1, want: "cond(p, a, b) is retired",
 	},
 	{
-		name: "a step condition, with the option on",
+		name: "a step condition",
 		src: `@trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
   step first {
@@ -311,10 +310,10 @@ automation probe {
   }
 }
 `,
-		opts: v1On, needle: "null", nth: 1, want: "null is retired",
+		needle: "null", nth: 1, want: "null is retired",
 	},
 	{
-		name: "a forEach where filter, with the option on",
+		name: "a forEach where filter",
 		src: `@trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
   step loop {
@@ -324,10 +323,10 @@ automation probe {
   }
 }
 `,
-		opts: v1On, needle: "null", nth: 1, want: "null is retired",
+		needle: "null", nth: 1, want: "null is retired",
 	},
 	{
-		name: "a step argument map entry with no key, with the option on",
+		name: "a step argument map entry with no key",
 		src: `@trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
   step first {
@@ -335,7 +334,7 @@ automation probe {
   }
 }
 `,
-		opts: v1On, needle: "event.payload.identityId", nth: 1, want: "a map entry needs a key: write identityId: event.payload.identityId",
+		needle: "event.payload.identityId", nth: 1, want: "a map entry needs a key: write identityId: event.payload.identityId",
 	},
 }
 
@@ -345,7 +344,7 @@ automation probe {
 func TestV1RefusalsNameTheAuthorsPosition(t *testing.T) {
 	for _, c := range v1PositionCases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := parseV1Authored(t, c.src, c.opts)
+			_, err := parseV1Authored(t, c.src)
 			if err == nil {
 				t.Fatalf("accepted:\n%s", c.src)
 			}
@@ -374,7 +373,7 @@ func TestV1RefusalsNameTheAuthorsPosition(t *testing.T) {
 func TestV1RefusalCoversTheOffendingToken(t *testing.T) {
 	for _, c := range v1PositionCases {
 		t.Run(c.name, func(t *testing.T) {
-			_, err := parseV1Authored(t, c.src, c.opts)
+			_, err := parseV1Authored(t, c.src)
 			var pe *ParseError
 			if !errors.As(err, &pe) {
 				t.Fatalf("not a positioned refusal: %v", err)
@@ -404,7 +403,7 @@ func TestV1OpenerPositionIsTheAuthors(t *testing.T) {
   paginate 5
 }
 `
-	_, err := parseV1Authored(t, src, v1Off)
+	_, err := parseV1Authored(t, src)
 	if err == nil {
 		t.Fatal("accepted a group missing its `)`")
 	}
@@ -425,7 +424,7 @@ func TestV1SpansAreAuthored(t *testing.T) {
   paginate 10
 }
 `
-	fn := onlyFunction(t, mustParseV1Authored(t, src, v1Off))
+	fn := onlyFunction(t, mustParseV1Authored(t, src))
 	join, ok := queryBase(fn.Body.(ast.ExpressionNode)).(*LogicalExpr)
 	if !ok {
 		t.Fatalf("query base is %T", queryBase(fn.Body.(ast.ExpressionNode)))

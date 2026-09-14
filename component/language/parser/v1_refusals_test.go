@@ -17,8 +17,8 @@ import (
 // forms that can appear in more than one place. TestV1EveryRetiredFormHasASample
 // holds the table and this list together. A FILE sample is a whole authored
 // construct, parsed the way the engine parses one (the struct-form rewriter,
-// then the parser) with Options.ExpressionsV1 on: the predicate positions'
-// legacy forms are refused only there.
+// then the parser): the predicate positions' legacy forms are refused only
+// there.
 var v1RetiredSamples = []struct {
 	rule string
 	src  string
@@ -116,7 +116,7 @@ func TestV1RetiredFormsRefuse(t *testing.T) {
 			}
 			var err error
 			if c.file {
-				_, err = parseV1Authored(t, c.src, v1On)
+				_, err = parseV1Authored(t, c.src)
 			} else {
 				_, err = ParseV1Expression(c.src)
 			}

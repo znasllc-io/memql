@@ -11,8 +11,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // generatedHeader is stamped on every emitted file. The wording matters: the
@@ -31,17 +29,8 @@ func generatedHeader(version string) string {
 `
 }
 
-// EmitConceptFile renders one type's .memql file, its filter clauses in the
-// expression grammar the engine parses with (langparser.DefaultOptions): the
-// tree this generator writes must load under the same switch as every other
-// file, so the generated reads flip to edition 2026 with that one switch.
+// EmitConceptFile renders one type's .memql file.
 func EmitConceptFile(version string, p *TypePlan) string {
-	return emitConceptFile(version, p, langparser.DefaultOptions.ExpressionsV1)
-}
-
-// emitConceptFile is EmitConceptFile with the expression grammar chosen
-// explicitly; expressionsV1 selects the edition-2026 filter spellings.
-func emitConceptFile(version string, p *TypePlan, expressionsV1 bool) string {
 	var b strings.Builder
 	b.WriteString(generatedHeader(version))
 	b.WriteString("//\n")
@@ -85,7 +74,7 @@ func emitConceptFile(version string, p *TypePlan, expressionsV1 bool) string {
 	b.WriteString("}\n\n")
 
 	b.WriteString(emitShape(p))
-	b.WriteString(emitReads(p, expressionsV1))
+	b.WriteString(emitReads(p))
 	return b.String()
 }
 
@@ -186,19 +175,16 @@ func conceptField(f FieldPlan) string {
 // default projection, and the two reads reconciliation and the
 // compliance export walk.
 
-// The two reads' filter clauses, in each grammar. The edition-2026 spellings
-// are BYTE FOR BYTE what `memqlmigrate --rewrite=expressions` writes over the
-// legacy ones -- the lambda header, `row.` on every payload field, the trait
-// applied to its row, the `when(args.since)` guard as the value its `&&`
-// ignores, and the long clause broken one `&&` operand per line under its
-// first operand -- so a regenerated tree and a migrated one cannot differ
-// (TestEmitReadsV1IsTheExpressionsRewrite).
+// The two reads' filter clauses, spelled as `memqlmigrate
+// --rewrite=expressions` wrote the tree's own -- the lambda header, `row.` on
+// every payload field, the trait applied to its row, the optional `since` as
+// the guard its `&&` ignores when absent, and the long clause broken one `&&`
+// operand per line under its first operand -- so the generated domain reads
+// like the rest of the tree.
 const (
-	byGidFilterLegacy = "  filter  storeId==args.storeId && gid==args.gid && actor.isClusterOwner==true\n"
-	byGidFilterV1     = "  filter  row => row.storeId == args.storeId && row.gid == args.gid && actor.isClusterOwner == true\n"
+	byGidFilter = "  filter  row => row.storeId == args.storeId && row.gid == args.gid && actor.isClusterOwner == true\n"
 
-	forStoreFilterLegacy = "  filter    storeId==args.storeId && isNotDeleted && actor.isClusterOwner==true && when(args.since) { updatedAt>=args.since }\n"
-	forStoreFilterV1     = "  filter    row => row.storeId == args.storeId\n" +
+	forStoreFilter = "  filter    row => row.storeId == args.storeId\n" +
 		"                && isNotDeleted(row)\n" +
 		"                && actor.isClusterOwner == true\n" +
 		"                && (args.since == nil || row.updatedAt >= args.since)\n"
@@ -208,11 +194,7 @@ const (
 // GID, and a store's live rows. Reconciliation walks the second to find what
 // the origin no longer returns, and the compliance export walks it to collect
 // everything referencing a customer.
-func emitReads(p *TypePlan, expressionsV1 bool) string {
-	byGidFilter, forStoreFilter := byGidFilterLegacy, forStoreFilterLegacy
-	if expressionsV1 {
-		byGidFilter, forStoreFilter = byGidFilterV1, forStoreFilterV1
-	}
+func emitReads(p *TypePlan) string {
 	var b strings.Builder
 	b.WriteString(wrapDoc(fmt.Sprintf("One mirrored Shopify %s by store and GID.", p.GraphQLType)))
 	b.WriteString("@actor\n")

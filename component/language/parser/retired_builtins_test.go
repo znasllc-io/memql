@@ -91,7 +91,7 @@ func TestRetiredCallsRefusedAtEveryV1Position(t *testing.T) {
 		{"a #2707 builtin in a step argument", "@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  step run {\n    logic f(x: quarter(event.payload.at))\n  }\n}\n", "#2707"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := parseV1Authored(t, tc.src, DefaultOptions)
+			_, err := parseV1Authored(t, tc.src)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("want a refusal saying %q, got %v", tc.want, err)
 			}

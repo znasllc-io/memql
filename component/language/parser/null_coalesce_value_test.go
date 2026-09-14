@@ -35,7 +35,6 @@ func parseAuthored(t *testing.T, src string) error {
 	}
 	p := NewParser(toks)
 	p.SetDocComments(lx.DocComments())
-	p.SetSource(norm)
 	_, perr := p.Parse()
 	return perr
 }

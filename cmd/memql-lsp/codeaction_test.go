@@ -64,15 +64,6 @@ func writeWorkspace(t *testing.T, files map[string]string) string {
 	return root
 }
 
-// expressionsV1 turns the edition-2026 grammar on for one test: the flip is
-// langparser.DefaultOptions, and the code actions exist only past it.
-func expressionsV1(t *testing.T) {
-	t.Helper()
-	saved := langparser.DefaultOptions
-	t.Cleanup(func() { langparser.DefaultOptions = saved })
-	langparser.DefaultOptions = langparser.Options{ExpressionsV1: true}
-}
-
 func initializedServer(t *testing.T, root string) *server {
 	t.Helper()
 	commonlog.Configure(-4, nil)
@@ -258,7 +249,6 @@ func TestCodeAction_Advertised(t *testing.T) {
 // id, the action keys on it, and the edit writes the CLI's text -- one
 // changed line, touched alone -- which then parses clean.
 func TestCodeAction_QuickFixWritesTheCLIRewrite(t *testing.T) {
-	expressionsV1(t)
 	root := writeWorkspace(t, codemodWorkspace)
 	s := initializedServer(t, root)
 	const rel = "fylo/queries.memql"
@@ -304,7 +294,6 @@ func TestCodeAction_QuickFixWritesTheCLIRewrite(t *testing.T) {
 // with retired calls, null and the key-less map entry of onDelegationCreated --
 // equals the CLI's output and parses clean. Only changed lines are edited.
 func TestCodeAction_FixAllWritesTheCLIRewrite(t *testing.T) {
-	expressionsV1(t)
 	files := map[string]string{}
 	for k, v := range codemodWorkspace {
 		files[k] = v
@@ -389,7 +378,6 @@ func TestCodeAction_FixAllWritesTheCLIRewrite(t *testing.T) {
 // A clause the codemod refuses gets no action and keeps its diagnostic; the
 // region beside it is still rewritable, and fix-all rewrites only that one.
 func TestCodeAction_RefusedClauseGetsNoAction(t *testing.T) {
-	expressionsV1(t)
 	files := map[string]string{}
 	for k, v := range codemodWorkspace {
 		files[k] = v
@@ -442,7 +430,6 @@ func TestCodeAction_RefusedClauseGetsNoAction(t *testing.T) {
 // automation shares its region (no blank line, no closing brace between), so
 // the @filter's fix is withheld too.
 func TestCodeAction_RegionWithARefusalOffersNothing(t *testing.T) {
-	expressionsV1(t)
 	files := map[string]string{}
 	for k, v := range codemodWorkspace {
 		files[k] = v
@@ -475,7 +462,6 @@ func TestCodeAction_RegionWithARefusalOffersNothing(t *testing.T) {
 // rewrite still reports a syntax error and offers nothing, while the query
 // beside it is fixed.
 func TestCodeAction_NoEditThatWouldNotParse(t *testing.T) {
-	expressionsV1(t)
 	files := map[string]string{}
 	for k, v := range codemodWorkspace {
 		files[k] = v
@@ -515,26 +501,9 @@ func TestCodeAction_NoEditThatWouldNotParse(t *testing.T) {
 	}
 }
 
-// Before the flip there is nothing to offer: the in-process positions still
-// read the legacy grammar, which the rewrite would break.
-func TestCodeAction_NothingBeforeTheFlip(t *testing.T) {
-	saved := langparser.DefaultOptions
-	t.Cleanup(func() { langparser.DefaultOptions = saved })
-	langparser.DefaultOptions = langparser.Options{}
-
-	root := writeWorkspace(t, codemodWorkspace)
-	s := workspaceServer(t, root)
-	uri, _, _ := openWorkspaceDoc(t, s, root, "fylo/queries.memql")
-	diag := protocol.Diagnostic{Code: &protocol.IntegerOrString{Value: "retired_filter_without_lambda"}, Range: protocol.Range{Start: protocol.Position{Line: 7}}}
-	if actions := codeActions(t, s, uri, diag.Range, []protocol.Diagnostic{diag}); len(actions) != 0 {
-		t.Errorf("offered %d actions before the flip", len(actions))
-	}
-}
-
 // The predicate set reads the open buffers, not the saved files: a spec typed
 // into another open file, not yet saved, decides the rewrite.
 func TestCodeAction_PredicatesReadOpenBuffers(t *testing.T) {
-	expressionsV1(t)
 	files := map[string]string{}
 	for k, v := range codemodWorkspace {
 		files[k] = v
@@ -571,7 +540,6 @@ func TestCodeAction_PredicatesReadOpenBuffers(t *testing.T) {
 // holds the core domains the workspace does not carry, as the engine's flat
 // registry does when the bundle loads over the core tree.
 func TestCodeAction_CorePredicatesResolve(t *testing.T) {
-	expressionsV1(t)
 	files := map[string]string{}
 	for k, v := range codemodWorkspace {
 		files[k] = v
@@ -594,7 +562,6 @@ func TestCodeAction_CorePredicatesResolve(t *testing.T) {
 // does not declare, is rewritten as an actor predicate -- the workspace
 // resolves over the core tree, as memqlmigrate does.
 func TestCodeAction_SpecOverACoreActorShape(t *testing.T) {
-	expressionsV1(t)
 	const rel = "fylo/specs.memql"
 	root := writeWorkspace(t, map[string]string{
 		"fylo/concepts.memql": "@namespace(\"fylo\")\nconcept order {\n  status  string\n}\n",

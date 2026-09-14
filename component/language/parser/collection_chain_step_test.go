@@ -7,9 +7,8 @@ import (
 )
 
 // parseLogicStepDefs is a local helper: it normalises + parses a logic source
-// string and returns the parsed *AutomationDef step list. It mirrors the
-// production load path (NormaliseAll -> NewParser -> SetSource -> Parse) so a
-// collection-chain step RHS gets its source span captured (#2317).
+// string and returns the parsed *AutomationDef step list, as the production
+// load path does (NormaliseAll -> NewParser -> Parse).
 func parseLogicStepDefs(t *testing.T, src string) []StepDef {
 	t.Helper()
 	normalised, err := NormaliseAll(src)
@@ -22,7 +21,6 @@ func parseLogicStepDefs(t *testing.T, src string) []StepDef {
 		t.Fatalf("Tokenize: %v", err)
 	}
 	p := NewParser(tokens)
-	p.SetSource(normalised)
 	root, err := p.Parse()
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
