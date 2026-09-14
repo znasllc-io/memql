@@ -17,11 +17,26 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
  * or a row renders one way on load and another way the moment anything about
  * it changes. The envelope wins on a collision so `id` stays the ROW's id
  * rather than any `id` the payload happens to carry.
+ *
+ * EXCEPT THE STREAM'S OWN STAMPS. The server adds `topic` and `eventKind` to
+ * every event envelope -- facts about the EVENT, not the row -- and a concept
+ * may declare a field by either name (`v1:campaigns:emailRule.eventKind`
+ * does). With the envelope winning, the first live change to an email rule
+ * replaced its "updated" with the event's own "node_updated", and the rule
+ * read as firing on creation until the next reload. A row's own field wins
+ * those two.
  */
+const EVENT_STAMPS = ["topic", "eventKind"];
+
 export function flatten(row: Row): Row {
   const nested = row["payload"];
   if (nested && typeof nested === "object" && !Array.isArray(nested)) {
-    return { ...(nested as Row), ...row };
+    const payload = nested as Row;
+    const out: Row = { ...payload, ...row };
+    for (const key of EVENT_STAMPS) {
+      if (key in payload) out[key] = payload[key];
+    }
+    return out;
   }
   return row;
 }

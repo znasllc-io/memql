@@ -308,6 +308,7 @@ shape moduleReadiness moduleReadinessFull {
   nodeId
   nodeType
   state
+  reason
   core
   lanes
   reportedAt

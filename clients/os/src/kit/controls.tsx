@@ -105,6 +105,7 @@ export function Input({
   placeholder,
   disabled = false,
   onEnter,
+  code = false,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -115,6 +116,12 @@ export function Input({
   placeholder?: string;
   disabled?: boolean;
   onEnter?: () => void;
+  /** The value is code the engine reads -- an expression, not prose. It is set
+   *  in the code face, and the browser's spelling, correction and
+   *  capitalisation are off: a phone that capitalises `row` into `Row` turns a
+   *  working condition into a refused one, and the person never typed the
+   *  capital. */
+  code?: boolean;
 }) {
   return (
     <>
@@ -123,10 +130,13 @@ export function Input({
       </label>
       <input
         id={id}
-        className="os-input"
+        className={code ? "os-input os-mono" : "os-input"}
         value={value}
         disabled={disabled}
         placeholder={placeholder}
+        spellCheck={code ? false : undefined}
+        autoCapitalize={code ? "off" : undefined}
+        autoCorrect={code ? "off" : undefined}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={
           onEnter

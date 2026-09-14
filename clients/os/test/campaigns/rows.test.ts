@@ -8,6 +8,7 @@ import {
   campaignIsFinished,
   campaignName,
   conceptEntity,
+  conditionRowIs,
   deliveryFromRow,
   emailReadinessFrom,
   emailRuleFromRow,
@@ -20,6 +21,7 @@ import {
   recipientFromRow,
   ruleFingerprint,
   ruleSentence,
+  ruleSentenceParts,
   senderFingerprint,
   senderIdentityFromRow,
   sendableCount,
@@ -398,10 +400,43 @@ describe("a rule as a sentence", () => {
     );
   });
 
-  it("carries the condition as a clause rather than dropping it", () => {
-    const rule = emailRuleFromRow(ruleRow({ id: "r1", condition: 'role=="admin"' }));
-    expect(ruleSentence(rule, { template: "Welcome", audience: "" })).toContain(
-      'but only when role=="admin"',
+  it("carries the condition as the last clause, quoted as it was typed", () => {
+    // Last, because that is where the builder asks for it, and because the
+    // list line is cut to one line: what is cut is the refinement, never who
+    // gets the mail.
+    const rule = emailRuleFromRow(ruleRow({ id: "r1", condition: 'row.role == "admin"' }));
+    expect(ruleSentence(rule, { template: "Welcome", audience: "" })).toBe(
+      'When a user is created, email Welcome to the cluster owner, but only when row.role == "admin".',
+    );
+  });
+
+  it("sets what the person typed in the code face, and nothing else", () => {
+    const rule = emailRuleFromRow(
+      ruleRow({
+        id: "r1",
+        eventKind: "updated",
+        recipientMode: "row_address",
+        recipientField: "primaryContactEmail",
+        condition: '  row.status in ["active", "trial"] && row.plan != "free"  ',
+      }),
+    );
+    const parts = ruleSentenceParts(rule, { template: "Welcome", audience: "" });
+    expect(parts.filter((part) => part.code).map((part) => part.text)).toEqual([
+      "primaryContactEmail",
+      'row.status in ["active", "trial"] && row.plan != "free"',
+    ]);
+    expect(parts.map((part) => part.text).join("")).toBe(
+      'When a user changes, email Welcome to the address in primaryContactEmail, but only when row.status in ["active", "trial"] && row.plan != "free".',
+    );
+  });
+
+  it("never rewords a condition, including one stored in the older payload. form", () => {
+    // The engine converts payload.role to row.role when the rule is turned on.
+    // The row keeps what the person wrote, and so does the sentence: a reworded
+    // condition is a second copy of the grammar, and it would drift.
+    const rule = emailRuleFromRow(ruleRow({ id: "r1", condition: 'payload.role == "admin"' }));
+    expect(ruleSentence(rule, { template: "Welcome", audience: "" })).toBe(
+      'When a user is created, email Welcome to the cluster owner, but only when payload.role == "admin".',
     );
   });
 
@@ -428,11 +463,46 @@ describe("a rule as a sentence", () => {
     expect(sentence).toContain("a template");
   });
 
+  it("keeps a rule's own eventKind when a live change folds it", () => {
+    // The stream stamps `eventKind` (the EVENT's kind) on every envelope, and
+    // this concept has a field by the same name. Measured in a browser against
+    // a real engine: the first live change after turning a rule on turned
+    // "When a user changes" into "When a user is created" until a reload.
+    const folded = emailRuleFromRow({
+      id: "v1:campaigns:emailRule:r1",
+      topic: "graph.node.updated.v1:campaigns:emailRule",
+      eventKind: "node_updated",
+      payload: { ...ruleRow({ id: "v1:campaigns:emailRule:r1", eventKind: "updated" }), status: "active" },
+    });
+    expect(folded.eventKind).toBe("updated");
+    expect(folded.status).toBe("active");
+    expect(ruleSentence(folded, { template: "Welcome", audience: "" })).toBe(
+      "When a user changes, email Welcome to the cluster owner.",
+    );
+  });
+
   it("names a concept by its entity", () => {
     expect(conceptEntity("v1:identity:user")).toBe("user");
     expect(conceptEntity("v1:campaigns:senderIdentity")).toBe("senderIdentity");
     // A malformed id keeps itself rather than becoming an empty noun.
     expect(conceptEntity("nonsense")).toBe("nonsense");
+  });
+});
+
+describe("what row is in a condition", () => {
+  it("is the thing the builder's sentence chose, created or changed", () => {
+    expect(conditionRowIs({ triggerConcept: "v1:identity:user", eventKind: "updated" })).toBe(
+      "the user that changed",
+    );
+    expect(conditionRowIs({ triggerConcept: "v1:accounts:account", eventKind: "created" })).toBe(
+      "the account that was created",
+    );
+  });
+
+  it("is the record before a concept is chosen", () => {
+    expect(conditionRowIs({ triggerConcept: "", eventKind: "created" })).toBe(
+      "the record that was created",
+    );
   });
 });
 

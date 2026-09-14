@@ -200,6 +200,20 @@ When `SetWiring()` is configured, inbound peer events are published via `bus.Eve
 channel instead of calling `localBus.Publish()` directly, with fallback to direct publish
 if the channel is full.
 
+**A broadcast rule reaches the nodes that dial the writer or its relays, not
+every node** (memql#5259, memql#5338). Forwarding follows `sendTarget`, which
+is set only by the OUTBOUND dial path (`AttachConnection`); inbound peers and
+children get no push, nothing constructs a server->client `EventForward`, and
+a relay goes at most three hops. In the cloud the edge and a product bff are
+dialed by nobody and receive no mesh event, identity is excluded from every
+broadcast by `meshEventParticipants`, and a peer whose connection is absent or
+reconnecting at that moment is skipped with nothing queued. A consumer that
+must eventually be right on every node needs its own floor -- the readiness
+recompute loop's retry and safety net, held by
+`TestEveryReadinessParticipantConvergesWhateverTheMeshDelivers`
+(`readiness_mesh_hop_test.go`), which also writes down which replicas the
+cloud topology leaves without the event.
+
 Routing rules use `*` to match any partition segment in event topics. For example,
 `graph.node.created.*.v1:cluster:*` matches cluster node creation in any partition.
 

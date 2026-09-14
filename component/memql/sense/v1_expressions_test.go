@@ -842,6 +842,55 @@ func TestRetiredHoverIsTheParsersTable(t *testing.T) {
 	}
 }
 
+// A spec or trait applied in an expression gets the card a catalog function
+// gets: the application as its signature, what it reads, where it runs at the
+// cursor's position, and the spellings it replaced.
+func TestHoverOnAPredicate(t *testing.T) {
+	s := New(v1Registry())
+	for _, c := range []struct {
+		name, src, needle string
+		want              []string
+	}{
+		{"a trait in a query filter", v1Query + "  filter row => row.status == args.owner && isActiveRecord(row)", "isActiveRecord", []string{
+			"```memql\nisActiveRecord(row) bool\n```",
+			"A trait: a predicate over any row, applied to the row it reads.",
+			"Pushed down to SQL.",
+			"Replaces `isActiveRecord` written bare and `trait isActiveRecord`.",
+		}},
+		{"a row spec in a query filter", v1Query + "  filter row => isOverdue(row)", "isOverdue", []string{
+			"```memql\nisOverdue(row) bool\n```",
+			"A spec over todo, applied to the row it reads.",
+			"Pushed down to SQL.",
+			"Replaces `isOverdue` written bare and `spec isOverdue`.",
+		}},
+		{"a context spec in a query filter", v1Query + "  filter row => requiresOwner(actor) && row.done == false", "requiresOwner", []string{
+			"```memql\nrequiresOwner(actor) bool\n```",
+			"A spec over actorEnvelope, applied to the actor.",
+			"Runs in process before the query, against the caller.",
+			"Replaces `requiresOwner` written bare and `spec requiresOwner`.",
+		}},
+		{"a spec in a logic body", "logic compute {\n  body {\n    return isOverdue(args.todo)", "isOverdue", []string{
+			"```memql\nisOverdue(row) bool\n```",
+			"Runs in process.",
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			card := hoverOn(t, s, c.src, c.needle)
+			hoverStyle(t, card)
+			for _, w := range c.want {
+				if !strings.Contains(card, w) {
+					t.Errorf("the card should contain %q, got:\n%s", w, card)
+				}
+			}
+		})
+	}
+
+	// A predicate named without being applied is not an application.
+	if card := hoverOn(t, s, v1Query+"  filter isActiveRecord", "isActiveRecord"); strings.Contains(card, "```memql\nisActiveRecord(row) bool") {
+		t.Errorf("a bare name is not an application, got:\n%s", card)
+	}
+}
+
 // The predicate positions' legacy spellings are hovered on every token an
 // author meets them by, and the card shows the author's own construct as the
 // rewrite writes it -- or the table's form, when the rewrite refuses it.

@@ -175,7 +175,12 @@ func TestGraphEdgeLabelsMatchPublicDocs(t *testing.T) {
 func TestTraversalFunctionsMatchPublicDocs(t *testing.T) {
 	documented := firstColumnCodeSpans(t, docs.MemqlGuide(), traversalFuncDocsHeading)
 	for i, entry := range documented {
-		documented[i] = strings.TrimSuffix(entry, "(expr)")
+		// The table spells each function with its argument placeholder
+		// (`childOf(match)`); the name is what the grammar declares.
+		if open := strings.Index(entry, "("); open >= 0 {
+			entry = entry[:open]
+		}
+		documented[i] = entry
 	}
 
 	if diff := diffStringSets(declaredRelationshipFunctions(t), documented); diff != "" {
