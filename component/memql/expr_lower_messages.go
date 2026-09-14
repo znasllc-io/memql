@@ -426,3 +426,46 @@ func literalListKinds(values []any) []string {
 	sort.Strings(out)
 	return out
 }
+
+// nodeSpan is where a refused node sits in the source it was parsed from: its
+// own Span when the parser gave it one, and otherwise the span its children
+// cover. A ternary, a literal, `nil` and a lambda are the nodes the parser
+// builds without one; each is located by what it contains -- a ternary from its
+// condition's start to its else-branch's end, a lambda by its body -- so a
+// refusal of one still points into the author's line. The zero Span (nothing
+// under the node was parsed with a position) means "no position": a caller
+// anchors to the construct instead, never to line 1.
+func nodeSpan(n ast.ExpressionNode) ast.Span {
+	switch x := n.(type) {
+	case nil:
+		return ast.Span{}
+	case *ast.IdentExpr:
+		return x.Span
+	case *ast.MemberExpr:
+		return x.Span
+	case *ast.CallExpr:
+		return x.Span
+	case *ast.UnaryExpr:
+		return x.Span
+	case *ast.BinaryExpr:
+		return x.Span
+	case *ast.ListExpr:
+		return x.Span
+	case *ast.MapExpr:
+		return x.Span
+	case *ast.ParenExpr:
+		return x.Span
+	case *ast.LambdaExpr:
+		return nodeSpan(x.Body)
+	case *ast.TernaryExpr:
+		start, end := nodeSpan(x.Condition), nodeSpan(x.Else)
+		if start.IsZero() {
+			return end
+		}
+		if !end.IsZero() {
+			start.EndLine, start.EndCol = end.EndLine, end.EndCol
+		}
+		return start
+	}
+	return ast.Span{}
+}

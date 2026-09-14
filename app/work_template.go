@@ -112,7 +112,10 @@ func loadWorkTemplate(ctx context.Context, engine *memql.MemQLEngine, loader *au
 		return nil, fmt.Errorf("work template source changed since compilation")
 	}
 	reg := memql.NewAuthoredRuntimeRegistry()
-	defined, err := memql.AuthorSessionBundle(reg, journal.OwnerUserId, strings.Join(sources, "\n\n"), "")
+	// Defined through the engine, whose define lowers the template's queries,
+	// specs and traits in its registries exactly as a session define does
+	// (memql#5366), so a member that does not lower refuses the template here.
+	defined, err := engine.DefineSessionBundle(reg, journal.OwnerUserId, strings.Join(sources, "\n\n"), "")
 	if err != nil || !defined.OK {
 		return nil, fmt.Errorf("work template failed execution-node validation: %v (%+v)", err, defined.Diagnostics)
 	}

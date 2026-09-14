@@ -168,6 +168,14 @@ func (e *MemQLEngine) refinePredicates() func(string) (string, ast.ExpressionNod
 //   - every name is the parameter, a lambda parameter, args (a declared
 //     argument), actor, now or config.
 func (e *MemQLEngine) validateRefine(fn *Function, refine *RefineExpression) error {
+	return validateRefineIn(fn, refine, e.predicateLookup())
+}
+
+// validateRefineIn is validateRefine over an explicit spec lookup -- the
+// engine's registry at Init, the scope an authored construct is lowered in at
+// define time. A nil lookup (an engine-free validation, which sees no spec
+// registry) defers the predicate checks to the lowering that has one.
+func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string) (*Spec, bool)) error {
 	lam := refine.Lambda
 	if lam == nil || len(lam.Params) != 1 {
 		return fmt.Errorf("refine takes a lambda of one parameter, the row")
@@ -176,7 +184,8 @@ func (e *MemQLEngine) validateRefine(fn *Function, refine *RefineExpression) err
 	if cost := EstimateCost(lam.Body); cost > tiers.MaxStaticCost {
 		return &LowerError{Node: ast.FormatExpr(lam), Position: tiers.PositionQueryRefine,
 			Reason: fmt.Sprintf("its static cost estimate is %d node evaluations, above tiers.MaxStaticCost (%d)", cost, tiers.MaxStaticCost),
-			Fix:    "Scan one list per element rather than nesting scans, or move the work into a logic body over a smaller input"}
+			Fix:    "Scan one list per element rather than nesting scans, or move the work into a logic body over a smaller input",
+			Span:   nodeSpan(lam)}
 	}
 	declared := map[string]bool{}
 	if fn != nil && fn.ArgsSchema != nil {
@@ -190,7 +199,7 @@ func (e *MemQLEngine) validateRefine(fn *Function, refine *RefineExpression) err
 	var walk func(n ast.ExpressionNode, local map[string]bool)
 	refuse := func(n ast.ExpressionNode, reason, fix string) {
 		if walkErr == nil {
-			walkErr = &LowerError{Node: ast.FormatExpr(n), Position: tiers.PositionQueryRefine, Reason: reason, Fix: fix}
+			walkErr = &LowerError{Node: ast.FormatExpr(n), Position: tiers.PositionQueryRefine, Reason: reason, Fix: fix, Span: nodeSpan(n)}
 		}
 	}
 	walk = func(n ast.ExpressionNode, local map[string]bool) {
@@ -219,7 +228,7 @@ func (e *MemQLEngine) validateRefine(fn *Function, refine *RefineExpression) err
 		case *ast.CallExpr:
 			if x.Receiver == nil && x.Kind == "" {
 				if _, ok := functions.Lookup(x.Name); !ok {
-					e.checkRefinePredicate(x, param, local, refuse)
+					checkRefinePredicate(x, param, local, refuse, lookup)
 				} else if isTraversalName(x.Name) {
 					refuse(x, "a traversal selects rows in SQL and has no in-process value", "Move it into the query's filter")
 					return
@@ -271,7 +280,7 @@ func (e *MemQLEngine) validateRefine(fn *Function, refine *RefineExpression) err
 // checkRefinePredicate checks a predicate application inside a refine: it is
 // applied to the row, and it names an edition-2026 row spec or trait -- the
 // only kind EvalExpr can evaluate.
-func (e *MemQLEngine) checkRefinePredicate(call *ast.CallExpr, param string, local map[string]bool, refuse func(ast.ExpressionNode, string, string)) {
+func checkRefinePredicate(call *ast.CallExpr, param string, local map[string]bool, refuse func(ast.ExpressionNode, string, string), lookup func(string) (*Spec, bool)) {
 	if len(call.Args) != 1 {
 		refuse(call, fmt.Sprintf("a predicate is applied to exactly one argument, and %s() has %d", call.Name, len(call.Args)), "Apply it to the row: `"+call.Name+"("+param+")`")
 		return
@@ -280,10 +289,11 @@ func (e *MemQLEngine) checkRefinePredicate(call *ast.CallExpr, param string, loc
 		refuse(call, "a predicate in a refine is applied to the row", "Apply it to the row: `"+call.Name+"("+param+")`")
 		return
 	}
-	var spec *Spec
-	if e != nil && e.specs != nil {
-		spec, _ = e.specs.Get(call.Name)
+	if lookup == nil {
+		// No registry to ask: the engine-aware lowering decides.
+		return
 	}
+	spec, _ := lookup(call.Name)
 	switch {
 	case spec == nil:
 		refuse(call, fmt.Sprintf("`%s` is not a spec, trait or catalog function known here", call.Name), "Check the name and the file-top `use` import")
