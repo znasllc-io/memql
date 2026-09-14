@@ -100,21 +100,28 @@ func TestAttributeMatrixListsWhatTheParserAccepts(t *testing.T) {
 	}
 	// record notes that the page lists name as accepted by the construct
 	// titled title, and fails when none of that construct's receivers accepts
-	// it -- naming the code the check refuses it with.
+	// it -- naming the code the check refuses it with. Every receiver of the
+	// construct that accepts the name is recorded, not only the first: a name
+	// the concept accepted both before the braces and inside them would
+	// otherwise read as missing from one of the two.
 	record := func(l *listing, title, name string) {
 		receivers := receiversNamed[title]
 		if len(receivers) == 0 {
 			t.Errorf("%s: %q names no construct or kind of field the registry knows", l.where, title)
 			return
 		}
+		accepted := false
 		for _, r := range receivers {
 			if _, ok := annotations.Lookup(r, name); ok {
 				if l.lists[r] == nil {
 					l.lists[r] = map[string]bool{}
 				}
 				l.lists[r][name] = true
-				return
+				accepted = true
 			}
+		}
+		if accepted {
+			return
 		}
 		code := "no refusal"
 		if ref := annotations.Check(receivers[0], annotations.Use{Name: name}); ref != nil {
@@ -128,6 +135,15 @@ func TestAttributeMatrixListsWhatTheParserAccepts(t *testing.T) {
 	glance := newListing("At a glance")
 	entries := newListing("Annotations")
 	for _, tb := range tables {
+		// Every row has its header's number of cells, counted on the pipes GFM
+		// splits on: a "|" in a doc or an example that escaped the escaping
+		// shows up here as a row that is too wide.
+		for _, row := range tb.rows {
+			if len(row) != len(tb.header) {
+				t.Errorf("%s, %s: a row has %d cells under a %d-cell header: %q",
+					tb.section, tb.subsection, len(row), len(tb.header), row)
+			}
+		}
 		switch tb.section {
 		case "By construct":
 			for _, row := range tb.rows {

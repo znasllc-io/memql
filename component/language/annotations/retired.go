@@ -27,14 +27,22 @@ var retiredEverywhere = map[string]string{
 	"role":       "buried (#2631 ruling / #2709); it was documented but never enforced (nothing ever checked the value at runtime; the load gate rejects it) -- access control lives at the actor layer (RBAC + the @public per-row-authz classification)",
 	"permission": "buried (#2631 ruling close-out / #2713); the @role twin -- documented but never enforced (its one help-payload reader was dead; the load gate rejects it) -- access control lives at the actor layer (RBAC + the @public per-row-authz classification)",
 	"visibility": "removed in the genesis simplification; it chose which node types load a construct, and every binary now loads everything while build tags decide which integrations are active -- delete the annotation",
+	// The function annotations #989 took out of the allow-lists. Nothing has
+	// read any of them since; naming the history here is what turns a bare
+	// "unknown annotation" into a refusal that says what happened to it.
+	"timeout":    "removed from the allow-lists in memql#989; nothing reads it -- delete the annotation",
+	"retry":      "removed from the allow-lists in memql#989; nothing reads it -- delete the annotation",
+	"audit":      "removed from the allow-lists in memql#989; nothing reads it -- delete the annotation",
+	"idempotent": "removed from the mutation allow-list in memql#989; nothing reads it -- delete the annotation",
+	"async":      "refused on automations since memql#2712: an automation already runs asynchronously off its event or schedule trigger, and nothing reads the annotation -- delete it",
 }
 
 // retiredOn maps an annotation retired on one receiver (and usually live on
 // another) to its migration hint.
 var retiredOn = map[retiredKey]string{
-	{Action, "kind"}:           "composites are automations now and a primitive needs no marker (construct-invocation ADR Decision 3); remove it",
-	{Action, "sideEffect"}:     "the authoritative side-effect class lives on the CAPABILITY declaration now (ADR Decision 3, Story 5); remove it from the action",
-	{Action, "reliability"}:    "reliability is machine-managed runtime state, not source (ADR Decision 3); remove it",
+	{Action, "kind"}:           "an action is always one primitive capability call now, and a composite of several is an automation, so there is nothing to mark; remove it",
+	{Action, "sideEffect"}:     "the authoritative side-effect class lives on the capability declaration the action calls, where an action cannot overstate or understate it; remove it from the action",
+	{Action, "reliability"}:    "reliability is runtime state the engine keeps, not something the source declares; remove it",
 	{Tool, "clientExecution"}:  "it dispatched the tool to the connected browser over the client-tool relay, which was removed with the cognition node (epic memql#4988). Every tool now needs a server-side @handler",
 	{Spec, "shape"}:            "a spec binds its shape or concept in the signature (epic #2281): `spec <boundName> <name> { return <bool> }`, with boundName resolved through the file-top `use` import",
 	{Spec, "row"}:              "it is a shape-only marker since epic #2281 -- to predicate on row metadata, bind a @row shape in the signature (`spec <shape> <name>`) and read its projected key by bare name",

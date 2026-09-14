@@ -457,6 +457,14 @@ One entry per annotation, in alphabetical order: where it is accepted and how it
 
 On an update mutation: treat the named array-typed payload fields as SETS and UNION the written elements into the stored array -- deduped, existing order kept, new members appended in the order given. The membership half @appendFields is not: append is not deduped and has no counterpart that removes, so a toggle built on it duplicates on a double click. Pairs with @removeFromSet. Format: @addToSet("disabledDeployables"). See memql#4951.
 
+Both follow the same rules:
+
+- Only an update mutation may carry it; on an insert it is refused at load, because an insert has no stored set to change.
+- A field absent from the write is untouched: the stored array survives the read-merge.
+- Members compare by their rendered form, so `1` and `"1"` are one member. A stored number comes back from JSON as a float and its string spelling as a string, and keeping both would be a set that quietly grew.
+- A stored value that is not an array reads as empty, and a scalar written where an array is expected is one member, as with `@appendFields`.
+- A field named by two of `@appendFields`, `@addToSet` and `@removeFromSet` is refused at load: each rewrites the same key, so which one won would depend on the executor's order rather than on anything the mutation says.
+
 ### @alias
 
 | On | Written as | Example |
@@ -527,7 +535,7 @@ Mark a vendor-level base provider (auth + type only).
 |---|---|---|
 | `ttl` | string | Cache TTL in whole seconds. Positional preferred (#2618): @cache(300); keyword ttl="300" keeps parsing. |
 
-Override the result-cache TTL for the query. Preferred form (#2618): @cache(300) -- the single ttl arg makes position unambiguous. The keyword form @cache(ttl="300") keeps parsing. Pure reads cache BY DEFAULT (60s backstop) without this annotation (5.6); @cache sets a different TTL, longer or shorter. @cache(ttl="0") is the explicit "never cache" opt-out (or use @nocache). The engine keys the cache on the plan signature (query/sort/limit/depth/shape + the keyset cursor) and evicts on any write to the read concept via the cache.invalidate.* broadcast channel (5.4/5.6 invalidation) -- cross-node eviction needs no per-concept routing rule.
+Override the result-cache TTL for the query. Preferred form (#2618): @cache(300) -- the single ttl arg makes position unambiguous. The keyword form @cache(ttl="300") keeps parsing. Pure reads cache BY DEFAULT (a 60s backstop) without this annotation; @cache sets a different TTL, longer or shorter. @cache(ttl="0") is the explicit "never cache" opt-out (or use @nocache). The engine keys the cache on the plan signature (query/sort/limit/depth/shape + the keyset cursor) and evicts on any write to the read concept via the cache.invalidate.* broadcast channel -- cross-node eviction needs no per-concept routing rule.
 
 ### @composable
 
@@ -563,7 +571,20 @@ On an insert (create-or-upsert) mutation: write the named payload fields ONLY wh
 | [prompt field](#prompt-field) | one string or one number | `@default("en")` |
 
 - On a provider: Mark this provider as the default for its modality.
-- On a concept field: The default the concept schema declares for the field. Declared metadata: it is emitted into the schema and NEVER applied on insert -- `??` in the mutation is what fills a value (memql#2960).
+- On a concept field: The default the concept schema declares for the field. Declared metadata: it is emitted into the schema and NEVER applied on insert -- `??` in the mutation is what fills a value (memql#2960). The emitted `default` is still read by the SDK, editor hover and form generators, so it has to be right.
+
+  The literal is lowered against the field's declared type, and one that could never be a value of that type is refused at load (memql#3248):
+
+  - `bool`: exactly `true` or `false`.
+  - `int`: a base-10 integer.
+  - `float`: a number; an integer literal is a valid float.
+  - `datetime`: an RFC3339 timestamp, or `""` for unset.
+  - `string` and `enum`: the literal verbatim, never coerced, so `@default("0")` on a string field is the string `"0"`.
+  - `object`, `array`, `map` and `any`: an untyped lowering, because the declaration does not narrow the literal to one reading.
+
+  Bare and quoted spellings are equivalent: `@default(false)` and `@default("false")` both declare the bool `false`, and `@default(7)` declares the number 7.
+
+  A default nothing stamps is caught at authoring time (memql#3038): `TestDefaultIsCoalescedOrStamped` fails when an optional, top-level concept field carries `@default` and no mutation bound to the concept stamps it. Only a stamped value counts -- `f: args.f ?? "v"`, a literal, or a computed expression; `accept { f }`, a bare `args.f` shorthand and a plain `f: args.f` all bind the field to a caller argument, so omitting the argument still writes nothing. Two things are outside the gate: a domain mounted at runtime through `MEMQL_DSL_PATH`, which it never scans, and a `@default` on a leaf inside an object block, which no write form can stamp because a mutation writes the parent object whole.
 - On a tool field: The default the tool's input schema advertises to the model.
 - On a prompt field: The default the prompt's input schema declares for the field.
 
@@ -620,7 +641,15 @@ Mark a tool as destructive (mutates/deletes); the tool loop gates it behind a co
 |---|---|---|
 | [query](#query), [mutate](#mutate), [logic](#logic), [automation](#automation), [spec and trait](#spec-and-trait), [seed](#seed), [prompt](#prompt), [provider](#provider), [rule](#rule), [tool](#tool), [builtin](#builtin), [action](#action), [capability](#capability) | no arguments | `@disabled` |
 
-Disable this definition.
+Takes the construct out of service without deleting it. Every construct is enabled by default and `@enabled` is an accepted no-op, so `@disabled` is the only off switch. A disabled construct stays in the tree, is still maintained, and must stay valid, because re-enabling it is only removing the annotation. What it does depends on the construct:
+
+- A disabled query, mutation, logic or builtin is hidden from `functions()` and from the MCP surface, its `@mcp` tool included, and a direct call is refused with `function "name" is disabled`; `help()` still describes it, reporting `"enabled": false`. A disabled builtin also skips the check that its Go executor exists, so a builtin whose executor is gone can be disabled without refusing boot.
+- A disabled automation is neither scheduled nor subscribed to its trigger, is dropped from the MCP surface, and is refused on every manual run path: the MCP dry run and live run, the run relay and the HTTP trigger.
+- A disabled tool, seed, prompt, provider, action, spec or trait is skipped at load. A tool is not registered, and its name stays reserved so no ungoverned tool is generated from the function behind it. A seed is never materialised and a prompt never registers. A provider is not registered and no auth is resolved for it, and on a `@base` provider it skips every provider that `@extends` it. An action is parsed but not registered. A spec or trait is still validated but never binds, and its name stays reserved, so a call to it says it is disabled rather than not found.
+- A disabled rule is loaded but never evaluated.
+- A disabled capability is still reconciled against its Go capability and checked for duplicates -- `@disabled` is not a validation bypass -- but it is left out of the catalog: `use capabilities....` imports stop resolving it, and an action that names it is refused at load with `capability "name" is @disabled`. To park DSL ahead of the Go it needs, put the file under a `_disabled/` directory instead, which the loaders skip.
+
+An authored spec or trait keeps the same state through the authoring lifecycle. Staging or promoting a disabled one is refused (`construct is @disabled; enable it (remove @disabled from the source) before promoting`). A promoted row that is disabled is skipped when the engine re-hydrates authored constructs and counted as `skippedDisabled` rather than quarantined; it reserves the name only when nothing live or already reserved holds it, and promoting the corrected source or demoting the name releases it. A staged one is skipped without reserving anything. A bundle that authors a disabled capability is refused (`capability "name" is @disabled`), because a disabled capability compiles to nothing.
 
 ### @displayCard
 
@@ -753,7 +782,7 @@ On a concept field: server-only (memql#2035) -- never projected by a shape's def
 |---|---|---|
 | [query](#query) | no arguments | `@latestMode` |
 
-On a query: marks the query as time-dependent because it reads `asOf latest` (the live tip of the append-only stream), so its result is clock-dependent / not reproducible. The engine AUTO-DERIVES this from a `asOf latest` clause in the body, so the annotation is an explicit, reader-facing restatement of that contract -- not a switch. A query with `asOf <explicit timestamp>` is deterministic and is NOT time-dependent. See core-builtins-and-collections-adr.md §2.3.
+On a query: marks the query as time-dependent because it reads `asOf latest` (the live tip of the append-only stream), so its result is clock-dependent / not reproducible. The engine AUTO-DERIVES this from an `asOf latest` clause in the body, so the annotation is an explicit, reader-facing restatement of that contract -- not a switch. A query with `asOf <explicit timestamp>` is deterministic and is NOT time-dependent.
 
 ### @level
 
@@ -832,7 +861,7 @@ The fewest characters a string value may carry.
 |---|---|---|
 | [concept](#concept) | one or more strings | `@mirroredTo("shopify")` |
 
-Declares WHO ELSE HOLDS A COPY of this MemQL-origin concept: @mirroredTo("shopify"), or several names in one annotation. Every write to the concept appends one v1:platform:outboxEntry per target, in the write's own transaction, which a per-connector drain worker delivers with an idempotency key, backoff, dead-lettering and audit. Only valid on a MemQL-origin concept -- @mirroredTo beside an external @origin is REFUSED at load, because re-mirroring somebody else's data onward is the origin's job and a mirror that also publishes is a second origin wearing the first one's badge. Each named connector must be registered or the engine refuses boot: a mirror target nobody drains is a silent drop. See docs/public/concepts/data-origins.md.
+Declares WHO ELSE HOLDS A COPY of this MemQL-origin concept: @mirroredTo("shopify"), or several names in one annotation. Every write to the concept appends one v1:platform:outboxEntry per target, in the write's own transaction, which a per-connector drain worker delivers with an idempotency key, backoff, dead-lettering and audit. Only valid on a MemQL-origin concept -- @mirroredTo beside an external @origin is REFUSED at load, because re-mirroring somebody else's data onward is the origin's job and a mirror that also publishes is a second origin wearing the first one's badge. Each named connector must be registered or the engine refuses boot: a mirror target nobody drains is a silent drop. See [data-origins.md](../concepts/data-origins.md).
 
 ### @modality
 
@@ -876,6 +905,8 @@ Opt this query OUT of caching entirely (force "never cache"). Clearer alias for 
 
 On any mutation: declare the named payload fields ONE-WAY -- a write may set them or change one non-empty value to another, but may never take a stored non-empty value back to empty. On the read-merge path a named field arriving empty is dropped from the delta when the stored row holds a non-empty value. Closes the gap read-merge cannot (it only inherits fields ABSENT from a delta, so a body writing `f: args.f ?? ""` blanks the stored value with an explicit empty string). Distinct from @createOnly, which forbids any post-create write; @noUnset forbids only set -> unset, so a legitimately-later stamp still lands. Format: @noUnset("bootstrappedAt"). See memql#3415.
 
+Empty means nil, a blank or whitespace-only string, or an empty array or object. A numeric or boolean zero is a value, not an unset: `0` and `false` are written like any other value, and treating them as empty would make `@noUnset` unwritable for those types.
+
 ### @onUnavailable
 
 | On | Written as | Example |
@@ -898,7 +929,7 @@ On a nested object block: the block accepts keys it does not declare, suppressin
 |---|---|---|
 | [concept](#concept) | one string | `@origin("memql")` |
 
-Declares WHERE CHANGES TO THIS CONCEPT ARE MADE -- the system that owns the data. @origin("memql") (the default when the annotation is absent) means MemQL originates it; @origin("&lt;connector>") names an external system, which makes the concept a MIRROR. A mirror is READ-ONLY BY CONSTRUCTION: component/memql refuses every write to it -- mutation, tool handler, raw insert or staged write -- that does not come from the connector the origin names, so what the badge says is what a reader may assume. The name must be a registered connector or the engine REFUSES BOOT naming the concept: a mirror nobody fills is a lie. Pairs with @mirroredTo to derive dataState (mirror | origin | native), which the registry, both SDKs and the portal badge read. See docs/public/concepts/data-origins.md.
+Declares WHERE CHANGES TO THIS CONCEPT ARE MADE -- the system that owns the data. @origin("memql") (the default when the annotation is absent) means MemQL originates it; @origin("&lt;connector>") names an external system, which makes the concept a MIRROR. A mirror is READ-ONLY BY CONSTRUCTION: component/memql refuses every write to it -- mutation, tool handler, raw insert or staged write -- that does not come from the connector the origin names, so what the badge says is what a reader may assume. The name must be a registered connector or the engine REFUSES BOOT naming the concept: a mirror nobody fills is a lie. Pairs with @mirroredTo to derive dataState (mirror | origin | native), which the registry, both SDKs and the portal badge read. See [data-origins.md](../concepts/data-origins.md).
 
 ### @pattern
 
@@ -948,7 +979,7 @@ Required on a policy: the first entry the AI Router resolves. A provider name, a
 |---|---|---|
 | [query](#query), [mutate](#mutate) | no arguments | `@public` |
 
-Per-row-authz marker: this query/mutation is intentionally callable without a caller-scope filter (concept catalogs, pre-auth login paths). See docs/public/operate/auth/per-row-authz-audit.md.
+Per-row-authz marker: this query/mutation is intentionally callable without a caller-scope filter (concept catalogs, pre-auth login paths). See [per-row-authz-audit.md](../operate/auth/per-row-authz-audit.md).
 
 ### @rateLimit
 
@@ -991,6 +1022,14 @@ Foreign-key relationship metadata. Format: @relationship(type="parent", field="x
 | [mutate](#mutate) | one or more strings | `@removeFromSet("disabledDeployables")` |
 
 On an update mutation: treat the named array-typed payload fields as SETS and REMOVE the written elements from the stored array, keeping the order of what remains. Removing something absent is a no-op rather than an error, so the mutation is idempotent and two callers removing the same member both succeed. Pairs with @addToSet, and the pair is what lets a set be edited one member at a time instead of read-modify-written whole. Format: @removeFromSet("disabledDeployables"). See memql#4951.
+
+Both follow the same rules:
+
+- Only an update mutation may carry it; on an insert it is refused at load, because an insert has no stored set to change.
+- A field absent from the write is untouched: the stored array survives the read-merge.
+- Members compare by their rendered form, so `1` and `"1"` are one member. A stored number comes back from JSON as a float and its string spelling as a string, and keeping both would be a set that quietly grew.
+- A stored value that is not an array reads as empty, and a scalar written where an array is expected is one member, as with `@appendFields`.
+- A field named by two of `@appendFields`, `@addToSet` and `@removeFromSet` is refused at load: each rewrites the same key, so which one won would depend on the executor's order rather than on anything the mutation says.
 
 ### @required
 
@@ -1057,7 +1096,15 @@ Shape kind: projects a concept's payload + row intrinsics (concept bound via the
 | `requiresIdentity` | flag | Beside public: readable by authenticated callers only (memql#4809). |
 | `rankFloor` | string | Beside clusterOwner: relaxes the READ to a rank floor while the write stays cluster-owner (memql#5216). |
 
-Declares WHO MAY SEE this concept's rows, once on the concept, instead of as an `actor.*` term every filter over it must remember to carry. Four tiers, one spelling each: @rowAuthz(public) (globally readable by intent -- spelled explicitly, because "no annotation" and "declared public" are different states), @rowAuthz(clusterOwner) (administrative), @rowAuthz(owner="&lt;field>") (the field is compared against actor.userId; it must be a field the concept declares, OR the literal "id" for a SELF-OWNED concept whose owner is the row itself -- memql#3029; `id` and only `id`, since createdBy means who WROTE the row, not whose row it is), @rowAuthz(via="&lt;spec>") (a relationship spec grants visibility). A fifth FORM, not a fifth tier: @rowAuthz(owner="&lt;field>", clusterOwner) is the composite -- the owner, OR a cluster owner (memql#4312) -- the only two-argument list, order-independent, and the form an operator console needs over per-user rows since a plain owner= tier has no cluster-owner bypass. ENFORCED ON THE READ PATH since Phase 3 (memql#3172): declaring a tier CHANGES WHAT READS RETURN. Two mechanisms, and neither consults the filter to decide whether to engage -- the tier's predicate is ANDed into the plan before the read runs (resolved from the construct's declared binding, so the narrowing pushes down into SQL), and every row leaving the engine is separately admitted against the tier ITS OWN concept declares, which is the only mechanism available to a raw client-supplied query string, to graph expansion, or to a TOP-LEVEL BUILTIN CALL whose rows come out of a Go handler (memql#3982) -- none of which has a filter to AND anything into. SUBSCRIPTIONS are gated by the same row admission (memql#4309): a graph.node.* event reaches a stream only if the tier admits the row for that stream's actor, a `granted` row arrives id-only with payload_omitted set for the client to re-read, and an UNDECLARED concept is delivered to everyone exactly as its reads already return to everyone -- the live feed mirrors the read path rather than running a second rulebook. The write side is enforced too: update/delete refuse when the target row's declared owner is not the actor (memql#3174). Implementation: component/memql/rowauthz_enforce.go, called from parser.go. MEASURED BY TestClusterOwnerTierInjectsTheAdminGate, TestFilteredReadPathAppliesTheRowGate, TestGraphExpansionAppliesTheTraversalGateBeforeItEmitsTheRow TestTopLevelBuiltinAppliesTheRowGate and TestSubscriptionFanOutAppliesTheRowGate -- named so a reader can check whether this is still true rather than trust the sentence. Trusting it would have been wrong before: this paragraph described the tier as parsed-but-unread for as long as Phase 3 had been live, which is false in the one direction that costs a reader a wrong authorization assumption, and it feeds editor hover, so the reach was wider than this file (memql#3727). See docs/public/operate/auth/per-row-authz-audit.md and memql#2803.
+Declares WHO MAY SEE this concept's rows, once on the concept, instead of as an `actor.*` term every filter over it must remember to carry. Four tiers, one spelling each: @rowAuthz(public) (globally readable by intent -- spelled explicitly, because "no annotation" and "declared public" are different states), @rowAuthz(clusterOwner) (administrative), @rowAuthz(owner="&lt;field>") (the field is compared against actor.userId; it must be a field the concept declares, OR the literal "id" for a SELF-OWNED concept whose owner is the row itself -- memql#3029; `id` and only `id`, since createdBy means who WROTE the row, not whose row it is), and @rowAuthz(via="&lt;spec>") (a relationship spec grants visibility).
+
+A fifth FORM, not a fifth tier: @rowAuthz(owner="&lt;field>", clusterOwner) is the composite -- the owner, OR a cluster owner (memql#4312), in either order -- and the form an operator console needs over per-user rows, since a plain owner= tier has no cluster-owner bypass. The other keys (account=, rankVisible, rankStrict, unowned=, requiresIdentity, rankFloor=) qualify a tier rather than naming one.
+
+ENFORCED ON THE READ PATH since Phase 3 (memql#3172): declaring a tier CHANGES WHAT READS RETURN. Two mechanisms, and neither consults the filter to decide whether to engage -- the tier's predicate is ANDed into the plan before the read runs (resolved from the construct's declared binding, so the narrowing pushes down into SQL), and every row leaving the engine is separately admitted against the tier ITS OWN concept declares, which is the only mechanism available to a raw client-supplied query string, to graph expansion, or to a TOP-LEVEL BUILTIN CALL whose rows come out of a Go handler (memql#3982) -- none of which has a filter to AND anything into.
+
+SUBSCRIPTIONS are gated by the same row admission (memql#4309): a graph.node.* event reaches a stream only if the tier admits the row for that stream's actor, a `granted` row arrives id-only with payload_omitted set for the client to re-read, and an UNDECLARED concept is delivered to everyone exactly as its reads already return to everyone -- the live feed mirrors the read path rather than running a second rulebook. The write side is enforced too: update/delete refuse when the target row's declared owner is not the actor (memql#3174).
+
+Implementation: component/memql/rowauthz_enforce.go, called from parser.go. MEASURED BY TestClusterOwnerTierInjectsTheAdminGate, TestFilteredReadPathAppliesTheRowGate, TestGraphExpansionAppliesTheTraversalGateBeforeItEmitsTheRow, TestTopLevelBuiltinAppliesTheRowGate and TestSubscriptionFanOutAppliesTheRowGate -- named so a reader can check whether this is still true rather than trust the sentence. Trusting it would have been wrong before: this doc described the tier as parsed-but-unread for as long as Phase 3 had been live, which is false in the one direction that costs a reader a wrong authorization assumption, and because the doc also feeds editor hover, the error reached every author who hovered the annotation (memql#3727). See [per-row-authz-audit.md](../operate/auth/per-row-authz-audit.md) and memql#2803.
 
 ### @schedule
 
@@ -1155,7 +1202,7 @@ The field is stamped server-side (createdAt, createdBy, status, ...): never acce
 |---|---|---|
 | [capability](#capability) | one string | `@sideEffect("write")` |
 
-On a capability: the coarse risk class @sideEffect("read"|"write"|"exec"). The AUTHORITATIVE sideEffectClass lives on the capability (ADR §7) and must equal the Go capability class, so an authored or generated action cannot spoof it.
+On a capability: the coarse risk class @sideEffect("read"|"write"|"exec"). It is the authoritative side-effect class: it lives on the capability, not on the action that calls it, and must equal the class of the Go capability the declaration names, so an authored or generated action cannot claim a lower one.
 
 ### @template
 
@@ -1202,7 +1249,7 @@ Event trigger for automations. Format: @trigger(event="graph.node.created.*.v1:n
 | [provider](#provider) | one string | `@type("OpenAI")` |
 
 - On a concept: The concept's row kind: "object" (the default), "collection" or "reference".
-- On a provider: The provider's vendor: "OpenAI" or "Anthropic".
+- On a provider: The provider's type, which picks the client that serves it: `OpenAI` (or `OpenAIChat`), `OpenAITTS` or `OpenAIEmbedding` for OpenAI, and `Anthropic` (or `AnthropicChat`) for Anthropic, matched without regard to case. `Fleet` and `SubscriptionApp` are accepted on a `@base` provider only: their models are named from a policy (`fleet:<model>`, `app:<id>`) rather than declared as children. Any other type leaves the provider registered but unavailable (`unsupported provider type`). Streaming is a parameter (`streaming true` in `params`), not a type, and a child that `@extends` a base takes the base's type.
 
 ### @unbounded
 
@@ -1210,7 +1257,7 @@ Event trigger for automations. Format: @trigger(event="graph.node.created.*.v1:n
 |---|---|---|
 | [query](#query) | one string | `@unbounded("a small catalog of fixed size")` |
 
-On a list-returning query: opt out of the pagination authoring rule and the implicit 50-row runtime cap. Format: @unbounded("reason"). The reason string is REQUIRED -- it documents why this query is a legitimate full-set read (small bounded catalog, sweep job, etc.) and is enumerated by the pagination audit report. A query that paginates/sorts is already bounded and must NOT carry @unbounded; the engine clamps the realized window to MEMQL_MEMORY_ENGINE_MAX_WINDOW regardless. See docs/public/language/authoring-rules.md.
+On a list-returning query: opt out of the pagination authoring rule and the implicit 50-row runtime cap. Format: @unbounded("reason"). The reason string is REQUIRED -- it documents why this query is a legitimate full-set read (small bounded catalog, sweep job, etc.) and is enumerated by the pagination audit report. A query that paginates/sorts is already bounded and must NOT carry @unbounded; the engine clamps the realized window to MEMQL_MEMORY_ENGINE_MAX_WINDOW regardless. See [authoring-rules.md](authoring-rules.md).
 
 ### @unique
 
@@ -1240,7 +1287,7 @@ A discriminated union: @variant(discriminator="kind") on an object field, follow
 |---|---|---|
 | [concept](#concept), [seed](#seed) | one string | `@version("1.0.0")` |
 
-- On a concept: Version tag for a concept or a seed: a semver string, @version("1.0.0"). Metadata only -- canonical ids are not versioned by it (#2613).
+- On a concept: Version tag for the concept: a semver string, @version("1.0.0"). Metadata only -- canonical ids are not versioned by it (#2613).
 - On a seed: Version tag for the seed.
 
 ### @when
@@ -1270,21 +1317,26 @@ A retired name is refused where the table says, with `annotation_retired` and a 
 | Annotation | Where | Write instead |
 |---|---|---|
 | [`@actor`](#actor) | [spec and trait](#spec-and-trait) | It is a shape-only marker since epic #2281 -- to predicate on the caller, bind an @actor shape in the signature (`spec <shape> <name>`) and read its projected key by bare name. |
+| `@async` | everywhere | Refused on automations since memql#2712: an automation already runs asynchronously off its event or schedule trigger, and nothing reads the annotation -- delete it. |
+| `@audit` | everywhere | Removed from the allow-lists in memql#989; nothing reads it -- delete the annotation. |
 | [`@cache`](#cache) | [concept](#concept) | A concept carries no cache setting -- a read caches, so set the TTL on the query that reads the concept (@cache(300)); a write to the concept evicts every cached read of it. |
 | `@caller` | [shape](#shape) | Use @actor (#221); the field accessor was renamed at the same time (caller.X -> actor.X). |
 | `@clientExecution` | [tool](#tool) | It dispatched the tool to the connected browser over the client-tool relay, which was removed with the cognition node (epic memql#4988). Every tool now needs a server-side @handler. |
 | `@concepts` | [shape](#shape) | Bind the concept in the signature instead: `shape <Concept> <name> { ... }`, with the concept imported by a file-top `use` line. |
 | [`@default`](#default) | [args field](#args-field) | It is never applied; write `args.<field> ?? <default>` in the body (a concept-field @default is not a substitute -- it is never applied on insert either). |
 | [`@description`](#description) | [args field](#args-field) | It was never retained (no AST slot); document the field with a `///` doc comment on the line above it (memql#3336). |
+| `@idempotent` | everywhere | Removed from the mutation allow-list in memql#989; nothing reads it -- delete the annotation. |
 | [`@internal`](#internal) | everywhere except [concept field](#concept-field) | Retired under the 2026.08 epoch (#2620 ruling / #2708); it only hid the construct from external discovery surfaces (tool listing, MCP promotion, the help()/listFunctions internal flag) while leaving it callable -- delete the annotation. |
-| `@kind` | [action](#action) | Composites are automations now and a primitive needs no marker (construct-invocation ADR Decision 3); remove it. |
+| `@kind` | [action](#action) | An action is always one primitive capability call now, and a composite of several is an automation, so there is nothing to mark; remove it. |
 | `@permission` | everywhere | Buried (#2631 ruling close-out / #2713); the @role twin -- documented but never enforced (its one help-payload reader was dead; the load gate rejects it) -- access control lives at the actor layer (RBAC + the @public per-row-authz classification). |
-| `@reliability` | [action](#action) | Reliability is machine-managed runtime state, not source (ADR Decision 3); remove it. |
+| `@reliability` | [action](#action) | Reliability is runtime state the engine keeps, not something the source declares; remove it. |
+| `@retry` | everywhere | Removed from the allow-lists in memql#989; nothing reads it -- delete the annotation. |
 | `@role` | everywhere | Buried (#2631 ruling / #2709); it was documented but never enforced (nothing ever checked the value at runtime; the load gate rejects it) -- access control lives at the actor layer (RBAC + the @public per-row-authz classification). |
 | [`@row`](#row) | [spec and trait](#spec-and-trait) | It is a shape-only marker since epic #2281 -- to predicate on row metadata, bind a @row shape in the signature (`spec <shape> <name>`) and read its projected key by bare name. |
 | [`@scope`](#scope) | [concept](#concept) | Remove the annotation; every concept lives in the default partition post-#56. |
 | `@shape` | [spec and trait](#spec-and-trait) | A spec binds its shape or concept in the signature (epic #2281): `spec <boundName> <name> { return <bool> }`, with boundName resolved through the file-top `use` import. |
-| [`@sideEffect`](#sideeffect) | [action](#action) | The authoritative side-effect class lives on the CAPABILITY declaration now (ADR Decision 3, Story 5); remove it from the action. |
+| [`@sideEffect`](#sideeffect) | [action](#action) | The authoritative side-effect class lives on the capability declaration the action calls, where an action cannot overstate or understate it; remove it from the action. |
+| `@timeout` | everywhere | Removed from the allow-lists in memql#989; nothing reads it -- delete the annotation. |
 | `@useX`, for any `X` that starts with an upper-case letter | everywhere | Declare the dependency with a file-top `use <module>.{ ... }` import instead, and put a bound concept in the signature (`query <Concept> <name> { ... }`). |
 | `@visibility` | everywhere | Removed in the genesis simplification; it chose which node types load a construct, and every binary now loads everything while build tags decide which integrations are active -- delete the annotation. |
 

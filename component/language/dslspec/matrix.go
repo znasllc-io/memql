@@ -2,6 +2,8 @@ package dslspec
 
 import (
 	"fmt"
+	"path"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -267,8 +269,8 @@ func (w *matrixWriter) entries() {
 			for _, p := range g {
 				phrases = append(phrases, p.Receiver.Phrase())
 			}
-			item := escapeMarkdown("On "+joinWords(phrases, "or")+": "+placementDoc(g[0]), false)
-			list.WriteString("- " + strings.ReplaceAll(item, "\n", "\n  ") + "\n")
+			item := registryText("On "+joinWords(phrases, "or")+": "+placementDoc(g[0]), false)
+			list.WriteString("- " + indentContinuation(item) + "\n")
 		}
 		w.b.WriteString(list.String() + "\n")
 	}
@@ -325,7 +327,7 @@ func (w *matrixWriter) receiverLink(r annotations.Receiver) string {
 
 // para writes one block of registry or page text.
 func (w *matrixWriter) para(text string) {
-	w.b.WriteString(escapeMarkdown(text, false) + "\n\n")
+	w.b.WriteString(registryText(text, false) + "\n\n")
 }
 
 // table writes a GFM table. Every cell is escaped, so a "|" in a doc or an
@@ -334,7 +336,7 @@ func (w *matrixWriter) table(header []string, rows [][]string) {
 	line := func(cells []string) {
 		escaped := make([]string, len(cells))
 		for i, c := range cells {
-			escaped[i] = escapeMarkdown(c, true)
+			escaped[i] = registryText(c, true)
 		}
 		w.b.WriteString("| " + strings.Join(escaped, " | ") + " |\n")
 	}
@@ -540,25 +542,46 @@ func writtenAs(p annotations.Placement) string {
 	return s
 }
 
-// shortForm is the forms in the cell's short words: "number or keywords". One
-// string or a list of them reads "strings", as Form.String reads it "one or
-// more strings".
-func shortForm(f annotations.Form) string {
+// formTerm is one argument form as the page names it: the short word a matrix
+// cell uses, and the registry's long words for it.
+type formTerm struct{ word, meaning string }
+
+// formTerms splits a form set into the terms a cell lists, in formWords order.
+// One string or a list of them is the single term "strings" ("one or more
+// strings"), the way Form.String reads the pair; the collapse is made here and
+// nowhere else. A form the registry gained and formWords did not is printed in
+// the registry's words rather than dropped, so its cell never reads as empty.
+func formTerms(f annotations.Form) []formTerm {
+	both := annotations.FormString | annotations.FormStrings
+	var out []formTerm
 	rest := f
-	if f&(annotations.FormString|annotations.FormStrings) == annotations.FormString|annotations.FormStrings {
-		rest &^= annotations.FormString
-	}
-	var words []string
 	for _, fw := range formWords {
-		if rest&fw.form != 0 {
-			words = append(words, fw.word)
-			rest &^= fw.form
+		if rest&fw.form == 0 {
+			continue
 		}
+		switch {
+		case fw.form == annotations.FormString && rest&both == both:
+			continue // read below, with FormStrings, as one term
+		case fw.form == annotations.FormStrings && rest&both == both:
+			out = append(out, formTerm{fw.word, both.String()})
+			rest &^= both
+			continue
+		}
+		out = append(out, formTerm{fw.word, fw.form.String()})
+		rest &^= fw.form
 	}
 	if rest != 0 {
-		// A form the registry gained and this table did not: print it rather
-		// than an empty cell, which would read as refused.
-		words = append(words, rest.String())
+		out = append(out, formTerm{rest.String(), rest.String()})
+	}
+	return out
+}
+
+// shortForm is the forms in the cell's short words: "number or keywords".
+func shortForm(f annotations.Form) string {
+	terms := formTerms(f)
+	words := make([]string, 0, len(terms))
+	for _, t := range terms {
+		words = append(words, t.word)
 	}
 	return joinWords(words, "or")
 }
@@ -568,18 +591,9 @@ func shortForm(f annotations.Form) string {
 func formLegend() string {
 	long := map[string]string{}
 	for _, p := range annotations.Placements() {
-		rest := p.Forms
-		if rest&(annotations.FormString|annotations.FormStrings) == annotations.FormString|annotations.FormStrings {
-			if _, ok := long["strings"]; !ok {
-				long["strings"] = (annotations.FormString | annotations.FormStrings).String()
-			}
-			rest &^= annotations.FormString | annotations.FormStrings
-		}
-		for _, fw := range formWords {
-			if rest&fw.form != 0 {
-				if _, ok := long[fw.word]; !ok {
-					long[fw.word] = fw.form.String()
-				}
+		for _, t := range formTerms(p.Forms) {
+			if _, ok := long[t.word]; !ok {
+				long[t.word] = t.meaning
 			}
 		}
 	}
@@ -674,44 +688,121 @@ func code(s string) string {
 	return "`" + s + "`"
 }
 
-// escapeMarkdown makes text safe to print as markdown. A "<" outside a code
-// span is written "&lt;", so a placeholder such as <field> in a registry doc
-// prints instead of being read as an HTML tag and dropped. In a table cell
-// every "|" is written "\|" -- inside a code span too, as GFM requires -- and
-// a line break becomes a space. Everything else, emphasis included, is the
-// registry's markdown and passes through.
-func escapeMarkdown(s string, inCell bool) string {
+// registryText renders registry text as markdown. The registry's docs are
+// markdown already (emphasis, code spans, paragraphs and lists pass through);
+// three things are changed, outside code spans only:
+//
+//   - a docs/public page named by its repository path becomes a relative link,
+//     since a path is useless to a reader of the published page;
+//   - a "<" is written "&lt;", so a placeholder such as <field> prints instead
+//     of being read as an HTML tag and dropped;
+//   - in a table cell a line break becomes a space.
+//
+// In a table cell every "|" is also written "\|", inside a code span too, as
+// GFM requires.
+func registryText(s string, inCell bool) string {
 	var b strings.Builder
-	for i := 0; i < len(s); {
-		c := s[i]
-		switch {
-		case c == '`':
-			n := runLength(s, i)
-			if end := closingRun(s, i+n, n); end >= 0 {
-				span := s[i : end+n]
-				if inCell {
-					span = strings.ReplaceAll(span, "|", `\|`)
-				}
-				b.WriteString(span)
-				i = end + n
-				continue
+	codeSegments(s, func(segment string, code bool) {
+		if !code {
+			segment = linkDocPages(segment)
+			segment = strings.ReplaceAll(segment, "<", "&lt;")
+			if inCell {
+				segment = strings.ReplaceAll(segment, "\n", " ")
 			}
-			// A run no run of the same length closes is literal text.
-			b.WriteString(s[i : i+n])
+		}
+		if inCell {
+			segment = strings.ReplaceAll(segment, "|", `\|`)
+		}
+		b.WriteString(segment)
+	})
+	return b.String()
+}
+
+// codeSegments walks s as a markdown renderer reads it: visit gets each code
+// span (code=true, backticks included) and each stretch of text between them,
+// in order. A backtick run opens a span only when a later run of the same
+// length closes it; an unmatched run is literal text.
+func codeSegments(s string, visit func(segment string, code bool)) {
+	start := 0 // where the pending text segment began
+	for i := 0; i < len(s); {
+		if s[i] != '`' {
+			i++
+			continue
+		}
+		n := runLength(s, i)
+		end := closingRun(s, i+n, n)
+		if end < 0 {
 			i += n
 			continue
-		case c == '<':
-			b.WriteString("&lt;")
-		case c == '|' && inCell:
-			b.WriteString(`\|`)
-		case c == '\n' && inCell:
-			b.WriteByte(' ')
-		default:
-			b.WriteByte(c)
 		}
-		i++
+		if start < i {
+			visit(s[start:i], false)
+		}
+		visit(s[i:end+n], true)
+		i = end + n
+		start = i
 	}
+	if start < len(s) {
+		visit(s[start:], false)
+	}
+}
+
+// docPagePath matches a docs/public page named by its repository path, with an
+// optional anchor. It ends at ".md" (or the anchor), so a sentence's full stop
+// after the path stays outside the link.
+var docPagePath = regexp.MustCompile(`docs/public/[A-Za-z0-9_./-]*\.md(?:#[A-Za-z0-9_-]+)?`)
+
+// linkDocPages turns every docs/public path in a text segment into a link
+// relative to the attribute matrix, named by the page's file name. A path that
+// is already a link target -- right after "(" -- is left alone.
+func linkDocPages(text string) string {
+	var b strings.Builder
+	last := 0
+	for _, m := range docPagePath.FindAllStringIndex(text, -1) {
+		if m[0] > 0 && strings.ContainsRune("(/[", rune(text[m[0]-1])) {
+			continue
+		}
+		target := text[m[0]:m[1]]
+		page, anchor, _ := strings.Cut(target, "#")
+		if anchor != "" {
+			anchor = "#" + anchor
+		}
+		b.WriteString(text[last:m[0]])
+		b.WriteString("[" + path.Base(page) + "](" + relativeToMatrix(page) + anchor + ")")
+		last = m[1]
+	}
+	b.WriteString(text[last:])
 	return b.String()
+}
+
+// relativeToMatrix is page's path relative to the attribute matrix's
+// directory: "../operate/auth/per-row-authz-audit.md".
+func relativeToMatrix(page string) string {
+	from := strings.Split(path.Dir(AttributeMatrixPath), "/")
+	to := strings.Split(page, "/")
+	common := 0
+	for common < len(from) && common < len(to)-1 && from[common] == to[common] {
+		common++
+	}
+	var parts []string
+	for range from[common:] {
+		parts = append(parts, "..")
+	}
+	return strings.Join(append(parts, to[common:]...), "/")
+}
+
+// indentContinuation indents every line of a list item after its first by the
+// item's content column, so paragraphs and nested lists stay inside the item.
+// A blank line stays empty: whitespace on it would be invisible noise in the
+// page and a trailing-whitespace error in its diff.
+func indentContinuation(item string) string {
+	lines := strings.Split(item, "\n")
+	for i := 1; i < len(lines); i++ {
+		if lines[i] != "" {
+			lines[i] = "  " + lines[i]
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // runLength counts the backticks in the run starting at i.

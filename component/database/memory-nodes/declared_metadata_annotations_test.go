@@ -896,7 +896,7 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 				"TestDeclaredMetadataKeysAreReadByNothing and correct:\n"+
 				"  - dsl/_reference/_concept.memql section 8\n"+
 				"  - docs/public/language/attribute-matrix.md, which is generated: change the @secret "+
-				"doc in component/language/annotations/secret_doc.go and run `make docs-matrix`\n"+
+				"doc (docSecretField) in component/language/annotations/long_docs.go and run `make docs-matrix`\n"+
 				"  - docs/public/language/reserved.md",
 				readerFile, joinHits(hits))
 		}
@@ -936,7 +936,7 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 			regenerate := ""
 			if doc == "docs/public/language/attribute-matrix.md" {
 				regenerate = "\n\nThis page is generated (memql#5360): change the @secret doc in " +
-					"component/language/annotations/secret_doc.go and run `make docs-matrix`; " +
+					"component/language/annotations/long_docs.go (docSecretField) and run `make docs-matrix`; " +
 					"a hand edit of the page is refused by TestAttributeMatrixIsGenerated."
 			}
 			if !strings.Contains(text, "@secret") && !strings.Contains(text, "x-secret") {

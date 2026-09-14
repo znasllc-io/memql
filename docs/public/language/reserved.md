@@ -289,13 +289,16 @@ is rejected at parse time. The canonical post-migration shape:
   `query <Concept> <name> { ... }`, `mutate <Concept> <name> { ... }`,
   `shape <Concept> <name> { ... }`, `seed <Concept> <name> { ... }`.
 
-The legacy `@input` wrapper and `@template` body annotation are also
-retired -- the parser rejects them with a migration hint.
+Inside a prompt's body, two legacy forms are refused with a migration hint:
+the `@input { ... }` wrapper (declare the fields directly in the body) and an
+inline `@template(...)` (use `@templateFile("...")` with a `.tmpl` file beside
+the prompt). They are forms of the prompt body, not annotations, so the
+attribute matrix does not list them. `@template` written before an
+automation is a live annotation: it marks a work-spine template.
 
-Every annotation, the constructs and fields that accept it, the form it is
-written in, and every retired name with what to write instead are listed in
-the [attribute matrix](attribute-matrix.md), which is generated from the
-registry.
+The [attribute matrix](attribute-matrix.md), generated from the registry,
+lists every annotation, the constructs and fields that accept it, the form it
+is written in, and every retired annotation with what to write instead.
 
 ---
 

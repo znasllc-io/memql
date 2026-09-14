@@ -116,50 +116,6 @@ func TestMatrixLinksLandOnHeadings(t *testing.T) {
 	}
 }
 
-// TestMatrixTablesAreRectangular: every row of every table has its header's
-// number of cells, counting the pipes GFM splits on -- so a "|" in a doc or an
-// example that escaped the escaping would show up here as a row that is too
-// wide.
-func TestMatrixTablesAreRectangular(t *testing.T) {
-	var header int
-	tables := 0
-	for _, line := range strings.Split(AttributeMatrix(), "\n") {
-		if !strings.HasPrefix(line, "|") {
-			header = 0
-			continue
-		}
-		cells := len(splitRow(line))
-		if header == 0 {
-			header = cells
-			tables++
-			continue
-		}
-		if cells != header {
-			t.Errorf("a row has %d cells under a %d-cell header: %s", cells, header, line)
-		}
-	}
-	if tables < 50 {
-		t.Fatalf("only %d tables on the page", tables)
-	}
-}
-
-// splitRow splits a table row on its unescaped pipes.
-func splitRow(line string) []string {
-	line = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(line), "|"), "|")
-	var cells []string
-	start := 0
-	for i := 0; i < len(line); i++ {
-		switch {
-		case line[i] == '\\':
-			i++
-		case line[i] == '|':
-			cells = append(cells, line[start:i])
-			start = i + 1
-		}
-	}
-	return append(cells, line[start:])
-}
-
 // TestMatrixHasNoRawHTML: outside code spans, no "<" reaches the page except
 // the GENERATED comment. A registry doc's <field> placeholder written raw is an
 // HTML tag to a markdown renderer, and GitHub drops it silently.
@@ -174,9 +130,47 @@ func TestMatrixHasNoRawHTML(t *testing.T) {
 	}
 }
 
-// stripCodeSpans removes single-backtick code spans, which print "<" as text.
+// stripCodeSpans removes the code spans from a line, which print "<" as text.
+// It walks them with the renderer's own codeSegments, so a span of any
+// backtick length is read the way the renderer reads it.
 func stripCodeSpans(line string) string {
-	return regexp.MustCompile("`[^`]*`").ReplaceAllString(line, "")
+	var b strings.Builder
+	codeSegments(line, func(segment string, code bool) {
+		if !code {
+			b.WriteString(segment)
+		}
+	})
+	return b.String()
+}
+
+// TestMatrixHasNoWhitespaceOnlyLines: no line of the page ends in whitespace,
+// which includes a blank line inside a list item. A multi-paragraph doc in an
+// entry whose receivers' docs differ is the case that would produce one.
+func TestMatrixHasNoWhitespaceOnlyLines(t *testing.T) {
+	for i, line := range strings.Split(AttributeMatrix(), "\n") {
+		if strings.TrimRight(line, " \t") != line {
+			t.Errorf("line %d ends in whitespace: %q", i+1, line)
+		}
+	}
+	item := indentContinuation("On a query: first paragraph.\n\nsecond paragraph\n- a nested item")
+	if want := "On a query: first paragraph.\n\n  second paragraph\n  - a nested item"; item != want {
+		t.Errorf("indentContinuation = %q, want %q", item, want)
+	}
+}
+
+// TestMatrixLinksDocPages: a docs/public page a registry doc names by its
+// repository path is a link relative to the page on the published page, and no
+// bare path is left outside a code span.
+func TestMatrixLinksDocPages(t *testing.T) {
+	page := AttributeMatrix()
+	if !strings.Contains(page, "[per-row-authz-audit.md](../operate/auth/per-row-authz-audit.md)") {
+		t.Error("the @rowAuthz doc's docs/public/operate/auth/per-row-authz-audit.md is not a relative link")
+	}
+	for i, line := range strings.Split(page, "\n") {
+		if strings.Contains(stripCodeSpans(line), "(docs/public/") || strings.Contains(stripCodeSpans(line), " docs/public/") {
+			t.Errorf("line %d names a docs/public path a reader cannot follow: %s", i+1, line)
+		}
+	}
 }
 
 func TestMatrixIsDeterministic(t *testing.T) {
@@ -205,7 +199,7 @@ func TestSlugMatchesGitHub(t *testing.T) {
 	}
 }
 
-func TestEscapeMarkdown(t *testing.T) {
+func TestRegistryText(t *testing.T) {
 	for _, tc := range []struct {
 		in     string
 		inCell bool
@@ -220,9 +214,14 @@ func TestEscapeMarkdown(t *testing.T) {
 		{"read|write", false, "read|write"},
 		{"two\nlines", true, "two lines"},
 		{"**bold** stays", false, "**bold** stays"},
+		{"See docs/public/operate/auth/per-row-authz-audit.md.", false, "See [per-row-authz-audit.md](../operate/auth/per-row-authz-audit.md)."},
+		{"See docs/public/language/authoring-rules.md#pagination", false, "See [authoring-rules.md](authoring-rules.md#pagination)"},
+		{"`docs/public/language/memql.md` stays code", false, "`docs/public/language/memql.md` stays code"},
+		{"[the page](docs/public/language/memql.md)", false, "[the page](docs/public/language/memql.md)"},
+		{"a|b in docs/public/concepts/data-origins.md", true, `a\|b in [data-origins.md](../concepts/data-origins.md)`},
 	} {
-		if got := escapeMarkdown(tc.in, tc.inCell); got != tc.want {
-			t.Errorf("escapeMarkdown(%q, %v) = %q, want %q", tc.in, tc.inCell, got, tc.want)
+		if got := registryText(tc.in, tc.inCell); got != tc.want {
+			t.Errorf("registryText(%q, %v) = %q, want %q", tc.in, tc.inCell, got, tc.want)
 		}
 	}
 }
