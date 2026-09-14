@@ -1,0 +1,183 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/dslfs"
+)
+
+// Every entry carries exactly one function, a name unique within its edition,
+// an edition the engine reads, and the epic and doc the listing prints -- the
+// registry is the migration channel, so an entry that cannot be listed or
+// dispatched is a promise the tool does not keep.
+func TestEveryRegisteredRewriteIsWellFormed(t *testing.T) {
+	seen := map[string]bool{}
+	for _, r := range registry {
+		key := r.edition + "/" + r.name
+		n := 0
+		for _, set := range []bool{r.plain != nil, r.path != nil, r.tree != nil} {
+			if set {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("%s carries %d functions, want exactly one of plain / path / tree", key, n)
+		}
+		if seen[key] {
+			t.Errorf("%s is registered twice", key)
+		}
+		seen[key] = true
+		if err := resolveEdition(r.edition); err != nil {
+			t.Errorf("%s: %v", key, err)
+		}
+		if r.epic == "" || r.doc == "" {
+			t.Errorf("%s has no epic or no doc; the usage listing prints both", key)
+		}
+	}
+}
+
+func runMigrate(t *testing.T, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+	var out, errb bytes.Buffer
+	err = run(args, &out, &errb)
+	return out.String(), errb.String(), err
+}
+
+// --edition=2026 --rewrite=<name> reaches the rewrite registered under that
+// name for that edition.
+func TestEditionAndRewriteDispatchToTheRegisteredRewrite(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "logic.memql")
+	if err := os.WriteFile(file, []byte("x := coalesce(a, b)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, err := runMigrate(t, "--edition="+langparser.Edition, "--rewrite=null-coalesce", file)
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, stderr)
+	}
+	if out != "x := a ?? b\n" {
+		t.Errorf("rewritten output = %q", out)
+	}
+	// The edition defaults to the engine's.
+	out, _, err = runMigrate(t, "--rewrite", "null-coalesce", file)
+	if err != nil || out != "x := a ?? b\n" {
+		t.Errorf("default edition: %q, %v", out, err)
+	}
+}
+
+// A rewrite the edition does not hold is refused as a usage error that names
+// every rewrite the edition does hold.
+func TestUnknownRewriteIsRefusedNamingTheRegisteredSet(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "q.memql")
+	if err := os.WriteFile(file, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, err := runMigrate(t, "--edition=2026", "--rewrite=expresions", file)
+	if !errors.Is(err, errUsage) {
+		t.Fatalf("err = %v, want a usage error", err)
+	}
+	if !strings.Contains(stderr, `no rewrite "expresions" is registered for edition 2026`) {
+		t.Errorf("refusal does not name the rewrite and the edition:\n%s", stderr)
+	}
+	for _, name := range rewriteNames("2026") {
+		if !strings.Contains(stderr, name) {
+			t.Errorf("refusal does not list the registered rewrite %q:\n%s", name, stderr)
+		}
+	}
+}
+
+func TestUnknownEditionIsRefusedNamingTheKnownOnes(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "q.memql")
+	if err := os.WriteFile(file, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, err := runMigrate(t, "--edition=2031", "--rewrite=null-coalesce", file)
+	if !errors.Is(err, errUsage) {
+		t.Fatalf("err = %v, want a usage error", err)
+	}
+	if !strings.Contains(stderr, `edition "2031" is not one this engine reads`) || !strings.Contains(stderr, langparser.Edition) {
+		t.Errorf("refusal does not name the edition and the known ones:\n%s", stderr)
+	}
+}
+
+// The language-line rewrite declares the engine's line in every domain that
+// has none -- and only there: a declared domain keeps what it declared, and
+// `_`/`.` directories are skipped exactly as the engine's mounts skip them.
+func TestLanguageLineDeclaresEveryUndeclaredDomain(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, content string) {
+		t.Helper()
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("shop/concepts.memql", "concept order {\n  id string\n}\n")
+	write("billing/queries.memql", "// a domain\n")
+	write("billing/memql.toml", "memql = \"1.0\"\nedition = \"2026\"\n# kept as written\n")
+	write("_parked/concepts.memql", "concept x {\n  id string\n}\n")
+	write("shop/prompts/reply.tmpl", "hello\n") // not a domain of its own
+
+	checked, _, err := runMigrate(t, "--rewrite=language-line", "-check", root)
+	if !errors.Is(err, errChanged) || strings.TrimSpace(checked) != filepath.Join(root, "shop", dslfs.ManifestFile) {
+		t.Fatalf("-check = %q, %v; want exactly the undeclared domain's manifest", checked, err)
+	}
+	if _, _, err := runMigrate(t, "--rewrite=language-line", "-w", root); err != nil {
+		t.Fatalf("-w: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "shop", dslfs.ManifestFile))
+	if err != nil {
+		t.Fatalf("shop has no manifest after the rewrite: %v", err)
+	}
+	m, err := dslfs.ParseManifest(got)
+	if err != nil || m.Language != langparser.LanguageVersion || m.Edition != langparser.Edition {
+		t.Errorf("written manifest %q parses to %+v, %v", got, m, err)
+	}
+	kept, _ := os.ReadFile(filepath.Join(root, "billing", dslfs.ManifestFile))
+	if !strings.Contains(string(kept), "kept as written") {
+		t.Errorf("a declared domain's manifest was rewritten: %q", kept)
+	}
+	for _, absent := range []string{"_parked/" + dslfs.ManifestFile, "shop/prompts/" + dslfs.ManifestFile, dslfs.ManifestFile} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(absent))); err == nil {
+			t.Errorf("%s was written, but it is not a domain", absent)
+		}
+	}
+	// Idempotent: a second run changes nothing.
+	if out, _, err := runMigrate(t, "--rewrite=language-line", "-check", root); err != nil || out != "" {
+		t.Errorf("second -check = %q, %v; want nothing to change", out, err)
+	}
+}
+
+// Passed a domain directory rather than the bundle root, the rewrite treats
+// the root as the one domain.
+func TestLanguageLineOnADomainDirectory(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "concepts.memql"), []byte("concept a {\n  id string\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runMigrate(t, "--rewrite=language-line", "-w", root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, dslfs.ManifestFile)); err != nil {
+		t.Errorf("a domain directory passed as the root got no manifest: %v", err)
+	}
+}
+
+func TestTreeRewriteRefusesAFileArgument(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "concepts.memql")
+	if err := os.WriteFile(file, []byte("concept a {\n  id string\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, err := runMigrate(t, "--rewrite=language-line", file)
+	if !errors.Is(err, errUsage) || !strings.Contains(stderr, "works on a whole tree; pass a directory") {
+		t.Errorf("err = %v, stderr = %q", err, stderr)
+	}
+}

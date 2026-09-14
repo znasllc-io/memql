@@ -128,16 +128,16 @@ func TestRewritePipelineCombinesRewrites(t *testing.T) {
 	src := "scores array(int); x := getAgent.first.payload.id; check := if getAgent.empty { f() }"
 	want := "scores []int; x := getAgent.First().payload.id; check := if getAgent.Empty() { f() }"
 
-	pipeline := []pathRewriter{
-		func(_ string, b []byte) ([]byte, error) { return rewriteResultNavigation(b) },
-		func(_ string, b []byte) ([]byte, error) { return rewriteSliceSyntax(b) },
-	}
-	got, err := applyPipeline("x.memql", []byte(src), pipeline)
+	pipeline, err := resolveRewrites("2026", []string{"result-navigation", "slice-syntax"})
 	if err != nil {
+		t.Fatal(err)
+	}
+	ws := &workingSet{root: ".", files: map[string][]byte{"x.memql": []byte(src)}, orig: map[string][]byte{"x.memql": []byte(src)}, visit: []string{"x.memql"}}
+	if err := applyPipeline(ws, pipeline); err != nil {
 		t.Fatalf("applyPipeline: %v", err)
 	}
-	if string(got) != want {
-		t.Errorf("pipeline:\n  got:  %q\n  want: %q", string(got), want)
+	if got := string(ws.files["x.memql"]); got != want {
+		t.Errorf("pipeline:\n  got:  %q\n  want: %q", got, want)
 	}
 }
 
@@ -146,8 +146,11 @@ func TestRewritePipelineCombinesRewrites(t *testing.T) {
 // equals the input byte-for-byte.
 func TestRewriteDoesNotAlterUnaffectedSource(t *testing.T) {
 	src := "// unchanged\nfunc (Query) foo(args any) (any, error) {\n  return concept==v1:foo:bar, nil\n}\n"
-	for name, fn := range rewriters {
-		name, fn := name, fn
+	for _, r := range registry {
+		if r.plain == nil {
+			continue
+		}
+		name, fn := r.name, r.plain
 		t.Run(name, func(t *testing.T) {
 			got, err := fn([]byte(src))
 			if err != nil {
