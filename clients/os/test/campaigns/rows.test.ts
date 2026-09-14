@@ -463,6 +463,24 @@ describe("a rule as a sentence", () => {
     expect(sentence).toContain("a template");
   });
 
+  it("keeps a rule's own eventKind when a live change folds it", () => {
+    // The stream stamps `eventKind` (the EVENT's kind) on every envelope, and
+    // this concept has a field by the same name. Measured in a browser against
+    // a real engine: the first live change after turning a rule on turned
+    // "When a user changes" into "When a user is created" until a reload.
+    const folded = emailRuleFromRow({
+      id: "v1:campaigns:emailRule:r1",
+      topic: "graph.node.updated.v1:campaigns:emailRule",
+      eventKind: "node_updated",
+      payload: { ...ruleRow({ id: "v1:campaigns:emailRule:r1", eventKind: "updated" }), status: "active" },
+    });
+    expect(folded.eventKind).toBe("updated");
+    expect(folded.status).toBe("active");
+    expect(ruleSentence(folded, { template: "Welcome", audience: "" })).toBe(
+      "When a user changes, email Welcome to the cluster owner.",
+    );
+  });
+
   it("names a concept by its entity", () => {
     expect(conceptEntity("v1:identity:user")).toBe("user");
     expect(conceptEntity("v1:campaigns:senderIdentity")).toBe("senderIdentity");
