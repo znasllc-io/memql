@@ -292,6 +292,11 @@ is rejected at parse time. The canonical post-migration shape:
 The legacy `@input` wrapper and `@template` body annotation are also
 retired -- the parser rejects them with a migration hint.
 
+Every annotation, the constructs and fields that accept it, the form it is
+written in, and every retired name with what to write instead are listed in
+the [attribute matrix](attribute-matrix.md), which is generated from the
+registry.
+
 ---
 
 ## 7. Where this list lives in code
@@ -304,8 +309,8 @@ several Go files. When the list below changes, update this doc:
 | Top-level engine names | `component/memql/keyword_slices.go` |
 | Row intrinsics | `component/memql/intrinsic_fields.go` |
 | Caller envelope | `component/memql/sense/builtins.go` + `runtime_evaluator.go` |
-| Construct keywords | per-construct parser allow-lists in `component/memql/` |
-| Annotations | the registry in `component/language/annotations` |
+| Construct keywords | `parser.TopLevelDeclKeywords` and `parser.StructFormKeywords` in `component/language/parser`, projected by `component/language/dslspec` |
+| Annotations | the registry in `component/language/annotations`; the [attribute matrix](attribute-matrix.md) is generated from it (`make docs-matrix`) |
 | Imported names (`use`) | `component/memql/dslimports/dslimports.go` |
 
 ---
