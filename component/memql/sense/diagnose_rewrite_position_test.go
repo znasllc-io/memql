@@ -51,16 +51,16 @@ var senseRewriteRefusalCases = []struct {
 	{"an update with no id", "mutate thing m {\n  args {\n    name string\n  }\n  update {\n    name: args.name\n  }\n}\n", "update", 1, "update block requires an `id: <expr>` line"},
 	{"a body block in a mutation", "mutate thing m {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
 
-	// Logic.
-	{"a logic with no body block", "logic noBody {\n  args {\n    a string\n  }\n}\n", "noBody", 1, "must wrap its procedural code in a `body { }` block"},
+	// Logic. A logic with no `body { }` block is written in statements, and
+	// its refusals are the statement parser's and the load gate's rather than
+	// the rewriter's (epic memql#5370): TestDiagnose_StatementRefusalLandsOnTheAuthorsText.
 	{"a logic body with no return", "logic noReturn {\n  args {\n    a string\n  }\n  body {\n    x := f(a: args.a)\n  }\n}\n", "x :=", 1, "must end with a `return <expr>` terminator"},
 
-	// Automation steps.
+	// Automation steps. An automation with no step block is written in
+	// statements too, and so is out of this table the same way.
 	{"an empty step", probeTrigger + "automation a {\n  step first {\n  }\n}\n", "step", 1, "body is empty"},
 	{"a forEach with no in", probeTrigger + "automation a {\n  step loop {\n    forEach t of event.payload.items {\n      logic touch(x: t)\n    }\n  }\n}\n", "forEach", 1, "expected `in`"},
 	{"a conditional step with no body", probeTrigger + "automation a {\n  step s {\n    if event.payload.a == 1\n  }\n}\n", "if", 1, "expected `{` after the if condition"},
-	{"an automation with no steps", probeTrigger + "automation noSteps {\n  args {\n    x string\n  }\n}\n", "noSteps", 1, "at least one `step` is required"},
-	{"a body block in an automation", probeTrigger + "automation a {\n  body {\n    x := 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
 
 	// A terse automation.
 	{"an args block before a terse automation", "args {\n  x string\n}\nautomation onThing @trigger(event=\"node.created\", concept=\"v1:probe:thing\") => logic noteThing\n", "args", 1, "must not be preceded by an `args { ... }` block"},

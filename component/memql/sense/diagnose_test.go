@@ -224,20 +224,33 @@ func TestDiagnose_InjectedErrors(t *testing.T) {
 			wantCode: "parse-error",
 		},
 		{
-			// A logic `body { }` with no trailing return -> a LOWERING error
-			// (no line/col of its own); the diagnostic anchors on the named
-			// construct's authored header line. (A logic WITHOUT the wrapper
-			// is no longer an error: it is the edition-2026 statement form,
-			// epic memql#5370.)
+			// A logic `body { }` with no trailing return -> a LOWERING error,
+			// placed on the body's last statement (memql#5364).
 			name: "logic-body-without-return",
 			src: "@description(\"no return\")\n" + //  1
-				"logic doThing {\n" + //              2  <- construct header
+				"logic doThing {\n" + //              2
 				"  body {\n" + //                     3
-				"    x := 1\n" + //                   4
+				"    x := 1\n" + //                   4  <- the last statement
 				"  }\n" + //                           5
 				"}\n", //                              6
-			wantLine: 2,
+			wantLine: 4,
+			exactCol: 5,
 			wantCode: "rewrite-error",
+		},
+		{
+			// A logic with no statement at all: without `body { }` it is written
+			// in statements (epic memql#5370), and the load gate refuses it for
+			// not ending with a return. The diagnostic lands on its header.
+			name: "logic-without-a-statement",
+			src: "@description(\"no statement\")\n" + // 1
+				"logic doThing {\n" + //                2  <- construct header
+				"  args {\n" + //                       3
+				"    x string @required\n" + //         4
+				"  }\n" + //                             5
+				"}\n", //                                6
+			wantLine: 2,
+			exactCol: 1,
+			wantCode: "body_logic_return",
 		},
 	}
 

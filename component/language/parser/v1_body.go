@@ -55,10 +55,14 @@ import (
 // isV1BodyKeyword reports whether word declares a statement body.
 func isV1BodyKeyword(word string) bool { return word == "logic" || word == "automation" }
 
-// bodyCallKinds are the construct kinds a statement calls.
-var bodyCallKinds = map[string]bool{
-	"query": true, "mutation": true, "logic": true, "builtin": true, "automation": true, "action": true,
-}
+// bodyCallKinds are the construct kinds a statement calls (BodyCallKinds).
+var bodyCallKinds = func() map[string]bool {
+	out := map[string]bool{}
+	for _, k := range BodyCallKinds() {
+		out[k] = true
+	}
+	return out
+}()
 
 // lastTok is the most recently consumed token.
 func (p *Parser) lastTok() Token {

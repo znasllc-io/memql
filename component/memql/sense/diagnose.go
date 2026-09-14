@@ -121,6 +121,15 @@ func (s *Service) Diagnose(source string, filePath string) []Diagnostic {
 		// loaded still gets told their relationship type refuses boot
 		// (memql#3661).
 		diagnostics = append(diagnostics, relationshipAxesRule(source)...)
+		// A body written in statements is held to the scope rules the loader
+		// refuses it for (compiler.CheckBody, epic memql#5370), which need no
+		// vocabulary either. The parse's positions are the author's when the
+		// lowering was marked, and the lowering's otherwise.
+		lexed, place := source, func(d Diagnostic) Diagnostic { return d }
+		if !positioned {
+			lexed, place = rewritten, lm.remap
+		}
+		diagnostics = append(diagnostics, bodyScopeDiagnostics(file, lexed, place)...)
 	}
 
 	return diagnostics
@@ -202,6 +211,12 @@ func errorCode(err error, fallback string) string {
 	var retired *parser.RetiredFormError
 	if errors.As(err, &retired) && retired.Form.Rule != "" {
 		return retired.Form.Rule
+	}
+	// A refusal of the statement parser carries its stable code the same way
+	// (epic memql#5370): body_empty, body_step_retired, ...
+	var body *parser.BodyRefusal
+	if errors.As(err, &body) && body.Code != "" {
+		return body.Code
 	}
 	return fallback
 }

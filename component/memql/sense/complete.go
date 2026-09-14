@@ -16,6 +16,13 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 	ctx := analyzeCursorContext(source, line, col)
 	ctx.FilePath = filePath
 
+	// Where a statement starts, or follows a statement on its line, the
+	// statement language decides what may be written (epic memql#5370) --
+	// even in a logic body, whose every other place is an expression.
+	if items, ok := s.completeAtStatement(ctx, source, line, col); ok {
+		return items
+	}
+
 	// An expression position (memql#5365) offers what the tier manifest admits
 	// there, and nothing it refuses.
 	if items, ok := s.completeAtExpression(ctx, source, line, col); ok {
@@ -39,9 +46,10 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 	case ContextReceiver:
 		items = s.completeReceiver(ctx.Prefix)
 	case ContextFuncBody:
-		// A body written in statements (epic memql#5370) has its own set.
-		if construct, ok := statementBody(source, line, ctx.Enclosing); ok {
-			items = s.completeStatementBody(ctx.Prefix, ctx.Enclosing, construct)
+		// In a body written in statements (epic memql#5370), what the
+		// statement completer and the expression positions left is a value.
+		if _, ok := statementBodySite(source, line, cursorLine(source, line, col), ctx.Enclosing, ctx.Prefix); ok {
+			items = s.statementExpressionItems(ctx, source, line, col)
 			break
 		}
 		items = s.completeFuncBody(ctx.Prefix, ctx.Enclosing, source)

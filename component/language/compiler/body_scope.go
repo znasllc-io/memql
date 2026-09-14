@@ -120,6 +120,10 @@ var bodyReservedNames = map[string]bool{
 	"config": true, "partition": true, "trace": true, "steps": true,
 }
 
+// IsBodyRoot reports whether a bare read of name is a reserved root in a body
+// of this kind ("logic" or "automation") -- the roots Sense offers there.
+func IsBodyRoot(kind, name string) bool { return isRoot(kind, name) }
+
 // isRoot reports whether a bare read of name is a reserved root in a body of
 // this kind. `event` is an automation's trigger; a logic has none of its own
 // and reads what its caller passes, args.event.
@@ -396,9 +400,16 @@ func (w *scopeWalk) statement(s ast.BodyStatement, sc *bodyScope, path []onceSte
 	}
 }
 
-// callRule refuses, in a logic, the two call kinds D14 keeps out of it.
+// LogicMayCall reports whether a logic may call a construct of kind: every
+// kind a statement calls but the two D14 keeps out of a logic, automation and
+// action, which belong in an automation. Sense offers what it admits.
+func LogicMayCall(kind string) bool {
+	return kind != "automation" && kind != "action"
+}
+
+// callRule refuses, in a logic, the call kinds LogicMayCall does not admit.
 func (w *scopeWalk) callRule(c *ast.ConstructCall) {
-	if w.kind != "logic" || (c.Kind != "automation" && c.Kind != "action") {
+	if w.kind != "logic" || LogicMayCall(c.Kind) {
 		return
 	}
 	w.problem(codeBodyCallNotInLogic, c.Span.Line, c.Span.Col,

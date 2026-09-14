@@ -30,6 +30,8 @@ var v1BodyRefusalCases = []struct {
 		"automation a {\n  step run {\n    logic l(event: event)\n  }\n}", "2:3", "`step run { ... }` is retired in edition 2026: write the step's call as a statement, `run := <call>` (memqlmigrate --rewrite=bodies rewrites it)"},
 	{"a body block in a logic", codeBodyBlockRetired,
 		"logic l {\n  body {\n    return 1\n  }\n}", "2:3", "`body { }` is retired in edition 2026: a logic's statements follow its args block directly"},
+	{"a body block in an automation", codeBodyBlockRetired,
+		"automation a {\n  body {\n    x := 1\n  }\n}", "2:3", "`body { }` is retired in edition 2026: an automation's statements follow its args block directly"},
 	{"the terse header", codeBodyTerseRetired,
 		"automation a @trigger(event=\"x\") => logic l", "1:1", "the terse `automation a @trigger(...) => logic L` form is retired in edition 2026: write @trigger(...) above `automation a { logic L(event: event) }`"},
 	{"a steps reference", codeBodyStepsReferenceRetired,
@@ -223,6 +225,43 @@ func TestBodyStatementFormsMatchTheParser(t *testing.T) {
 	sort.Strings(extra)
 	if len(extra) > 0 {
 		t.Errorf("the cases use forms BodyStatementForms does not list: %v", extra)
+	}
+	// The words Sense offers where a statement starts are forms the cases
+	// accept.
+	for _, kw := range BodyStatementKeywords() {
+		if !listed[kw] {
+			t.Errorf("%s opens a statement (BodyStatementKeywords) and BodyStatementForms does not list it", kw)
+		}
+	}
+}
+
+// TestBodyCallKindsAreEachCalled: every kind BodyCallKinds lists is called by
+// a case in v1BodyCases, so the list Sense offers is the parser's.
+func TestBodyCallKindsAreEachCalled(t *testing.T) {
+	called := map[string]bool{}
+	for _, c := range v1BodyCases {
+		ast.WalkBody(v1Body(t, parseV1BodyFile(t, c.src)).Statements, func(s ast.BodyStatement) bool {
+			switch v := s.(type) {
+			case *ast.AssignStatement:
+				if v.Call != nil {
+					called[v.Call.Kind] = true
+				}
+			case *ast.CallStatement:
+				if v.Call != nil {
+					called[v.Call.Kind] = true
+				}
+			case *ast.ReturnStatement:
+				if v.Call != nil {
+					called[v.Call.Kind] = true
+				}
+			}
+			return true
+		})
+	}
+	for _, k := range BodyCallKinds() {
+		if !called[k] {
+			t.Errorf("no case in v1BodyCases calls a %s, which BodyCallKinds lists", k)
+		}
 	}
 }
 

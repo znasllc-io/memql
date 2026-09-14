@@ -5,6 +5,13 @@
       "verdict": "refuse_parse",
       "code": "body_one_statement_per_line",
       "message": "one statement per line: `y` starts a second statement on line 2"
+    },
+    {
+      "file": "no-statement.memql",
+      "verdict": "refuse_load",
+      "code": "body_logic_return",
+      "message": "a logic ends with `return <value>`: its last statement, outside any block, is the return",
+      "note": "A logic with no statement has no return to end on; an automation with none is refused at parse (body_empty)."
     }
   ]
 }

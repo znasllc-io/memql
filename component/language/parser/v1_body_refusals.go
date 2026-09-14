@@ -73,6 +73,21 @@ func BodyStatementForms() []string {
 	}
 }
 
+// BodyStatementKeywords lists the words that open a statement, in the order
+// BodyStatementForms lists them. A statement also opens with the name it
+// binds (`x := ...`) or with a construct call's kind (BodyCallKinds); `else`
+// follows a closing brace on its line, and `case` / `default` open the lines
+// of a switch and `branch` those of a parallel.
+func BodyStatementKeywords() []string {
+	return []string{"if", "for", "switch", "parallel", "publish", "return"}
+}
+
+// BodyCallKinds lists the construct kinds a statement calls, in the order a
+// refusal names them.
+func BodyCallKinds() []string {
+	return []string{"query", "mutation", "logic", "builtin", "automation", "action"}
+}
+
 // BodyRefusal is a parse-time refusal of a body, with its stable code. It
 // unwraps to the positioned *ParseError, so every consumer that reads a parse
 // error's position reads this one's.
