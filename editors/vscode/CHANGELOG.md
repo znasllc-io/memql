@@ -22,9 +22,11 @@ someone deciding whether to install rather than for someone reading the repo.
 **Writing edition 2026**
 - Filters, specs, traits and trigger filters are written as a lambda over a
   named parameter: `filter row => row.status == "open" && isActiveRecord(row)`.
-  After `row.`, completion offers the fields of the concept the query, spec or
-  trigger is bound to, each with its declared type, then the fields every row
-  carries, such as `id` and `createdAt`.
+  In a filter, a refine clause or a trigger filter, completion offers the
+  `row =>` header and nothing else until it is written. After `row.`, it offers
+  the fields of the concept the query, spec or trigger is bound to, each with
+  its declared type, then the fields every row carries, such as `id` and
+  `createdAt`.
 - Completion offers only what the cursor's position accepts. A filter or a
   condition is not offered query or mutation calls, the middle of an
   expression is not offered statement keywords, and a list field of the row in
