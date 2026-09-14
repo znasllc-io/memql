@@ -827,6 +827,27 @@ the `claude` label and `epic:<name>`, one epic issue and its task sub-issues eac
 records their numbers in this index. Plans are written by the session that picks the
 epic up and deleted in the epic's merge.
 
+### Issues, filed 2026-09-13
+
+| Priority | Epic | Repository | Epic issue | Task issues |
+|---|---|---|---|---|
+| P07 | A The app door completion (engine half) | memql | #5391 | #5392-#5395 |
+| P02 | A The app door completion (cockpit half) | memql-cockpit | #436 | #437-#439 |
+| P08 | B Recording (engine half) | memql | #5396 | #5397-#5401 |
+| P03 | B Recording (cockpit half) | memql-cockpit | #440 | #441-#443 |
+| P09 | C Learning | memql | #5402 | #5403-#5407 |
+| P10 | D Certification and replay | memql | #5408 | #5409-#5413 |
+| P11 | E Intervention, feedback and reusable decomposition | memql | #5414 | #5415-#5420 |
+
+Every task is a GitHub sub-issue of its epic; every epic body names its priority, its
+PR grouping, this record and its branch; every task body carries its deliverable,
+acceptance and files and opens with its epic, its PR number and the record section. All
+carry the `claude` label and `epic:<name>`. The priority label `priority:Pnn` orders the
+epics across each repository, lower first: in `memql` the six DSL freeze epics (P01 to
+P06, record `2026-09-13-dsl-v1-language-freeze-program-design.md`) precede this
+program, and in `memql-cockpit` the in-flight worker-stream-hardening epic (#425, P01)
+precedes its two halves here.
+
 ## 9. Out of scope
 
 - Distilling trajectories into model weights.
