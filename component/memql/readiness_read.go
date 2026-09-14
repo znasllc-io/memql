@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -121,11 +122,22 @@ func (e *MemQLEngine) evaluateReadinessRecomputeExpression(ctx context.Context) 
 		return nil, fmt.Errorf("readinessRecompute is internal or owner-only")
 	}
 	written, err := e.WriteModuleReadiness(ctx)
-	if err != nil {
+	// A PASS THAT COULD NOT EVALUATE A MODULE STILL ANSWERS. Its known rows
+	// were written, and refusing the whole call would tell the caller the
+	// recompute did nothing when it did most of it; the modules it could not
+	// evaluate are named instead, each with its closed-vocabulary reason, and
+	// this node's recompute loop keeps retrying them on its own.
+	unknown := []string{}
+	var u *ReadinessUnknownError
+	switch {
+	case err == nil:
+	case errors.As(err, &u):
+		unknown = u.pairs()
+	default:
 		return nil, err
 	}
 	nodeId, _ := e.readinessIdentity()
-	raw, err := json.Marshal(map[string]any{"nodeId": nodeId, "written": written})
+	raw, err := json.Marshal(map[string]any{"nodeId": nodeId, "written": written, "unknown": unknown})
 	if err != nil {
 		return nil, err
 	}
