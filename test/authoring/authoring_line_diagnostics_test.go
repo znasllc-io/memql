@@ -84,7 +84,7 @@ logic logicBad {
     x string @required
   }
   body {
-    return coalesce(args.x $ "y")
+    return args.x $ "y"
   }
 }`,
 		},
@@ -152,7 +152,7 @@ logic logicShift {
     x string @required
   }
   body {
-    return coalesce(args.x $ "y")
+    return args.x $ "y"
   }
 }`
 	base := priorConcept + "\n\n" + erroring
@@ -185,7 +185,7 @@ logic noAnchor {
     x string @required
   }
   body {
-    return coalesce(args.x $ "y")
+    return args.x $ "y"
   }
 }`,
 	}})

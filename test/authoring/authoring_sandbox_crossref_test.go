@@ -98,9 +98,7 @@ func TestCrossRef_DanglingShapeImportFails(t *testing.T) {
 			Source: `use crossns.shapes.{ ghostShapeThatDoesNotExist }
 
 @description("references a missing shape")
-spec ghostShapeThatDoesNotExist crossDanglingSpec {
-  return role == "admin"
-}`,
+spec ghostShapeThatDoesNotExist crossDanglingSpec = actor => actor.role == "admin"`,
 		},
 	}, eng)
 
