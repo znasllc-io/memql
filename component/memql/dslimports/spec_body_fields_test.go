@@ -38,7 +38,7 @@ func specBodyTree(specs string) fstest.MapFS {
 
 func specBodyErrs(t *testing.T, specs string) []error {
 	t.Helper()
-	tree, err := Load(specBodyTree(specs))
+	tree, err := Load(withLanguageLines(specBodyTree(specs)))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -59,9 +59,7 @@ func TestSpecBodyRejectsUndeclaredActorShapeKey(t *testing.T) {
 	errs := specBodyErrs(t, `use lab.shapes.{ labActor }
 
 /// Caller must be an admin -- with a typo'd envelope key.
-spec labActor requiresAdmin {
-  return rolle == "admin"
-}
+spec labActor requiresAdmin = actor => actor.rolle == "admin"
 `)
 	if len(errs) != 1 {
 		t.Fatalf("expected exactly 1 spec-body error, got %d: %v", len(errs), errs)
@@ -81,9 +79,7 @@ func TestSpecBodyRejectsUndeclaredConceptProperty(t *testing.T) {
 	errs := specBodyErrs(t, `use lab.concepts.{ widget }
 
 /// Rows in a region -- with a typo'd property.
-spec widget inRegion {
-  return regoin == "eu"
-}
+spec widget inRegion = row => row.regoin == "eu"
 `)
 	if len(errs) != 1 {
 		t.Fatalf("expected exactly 1 spec-body error, got %d: %v", len(errs), errs)
@@ -99,19 +95,13 @@ func TestSpecBodyAcceptsDeclaredFields(t *testing.T) {
 use lab.concepts.{ widget }
 
 /// Caller must be an admin.
-spec labActor requiresAdmin {
-  return role == "admin"
-}
+spec labActor requiresAdmin = actor => actor.role == "admin"
 
 /// Caller is a known user.
-spec labActor knownUser {
-  return userId != ""
-}
+spec labActor knownUser = actor => actor.userId != ""
 
 /// Rows in a region.
-spec widget inRegion {
-  return region == "eu"
-}
+spec widget inRegion = row => row.region == "eu"
 `)
 	if len(errs) != 0 {
 		t.Fatalf("correct spec bodies must not be flagged, got: %v", errs)
@@ -125,9 +115,7 @@ spec widget inRegion {
 func TestSpecBodySkipsTraits(t *testing.T) {
 	errs := specBodyErrs(t, `
 /// Matches active rows. Unbound by design.
-trait labIsActive {
-  return active == true
-}
+trait labIsActive = row => row.active == true
 `)
 	if len(errs) != 0 {
 		t.Fatalf("traits are unbound by design and must be skipped, got: %v", errs)
@@ -139,11 +127,10 @@ trait labIsActive {
 // second, wronger diagnostic -- and would fire on a product bundle whose
 // binding lives in a namespace absent from the linted root.
 func TestSpecBodySkipsUnresolvableBinding(t *testing.T) {
+	// The binding is dangling on purpose. memqlmigrate:keep
 	errs := specBodyErrs(t, `
 /// Bound to something this tree does not declare.
-spec nowhereShape orphan {
-  return whatever == "x"
-}
+spec nowhereShape orphan = row => row.whatever == "x"
 `)
 	if len(errs) != 0 {
 		t.Fatalf("an unresolvable binding must be skipped, got: %v", errs)
@@ -157,14 +144,10 @@ func TestSpecBodyAcceptsConstructReferences(t *testing.T) {
 	errs := specBodyErrs(t, `use lab.shapes.{ labActor }
 
 /// Caller must be an admin.
-spec labActor requiresAdmin {
-  return role == "admin"
-}
+spec labActor requiresAdmin = actor => actor.role == "admin"
 
-/// Composed predicate referencing another spec by bare name.
-spec labActor requiresAdminToo {
-  return requiresAdmin
-}
+/// Composed predicate applying another spec.
+spec labActor requiresAdminToo = actor => requiresAdmin(actor)
 `)
 	if len(errs) != 0 {
 		t.Fatalf("a bare construct reference must not be read as a field, got: %v", errs)
@@ -177,14 +160,14 @@ spec labActor requiresAdminToo {
 // -- a guaranteed false positive on documented, working DSL, with no name
 // collision or product bundle needed (memql#2804 review).
 func TestSpecBodyAcceptsDefaultProjectionShape(t *testing.T) {
-	tree, err := Load(fstest.MapFS{
+	tree, err := Load(withLanguageLines(fstest.MapFS{
 		"lab/concepts.memql": &fstest.MapFile{Data: []byte(
 			"/// A lab widget.\nconcept widget {\n  region string  @description(\"Region.\")\n}\n")},
 		"lab/shapes.memql": &fstest.MapFile{Data: []byte(
 			"/// Default projection of every field.\n@row\nshape widget widgetFull {\n}\n")},
 		"lab/specs.memql": &fstest.MapFile{Data: []byte(
-			"/// Rows in a region.\nspec widgetFull inRegion {\n  return region == \"eu\"\n}\n")},
-	})
+			"/// Rows in a region.\nspec widgetFull inRegion = row => row.region == \"eu\"\n")},
+	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -203,9 +186,7 @@ func TestSpecBodyRejectsIntrinsicOnShapeBoundSpec(t *testing.T) {
 	errs := specBodyErrs(t, `use lab.shapes.{ labActor }
 
 /// Reads a row intrinsic through an @actor binding.
-spec labActor recentActor {
-  return createdAt != ""
-}
+spec labActor recentActor = actor => actor.createdAt != ""
 `)
 	if len(errs) != 1 {
 		t.Fatalf("a shape-bound spec must not admit row intrinsics, got %d: %v", len(errs), errs)
@@ -221,9 +202,7 @@ func TestSpecBodyAcceptsIntrinsicOnConceptBoundSpec(t *testing.T) {
 	errs := specBodyErrs(t, `use lab.concepts.{ widget }
 
 /// Rows created after a cutoff.
-spec widget recentWidget {
-  return createdAt != ""
-}
+spec widget recentWidget = row => row.createdAt != ""
 `)
 	if len(errs) != 0 {
 		t.Fatalf("a concept-bound row spec may name intrinsics, got: %v", errs)
@@ -236,15 +215,15 @@ spec widget recentWidget {
 // on legal DSL, which is the failure resolveFilterConcept's explicit-import
 // guard exists to prevent.
 func TestSpecBodySkipsExternallySuppliedBinding(t *testing.T) {
-	tree, err := Load(fstest.MapFS{
+	tree, err := Load(withLanguageLines(fstest.MapFS{
 		// A bundle-local shape that happens to share the engine shape's name.
 		"catalog/shapes.memql": &fstest.MapFile{Data: []byte(
 			"/// Unrelated local shape.\n@row\nshape labActor {\n  sku\n  price\n}\n")},
 		"orders/specs.memql": &fstest.MapFile{Data: []byte(
 			"use common.shapes.{ labActor }\n\n" +
 				"/// Bound to the ENGINE shape, absent from this root.\n" +
-				"spec labActor requiresAdmin {\n  return role == \"admin\"\n}\n")},
-	})
+				"spec labActor requiresAdmin = actor => actor.role == \"admin\"\n")},
+	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -262,16 +241,16 @@ func TestSpecBodySkipsExternallySuppliedBinding(t *testing.T) {
 // here would silence a real typo whenever some unrelated trait shared its
 // spelling (memql#2804 review).
 func TestSpecBodyTypoNotMaskedByUnrelatedConstruct(t *testing.T) {
-	tree, err := Load(fstest.MapFS{
+	tree, err := Load(withLanguageLines(fstest.MapFS{
 		"lab/shapes.memql": &fstest.MapFile{Data: []byte(
 			"/// Actor envelope.\n@actor\nshape labActor {\n  actor.role\n}\n")},
 		// An unrelated trait in another namespace sharing the typo's spelling.
 		"other/traits.memql": &fstest.MapFile{Data: []byte(
-			"/// Unrelated.\ntrait roles {\n  return active == true\n}\n")},
+			"/// Unrelated.\ntrait roles = row => row.active == true\n")},
 		"lab/specs.memql": &fstest.MapFile{Data: []byte(
 			"/// Typo'd envelope key that collides with a trait name.\n" +
-				"spec labActor requiresAdmin {\n  return roles == \"admin\"\n}\n")},
-	})
+				"spec labActor requiresAdmin = actor => actor.roles == \"admin\"\n")},
+	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -291,7 +270,7 @@ func TestSpecBodyTypoNotMaskedByUnrelatedConstruct(t *testing.T) {
 // concept from the spec's domain -- which both flags the correct field and
 // admits the wrong one (memql#2804 review, D1).
 func TestSpecBodyResolvesDefaultProjectionInTheShapesScope(t *testing.T) {
-	tree, err := Load(fstest.MapFS{
+	tree, err := Load(withLanguageLines(fstest.MapFS{
 		"core/concepts.memql": &fstest.MapFile{Data: []byte(
 			"/// The real widget.\nconcept widget {\n  region string  @description(\"Region.\")\n}\n")},
 		"catalog/shapes.memql": &fstest.MapFile{Data: []byte(
@@ -302,8 +281,8 @@ func TestSpecBodyResolvesDefaultProjectionInTheShapesScope(t *testing.T) {
 			"/// A different widget.\nconcept widget {\n  sku string  @description(\"SKU.\")\n}\n")},
 		"orders/specs.memql": &fstest.MapFile{Data: []byte(
 			"use catalog.shapes.{ widgetFull }\n\n" +
-				"/// Reads the SHAPE's concept field.\nspec widgetFull inRegion {\n  return region == \"eu\"\n}\n")},
-	})
+				"/// Reads the SHAPE's concept field.\nspec widgetFull inRegion = row => row.region == \"eu\"\n")},
+	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -320,7 +299,7 @@ func TestSpecBodyResolvesDefaultProjectionInTheShapesScope(t *testing.T) {
 // boot -- the same asymmetry the shape-bound intrinsic rule exists to avoid
 // (memql#2804 review, D2).
 func TestSpecBodyRejectsInternalFieldOnDefaultProjection(t *testing.T) {
-	tree, err := Load(fstest.MapFS{
+	tree, err := Load(withLanguageLines(fstest.MapFS{
 		"lab/concepts.memql": &fstest.MapFile{Data: []byte(
 			"/// A lab widget.\nconcept widget {\n" +
 				"  region string  @description(\"Region.\")\n" +
@@ -328,8 +307,8 @@ func TestSpecBodyRejectsInternalFieldOnDefaultProjection(t *testing.T) {
 		"lab/shapes.memql": &fstest.MapFile{Data: []byte(
 			"/// Default projection.\n@row\nshape widget widgetFull {\n}\n")},
 		"lab/specs.memql": &fstest.MapFile{Data: []byte(
-			"/// Reads a server-only field.\nspec widgetFull readsInternal {\n  return secret == \"x\"\n}\n")},
-	})
+			"/// Reads a server-only field.\nspec widgetFull readsInternal = row => row.secret == \"x\"\n")},
+	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -344,16 +323,23 @@ func TestSpecBodyRejectsInternalFieldOnDefaultProjection(t *testing.T) {
 	}
 }
 
-// conceptFieldMapper reads the bound concept "by bare name only" and rejects
-// any dotted reference, so a concept-bound spec must not be allowed the
-// reserved heads a query filter may use (memql#2804 review, D3).
+// A spec takes no arguments: the engine's lowering refuses an `args.x` read in
+// a spec body at load ("a spec or trait takes no arguments"), so the lane
+// reports it rather than lint clean and refuse at boot (memql#2804 review, D3).
+// The actor envelope, which a pre-2026 concept-bound spec could not read (its
+// mapper took bare fields only), is in every edition-2026 predicate's scope
+// and is admitted.
 func TestSpecBodyRejectsReservedHeadOnConceptBoundSpec(t *testing.T) {
-	for _, body := range []string{`args.foo == "y"`, `actor.userId == "y"`} {
+	for body, want := range map[string]int{
+		`args.foo == "y"`:            1,
+		`row.region == args.foo`:     1,
+		`actor.userId == "y"`:        0,
+		`row.region == actor.userId`: 0,
+	} {
 		errs := specBodyErrs(t, "use lab.concepts.{ widget }\n\n"+
-			"/// Reads a reserved head.\nspec widget usesReserved {\n  return "+body+"\n}\n")
-		if len(errs) != 1 {
-			t.Errorf("%s: a concept-bound spec may name only bare fields/intrinsics; got %d: %v",
-				body, len(errs), errs)
+			"/// Reads a reserved head.\nspec widget usesReserved = row => "+body+"\n")
+		if len(errs) != want {
+			t.Errorf("%s: want %d diagnostic(s), got %d: %v", body, want, len(errs), errs)
 		}
 	}
 }

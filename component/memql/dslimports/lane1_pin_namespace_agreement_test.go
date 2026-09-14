@@ -53,7 +53,7 @@ query widget deployWidgets {
   args {
     label  string  @required
   }
-  filter  label == args.label
+  filter  row => row.label == args.label
 }`),
 	}
 }
@@ -111,7 +111,7 @@ query widget deployWidgets {
   args {
     label  string  @required
   }
-  filter  label == args.label
+  filter  row => row.label == args.label
 }`)
 	root["other/concepts.memql"] = file(`@version("1.0.0")
 @description("Declares sprocket, in a namespace the import does not name.")
@@ -171,7 +171,7 @@ query widget deployWidgets {
   args {
     label  string  @required
   }
-  filter  label == args.label
+  filter  row => row.label == args.label
 }`)
 	for _, err := range loadTree(t, scoped).VerifyReferentialIntegrity() {
 		if strings.Contains(err.Error(), "use cluster:rollout.concepts") {
@@ -194,7 +194,7 @@ query widget deployWidgets {
   args {
     label  string  @required
   }
-  filter  label == args.label
+  filter  row => row.label == args.label
 }`)
 
 	var remedy string
@@ -245,7 +245,7 @@ query widget deployWidgets {
   args {
     label  string  @required
   }
-  filter  label == args.label
+  filter  row => row.label == args.label
 }`),
 	}
 

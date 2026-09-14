@@ -1,38 +1,85 @@
 package dslspec
 
+import (
+	"github.com/znasllc-io/memql/component/language/functions"
+	"github.com/znasllc-io/memql/component/language/parser"
+)
+
 // lexicon.go holds the non-construct vocabulary: control-flow / clause /
-// reserved keywords, the one-Go-grammar operator set (#971), and the field
-// type names. These tables are the SoT for the corresponding sense surfaces
-// (which previously hard-coded a stale set that still carried `has` and
-// `array`).
+// reserved keywords, the operator set (projected from the operator table since
+// memql#5365), and the field type names. These tables are the SoT for the
+// corresponding sense surfaces (which previously hard-coded a stale set that
+// still carried `has` and `array`).
 
 // keywords returns reserved words that are not top-level constructs:
-// control-flow words used inside logic/automation bodies, the block-header
-// clause keywords, the reserved engine identifiers, and `use`.
+// control-flow words used inside logic/automation bodies, the body clause
+// keywords (derived from the parser's clause table, bodyClauseKeywords), the
+// reserved engine identifiers, and `use`.
 func keywords() []Keyword {
+	out := controlKeywords()
+	out = append(out, bodyClauseKeywords()...)
+	return append(out, reservedKeywords()...)
+}
+
+// bodyClauseKeywords returns one clause keyword per body clause any
+// construct accepts, in the order the constructs list them, DERIVED from
+// parser.BodyClauses (memql#5359) -- the hand list this replaced lacked sort,
+// paginate, asOf, count, step and precondition. The doc of each is
+// clauseDocs'; a clause without one fails the drift test.
+func bodyClauseKeywords() []Keyword {
+	seen := map[string]bool{}
+	var out []Keyword
+	for _, kw := range constructKeywords() {
+		for _, clause := range parser.BodyClauses(kw) {
+			if seen[clause] {
+				continue
+			}
+			seen[clause] = true
+			out = append(out, Keyword{Name: clause, Doc: clauseDocs[clause], Kind: "clause"})
+		}
+	}
+	return out
+}
+
+// clauseDocs is the one-line doc of each body clause.
+var clauseDocs = map[string]string{
+	"args":         "Input-schema block: declares caller-passed args read as args.X in the body.",
+	"filter":       "Query clause: `filter row => <predicate>`, the boolean predicate over the row, pushed down to SQL. A line clause -- it takes the rest of its line and the lines after it that open with an operator; no block.",
+	"refine":       "Query clause: `refine row => <predicate>`, a predicate the database cannot run, applied in process to each page `paginate` reads, so a page may come back short. Requires paginate; never with count.",
+	"shape":        "Query clause: names the projection shape for the result -- `shape <name>`. (Also the `shape` construct keyword and the `<expr> with shape(...)` expression.)",
+	"sort":         "Query clause: order the result -- `sort \"row.createdAt\", \"desc\"`. Payload keys are bare; row intrinsics take the row. namespace.",
+	"paginate":     "Query clause: bound the result to a window -- `paginate 25`. A list-returning query carries paginate, sort, count or @unbounded(\"reason\") (memql#1965).",
+	"asOf":         "Query clause: read the stream as of a moment -- `asOf latest`, or `asOf args.at ?? latest`. Query-only (core-builtins ADR 2.3).",
+	"count":        "Query clause: aggregate the matching set to {count: N} -- a bare `count`. Mutually exclusive with shape, sort and paginate.",
+	"insert":       "Mutation block: the row to create. Exactly one insert OR update per mutation.",
+	"update":       "Mutation block: partial read-merge-write of an existing row (keyed by id).",
+	"accept":       "Write-block sugar: `accept { name, ... }` lists the public fields the mutation accepts -- each auto-binds to its same-named arg (`name` -> `name: args.name`). Every name must be a declared arg. Nested inside insert{}/update{} (or top-level, which means insert). Never mixed with loose fields.",
+	"stamp":        "Write-block sugar: `stamp { key: value, ... }` carries the server-set fields beside an accept{} list. Nested inside insert{}/update{} (or top-level with accept, which means insert).",
+	"body":         "Logic block: named statements ending in `return <expr>`. An automation has no body block -- its body is step blocks.",
+	"step":         "Automation block: `step <name> { <call> }`, one unit of the automation's work; steps run in order, and each result is readable by name.",
+	"precondition": "Automation block: `precondition <name> { ... }`, a deterministic check that must hold before the steps run (Epic 4, memql#2139).",
+	"params":       "Provider block: model/window/cost parameters.",
+	"auth":         "Provider block: vendor auth (e.g. apiKey env(\"...\")).",
+}
+
+// controlKeywords are the control-flow words of logic / automation bodies.
+func controlKeywords() []Keyword {
 	return []Keyword{
 		// Control flow (logic / automation bodies).
-		{Name: "if", Doc: "Conditional control flow: if cond { ... } else { ... }. For a conditional VALUE use the cond(...) expression.", Kind: "control"},
+		{Name: "if", Doc: "Conditional control flow: if cond { ... } else { ... }. For a conditional VALUE write the expression `p ? a : b`.", Kind: "control"},
 		{Name: "else", Doc: "Alternative branch of an if statement.", Kind: "control"},
 		{Name: "for", Doc: "Iterate a collection: for item := range collection { ... }.", Kind: "control"},
 		{Name: "range", Doc: "Iteration source in a for statement.", Kind: "control"},
 		{Name: "return", Doc: "Return the trailing value from a logic body.", Kind: "control"},
-		{Name: "when", Doc: "Arg-conditional guard: when(args.x) { <expr> } -- the guarded block (and its connective) is dropped if args.x is absent.", Kind: "control"},
-		{Name: "in", Doc: "Membership test: args.x in payload.list, or payload.kind in [\"a\", \"b\"]. The single membership operator (`has` is retired).", Kind: "control"},
-		{Name: "startsWith", Doc: "String-prefix test: <field> startsWith \"lit\", [\"a\", \"b\"] (ANY of) or args.x. Filter and spec predicate; an empty list and a blank prefix match nothing (memql#4208).", Kind: "control"},
+		{Name: "when", Doc: "Retired in edition 2026: the arg-conditional guard `when(args.x) { <predicate> }` is written `args.x == nil || <predicate>`, which lowers the same way. memqlmigrate --rewrite=expressions rewrites it.", Kind: "control"},
+		{Name: "in", Doc: "Membership test: `args.tag in row.tags`, or `row.kind in [\"a\", \"b\"]`. The single membership operator (`has` and the `.contains(v)` collection method are retired).", Kind: "control"},
+		{Name: "startsWith", Doc: "String-prefix test: `row.name startsWith \"lit\"`, a list of prefixes (ANY of), or an arg. An empty list and a blank prefix match nothing (memql#4208).", Kind: "control"},
+	}
+}
 
-		// Block-header clauses (struct-form construct bodies).
-		{Name: "args", Doc: "Input-schema block: declares caller-passed args read as args.X in the body.", Kind: "clause"},
-		{Name: "filter", Doc: "Query clause: the boolean row predicate (specs + payload/intrinsic comparisons).", Kind: "clause"},
-		{Name: "shape", Doc: "Query clause: names the projection shape for the result. (Also the `shape` construct keyword and the `<expr> with shape(...)` expression.)", Kind: "clause"},
-		{Name: "insert", Doc: "Mutation block: the row to create. Exactly one insert OR update per mutation.", Kind: "clause"},
-		{Name: "update", Doc: "Mutation block: partial read-merge-write of an existing row (keyed by id).", Kind: "clause"},
-		{Name: "accept", Doc: "Write-block sugar: `accept { name, ... }` lists the public fields the mutation accepts -- each auto-binds to its same-named arg (`name` -> `name: args.name`). Every name must be a declared arg. Nested inside insert{}/update{} (or top-level, which means insert). Never mixed with loose fields.", Kind: "clause"},
-		{Name: "stamp", Doc: "Write-block sugar: `stamp { key: value, ... }` carries the server-set fields beside an accept{} list. Nested inside insert{}/update{} (or top-level with accept, which means insert).", Kind: "clause"},
-		{Name: "body", Doc: "Logic/automation block: named statements ending in `return <expr>`.", Kind: "clause"},
-		{Name: "params", Doc: "Provider block: model/window/cost parameters.", Kind: "clause"},
-		{Name: "auth", Doc: "Provider block: vendor auth (e.g. apiKey env(\"...\")).", Kind: "clause"},
-
+// reservedKeywords are the reserved engine identifiers and `use`.
+func reservedKeywords() []Keyword {
+	return []Keyword{
 		// Reserved engine identifiers (bare top-level names, not args).
 		{Name: "now", Doc: "Reserved: RFC3339 timestamp captured at eval start.", Kind: "reserved"},
 		{Name: "actor", Doc: "Reserved: the auth envelope. Closed member set (#2623): userId, role, identityId, isClusterOwner, primaryEmail, now, plus the legacy isOwner alias. Reading it requires @actor in the construct preamble (#2621).", Kind: "reserved", Properties: []KeywordProperty{
@@ -55,34 +102,27 @@ func keywords() []Keyword {
 	}
 }
 
-// operators returns the one-Go-boolean-grammar operator set (#971). The
-// retired `;`-AND / `,`-OR separators and the `has` membership operator are
-// intentionally absent -- the drift test asserts they never reappear here.
+// operators returns the v1 expression operators, projected row for row from
+// the one operator table (component/language/functions, Operators) -- symbol,
+// prose, absence rule and precedence -- so no operator is described in two
+// places (memql#5365). The retired `;`-AND / `,`-OR separators and the `has`
+// membership operator are not in that table; the drift test asserts they never
+// reappear here.
+//
+// `!` is a working operator everywhere in v1: the evaluators give it the
+// record's two-valued meaning (every predicate answers true or false, absent
+// included). Its old Doc warned that it was refused at load (memql#3630), which
+// was true of the pre-v1 converters and is exactly what this epic changes.
 func operators() []Operator {
-	return []Operator{
-		{Symbol: "==", Doc: "Equality."},
-		{Symbol: "!=", Doc: "Inequality."},
-		{Symbol: "<", Doc: "Less than."},
-		{Symbol: "<=", Doc: "Less than or equal."},
-		{Symbol: ">", Doc: "Greater than."},
-		{Symbol: ">=", Doc: "Greater than or equal."},
-		{Symbol: "&&", Doc: "Logical AND."},
-		{Symbol: "||", Doc: "Logical OR."},
-		// `!` is listed so Sense can EXPLAIN the token an author types,
-		// not to offer it as usable. It lexes and parses and is then
-		// refused by every ASTConverter surface -- filters and specs get
-		// the #2542 expression-led scope error, logic bodies and
-		// collection lambdas get "NOT/! does not convert". Its only
-		// working home is an automation cond-step condition, which the
-		// string evaluator in component/automations/evaluator.go handles.
-		// The Doc used to read "Logical NOT (highest precedence)", which
-		// advertised an operator the loader has never accepted
-		// (memql#3630).
-		{Symbol: "!", Doc: "Logical NOT -- NOT SUPPORTED in filters, specs, logic bodies or collection lambdas; rejected at load. Write the != comparison form. Works in runtime condition strings only: an automation cond-step condition and a trigger @filter."},
-		{Symbol: "in", Doc: "Membership: lhs in rhsCollection."},
-		{Symbol: "startsWith", Doc: "String prefix: field startsWith prefix, or ANY of a list of prefixes. Parameterized `^@ ANY(text[])` in SQL; empty list / blank prefix match nothing (memql#4208)."},
-		{Symbol: "??", Doc: "Null-coalescing: first non-nil/non-empty operand; a ?? b ?? c folds to coalesce(a, b, c) with the final operand as the ultimate fallback. Binds tighter than comparison, looser than arithmetic (#2611)."},
+	table := functions.Operators()
+	out := make([]Operator, 0, len(table))
+	for _, op := range table {
+		out = append(out, Operator{
+			Symbol: op.Symbol, Doc: op.Doc, Name: op.Name, Kind: op.Kind,
+			Form: op.Form, Absence: op.Absence, Level: op.Level,
+		})
 	}
+	return out
 }
 
 // fieldTypes returns the type names valid in a concept field, args field, or

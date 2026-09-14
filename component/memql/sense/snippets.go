@@ -38,7 +38,7 @@ func escapeSnippetLiteral(text string) string {
 	return out
 }
 
-// blockSnippet builds the body-block snippet for a named block:
+// blockSnippet builds the body-block snippet for a block clause:
 //
 //	args {
 //	  <cursor>
@@ -48,12 +48,44 @@ func escapeSnippetLiteral(text string) string {
 // rather than drowning it out (everything unset sorts as 00000000 --
 // first -- which is why every item here sets it deliberately).
 func blockSnippet(block, construct string) CompletionItem {
+	if block == "filter" {
+		// A filter is not a block in v1: it is a clause whose value is a
+		// lambda over the row (the `filter { }` block is a pre-v1 spelling).
+		return CompletionItem{
+			Label:         "filter row => ...",
+			Kind:          "snippet",
+			Detail:        construct + " clause",
+			Documentation: "Insert a `filter row => <predicate>` clause over the bound concept's row.",
+			InsertText:    `filter row => row.${1:field} == ${2:"value"}$0`,
+			IsSnippet:     true,
+			SortPriority:  1,
+		}
+	}
 	return CompletionItem{
 		Label:         block + " { ... }",
 		Kind:          "snippet",
 		Detail:        construct + " block",
-		Documentation: "Insert an `" + block + " { }` block with the cursor inside.",
+		Documentation: "Insert a `" + block + " { }` block with the cursor inside.",
 		InsertText:    block + " {\n\t$0\n}",
+		IsSnippet:     true,
+		SortPriority:  1,
+	}
+}
+
+// namedBlockSnippet builds the snippet for a block that carries a name
+// (parser.IsNamedBlock): the name is the first tabstop and the cursor lands
+// inside, because `step { ... }` without one is refused.
+//
+//	step <name> {
+//	  <cursor>
+//	}
+func namedBlockSnippet(block, construct string) CompletionItem {
+	return CompletionItem{
+		Label:         block + " <name> { ... }",
+		Kind:          "snippet",
+		Detail:        construct + " block",
+		Documentation: "Insert a named `" + block + " <name> { }` block with the cursor inside.",
+		InsertText:    block + " ${1:name} {\n\t$0\n}",
 		IsSnippet:     true,
 		SortPriority:  1,
 	}
@@ -67,8 +99,21 @@ var constructSkeletons = []struct {
 }{
 	{
 		keyword: "query", label: "query <Concept> <name> { ... }",
-		doc:  "A read construct bound to a concept: filter clause plus optional args and shape.",
-		body: "query ${1:Concept} ${2:name} {\n\tfilter ${1:Concept}.${3:field} == args.${4:arg}\n\t$0\n}",
+		doc: "A read construct bound to a concept: a declared arg, a `filter row => ...` predicate over the row, and a page size.",
+		// The arg is declared because the loader refuses an args.X a body reads
+		// but never declares, and the page size because a list-returning query
+		// must carry paginate, sort, count or @unbounded.
+		body: "query ${1:Concept} ${2:name} {\n\targs {\n\t\t${4:value} string\n\t}\n\tfilter row => row.${3:field} == args.${4:value}\n\tpaginate ${5:50}\n\t$0\n}",
+	},
+	{
+		keyword: "spec", label: "spec <Concept> <name> = row => ...",
+		doc:  "A predicate over one bound concept, applied as `name(row)`. Over an @actor shape the parameter is `actor`.",
+		body: "/// ${1:What the predicate matches.}\nspec ${2:Concept} ${3:name} = row => row.${4:field} == ${5:true}$0",
+	},
+	{
+		keyword: "trait", label: "trait <name> = row => ...",
+		doc:  "A predicate over any row, bound to no concept, applied as `name(row)`.",
+		body: "/// ${1:What the predicate matches.}\ntrait ${2:name} = row => row.${3:field} == ${4:true}$0",
 	},
 	{
 		keyword: "mutation", label: "mutation <Concept> <name> { ... }",
@@ -118,4 +163,22 @@ func constructSkeletonItems(prefix string) []CompletionItem {
 		})
 	}
 	return items
+}
+
+// annotationSnippets are the annotation completions that insert a whole v1
+// form rather than a name: the trigger filter, whose argument is a lambda over
+// the triggering row. Offered where the construct takes @filter.
+func annotationSnippets(enc EnclosingConstruct) []CompletionItem {
+	if !containsString(annotationsForConstruct(enc), "filter") {
+		return nil
+	}
+	return []CompletionItem{{
+		Label:         "@filter(...)",
+		Kind:          "snippet",
+		Detail:        "trigger filter",
+		Documentation: "Insert a trigger filter over the triggering row: `@filter(row => <predicate>)`.",
+		InsertText:    `filter(row => row.${1:field} == ${2:"value"})$0`,
+		IsSnippet:     true,
+		SortPriority:  2,
+	}}
 }

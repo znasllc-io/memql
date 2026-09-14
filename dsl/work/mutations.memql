@@ -23,7 +23,7 @@
 // optional field carrying a @default is STAMPED with that default here,
 // because @default is documentation and `??` is the only mechanism that
 // writes a value (memql#3038) -- and for approval.decision it is
-// load-bearing, since workApprovalsForOwner filters decision=="".
+// load-bearing, since workApprovalsForOwner filters `row.decision == ""`.
 
 /// Open a run. status is an argument rather than a stamp so epic A2 can open a run in `compiling`.
 /// @serverOnly: a caller who can open a run can fabricate an execution record, and the writer is a

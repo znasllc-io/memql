@@ -48,7 +48,7 @@ func TestComplete_ShapeBodyOffersOnlyBoundConceptFields(t *testing.T) {
 	}
 	// The global vocabulary must be gone. `return` and `if` are control
 	// keywords; a projection list can hold neither.
-	for _, unwanted := range []string{"return", "if", "for", "coalesce"} {
+	for _, unwanted := range []string{"return", "if", "for", "lower"} {
 		if containsLabel(items, unwanted) {
 			t.Errorf("shape body must not offer %q -- a projection list holds fields, not statements; got %v", unwanted, labelsOfItems(items))
 		}

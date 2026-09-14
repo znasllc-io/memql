@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/dslclause"
 	"github.com/znasllc-io/memql/component/memql/dslgate"
 )
 
@@ -51,9 +52,41 @@ func carriesAnnotationGate(src, name string) bool {
 	if loc == nil {
 		return false
 	}
-	head := src[:loc[0]]
+	return dslgate.ConstructCarriesActorGate(constructHead(src, loc[0]))
+}
+
+// braceLessDeclRe matches the opening line of an edition-2026 brace-less
+// declaration: `spec <binding> <name> = ...` or `trait <name> = ...`.
+var braceLessDeclRe = regexp.MustCompile(`(?m)^(?:spec|trait)[ \t]+\w+(?:[ \t]+\w+)?[ \t]*=`)
+
+// constructHead returns the text between the end of the construct ABOVE the
+// signature that starts at sigStart and that signature -- the annotation
+// block, and nothing that belongs to another construct.
+//
+// The end of the construct above is its closing brace, or, for an
+// edition-2026 brace-less spec or trait (epic memql#5363), the last line of
+// its expression (dslclause.ClauseExtent). A brace-less declaration has no
+// brace to stop at, so a walk back to the previous `}` crossed it and read
+// the spec's own annotations -- and whatever sat above it -- as the head of
+// the construct below.
+func constructHead(src string, sigStart int) string {
+	head := src[:sigStart]
 	if end := strings.LastIndex(head, "\n}\n"); end >= 0 {
 		head = head[end:]
 	}
-	return dslgate.ConstructCarriesActorGate(head)
+	code := dslgate.BlankComments(head)
+	locs := braceLessDeclRe.FindAllStringIndex(code, -1)
+	if len(locs) == 0 {
+		return head
+	}
+	decl := locs[len(locs)-1][0]
+	lines := strings.Split(code[decl:], "\n")
+	off := decl
+	for i, last := 0, dslclause.ClauseExtent(lines, 0); i <= last; i++ {
+		off += len(lines[i]) + 1
+	}
+	if off > len(head) {
+		return ""
+	}
+	return head[off:]
 }

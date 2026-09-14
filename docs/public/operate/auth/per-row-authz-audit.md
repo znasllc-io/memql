@@ -49,7 +49,7 @@ client-callable, so no caller-check applies and it is never flagged.
 
 | Bucket | Definition | Required gating |
 |---|---|---|
-| **owned** | Row carries `ownerUserId` (or `userId` for identity-domain concepts) | `filter` must include `ownerUserId == actor.userId` (the caller can only read rows they own) |
+| **owned** | Row carries `ownerUserId` (or `userId` for identity-domain concepts) | `filter` must include `row.ownerUserId == actor.userId` (the caller can only read rows they own) |
 | **granted** | Row visible via a relationship (e.g. a task through its plan, a recipient through its audience) | Filter must reference a relationship spec that gates on `actor.userId` |
 | **admin** | Cluster-owner-only (e.g. audit log, identity admin views) | A top-level conjunct `actor.isClusterOwner == true`, or an admin context-spec |
 | **public** | Globally readable by intent (concept catalogs, role registry, public lookup tables) | `@public` annotation on the construct |
@@ -185,10 +185,10 @@ otherwise), skips cluster-owned rows, and excludes self-owned tiers
 entirely — their "owner field" is the row's own id, so a transfer would
 rename the row.
 
-> **Payload fields are BARE.** The `payload.` prefix this table used to
-> prescribe was retired by memql#2292 and is hard-failed by
-> `test/dslconformance/conformance_test.go`; a filter written that way does not load.
-> Row intrinsics take the `row.` namespace (`row.id`, `row.createdAt`).
+> **Fields are read through the filter's lambda parameter.** In edition
+> 2026 `row.ownerUserId` is the payload field and `row.id` the intrinsic,
+> so neither the `payload.` prefix this table used to prescribe (retired
+> by memql#2292) nor the pre-v1 bare field is a way to name one.
 
 > **`granted` is not implemented.** The classifier has no counter for it
 > and does not resolve relationship specs, so a granted construct lands
@@ -202,7 +202,8 @@ rename the row.
 > engine rejects it in `component/memql/ast_converter.go`, naming the
 > replacement as the predicate form `spec <name>` — no quotes, no
 > parens — which in a filter is the spec written as a top-level
-> conjunct.
+> conjunct. Edition 2026 retires that form too: a spec is applied to
+> its receiver, `requiresOwner(actor)`.
 >
 > **Do not take the list of live context-specs from here.** That is the
 > kind of hand-written inventory the rest of this document was rewritten
@@ -1093,7 +1094,7 @@ It does not merely scan for a substring. Flagging evaluates the
 a caller-check has to hold on every path, so an admin gate that is a
 top-level conjunct counts and the same term as a disjunct does not
 (memql#2832, memql#2840). A text scan alone would accept
-`ownerUserId == actor.userId || status == "open"`, which gates nothing.
+`row.ownerUserId == actor.userId || row.status == "open"`, which gates nothing.
 
 **What fails the build, and what does not.** The document used to say
 the test is "informational (does not fail the build)", and the status
@@ -1179,8 +1180,8 @@ emerged from the initial sweep:
    the admin surface is consolidated. The fix here used to be written
    as "composing a `requiresClusterOwner` spec", which does not exist —
    see the note under "The buckets". The live context-spec is
-   `requiresOwner`, named as a bare top-level conjunct rather than
-   through `spec("...")`; a role FLOOR or a role GRANT is now an
+   `requiresOwner`, applied as a top-level conjunct (`requiresOwner(actor)`)
+   rather than through `spec("...")`; a role FLOOR or a role GRANT is now an
    annotation (`@requiresRank` / `@requiresCapability`) rather than a
    spec at all (epic memql#5166).
 4. **Web-authenticated user-self** — PAT + worker-token list

@@ -2,6 +2,9 @@ package parser
 
 import (
 	"testing"
+
+	"github.com/znasllc-io/memql/component/language/annotations"
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
 func TestLexer_SimpleQuery(t *testing.T) {
@@ -460,7 +463,7 @@ func TestParser_RegularFunctionCall(t *testing.T) {
 func TestParser_AutomationStep_FunctionCall(t *testing.T) {
 	input := `
 func (Automation) testAuto(_ any) {
-  checkUser := userById(userId=event.payload.userId)
+  checkUser := userById(userId: event.payload.userId)
   return checkUser
 }`
 
@@ -515,8 +518,8 @@ func (Automation) testAuto(_ any) {
 func TestParser_AutomationStep_ConditionalFunctionCall(t *testing.T) {
 	input := `
 func (Automation) testAuto(_ any) {
-  createSession := if first(checkExisting).id==nil {
-    mutationCreateSession(partitionId=event.payload.partitionId, participantId=event.payload.id)
+  createSession := if checkExisting.first().id == nil {
+    mutationCreateSession(partitionId: event.payload.partitionId, participantId: event.payload.id)
   }
   return createSession
 }`
@@ -608,7 +611,7 @@ func (Automation) testAutomation(_ any) {
 func TestParser_QueryFunction(t *testing.T) {
 	input := `
 func (Query) activeUsers(args any) (any, error) {
-	return concept==v1:user&&payload.role==args.role, nil
+	return concept==v1:user && (row => args.role == nil || row.role == args.role), nil
 }`
 
 	lexer := NewLexer(input)
@@ -649,7 +652,7 @@ func (Query) activeUsers(args any) (any, error) {
 func TestParser_MutationFunction(t *testing.T) {
 	input := `
 func (Mutation) createUser(args any) error {
-	return insert("v1:user", id="test-user", payload={"name": "Test"})
+	return insert("v1:user", id="test-user", payload={name: "Test"})
 }`
 
 	lexer := NewLexer(input)
@@ -1161,7 +1164,7 @@ func (Automation) bootstrap(ctx any) {
 	}
 
 	createUser := mutation if checkUser.metadata.itemCount == 0 {
-		insert("v1:user", id=concat("user-", ctx.userId))
+		insert("v1:user", id="user-" + ctx.userId)
 	}
 
 	return createUser
@@ -1335,7 +1338,7 @@ func TestParser_GoStyleQuery(t *testing.T) {
 	input := `
 @description("Returns active users")
 func (Query) activeUsers(args any) (any, error) {
-  return concept==v1:user && payload.active==true, nil
+  return concept==v1:user && (row => row.active == true), nil
 }
 `
 	lexer := NewLexer(input)
@@ -1506,51 +1509,28 @@ func (Automation) myAutomation(_ any) {
 	}
 }
 
+// TestParser_ArgsAttribute pins the object-literal ARGUMENT form of the
+// annotation grammar: `@name({...})` parses to a map Value. No receiver takes
+// the form (memql#5359: the registry refuses it everywhere, the builtin @args
+// included, whose converter reads keyword arguments only), so it is parsed
+// here directly rather than on a construct that would refuse it.
 func TestParser_ArgsAttribute(t *testing.T) {
-	input := `
-@disabled
-@args({ "userId": { "type": "string", "required": true }, "limit": { "type": "number", "default": 10 } })
-func (Query) searchUsers(args any) (any, error) {
-  return concept==v1:user && payload.userId==args.userId, nil
-}
-`
+	input := `@args({ "userId": { "type": "string", "required": true }, "limit": { "type": "number", "default": 10 } })`
 	lexer := NewLexer(input)
 	tokens, err := lexer.Tokenize()
 	if err != nil {
 		t.Fatalf("Lexer error: %v", err)
 	}
 
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
+	argsAttr, err := NewParser(tokens).parseAttribute()
 	if err != nil {
 		t.Fatalf("Parser error: %v", err)
 	}
-
-	file, ok := ast.(*File)
-	if !ok {
-		t.Fatalf("Expected File, got %T", ast)
+	if argsAttr == nil || argsAttr.Name != "args" {
+		t.Fatalf("Expected an @args attribute, got %+v", argsAttr)
 	}
-
-	funcDef, ok := file.Definitions[0].(*FunctionDef)
-	if !ok {
-		t.Fatalf("Expected FunctionDef, got %T", file.Definitions[0])
-	}
-
-	// Should have 2 attributes
-	if len(funcDef.Attributes) != 2 {
-		t.Fatalf("Expected 2 attributes, got %d", len(funcDef.Attributes))
-	}
-
-	// Find args attribute
-	var argsAttr *Attribute
-	for _, attr := range funcDef.Attributes {
-		if attr.Name == "args" {
-			argsAttr = attr
-			break
-		}
-	}
-	if argsAttr == nil {
-		t.Fatal("Expected to find @args attribute")
+	if u := AnnotationUse(argsAttr); u.Form != annotations.FormObject {
+		t.Errorf("AnnotationUse(@args({...})).Form = %s, want %s", u.Form, annotations.FormObject)
 	}
 
 	// Check that it has a Value (the object)
@@ -1905,14 +1885,14 @@ func (Mutation) createThing(args any) error {
 	}
 
 	p := NewParser(tokens)
-	ast, err := p.Parse()
+	root, err := p.Parse()
 	if err != nil {
 		t.Fatalf("Parser error: %v", err)
 	}
 
-	file, ok := ast.(*File)
+	file, ok := root.(*File)
 	if !ok {
-		t.Fatalf("Expected File, got %T", ast)
+		t.Fatalf("Expected File, got %T", root)
 	}
 	def, ok := file.Definitions[0].(*FunctionDef)
 	if !ok {
@@ -1923,12 +1903,10 @@ func (Mutation) createThing(args any) error {
 		t.Fatalf("Expected MutationStmt, got %T", def.Body)
 	}
 
-	argRef, ok := m.IDTemplate.(*ArgRefExpr)
-	if !ok {
-		t.Fatalf("Expected IDTemplate ArgRefExpr, got %T", m.IDTemplate)
-	}
-	if argRef.Path != "partitionId" {
-		t.Fatalf("Expected ArgRefExpr.Path 'partitionId', got %q", argRef.Path)
+	// Edition 2026: the slot holds the v1 node the author wrote.
+	id, ok := m.IDTemplate.(*ast.MemberExpr)
+	if !ok || ast.FormatExpr(id) != "args.partitionId" {
+		t.Fatalf("Expected IDTemplate to read args.partitionId, got %T %v", m.IDTemplate, m.IDTemplate)
 	}
 }
 
@@ -1936,7 +1914,7 @@ func TestParser_MutationBody_PreservesIdTemplate_Concat(t *testing.T) {
 	input := `
 func (Mutation) createThing(args any) error {
   return insert("v1:thing",
-    id=concat("thing-", hash(concat(args.partitionId, ":", args.userId))),
+    id="thing-" + hash(args.partitionId + ":" + args.userId),
     payload={ name: "X" }
   )
 }`
@@ -1948,14 +1926,14 @@ func (Mutation) createThing(args any) error {
 	}
 
 	p := NewParser(tokens)
-	ast, err := p.Parse()
+	root, err := p.Parse()
 	if err != nil {
 		t.Fatalf("Parser error: %v", err)
 	}
 
-	file, ok := ast.(*File)
+	file, ok := root.(*File)
 	if !ok {
-		t.Fatalf("Expected File, got %T", ast)
+		t.Fatalf("Expected File, got %T", root)
 	}
 	def, ok := file.Definitions[0].(*FunctionDef)
 	if !ok {
@@ -1966,8 +1944,10 @@ func (Mutation) createThing(args any) error {
 		t.Fatalf("Expected MutationStmt, got %T", def.Body)
 	}
 
-	if _, ok := m.IDTemplate.(*ConcatExpr); !ok {
-		t.Fatalf("Expected IDTemplate ConcatExpr, got %T", m.IDTemplate)
+	// Edition 2026 concatenates with +: the slot holds the whole expression.
+	id, ok := m.IDTemplate.(*ast.BinaryExpr)
+	if want := `"thing-" + hash(args.partitionId + ":" + args.userId)`; !ok || id.Op != "+" || ast.FormatExpr(id) != want {
+		t.Fatalf("Expected IDTemplate %s, got %T %v", want, m.IDTemplate, m.IDTemplate)
 	}
 }
 
@@ -1987,14 +1967,14 @@ func (Mutation) createThing(args any) error {
 	}
 
 	p := NewParser(tokens)
-	ast, err := p.Parse()
+	root, err := p.Parse()
 	if err != nil {
 		t.Fatalf("Parser error: %v", err)
 	}
 
-	file, ok := ast.(*File)
+	file, ok := root.(*File)
 	if !ok {
-		t.Fatalf("Expected File, got %T", ast)
+		t.Fatalf("Expected File, got %T", root)
 	}
 	def, ok := file.Definitions[0].(*FunctionDef)
 	if !ok {
@@ -2005,12 +1985,10 @@ func (Mutation) createThing(args any) error {
 		t.Fatalf("Expected MutationStmt, got %T", def.Body)
 	}
 
-	argRef, ok := m.CreatedAtTemplate.(*ArgRefExpr)
-	if !ok {
-		t.Fatalf("Expected CreatedAtTemplate ArgRefExpr, got %T", m.CreatedAtTemplate)
-	}
-	if argRef.Path != "createdAt" {
-		t.Fatalf("Expected ArgRefExpr.Path 'createdAt', got %q", argRef.Path)
+	// Edition 2026: the slot holds the v1 node the author wrote.
+	createdAt, ok := m.CreatedAtTemplate.(*ast.MemberExpr)
+	if !ok || ast.FormatExpr(createdAt) != "args.createdAt" {
+		t.Fatalf("Expected CreatedAtTemplate to read args.createdAt, got %T %v", m.CreatedAtTemplate, m.CreatedAtTemplate)
 	}
 }
 

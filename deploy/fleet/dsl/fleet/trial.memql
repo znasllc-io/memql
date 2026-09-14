@@ -86,11 +86,11 @@ automation trialNudgeDay7 {
   step notify {
     forEach item in decide.result where item.payload.tier == "trial" && item.payload.trialEndsAt > addDuration(now, "P7D") && item.payload.trialEndsAt <= addDuration(now, "P8D") {
       stageOutboundRequest {
-        requestId:   concat("fleet-trial-nudge-7-", item.id),
+        requestId:   "fleet-trial-nudge-7-" + item.id,
         medium:      "email",
         target:      item.payload.notifyEmail,
         subject:     "One week left on your MemQL Cloud trial",
-        body:        concat("Your trial instance at https://", item.payload.domain, " has a week to run. Add a plan in Orbit to keep it -- nothing is lost if you decide later, but the instance pauses when the trial ends."),
+        body:        "Your trial instance at https://" + item.payload.domain + " has a week to run. Add a plan in Orbit to keep it -- nothing is lost if you decide later, but the instance pauses when the trial ends.",
         requestedBy: "fleet.trialNudgeDay7"
       }
     }
@@ -108,11 +108,11 @@ automation trialNudgeDay12 {
   step notify {
     forEach item in decide.result where item.payload.tier == "trial" && item.payload.trialEndsAt > addDuration(now, "P2D") && item.payload.trialEndsAt <= addDuration(now, "P3D") {
       stageOutboundRequest {
-        requestId:   concat("fleet-trial-nudge-12-", item.id),
+        requestId:   "fleet-trial-nudge-12-" + item.id,
         medium:      "email",
         target:      item.payload.notifyEmail,
         subject:     "Your MemQL Cloud trial ends in two days",
-        body:        concat("Your trial instance at https://", item.payload.domain, " pauses in two days. Your data stays exactly where it is for 14 days after that, and adding a plan in Orbit brings it straight back."),
+        body:        "Your trial instance at https://" + item.payload.domain + " pauses in two days. Your data stays exactly where it is for 14 days after that, and adding a plan in Orbit brings it straight back.",
         requestedBy: "fleet.trialNudgeDay12"
       }
     }
@@ -137,7 +137,7 @@ automation trialExpirySuspend {
     logic runningInstances ( event )
   }
   step suspend {
-    forEach item in decide.result where item.payload.tier == "trial" && exists(item.payload.trialEndsAt) && item.payload.trialEndsAt < now {
+    forEach item in decide.result where item.payload.tier == "trial" && item.payload.trialEndsAt != nil && item.payload.trialEndsAt < now {
       requestInstanceSuspend {
         instanceId: item.id
       }
@@ -157,7 +157,7 @@ automation trialExpiryClose {
     logic trialingSubscriptions ( event )
   }
   step close {
-    forEach item in decide.result where exists(item.payload.trialEndsAt) && item.payload.trialEndsAt < now {
+    forEach item in decide.result where item.payload.trialEndsAt != nil && item.payload.trialEndsAt < now {
       endSubscription {
         subscriptionId: item.id,
         status:         "paused",
@@ -189,7 +189,7 @@ automation hibernateIdleInstances {
     logic runningInstances ( event )
   }
   step suspend {
-    forEach item in decide.result where exists(item.payload.lastActivityAt) && addDuration(item.payload.lastActivityAt, "P14D") < now {
+    forEach item in decide.result where item.payload.lastActivityAt != nil && addDuration(item.payload.lastActivityAt, "P14D") < now {
       requestInstanceSuspend {
         instanceId: item.id
       }
@@ -221,7 +221,7 @@ automation teardownAfterGrace {
     logic suspendedInstances ( event )
   }
   step destroy {
-    forEach item in decide.result where exists(item.payload.suspendedAt) && addDuration(item.payload.suspendedAt, "P14D") < now {
+    forEach item in decide.result where item.payload.suspendedAt != nil && addDuration(item.payload.suspendedAt, "P14D") < now {
       requestInstanceTeardown {
         instanceId: item.id
       }

@@ -82,7 +82,7 @@ func TestEmitBundle_MultiPhase(t *testing.T) {
 	// spec dep. The fake returns the same shape for every authoringEmit call;
 	// the emit code normalizes the automation name to the phase name.
 	p0auto := memql.SandboxConstruct{Kind: "automation", Name: "ignored0", Source: "automation ignored0 { }"}
-	p0spec := memql.SandboxConstruct{Kind: "spec", Name: "specPhase0", Source: "spec activeRowTrait specPhase0 {\n  return active == true\n}"}
+	p0spec := memql.SandboxConstruct{Kind: "spec", Name: "specPhase0", Source: "spec activeRowTrait specPhase0 = row => row.active == true"}
 	fe := &fakeEngine{
 		aiResponder: func(templateId string, data map[string]any) (any, error) {
 			if templateId == "authoringEmit" {

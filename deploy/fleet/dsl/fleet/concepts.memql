@@ -34,7 +34,7 @@
 //   `ownerUserId`. A subscriber is a person with a login on the mothership,
 //   and every row they can see is a row they own. Cross-tenant reads are then
 //   impossible by construction rather than by a filter somebody has to
-//   remember: the owned tier injects ownerUserId==actor.userId into every read
+//   remember: the owned tier injects `row.ownerUserId == actor.userId` into every read
 //   and has no cluster-owner bypass. This is the property task memql#3855's
 //   acceptance criterion "cross-tenant reads impossible" is asking for, and it
 //   is enforced here rather than in Orbit -- a console is a client, and a

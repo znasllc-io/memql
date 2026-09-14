@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -33,11 +34,11 @@ import (
 // coordinator to triage (they are NOT fixed in this story per the S7 charter).
 //
 // This package (parser) cannot import component/language/compiler
-// (import cycle), so the rewriter-family kinds (query / mutate / logic /
+// (import cycle), so the rewriter-family kinds (query / mutation / logic /
 // automation) are exercised via NormaliseAll (which lives here) rather than
 // ParseFileSource.
 
-// Rewriter-family kinds (query / mutate / logic / automation) reach the parser
+// Rewriter-family kinds (query / mutation / logic / automation) reach the parser
 // only after NormaliseAll expands their struct form. Structural errors (missing
 // concept, a forbidden body{} block) surface in NormaliseAll; annotation / token
 // errors (a malformed @trigger) surface in the subsequent parse. The full
@@ -85,9 +86,9 @@ func TestNegative_MalformedDeclBody(t *testing.T) {
 			func(s string) error { _, e := ParseProviderDecl(s); return e }},
 		{"policy", "@primary(\"x\")\npolicy p {\n", // unterminated brace
 			func(s string) error { _, e := ParsePolicyDecl(s); return e }},
-		{"spec", "spec activeRowTrait s {\n  return status ==== \"x\" &&&& true\n}\n",
+		{"spec", "spec activeRowTrait s = row => row.status ==== \"x\" &&&& true\n",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
-		{"trait", "trait t {\n  return active ==== true\n}\n",
+		{"trait", "trait t = row => row.active ==== true\n",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
 		{"seed", "seed agent sd {\n  name: @@@ broken !!!\n}\n",
 			func(s string) error { _, e := ParseSeedDecl(s); return e }},
@@ -109,7 +110,7 @@ func TestNegative_MalformedDeclBody(t *testing.T) {
 
 // 2a. Body rule (ADR Decision 5): `body { }` is MANDATORY on logic, FORBIDDEN
 // on every other construct. Cross-ref: body_rule_test.go covers the direct
-// decl-parser sites; here we cover the rewriter-family sites (query / mutate /
+// decl-parser sites; here we cover the rewriter-family sites (query / mutation /
 // automation) via NormaliseAll plus the logic-missing-body half.
 func TestNegative_BodyRule(t *testing.T) {
 	t.Run("logic-missing-body", func(t *testing.T) {
@@ -118,7 +119,7 @@ func TestNegative_BodyRule(t *testing.T) {
 			"logic", "must wrap its procedural code in a `body { }` block")
 	})
 	t.Run("query-with-body", func(t *testing.T) {
-		_, err := NormaliseAll("use cognition.concepts.{ space }\nquery space q {\n  filter active == true\n  body { return 1 }\n}\n")
+		_, err := NormaliseAll("use cognition.concepts.{ space }\nquery space q {\n  filter row => row.active == true\n  body { return 1 }\n}\n")
 		assertParseErr(t, "query with body{}", err,
 			"must not declare a `body { }` block", "reserved for `logic`")
 	})
@@ -128,10 +129,12 @@ func TestNegative_BodyRule(t *testing.T) {
 			"must not declare a `body { }` block")
 	})
 	t.Run("spec-with-body", func(t *testing.T) {
-		// Direct decl-parser site (spec): a body{} block is forbidden.
-		_, err := ParseSpecDecl("spec activeRowTrait s {\n  body { return active == true }\n}\n")
-		assertParseErr(t, "spec with body{}", err,
-			"must not declare a `body { }` block")
+		// Direct decl-parser site (spec). Edition 2026 has no braced spec, so
+		// a body{} block is refused as the retired braced form, at its `{`.
+		// memqlmigrate:keep -- the braced body is the case.
+		src := "spec activeRowTrait s {\n  body { return active == true }\n}\n"
+		_, err := ParseSpecDecl(src)
+		wantRetiredAt(t, err, ruleSpecReturnBody, src, "{\n  body", 1)
 	})
 }
 
@@ -139,7 +142,7 @@ func TestNegative_BodyRule(t *testing.T) {
 // must carry exactly the right number of identifiers.
 func TestNegative_SignatureArity(t *testing.T) {
 	t.Run("query-missing-concept", func(t *testing.T) {
-		_, err := NormaliseAll("query q {\n  filter active == true\n  shape s\n}\n")
+		_, err := NormaliseAll("query q {\n  filter row => row.active == true\n  shape s\n}\n")
 		assertParseErr(t, "query missing concept binding", err, "missing concept binding")
 	})
 	t.Run("mutation-missing-concept", func(t *testing.T) {
@@ -165,7 +168,7 @@ func TestNegative_UnknownAnnotation_Rejected(t *testing.T) {
 			func(s string) error { _, e := ParseToolDecl(s); return e }},
 		{"provider", "@bogusAnno\n@extends(\"openai\")\nprovider p {\n  params { contextWindow 1 }\n}\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParseProviderDecl(s); return e }},
-		{"seed", "@bogusAnno\nseed agent s {\n  name: \"x\"\n}\n", "unknown seed annotation @bogusAnno",
+		{"seed", "@bogusAnno\nseed agent s {\n  name: \"x\"\n}\n", "unknown annotation @bogusAnno on a seed",
 			func(s string) error { _, e := ParseSeedDecl(s); return e }},
 	}
 	for _, tc := range cases {
@@ -261,6 +264,59 @@ func TestNegative_TrailingTokens(t *testing.T) {
 	})
 }
 
+// A spec or trait lambda is the one predicate clause no bracket or brace
+// closes, so its parse stops at the first token that cannot extend it: a word
+// the grammar does not know would end the predicate early and everything
+// after it would be dropped. That text is refused instead -- on the lambda's
+// own line in a file, anywhere after it in a slice -- at the token, naming
+// the operator an English connective stands for.
+func TestNegative_SpecLambdaRefusesWhatItWouldDrop(t *testing.T) {
+	cases := []struct {
+		name, src, want, at string
+		slice               bool
+	}{
+		{"`or` on the predicate's line, in a file", "spec thing s = row => row.a == 1 or row.b == 2\n", "`or` is not an operator: write `||`", "or", false},
+		{"`and` on the predicate's line, in a slice", "trait t = row => row.a == 1 and row.b == 2\n", "`and` is not an operator: write `&&`", "and", true},
+		{"a word on the next line, in a slice", "spec thing s = row => row.a == 1\n  bogus\n", "unexpected `bogus` after the spec \"s\"", "bogus", true},
+		{"a stray brace on the predicate's line, in a file", "spec thing s = row => row.a == 1 }\n", "unexpected `}` after the predicate of spec \"s\"", "}", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var err error
+			if tc.slice {
+				_, err = ParseSpecDecl(tc.src)
+			} else {
+				_, err = ParseFile(tc.src)
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want a refusal saying %q, got %v", tc.want, err)
+			}
+			var pe *ParseError
+			if !errors.As(err, &pe) {
+				t.Fatalf("the refusal carries no position: %v", err)
+			}
+			wantLine, wantCol := authoredAt(t, tc.src, tc.at, 1)
+			if line, col := pe.Position(); line != wantLine || col != wantCol {
+				t.Errorf("refused at %d:%d, want %d:%d, the %q", line, col, wantLine, wantCol, tc.at)
+			}
+		})
+	}
+	// A declaration that follows on a line of its own is not trailing text,
+	// and a predicate continued on the next line by an operator is one
+	// predicate.
+	for _, src := range []string{
+		"spec thing s = row => row.a == 1\ntrait t = row => row.b == 2\n",
+		"spec thing s = row => row.a == 1\n  || row.b == 2\n",
+	} {
+		if _, err := ParseFile(src); err != nil {
+			t.Errorf("%q: %v", src, err)
+		}
+	}
+	if decl, err := ParseSpecDecl("spec thing s = row => row.a == 1\n  || row.b == 2\n"); err != nil || decl.Lambda == nil {
+		t.Errorf("a continued predicate in a slice: %+v, %v", decl, err)
+	}
+}
+
 func TestNegative_WordLogicalOperators(t *testing.T) {
 	// The English `and` / `or` infix forms are not lexer keywords, so the parser
 	// rejects them (the EOF check / body parse trips). This is a parser-level
@@ -274,7 +330,7 @@ func TestNegative_WordLogicalOperators(t *testing.T) {
 		assertParseErr(t, "`or` infix", err)
 	})
 	t.Run("or-in-spec-body", func(t *testing.T) {
-		_, err := ParseSpecDecl("spec activeRowTrait s {\n  return a == 1 or b == 2\n}\n")
+		_, err := ParseSpecDecl("spec activeRowTrait s = row => row.a == 1 or row.b == 2\n")
 		assertParseErr(t, "`or` in spec body", err)
 	})
 }
@@ -296,6 +352,7 @@ func TestNegative_ErrorsCarryPosition(t *testing.T) {
 		},
 		"typo-top-level-keyword": func() error { _, e := ParseFile("conept foo { }"); return e },
 		"spec-body-block": func() error {
+			// memqlmigrate:keep -- the braced body is the case.
 			_, e := ParseSpecDecl("spec activeRowTrait s {\n  body { return active == true }\n}\n")
 			return e
 		},
@@ -360,9 +417,9 @@ func TestRetiredOperators_ParserAcceptsToTreeScanGate(t *testing.T) {
 // ===========================================================================
 
 // HOLE 1 -- CLOSED (memql#2395): shape / builtin / prompt / spec / trait /
-// policy now reject an unknown annotation against the canonical
-// annotations.ByReceiver registry (validateDeclAnnotations), matching the
-// tool / provider / seed behavior pinned by the active test above.
+// policy reject an unknown annotation against the annotation registry --
+// since memql#5359 through the one parse-time check every construct parser
+// runs (checkAnnotations), the same gate as tool / provider / seed above.
 func TestHOLE_UnknownAnnotationSilentlyAccepted(t *testing.T) {
 	cases := []struct {
 		kind, src, want string
@@ -376,7 +433,7 @@ func TestHOLE_UnknownAnnotationSilentlyAccepted(t *testing.T) {
 			func(s string) error { _, e := ParsePromptDecl(s); return e }},
 		{"spec", "@bogusAnno\nspec someShape sp {\n  return active == true\n}\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
-		{"trait", "@bogusAnno\ntrait tr {\n  return active == true\n}\n", "unknown annotation @bogusAnno",
+		{"trait", "@bogusAnno\ntrait tr = row => row.active == true\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
 		{"policy", "@bogusAnno\n@primary(\"x\")\npolicy p { }\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParsePolicyDecl(s); return e }},
@@ -388,10 +445,10 @@ func TestHOLE_UnknownAnnotationSilentlyAccepted(t *testing.T) {
 	}
 
 	// Message quality: a typo'd annotation gets a did-you-mean against the
-	// kind's registry set (suggest.go, the #2358 helper).
+	// receiver's registry set, and the refusal ends with its code.
 	t.Run("did-you-mean", func(t *testing.T) {
 		_, err := ParseShapeDecl("@descripton(\"x\")\n@row\nshape s {\n  row.id\n}\n")
-		assertParseErr(t, "shape @descripton", err, "did you mean 'description'?")
+		assertParseErr(t, "shape @descripton", err, "did you mean @description?", "[annotation_unknown]")
 	})
 }
 

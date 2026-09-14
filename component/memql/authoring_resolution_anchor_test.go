@@ -55,13 +55,13 @@ concept widget {
 
 @description("first")
 query widget allA {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   widgetFull
 }
 
 @description("second")
 query widget allB {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   widgetFull
 }
 `
@@ -134,7 +134,7 @@ func TestAnchorIsZeroWithoutAVerbatimBundleAnchor(t *testing.T) {
 	c := SandboxConstruct{
 		Name:       "orphan",
 		Kind:       "query",
-		Source:     "query plan orphan {\n  filter isActiveRecord\n}\n",
+		Source:     "query plan orphan {\n  filter row => isActiveRecord(row)\n}\n",
 		BundleLine: 0, // the splitter could not find this body in the bundle
 	}
 	if pos := constructAnchor(c); pos.Line != 0 {

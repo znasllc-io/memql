@@ -66,6 +66,29 @@ func TestResolveDSLRoot_SingleDomainIsNotARoot(t *testing.T) {
 	}
 }
 
+// TestResolveDSLRoot_OneDomainUnderTheConventionalCandidate is the product
+// repository (memql#5362): exactly one domain, under dsl/, beside the rest of
+// a repository. The two-domain bar is the ROOT's, and held to it dsl/ never
+// qualified, so the build mounted nothing in any product repository. The stray
+// dsl/test.memql is the scratch file that bar exists for: it must not change
+// the answer here either.
+func TestResolveDSLRoot_OneDomainUnderTheConventionalCandidate(t *testing.T) {
+	productRepo := fstest.MapFS{
+		"dsl/test.memql":          &fstest.MapFile{Data: []byte("// scratch\n")},
+		"dsl/znas/concepts.memql": &fstest.MapFile{Data: []byte("concept order {\n  id string\n}")},
+		"cmd/product/main.go":     &fstest.MapFile{Data: []byte("package main\n")},
+		"docs/getting-started.md": &fstest.MapFile{Data: []byte("# docs\n")},
+	}
+	if _, prefix := resolveDSLRoot(productRepo); prefix != "dsl" {
+		t.Fatalf("prefix = %q; want \"dsl\" -- one domain under the conventional directory is a DSL tree", prefix)
+	}
+	g := buildWorkspaceGraph(productRepo)
+	if !g.HasNamespace("znas") || g.HasNamespace("dsl") {
+		t.Errorf("HasNamespace(znas) = %v, HasNamespace(dsl) = %v; want the domain, not its container",
+			g.HasNamespace("znas"), g.HasNamespace("dsl"))
+	}
+}
+
 // TestWorkspaceGraph_ResolvesNamespacesFromRepoRoot drives the whole seam the
 // way the LSP does -- from the repository root -- and asserts the answers an
 // author's `use` line depends on. Every assertion here failed before #2762.

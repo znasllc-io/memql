@@ -10,8 +10,8 @@ import (
 
 func TestCompileSource_SimpleQuery(t *testing.T) {
 	source := `
-func (Query) activeUsers(role any) {
-	concept==v1:user&&payload.role==args.role
+query user activeUsers {
+  filter row => row.active == true
 }`
 
 	result, err := CompileSource(source)
@@ -30,21 +30,64 @@ func (Query) activeUsers(role any) {
 	if fn.Type != "query" {
 		t.Errorf("Expected type 'query', got %q", fn.Type)
 	}
+	// The internal form carries the filter lambda as its canonical source,
+	// parenthesised as the rewriter joins it, and reads back.
+	if want := `concept=="user";(row => row.active == true)`; fn.Query != want {
+		t.Errorf("compiled query = %q, want %q", fn.Query, want)
+	}
+	if _, err := parser.ParseExpression(fn.Query); err != nil {
+		t.Errorf("the compiled query does not read back: %v", err)
+	}
+}
+
+// TestCompileSource_V1MutationValues: a mutation's values are edition-2026
+// expressions, and the compiled insert(...) carries each as its canonical
+// source -- `+` and `??` as written. It reads back where a mutation's values
+// are read: in a mutation body, which parses them with the v1 grammar (the
+// internal query form, ParseExpression, keeps the legacy grammar and has no
+// `+` on strings).
+func TestCompileSource_V1MutationValues(t *testing.T) {
+	result, err := CompileSource(`
+mutation thing createThing {
+  args {
+    id    string!
+    name  string
+  }
+  insert {
+    id: "thing-" + args.id
+    name: args.name ?? "unnamed"
+  }
+}`)
+	if err != nil {
+		t.Fatalf("CompileSource error: %v", err)
+	}
+	if len(result.Functions) != 1 {
+		t.Fatalf("Expected 1 function, got %d", len(result.Functions))
+	}
+	query := result.Functions[0].Query
+	for _, want := range []string{`id="thing-" + args.id`, `name: args.name ?? "unnamed"`} {
+		if !strings.Contains(query, want) {
+			t.Errorf("compiled mutation %q does not carry %q", query, want)
+		}
+	}
+	if strings.Contains(query, "<<unsupported") {
+		t.Fatalf("compiled mutation carries an unsupported-expression placeholder: %q", query)
+	}
+	if _, err := parser.ParseFile("func (Mutation) createThing(args any) error {\n  return " + query + "\n}"); err != nil {
+		t.Errorf("the compiled mutation does not read back as a mutation body: %v", err)
+	}
 }
 
 func TestCompileSource_Automation(t *testing.T) {
 	source := `
 @schedule("*/30 * * * *")
-func (Automation) leadProcessor(_ any) {
-	fetchLeads := query {
-		concept==v1:lead&&payload.active==true
-	}
-
-	processLeads := query {
-		concept==v1:lead
-	}
-
-	return processLeads
+automation leadProcessor {
+  step fetchLeads {
+    query activeLeads(limit: 10)
+  }
+  step processLeads {
+    logic processLeads(leads: fetchLeads)
+  }
 }`
 
 	result, err := CompileSource(source)
@@ -64,11 +107,11 @@ func (Automation) leadProcessor(_ any) {
 
 func TestTranspileAutomation(t *testing.T) {
 	source := `
-func (Automation) testAuto(_ any) {
-	step1 := query {
-		concept==v1:test
-	}
-	return step1
+@trigger(event="node.created", concept="v1:probe:thing")
+automation testAuto {
+  step step1 {
+    query listThings()
+  }
 }`
 
 	jsonOutput, err := TranspileAutomation(source)
@@ -93,21 +136,16 @@ func (Automation) testAuto(_ any) {
 
 func TestTranspileAutomation_ForEachBareVarReferencesNotQuoted(t *testing.T) {
 	source := `
-func (Automation) autoJoinAIExample(_ any) {
-  getAgents := query {
-    concept==v1:agents:agent&&
-    payload.active==true
+@trigger(event="node.created", concept="v1:probe:agent")
+automation autoJoinAIExample {
+  step getAgents {
+    query activeAgents()
   }
-
-  for item := range getAgents.result.Bundle.nodes {
-    checkExisting := query {
-      concept==v1:cognition:participant&&
-      payload.agentId==item.id&&
-      payload.status!="left"
+  step join {
+    forEach agent in getAgents.nodes() where agent.status != "left" {
+      mutation createParticipant(agentId: agent.id, status: "joined")
     }
   }
-
-  return getAgents
 }`
 
 	jsonOutput, err := TranspileAutomation(source)
@@ -115,13 +153,20 @@ func (Automation) autoJoinAIExample(_ any) {
 		t.Fatalf("TranspileAutomation error: %v", err)
 	}
 
-	// Compiler should not pre-quote bare forEach item references like item.id,
-	// otherwise the runtime evaluator cannot resolve them.
-	if strings.Contains(jsonOutput, `payload.agentId=="item.id"`) {
-		t.Fatalf("expected item.id to remain unquoted in compiled query, got: %s", jsonOutput)
+	// A reference to the loop variable is an expression the runtime
+	// evaluates, never a string: it compiles to an {"$expr"} leaf, and a
+	// literal beside it stays a literal.
+	if strings.Contains(jsonOutput, `"agentId": "item.id"`) {
+		t.Fatalf("the loop variable was written as a string, which the runtime reads as text: %s", jsonOutput)
 	}
-	if !strings.Contains(jsonOutput, `payload.agentId==item.id`) {
-		t.Fatalf("expected compiled query to contain unquoted item.id, got: %s", jsonOutput)
+	if !strings.Contains(jsonOutput, `"$expr": "item.id"`) {
+		t.Fatalf("expected the loop variable read as {\"$expr\": \"item.id\"}, got: %s", jsonOutput)
+	}
+	if !strings.Contains(jsonOutput, `"status": "joined"`) {
+		t.Fatalf("expected the literal argument to stay a literal, got: %s", jsonOutput)
+	}
+	if !strings.Contains(jsonOutput, `"filter": "item.status != \"left\""`) {
+		t.Fatalf("expected the where clause as canonical v1 source, got: %s", jsonOutput)
 	}
 }
 
@@ -202,59 +247,13 @@ func TestValidateMemQL(t *testing.T) {
 	}
 }
 
-func TestCompileSource_NoNamingWarnings(t *testing.T) {
-	// The naming-prefix lint is retired (DSL grammar redesign, C2/#2042):
-	// a query named without the `query` prefix must NOT emit a naming
-	// warning anymore. Names are free; references resolve structurally.
-	source := `
-args { role string }
-func (Query) activeUsers(args any) {
-	concept==v1:user
-}`
-
-	result, err := CompileSource(source)
-	if err != nil {
-		t.Fatalf("CompileSource error: %v", err)
-	}
-
-	for _, w := range result.Warnings {
-		if strings.HasPrefix(w.Rule, "naming.") {
-			t.Fatalf("naming-prefix lint should be retired, got warning %q", w.Rule)
-		}
-	}
-}
-
-func TestCompileSource_EmitsInlineDeprecationWarnings(t *testing.T) {
-	source := `
-func (Automation) testAuto(_ any) {
-	step1 := query {
-		concept==v1:test
-	}
-	return step1
-}`
-
-	result, err := CompileSource(source)
-	if err != nil {
-		t.Fatalf("CompileSource error: %v", err)
-	}
-
-	found := false
-	for _, warning := range result.Warnings {
-		if warning.Rule == "deprecation.inline-block-step" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatalf("expected inline deprecation warning")
-	}
-}
-
 func TestCompileSource_FunctionCallStepInAutomation(t *testing.T) {
 	source := `
-func (Automation) testAuto(_ any) {
-	checkUser := userById(userId=event.payload.userId)
-	return checkUser
+@trigger(event="node.created", concept="v1:probe:user")
+automation testAuto {
+  step checkUser {
+    query userById(userId: event.payload.userId)
+  }
 }`
 
 	result, err := CompileSource(source)
@@ -283,36 +282,9 @@ func (Automation) testAuto(_ any) {
 	if functionConfig["name"] != "userById" {
 		t.Fatalf("expected function name userById, got %v", functionConfig["name"])
 	}
-}
-
-func TestCompileFile_StrictWarnings(t *testing.T) {
-	// An inline-block-step deprecation warning triggers strict lint.
-	// (The naming-prefix lint that used to drive this test is retired
-	// in C2/#2042; the strict-warnings path is unchanged.)
-	source := `
-func (Automation) testAuto(_ any) {
-	step1 := query {
-		concept==v1:test
-	}
-	return step1
-}`
-
-	ast, err := ParseMemQL(source)
-	if err != nil {
-		t.Fatalf("ParseMemQL error: %v", err)
-	}
-	file, ok := ast.(*parser.File)
-	if !ok {
-		t.Fatalf("expected *parser.File, got %T", ast)
-	}
-
-	compiler := New(Config{StrictWarnings: true})
-	_, err = compiler.CompileFile(file)
-	if err == nil {
-		t.Fatalf("expected strict warning error")
-	}
-	if _, ok := err.(*LintError); !ok {
-		t.Fatalf("expected LintError, got %T", err)
+	args, _ := functionConfig["args"].(map[string]any)
+	if leaf, _ := args["userId"].(map[string]any); leaf["$expr"] != "event.payload.userId" {
+		t.Fatalf("expected the userId argument as an expression leaf, got %#v", args["userId"])
 	}
 }
 
@@ -335,9 +307,11 @@ func (Automation) myAutomation(arg1 any, arg2 any) {
 
 func TestCompileResult_ToJSON(t *testing.T) {
 	source := `
-func (Automation) testAuto(_ any) {
-	step1 := query { concept==v1:test }
-	return step1
+@trigger(event="node.created", concept="v1:probe:thing")
+automation testAuto {
+  step step1 {
+    query listThings()
+  }
 }`
 
 	result, err := CompileSource(source)
@@ -386,10 +360,17 @@ func TestIsAutomationFile(t *testing.T) {
 	}
 }
 
+// TestCompiler_ConditionalFilter: an optional argument's predicate is the
+// edition-2026 guard `(args.x == nil || <predicate>)` -- the retired `?.`
+// prefix it replaces is refused at parse -- and the compiled query carries
+// it as written.
 func TestCompiler_ConditionalFilter(t *testing.T) {
 	source := `
-func (Query) activeUsers(role any) {
-	concept==v1:user&&payload.role==args.role
+query user activeUsers {
+  args {
+    role string
+  }
+  filter row => (args.role == nil || row.role == args.role)
 }`
 
 	result, err := CompileSource(source)
@@ -401,28 +382,26 @@ func (Query) activeUsers(role any) {
 		t.Fatalf("Expected 1 function, got %d", len(result.Functions))
 	}
 
-	// The query should contain the ?. syntax
-	// `?.` is retired (memql#5375): the optional-chain prefix is gone, and
-	// the compiled query carries the plain path. This asserted the prefix
-	// SURVIVED compilation, which is now the regression rather than the
-	// contract.
+	if want := "(args.role == nil || row.role == args.role)"; !strings.Contains(result.Functions[0].Query, want) {
+		t.Errorf("Expected the query to carry the guard %q, got %q", want, result.Functions[0].Query)
+	}
 	if strings.Contains(result.Functions[0].Query, "?.") {
-		t.Errorf("Expected query to contain '?.', got %q", result.Functions[0].Query)
+		t.Errorf("the retired ?. prefix reached the compiled query: %q", result.Functions[0].Query)
 	}
 }
 
 func TestCompiler_AutomationWithCondition(t *testing.T) {
 	source := `
-func (Automation) conditional(_ any) {
-	checkExists := query {
-		concept==v1:test&&id=="test-id"
-	}
-
-	createIfMissing := mutation if checkExists.metadata.itemCount == 0 {
-		insert("v1:test", id="test-id", payload={"created": true})
-	}
-
-	return createIfMissing
+@trigger(event="node.created", concept="v1:probe:thing")
+automation conditional {
+  step checkExists {
+    query thingById(id: "test-id")
+  }
+  step createIfMissing {
+    if checkExists.empty() {
+      mutation createThing(id: "test-id", created: true)
+    }
+  }
 }`
 
 	result, err := CompileSource(source)
@@ -434,10 +413,26 @@ func (Automation) conditional(_ any) {
 		t.Fatalf("Expected 1 automation, got %d", len(result.Automations))
 	}
 
-	// The automation was successfully parsed - the body structure is implementation-specific
 	auto := result.Automations[0]
 	if auto.Name != "conditional" {
 		t.Errorf("Expected name 'conditional', got %q", auto.Name)
+	}
+	// The condition is canonical v1 source, and the gated call's literal
+	// arguments stay literals.
+	steps, _ := auto.JSON["steps"].([]map[string]any)
+	var gated map[string]any
+	for _, s := range steps {
+		if s["id"] == "createIfMissing" {
+			gated = s
+		}
+	}
+	if gated == nil || gated["condition"] != "checkExists.empty()" {
+		t.Fatalf("createIfMissing = %#v, want the condition checkExists.empty()", gated)
+	}
+	fn, _ := gated["function"].(map[string]any)
+	args, _ := fn["args"].(map[string]any)
+	if fn["name"] != "createThing" || args["id"] != "test-id" || args["created"] != true {
+		t.Fatalf("the gated call = %#v", fn)
 	}
 }
 
@@ -674,261 +669,27 @@ func TestCompiler_ExpressionToString_StringFunctions(t *testing.T) {
 	}
 }
 
-func TestCompiler_ExpressionToJSONExpr(t *testing.T) {
-	// Test the JSON expression translation directly via the compiler
-	c := NewDefault()
-
-	tests := []struct {
-		name     string
-		source   string
-		expected string
-	}{
-		{
-			name:   "var ref",
-			source: `func (Query) t() { var("MY_VAR") }`,
-			// We need to compile and check the JSON output contains $var.MY_VAR
-			expected: "$var.MY_VAR",
-		},
-		{
-			name:     "step ref",
-			source:   `func (Query) t() { step("checkUser") }`,
-			expected: "$steps.checkUser.result",
-		},
-		{
-			name:     "input ref",
-			source:   `func (Query) t() { input() }`,
-			expected: "$input",
-		},
-		{
-			name:     "item ref",
-			source:   `func (Query) t() { item() }`,
-			expected: "$item",
-		},
-		{
-			name:     "timestamp ref",
-			source:   `func (Query) t() { now }`,
-			expected: "$timestamp",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ast, err := ParseMemQL(tt.source)
-			if err != nil {
-				t.Fatalf("Parse error: %v", err)
-			}
-
-			// Get the expression from the parsed file
-			file := ast.(*parser.File)
-			funcDef := file.Definitions[0].(*parser.FunctionDef)
-			expr := funcDef.Body.(parser.ExpressionNode)
-
-			// Test expressionToJSONExpr
-			result := c.expressionToJSONExpr(expr)
-			if result != tt.expected {
-				t.Errorf("Expected %q, got %q", tt.expected, result)
-			}
-		})
-	}
-}
-
-func TestCompiler_ExpressionToJSONExpr_FieldAccess(t *testing.T) {
-	// Test that field(item(), "name") becomes $item.name
-	c := NewDefault()
-
-	source := `func (Query) t() { field(item(), "name") }`
-	ast, err := ParseMemQL(source)
-	if err != nil {
-		t.Fatalf("Parse error: %v", err)
-	}
-
-	file := ast.(*parser.File)
-	funcDef := file.Definitions[0].(*parser.FunctionDef)
-	expr := funcDef.Body.(parser.ExpressionNode)
-
-	result := c.expressionToJSONExpr(expr)
-	expected := "$item.name"
-	if result != expected {
-		t.Errorf("Expected %q, got %q", expected, result)
-	}
-}
-
-// TestParseObjectLiteral_BarePathShorthand covers the automation
-// step-arg shorthand: a dotted path like `event.payload.partitionId` with no
-// `key:` prefix infers the terminal segment as the key.
-func TestParseObjectLiteral_BarePathShorthand(t *testing.T) {
-	c := New(Config{})
-	obj, _ := c.parseObjectLiteral(`{
-		event.payload.partitionId,
-		event.payload.email,
-		registerNode.result.node.id,
-		name: "explicit",
-		email: "override@example.com"
-	}`)
-	if obj == nil {
-		t.Fatal("expected parsed object, got nil")
-	}
-	checks := map[string]string{
-		"partitionId": "event.payload.partitionId",
-		"id":          "registerNode.result.node.id",
-		"name":        "explicit",
-	}
-	for key, want := range checks {
-		got, _ := obj[key].(string)
-		if got != want {
-			t.Errorf("%s: expected %q, got %q", key, want, got)
-		}
-	}
-	// Verbose `email:` entry must override the shorthand (map insertion order:
-	// shorthand email first, then verbose email wins).
-	if v, _ := obj["email"].(string); v != "override@example.com" {
-		t.Errorf("email: expected verbose override, got %q", v)
-	}
-}
-
-// Single-identifier bare values (no dots) must NOT be picked up as
-// shorthand -- they'd collide with step-reference semantics like
-// `allAgents` meaning "the step's result".
-func TestParseObjectLiteral_BarePathRejectsSingleIdentifier(t *testing.T) {
-	c := New(Config{})
-	// `allAgents` with no key prefix should fall through to the
-	// verbose parser, which will then fail to find a colon and
-	// produce a malformed entry. We just verify shorthand didn't
-	// silently claim it.
-	obj, _ := c.parseObjectLiteral(`{foo: bar, allAgents}`)
-	if obj == nil {
-		return // acceptable: parser rejected the malformed input
-	}
-	if _, ok := obj["allAgents"]; ok {
-		t.Errorf("single identifier should not be shorthand, got %v", obj)
-	}
-}
-
-// TestParseObjectLiteral_UnquotedKeys_Required verifies that object
-// literal keys are expected in unquoted form. Quoted keys (`"id": ...`)
-// still parse via the language parser's TokenString case, but our
-// convention (see authoring rule #18) is to use unquoted identifiers.
-// This test exists to lock in that the unquoted form is the canonical
-// path that the AST and compiler produce.
-func TestParseObjectLiteral_UnquotedKeys(t *testing.T) {
-	c := New(Config{})
-	obj, _ := c.parseObjectLiteral(`{name: "Alice", age: 30, active: true}`)
-	if obj == nil {
-		t.Fatal("expected parsed object")
-	}
-	if obj["name"] != "Alice" || obj["age"] != int64(30) || obj["active"] != true {
-		t.Errorf("expected unquoted keys to parse cleanly, got %+v", obj)
-	}
-}
-
-// TestConvertArgReferences locks in the memql#367 fix: ArgRefExpr
-// nodes that compile via expressionToString to `arg("path")` get
-// rewritten to `$args.path` so the LogicRunner's evaluator (which
-// seeds caller args into its custom map under the `args` key)
-// resolves the path through `resolvePath`. Without the rewrite the
-// MutationExecutor receives the literal string `arg("path")` and
-// stamps it onto the inserted row.
-func TestConvertArgReferences(t *testing.T) {
-	tests := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{
-			name: "single arg path",
-			in:   `arg("event.payload.node.id")`,
-			want: `$args.event.payload.node.id`,
-		},
-		{
-			name: "multiple arg refs in one expression",
-			in:   `concat(arg("a"), arg("b"))`,
-			want: `concat($args.a, $args.b)`,
-		},
-		{
-			name: "actor reference preserved (resolved elsewhere at filter time)",
-			in:   `arg("actor.userId")`,
-			want: `arg("actor.userId")`,
-		},
-		{
-			name: "mixed actor + args",
-			in:   `concat(arg("event.id"), arg("actor.userId"))`,
-			want: `concat($args.event.id, arg("actor.userId"))`,
-		},
-		{
-			name: "bare actor literal preserved",
-			in:   `arg("actor")`,
-			want: `arg("actor")`,
-		},
-		{
-			name: "no arg refs untouched",
-			in:   `concat("hello", $event.payload.id)`,
-			want: `concat("hello", $event.payload.id)`,
-		},
-		{
-			name: "empty string untouched",
-			in:   ``,
-			want: ``,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := convertArgReferences(tt.in)
-			if got != tt.want {
-				t.Errorf("convertArgReferences(%q) = %q, want %q", tt.in, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestCompileStepHelperValue_ArgsShorthandRawString locks in the
-// memql#367 fix for the OTHER path: bare `args.X` raw-string values
-// (the parser stores shorthand-key entries as raw source text, not
-// as AST nodes) get the `$` prefix so the evaluator resolves them
-// through the args custom map.
-func TestCompileStepHelperValue_ArgsShorthandRawString(t *testing.T) {
-	c := New(Config{})
-	got := c.compileStepHelperValue("args.event.payload.node.id")
-	want := "$args.event.payload.node.id"
-	if got != want {
-		t.Errorf("compileStepHelperValue(shorthand args path) = %v, want %v", got, want)
-	}
-
-	// Already-prefixed paths are passthrough.
-	got = c.compileStepHelperValue("$args.event.id")
-	if got != "$args.event.id" {
-		t.Errorf("compileStepHelperValue($args.X) should be unchanged, got %v", got)
-	}
-
-	// Existing event./item. handling stays intact.
-	got = c.compileStepHelperValue("event.payload.id")
-	if got != "$event.payload.id" {
-		t.Errorf("compileStepHelperValue(event.X) = %v, want $event.X", got)
-	}
-}
-
 // TestCompiler_LogicCoalesceInFunctionStepResolvesArgRefs (memql#1065)
 //
 // A logic body that ends with a BARE `return <builtin>({field:
-// coalesce(args.X, args.Y)})` compiles the whole call into the
-// `_return` STRING, with the arg refs serialized as `arg("X")`. At
-// runtime that string is handed to engine.Execute with no caller-args
-// bound, so the refs resolve to empty -- the dailyspace builtin then
-// errors "userId is required" on every login.
+// coalesce(args.X, args.Y)})` compiled the whole call into the `_return`
+// STRING, with the arg refs serialized as `arg("X")`. At runtime that string
+// was handed to engine.Execute with no caller-args bound, so the refs
+// resolved to empty -- the dailyspace builtin then errored "userId is
+// required" on every login.
 //
-// The fix evaluates the coalesce inside an intermediate function STEP
-// (`ensured := <builtin>({field: coalesce(args.X, args.Y)})`) whose
-// args the function-step executor resolves against the local evaluator
-// BEFORE building the engine query. This test pins that the compiled
-// step carries the coalesce in the $args form the resolver understands,
-// and that the `_return` is a bare step reference (resolved locally),
-// not a re-parsed builtin call string.
+// The fix evaluates the fallback inside an intermediate function STEP whose
+// args the runtime resolves against the logic's own arguments before it
+// calls the builtin. In edition 2026 that argument is an {"$expr"} leaf the
+// runtime evaluates with EvalExpr, args in scope, and the `_return` is a
+// bare step reference -- never a re-parsed builtin call string.
 func TestCompiler_LogicCoalesceInFunctionStepResolvesArgRefs(t *testing.T) {
 	source := `
 use common.builtins.{ ensureDailySpaceForUser }
 logic logicEnsureDailySpaceOnAuthSession {
   args { event object @required }
   body {
-    ensured := ensureDailySpaceForUser(userId: coalesce(args.event.payload.userId, args.event.payload.subject))
+    ensured := ensureDailySpaceForUser(userId: args.event.payload.userId ?? args.event.payload.subject)
     return ensured
   }
 }`
@@ -978,14 +739,8 @@ logic logicEnsureDailySpaceOnAuthSession {
 		t.Fatalf("step 0 is not the ensureDailySpaceForUser function step: %#v", steps[0])
 	}
 	argsMap, _ := fn["args"].(map[string]any)
-	userIdExpr, _ := argsMap["userId"].(string)
-	// The function-step arg carries the $args form the resolver understands
-	// (resolveArgValueRef -> evaluateCoalesce skips the empty userId and
-	// falls through to subject), NOT the engine-unresolvable arg("...") form.
-	if !strings.Contains(userIdExpr, "$args.event.payload.subject") {
-		t.Fatalf("userId arg = %q, want a coalesce carrying $args.event.payload.subject", userIdExpr)
-	}
-	if strings.Contains(userIdExpr, `arg("`) {
-		t.Fatalf("userId arg still carries engine-unresolvable arg(\"...\") form: %q", userIdExpr)
+	leaf, _ := argsMap["userId"].(map[string]any)
+	if want := "args.event.payload.userId ?? args.event.payload.subject"; leaf["$expr"] != want {
+		t.Fatalf("userId arg = %#v, want the expression leaf {\"$expr\": %q}", argsMap["userId"], want)
 	}
 }

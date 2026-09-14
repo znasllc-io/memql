@@ -1,0 +1,6 @@
+/// Open tickets whose first tag is urgent, with the retired first().
+query ticket qrFirstCall {
+  filter row => row.status == "open"
+  paginate 50
+  refine row => first(row.tags) == "urgent"
+}

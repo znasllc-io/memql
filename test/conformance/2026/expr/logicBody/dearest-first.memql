@@ -1,0 +1,1 @@
+args.items.orderByDesc(i => i.price).first().name

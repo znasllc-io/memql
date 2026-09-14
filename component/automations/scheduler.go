@@ -691,7 +691,18 @@ func evaluateTriggerFilter(a *Automation, event *events.Event, bound map[string]
 		"error":  "",
 	})
 
-	return evaluator.EvaluateCondition(a.Trigger.Filter)
+	// The filter is a lambda over the triggering ROW (`@filter(row =>
+	// row.status == "archived")`), parsed at load -- or, for an automation
+	// built in Go, before its first fire (ensurePrepared); the rest of the
+	// scope is the state seeded above. A filter that does not parse decides
+	// nothing: the fire is refused with the parse error.
+	if err := ensurePrepared(a); err != nil {
+		return false, err
+	}
+	if lam := a.Trigger.FilterLambda; lam != nil {
+		return evaluateTriggerFilterV1(lam, event, evaluator)
+	}
+	return false, fmt.Errorf("automation %q: its trigger filter was never prepared (automations.PrepareExpressions)", a.Name)
 }
 
 func (s *Scheduler) executeAutomation(automation *Automation, triggeredBy string, event *events.Event) {

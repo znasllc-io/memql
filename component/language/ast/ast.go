@@ -274,6 +274,20 @@ type CountExpr struct {
 func (*CountExpr) node()           {}
 func (*CountExpr) expressionNode() {}
 
+// RefineExpr is the `refine <lambda>` query clause (memql#5364): a predicate
+// evaluated in process over the page its paginated Target reads, after SQL.
+// It is the one named in-process construct in a query, it requires paginate
+// -- so what it scans is bounded by construction -- and it may return fewer
+// rows than the page size. The struct-form rewriter places it inside shape
+// and outside paginate: shape(refine(paginate(...), row => ...), "s").
+type RefineExpr struct {
+	Target ExpressionNode
+	Lambda *LambdaExpr
+}
+
+func (*RefineExpr) node()           {}
+func (*RefineExpr) expressionNode() {}
+
 // ShapeExpr applies a result-shaping template to the target expression.
 type ShapeExpr struct {
 	Target        ExpressionNode
@@ -744,13 +758,17 @@ type MutationStmt struct {
 	// produced before update() landed.
 	Kind    MutationKind
 	Concept string
-	// IDTemplate preserves the id=... expression (string literal, args.X, concat(...), etc.)
-	// for later runtime evaluation by mutation/function execution.
+	// IDTemplate preserves the id=... expression for later runtime evaluation
+	// by mutation/function execution: the v1 ExpressionNode itself, as are the
+	// three templates below.
 	IDTemplate any
 	// CreatedAtTemplate preserves createdAt=... expression for optional CreatedAt overrides.
 	// It should evaluate to an RFC3339/RFC3339Nano timestamp string at runtime.
 	CreatedAtTemplate any
 	PayloadRaw        string
+	// PayloadExpr is the payload, a map literal; PayloadRaw holds its
+	// canonical source (ast.FormatExpr).
+	PayloadExpr ExpressionNode
 	// ParentTemplate and AliasOfTemplate preserve relationship hints for later evaluation.
 	ParentTemplate  any
 	AliasOfTemplate any
@@ -781,7 +799,38 @@ type Attribute struct {
 	Name  string         // e.g., "enabled", "trigger", "description"
 	Value any            // Single value (string, bool, etc.) or nil for flag attributes
 	Args  map[string]any // Named args: key=value pairs
+	// Spelling records how the argument list was written, for the two
+	// spellings Value and Args cannot tell apart (memql#5359): `@when()` and
+	// `@when` both leave Value and Args empty; `@x(!"a")` and `@x("!a")` both
+	// store "!a". The annotation registry's check reads it, because a
+	// placement may take one spelling and not the other.
+	Spelling ArgSpelling
+	// ArgKeys records the keyword arguments in the order they were written,
+	// and which were written BARE (`clusterOwner`) rather than with a value
+	// (`owner="x"`) -- Args is a map, so it keeps neither, and a bare key lands
+	// in it as `true`, the same entry `key=true` makes (memql#5359). The
+	// parser fills it; an attribute built in Go may leave it nil.
+	ArgKeys []ArgKey
 }
+
+// ArgKey is one keyword argument as it was written.
+type ArgKey struct {
+	Name string
+	Bare bool // written without a value: `@rowAuthz(clusterOwner)`
+}
+
+// ArgSpelling is how an attribute's arguments were written, where Value and
+// Args alone cannot say.
+type ArgSpelling uint8
+
+const (
+	// ArgsAsParsed: Value and Args say everything there is to say.
+	ArgsAsParsed ArgSpelling = iota
+	// ArgsEmptyParens: written `@name()`.
+	ArgsEmptyParens
+	// ArgsExclusion: `@name(!"a", !"b")`; Value holds "!a" or {"!a", "!b"}.
+	ArgsExclusion
+)
 
 func (*Attribute) node() {}
 
@@ -1233,6 +1282,10 @@ func (*AutomationDef) node() {}
 type TriggerDef struct {
 	Event  string
 	Filter string
+	// FilterLambda is the edition-2026 trigger filter, `@filter(row => ...)`
+	// (memql#5364): `row` is the triggering row. Filter then holds its
+	// canonical source (ast.FormatExpr). Nil for today's raw-text filter.
+	FilterLambda *LambdaExpr
 }
 
 // ArgsSchema defines an args-block schema -- the input schema for a
@@ -1296,6 +1349,16 @@ type StepDef struct {
 	RetryCount int    // from retry(n) wrapper
 	OnError    string // error handling strategy (e.g., "continue", "fail")
 	Config     any    // Step-type-specific configuration
+
+	// ConditionExpr is Condition parsed; Condition holds its canonical
+	// source. Nil when the step has no condition.
+	ConditionExpr ExpressionNode
+
+	// Line is the author's line the step is written on: its name, or the
+	// keyword of a statement that is a step. Zero for a step no source
+	// produced. The compiler names it when it refuses a step (two steps
+	// with one id, memql#5367).
+	Line int
 }
 
 // StepType identifies the kind of step.
@@ -1346,6 +1409,11 @@ type ForEachStepConfig struct {
 	Index       string // Index variable (optional, e.g., "i" in "for i, item := range")
 	Concurrency int
 	Do          []StepDef
+
+	// SourceExpr and FilterExpr are Source and Filter parsed; the string
+	// fields hold their canonical source. FilterExpr is nil with no filter.
+	SourceExpr ExpressionNode
+	FilterExpr ExpressionNode
 }
 
 // ParallelStepConfig configures concurrent step execution.
@@ -1360,6 +1428,10 @@ type SwitchStepConfig struct {
 	Expression string
 	Cases      map[string]*SwitchCase
 	Default    *SwitchCase
+
+	// ExpressionExpr is Expression parsed; Expression holds its canonical
+	// source.
+	ExpressionExpr ExpressionNode
 }
 
 // SwitchCase defines what to execute for a switch case.
@@ -1762,25 +1834,21 @@ type PromptField struct {
 }
 
 // SpecDecl is the shared-frontend AST node for a struct-form spec
-// or trait declaration (`spec NAME { <bool-expr> }` /
-// `trait NAME { <bool-expr> }`). Introduced by memql#334
+// or trait declaration (`spec <bound> <name> = row => <bool-expr>` /
+// `trait <name> = row => <bool-expr>`). Introduced by memql#334
 // (sub-epic #329 / #310 Stage 1C) so the unified spec loader can
 // parse specs + traits through the langparser instead of the
 // hand-rolled spec_parser.go mini-parser.
 //
-// Body grammar: a single boolean expression. The langparser parses
-// the body via the shared expression-parsing path and stores the
-// resulting typed ExpressionNode here; the memql-side converter
-// (specDeclToSpec) runs NewASTConverter().ConvertExpression on it
-// + the existing classifier + boolean-shape validator.
+// The body is the edition-2026 lambda (memql#5364), held in Lambda; the
+// engine lowers it against the resolved binding at Init.
 //
 // Annotation surface (validated by the converter, not the parser):
 //
 //	@description("text")              documentation (both specs + traits)
 //	@enabled / @disabled              lifecycle (traits only; no-op flags)
 //
-// IsTrait discriminates the two header keywords (`spec NAME { ... }`
-// vs `trait NAME { ... }`). Specs and traits share the SpecRegistry
+// IsTrait discriminates the two header keywords (`spec` vs `trait`). Specs and traits share the SpecRegistry
 // runtime contract; the trait flag drives the converter's
 // classification of whether the entry binds a concept (specs do via
 // file-top use + signature; traits are concept-agnostic).
@@ -1789,12 +1857,16 @@ type SpecDecl struct {
 	// immediately above this declaration (memql#2633, capture-only;
 	// description sourcing flips in #2634).
 	DocComment string
-	Name       string         // spec / trait name
-	BoundName  string         // signature binding: `spec <BoundName> <Name>` resolves to an imported shape XOR concept (specs only; empty for traits)
-	IsTrait    bool           // true for `trait NAME { ... }`, false for `spec NAME { ... }`
-	Attributes []*Attribute   // declaration-level annotations
-	Body       ExpressionNode // parsed boolean expression body (the `return <bool>` body's expression)
-	Path       string         // source path, for errors/diagnostics
+	Name       string       // spec / trait name
+	BoundName  string       // signature binding: `spec <BoundName> <Name>` resolves to an imported shape XOR concept (specs only; empty for traits)
+	IsTrait    bool         // true for a trait, false for a spec
+	Attributes []*Attribute // declaration-level annotations
+	Path       string       // source path, for errors/diagnostics
+
+	// Lambda is the body, `spec <bound> <name> = row => ...` /
+	// `trait <name> = row => ...` (memql#5364): exactly one parameter, the
+	// bound row -- or, over an @actor shape, `actor`.
+	Lambda *LambdaExpr
 }
 
 func (*SpecDecl) node() {}
@@ -1905,6 +1977,12 @@ type RelationshipDecl struct {
 	// an engine release. Empty means unlabelled, which every declaration
 	// predating #3652 is.
 	As string
+
+	// Attribute is the @relationship(...) annotation this was read from, kept
+	// so the concept translator can hold it to the annotation registry (its
+	// keyword keys, its form) -- the typed fields above drop what they do not
+	// read (memql#5359).
+	Attribute *Attribute
 }
 
 // ProviderDecl is the shared-frontend AST node for an AI provider

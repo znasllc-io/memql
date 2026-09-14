@@ -11,13 +11,37 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
+
+// withLanguageLines returns a copy of root with the engine's own language line
+// declared in every domain that lacks one (memql#5357). Load, like boot, reads
+// no file of a domain whose line is refused, so a fixture meant to be PARSED
+// must declare it -- without one, every test here would pass having read
+// nothing at all.
+func withLanguageLines(root fstest.MapFS) fstest.MapFS {
+	line := dslfs.Manifest{Language: languageParser.LanguageVersion, Edition: languageParser.Edition}.Render()
+	out := make(fstest.MapFS, len(root)+1)
+	for p, f := range root {
+		out[p] = f
+	}
+	for p := range root {
+		if d := languageParser.LanguageLineDomainOf(p); d != "" {
+			if _, declared := out[d+"/"+dslfs.ManifestFile]; !declared {
+				out[d+"/"+dslfs.ManifestFile] = &fstest.MapFile{Data: []byte(line)}
+			}
+		}
+	}
+	return out
+}
 
 // loadTree is a test helper: Load must succeed (the integrity lanes are the
 // object under test, not the parse layer).
 func loadTree(t *testing.T, root fstest.MapFS) *Tree {
 	t.Helper()
-	tree, err := Load(root)
+	tree, err := Load(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -80,7 +104,7 @@ query ghost queryGhosts {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree,
@@ -97,7 +121,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree,
@@ -117,7 +141,7 @@ query item queryBySpace {
   args {
     spaceId  string  @required
   }
-  filter  name == args.spaceId
+  filter  row => row.name == args.spaceId
 }`),
 	})
 	assertFindings(t, tree)
@@ -135,7 +159,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree)
@@ -241,7 +265,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name && someBuiltin == true
+  filter  row => row.name == args.name && row.someBuiltin == true
 }`),
 	})
 	if !tree.ImportsOnly["demo/builtins.memql"] {
@@ -267,7 +291,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }
 
 @description("Binds a concept that exists nowhere in the tree.")
@@ -275,7 +299,7 @@ query phantom queryPhantoms {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree,
@@ -325,7 +349,7 @@ mutation thing createThing {
 }`),
 		"demo/mutationshelpers.memql": file(demoConcepts),
 	}
-	tree, err := Load(root)
+	tree, err := Load(withLanguageLines(root))
 	if err == nil {
 		t.Fatalf("expected a parse diagnostic from the broken concepts file")
 	}
@@ -351,7 +375,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 		"other/queries.memql": file(`
 @description("Signature concept resolved through the global fallback.")
@@ -359,7 +383,7 @@ query item queryOtherItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree)
@@ -377,7 +401,7 @@ query space querySpaces {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree)
@@ -403,7 +427,7 @@ query widget queryWidgets {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree,
@@ -437,7 +461,7 @@ query widget queryWidgets {
   args {
     label  string  @required
   }
-  filter  label == args.label
+  filter  row => row.label == args.label
 }`),
 	})
 	assertFindings(t, tree)
@@ -462,7 +486,7 @@ query item queryImported {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 		"fourth/queries.memql": file(`use fourth.helpers.{ helperItemQueryDoc }
 
@@ -471,7 +495,7 @@ query item queryUnimported {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 		"fourth/helpers.memql": file(`@description("Helper shape so the fourth file authors an in-root import.")
 @row
@@ -507,17 +531,14 @@ shape item helperItemQueryDoc {
 func TestVerify_SpecBoundNameMissing(t *testing.T) {
 	tree := loadTree(t, fstest.MapFS{
 		"demo/concepts.memql": file(demoConcepts),
+		// The binding is dangling on purpose. memqlmigrate:keep
 		"demo/specs.memql": file(`use demo.concepts.{ item }
 
 @description("A healthy concept-bound spec.")
-spec item specIsActive {
-  return status == "active"
-}
+spec item specIsActive = row => row.status == "active"
 
 @description("Binds a shape/concept that exists nowhere.")
-spec ghostShape specIsGhost {
-  return status == "ghost"
-}`),
+spec ghostShape specIsGhost = row => row.status == "ghost"`),
 	})
 	assertFindings(t, tree,
 		`demo/specs.memql: spec "specIsGhost" binds "ghostShape", which is not declared as a shape or concept anywhere in the DSL root`)
@@ -568,7 +589,7 @@ mutation item upsertItem {
   insert {
     id: args.itemId
     args.name
-    status: coalesce(args.name, "active")
+    status: args.name ?? "active"
     createdAt: now
     createdBy: actor.userId
     args.payload
@@ -679,7 +700,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree,
@@ -723,7 +744,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	})
 	assertFindings(t, tree,

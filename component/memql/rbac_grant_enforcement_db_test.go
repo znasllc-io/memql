@@ -64,7 +64,7 @@ logic grantGateProbeLogic {
     probe string @required
   }
   body {
-    return cond(args.probe == "x", "yes", "no")
+    return args.probe == "x" ? "yes" : "no"
   }
 }
 `
@@ -79,7 +79,7 @@ logic rankGateProbeLogic {
     probe string @required
   }
   body {
-    return cond(args.probe == "x", "yes", "no")
+    return args.probe == "x" ? "yes" : "no"
   }
 }
 `
@@ -92,7 +92,7 @@ query role grantGateProbeQuery {
   args {
     slug string!
   }
-  filter  slug == args.slug
+  filter  row => row.slug == args.slug
 }
 `
 
@@ -120,8 +120,19 @@ func installGrantTestCatalog(t *testing.T) {
 
 // installGrantProbes registers the two gated constructs on an engine and
 // removes them when the test ends.
+//
+// It also wires a LogicRunner for them. An edition-2026 logic body that
+// returns an expression runs on the LogicRunner (logic_body_v1.go), which
+// component/automations provides and this package cannot import. The probes
+// are about the GATES, which the engine decides before it hands a call to the
+// runner, so a runner that only reports it was reached is the whole of what
+// an admitted call needs here. Restored when the test ends: the engine may be
+// the shared one.
 func installGrantProbes(t *testing.T, eng *MemQLEngine) {
 	t.Helper()
+	previous := eng.LogicRunner()
+	eng.SetLogicRunner(gateProbeLogicRunner{})
+	t.Cleanup(func() { eng.SetLogicRunner(previous) })
 	var probes []*Function
 	for _, p := range []struct{ name, kind, src string }{
 		{grantProbeLogic, "logic", grantProbeLogicSource},
@@ -163,6 +174,14 @@ func grantEngine(t *testing.T) *MemQLEngine {
 	})
 	installGrantProbes(t, eng)
 	return eng
+}
+
+// gateProbeLogicRunner stands in for the LogicRunner behind the gate probes:
+// reaching it is the proof the gates admitted the call.
+type gateProbeLogicRunner struct{}
+
+func (gateProbeLogicRunner) RunLogic(_ context.Context, fnName string, _ *langparser.AutomationDef, _ map[string]any) (any, error) {
+	return map[string]any{"ran": fnName}, nil
 }
 
 // writeGrant writes one grant through the real @serverOnly mutation at the
@@ -438,14 +457,16 @@ func TestGrantEnforcementNegativeControlRoleOnlyResolver(t *testing.T) {
 }
 
 // TestSingleStatementLogicClearsItsFloors pins the hole the capability probe
-// exposed (epic memql#5296). A single-statement logic -- `return cond(...)`
-// -- never hoists to plan.LogicCall (that needs LogicSteps); it expands to a
-// literal at plan.Root and returned from one of executeWith's seven early
-// branches BEFORE the plan-level rank and capability gates ran. So a
-// `@requiresRank` or `@requiresCapability` on it was recorded on the plan and
-// read by nothing, while the same annotation on a multi-step logic or a query
-// was enforced. Both gates now run directly after the parse; this asserts
-// both halves for both annotations.
+// exposed (epic memql#5296). A pre-2026 single-statement logic -- `return
+// cond(...)` -- never hoisted to plan.LogicCall (that needs LogicSteps); it
+// expanded to a literal at plan.Root and returned from one of executeWith's
+// seven early branches BEFORE the plan-level rank and capability gates ran.
+// So a `@requiresRank` or `@requiresCapability` on it was recorded on the plan
+// and read by nothing, while the same annotation on a multi-step logic or a
+// query was enforced. Both gates now run directly after the parse. In edition
+// 2026 the same single-statement body runs on the LogicRunner (stubbed by
+// installGrantProbes), and the gates must still decide before the call
+// reaches it; this asserts both halves for both annotations.
 func TestSingleStatementLogicClearsItsFloors(t *testing.T) {
 	eng := grantEngine(t)
 	suffix := uniqueSuffix("floors")

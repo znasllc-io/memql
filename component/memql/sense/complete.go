@@ -7,12 +7,20 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
+	"github.com/znasllc-io/memql/component/language/dslspec"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Complete returns completion suggestions at a cursor position.
 func (s *Service) Complete(source string, line, col int, filePath string) []CompletionItem {
 	ctx := analyzeCursorContext(source, line, col)
 	ctx.FilePath = filePath
+
+	// An expression position (memql#5365) offers what the tier manifest admits
+	// there, and nothing it refuses.
+	if items, ok := s.completeAtExpression(ctx, source, line, col); ok {
+		return items
+	}
 
 	var items []CompletionItem
 
@@ -88,15 +96,19 @@ func (s *Service) completeTopLevel(prefix string) []CompletionItem {
 
 // completeAnnotation returns annotation name completions after @.
 func (s *Service) completeAnnotation(ctx CursorContext) []CompletionItem {
+	if receivers := fieldAnnotationReceivers(ctx.Enclosing); len(receivers) > 0 {
+		return fieldAnnotationItems(receivers, ctx.Prefix, "", 1)
+	}
 	validAnnotations := annotationsForConstruct(ctx.Enclosing)
 
+	receiver := receiverOfConstruct(ctx.Enclosing)
 	var items []CompletionItem
 	for _, name := range validAnnotations {
 		if strings.HasPrefix(name, ctx.Prefix) {
 			doc := AnnotationDocs[name]
 			insertText := name
 			// Annotations with args get parens.
-			if annotationTakesArgs(name) {
+			if annotationTakesArgs(receiver, name) {
 				insertText = name + "("
 			}
 			items = append(items, CompletionItem{
@@ -104,6 +116,13 @@ func (s *Service) completeAnnotation(ctx CursorContext) []CompletionItem {
 				Documentation: doc, InsertText: insertText,
 				SortPriority: 1,
 			})
+		}
+	}
+	// The whole-form snippets (the trigger filter's lambda), beside the bare
+	// annotation names they complete.
+	for _, it := range annotationSnippets(ctx.Enclosing) {
+		if strings.HasPrefix(it.InsertText, ctx.Prefix) {
+			items = append(items, it)
 		}
 	}
 
@@ -189,22 +208,51 @@ func (s *Service) completeFuncBody(prefix string, enc EnclosingConstruct, source
 
 	var items []CompletionItem
 
-	// Construct-scoped body blocks (#2627): the spec's BodyBlocks for
-	// THIS construct, offered where a block can open (directly in the
+	// Construct-scoped body clauses (#2627): the spec's BodyBlocks for
+	// THIS construct, offered where a clause can start (directly in the
 	// construct body, not nested inside another block). A logic body
-	// never offers `filter`; a shape body never offers `insert`.
+	// never offers `filter`; a shape body never offers `insert`. A LINE
+	// clause (`filter <expr>`, `paginate 25`) is inserted as its keyword and
+	// a space: it opens no block, and the `filter {` this used to insert is
+	// a form the rewriter refuses (memql#5359).
 	if len(enc.Blocks) == 0 {
 		for _, blk := range bodyBlocksForConstruct(enc) {
-			if strings.HasPrefix(blk, prefix) {
+			if !strings.HasPrefix(blk, prefix) {
+				continue
+			}
+			if parser.IsLineClause(blk) {
+				insert := blk + " "
+				// A filter and a refine are clauses over a lambda in v1.
+				if blk == "filter" || blk == "refine" {
+					insert = blk + " row => "
+				}
 				items = append(items, CompletionItem{
-					Label: blk, Kind: "keyword", Detail: enc.Keyword + " block",
-					Documentation: KeywordDocs[blk], InsertText: blk + " {",
+					Label: blk, Kind: "keyword", Detail: enc.Keyword + " clause",
+					Documentation: specClauseDoc(blk), InsertText: insert,
 					SortPriority: 2,
 				})
-				// The snippet form opens the block and places the cursor
-				// inside (#2629).
-				items = append(items, blockSnippet(blk, enc.Keyword))
+				continue
 			}
+			// A named block (`step <name> { ... }`) needs its name before the
+			// brace -- a nameless one is refused -- so the keyword is inserted
+			// with a space and the snippet puts the name first.
+			if parser.IsNamedBlock(blk) {
+				items = append(items, CompletionItem{
+					Label: blk, Kind: "keyword", Detail: enc.Keyword + " block",
+					Documentation: specClauseDoc(blk), InsertText: blk + " ",
+					SortPriority: 2,
+				})
+				items = append(items, namedBlockSnippet(blk, enc.Keyword))
+				continue
+			}
+			items = append(items, CompletionItem{
+				Label: blk, Kind: "keyword", Detail: enc.Keyword + " block",
+				Documentation: specClauseDoc(blk), InsertText: blk + " {",
+				SortPriority: 2,
+			})
+			// The snippet form opens the block and places the cursor
+			// inside (#2629).
+			items = append(items, blockSnippet(blk, enc.Keyword))
 		}
 	}
 
@@ -508,31 +556,59 @@ func (s *Service) completeConstructConcept(ctx CursorContext) []CompletionItem {
 			Documentation: doc, InsertText: short,
 			SortPriority: priority,
 		})
-		// Secondary: a fully-formed `use <domain>.concepts.{ short }` import
-		// when the concept isn't already in file scope, the domain is known,
-		// and the spec rule asks for it -- the owner's "no concept in scope ->
-		// suggest importing one" behaviour. A concept of the file's OWN
-		// domain is ambient (#2617) -- in scope with no import -- so the
-		// import suggestion is suppressed there (the bare suggestion above
-		// already binds it).
+		// Secondary: bind the concept AND import it, when it isn't already in
+		// file scope, the domain is known, and the spec rule asks for it -- the
+		// owner's "no concept in scope -> suggest importing one" behaviour. A
+		// concept of the file's OWN domain is ambient (#2617) -- in scope with
+		// no import -- so the import suggestion is suppressed there (the bare
+		// suggestion above already binds it), as it is when the file already
+		// imports the concept.
+		//
+		// The slot gets the NAME; the `use <domain>.concepts.{ short }` line is
+		// an edit of its own, placed with the file's imports (memql#5359). It
+		// used to be inserted AT the slot, which made `query use
+		// library.concepts.{ folder }` -- a file that does not parse.
 		if suggestImport && domain != "" && !inScope[short] && domain != fileDomain(ctx.FilePath) {
 			useLine := "use " + domain + ".concepts.{ " + short + " }"
 			items = append(items, CompletionItem{
-				Label:         useLine,
-				Kind:          "snippet",
-				Detail:        "import concept",
-				Documentation: "Import `" + short + "` from `" + domain + "` into file scope, then bind it.",
-				// AUDITED (#2629): this was multi-line PLAIN text -- no
-				// snippet syntax, so it never suffered the literal-insert
-				// bug; it simply left the cursor at the end of the bound
-				// name. Now a real snippet, with the literals escaped.
-				InsertText:   escapeSnippetLiteral(useLine) + "\n" + escapeSnippetLiteral(short) + "$0",
-				IsSnippet:    true,
-				SortPriority: 2,
+				Label:           useLine,
+				Kind:            "snippet",
+				Detail:          "import concept",
+				Documentation:   "Bind `" + short + "` and import it from `" + domain + "`: the `use` line goes with the file's imports.",
+				InsertText:      short,
+				SortPriority:    2,
+				AdditionalEdits: []TextEdit{importEdit(ctx.Source, useLine)},
 			})
 		}
 	}
 	return items
+}
+
+// importEdit places a file-top `use` line: after the file's last `use`
+// declaration (whose braced list may span lines), or at the top of the file,
+// followed by a blank line, when it has none.
+func importEdit(source, useLine string) TextEdit {
+	lines := strings.Split(source, "\n")
+	last := 0 // 1-based line of the last `use` declaration's final line
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(trimmed, "use ") {
+			continue
+		}
+		end := i
+		if strings.Contains(trimmed, "{") && !strings.Contains(trimmed, "}") {
+			for end < len(lines)-1 && !strings.Contains(lines[end], "}") {
+				end++
+			}
+		}
+		last, i = end+1, end
+	}
+	if last == 0 {
+		at := Position{Line: 1, Column: 1}
+		return TextEdit{Range: Range{Start: at, End: at}, NewText: useLine + "\n\n"}
+	}
+	at := Position{Line: last + 1, Column: 1}
+	return TextEdit{Range: Range{Start: at, End: at}, NewText: useLine + "\n"}
 }
 
 // splitConceptID splits a canonical concept id (v1:<domain>:<...>:<leaf>) into
@@ -618,23 +694,81 @@ func (s *Service) completeConceptDef(prefix string) []CompletionItem {
 			})
 		}
 	}
-	// Field-level annotations.
-	for _, ann := range []string{"required", "default", "description"} {
-		items = append(items, CompletionItem{
-			Label: "@" + ann, Kind: "annotation", Detail: "field annotation",
-			Documentation: AnnotationDocs[ann], InsertText: "@" + ann,
-			SortPriority: 5,
-		})
+	// Field-level annotations and the body's own @relationship: the
+	// registry's concept-field and concept-body receivers, the sets the
+	// concept translator checks against, each with the paren it needs
+	// (memql#5359).
+	items = append(items, fieldAnnotationItems([]annotations.Receiver{annotations.ConceptField, annotations.ConceptBody}, "", "@", 5)...)
+	return items
+}
+
+// fieldAnnotationReceivers returns the registry receivers of the field an `@`
+// at the cursor is written on, or nil when the cursor is not in a field list
+// -- in a construct's preamble, where the construct's own set applies. A
+// concept body takes its fields' annotations and its own @relationship (a
+// nested object or variant block, its fields' only); a tool / prompt /
+// builtin body its fields'; an args block its fields'. Before memql#5359 an
+// `@` after a field's type offered the CONSTRUCT's annotations, every one of
+// which the field refuses.
+func fieldAnnotationReceivers(enc EnclosingConstruct) []annotations.Receiver {
+	if enc.Keyword == "" || enc.Preamble {
+		return nil
+	}
+	body := dslspec.BodyFieldReceiver(enc.Keyword)
+	if n := len(enc.Blocks); n > 0 {
+		switch {
+		case enc.Blocks[n-1] == "args":
+			return []annotations.Receiver{annotations.ArgsField}
+		case body == annotations.ConceptField:
+			return []annotations.Receiver{annotations.ConceptField}
+		}
+		return nil
+	}
+	switch body {
+	case "":
+		return nil
+	case annotations.ConceptField:
+		return []annotations.Receiver{annotations.ConceptField, annotations.ConceptBody}
+	}
+	return []annotations.Receiver{body}
+}
+
+// fieldAnnotationItems renders the annotations of the given receivers that
+// start with prefix, each once, inserting lead + the name and the `(` when its
+// placement cannot be written bare.
+func fieldAnnotationItems(receivers []annotations.Receiver, prefix, lead string, priority int) []CompletionItem {
+	var items []CompletionItem
+	seen := map[string]bool{}
+	for _, r := range receivers {
+		for _, name := range AnnotationsByReceiver[string(r)] {
+			if seen[name] || !strings.HasPrefix(name, prefix) {
+				continue
+			}
+			seen[name] = true
+			insert := lead + name
+			if annotationTakesArgs(string(r), name) {
+				insert += "("
+			}
+			items = append(items, CompletionItem{
+				Label: "@" + name, Kind: "annotation", Detail: "field annotation",
+				Documentation: AnnotationDocs[name], InsertText: insert,
+				SortPriority: priority,
+			})
+		}
 	}
 	return items
 }
 
-// allAnnotationNames returns all known annotation names.
+// allAnnotationNames returns every annotation a construct may carry in its
+// leading position -- the union fallback. Field-only annotations (@pii,
+// @minimum, ...) are left out: they are written after a field's type, never
+// before a declaration, so offering them at an `@` above one would offer an
+// annotation every construct refuses.
 func allAnnotationNames() []string {
 	seen := make(map[string]bool)
 	var names []string
-	for _, annotations := range AnnotationsByReceiver {
-		for _, name := range annotations {
+	for _, c := range dslSpec.Constructs {
+		for _, name := range AnnotationsByReceiver[c.AnnotationReceiver] {
 			if !seen[name] {
 				seen[name] = true
 				names = append(names, name)
@@ -645,51 +779,64 @@ func allAnnotationNames() []string {
 	return names
 }
 
-// annotationTakesArgs returns true if the annotation expects arguments.
-func annotationTakesArgs(name string) bool {
-	switch name {
-	case "description", "version", "trigger", "filter",
-		// relationship was MISSING from this hand-maintained switch, so
-		// completion inserted it without the opening paren (#2627's
-		// in-sync test is what caught it). @schedule and @rateLimit stood
-		// beside it here until memql#5375 retired both.
-		"relationship",
-		"handler", "executionTime", "executor", "args",
-		"defaultProvider", "templateFile", "type", "vendor", "model", "extends",
-		"cache", "defaultFilter", "concepts", "default",
-		// The two concept annotations memql#5378 verified are read. Both
-		// take keyword arguments and are declared in
-		// annotations.KeywordArgs, so the in-sync test fires on them by
-		// name -- which is how this omission surfaced immediately.
-		"displayCard", "composable",
-		// The whole field-list family was missing here (memql#4951): every
-		// one takes `("a", "b")` and completion offered them bare. The
-		// in-sync test only fires for annotations declared in
-		// annotations.KeywordArgs, and these take POSITIONAL strings, so it
-		// could not see them. Added together rather than one at a time,
-		// because the next one added would inherit the same gap.
-		"mergeFields", "appendFields", "addToSet", "removeFromSet",
-		"createOnly", "noUnset", "requiresRank", "visibility", "alias",
-		// The rule surface (epic memql#5127). @when takes keyword arguments
-		// and is declared in annotations.KeywordArgs, so the in-sync test
-		// fires on it by name; the other four take a positional value, which
-		// that test cannot see -- they are added together for the reason the
-		// field-list family above was.
-		"when", "policy", "level", "precedence", "onUnavailable", "exclude":
-		return true
-	default:
-		return false
+// annotationTakesArgs reports whether completion should insert `@name(` --
+// the placement takes arguments and cannot be written bare -- read off the
+// registry's argument forms rather than a hand list (the hand switch this
+// replaced missed rateLimit, relationship and the whole field-list family
+// before it was noticed, memql#4951). On an unknown receiver (the union
+// fallback) the name takes arguments when any placement of it must.
+func annotationTakesArgs(receiver, name string) bool {
+	if p, ok := annotations.Lookup(annotations.Receiver(receiver), name); ok {
+		return p.Forms&annotations.FormFlag == 0
 	}
+	for _, p := range annotations.Placements() {
+		if p.Name == name && p.Forms&annotations.FormFlag == 0 {
+			return true
+		}
+	}
+	return false
 }
 
-// enclosingConstructArgsFields returns the declared args-field names of
-// the construct enclosing the cursor line -- the unified source (#2624)
-// behind both the automation bare-name completion (G2, memql#2364 / ADR
-// Decision 3) and the `args.` member completion, so the two can never
-// disagree about what is declared. Pure source-level scan, no registry.
-func enclosingConstructArgsFields(source string, line int) []string {
-	return constructArgsFields(source, line, `^\s*(?:automation|query|mutate|logic)\s+[A-Za-z_]`)
+// receiverOfConstruct is the registry receiver of the detected construct's
+// leading annotations, or "" when none was detected.
+func receiverOfConstruct(enc EnclosingConstruct) string {
+	if enc.Keyword == "" {
+		return ""
+	}
+	if c := dslSpec.ConstructByKeyword(enc.Keyword); c != nil {
+		return c.AnnotationReceiver
+	}
+	return ""
 }
+
+// argsFieldItems offers declared args fields, as `args.` member completion
+// does wherever it reads them: constructArgs is the one source-level scan
+// (#2624) behind the automation bare-name completion (G2, memql#2364 / ADR
+// Decision 3) and every `args.` completion, so the two can never disagree
+// about what is declared.
+func argsFieldItems(fields []string, types map[string]string, prefix, doc string) []CompletionItem {
+	var items []CompletionItem
+	for _, f := range fields {
+		if !strings.HasPrefix(f, prefix) {
+			continue
+		}
+		// The detail is the declared type, the one fact an author picking an
+		// arg needs.
+		detail := types[f]
+		if detail == "" {
+			detail = "args field"
+		}
+		items = append(items, CompletionItem{
+			Label: f, Kind: "variable", Detail: detail,
+			Documentation: doc, InsertText: f, SortPriority: 1,
+		})
+	}
+	return items
+}
+
+// enclosingConstructHeader matches the header of a construct that declares an
+// args block.
+const enclosingConstructHeader = `^\s*(?:automation|query|mutate|logic)\s+[A-Za-z_]`
 
 // automationArgsFieldCompletions keeps the G2 bare-name behavior:
 // inside an AUTOMATION body the declared args fields resolve bare, so
@@ -697,7 +844,8 @@ func enclosingConstructArgsFields(source string, line int) []string {
 // get the `args.` member path (bare args fields do not resolve there).
 func automationArgsFieldCompletions(source string, line int, prefix string) []CompletionItem {
 	var items []CompletionItem
-	for _, f := range constructArgsFields(source, line, `^\s*automation\s+[A-Za-z_]`) {
+	fields, _ := constructArgs(source, line, `^\s*automation\s+[A-Za-z_]`)
+	for _, f := range fields {
 		if strings.HasPrefix(f, prefix) {
 			items = append(items, CompletionItem{
 				Label: f, Kind: "variable", Detail: "args field",
@@ -709,31 +857,33 @@ func automationArgsFieldCompletions(source string, line int, prefix string) []Co
 	return items
 }
 
-// constructArgsFields scans for the construct (matching headerPattern)
-// enclosing the cursor line and returns its args-block field names.
-func constructArgsFields(source string, line int, headerPattern string) []string {
+// constructArgs scans for the construct (matching headerPattern) enclosing
+// the cursor line and returns its args-block field names, in order, and each
+// field's declared type.
+func constructArgs(source string, line int, headerPattern string) ([]string, map[string]string) {
 	lines := strings.Split(source, "\n")
 	if line < 1 || line > len(lines) {
-		return nil
+		return nil, nil
 	}
 	headerPat := regexp.MustCompile(headerPattern)
-	fieldPat := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s+\S`)
 	argsPat := regexp.MustCompile(`^\s*args\s*\{`)
 
 	depth, inConstruct, inArgs, argsDepthAt, start := 0, false, false, 0, -1
 	var fields []string
+	types := map[string]string{}
 	for i, ln := range lines {
 		opens := strings.Count(ln, "{")
 		closes := strings.Count(ln, "}")
 		if !inConstruct && headerPat.MatchString(ln) {
 			inConstruct, start, depth = true, i+1, 0
-			fields = nil
+			fields, types = nil, map[string]string{}
 		}
 		if inConstruct {
 			if inArgs {
 				if trimmed := strings.TrimSpace(ln); trimmed != "" && !strings.HasPrefix(trimmed, "//") && !strings.Contains(ln, "args") {
-					if m := fieldPat.FindStringSubmatch(ln); m != nil {
+					if m := argsFieldTypePattern.FindStringSubmatch(ln); m != nil {
 						fields = append(fields, m[1])
+						types[m[1]] = strings.TrimSuffix(m[2], "!")
 					}
 				}
 				if depth+opens-closes < argsDepthAt {
@@ -746,7 +896,7 @@ func constructArgsFields(source string, line int, headerPattern string) []string
 			depth += opens - closes
 			if depth <= 0 && i+1 > start {
 				if line >= start && line <= i+1 {
-					return fields
+					return fields, types
 				}
 				inConstruct, inArgs = false, false
 			}
@@ -754,9 +904,9 @@ func constructArgsFields(source string, line int, headerPattern string) []string
 	}
 	// Cursor inside a still-open construct at EOF (mid-typing).
 	if inConstruct && line >= start {
-		return fields
+		return fields, types
 	}
-	return nil
+	return nil, nil
 }
 
 // fileDomain derives the ambient domain from a document path: the base
@@ -795,17 +945,8 @@ func (s *Service) completeFieldAccess(ctx CursorContext, source string, line int
 		}
 		return nil
 	case "args":
-		var items []CompletionItem
-		for _, f := range enclosingConstructArgsFields(source, line) {
-			if strings.HasPrefix(f, ctx.Prefix) {
-				items = append(items, CompletionItem{
-					Label: f, Kind: "variable", Detail: "args field",
-					Documentation: "Declared in the enclosing construct's args { } block.",
-					InsertText:    f, SortPriority: 1,
-				})
-			}
-		}
-		return items
+		fields, types := constructArgs(source, line, enclosingConstructHeader)
+		return argsFieldItems(fields, types, ctx.Prefix, "Declared in the enclosing construct's args { } block.")
 	case "row":
 		// `@row` puts the row envelope in scope: the intrinsics every
 		// stored row carries, independent of its concept's payload
@@ -898,9 +1039,9 @@ func eventMemberCompletions(prefix string) []CompletionItem {
 // annotationsForConstruct maps a detected construct to the annotations
 // legal on it (#2627), handling the three documented edges:
 //
-//   - the CONCEPT construct's receiver key is "" -- a real registry key,
-//     not "unresolved", so an empty Keyword (detection abstained) and an
-//     empty Receiver (concept) must not be conflated;
+//   - the CONCEPT construct's receiver key is "Concept" (it was "" before
+//     memql#5359, which is why an empty Keyword -- detection abstained -- is
+//     tested for rather than an empty receiver);
 //   - an unbacked construct (today exactly `use`, pinned by the dslspec
 //     drift test's knownUnbacked set) falls back to the union rather
 //     than offering nothing;
@@ -982,18 +1123,11 @@ func (s *Service) completeInBlock(prefix string, enc EnclosingConstruct, block s
 		return items, true
 
 	case "inFilterClause":
-		var items []CompletionItem
-		for _, head := range reservedFilterHeads {
-			if strings.HasPrefix(head, prefix) {
-				items = append(items, CompletionItem{
-					Label: head, Kind: "keyword", Detail: "filter head",
-					Documentation: KeywordDocs[head], InsertText: head,
-					SortPriority: 2,
-				})
-			}
-		}
-		items = append(items, s.boundConceptFieldItems(prefix, enc)...)
-		return items, true
+		// The pre-v1 `filter { }` block. Edition 2026 has no filter block: the
+		// parser reads the braces as a map literal and refuses a filter that is
+		// not a lambda, so nothing typed inside one can load and nothing is
+		// offered. A bare field name here is exactly the refused spelling.
+		return nil, true
 
 	case "inWriteBlock":
 		var items []CompletionItem
@@ -1048,14 +1182,6 @@ func (s *Service) boundConceptFieldItems(prefix string, enc EnclosingConstruct) 
 		break
 	}
 	return items
-}
-
-// reservedFilterHeads mirrors the engine plan parser's
-// reservedFilterHead set (component/memql/parser.go) -- the path roots
-// legal at the head of a filter predicate.
-var reservedFilterHeads = []string{
-	"payload", "actor", "args", "now", "config",
-	"trace", "meta", "schema", "partition", "provenance",
 }
 
 // rowIntrinsics is the row envelope every stored row carries regardless of

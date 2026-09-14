@@ -97,13 +97,9 @@ mutation budget setBudget {
     active             bool
   }
   insert {
-    args.id
-    args.scope
-    args.scopeId
-    args.periodType
-    args.limitUSD
-    args.alertThresholdPct
-    args.resetAt
-    active: args.active ?? true
+    accept { id, scope, scopeId, periodType, limitUSD, alertThresholdPct, resetAt }
+    stamp {
+      active: args.active ?? true
+    }
   }
 }

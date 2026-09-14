@@ -14,6 +14,8 @@ package baseloader
 // Skip atoms alongside the S5 duplicate detections and the durable-
 // bundle re-hydration quarantines.
 
+import "errors"
+
 // Skip is one construct a loader could not register: it either failed to
 // parse or failed to register into its registry. It carries enough to
 // name the construct in a strict-boot failure and in the startup log --
@@ -26,6 +28,40 @@ type Skip struct {
 	File      string // origin file path in the DSL tree
 	Phase     string // "parse" | "register" (or a loader-specific phase)
 	Err       string // error text
+	// Code is the refusal's stable rule id when the error carries one
+	// (RuleCode) -- a lowering refusal's `lower_*`, an annotation's
+	// `annotation_*`, a retired form's rule -- and empty otherwise. The text
+	// in Err carries it too; this is the field a consumer keys on without
+	// parsing prose (D24).
+	Code string
+}
+
+// CodedRefusal is what an error implements to carry a stable rule id: the
+// lowering's LowerError, the annotation registry's Refusal, the parser's
+// RetiredFormError. baseloader names the method rather than the types so it
+// imports none of their packages.
+type CodedRefusal interface {
+	RuleCode() string
+}
+
+// RuleCode is the stable rule id err carries anywhere on its chain, or "".
+func RuleCode(err error) string {
+	var coded CodedRefusal
+	if err != nil && errors.As(err, &coded) && coded != nil {
+		return coded.RuleCode()
+	}
+	return ""
+}
+
+// SkipFor is the Skip for a construct whose load failed with err: its text,
+// and its rule id when it carries one.
+func SkipFor(component, keyword, name, file, phase string, err error) Skip {
+	s := Skip{Component: component, Keyword: keyword, Name: name, File: file, Phase: phase}
+	if err != nil {
+		s.Err = err.Error()
+		s.Code = RuleCode(err)
+	}
+	return s
 }
 
 // Report is the skip sink LoadOne / LoadMany append to. A nil *Report is

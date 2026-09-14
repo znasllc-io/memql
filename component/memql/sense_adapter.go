@@ -97,6 +97,25 @@ func (a *SenseAdapter) SpecNames() []string {
 	return a.engine.specs.Names()
 }
 
+// SpecGet projects a registered spec or trait: its kind (row or context) and
+// its signature binding, which Sense needs to apply it to `row` or `actor`.
+func (a *SenseAdapter) SpecGet(name string) (*sense.SpecInfo, bool) {
+	if a.engine.specs == nil {
+		return nil, false
+	}
+	s, err := a.engine.specs.Get(name)
+	if err != nil || s == nil {
+		return nil, false
+	}
+	return &sense.SpecInfo{
+		Name:        s.Name,
+		Description: s.Description,
+		Kind:        string(s.Kind),
+		Bound:       s.BoundName,
+		Trait:       s.IsTrait,
+	}, true
+}
+
 func (a *SenseAdapter) ToolNames() []string {
 	if a.engine.tools == nil {
 		return nil

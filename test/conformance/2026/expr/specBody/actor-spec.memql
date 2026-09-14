@@ -1,0 +1,2 @@
+/// The caller is an admin.
+spec sbCaller sbCallerIsAdmin = actor => actor.role == "admin"

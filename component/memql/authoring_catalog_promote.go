@@ -21,7 +21,6 @@ package memql
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -95,16 +94,14 @@ func (e *MemQLEngine) PromoteConstructToCatalog(ctx context.Context, constructID
 		return CatalogPromotion{}, fmt.Errorf("catalog: nil engine")
 	}
 
-	args, err := json.Marshal(map[string]string{
-		"constructId":      plan.ConstructID,
-		"catalogKey":       plan.CatalogKey,
-		"catalogMatchText": plan.MatchText,
-		"fromBundleId":     plan.FromBundleID,
-	})
-	if err != nil {
-		return CatalogPromotion{}, fmt.Errorf("catalog: marshal promotion args: %w", err)
-	}
-	if _, err := e.Execute(ctx, "catalogueConstruct("+string(args)+")"); err != nil {
+	// The named-argument form; a marshalled map in the parens is the
+	// object-literal form the parser refuses (see SetConstructStatus).
+	if _, err := e.Execute(ctx, mutationCall("catalogueConstruct",
+		[2]string{"constructId", plan.ConstructID},
+		[2]string{"catalogKey", plan.CatalogKey},
+		[2]string{"catalogMatchText", plan.MatchText},
+		[2]string{"fromBundleId", plan.FromBundleID},
+	)); err != nil {
 		return CatalogPromotion{}, fmt.Errorf("catalog: catalogueConstruct: %w", err)
 	}
 

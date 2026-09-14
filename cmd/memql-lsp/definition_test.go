@@ -71,7 +71,7 @@ func TestDefinition_JumpsToDeclarationInAnotherFile(t *testing.T) {
 
 	commonlog.Configure(-4, nil)
 	s := newServer(root, commonlog.GetLogger(lsName))
-	s.buildSense()
+	s.buildSense(nil)
 
 	shapesURI := pathToURI(filepath.Join(domain, "shapes.memql"))
 	s.docs.open(shapesURI, shapes)

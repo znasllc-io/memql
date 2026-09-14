@@ -1,0 +1,1 @@
+args.status in ["open", "held"] && args.code startsWith "INC-"

@@ -23,7 +23,7 @@ query thing zzParked {
 }
 */
 query thing zzLive {
-  filter  label=="y"
+  filter  row => row.label == "y"
 }
 `
 
@@ -32,7 +32,7 @@ const cleanQuerySource = `use probe.concepts.{ thing }
 @public
 @description("intentionally caller-scope-free")
 query thing zzLive {
-  filter  label=="y"
+  filter  row => row.label == "y"
 }
 `
 
@@ -49,7 +49,7 @@ func treeFor(t *testing.T, querySrc string) *Tree {
 		"probe/concepts.memql": {Data: []byte(probeConceptSource)},
 		"probe/queries.memql":  {Data: []byte(querySrc)},
 	}
-	tree, err := Load(root)
+	tree, err := Load(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("fixture tree did not load, so this measures nothing: %v", err)
 	}

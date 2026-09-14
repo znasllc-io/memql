@@ -1,0 +1,6 @@
+@executor("integration.timeutil.dateKeyInTimezone")
+@description
+builtin ticketDateKeyDescription {
+  timezone  string  @description("An IANA timezone; UTC when empty.")
+  now       string  @description("The instant to key, RFC3339.")
+}

@@ -1,0 +1,11 @@
+/// The open tickets, a page at a time.
+query ticket qfOpenPage {
+  filter row => row.status == "open"
+  paginate 20
+}
+
+/// A filter that runs a query for every row.
+query ticket qfConstructCall {
+  filter row => row.id in query qfOpenPage()
+  paginate 20
+}

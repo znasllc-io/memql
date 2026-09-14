@@ -5,13 +5,13 @@ query shop shopById {
   args {
     shopId  string!
   }
-  filter  row.id==args.shopId && ownerUserId==actor.userId
+  filter  row => row.id == args.shopId && row.ownerUserId == actor.userId
   shape   shopFull
 }
 
 @actor
 query shop shops {
-  filter    ownerUserId==actor.userId
+  filter    row => row.ownerUserId == actor.userId
   sort      "row.createdAt", "desc"
   paginate  50
   shape     shopFull

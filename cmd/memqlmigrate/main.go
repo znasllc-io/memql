@@ -2,113 +2,59 @@
 //
 // Usage:
 //
-//	memqlmigrate --rewrite=<name>[,<name>...] [-w] [-check] <path>...
+//	memqlmigrate [--edition=<edition>] --rewrite=<name>[,<name>...] [-w] [-check] <path>...
+//	memqlmigrate --grammar-version
 //
 // Companion to memqlfmt. Where memqlfmt normalises whitespace and
 // indentation, memqlmigrate performs one-shot syntactic rewrites that
-// retire a deprecated form. One named rewrite per legacy form so the
-// tool runs idempotently per release, matching the shape of `go fix`.
+// carry a tree across a change to the language. One named rewrite per
+// change, so the tool runs idempotently per release, matching the shape of
+// `go fix` and `cargo fix --edition`.
 //
-// Supported rewrites:
+// Every rewrite is registered in rewrites.go under the EDITION it moves a
+// tree onto and the EPIC that shipped it (epic memql#5356). --edition picks
+// the edition and defaults to the one this engine writes; --rewrite names
+// rewrites registered for it. `memqlmigrate --help` lists them. Each
+// rewrite's own doc comment says exactly what it changes and what it leaves
+// alone.
 //
-//	result-navigation   .empty / .first / .last / .count / .nodes
-//	                    (magical field access on step results) →
-//	                    .Empty() / .First() / .Last() / .Len() / .Nodes()
-//	                    (method-style, recognised by the evaluator).
-//
-//	slice-syntax        array(T) → []T (Go-aligned slice type spelling).
-//
-//	args-description    strip @description("...") from args{} fields --
-//	                    the parser REJECTS the annotation (memql#3336, no
-//	                    AST slot), so this is the fixer for a file that
-//	                    refuses to load; declaration-level and concept-
-//	                    field @description are load-bearing and untouched.
-//
-//	accept-stamp        collapse arg-mirror runs in mutation write blocks
-//	                    into the accept/stamp form (#2616; form shipped by
-//	                    #2593). Only provably-safe blocks rewrite -- the
-//	                    result is verified equivalent through the engine's
-//	                    own mutation emitter.
-//
-//	same-domain-use     delete use imports of the file's own domain
-//	                    (#2617: same-domain constructs are ambient); the
-//	                    domain is the file's containing directory, so this
-//	                    rewrite is path-aware.
-//
-//	row-authz           seed @rowAuthz(...) on each concept from how its
-//	                    existing queries filter (#2920). Whole-tree, so it
-//	                    is path-aware and only targets concepts.memql.
-//	                    Declares ONLY the tiers a top-level filter conjunct
-//	                    proves, and only when EVERY query over the concept
-//	                    clears that floor -- an unscoped sibling blocks the
-//	                    declaration rather than being ignored. Never infers
-//	                    `public` or `granted`. Re-runnable; a concept that
-//	                    already declares a tier is left alone.
-//
-//	null-coalesce       coalesce(a, b, c) → a ?? b ?? c (#2766; the
-//	                    operator shipped by #2611). Skips what the
-//	                    Swift-tight precedence would re-associate --
-//	                    arithmetic / unary neighbours, and comparisons
-//	                    inside an argument -- plus multi-line calls.
+// A TREE rewrite cannot decide a file from that file alone, so it takes a
+// directory and refuses a file argument: `language-line` (a domain's
+// manifest) and `expressions` (edition 2026's lambda forms, whose predicate
+// uses are resolved against every spec and trait in the tree) are the two
+// today.
 //
 // Flags:
 //
-//	--rewrite=NAME[,NAME...]   comma-separated list of rewrites to apply
+//	--edition=EDITION          the edition whose rewrites to run (default: the engine's)
+//	--rewrite=NAME[,NAME...]   comma-separated rewrites, applied in the order given
 //	-w                         rewrite files in place (otherwise print)
 //	-check                     exit non-zero and list files that would change
 //
-// Without -w and without -check, the tool prints the rewritten content
-// for each file to stdout. Rewrites apply at the lexical layer; the
-// tool is conservative and leaves input unchanged when it cannot
-// safely perform the transformation.
+// Without -w and without -check, the tool prints the rewritten content of
+// each file to stdout; a file a tree rewrite creates is printed under a
+// "==> path <==" header. Rewrites apply at the lexical layer; the tool is
+// conservative and leaves input unchanged when it cannot safely perform the
+// transformation.
+//
+// Exit codes: 0 done, 1 a rewrite failed or -check found files that would
+// change, 2 a usage error (an unknown flag, edition or rewrite).
 package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"io"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
-
-type rewriter func([]byte) ([]byte, error)
-
-// pathRewriter is a rewrite that needs the file's path (e.g. to derive
-// the containing domain directory, #2617).
-type pathRewriter func(path string, src []byte) ([]byte, error)
-
-var rewriters = map[string]rewriter{
-	"result-navigation":        rewriteResultNavigation,
-	"slice-syntax":             rewriteSliceSyntax,
-	"args-description":         rewriteArgsDescription,
-	"accept-stamp":             langparser.RewriteAcceptStamp,
-	"required-sigil":           langparser.RewriteRequiredSigil,
-	"enum-type":                langparser.RewriteEnumTypeArgs,
-	"cache-positional":         langparser.RewriteCachePositional,
-	"terse-automation":         langparser.RewriteLonghandSingleStepAutomation,
-	"actor-binding":            langparser.RewriteActorBinding,
-	"doc-comment-descriptions": langparser.RewriteDocCommentDescriptions,
-	"null-coalesce":            langparser.RewriteNullCoalesce,
-	// The attribute cleanup of epic memql#5375 (D17). Construct-aware: see
-	// attributes.go for why three of the names it touches survive on one
-	// receiver and are retired on another. Pair it with
-	// `attributes-namespace` below for a whole-tree migration.
-	"attributes": rewriteAttributes,
-}
-
-var pathRewriters = map[string]pathRewriter{
-	"same-domain-use":   rewriteSameDomainUse,
-	"namespace-default": rewriteNamespaceDefault,
-	"row-authz":         rewriteRowAuthz,
-	// The @namespace half of `attributes`: redundancy depends on the
-	// directory's namespace.pin, so it cannot be decided from the file.
-	"attributes-namespace": rewriteAttributesNamespace,
-}
 
 // rewriteNamespaceDefault strips @namespace annotations that restate the
 // file's containing DOMAIN directory (#2614) -- absent @namespace derives
@@ -181,13 +127,20 @@ func rewriteRowAuthz(path string, src []byte) ([]byte, error) {
 }
 
 type opts struct {
+	edition  string
 	rewrites []string
 	check    bool
 	write    bool
 }
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
+	err := run(os.Args[1:], os.Stdout, os.Stderr)
+	switch {
+	case err == nil:
+	case errors.Is(err, errUsage):
+		// The usage problem was already written to stderr where it was found.
+		os.Exit(2)
+	default:
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -198,7 +151,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	// fingerprint (S6, memql#2361) -- the value stamped into authored rows
 	// and release lockfiles, and the identity of the migration channel.
 	if len(args) == 1 && args[0] == "--grammar-version" {
-		fmt.Fprintf(stdout, "%s (fingerprint %s)\n", languageParser.GrammarVersion, languageParser.GrammarFingerprint())
+		fmt.Fprintf(stdout, "%s (fingerprint %s)\n", langparser.GrammarVersion, langparser.GrammarFingerprint())
 		return nil
 	}
 
@@ -206,62 +159,61 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-
+	if err := resolveEdition(o.edition); err != nil {
+		fmt.Fprintln(stderr, err)
+		return errUsage
+	}
 	if len(o.rewrites) == 0 {
 		fmt.Fprintln(stderr, "memqlmigrate: --rewrite=NAME is required")
-		listRewriters(stderr)
+		listRewriters(stderr, o.edition)
 		return errUsage
 	}
-
-	pipeline := make([]pathRewriter, 0, len(o.rewrites))
-	for _, name := range o.rewrites {
-		if fn, ok := rewriters[name]; ok {
-			plain := fn
-			pipeline = append(pipeline, func(_ string, b []byte) ([]byte, error) { return plain(b) })
-			continue
-		}
-		if fn, ok := pathRewriters[name]; ok {
-			pipeline = append(pipeline, fn)
-			continue
-		}
-		fmt.Fprintf(stderr, "memqlmigrate: unknown rewrite %q\n", name)
-		listRewriters(stderr)
-		return errUsage
-	}
-
-	expanded, err := expandPaths(paths)
+	pipeline, err := resolveRewrites(o.edition, o.rewrites)
 	if err != nil {
-		return fmt.Errorf("memqlmigrate: %w", err)
+		fmt.Fprintln(stderr, err)
+		return errUsage
+	}
+
+	sets, err := loadWorkingSets(paths, pipeline)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return errUsage
 	}
 
 	changed := 0
-	for _, p := range expanded {
-		orig, err := os.ReadFile(p)
-		if err != nil {
-			return fmt.Errorf("memqlmigrate: read %s: %w", p, err)
+	for _, ws := range sets {
+		if err := applyPipeline(ws, pipeline); err != nil {
+			return fmt.Errorf("memqlmigrate: %w", err)
 		}
-		out, err := applyPipeline(p, orig, pipeline)
-		if err != nil {
-			return fmt.Errorf("memqlmigrate: rewrite %s: %w", p, err)
-		}
-		if o.check {
-			if !bytes.Equal(orig, out) {
-				fmt.Fprintln(stdout, p)
-				changed++
-			}
-			continue
-		}
-		if o.write {
-			if !bytes.Equal(orig, out) {
-				if err := os.WriteFile(p, out, 0o644); err != nil {
-					return fmt.Errorf("memqlmigrate: write %s: %w", p, err)
+		for _, rel := range ws.outputOrder() {
+			full := filepath.Join(ws.root, filepath.FromSlash(rel))
+			orig, existed := ws.orig[rel]
+			out := ws.files[rel]
+			differs := !existed || !bytes.Equal(orig, out)
+			switch {
+			case o.check:
+				if differs {
+					fmt.Fprintln(stdout, full)
+					changed++
 				}
-				changed++
+			case o.write:
+				if differs {
+					if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+						return fmt.Errorf("memqlmigrate: write %s: %w", full, err)
+					}
+					if err := os.WriteFile(full, out, 0o644); err != nil {
+						return fmt.Errorf("memqlmigrate: write %s: %w", full, err)
+					}
+					changed++
+				}
+			default:
+				if !existed {
+					fmt.Fprintf(stdout, "==> %s <==\n", full)
+				}
+				if _, err := stdout.Write(out); err != nil {
+					return fmt.Errorf("memqlmigrate: stdout: %w", err)
+				}
 			}
-			continue
-		}
-		if _, err := stdout.Write(out); err != nil {
-			return fmt.Errorf("memqlmigrate: stdout: %w", err)
 		}
 	}
 
@@ -277,7 +229,7 @@ var (
 )
 
 func parseFlags(args []string, stderr io.Writer) (opts, []string, error) {
-	var o opts
+	o := opts{edition: langparser.Edition}
 	paths := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -286,28 +238,34 @@ func parseFlags(args []string, stderr io.Writer) (opts, []string, error) {
 			o.write = true
 		case a == "-check":
 			o.check = true
-		case a == "--rewrite":
+		case a == "--rewrite", a == "--edition":
 			if i+1 >= len(args) {
-				fmt.Fprintln(stderr, "memqlmigrate: --rewrite requires a value")
+				fmt.Fprintf(stderr, "memqlmigrate: %s requires a value\n", a)
 				return o, nil, errUsage
 			}
 			i++
-			o.rewrites = append(o.rewrites, splitCSV(args[i])...)
+			if a == "--rewrite" {
+				o.rewrites = append(o.rewrites, splitCSV(args[i])...)
+			} else {
+				o.edition = strings.TrimSpace(args[i])
+			}
 		case strings.HasPrefix(a, "--rewrite="):
 			o.rewrites = append(o.rewrites, splitCSV(strings.TrimPrefix(a, "--rewrite="))...)
+		case strings.HasPrefix(a, "--edition="):
+			o.edition = strings.TrimSpace(strings.TrimPrefix(a, "--edition="))
 		case a == "-h", a == "--help":
-			printUsage(stderr)
+			printUsage(stderr, o.edition)
 			return o, nil, errUsage
 		case strings.HasPrefix(a, "-"):
 			fmt.Fprintf(stderr, "memqlmigrate: unknown flag %q\n", a)
-			printUsage(stderr)
+			printUsage(stderr, o.edition)
 			return o, nil, errUsage
 		default:
 			paths = append(paths, a)
 		}
 	}
 	if len(paths) == 0 {
-		printUsage(stderr)
+		printUsage(stderr, o.edition)
 		return o, nil, errUsage
 	}
 	return o, paths, nil
@@ -324,72 +282,173 @@ func splitCSV(s string) []string {
 	return out
 }
 
-func printUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: memqlmigrate --rewrite=NAME[,NAME...] [-w] [-check] <path>...")
-	listRewriters(w)
+func printUsage(w io.Writer, edition string) {
+	fmt.Fprintln(w, "usage: memqlmigrate [--edition=EDITION] --rewrite=NAME[,NAME...] [-w] [-check] <path>...")
+	listRewriters(w, edition)
 }
 
-func listRewriters(w io.Writer) {
-	// DERIVED from the two registries, not hand-listed. The hand-written
-	// version silently omitted `null-coalesce` and `row-authz` -- a usage
-	// message that denies a rewrite exists is worse than none, because the
-	// docs tell operators to run it.
-	names := make([]string, 0, len(rewriters)+len(pathRewriters))
-	for n := range rewriters {
-		names = append(names, n)
+// listRewriters is DERIVED from the registry, never hand-listed. The
+// hand-written version once silently omitted `null-coalesce` and
+// `row-authz` -- a usage message that denies a rewrite exists is worse than
+// none, because the docs tell operators to run it.
+func listRewriters(w io.Writer, edition string) {
+	rs := rewritesFor(edition)
+	if len(rs) == 0 {
+		fmt.Fprintf(w, "no rewrites are registered for edition %s (this engine reads: %s)\n",
+			edition, strings.Join(langparser.Editions(), ", "))
+		return
 	}
-	for n := range pathRewriters {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	fmt.Fprintln(w, "available rewrites:")
-	for _, n := range names {
-		fmt.Fprintf(w, "  %s\n", n)
-	}
-	fmt.Fprintln(w, "\nSee the package doc comment in cmd/memqlmigrate/main.go for what each one does.")
-}
-
-func applyPipeline(path string, src []byte, pipeline []pathRewriter) ([]byte, error) {
-	out := src
-	for _, fn := range pipeline {
-		next, err := fn(path, out)
-		if err != nil {
-			return nil, err
+	width := 0
+	for _, r := range rs {
+		if len(r.name) > width {
+			width = len(r.name)
 		}
-		out = next
 	}
-	return out, nil
+	fmt.Fprintf(w, "rewrites for edition %s:\n", edition)
+	for _, r := range rs {
+		fmt.Fprintf(w, "  %-*s  %s (%s)\n", width, r.name, r.doc, r.epic)
+	}
 }
 
-func expandPaths(paths []string) ([]string, error) {
-	var out []string
+// workingSet is one path argument's files, keyed by slash-separated path
+// relative to root.
+type workingSet struct {
+	root string
+	// files is the current content of every file the pipeline can see.
+	files map[string][]byte
+	// orig is the content as read. A key present in files and absent here is
+	// a file a tree rewrite created.
+	orig map[string][]byte
+	// visit is the .memql files a file-level rewrite runs over, in the order
+	// they were found.
+	visit []string
+}
+
+// outputOrder is every file the run reports: the visited files in the order
+// they were found, then any file a tree rewrite created or changed that a
+// file-level rewrite did not visit, sorted.
+func (ws *workingSet) outputOrder() []string {
+	seen := make(map[string]bool, len(ws.visit))
+	out := append([]string(nil), ws.visit...)
+	for _, v := range ws.visit {
+		seen[v] = true
+	}
+	var extra []string
+	for k, v := range ws.files {
+		if seen[k] {
+			continue
+		}
+		if o, existed := ws.orig[k]; !existed || !bytes.Equal(o, v) {
+			extra = append(extra, k)
+		}
+	}
+	sort.Strings(extra)
+	return append(out, extra...)
+}
+
+// loadWorkingSets reads each path argument. A directory is a tree: its .memql
+// files are visited, and when the pipeline holds a tree rewrite every file
+// under it is loaded so the rewrite can see the whole tree. A file argument is
+// a one-file set, which a tree rewrite cannot run on.
+func loadWorkingSets(paths []string, pipeline []rewrite) ([]*workingSet, error) {
+	var treeRewrite string
+	for _, r := range pipeline {
+		if r.tree != nil {
+			treeRewrite = r.name
+			break
+		}
+	}
+	sets := make([]*workingSet, 0, len(paths))
 	for _, p := range paths {
 		info, err := os.Stat(p)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("memqlmigrate: %w", err)
 		}
+		ws := &workingSet{files: map[string][]byte{}, orig: map[string][]byte{}}
 		if !info.IsDir() {
-			out = append(out, p)
+			if treeRewrite != "" {
+				return nil, fmt.Errorf("memqlmigrate: rewrite %q works on a whole tree; pass a directory, not the file %s", treeRewrite, p)
+			}
+			data, err := os.ReadFile(p)
+			if err != nil {
+				return nil, fmt.Errorf("memqlmigrate: read %s: %w", p, err)
+			}
+			ws.root = filepath.Dir(p)
+			rel := filepath.ToSlash(filepath.Base(p))
+			ws.files[rel], ws.orig[rel] = data, data
+			ws.visit = []string{rel}
+			sets = append(sets, ws)
 			continue
 		}
-		err = filepath.WalkDir(p, func(path string, d os.DirEntry, werr error) error {
+		ws.root = p
+		err = fs.WalkDir(os.DirFS(p), ".", func(rel string, d fs.DirEntry, werr error) error {
 			if werr != nil {
 				return werr
 			}
-			if d.IsDir() {
+			if d.IsDir() || !d.Type().IsRegular() {
 				return nil
 			}
-			if filepath.Ext(path) != ".memql" {
+			isMemql := path.Ext(rel) == ".memql"
+			if !isMemql && treeRewrite == "" {
 				return nil
 			}
-			out = append(out, path)
+			data, err := fs.ReadFile(os.DirFS(p), rel)
+			if err != nil {
+				return err
+			}
+			ws.files[rel], ws.orig[rel] = data, data
+			if isMemql {
+				ws.visit = append(ws.visit, rel)
+			}
 			return nil
 		})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("memqlmigrate: %w", err)
+		}
+		sets = append(sets, ws)
+	}
+	return sets, nil
+}
+
+// applyPipeline runs the rewrites in order over one working set. A file-level
+// rewrite runs over every visited .memql file; a tree rewrite sees the whole
+// set and its result is merged back, new files included.
+func applyPipeline(ws *workingSet, pipeline []rewrite) error {
+	for _, r := range pipeline {
+		switch {
+		case r.plain != nil || r.path != nil:
+			for _, rel := range ws.visit {
+				full := filepath.Join(ws.root, filepath.FromSlash(rel))
+				var next []byte
+				var err error
+				if r.plain != nil {
+					next, err = r.plain(ws.files[rel])
+				} else {
+					next, err = r.path(full, ws.files[rel])
+				}
+				if err != nil {
+					return fmt.Errorf("rewrite %s: %s: %w", r.name, full, err)
+				}
+				ws.files[rel] = next
+			}
+		case r.tree != nil:
+			view := make(map[string][]byte, len(ws.files))
+			for k, v := range ws.files {
+				view[k] = v
+			}
+			out, err := r.tree(ws.root, view)
+			if err != nil {
+				return fmt.Errorf("rewrite %s: %s: %w", r.name, ws.root, err)
+			}
+			for k, v := range out {
+				if _, known := ws.files[k]; !known && path.Ext(k) == ".memql" {
+					ws.visit = append(ws.visit, k)
+				}
+				ws.files[k] = v
+			}
 		}
 	}
-	return out, nil
+	return nil
 }
 
 // resultNavigationMap is the canonical result-navigation rewrite table.

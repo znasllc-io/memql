@@ -1,0 +1,180 @@
+{
+  "cases": [
+    {
+      "file": "coalesced-title.memql",
+      "verdict": "load_ok",
+      "note": "A mutation value computes what the field is written with."
+    },
+    {
+      "file": "misspelled-arg.memql",
+      "verdict": "refuse_load",
+      "message": "args field \"title\" declared but never referenced as args.title in the body",
+      "note": "A value reads only declared args; the misspelling leaves the declared one unread, and the load says which."
+    },
+    {
+      "file": "title-or-untitled.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {},
+      "expect": "untitled"
+    },
+    {
+      "file": "title-or-untitled.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "title": " "
+      },
+      "expect": "untitled",
+      "note": "`??` falls through on a whitespace-only string (rule 30)."
+    },
+    {
+      "file": "title-or-untitled.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "title": "Disk full"
+      },
+      "expect": "Disk full"
+    },
+    {
+      "file": "incident-code.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "number": 42
+      },
+      "expect": "INC-42"
+    },
+    {
+      "file": "priority-label.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "priority": 5
+      },
+      "expect": "high"
+    },
+    {
+      "file": "payload-map.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "title": "Disk full",
+        "tag": "ops"
+      },
+      "expect": {
+        "tags": [
+          "ops"
+        ],
+        "title": "Disk full"
+      },
+      "note": "An absent value contributes nothing to a list or a map: the tag list holds one element."
+    },
+    {
+      "file": "nonblank-tags.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "tags": [
+          "a",
+          "",
+          "b"
+        ]
+      },
+      "expect": 2
+    },
+    {
+      "file": "negated-delta.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "delta": 4
+      },
+      "expect": -4
+    },
+    {
+      "file": "not-archived.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "archived": false
+      },
+      "expect": true
+    },
+    {
+      "file": "optional-source.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "meta": null
+      },
+      "expect": "manual"
+    },
+    {
+      "file": "open-or-held.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "status": "open",
+        "code": "INC-3"
+      },
+      "expect": true
+    },
+    {
+      "file": "either-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "a": 0,
+        "b": 2
+      },
+      "expect": true
+    },
+    {
+      "file": "doubled-sum.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "a": 1,
+        "b": 2
+      },
+      "expect": 6
+    },
+    {
+      "file": "stamped-by.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "actor": {
+        "userId": "u1"
+      },
+      "expect": "u1"
+    },
+    {
+      "file": "nil-value.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "expect": null
+    },
+    {
+      "file": "open-ticket.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "ticket": {
+          "status": "open"
+        }
+      },
+      "expect": true
+    },
+    {
+      "file": "coalesce.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "an-undeclared-arg.memql",
+      "verdict": "refuse_load",
+      "message": "body reads args.name, which is not declared in the args block (declared: ticketId)"
+    }
+  ]
+}

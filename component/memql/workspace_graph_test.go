@@ -15,6 +15,7 @@ import (
 
 func fyloWorkspace() fstest.MapFS {
 	return fstest.MapFS{
+		"fylo/memql.toml": languageLineFile(),
 		"fylo/concepts.memql": &fstest.MapFile{Data: []byte(`@version("1.0.0")
 concept order {
   id  string  @required
@@ -23,7 +24,7 @@ concept order {
 
 query order listOrders {
   args { id  string  @required }
-  filter  id == args.id
+  filter  row => row.id == args.id
 }`)},
 	}
 }
@@ -117,7 +118,7 @@ mutation ghostConcept touchGhost {
 }`)},
 	}
 
-	svc, err := BuildOfflineSense(root)
+	svc, err := BuildOfflineSense(withLanguageLines(root))
 	if err == nil {
 		t.Fatal("expected a strict-boot error for a mutation bound to a nonexistent concept")
 	}
@@ -139,7 +140,7 @@ concept item {
   id  string  @required
 }`)},
 	}
-	svc, err := BuildOfflineSense(root)
+	svc, err := BuildOfflineSense(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("BuildOfflineSense over a clean workspace: %v", err)
 	}
@@ -153,7 +154,7 @@ concept item {
 		}
 		return out
 	}
-	tail := "\n\nquery item listItems {\n  filter id == \"x\"\n}\n"
+	tail := "\n\nquery item listItems {\n  filter row => row.id == \"x\"\n}\n"
 
 	// Valid import: zero import diagnostics.
 	if got := importCodes("use demo.concepts.{ item }" + tail); len(got) != 0 {
@@ -184,7 +185,7 @@ concept item {
   id  string  @required
 }`)},
 	}
-	svc, err := BuildOfflineSense(root)
+	svc, err := BuildOfflineSense(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("BuildOfflineSense: %v", err)
 	}
@@ -225,7 +226,7 @@ concept item {
   id  string  @required
 }`)},
 	}
-	svc, err := BuildOfflineSense(root)
+	svc, err := BuildOfflineSense(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("BuildOfflineSense: %v", err)
 	}

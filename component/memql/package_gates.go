@@ -43,6 +43,7 @@ import (
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/core/component"
+	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
@@ -61,6 +62,12 @@ type PackageDSLResult struct {
 	// Diagnostics is every problem strict boot would print, construct by
 	// construct. Empty means this tree mounts clean.
 	Diagnostics []LintDiagnostic
+	// UnreadRootManifest is the diagnostic for a memql.toml at the root of the
+	// tree (language_line_unread), or nil. It is NOT in Diagnostics: no mount
+	// reads a root file -- each domain declares its line in its own
+	// <domain>/memql.toml -- so boot refuses nothing for it, and a deploy must
+	// neither be refused for it nor be told it "would refuse boot".
+	UnreadRootManifest *LintDiagnostic
 }
 
 // AnalyzePackageDSL validates the product-DSL half of a candidate package.
@@ -81,6 +88,9 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 	defer unmount()
 
 	result := PackageDSLResult{Mounted: mounted, SkippedCore: skippedCore}
+	if msg, unread := memqldsl.UnreadRootManifest(root); unread {
+		result.UnreadRootManifest = &LintDiagnostic{File: dslfs.ManifestFile, Message: msg}
+	}
 
 	concepts, conceptSkips, err := BuildUnifiedConcepts(logger, memqldsl.Tree())
 
@@ -108,10 +118,7 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 
 	if eng.loadReport != nil {
 		for _, s := range eng.loadReport.Skipped {
-			result.Diagnostics = append(result.Diagnostics, LintDiagnostic{
-				File:    s.File,
-				Message: s.Keyword + " " + s.Name + " (" + s.Phase + "): " + s.Err,
-			})
+			result.Diagnostics = append(result.Diagnostics, LintDiagnostic{File: s.File, Message: skipDiagnostic(s)})
 		}
 		for _, d := range eng.loadReport.Duplicates {
 			result.Diagnostics = append(result.Diagnostics, LintDiagnostic{Message: "duplicate construct: " + d.String()})
@@ -127,6 +134,9 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 	}
 
 	sortDiagnostics(result.Diagnostics)
+	// The concept build and Init both refuse a domain whose language line the
+	// engine will not read (memql#5357); the package author reads it once.
+	result.Diagnostics = dedupeDiagnostics(result.Diagnostics)
 	return result, nil
 }
 

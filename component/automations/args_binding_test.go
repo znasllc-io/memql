@@ -234,7 +234,7 @@ func TestEvaluatorSeesArgs(t *testing.T) {
 	eval := NewEvaluator()
 	eval.SetCustom("args", bound)
 
-	val, err := eval.EvaluateFilterValue("args.environment")
+	val, err := evalV1(eval, "args.environment")
 	if err != nil {
 		t.Fatalf("resolve args.environment: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestEvaluatorSeesArgs(t *testing.T) {
 		t.Errorf("args.environment = %v, want staging", val)
 	}
 
-	ok, err := eval.EvaluateCondition(`args.environment == "staging"`)
+	ok, err := evalV1Cond(t, eval, `args.environment == "staging"`)
 	if err != nil {
 		t.Fatalf("evaluate condition: %v", err)
 	}

@@ -25,7 +25,7 @@ func TestRewriteDocComments_VerbatimDuplicateHeaderDeleted(t *testing.T) {
 @actor
 @description("Lists active spaces for the calling user, newest first.")
 query space querySpacesProbe {
-  filter ownerUserId == actor.userId
+  filter row => row.ownerUserId == actor.userId
 }
 `
 	got := rewriteDoc(t, src)
@@ -49,7 +49,7 @@ func TestRewriteDocComments_ParaphraseAboveThresholdDeleted(t *testing.T) {
 	src := `// Active spaces belonging to the calling user, returned newest first.
 @description("Lists the active spaces for the calling user, newest first.")
 query space querySpacesProbe {
-  filter ownerUserId == actor.userId
+  filter row => row.ownerUserId == actor.userId
 }
 `
 	got := rewriteDoc(t, src)
@@ -63,7 +63,7 @@ func TestRewriteDocComments_NonDuplicateHeaderKept(t *testing.T) {
 // migration constraints and the keyset-pagination contract details.
 @description("Lists active spaces for the calling user.")
 query space querySpacesProbe {
-  filter ownerUserId == actor.userId
+  filter row => row.ownerUserId == actor.userId
 }
 `
 	got := rewriteDoc(t, src)
@@ -85,7 +85,7 @@ query candidate queryTracesProbe {
     planId string!
     limit  number
   }
-  filter planId == args.planId
+  filter row => row.planId == args.planId
 }
 `
 	got := rewriteDoc(t, src)
@@ -104,7 +104,7 @@ query candidate queryTracesProbe {
     planId string!
     limit  number
   }
-  filter planId == args.planId
+  filter row => row.planId == args.planId
 }
 `
 	got := rewriteDoc(t, src)
@@ -124,7 +124,7 @@ func TestRewriteDocComments_UnplaceableSectionKept(t *testing.T) {
 //   a projection whose rows interleave the join in a way the schema cannot express
 @description("Probe.")
 query space queryOddProbe {
-  filter ownerUserId == "x"
+  filter row => row.ownerUserId == "x"
 }
 `
 	got := rewriteDoc(t, src)
@@ -163,7 +163,7 @@ mutation candidate mutateDoneProbe {
 func TestRewriteDocComments_LongDescriptionWrapsAndRoundTrips(t *testing.T) {
 	long := strings.Repeat("alpha beta gamma delta epsilon ", 12)
 	long = strings.TrimSpace(long)
-	src := "@description(\"" + long + "\")\nquery space queryLongProbe {\n  filter ownerUserId == \"x\"\n}\n"
+	src := "@description(\"" + long + "\")\nquery space queryLongProbe {\n  filter row => row.ownerUserId == \"x\"\n}\n"
 	got := rewriteDoc(t, src)
 	if LeadingDocComment(got) != long {
 		t.Errorf("wrapped description must round-trip through the join:\ngot  %q\nwant %q", LeadingDocComment(got), long)
@@ -195,7 +195,7 @@ func TestRewriteDocComments_Idempotent(t *testing.T) {
 	src := `// Lists active spaces for the calling user, newest first.
 @description("Lists active spaces for the calling user, newest first.")
 query space querySpacesProbe {
-  filter ownerUserId == actor.userId
+  filter row => row.ownerUserId == actor.userId
 }
 `
 	once := rewriteDoc(t, src)
@@ -211,9 +211,9 @@ query space querySpacesProbe {
 // the contextual keywords stay expressions.
 func TestParseHeuristic_BareConstructKeywordIsFile(t *testing.T) {
 	for name, src := range map[string]string{
-		"bare-trait": "trait t1 {\n  return effect == \"allow\"\n}\n",
-		"bare-spec":  "spec actorEnvelope s1 {\n  return role == \"admin\"\n}\n",
-		"doc-trait":  "/// Doc.\ntrait t1 {\n  return effect == \"allow\"\n}\n",
+		"bare-trait": "trait t1 = row => row.effect == \"allow\"\n",
+		"bare-spec":  "spec actorEnvelope s1 = actor => actor.role == \"admin\"\n",
+		"doc-trait":  "/// Doc.\ntrait t1 = row => row.effect == \"allow\"\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			tokens, err := NewLexer(src).Tokenize()
@@ -221,7 +221,6 @@ func TestParseHeuristic_BareConstructKeywordIsFile(t *testing.T) {
 				t.Fatal(err)
 			}
 			p := NewParser(tokens)
-			p.SetSource(src)
 			node, err := p.Parse()
 			if err != nil {
 				t.Fatalf("Parse: %v", err)
@@ -278,7 +277,7 @@ logic orphanProbe {
     a string @required
   }
   body {
-    return coalesce(args.a, "")
+    return args.a ?? ""
   }
 }
 `
@@ -298,9 +297,7 @@ func TestRewriteDocComments_AdditiveLongHeaderKept(t *testing.T) {
 // isConfirmed sibling for the human-confirmed tier and the usage example
 // concept==v1:data:record&&isChecked() for filter composition.
 @description("Matches active data records in checked validation state.")
-trait probeChecked {
-  return validationState == "checked"
-}
+trait probeChecked = row => row.validationState == "checked"
 `
 	got := rewriteDoc(t, src)
 	if !strings.Contains(got, "synthetically validated but not yet confirmed") {
@@ -322,7 +319,7 @@ logic absentProbe {
     a string @required
   }
   body {
-    return coalesce(args.a, "")
+    return args.a ?? ""
   }
 }
 `
@@ -340,7 +337,7 @@ func TestRewriteDocComments_ShadowedDescriptionDropped(t *testing.T) {
 	src := `/// Lists active spaces for the calling user, newest first.
 @description("Lists active spaces for the calling user, newest first.")
 query space queryShadowProbe {
-  filter ownerUserId == actor.userId
+  filter row => row.ownerUserId == actor.userId
 }
 `
 	got := rewriteDoc(t, src)

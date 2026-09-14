@@ -1,0 +1,6 @@
+/// A support queue declared a collection, with nothing it contains.
+@type("collection")
+concept queue {
+  name       string
+  ticketIds  []string
+}

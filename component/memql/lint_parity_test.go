@@ -31,9 +31,12 @@ func diagsContain(diags []LintDiagnostic, sub string) bool {
 	return false
 }
 
+// lint runs the parity pass over root with every fixture domain declaring the
+// engine's own language line (memql#5357), so each test sees only the problem
+// its fixture is about.
 func lint(t *testing.T, root fstest.MapFS) []LintDiagnostic {
 	t.Helper()
-	diags, _, err := LintUnifiedTree(nil, root)
+	diags, _, err := LintUnifiedTree(nil, withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("LintUnifiedTree: %v", err)
 	}
@@ -169,15 +172,15 @@ logic decideThing {
 	}
 }
 
-// TestLintParity_LogicArithmeticOverComparison is a validator class for the
-// #2542 unparenthesized-comparison arithmetic trap: a logic body with
-// `return a - b > 0` parses (and Init converts arithmetic), but the boolean
-// operand only surfaces at evalCollScalar -- so memqllint accepted it while the
-// runtime failed with an opaque non-numeric-operand error. The converter's
-// convertArithmeticExpr (plus validateLogicArithmeticOperands for intermediate
-// steps) rejects it at load with the parenthesise-the-arithmetic guidance;
-// LintUnifiedTree surfaces that through the real Init.
-func TestLintParity_LogicArithmeticOverComparison(t *testing.T) {
+// TestLintParity_LogicArithmeticOverComparisonReadsByPrecedence pins the end
+// of the #2542 unparenthesized-comparison trap. Before edition 2026 a logic
+// body's `return a - b > 0` parsed as `a - (b > 0)` -- the trailing bare
+// identifier folded the comparison into the subtraction -- and the loader
+// refused it with the parenthesise-the-arithmetic guidance, which memqllint
+// surfaced. Edition 2026 has one precedence table (rule 11c): arithmetic binds
+// tighter than comparison, so the same text means `(a - b) > 0` and mounts
+// clean, as the parenthesized idiom below does.
+func TestLintParity_LogicArithmeticOverComparisonReadsByPrecedence(t *testing.T) {
 	root := fstest.MapFS{
 		"lintarith/concepts.memql": {Data: []byte(`@version("1.0.0")
 @description("A marker concept so the domain carries a concept.")
@@ -185,8 +188,7 @@ concept marker {
   label  string  @required  @description("Marker label.")
 }
 `)},
-		"lintarith/logic.memql": {Data: []byte(`
-@description("Returns an unparenthesized arithmetic-then-comparison (#2542 trap).")
+		"lintarith/logic.memql": {Data: []byte(`@description("Returns an unparenthesized arithmetic-then-comparison, which reads by precedence.")
 logic ratioGate {
   args {
     a  int  @required
@@ -199,14 +201,14 @@ logic ratioGate {
 `)},
 	}
 	diags := lint(t, root)
-	if !diagsContain(diags, "comparison") || !diagsContain(diags, "(a - b) > 0") {
-		t.Fatalf("expected an arithmetic-over-comparison diagnostic with the parenthesise fix; got: %+v", diags)
+	if len(diags) != 0 {
+		t.Fatalf("`args.a - args.b > 0` reads as `(args.a - args.b) > 0` and must mount clean; got: %+v", diags)
 	}
 }
 
-// TestLintParity_LogicParenthesizedComparisonIsClean is the positive control:
-// the parenthesized working idiom `(a - b) > 0` mounts clean -- the validator
-// fires only on the trap shape, not on legitimate expression-led comparisons.
+// TestLintParity_LogicParenthesizedComparisonIsClean: the parenthesized idiom
+// `(a - b) > 0` mounts clean, the same expression the unparenthesized form
+// above reads as.
 func TestLintParity_LogicParenthesizedComparisonIsClean(t *testing.T) {
 	root := fstest.MapFS{
 		"lintarithok/concepts.memql": {Data: []byte(`@version("1.0.0")

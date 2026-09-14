@@ -10,17 +10,41 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
+// inProcessStep runs a step the way the real step registry runs an
+// in-process expression: steps.QueryExecutor evaluates a query step that is
+// not a construct call over the run (Evaluator.InProcessQuery), with no
+// engine round trip. handled is false for every other step -- the ones that
+// reach the engine, which a stub registry records instead.
+func inProcessStep(ctx context.Context, step *Step, sc *StepContext) (result *StepResult, handled bool, err error) {
+	if sc == nil || sc.Evaluator == nil {
+		return nil, false, nil
+	}
+	v, inProcess, err := sc.Evaluator.InProcessQuery(ctx, step)
+	if !inProcess {
+		return nil, false, nil
+	}
+	now := time.Now()
+	if err != nil {
+		return &StepResult{StepId: step.ID, Status: "failed", Error: err.Error(), StartedAt: now, CompletedAt: now}, true, err
+	}
+	return &StepResult{StepId: step.ID, Status: "success", StartedAt: now, CompletedAt: now, Result: v}, true, nil
+}
+
 // recordingStepRegistry is a minimal StepExecutorRegistry stub for the
-// logic-runner end-to-end tests. It records every dispatched step ID and
-// returns a canned success result, so a Logic body's intermediate
-// side-effect steps run without a live engine / DB. The `_return` step
-// is resolved by RunLogic's local-expression path before it ever reaches
-// the registry, so it never lands here for a literal return.
+// logic-runner end-to-end tests. An in-process expression step evaluates as
+// the real query executor evaluates it (inProcessStep); every other step --
+// one that would reach the engine -- is recorded and answered with a canned
+// success result, so a Logic body's side-effect steps run without a live
+// engine / DB. `dispatched` is therefore exactly the steps that would make
+// an engine round trip.
 type recordingStepRegistry struct {
 	dispatched []string
 }
 
-func (r *recordingStepRegistry) Execute(_ context.Context, step *Step, _ *StepContext) (*StepResult, error) {
+func (r *recordingStepRegistry) Execute(ctx context.Context, step *Step, sc *StepContext) (*StepResult, error) {
+	if res, handled, err := inProcessStep(ctx, step, sc); handled {
+		return res, err
+	}
 	r.dispatched = append(r.dispatched, step.ID)
 	now := time.Now()
 	return &StepResult{
@@ -50,7 +74,6 @@ func parseLogicBody(t *testing.T, src string) *languageParser.AutomationDef {
 		t.Fatalf("Tokenize: %v", err)
 	}
 	parser := languageParser.NewParser(tokens)
-	parser.SetSource(normalised)
 	ast, err := parser.Parse()
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -86,8 +109,7 @@ func parseLogicBody(t *testing.T, src string) *languageParser.AutomationDef {
 // its own `_return` step on the output side) and the steps must
 // arrive in topological dependency order.
 func TestLogicRunner_CompilesMultiStepBody(t *testing.T) {
-	src := `@useQuery(queryFoo, queryBar)
-@description("test")
+	src := `@description("test")
 logic doStuff {
   args {
     partitionId  string  @required
@@ -95,7 +117,7 @@ logic doStuff {
   body {
     first := queryFoo( partitionId: args.partitionId )
     second := queryBar( id: first.first().id )
-    return coalesce(second.first(), first.first())
+    return second.first() ?? first.first()
   }
 }`
 	body := parseLogicBody(t, src)
@@ -153,9 +175,7 @@ logic doStuff {
 // string. The runner's step loop evaluates the condition before
 // dispatching, mirroring the automation executor's behaviour.
 func TestLogicRunner_HandlesConditionalSteps(t *testing.T) {
-	src := `@useQuery(queryThing)
-@useMutation(mutationCreateThing)
-@description("test")
+	src := `@description("test")
 logic provisionThing {
   args {
     name  string  @required
@@ -165,7 +185,7 @@ logic provisionThing {
     created := if existing.empty() {
       mutationCreateThing( name: args.name )
     }
-    return coalesce(created, existing.first())
+    return created ?? existing.first()
   }
 }`
 	body := parseLogicBody(t, src)
@@ -211,30 +231,30 @@ func TestLogicRunner_SeedsCallerArgsEverywhere(t *testing.T) {
 	evaluator := r.newEvaluatorForLogic(context.Background(), args)
 
 	// `args` custom variable
-	val, err := evaluator.EvaluateValue(`$args.partitionId`)
+	val, err := evalV1(evaluator, `args.partitionId`)
 	if err != nil {
-		t.Fatalf("evaluate $args.partitionId: %v", err)
+		t.Fatalf("evaluate args.partitionId: %v", err)
 	}
 	if val != "space-abc" {
-		t.Errorf("$args.partitionId = %#v, want %q", val, "space-abc")
+		t.Errorf("args.partitionId = %#v, want %q", val, "space-abc")
 	}
 
 	// `event` custom variable plumbed from args
-	val, err = evaluator.EvaluateValue(`$event.payload.id`)
+	val, err = evalV1(evaluator, `event.payload.id`)
 	if err != nil {
-		t.Fatalf("evaluate $event.payload.id: %v", err)
+		t.Fatalf("evaluate event.payload.id: %v", err)
 	}
 	if val != "user-123" {
-		t.Errorf("$event.payload.id = %#v, want %q", val, "user-123")
+		t.Errorf("event.payload.id = %#v, want %q", val, "user-123")
 	}
 
-	// `ctx.input` mirrors args (legacy form still supported)
-	val, err = evaluator.EvaluateValue(`$ctx.input.partitionId`)
+	// `ctx.input` mirrors args
+	val, err = evalV1(evaluator, `ctx.input.partitionId`)
 	if err != nil {
-		t.Fatalf("evaluate $ctx.input.partitionId: %v", err)
+		t.Fatalf("evaluate ctx.input.partitionId: %v", err)
 	}
 	if val != "space-abc" {
-		t.Errorf("$ctx.input.partitionId = %#v, want %q", val, "space-abc")
+		t.Errorf("ctx.input.partitionId = %#v, want %q", val, "space-abc")
 	}
 }
 
@@ -255,10 +275,10 @@ func TestLogicRunner_EventBindingIsFirstClass(t *testing.T) {
 	ev := r.newEvaluatorForLogic(context.Background(), args)
 
 	for _, expr := range []string{
-		`$args.event.payload.activePartitionId`, // author-facing form in the live logics
-		`$event.payload.activePartitionId`,      // bare form after the compiler's lift
+		`args.event.payload.activePartitionId`, // author-facing form in the live logics
+		`event.payload.activePartitionId`,      // the bare event root
 	} {
-		val, err := ev.EvaluateValue(expr)
+		val, err := evalV1(ev, expr)
 		if err != nil {
 			t.Fatalf("evaluate %s: %v", expr, err)
 		}
@@ -279,21 +299,21 @@ func TestLogicRunner_EventBindingSeededWhenAbsent(t *testing.T) {
 	ev := r.newEvaluatorForLogic(context.Background(), map[string]any{"partitionId": "space-abc"})
 
 	// The envelope itself is a well-formed object (not nil).
-	envelope, err := ev.EvaluateValue(`$event`)
+	envelope, err := evalV1(ev, `event`)
 	if err != nil {
-		t.Fatalf("evaluate $event: %v", err)
+		t.Fatalf("evaluate event: %v", err)
 	}
 	if _, ok := envelope.(map[string]any); !ok {
-		t.Fatalf("$event = %#v (%T), want a well-formed envelope object", envelope, envelope)
+		t.Fatalf("event = %#v (%T), want a well-formed envelope object", envelope, envelope)
 	}
 
-	// A missing payload field resolves cleanly to empty -- no unbound-root error.
-	val, err := ev.EvaluateValue(`$event.payload.id`)
+	// A missing payload field resolves cleanly to absent -- no unbound-root error.
+	val, err := evalV1(ev, `event.payload.id`)
 	if err != nil {
-		t.Fatalf("evaluate $event.payload.id with no event arg: %v (must degrade to empty, not error)", err)
+		t.Fatalf("evaluate event.payload.id with no event arg: %v (must degrade to absent, not error)", err)
 	}
-	if val != nil && val != "" {
-		t.Errorf("$event.payload.id = %#v, want nil/empty for the synthetic envelope", val)
+	if !memql.IsAbsent(val) {
+		t.Errorf("event.payload.id = %#v, want absent for the synthetic envelope", val)
 	}
 }
 
@@ -314,9 +334,7 @@ func TestLogicRunner_EventBindingSeededWhenAbsent(t *testing.T) {
 // have received it and the value was dropped. This fixture is about the
 // _return step, so the argument name only has to be a legal one.
 func TestLogicRunner_PreservesReturnStep(t *testing.T) {
-	src := `@useQuery(queryFoo)
-@useMutation(mutationBar)
-@description("repro")
+	src := `@description("repro")
 logic logicSweep {
   args {
     asOf string @required
@@ -366,7 +384,7 @@ logic logicSweep {
 // This is the path that lets revokeExpiredDelegations,
 // purgeExpiredArchivedSpaces, and the rest of the
 // `return X.count()` family run end-to-end.
-func TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod(t *testing.T) {
+func TestLogicRunner_ReturnPureStepMethod(t *testing.T) {
 	evaluator := NewEvaluator()
 	evaluator.SetStepResult("expiredDelegations", &StepResult{
 		Status: "success",
@@ -382,45 +400,37 @@ func TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod(t *testing.T) {
 	})
 
 	// .count() -> count of nodes
-	val, handled, err := tryEvaluateReturnLocally("expiredDelegations.count()", evaluator)
+	val, err := evalV1(evaluator, "expiredDelegations.count()")
 	if err != nil {
-		t.Fatalf("tryEvaluateReturnLocally: %v", err)
+		t.Fatalf("expiredDelegations.count(): %v", err)
 	}
-	if !handled {
-		t.Fatalf("expected handled=true for `expiredDelegations.count()`; bound step ID should be recognised")
-	}
-	if val != 3 {
+	if !numericEquals(val, 3) {
 		t.Errorf(".count() = %#v, want 3", val)
 	}
 
 	// .empty() -> false (3 nodes)
-	val, handled, err = tryEvaluateReturnLocally("expiredDelegations.empty()", evaluator)
-	if err != nil {
-		t.Fatalf("tryEvaluateReturnLocally: %v", err)
-	}
-	if !handled || val != false {
-		t.Errorf(".empty() = (handled=%v val=%#v); want (true, false)", handled, val)
+	val, err = evalV1(evaluator, "expiredDelegations.empty()")
+	if err != nil || val != false {
+		t.Errorf(".empty() = %#v (err %v); want false", val, err)
 	}
 
-	// .first().id navigation
-	val, handled, err = tryEvaluateReturnLocally("expiredDelegations.first()", evaluator)
+	// .first() -> the first node
+	val, err = evalV1(evaluator, "expiredDelegations.first()")
 	if err != nil {
-		t.Fatalf("tryEvaluateReturnLocally: %v", err)
-	}
-	if !handled {
-		t.Errorf(".first() should be handled locally")
+		t.Fatalf("expiredDelegations.first(): %v", err)
 	}
 	if m, ok := val.(map[string]any); !ok || m["id"] != "d1" {
 		t.Errorf(".first() = %#v, want first node {id: d1}", val)
 	}
 }
 
-// TestLogicRunner_TryEvaluateReturnLocally_BareStepVariable pins the
-// memql#363 regression fix: a `return nodeRecord` after a
-// `nodeRecord := mutation...` step must resolve to the step's bound
-// value, not surface as `unknown spec "nodeRecord"` when the engine's
-// query parser treats the bare identifier as a spec name.
-func TestLogicRunner_TryEvaluateReturnLocally_BareStepVariable(t *testing.T) {
+// TestLogicRunner_ReturnBareStepVariable pins the memql#363 regression
+// fix: a `return nodeRecord` after a `nodeRecord := mutation...` step must
+// resolve to the step's value, not surface as `unknown spec "nodeRecord"`
+// when the engine's query parser treats the bare identifier as a spec name.
+// Evaluated, a bare step name over a Bundle-backed result stands for its
+// node list (run_scope.go).
+func TestLogicRunner_ReturnBareStepVariable(t *testing.T) {
 	evaluator := NewEvaluator()
 	evaluator.SetStepResult("nodeRecord", &StepResult{
 		Status: "success",
@@ -431,271 +441,16 @@ func TestLogicRunner_TryEvaluateReturnLocally_BareStepVariable(t *testing.T) {
 		},
 	})
 
-	val, handled, err := tryEvaluateReturnLocally("nodeRecord", evaluator)
+	val, err := evalV1(evaluator, "nodeRecord")
 	if err != nil {
-		t.Fatalf("tryEvaluateReturnLocally: %v", err)
+		t.Fatalf("nodeRecord: %v", err)
 	}
-	if !handled {
-		t.Fatalf("expected handled=true for bare step identifier `nodeRecord`")
+	nodes, ok := val.([]any)
+	if !ok || len(nodes) != 1 {
+		t.Fatalf("bare step-variable return: got %#v, want the one-node list", val)
 	}
-	bundle, ok := val.(map[string]any)
-	if !ok {
-		t.Fatalf("bare step-variable return: got %T, want map[string]any", val)
-	}
-	if _, ok := bundle["Bundle"]; !ok {
-		t.Errorf("bare step-variable return: missing Bundle key, got %#v", bundle)
-	}
-}
-
-// TestLogicRunner_TryEvaluateReturnLocally_FallsThrough pins that
-// expressions which AREN'T pure step-method calls report handled=false
-// so the caller falls back to engine.Execute. This protects compound
-// expressions, mutation calls, and literals from being silently
-// short-circuited.
-func TestLogicRunner_TryEvaluateReturnLocally_FallsThrough(t *testing.T) {
-	evaluator := NewEvaluator()
-	evaluator.SetStepResult("rows", &StepResult{
-		Status: "success",
-		Result: map[string]any{"Bundle": map[string]any{"nodes": []any{}}},
-	})
-
-	tests := []struct {
-		name string
-		expr string
-	}{
-		{"compound coalesce", `coalesce(rows.first(), "fallback")`},
-		{"mutation call", `mutationCreateThing(name: "x")`},
-		{"builtin call", `ensureDailySpaceForCaller()`},
-		{"unknown step", `notARealStep.count()`},
-		{"bare unknown identifier", `notARealStep`},
-		{"single-segment call", `someFunc()`},
-		{"empty expr", ``},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, handled, err := tryEvaluateReturnLocally(tt.expr, evaluator)
-			if err != nil {
-				t.Errorf("expected no error for %q, got %v", tt.expr, err)
-			}
-			if handled {
-				t.Errorf("expected handled=false for %q (should fall through to engine.Execute)", tt.expr)
-			}
-		})
-	}
-}
-
-// TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce pins the
-// positional-builtin short-circuit (#362). Before this lands,
-// `return coalesce(stepX, stepY.first())` and step-RHS
-// `enabled := coalesce(args.X, true)` both fall through to
-// engine.Execute, which fails the lookup with `function "coalesce"
-// not found`. The local short-circuit evaluates each arg against
-// the bound Evaluator (args via custom-var resolution, step refs
-// via EvaluateStepReference, literals via strconv parsing) and
-// applies the first-non-empty semantics.
-func TestLogicRunner_TryEvaluateBuiltinLocally_Coalesce(t *testing.T) {
-
-	t.Run("first non-empty arg wins", func(t *testing.T) {
-		evaluator := NewEvaluator()
-		val, handled, err := tryEvaluateBuiltinLocally(`coalesce("first", "second")`, evaluator)
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		if !handled {
-			t.Fatalf("expected handled=true for `coalesce(\"first\", \"second\")`")
-		}
-		if val != "first" {
-			t.Errorf("val = %#v, want %q", val, "first")
-		}
-	})
-
-	t.Run("empty string is skipped to fallback", func(t *testing.T) {
-		evaluator := NewEvaluator()
-		val, _, err := tryEvaluateBuiltinLocally(`coalesce("", "fallback")`, evaluator)
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		if val != "fallback" {
-			t.Errorf("val = %#v, want %q", val, "fallback")
-		}
-	})
-
-	t.Run("args.X.Y resolves via the custom-var path", func(t *testing.T) {
-		// Mirrors cluster/logic.memql line 26:
-		//   coalesce(args.event.payload.database.host, "localhost")
-		evaluator := NewEvaluator()
-		evaluator.SetCustom("args", map[string]any{
-			"event": map[string]any{
-				"payload": map[string]any{
-					"database": map[string]any{"host": "live.host"},
-				},
-			},
-		})
-		val, handled, err := tryEvaluateBuiltinLocally(
-			`coalesce(args.event.payload.database.host, "localhost")`,
-			evaluator,
-		)
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		if !handled {
-			t.Fatalf("expected handled=true")
-		}
-		if val != "live.host" {
-			t.Errorf("val = %#v, want %q", val, "live.host")
-		}
-	})
-
-	t.Run("missing args.X.Y falls through to literal fallback", func(t *testing.T) {
-		evaluator := NewEvaluator()
-		evaluator.SetCustom("args", map[string]any{
-			"event": map[string]any{"payload": map[string]any{}},
-		})
-		val, _, err := tryEvaluateBuiltinLocally(
-			`coalesce(args.event.payload.database.host, "localhost")`,
-			evaluator,
-		)
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		if val != "localhost" {
-			t.Errorf("val = %#v, want %q (default)", val, "localhost")
-		}
-	})
-
-	t.Run("bare step ref + step.method() return values", func(t *testing.T) {
-		// Mirrors cluster/logic.memql line 52:
-		//   return coalesce(clusterRecord, existing.first())
-		// When the create-branch ran, clusterRecord is bound. When it
-		// didn't, clusterRecord.Status=="skipped" and the fallback is
-		// the first existing row.
-		evaluator := NewEvaluator()
-		evaluator.SetStepResult("clusterRecord", &StepResult{
-			Status: "success",
-			Result: map[string]any{"id": "new-cluster"},
-		})
-		val, _, err := tryEvaluateBuiltinLocally(
-			`coalesce(clusterRecord, existing.first())`,
-			evaluator,
-		)
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		// clusterRecord resolves to its StepResult — non-nil so coalesce
-		// picks it. We just check it's non-nil because the bare-step
-		// path returns the *StepResult itself.
-		if val == nil {
-			t.Fatalf("expected non-nil clusterRecord arg, got nil")
-		}
-	})
-
-	t.Run("non-builtin name returns handled=false", func(t *testing.T) {
-		evaluator := NewEvaluator()
-		val, handled, err := tryEvaluateBuiltinLocally(`someUserFunc("a", "b")`, evaluator)
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		if handled {
-			t.Errorf("expected handled=false for unknown name; got val=%#v", val)
-		}
-	})
-
-	t.Run("bare step name with no parens returns handled=false", func(t *testing.T) {
-		// The bare step-name case (no parens / no method) does NOT match
-		// the `<name>(...)` shape; it falls through to engine.Execute.
-		// This pins that the builtin matcher doesn't accidentally
-		// swallow bare identifiers.
-		evaluator := NewEvaluator()
-		_, handled, _ := tryEvaluateBuiltinLocally("clusterRecord", evaluator)
-		if handled {
-			t.Errorf("expected handled=false for bare identifier")
-		}
-	})
-}
-
-// TestReconstructPositionalBuiltinCall pins the fix for the
-// `getGA := coalesce(a, b)` step-ASSIGNMENT bug (#362 / autoJoinAI
-// missing greeting). Positional-builtin assignments compile to
-// StepTypeFunction; without reconstruction they fall to
-// FunctionExecutor's named-arg serialization (`coalesce(0="a", 1="b")`)
-// which the MemQL parser rejects with `expected ')', got "="`.
-// reconstructPositionalBuiltinCall rebuilds the positional call string
-// so the local Evaluator handles it instead of engine.Execute.
-func TestReconstructPositionalBuiltinCall(t *testing.T) {
-	t.Run("coalesce positional args reconstruct in order, literals preserved", func(t *testing.T) {
-		fn := &FunctionStepConfig{
-			Name: "coalesce",
-			Args: map[string]any{"0": "getActiveGA", "1": `""`},
-		}
-		got, ok := reconstructPositionalBuiltinCall(fn)
-		if !ok {
-			t.Fatalf("expected ok=true for coalesce")
-		}
-		if got != `coalesce(getActiveGA, "")` {
-			t.Errorf("got %q, want %q", got, `coalesce(getActiveGA, "")`)
-		}
-	})
-
-	t.Run("non-positional-builtin name is not handled", func(t *testing.T) {
-		fn := &FunctionStepConfig{Name: "userById", Args: map[string]any{"0": "x"}}
-		if _, ok := reconstructPositionalBuiltinCall(fn); ok {
-			t.Errorf("expected ok=false for non-positional-builtin %q", fn.Name)
-		}
-	})
-
-	t.Run("reconstructed coalesce evaluates locally (the bug repro)", func(t *testing.T) {
-		evaluator := NewEvaluator()
-		fn := &FunctionStepConfig{
-			Name: "coalesce",
-			Args: map[string]any{"0": `""`, "1": `"fallback"`},
-		}
-		callStr, ok := reconstructPositionalBuiltinCall(fn)
-		if !ok {
-			t.Fatalf("expected ok=true")
-		}
-		val, handled, err := tryEvaluateBuiltinLocally(callStr, evaluator)
-		if err != nil {
-			t.Fatalf("err: %v", err)
-		}
-		if !handled {
-			t.Fatalf("expected handled=true for reconstructed %q", callStr)
-		}
-		if val != "fallback" {
-			t.Errorf("val = %#v, want %q", val, "fallback")
-		}
-	})
-}
-
-// TestSplitTopLevelArgs pins the arg splitter -- the helper has to
-// keep nested parens (`x.method()`, `inner(a, b)`), brackets, braces,
-// and quoted strings as a single arg even when they contain commas.
-func TestSplitTopLevelArgs(t *testing.T) {
-	cases := []struct {
-		in   string
-		want []string
-	}{
-		{`a, b`, []string{"a", "b"}},
-		{`"a, b", c`, []string{`"a, b"`, "c"}},
-		{`x.method(), y`, []string{"x.method()", "y"}},
-		{`outer(a, b), z`, []string{"outer(a, b)", "z"}},
-		{`{a: 1, b: 2}, x`, []string{"{a: 1, b: 2}", "x"}},
-		{``, nil},
-		{`single`, []string{"single"}},
-	}
-	for _, tc := range cases {
-		got, err := splitTopLevelArgs(tc.in)
-		if err != nil {
-			t.Fatalf("splitTopLevelArgs(%q): %v", tc.in, err)
-		}
-		if len(got) != len(tc.want) {
-			t.Errorf("splitTopLevelArgs(%q) = %#v, want %#v", tc.in, got, tc.want)
-			continue
-		}
-		for i := range got {
-			if got[i] != tc.want[i] {
-				t.Errorf("splitTopLevelArgs(%q)[%d] = %q, want %q", tc.in, i, got[i], tc.want[i])
-			}
-		}
+	if n, _ := nodes[0].(map[string]any); n["id"] != "v1:cluster:node:bff-local" {
+		t.Errorf("bare step-variable return: node = %#v", nodes[0])
 	}
 }
 
@@ -711,130 +466,6 @@ func TestLogicRunner_RejectsNilBody(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "logic body is nil") {
 		t.Errorf("expected `logic body is nil` error, got %v", err)
-	}
-}
-
-// TestLogicRunner_EvaluateLocalExpr_ScalarLiterals pins the memql#1090
-// fix: a Logic body whose trailing `return <expr>` is a bare scalar
-// literal must resolve to that literal's typed value through the
-// logic-time local resolver, WITHOUT routing the literal string into
-// engine.Execute. The staging-confirmed repro was the
-// `logicSeedKnowledgeDomains` body `seed := <builtin>; return 1`: the
-// "1" return string reached engine.Execute, where Parse produced a
-// LiteralValueNode root that cloneExpressionNode dropped to nil, and
-// the unbounded-query guard rejected the call with "query must include
-// at least one filter or relationship expression". EvaluateLocalExpr is
-// the convergence entry the LogicRunner return path drives (RunLogic
-// calls it on returnStep.Query.Query before falling back to the step
-// registry / engine.Execute), so asserting handled=true here proves the
-// literal never reaches the guard.
-func TestLogicRunner_EvaluateLocalExpr_ScalarLiterals(t *testing.T) {
-	evaluator := NewEvaluator()
-	tests := []struct {
-		name string
-		expr string
-		want any
-	}{
-		{"int literal (the seedKnowledgeDomains return)", "1", int64(1)},
-		{"zero", "0", int64(0)},
-		{"negative int", "-7", int64(-7)},
-		{"float literal", "3.14", 3.14},
-		{"double-quoted string", `"hello"`, "hello"},
-		{"single-quoted string", `'world'`, "world"},
-		{"empty string literal", `""`, ""},
-		{"bool true", "true", true},
-		{"bool false", "false", false},
-		{"null literal", "null", nil},
-		{"whitespace padded int", "  42  ", int64(42)},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			val, handled, err := EvaluateLocalExpr(tt.expr, evaluator)
-			if err != nil {
-				t.Fatalf("EvaluateLocalExpr(%q) err = %v", tt.expr, err)
-			}
-			if !handled {
-				t.Fatalf("EvaluateLocalExpr(%q) handled=false; literal must resolve locally and never reach engine.Execute (memql#1090)", tt.expr)
-			}
-			if val != tt.want {
-				t.Errorf("EvaluateLocalExpr(%q) = %#v, want %#v", tt.expr, val, tt.want)
-			}
-		})
-	}
-}
-
-// TestLogicRunner_EvaluateLocalExpr_PreservesNonLiterals pins that the
-// memql#1090 literal short-circuit does NOT swallow genuine queries,
-// function calls, or other non-literal returns. A real concept query
-// (`return queryFoo(...)`) and a top-level mutation / builtin call
-// must report handled=false from the literal+step-ref+positional-builtin
-// resolver so the LogicRunner falls back to engine.Execute and the query
-// actually runs. Bare step refs / step-method calls / coalesce stay on
-// their existing local paths (handled=true) and are covered by their own
-// tests; here we focus on the "must reach the engine" set.
-func TestLogicRunner_EvaluateLocalExpr_PreservesNonLiterals(t *testing.T) {
-	evaluator := NewEvaluator()
-	fallThrough := []struct {
-		name string
-		expr string
-	}{
-		{"genuine concept query", `queryActiveSpaces(ownerUserId: "u1")`},
-		{"top-level mutation call", `mutationCreateThing(name: "x")`},
-		{"non-positional builtin call", `ensureDailySpaceForCaller()`},
-		{"identifier that looks numeric-ish but isnt a literal", `v1abc`},
-		{"comparison filter", `payload.status=="active"`},
-	}
-	for _, tt := range fallThrough {
-		t.Run(tt.name, func(t *testing.T) {
-			val, handled, err := EvaluateLocalExpr(tt.expr, evaluator)
-			if err != nil {
-				t.Fatalf("EvaluateLocalExpr(%q) err = %v", tt.expr, err)
-			}
-			if handled {
-				t.Fatalf("EvaluateLocalExpr(%q) handled=true val=%#v; a real query/call must fall through to engine.Execute", tt.expr, val)
-			}
-		})
-	}
-}
-
-// TestTryEvaluateLiteralLocally_StrictMatching pins the literal matcher's
-// strictness directly: only number / quoted-string / true / false / null
-// match, so no genuine query, identifier, or call is misclassified as a
-// literal. Guards the memql#1090 fix against over-reach.
-func TestTryEvaluateLiteralLocally_StrictMatching(t *testing.T) {
-	literals := map[string]any{
-		"1":     int64(1),
-		"1.5":   1.5,
-		`"x"`:   "x",
-		"true":  true,
-		"false": false,
-		"null":  nil,
-	}
-	for expr, want := range literals {
-		val, ok := tryEvaluateLiteralLocally(expr)
-		if !ok {
-			t.Errorf("tryEvaluateLiteralLocally(%q) = (_, false), want literal match", expr)
-			continue
-		}
-		if val != want {
-			t.Errorf("tryEvaluateLiteralLocally(%q) = %#v, want %#v", expr, val, want)
-		}
-	}
-
-	nonLiterals := []string{
-		"",
-		"someStep",
-		"rows.count()",
-		"coalesce(a, b)",
-		`queryFoo(id: "x")`,
-		"payload.active==true",
-		`"unterminated`,
-		"v1:cluster:node",
-	}
-	for _, expr := range nonLiterals {
-		if _, ok := tryEvaluateLiteralLocally(expr); ok {
-			t.Errorf("tryEvaluateLiteralLocally(%q) matched as literal; should not", expr)
-		}
 	}
 }
 
@@ -965,17 +596,21 @@ func numericEquals(v any, n int) bool {
 	}
 }
 
-// emptyQueryStepRegistry is a step-registry stub whose every dispatched step
-// returns a result with zero rows, so a downstream `existing.empty()` guard
-// evaluates true (the first-boot path where the seeded records do not yet
-// exist and the conditional mutation steps must fire). It records each
-// dispatched step ID so a test can assert exactly which steps reached the
-// engine.
+// emptyQueryStepRegistry is a step-registry stub whose every engine-bound
+// step returns a result with zero rows, so a downstream `existing.empty()`
+// guard evaluates true (the first-boot path where the seeded records do not
+// yet exist and the conditional mutation steps must fire). An in-process
+// expression step evaluates as the real query executor evaluates it
+// (inProcessStep). It records each engine-bound step ID so a test can
+// assert exactly which steps reached the engine.
 type emptyQueryStepRegistry struct {
 	dispatched []string
 }
 
-func (r *emptyQueryStepRegistry) Execute(_ context.Context, step *Step, _ *StepContext) (*StepResult, error) {
+func (r *emptyQueryStepRegistry) Execute(ctx context.Context, step *Step, sc *StepContext) (*StepResult, error) {
+	if res, handled, err := inProcessStep(ctx, step, sc); handled {
+		return res, err
+	}
 	r.dispatched = append(r.dispatched, step.ID)
 	now := time.Now()
 	return &StepResult{
@@ -1087,17 +722,15 @@ logic logicSeedWelcomeCurriculum {
 //
 //	logic aov {
 //	  body {
-//	    r := coalesce(args.revenue, 0)
-//	    o := coalesce(args.orders, 1)
+//	    r := args.revenue ?? 0
+//	    o := args.orders ?? 1
 //	    return r / o
 //	  }
 //	}
 //
-// must LOAD (the serializer emits the parenthesized operator form instead of
-// `<<unsupported expression *ast.ArithmeticExpr>>`) AND EVALUATE (the
-// LogicRunner's arithmetic branch resolves both step operands locally and
-// applies the #2316 numeric rules). Nothing reaches the step registry: the
-// coalesce steps and the return all resolve locally.
+// must LOAD AND EVALUATE (both step operands resolve in process under the
+// #2316 numeric rules). Nothing reaches the engine: the `??` steps and the
+// return all evaluate in process.
 func TestLogicRunner_RunLogic_TerminalReturnArithmetic(t *testing.T) {
 	src := `
 @description("aov-style terminal-return arithmetic (#2542)")
@@ -1107,8 +740,8 @@ logic aov {
     orders int @required
   }
   body {
-    r := coalesce(args.revenue, 0)
-    o := coalesce(args.orders, 1)
+    r := args.revenue ?? 0
+    o := args.orders ?? 1
     return r / o
   }
 }
@@ -1143,8 +776,8 @@ logic ratio {
     b int @required
   }
   body {
-    x := coalesce(args.a, 0)
-    y := coalesce(args.b, 0)
+    x := args.a ?? 0
+    y := args.b ?? 0
     return x / y
   }
 }
@@ -1156,13 +789,13 @@ logic ratio {
 	if err == nil {
 		t.Fatalf("RunLogic succeeded on x / 0; want a division-by-zero error")
 	}
-	if !strings.Contains(err.Error(), "division by zero") {
-		t.Errorf("error = %q, want it to name division by zero", err.Error())
+	if !strings.Contains(err.Error(), "division_by_zero") {
+		t.Errorf("error = %q, want the division_by_zero refusal", err.Error())
 	}
 }
 
-// Modulo requires integer operands: a float operand must surface the #2316
-// integer-operands error, not compute a bogus value.
+// Modulo requires whole-number operands: a fractional operand must surface
+// the operand_type refusal, not compute a bogus value.
 func TestLogicRunner_RunLogic_TerminalReturnArithmetic_FloatModulo(t *testing.T) {
 	src := `
 @description("float modulo surfaces cleanly")
@@ -1172,8 +805,8 @@ logic remainder {
     b int @required
   }
   body {
-    x := coalesce(args.a, 0)
-    y := coalesce(args.b, 1)
+    x := args.a ?? 0
+    y := args.b ?? 1
     return x % y
   }
 }
@@ -1185,8 +818,8 @@ logic remainder {
 	if err == nil {
 		t.Fatalf("RunLogic succeeded on float %% int; want an integer-operands error")
 	}
-	if !strings.Contains(err.Error(), "integer operands") {
-		t.Errorf("error = %q, want the integer-operands modulo error", err.Error())
+	if !strings.Contains(err.Error(), "needs whole numbers") {
+		t.Errorf("error = %q, want the operand_type whole-numbers refusal", err.Error())
 	}
 }
 
@@ -1339,7 +972,7 @@ logic boundary {
     start string @required
   }
   body {
-    seed := coalesce(args.start, "")
+    seed := args.start ?? ""
     return addDuration(seed, "P1D")
   }
 }
@@ -1370,7 +1003,7 @@ logic weeksBetween {
     b string @required
   }
   body {
-    seed := coalesce(args.a, "")
+    seed := args.a ?? ""
     return daysBetween(args.a, args.b) / 7
   }
 }
@@ -1392,18 +1025,19 @@ logic weeksBetween {
 
 // TestLogicRunner_CompileRoundTrip_ArithmeticAndDateBuiltins pins the
 // serializer half of #2541/#2542: the compiled `_return` string carries
-// re-parseable source, never the `<<unsupported expression %T>>` marker.
+// canonical v1 source -- re-parseable, never the `<<unsupported expression
+// %T>>` marker, and never rewritten into another dialect (no `$args`).
 func TestLogicRunner_CompileRoundTrip_ArithmeticAndDateBuiltins(t *testing.T) {
 	cases := []struct {
 		name       string
 		ret        string
 		wantReturn string
 	}{
-		{"arithmetic", "return r / o", "(r / o)"},
-		{"nested_arithmetic", "return (r * 100) / o", "((r * 100) / o)"},
+		{"arithmetic", "return r / o", "r / o"},
+		{"nested_arithmetic", "return (r * 100) / o", "(r * 100) / o"},
 		{"addDuration", `return addDuration(r, "P1D")`, `addDuration(r, "P1D")`},
-		{"daysBetween_args", "return daysBetween(args.a, args.b)", "daysBetween($args.a, $args.b)"},
-		{"date_in_arithmetic", "return daysBetween(args.a, args.b) / 7", "(daysBetween($args.a, $args.b) / 7)"},
+		{"daysBetween_args", "return daysBetween(args.a, args.b)", "daysBetween(args.a, args.b)"},
+		{"date_in_arithmetic", "return daysBetween(args.a, args.b) / 7", "daysBetween(args.a, args.b) / 7"},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -1416,8 +1050,8 @@ logic probe {
     b string @required
   }
   body {
-    r := coalesce(args.a, "")
-    o := coalesce(args.b, "")
+    r := args.a ?? ""
+    o := args.b ?? ""
     ` + tc.ret + `
   }
 }

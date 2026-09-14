@@ -10,21 +10,6 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
-// classifyScalarOrExpr must map the bare reserved identifier `now` to its
-// canonical call form so the template evaluator stamps a real timestamp at
-// render time -- NOT the literal string "now". (memql#1629) The `timestamp`
-// spelling is retired (epic #2298 / #2301): bare `timestamp` is now an
-// ordinary identifier, not the clock.
-func TestClassifyScalarOrExpr_BareNow(t *testing.T) {
-	require.Equal(t, "now()", classifyScalarOrExpr("now"))
-	// `timestamp` is no longer special-cased -- it passes through as-is.
-	require.Equal(t, "timestamp", classifyScalarOrExpr("timestamp"))
-	// Other bare identifiers / literals are unchanged.
-	require.Equal(t, "args.foo", classifyScalarOrExpr("args.foo"))
-	require.Equal(t, true, classifyScalarOrExpr("true"))
-	require.Equal(t, nil, classifyScalarOrExpr("null"))
-}
-
 // An authored `createdAt: now` / `updatedAt: now` must render to a valid
 // RFC3339 timestamp, not the literal string "now" that date-time
 // concept validation rejects. (memql#1629)

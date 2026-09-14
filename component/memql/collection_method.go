@@ -305,6 +305,16 @@ func evalCollScalar(expr ExpressionNode, args map[string]any, locals map[string]
 		return evalCollBinaryComparison(node, args, locals)
 	case *LogicalExpression:
 		return evalCollLogical(node, args, locals)
+	case *NotExpression:
+		// The IR's `!` reaching the collection subset -- a predicate lowered
+		// for a filter and evaluated here instead -- negates the operand's
+		// truthiness, the same reading evalCollLogical gives && and ||, so
+		// the three connectives agree about what an operand means.
+		operand, err := evalCollScalar(node.Target, args, locals)
+		if err != nil {
+			return nil, err
+		}
+		return !IsTruthy(operand), nil
 	case *ArithmeticExpression:
 		return evalCollArithmetic(node, args, locals)
 	case *DotAccessExpression:
@@ -426,9 +436,10 @@ func evalCollCond(node *FunctionCallExpression, args, locals map[string]any) (an
 // "1", ...) of a converter-normalised builtin call.
 //
 // One at a time rather than all at once, so coalesce can stop at the first
-// operand that is present -- matching mutationTemplateEvaluator.evalCoalesce
-// and MutationExecutor.evaluateCoalesce, which parse and evaluate lazily. An
-// operand that is already a plain value (a literal) is returned as-is.
+// operand that is present -- matching coalesceSelect, which evaluates its arms
+// lazily, and MutationExecutor.evaluateCoalesce, which parses and evaluates
+// lazily. An operand that is already a plain value (a literal) is returned
+// as-is.
 func evalCollPositionalOperand(node *FunctionCallExpression, name string, i int, args, locals map[string]any) (any, error) {
 	raw, ok := node.Args[strconv.Itoa(i)]
 	if !ok {

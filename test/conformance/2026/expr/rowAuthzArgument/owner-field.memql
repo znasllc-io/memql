@@ -1,0 +1,6 @@
+/// A note its owner reads.
+@rowAuthz(owner="ownerUserId")
+concept raNote {
+  ownerUserId  string
+  body         string
+}

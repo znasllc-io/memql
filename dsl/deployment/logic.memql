@@ -61,20 +61,22 @@ logic nextDeploymentVersion {
 // available in every body). The deploy automation calls this before kicking
 // off a deploy; an out-of-role caller's request is dropped.
 //
-// SHAPE NOTE (#2380): both gates use the multi-step decide form (steps +
-// cond + return of a step ref) -- the LogicRunner-executed shape proven at
-// runtime. The single-statement `return a == b || ...` form compiles to a
-// query-path expression that SCANS (it died on the engine's bookkeeping
-// rows at the first live deploy); until that engine path evaluates
-// in-process, author role gates in this shape.
+// SHAPE NOTE (#2380): both gates use the multi-step decide form (statements
+// + a conditional + return of a step ref), the LogicRunner-executed shape,
+// because the single-statement `return a == b || ...` form used to compile
+// to a query-path expression that SCANNED (it died on the engine's
+// bookkeeping rows at the first live deploy). An edition-2026 body that
+// returns an expression runs on the LogicRunner too and is evaluated in
+// process, so the single-statement form no longer scans; the multi-step form
+// stays as the migration wrote it.
 /// Pure forward-deploy role gate, mirroring spec requiresDeveloperOrAbove (#1876): true when the
 /// actor holds developer, admin, or owner. Writer/reader are read-only.
 @actor
 logic deploymentForwardAllowed {
   body {
     role := actor.role ?? ""
-    isElevated := cond(role == "admin", true, cond(role == "owner", true, false))
-    allowed := cond(role == "developer", true, isElevated)
+    isElevated := role == "admin" ? true : role == "owner" ? true : false
+    allowed := role == "developer" ? true : isElevated
     return allowed
   }
 }
@@ -89,7 +91,7 @@ logic deploymentForwardAllowed {
 logic deploymentRollbackAllowed {
   body {
     role := actor.role ?? ""
-    allowed := cond(role == "owner", true, false)
+    allowed := role == "owner" ? true : false
     return allowed
   }
 }
@@ -107,7 +109,7 @@ logic deployRollbackTarget {
   body {
     prev := args.previousDeploymentId ?? ""
     ok := args.passed ?? false
-    target := cond(ok == true, "", prev)
+    target := ok == true ? "" : prev
     return target
   }
 }
@@ -142,7 +144,7 @@ logic engineNodeTypes {
 // deployOutcomeLabel maps the post-deploy gate result to the terminal
 // deployment STATUS the automation stamps + announces: "succeeded" when the
 // gate passed, "failed" otherwise. It mirrors deployGateGreen's fail-closed
-// coalesce (a missing/garbled gate result is treated as NOT passed -> "failed")
+// `?? false` (a missing/garbled gate result is treated as NOT passed -> "failed")
 // so a deploy never auto-succeeds on a blank gate. Pure: reads the action
 // result object + returns a string, no write. The deployEngineCluster
 // automation switches its finalize step on this label -- the "succeeded"/"failed"
@@ -158,7 +160,7 @@ logic deployOutcomeLabel {
   }
   body {
     ok := args.passed ?? false
-    outcome := cond(ok == true, "succeeded", "failed")
+    outcome := ok == true ? "succeeded" : "failed"
     return outcome
   }
 }
@@ -181,7 +183,7 @@ logic installDependencyVerdict {
   }
   body {
     ok := args.passed ?? false
-    verdict := cond(ok == true, "ok", "missing")
+    verdict := ok == true ? "ok" : "missing"
     return verdict
   }
 }
@@ -209,7 +211,7 @@ logic renderDiffVerdict {
   body {
     gateRequired := args.required ?? false
     clear := args.passed ?? false
-    verdict := cond(gateRequired == true, cond(clear == true, "clear", "blocked"), "clear")
+    verdict := gateRequired == true ? (clear == true ? "clear" : "blocked") : "clear"
     return verdict
   }
 }

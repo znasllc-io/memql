@@ -2,8 +2,6 @@ package dslconformance
 
 import (
 	"fmt"
-	"github.com/znasllc-io/memql/dsl"
-	"io"
 	"os"
 	"regexp"
 	"sort"
@@ -13,7 +11,6 @@ import (
 	"unicode/utf8"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // naming_conventions_test.go -- memql#2853.
@@ -228,7 +225,13 @@ type declaration struct {
 
 // TestNoKindPrefixInConstructNames is the gate.
 func TestNoKindPrefixInConstructNames(t *testing.T) {
-	decls := scanShippedDeclarations(t)
+	// A spec or trait carries no brace (epic memql#5363), and every one of
+	// them must still be scanned.
+	onTree(t, checkNoKindPrefixInConstructNames)
+}
+
+func checkNoKindPrefixInConstructNames(t *testing.T, c corpus) {
+	decls := scanDeclarations(t, c)
 	if len(decls) == 0 {
 		t.Fatal("no constructs were scanned, so this test asserts nothing -- the token scan or " +
 			"the file walk has broken")
@@ -265,6 +268,16 @@ func TestNoKindPrefixInConstructNames(t *testing.T) {
 	}
 	t.Logf("scanned %d declarations across %d kinds (%s), %d prefixed",
 		len(decls), len(perKeyword), strings.Join(parts, " "), len(offenders))
+
+	// Every kind the corpus declares must be reached. The brace-less kinds are
+	// the ones a brace-anchored scan loses, and it loses them without a sound.
+	// Measured when the floors were set: 32 traits, 7 specs, 529 queries and
+	// 418 mutations.
+	for kw, floor := range map[string]int{"trait": 25, "spec": 5, "query": 400, "mutate": 300} {
+		if perKeyword[kw] < floor {
+			t.Errorf("scanned %d %s declarations -- the scan has stopped reaching them", perKeyword[kw], kw)
+		}
+	}
 }
 
 // TestNoKindPrefixGateIsLive proves the gate actually fires, on exactly the
@@ -280,7 +293,7 @@ func TestNoKindPrefixGateIsLive(t *testing.T) {
 	}{
 		{
 			name:    "plain prefixed query",
-			src:     "query user queryFooBar {\n  filter id == args.id\n}\n",
+			src:     "query user queryFooBar {\n  filter row => row.id == args.id\n}\n",
 			want:    "queryFooBar",
 			wantHit: true,
 		},
@@ -328,23 +341,40 @@ func TestNoKindPrefixGateIsLive(t *testing.T) {
 		},
 		{
 			name:    "unprefixed name is fine",
-			src:     "query user userById {\n  filter id == args.id\n}\n",
+			src:     "query user userById {\n  filter row => row.id == args.id\n}\n",
 			wantHit: false,
 		},
 		{
 			name:    "prefix must be followed by uppercase -- `queryable` is a fine name",
-			src:     "query user queryable {\n  filter id == args.id\n}\n",
+			src:     "query user queryable {\n  filter row => row.id == args.id\n}\n",
 			wantHit: false,
 		},
 		{
 			name:    "commented-out example must not be reported",
-			src:     "// query user queryFooBar {\n/// mutation user mutationFooBar {\nquery user userById {\n  filter id == args.id\n}\n",
+			src:     "// query user queryFooBar {\n/// mutation user mutationFooBar {\nquery user userById {\n  filter row => row.id == args.id\n}\n",
+			wantHit: false,
+		},
+		{
+			name:    "brace-less trait (edition 2026) -- no body to anchor on",
+			src:     "trait traitIsActiveRecord = row => row.active == true\n",
+			want:    "traitIsActiveRecord",
+			wantHit: true,
+		},
+		{
+			name:    "brace-less spec (edition 2026), wrapped across lines",
+			src:     "spec agent specIsFoo = row => row.a == 1\n                   && row.b == 2\n",
+			want:    "specIsFoo",
+			wantHit: true,
+		},
+		{
+			name:    "unprefixed brace-less trait is fine",
+			src:     "trait isActiveRecord = row => row.active == true\n",
 			wantHit: false,
 		},
 		{
 			name: "a terse automation's `=> logic X` tail is a CALL SITE, not a declaration",
 			src: "automation purgeThings @trigger(schedule=\"0 0 2 * * *\") => logic logicPurgeThings\n" +
-				"query user userById {\n  filter id == args.id\n}\n",
+				"query user userById {\n  filter row => row.id == args.id\n}\n",
 			wantHit: false,
 		},
 	}
@@ -409,26 +439,18 @@ func hasKindPrefix(keyword, name string) bool {
 // constructs, and they are the one place a placeholder name is legitimate.
 func scanShippedDeclarations(t *testing.T) []declaration {
 	t.Helper()
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("walking the DSL tree: %v", err)
-	}
+	return scanDeclarations(t, embeddedCorpus(t))
+}
+
+// scanDeclarations is scanShippedDeclarations over any corpus.
+func scanDeclarations(t *testing.T, c corpus) []declaration {
+	t.Helper()
 	var out []declaration
-	for _, p := range paths {
+	for _, p := range c.paths {
 		if strings.HasPrefix(p, "_") || strings.Contains(p, "/_") {
 			continue
 		}
-		f, openErr := tree.Open(p)
-		if openErr != nil {
-			t.Fatalf("open %s: %v", p, openErr)
-		}
-		raw, readErr := io.ReadAll(f)
-		f.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", p, readErr)
-		}
-		decls, scanErr := declarationsIn(p, string(raw))
+		decls, scanErr := declarationsIn(p, c.files[p])
 		if scanErr != nil {
 			t.Fatalf("lex %s: %v", p, scanErr)
 		}
@@ -466,12 +488,15 @@ func declarationsIn(path, src string) ([]declaration, error) {
 			continue
 		}
 		name, skip := "", 0
+		// A spec or trait has no brace: its `{ return ... }` body is retired
+		// and refused at parse, so the braced arms are every other kind's.
+		predicate := tokens[i].Literal == "spec" || tokens[i].Literal == "trait"
 		switch {
-		case i+2 < len(tokens) &&
+		case !predicate && i+2 < len(tokens) &&
 			tokens[i+1].Type == languageParser.TokenIdentifier &&
 			tokens[i+2].Type == languageParser.TokenBraceOpen:
 			name, skip = tokens[i+1].Literal, 1
-		case i+3 < len(tokens) &&
+		case !predicate && i+3 < len(tokens) &&
 			tokens[i+1].Type == languageParser.TokenIdentifier &&
 			tokens[i+2].Type == languageParser.TokenIdentifier &&
 			tokens[i+3].Type == languageParser.TokenBraceOpen:
@@ -495,6 +520,23 @@ func declarationsIn(path, src string) ([]declaration, error) {
 			tokens[i+1].Type == languageParser.TokenIdentifier &&
 			tokens[i+2].Type == languageParser.TokenAt:
 			name, skip = tokens[i+1].Literal, 1
+
+		// The BRACE-LESS predicates (epic memql#5363) have no body either:
+		// `trait isActiveRecord = row => ...` and `spec agent isX = row =>
+		// ...`. The same defect as the terse automation above, one grammar
+		// change later -- without these arms every spec and trait is invisible
+		// to the naming gates.
+		case predicate &&
+			i+2 < len(tokens) &&
+			tokens[i+1].Type == languageParser.TokenIdentifier &&
+			isAssignToken(tokens[i+2]):
+			name, skip = tokens[i+1].Literal, 1
+		case predicate &&
+			i+3 < len(tokens) &&
+			tokens[i+1].Type == languageParser.TokenIdentifier &&
+			tokens[i+2].Type == languageParser.TokenIdentifier &&
+			isAssignToken(tokens[i+3]):
+			name, skip = tokens[i+2].Literal, 2
 		}
 		if name == "" {
 			continue
@@ -503,6 +545,12 @@ func declarationsIn(path, src string) ([]declaration, error) {
 		i += skip
 	}
 	return out, nil
+}
+
+// isAssignToken reports whether a token is the `=` that opens a brace-less
+// declaration's expression.
+func isAssignToken(tok languageParser.Token) bool {
+	return tok.Type == languageParser.TokenOperator && tok.Literal == "="
 }
 
 // TestNamingDocsDoNotMandateAPrefix stops the retired rule being reinstated in
@@ -722,13 +770,13 @@ func TestNamingDocGateIsLive(t *testing.T) {
 			"see `queryStaleClusterNodes` in `dsl/cluster/queries.memql` for this", true},
 		// C -- teaching by example, across the half the substring list was blind to
 		{"prefixed query declaration in a fence",
-			"```memql\nquery user queryUserById {\n  filter row.id == args.id\n}\n```", true},
+			"```memql\nquery user queryUserById {\n  filter row => row.id == args.id\n}\n```", true},
 		{"prefixed logic declaration in a fence",
 			"```memql\nlogic logicBootstrapSession {\n  body { return true }\n}\n```", true},
 		{"prefixed spec declaration in a fence",
-			"```memql\nspec participant specIsGuest {\n  return isGuest == true\n}\n```", true},
+			"```memql\nspec participant specIsGuest = row => row.isGuest == true\n```", true},
 		{"prefixed trait declaration in a fence",
-			"```memql\ntrait traitIsActive {\n  return active == true\n}\n```", true},
+			"```memql\ntrait traitIsActive = row => row.active == true\n```", true},
 		{"prefixed seed declaration in a fence",
 			"```memql\nseed skill seedWorkbenchBaseline {\n  name: \"x\"\n}\n```", true},
 		{"kebab-prefixed seed declaration in a fence",
@@ -741,7 +789,7 @@ func TestNamingDocGateIsLive(t *testing.T) {
 		{"real un-prefixed name claimed live",
 			"see `staleClusterNodes` in `dsl/cluster/queries.memql`", false},
 		{"un-prefixed declaration in a fence",
-			"```memql\nquery user userById {\n  filter row.id == args.id\n}\n```", false},
+			"```memql\nquery user userById {\n  filter row => row.id == args.id\n}\n```", false},
 		{"absent but UN-prefixed name (product DSL, out of scope)",
 			"use cognition.concepts.{ canvasState }", false},
 		{"deliberate does-not-exist citation",

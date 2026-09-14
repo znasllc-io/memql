@@ -44,7 +44,7 @@ query widget alphaWidgets {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`),
 	}
 }
@@ -72,7 +72,7 @@ query widget gammaWidgets {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`)
 	tree := loadTree(t, root)
 

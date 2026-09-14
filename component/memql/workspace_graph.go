@@ -94,9 +94,9 @@ func (g senseWorkspaceGraph) DeclarationSites(name string) []sense.DeclSite {
 }
 
 // dslRootCandidates are the conventional places a DSL tree sits relative to an
-// opened workspace. The engine keeps its domains under dsl/; a product bundle
-// repo may keep them at the top level, which resolveDSLRoot handles by testing
-// the root itself first.
+// opened workspace. The engine keeps its domains under dsl/, and so does every
+// product repository; a product bundle may keep them at the top level, which
+// resolveDSLRoot handles by testing the root itself first.
 var dslRootCandidates = []string{"dsl"}
 
 // resolveDSLRoot returns the sub-tree the workspace graph should resolve
@@ -111,6 +111,13 @@ var dslRootCandidates = []string{"dsl"}
 // diagnostics could never prove a symbol missing (memql#2762). Rooting the
 // index where the domain directories actually live is what makes
 // `use calendar.concepts.{ ... }` resolvable.
+//
+// The root and a conventional candidate are held to different bars. The root
+// must hold two domains (isDSLRoot says why); dsl/ needs only one, because a
+// product repository keeps exactly one domain there (dsl/<product>/). Held to
+// two, dsl/ never qualified in a product repository: the build mounted
+// nothing, and the editor lost the product's vocabulary and every word about
+// its language line while boot refused the tree (memql#5362).
 func resolveDSLRoot(root fs.FS) (fs.FS, string) {
 	if root == nil {
 		return nil, ""
@@ -123,21 +130,30 @@ func resolveDSLRoot(root fs.FS) (fs.FS, string) {
 		if err != nil {
 			continue
 		}
-		if isDSLRoot(sub) {
+		if holdsDomains(sub, 1) {
 			return sub, candidate
 		}
 	}
 	return root, ""
 }
 
-// isDSLRoot reports whether d's immediate children look like DSL domain
-// directories: at least two of them directly contain a .memql file.
+// isDSLRoot reports whether d, a workspace ROOT, looks like the directory DSL
+// domains sit in: at least two of its immediate children directly contain a
+// .memql file.
 //
 // Two rather than one deliberately. A repository root whose dsl/ directory
 // happens to hold a stray .memql would otherwise look like a domain holder and
 // win over the real tree below it; requiring a second sibling domain makes the
-// answer stable against scratch files.
+// answer stable against scratch files. A conventional candidate is not held to
+// it (resolveDSLRoot): what sits under dsl/ is the tree, not a stand-in for it.
 func isDSLRoot(d fs.FS) bool {
+	return holdsDomains(d, 2)
+}
+
+// holdsDomains reports whether at least atLeast of d's immediate children look
+// like DSL domain directories: not "_"- or "."-prefixed, and directly
+// containing a .memql file.
+func holdsDomains(d fs.FS, atLeast int) bool {
 	entries, err := fs.ReadDir(d, ".")
 	if err != nil {
 		return false
@@ -155,7 +171,7 @@ func isDSLRoot(d fs.FS) bool {
 			continue
 		}
 		domains++
-		if domains >= 2 {
+		if domains >= atLeast {
 			return true
 		}
 	}

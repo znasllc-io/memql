@@ -3,6 +3,7 @@ package memql
 import (
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -23,16 +24,12 @@ func lifecycleDiscardLogger() *slog.Logger {
 
 func TestLoadUnifiedSpecs_DisabledSpecSkipped(t *testing.T) {
 	overlay := fstest.MapFS{"specs.memql": {Data: []byte(`@disabled
-spec actorEnvelope retiredProbeSpec {
-  return role == "admin"
-}
+spec actorEnvelope retiredProbeSpec = actor => actor.role == "admin"
 
-spec actorEnvelope liveProbeSpec {
-  return role == "admin"
-}
+spec actorEnvelope liveProbeSpec = actor => actor.role == "admin"
 `)}}
 	const domain = "lifecycledisabledspecs"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := newSpecRegistry()
@@ -61,39 +58,59 @@ spec actorEnvelope liveProbeSpec {
 
 // The gate must sit AFTER body validation: a @disabled spec with a broken
 // body must still be rejected, or disabling ships the breakage green and
-// re-enabling bricks boot.
+// re-enabling bricks boot. An edition-2026 body is validated by Lower, which
+// runs at Init (memql#5366) -- the loader cannot, since what the body may read
+// depends on its binding -- so the loader keeps a @disabled body for the Init
+// pass, which lowers it exactly as an enabled one and registers nothing. A
+// sound @disabled body beside it stays quiet: an intentional disable is still
+// not a strict-boot problem.
 func TestLoadUnifiedSpecs_DisabledSpecStillValidated(t *testing.T) {
-	overlay := fstest.MapFS{"specs.memql": {Data: []byte(`@disabled
-spec actorEnvelope brokenRetiredSpec {
-  return 42
-}
-`)}}
-	const domain = "lifecycledisabledspecinvalid"
-	memqldsl.RegisterTree(domain, overlay)
-	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
+	eng, err := bootLowerTree(t, map[string]string{
+		"specs.memql": `use common.shapes.{ actorEnvelope }
 
-	registry := newSpecRegistry()
-	rep := newLoadReport()
-	if _, err := LoadUnifiedSpecs(lifecycleDiscardLogger(), registry, rep); err != nil {
-		t.Fatalf("LoadUnifiedSpecs: %v", err)
+/// Retired, and its body is a number, not a condition.
+@disabled
+spec actorEnvelope brokenRetiredSpec = actor => 42
+
+/// Retired, and sound.
+@disabled
+spec actorEnvelope soundRetiredSpec = actor => actor.role == "admin"
+`,
+	})
+	if err == nil {
+		t.Fatal("a @disabled spec with a non-boolean body booted clean; re-enabling it would brick boot")
 	}
-	if !rep.HasProblems() {
-		t.Error("a @disabled spec with a non-boolean body must still fail validation (parse-phase skip), or re-enabling it later bricks boot")
+	skips := lowerInitSkips(eng)
+	if len(skips) != 1 {
+		t.Fatalf("want exactly the broken body refused, got %d skip(s):\n%s", len(skips), strings.Join(skips, "\n"))
+	}
+	for _, want := range []string{
+		"spec brokenRetiredSpec",
+		"@disabled, and its body does not lower -- re-enabling it would refuse boot",
+		"`42` is a number, and a condition must be boolean",
+	} {
+		if !strings.Contains(skips[0], want) {
+			t.Errorf("the refusal does not say %q:\n%s", want, skips[0])
+		}
+	}
+	for _, name := range []string{"brokenRetiredSpec", "soundRetiredSpec"} {
+		if eng.specs.Has(name) {
+			t.Errorf("@disabled %s was registered; validating a disabled body must not make it callable", name)
+		}
+		if !eng.specs.IsDisabled(name) {
+			t.Errorf("@disabled %s lost its name reservation", name)
+		}
 	}
 }
 
 func TestLoadUnifiedSpecs_DisabledTraitSkipped(t *testing.T) {
 	overlay := fstest.MapFS{"traits.memql": {Data: []byte(`@disabled
-trait retiredProbeTrait {
-  return effect == "allow"
-}
+trait retiredProbeTrait = row => row.effect == "allow"
 
-trait liveProbeTrait {
-  return effect == "allow"
-}
+trait liveProbeTrait = row => row.effect == "allow"
 `)}}
 	const domain = "lifecycledisabledtraits"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := newSpecRegistry()

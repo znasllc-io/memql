@@ -12,12 +12,6 @@ import (
 // one shape it introduced: a caller-supplied flag that WIDENS a read, and
 // therefore sits on the LEFT of a comparison because there is no row field to
 // put there.
-//
-// The row half is written `payload.status` rather than the bare `status` the
-// tree uses, because the bare-property rewrite (rewriteFilterFieldRefs) runs
-// LATER in the plan pipeline than the argument expansion under test -- a bare
-// field here would still be bare at the compile assertion below and fail it for
-// a reason that has nothing to do with caller arguments.
 const probeArgLhsSrc = `use accounts.concepts.{ account }
 
 @description("probe")
@@ -25,7 +19,7 @@ query account probeAccountsIncludeArchived {
   args {
     includeArchived  boolean
   }
-  filter  payload.status=="active" || args.includeArchived==true
+  filter  row => row.status == "active" || args.includeArchived == true
 }
 `
 
@@ -76,17 +70,32 @@ func TestFilterArgReferenceOnTheLeftHandSideIsBound(t *testing.T) {
 			// The term must be FOLDED, not dropped: dropping it would make
 			// `status=="active" || <gone>` a narrower read that still returns
 			// rows, which is the failure a "no args. left" assertion alone
-			// cannot see. Collected by a WALK rather than read off a fixed
-			// position -- whether the concept conjunct wraps the disjunction or
-			// sits beside it depends on whether the concept registry is
-			// populated, which differs between running this test alone and
-			// running the package.
-			folded := constantBools(expanded)
-			if len(folded) != 1 {
-				t.Fatalf("expected exactly one folded caller-flag constant, got %d", len(folded))
+			// cannot see. In edition 2026 the flag's comparison reads no row,
+			// so Lower made it a plan constant (memql#5366), and expansion
+			// folds it through the disjunction rather than leaving a constant
+			// node behind: TRUE || x is TRUE, which the concept conjunct then
+			// absorbs, and FALSE || x is x. So the fold shows in WHICH ROW
+			// TERMS SURVIVE -- none when the flag widens the read to every
+			// row, exactly the status term when it does not -- and no
+			// constant is left for the compiler. Collected by a WALK rather
+			// than read off a fixed position: whether the concept conjunct
+			// wraps the disjunction or sits beside it depends on whether the
+			// concept registry is populated, which differs between running
+			// this test alone and running the package.
+			if leftover := constantBools(expanded); len(leftover) != 0 {
+				t.Fatalf("expansion left %d constant(s) in %s; a plan constant folds through the connective around it",
+					len(leftover), canonicalExpression(expanded))
 			}
-			if folded[0] != tc.want {
-				t.Errorf("folded value = %v, want %v", folded[0], tc.want)
+			statusTerms := 0
+			for _, c := range comparisonsIn(expanded) {
+				if strings.EqualFold(c.Field.Raw, "payload.status") {
+					statusTerms++
+				}
+			}
+			if want := map[bool]int{true: 0, false: 1}[tc.want]; statusTerms != want {
+				t.Errorf("%s keeps %d status term(s), want %d: a flag that is %v admits %s",
+					canonicalExpression(expanded), statusTerms, want, tc.want,
+					map[bool]string{true: "every row, so the status term folds away", false: "only the status term's rows"}[tc.want])
 			}
 
 			// And the folded tree must still compile as ONE query. A tree the
@@ -112,6 +121,23 @@ func constantBools(expr ExpressionNode) []bool {
 			walk(n.Right)
 		case *constantBoolExpression:
 			out = append(out, n.value)
+		}
+	}
+	walk(expr)
+	return out
+}
+
+// comparisonsIn collects every comparison in the tree.
+func comparisonsIn(expr ExpressionNode) []*ComparisonExpression {
+	var out []*ComparisonExpression
+	var walk func(ExpressionNode)
+	walk = func(node ExpressionNode) {
+		switch n := node.(type) {
+		case *LogicalExpression:
+			walk(n.Left)
+			walk(n.Right)
+		case *ComparisonExpression:
+			out = append(out, n)
 		}
 	}
 	walk(expr)

@@ -64,7 +64,7 @@ tool workbenchHost {
 	// domain name; the loader walks every mounted domain identically, so
 	// domain name does not affect tool resolution.
 	const domain = "carrierconformance1133"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() {
 		// Remove the throwaway overlay so its tools.memql does not leak into
 		// later tests' dsl.Tree() walk. UnregisterTree is the clean teardown:

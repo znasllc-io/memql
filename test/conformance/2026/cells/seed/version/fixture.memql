@@ -1,0 +1,19 @@
+/// The row this cell's seed writes.
+concept escalationRule {
+  name        string
+  afterHours  int
+}
+
+/// The mutation the seed materializer writes this concept's rows through: create<Concept>.
+mutate escalationRule createEscalationRule {
+  args {
+    escalationRuleId  string!
+    name              string!
+    afterHours        int
+  }
+  insert {
+    id: args.escalationRuleId
+    name: args.name
+    afterHours: args.afterHours
+  }
+}

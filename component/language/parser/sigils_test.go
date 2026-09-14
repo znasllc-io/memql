@@ -132,7 +132,7 @@ func TestPositionalCacheTTL(t *testing.T) {
 		"positional": "@cache(300)",
 		"zero":       "@cache(0)",
 	} {
-		normalised, err := NormaliseQuerySource(src + "\nquery widget listWidgets {\n  filter widget.kind == args.kind\n}")
+		normalised, err := NormaliseQuerySource(src + "\nquery widget listWidgets {\n  filter row => row.kind == args.kind\n}")
 		if err != nil {
 			t.Fatalf("%s: normalise: %v", name, err)
 		}
@@ -175,7 +175,6 @@ func TestSigilAndEnumType_OtherFieldParsers(t *testing.T) {
 	bf, err := ParseFile(`builtin probeBuiltin {
   level enum("low", "high")!
   tag string!
-  @handler(type="function", name="x")
 }`)
 	if err != nil {
 		t.Fatalf("builtin parse: %v", err)

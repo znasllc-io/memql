@@ -424,6 +424,9 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	if automation == nil {
 		return nil, fmt.Errorf("automation is nil")
 	}
+	if err := ensurePrepared(automation); err != nil {
+		return nil, err
+	}
 
 	// Acquire concurrency slot (blocks if limit reached)
 	// This prevents database connection exhaustion during event storms
@@ -514,11 +517,9 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	// Make timestamp available to the evaluator
 	evaluator.SetCustom("timestamp", time.Now().UTC().Format(time.RFC3339))
 
-	// Make triggering event data available to the evaluator under
-	// the legacy `event` global AND the canonical ctx envelope. The
-	// two share the same backing map — body authors should write the
-	// `ctx.input.<...>` form going forward; `event.<...>` is kept
-	// for transition and parse-equivalent through Phase B/D.
+	// Make triggering event data available to the evaluator under the
+	// `event` root AND the ctx envelope; the two share the same backing
+	// map.
 	eventEnvelope := buildEventEnvelope(triggeringEvent, triggeredBy, trigger)
 	if adopt != nil && adopt.Journal != nil && adopt.Journal.GoalId == "" && adopt.Journal.TriggerEvent != nil {
 		eventEnvelope = adopt.Journal.TriggerEvent
@@ -566,6 +567,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		// optional field resolve bare to nil instead of the literal fallback.
 		evaluator.SetCustom("argsDeclared", declaredArgsSet(automation))
 	}
+	bindRunAmbient(ctx, e.engine, evaluator)
 
 	if e.logger != nil {
 		e.logger.Info("starting automation execution",
@@ -781,7 +783,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 					"condition", step.Condition,
 				)
 			}
-			shouldRun, err := evaluator.EvaluateCondition(step.Condition)
+			shouldRun, err := evaluator.StepCondition(ctx, step)
 			if err != nil {
 				if e.logger != nil {
 					e.logger.Warn("step condition evaluation failed",
@@ -814,7 +816,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 					)
 				}
 				exec.AddStepResult(skipResult)
-				// Make skipped steps visible to later step conditions ($steps.<id>.status).
+				// Make skipped steps visible to later step conditions (steps.<id>.status).
 				evaluator.SetStepResult(step.ID, skipResult)
 				// A skipped step is a first-class trace entry: "this step did
 				// not run, and here is the condition that decided that" is
@@ -1174,6 +1176,8 @@ func (e *Executor) handleAutomationError(ctx context.Context, automation *Automa
 		evaluator.SetSystemSecretResolver(e.createSystemSecretResolver())
 		evaluator.SetCanonicalIdResolver(e.createCanonicalIdResolver())
 		evaluator.SetLogger(e.logger)
+		bindRunAmbient(ctx, e.engine, evaluator)
+		bindOnErrorRun(evaluator, automation, exec, triggeringEvent)
 
 		stepCtx := &StepContext{
 			Logger:    e.logger,

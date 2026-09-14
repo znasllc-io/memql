@@ -162,6 +162,59 @@ automation aliceOnUserCreate {
 	}
 }
 
+// TestAuthoredScheduler_EventTrigger_HonoursItsFilter: the @filter decides
+// whether an event fires an authored automation, as it does a core one -- a
+// v1 lambda over the triggering row and a legacy condition alike, with the
+// args contract an email rule's generated construct declares. The authored
+// subscriber used to skip the filter, so a rule's "only when" condition
+// changed nothing: every event of the kind fired it.
+func TestAuthoredScheduler_EventTrigger_HonoursItsFilter(t *testing.T) {
+	loadConceptsForAuthored(t)
+	for _, c := range []struct{ name, filter string }{
+		{"v1 lambda over the row", `@filter(row => row.primaryEmail.includes("@acme.com"))`},
+		{"legacy condition", `@filter(row => row.primaryEmail == "eve@acme.com")`},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			bus := events.NewBus()
+			rec := &runRecorder{}
+			s := newAuthoredSchedulerForTest(t, bus, rec.run)
+			defer s.Stop()
+
+			const owner = "v1:identity:user:alice"
+			src := "" +
+				`@trigger(event="node.created", concept="v1:identity:user")` + "\n" +
+				c.filter + "\n" +
+				"automation aliceOnAcmeUser {\n" +
+				"  args {\n    id any\n  }\n" +
+				"  step run {\n    logic sandboxNoopLogic { event: event }\n  }\n" +
+				"}"
+			if err := s.Activate(authoredAutomationConstruct(owner, "aliceOnAcmeUser", src)); err != nil {
+				t.Fatalf("Activate: %v", err)
+			}
+
+			// A graph CDC event: the stored payload flattened onto the top
+			// level and again under `payload`.
+			created := func(short, email string) events.Event {
+				id := "v1:identity:user:" + short
+				return events.NewEvent("graph.node.created.v1:identity:user", events.KindNodeCreated, map[string]any{
+					"id": id, "nodeId": id, "concept": "v1:identity:user", "nodeType": "node",
+					"primaryEmail": email,
+					"payload":      map[string]any{"primaryEmail": email},
+				})
+			}
+
+			bus.PublishSync(created("dana", "dana@example.org"))
+			if rec.count() != 0 {
+				t.Fatalf("an event the filter refuses fired the automation (%d runs)", rec.count())
+			}
+			bus.PublishSync(created("eve", "eve@acme.com"))
+			if rec.count() != 1 {
+				t.Fatalf("an event the filter admits fired the automation %d times, want once", rec.count())
+			}
+		})
+	}
+}
+
 // TestAuthoredScheduler_OwnerScopedIsolation: two owners can each activate an
 // identically-named authored automation; they fire independently and each runs
 // under its own author envelope. Deactivating one leaves the other live.

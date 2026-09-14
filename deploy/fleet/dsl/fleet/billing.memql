@@ -239,7 +239,7 @@ automation dunningEmailOnPaymentFailure {
     switch status {
       case "past_due" {
         stageOutboundRequest {
-          requestId:   concat("fleet-dunning-", id, "-", graceEndsAt),
+          requestId:   "fleet-dunning-" + id + "-" + graceEndsAt,
           medium:      "email",
           target:      billingEmail,
           subject:     "Action needed: your MemQL Cloud payment did not go through",

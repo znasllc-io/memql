@@ -193,7 +193,7 @@ concept inboundRequest {
 /// cluster" is not merely unimplemented, it is not EXPRESSIBLE, and the caller silently gets a
 /// subset. That query is the Deployables app's primary screen, and cluster-wide hostname uniqueness would be
 /// uncheckable for the same reason. The composite keeps BOTH statements true at once: it injects
-/// (ownerUserId==actor.userId)||(actor.isClusterOwner==true), so a user reads exactly their own
+/// `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)`, so a user reads exactly their own
 /// deployables and an operator reads every row in the cluster -- which is what makes "list every
 /// site" expressible, and what lets the Go hostname-uniqueness probe see rows it does not own.
 /// Going the other way (staying clusterOwner and adding an owner field) would have made every

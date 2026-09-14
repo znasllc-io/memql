@@ -17,9 +17,7 @@ import (
 // validSpecBundle is a context-spec: it compiles + binds with no concept
 // dependency, so it validates cleanly through the Gate-1 sandbox.
 const validSpecBundle = `@description("MCP session test spec")
-spec actorEnvelope mcpSessionSpec {
-  return role == "admin"
-}`
+spec actorEnvelope mcpSessionSpec = actor => actor.role == "admin"`
 
 func newAuthoredRegistry() *memql.AuthoredRuntimeRegistry {
 	return memql.NewAuthoredRuntimeRegistry()
@@ -69,7 +67,7 @@ func TestDefine_RejectsInvalidBundle(t *testing.T) {
 	ctx := withMCPSession(context.Background(), "owner-1", reg)
 	// Dangling operator -> Gate-1 compile failure.
 	res := callMCPTool(ctx, eng, "developer", TierAuthoring, "", toolDefine,
-		map[string]any{"bundle": `spec actorEnvelope brokenSpec { return role == }`})
+		map[string]any{"bundle": `spec actorEnvelope brokenSpec = actor => actor.role ==`})
 	if !isError(res) {
 		t.Fatalf("invalid bundle should be an error result, got %v", res)
 	}

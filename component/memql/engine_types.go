@@ -50,6 +50,12 @@ type QueryPlan struct {
 	// Peeled off the outermost CountExpression by applyDirectiveWrappers.
 	Count bool
 
+	// Refine is the query's `refine` clause (memql#5366): an in-process
+	// predicate Execute applies to the SQL page before shaping (refine.go).
+	// Peeled off its RefineExpression by applyDirectiveWrappers; nil for a
+	// query without one.
+	Refine *RefineExpression
+
 	// BoundConcept is the concept the executed construct DECLARES it
 	// reads -- copied from the resolved query function's BoundConcept,
 	// which the loader fills from the construct's signature and its
@@ -196,6 +202,25 @@ type Spec struct {
 	// Traits share the runtime contract (atomic boolean predicate)
 	// but are deliberately unbound (concept-agnostic).
 	IsTrait bool
+
+	// Lambda is the edition-2026 body, `spec c isX = row => ...` (memql#5366),
+	// kept as the parsed v1 AST for two readers: the Init pass lowers it into
+	// Expr against the resolved binding (lowerAllPushdownPositions), and
+	// EvalExpr evaluates it when the predicate is applied in process -- a
+	// refine clause, an automation condition -- where there is no SQL. Nil
+	// for an inline spec of the internal query form, whose Expr is converted
+	// where it is defined (buildInlineSpec).
+	Lambda *ast.LambdaExpr
+
+	// Uses are the file-top `use` imports in force where the spec was
+	// written: the tree file's for a loaded spec, the construct source's own
+	// for an authored one (a bundle's spec slice carries the bundle's import
+	// preamble, so its stored row does too). The binding resolves through
+	// them FIRST -- an import that names the bound name decides which shape
+	// or concept it is, exactly as a query's signature concept resolves --
+	// then the spec's own domain, then the whole tree (specBindingShape /
+	// specBindingConcept). Parsed once and never mutated, so clones share it.
+	Uses []*ast.UseDeclaration
 }
 
 func (s *Spec) clone() *Spec {
@@ -212,6 +237,12 @@ func (s *Spec) clone() *Spec {
 		Origin:      s.Origin,
 		BoundName:   s.BoundName,
 		IsTrait:     s.IsTrait,
+		// The parsed v1 AST is never mutated after parsing, so clones share
+		// it -- and they must carry it: the registry hands out clones, and a
+		// clone without the lambda is a v1 predicate EvalExpr cannot apply.
+		Lambda: s.Lambda,
+		// And the imports, or a clone would bind differently than its source.
+		Uses: s.Uses,
 	}
 }
 
@@ -375,6 +406,14 @@ const (
 	// strings.HasPrefix. An empty list and a blank prefix match nothing --
 	// see normalizePrefixValues for why.
 	OpStartsWith ComparisonOperator = "startsWith"
+	// OpIncludes is the substring test (memql#5366): `<field>.includes(<sub>)`,
+	// the edition-2026 spelling of what was contains(s, sub). SQL:
+	// `(jsonb_typeof(p) = 'string' AND strpos(<text>, ?) > 0)`; in process:
+	// strings.Contains. A blank or whitespace-only needle matches nothing, for
+	// the reason a blank startsWith prefix does (rule 32): "" occurs in every
+	// string, so the literal reading would let an empty search widen a selection
+	// to every row.
+	OpIncludes ComparisonOperator = "includes"
 )
 
 // ComparisonExpression compares a field to a literal value or collection.

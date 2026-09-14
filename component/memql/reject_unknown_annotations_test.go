@@ -7,23 +7,18 @@ import (
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// TestBuiltinDeclToFunction_RejectsUnknownAnnotation locks in #990: the
-// builtin converter no longer silently swallows unknown annotations.
+// TestBuiltinDeclToFunction_RejectsUnknownAnnotation locks in #990: an unknown
+// annotation on a builtin is refused -- since memql#5359 at parse time, by the
+// annotation registry, so the converter only ever sees a legal set.
 func TestBuiltinDeclToFunction_RejectsUnknownAnnotation(t *testing.T) {
-	decl := &languageParser.BuiltinDecl{
-		Name: "cognitionScore",
-		Attributes: []*languageParser.Attribute{
-			{Name: "executor", Value: "integration.cognition.scoreUtterance"},
-			{Name: "bogusBuiltinAnno"},
-		},
-	}
+	src := "@executor(\"integration.cognition.scoreUtterance\")\n@bogusBuiltinAnno\nbuiltin cognitionScore {\n}\n"
 
-	_, err := builtinDeclToFunction(decl, "dsl/cognition/builtins.memql")
+	_, err := languageParser.ParseBuiltinDecl(src)
 	if err == nil {
 		t.Fatalf("expected unknown annotation @bogusBuiltinAnno to be rejected")
 	}
-	if !strings.Contains(err.Error(), "unknown annotation @bogusBuiltinAnno") {
-		t.Fatalf("expected unknown-annotation error naming @bogusBuiltinAnno, got: %v", err)
+	if !strings.Contains(err.Error(), "unknown annotation @bogusBuiltinAnno on a builtin") || !strings.HasSuffix(err.Error(), "[annotation_unknown]") {
+		t.Fatalf("expected the registry's unknown-annotation refusal naming @bogusBuiltinAnno, got: %v", err)
 	}
 }
 
@@ -42,23 +37,17 @@ func TestBuiltinDeclToFunction_AcceptsSupported(t *testing.T) {
 	}
 }
 
-// TestPromptDeclToPromptDecl_RejectsUnknownAnnotation locks in #990 for prompts.
+// TestPromptDeclToPromptDecl_RejectsUnknownAnnotation locks in #990 for
+// prompts, on the path it now runs on (the parser's registry check).
 func TestPromptDeclToPromptDecl_RejectsUnknownAnnotation(t *testing.T) {
-	decl := &languageParser.PromptDecl{
-		Name: "agentReply",
-		Attributes: []*languageParser.Attribute{
-			{Name: "description", Value: "agent reply"},
-			{Name: "templateFile", Value: "agentReply.tmpl"},
-			{Name: "bogusPromptAnno"},
-		},
-	}
+	src := "@description(\"agent reply\")\n@templateFile(\"agentReply.tmpl\")\n@bogusPromptAnno\nprompt agentReply {\n  x string\n}\n"
 
-	_, err := promptDeclToPromptDecl(decl, "dsl/cognition/prompts.memql")
+	_, err := languageParser.ParsePromptDecl(src)
 	if err == nil {
 		t.Fatalf("expected unknown annotation @bogusPromptAnno to be rejected")
 	}
-	if !strings.Contains(err.Error(), "unknown annotation @bogusPromptAnno") {
-		t.Fatalf("expected unknown-annotation error naming @bogusPromptAnno, got: %v", err)
+	if !strings.Contains(err.Error(), "unknown annotation @bogusPromptAnno on a prompt") || !strings.HasSuffix(err.Error(), "[annotation_unknown]") {
+		t.Fatalf("expected the registry's unknown-annotation refusal naming @bogusPromptAnno, got: %v", err)
 	}
 }
 

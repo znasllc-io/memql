@@ -81,6 +81,18 @@ func SandboxCompileBundleWithEngine(constructs []SandboxConstruct, engine *MemQL
 			rep.OK = false
 		}
 	}
+
+	// Then the lowering of the queries, specs and traits that compiled AND
+	// resolved, in the engine's registries (authoring_lower.go). After the
+	// reference checks rather than before, so a construct naming something
+	// that does not exist keeps the reference check's diagnostic -- which
+	// names the import to fix -- instead of the lowering's account of the
+	// same absence.
+	lowering := engineFreeLowering
+	if engine != nil {
+		lowering = &authoringLowering{engine: engine}
+	}
+	lowering.lowerBundle(constructs, &rep, overlay)
 	return rep
 }
 

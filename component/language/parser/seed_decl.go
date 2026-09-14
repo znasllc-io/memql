@@ -1,9 +1,11 @@
 package parser
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	"github.com/znasllc-io/memql/component/language/ast"
 )
 
@@ -25,8 +27,8 @@ import (
 // and `<field> { ... }` nested blocks. Values cover string / int /
 // float / bool / string-array; no other element types in arrays.
 // Field-name validation against the bound concept's schema is the
-// loader's job, NOT the parser's -- this matches parseSeedMemQL's
-// schema-agnostic stance.
+// loader's job, NOT the parser's -- the stance the retired
+// hand-rolled seed parser took too.
 //
 // memql#335 (sub-epic #329 / Stage 1C of #310).
 func (p *Parser) parseSeedDecl(attrs []*ast.Attribute) (*ast.SeedDecl, error) {
@@ -54,10 +56,11 @@ func (p *Parser) parseSeedDecl(attrs []*ast.Attribute) (*ast.SeedDecl, error) {
 		decl.Name = first
 	}
 
-	// Translate the leading attribute set. Mirror parseSeedMemQL's
-	// allow-list -- unknown annotations are rejected, matching the
-	// hand-rolled parser's hard-fail default branch (different from
-	// the prompt / builtin parsers which tolerate unknowns silently).
+	// Which annotations a seed takes is the registry's answer
+	// (memql#5359); the switch below reads the legal ones.
+	if err := p.checkAnnotations(annotations.Seed, fmt.Sprintf("seed %q", decl.Name), attrs); err != nil {
+		return nil, err
+	}
 	for _, attr := range attrs {
 		if attr == nil {
 			continue
@@ -84,9 +87,6 @@ func (p *Parser) parseSeedDecl(attrs []*ast.Attribute) (*ast.SeedDecl, error) {
 			}
 		case "templateFile":
 			decl.TemplateFile = attrStringValue(attr)
-		default:
-			return nil, newParseErrorf(&p.current,
-				"unknown seed annotation @%s (allowed: @version, @namespace, @scope, @description, @templateFile, @enabled, @disabled)", attr.Name)
 		}
 	}
 
@@ -160,8 +160,8 @@ func (p *Parser) parseSeedBlock() (*ast.SeedBlock, error) {
 	return block, nil
 }
 
-// parseSeedValue reads one RHS scalar or string-array. Mirrors
-// parseSeedMemQL's value surface: string, int, float, true / false,
+// parseSeedValue reads one RHS scalar or string-array. Mirrors the
+// retired hand-rolled seed parser's value surface: string, int, float, true / false,
 // or `[ "a", "b" ]`. Ref-typed arrays (e.g. `[tool("respondToUser")]`)
 // are out of scope for v1 seeds -- callers that need them fall back
 // to plain string-array form for tool / knowledge bindings, same as

@@ -24,14 +24,15 @@
 // mutation-DEFINITION rewriter (NormaliseMutationSource matches the header
 // anywhere in the file).
 
-// Bootstrap cluster, database, and identity provider records on first startup.
-// The pure bootstrapCluster logic decides { create, withIdentityProvider }
-// (create == existingCluster() empty AND node.type=="bff"); the three creates
-// are `if`-gated mutation steps so nothing is written once a cluster exists or
-// off the bff node, and the identityProvider row lands only when the startup
-// envelope carries one. Every create field binds an explicit key + coalesce (a
-// multi-segment path like event.payload.database.host is nil when absent, and a
-// nil @required arg trips validation), mirroring registerNode/deregisterNode.
+// Bootstrap cluster, database, and identity provider records on startup.
+// The pure bootstrapCluster logic decides `create` (existingCluster() empty
+// AND node.type == "bff") and gates the cluster create, so that row is
+// written once; clusterInfraRefresh gates the database and identity-provider
+// creates on every bff start (memql#4766), and the identityProvider row lands
+// only when the startup envelope carries one. Every create field binds an
+// explicit key + a `??` fallback (a multi-segment path like database.host is
+// nil when absent, and a nil @required arg trips validation), mirroring
+// registerNode/deregisterNode.
 /// Bootstrap cluster, database, and identity provider records on first startup
 @trigger(event="system.startup")
 automation bootstrapCluster {
@@ -98,7 +99,7 @@ automation bootstrapCluster {
     }
   }
   step idpRecord {
-    if steps.refreshInfra.result == true && exists(payload.identityProvider) {
+    if steps.refreshInfra.result == true && payload.identityProvider != nil {
       mutation createIdentityProvider (
         identityProviderId: "v1:cluster:identityProvider:primary",
         clusterId:          "v1:cluster:cluster:self",
@@ -134,10 +135,10 @@ automation bootstrapCluster {
 // action="stopped", reason="system.shutdown". The former deregisterNode logic
 // was a single inline write (ADR S2.1 logic-purity violation); the write now
 // lives here as a mutation step and the logic is gone (#2235). Every field is
-// bound with an explicit key + coalesce: a multi-segment path like
-// event.payload.node.id evaluates to nil when absent, and passing nil for a
-// @required mutation arg (nodeId / nodeType / action) trips "required argument
-// missing" at validation; coalesce(..., "") guarantees a non-nil string.
+// bound with an explicit key + a `??` fallback: a multi-segment path like
+// node.id evaluates to nil when absent, and passing nil for a @required
+// mutation arg (nodeId / nodeType / action) trips "required argument missing"
+// at validation; `?? ""` guarantees a non-nil string.
 /// Record node shutdown in the database
 @trigger(event="system.shutdown")
 automation deregisterNode {
@@ -162,7 +163,7 @@ automation deregisterNode {
 // timeline -- one concept row per real node. The former registerNode logic did
 // both inline writes (ADR S2.1 logic-purity violation); each write is now its
 // own mutation step and the logic is gone (#2235). Every field is bound with an
-// explicit key + coalesce for the same reason as deregisterNode above: a
+// explicit key + a `??` fallback for the same reason as deregisterNode above: a
 // multi-segment path is nil when absent and would trip the @required check.
 // version/address are not createSpawnEvent args (they already live on the node
 // record from createNode), so the spawn step carries only the flat event fields.

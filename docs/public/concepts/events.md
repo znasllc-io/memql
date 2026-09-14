@@ -170,7 +170,7 @@ stay verbatim. See [Node Identifier Conventions](identifiers.md).)
   "automationOrigin": "unified:deploypack/automations.memql:deployStaging",
   "executionId": "exec-abc123",
   "preconditionId": "digestPinned",
-  "check": "exists(args.imageDigest)",
+  "check": "args.imageDigest != nil",
   "literal": "imageDigest",
   "preconditionDescription": "the deploy needs a pinned image digest",
   "triggerTopic": "graph.node.updated.v1:cluster:deployment",

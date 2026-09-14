@@ -34,7 +34,7 @@ mutation c1Widget mutationCreateC1Widget {
     widgetId  string  @required
   }
   insert {
-    id:    canonicalId(args.widgetId, c1Widget)
+    id:    canonicalId(args.widgetId, "c1Widget")
     label: "x"
   }
 }`

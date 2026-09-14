@@ -15,11 +15,11 @@ func (Query) getUsers() {
 }
 
 func (Query) getUserById() {
-  concept==v1:user&&id==args.id
+  concept==v1:user && (row => row.id == args.id)
 }
 
 func (Query) getUsersByRole() {
-  concept==v1:user&&payload.role==args.role
+  concept==v1:user && (row => row.role == args.role)
 }
 `
 	ast := mustParse(t, source)
@@ -75,17 +75,16 @@ func (Query) helperQuery() {
 func TestValidateFileComposition_MutationWithQueries(t *testing.T) {
 	// Valid: 1 mutation + validation queries
 	source := `
-@audit
 func (Mutation) createUser() {
-  insert("v1:user", payload={"name": args.name})
+  insert("v1:user", payload={name: args.name})
 }
 
 func (Query) validateEmail() {
-  concept==v1:user&&payload.email==args.email
+  concept==v1:user && (row => row.email == args.email)
 }
 
 func (Query) checkDuplicate() {
-  concept==v1:user&&payload.name==args.name
+  concept==v1:user && (row => row.name == args.name)
 }
 `
 	ast := mustParse(t, source)
@@ -282,7 +281,7 @@ func TestValidateFileComposition_ArgsWithoutBlock(t *testing.T) {
 	source := `
 @description("Search users")
 func (Query) searchUsers(args any) {
-  concept==v1:user && payload.role==args.role
+  concept==v1:user && (row => args.role == nil || row.role == args.role)
 }
 `
 	ast := mustParse(t, source)
@@ -309,7 +308,7 @@ args {
   status  string
 }
 func (Query) searchUsers(args any) {
-  concept==v1:user && payload.role==args.role
+  concept==v1:user && (row => args.role == nil || row.role == args.role)
 }
 `
 	ast := mustParse(t, source)
@@ -347,7 +346,6 @@ func (Query) getAllUsers() {
 func TestValidateFileComposition_MutationArgsWithBlock(t *testing.T) {
 	// Valid: Mutation with args parameter AND file-top args block.
 	source := `
-@audit
 args {
   email  string  @required
   name   string  @required

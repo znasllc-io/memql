@@ -28,11 +28,12 @@ func TestReceiverFilteredAnnotations(t *testing.T) {
 			want: []string{"trigger", "filter"}, absent: []string{"mergeFields", "cache"},
 		},
 		{
-			name: "concept preamble uses the \"\" receiver", src: "@\nconcept widget {\n}\n", line: 1, col: 2,
-			// NOTE: @cache IS legal on a concept (the registry's ""
-			// receiver carries it); the absent list must not invent
-			// restrictions the engine does not have.
-			want: []string{"version", "relationship", "cache"}, absent: []string{"mergeFields", "trigger", "handler"},
+			name: "concept preamble uses the Concept receiver", src: "@\nconcept widget {\n}\n", line: 1, col: 2,
+			// @cache is RETIRED on a concept (the concept loader always
+			// refused it; the old "" receiver offered it anyway), and
+			// @relationship is written inside the body, not before the
+			// declaration (memql#5359).
+			want: []string{"namespace", "version", "rowAuthz", "displayCard"}, absent: []string{"mergeFields", "trigger", "handler", "cache", "relationship"},
 		},
 		{
 			name: "tool preamble", src: "@\ntool probeTool {\n}\n", line: 1, col: 2,
@@ -82,14 +83,14 @@ func TestConstructScopedBodyCompletion(t *testing.T) {
 		want, absent []string
 	}{
 		{
-			name: "query body offers its blocks only",
+			name: "query body offers its clauses only",
 			src:  "query todo todos {\n  ",
-			want: []string{"args", "filter", "shape"}, absent: []string{"insert", "update", "body"},
+			want: []string{"args", "filter", "shape", "sort", "paginate", "asOf", "count"}, absent: []string{"insert", "update", "body"},
 		},
 		{
 			name: "mutation body offers write blocks",
 			src:  "mutation todo createTodo {\n  ",
-			want: []string{"args", "insert", "update"}, absent: []string{"filter", "shape", "body"},
+			want: []string{"args", "insert", "update", "accept", "stamp"}, absent: []string{"filter", "shape", "body"},
 		},
 		{
 			name: "logic body offers body, never filter",
@@ -97,9 +98,12 @@ func TestConstructScopedBodyCompletion(t *testing.T) {
 			want: []string{"args", "body"}, absent: []string{"filter", "insert", "shape"},
 		},
 		{
-			name: "automation body offers body, never insert",
+			// An automation has no body block -- its body is step blocks
+			// (emitAutomation refuses `body { }`); offering `body` here was
+			// the stale hand list memql#5359 replaced.
+			name: "automation body offers steps, never body or insert",
 			src:  "@trigger(event=\"x.y\")\nautomation onThing {\n  ",
-			want: []string{"args", "body"}, absent: []string{"insert", "filter", "shape"},
+			want: []string{"args", "step", "precondition"}, absent: []string{"insert", "filter", "shape", "body"},
 		},
 	}
 	for _, tc := range cases {
@@ -140,15 +144,21 @@ func TestOfferedAnnotationsAreAlwaysLegal(t *testing.T) {
 	}
 }
 
-// annotationTakesArgs is hand-maintained; every offerable annotation
-// must be classified, and the classification must match the registry's
-// own argument model.
+// annotationTakesArgs reads the registry's argument forms: completion inserts
+// `@name(` exactly when the placement cannot be written bare. Pinned per
+// placement, plus the fallback that has no receiver.
 func TestAnnotationTakesArgsInSync(t *testing.T) {
-	for _, name := range allAnnotationNames() {
-		hasArgs := len(annotations.KeywordArgs[name]) > 0
-		if hasArgs && !annotationTakesArgs(name) {
-			t.Errorf("@%s has registry keyword args but annotationTakesArgs says no -- completion inserts it without '('", name)
+	for _, p := range annotations.Placements() {
+		want := p.Forms&annotations.FormFlag == 0
+		if got := annotationTakesArgs(string(p.Receiver), p.Name); got != want {
+			t.Errorf("%s @%s: annotationTakesArgs = %v, want %v (forms: %s)", p.Receiver, p.Name, got, want, p.Forms)
 		}
+	}
+	if !annotationTakesArgs("", "trigger") {
+		t.Error("with no receiver, @trigger must still insert its paren")
+	}
+	if annotationTakesArgs("", "serverOnly") {
+		t.Error("with no receiver, the bare flag @serverOnly must not insert a paren")
 	}
 }
 

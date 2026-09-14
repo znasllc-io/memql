@@ -1,0 +1,5 @@
+/// Tickets sorted by a concatenated key.
+query ticket soConcatenation {
+  sort "row.created" + "At"
+  paginate 20
+}

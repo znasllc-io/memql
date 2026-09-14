@@ -1,134 +1,456 @@
-// Package annotations is the single physical source of truth for the
-// MemQL construct-annotation surface: which annotations each receiver
-// kind accepts (ByReceiver) and the one-line doc for each annotation
-// (Docs).
+// Package annotations is the one registry of the MemQL annotation surface:
+// every place an annotation can be written (a Receiver), every annotation
+// each place accepts (a Placement), the argument forms and keyword keys it
+// takes, an example of it, and the check every parser runs (Check, CheckAll).
 //
-// It is a leaf package — it imports nothing inside the repo — so both
-// the engine-side load gate (component/memql) and the editor/sense
-// surface (component/memql/sense) can derive from it without an import
-// cycle. Before this package existed the two surfaces each kept their
-// own hand-maintained copy and a consistency test guarded them against
-// drift (#991); now there is one copy and the test guards that the
-// derived views still agree.
+// It is a leaf package -- it imports nothing inside the repo -- so the
+// parser, the concept translator in component/database, the editor surface
+// (component/memql/sense) and the DSL spec (component/language/dslspec) all
+// derive from it without an import cycle.
 //
-// Scope: this registry backs the four function constructs' load-time
-// allow-list (Query / Mutation / Logic / Automation) and the editor's
-// completion/diagnose/hover surface for every receiver. The per-
-// construct decl parsers in component/language/parser (tool_decl.go,
-// provider_decl.go, ...) remain the authoritative parse-time gate for
-// the declarative constructs — their accepted sets are mirrored here
-// for the editor, kept in sync by review.
+// # One gate
+//
+// Every construct parser and every field list in component/language/parser
+// converts the annotations it read into Uses (parser.AnnotationUse) and calls
+// CheckAll at PARSE time; the concept translator does the same for a concept,
+// its body (@relationship) and its fields. The per-construct parsers keep the
+// argument SEMANTICS (what a value means, whether it is well-formed); which
+// names, forms and keys are legal is decided here and nowhere else. Before
+// this registry the answer lived in eleven places -- a load-time text scan,
+// inline switches in the tool / provider / seed / action parsers, duplicate
+// lists in four converters and the concept loader's own switch -- and they
+// disagreed (memql#5359).
 package annotations
 
-// ByReceiver maps a receiver kind to the annotation names it accepts.
-// The empty-string key is the top-level concept-definition receiver.
-//
-// For the four function constructs (Query / Mutation / Logic /
-// Automation) this is the canonical allow-list the load-time validator
-// consults (via component/memql). For the declarative constructs it is
-// the editor projection of each decl parser's accepted set.
-var ByReceiver = map[string][]string{
-	"Query": {
-		// @enabled, @latestMode and @nocache retired in memql#5375: the
-		// first was an explicit no-op, the second restated what `asOf
-		// latest` in the body already says, the third was the second
-		// spelling of @cache(0).
-		"description", "disabled", "public", "serverOnly", "mcp", "unbounded", "cache", "actor", "requiresRank", "requiresCapability",
-	},
-	"Mutation": {
-		"description", "disabled", "actor", "public", "serverOnly",
-		"mergeFields", "appendFields", "addToSet", "removeFromSet", "createOnly", "noUnset", "scrubPii", "mcp", "requiresRank", "requiresCapability",
-	},
-	"Logic": {
-		"description", "disabled", "eventField", "actor", "requiresRank", "requiresCapability",
-	},
-	"Automation": {
-		// @schedule retired in memql#5375: @trigger(schedule=...) is the
-		// one spelling, which keeps "how is this automation reached" a
-		// single annotation and lets @template be refused beside it
-		// coherently.
-		"description", "disabled", "trigger", "filter", "mcp", "actor", "template",
-	},
-	"Action": {
-		"description", "disabled", "kind", "sideEffect",
-	},
-	"Capability": {
-		"description", "disabled", "sideEffect",
-	},
-	"Spec": {
-		"description", "disabled",
-	},
-	"Tool": {
-		// @rateLimit and @scopes retired in memql#5375: both were stored
-		// on the tool, cloned, advertised on the gRPC tool descriptor and
-		// enforced nowhere -- so each read as a ceiling or a gate while
-		// being neither, which is worse than their absence.
-		//
-		// @allowedRoles STAYS. D17 proposed replacing it with
-		// @requiresRank + @requiresCapability, but those gate the human
-		// actor's catalog rank and their grants over a resource, while
-		// this gates which AGENT role may call the tool -- a different
-		// axis, enforced on every path (tool_types.go, grpc/server.go,
-		// tool_execution.go). Substituting rank for agent role would let
-		// every specialist call the assistant-only tools.
-		"description", "disabled", "handler", "executionTime",
-		"destructive", "requiresConfirmation",
-		"allowedRoles", "mcp",
-	},
-	"Builtin": {
-		// @requiresCapability (epic memql#5288, task memql#5301): a builtin is
-		// where most of an app's ACTIONS live -- packageDeploy, siteArchive,
-		// customDomainAdd are all builtins -- so the part vocabulary
-		// (`execute` on `app:<id>/<part>`) has to be declarable here or it
-		// gates nothing that matters. @requiresRank stays off builtins: a
-		// rank floor on a Go-served read is applied in its handler (the
-		// logsSearch precedent), and nothing has asked for the annotation.
-		"description", "disabled", "executor", "alias", "args", "sdk",
-		"requiresCapability",
-	},
-	"Prompt": {
-		"description", "disabled", "level", "defaultProvider", "templateFile",
-	},
-	"Provider": {
-		// @type renamed @vendor in memql#5375: one name, one meaning. A
-		// concept's @type is its row kind, and the two shared a spelling
-		// for no reason beyond history.
-		"disabled",
-		"description", "vendor", "model", "modality", "default", "base", "extends",
-	},
-	"Shape": {
-		"description", "row", "actor",
-	},
-	"Policy": {
-		"description", "primary", "fallback",
-	},
-	"Rule": {
-		"description", "disabled",
-		"when", "policy", "level", "precedence", "onUnavailable", "exclude", "locked",
-	},
-	"Seed": {
-		// @namespace retired in memql#5375; @version stays -- a seed's
-		// version is id-bearing.
-		"description", "version", "scope", "templateFile", "disabled",
-	},
-	"": { // top-level (concept definitions)
-		// @namespace retired in memql#5375: the namespace is the domain
-		// directory or that directory's one-line namespace.pin, so the
-		// annotation could only restate one or disagree with it.
-		// @version stays -- it is the "v1" of every canonical id.
-		//
-		// @displayCard and @composable are declared here as well as in
-		// component/database/memory-nodes' own concept table, because
-		// memql#5378 verified both are READ (see Docs, which names the
-		// reader) and the attribute matrix derives its rows from this map.
-		"description", "version", "scope", "visibility", "type", "cache", "relationship",
-		"rowAuthz", "origin", "mirroredTo", "displayCard", "composable",
-	},
+import "sort"
+
+// ArgSpec is one keyword key an annotation accepts inside @name(...). A bare
+// flag key -- `clusterOwner` in `@rowAuthz(owner="x", clusterOwner)` -- has
+// Type "flag".
+type ArgSpec struct {
+	Name string // keyword-arg name, e.g. "event"
+	Type string // "string", "int", "flag", ...
+	Doc  string // one-line completion/hover doc
 }
 
-// Docs maps an annotation name to its one-line hover/completion doc.
-// Every name offered by ByReceiver carries an entry here (enforced by
-// TestEveryAnnotationHasDoc in component/memql/sense).
+// Placement is one annotation on one receiver: the argument forms it takes,
+// its keyword keys, whether it may be written more than once, the canonical
+// example, and a receiver-specific doc when the name means something
+// different here than elsewhere.
+type Placement struct {
+	Receiver   Receiver
+	Name       string
+	Forms      Form
+	Keys       []ArgSpec // closed key set for FormKeywords; a bare flag key has Type "flag"
+	Repeatable bool
+	Example    string // canonical use on this receiver, e.g. `@cache(300)`
+	Doc        string // receiver-specific doc; empty falls back to Docs[Name]
+}
+
+// Placements returns every placement, in receiver order (Receivers) and then
+// by name. The result is a fresh slice the caller may keep.
+func Placements() []Placement {
+	return append([]Placement(nil), placements...)
+}
+
+// Lookup returns the placement of name on r, and whether r accepts name.
+func Lookup(r Receiver, name string) (Placement, bool) {
+	p, ok := placementIndex[r][name]
+	return p, ok
+}
+
+// ByReceiver maps each receiver's name to the annotation names it accepts,
+// sorted. It is DERIVED from the placements and kept for the consumers that
+// only need names (completion, the dslspec projection); the check reads the
+// placements themselves. The concept's key is "Concept" (it was "" before
+// memql#5359).
+var ByReceiver = func() map[string][]string {
+	out := map[string][]string{}
+	for _, p := range placements {
+		out[string(p.Receiver)] = append(out[string(p.Receiver)], p.Name)
+	}
+	return out
+}()
+
+// KeywordArgs maps an annotation name to the keyword keys its parenthesised
+// form accepts. It is the editor's view (completion inside @name(...), hover
+// on a key), DERIVED from the placements: for a name whose keyword form sits
+// on more than one receiver, the first placement in receiver order speaks for
+// it.
+var KeywordArgs = func() map[string][]ArgSpec {
+	out := map[string][]ArgSpec{}
+	for _, p := range placements {
+		if len(p.Keys) == 0 {
+			continue
+		}
+		if _, seen := out[p.Name]; !seen {
+			out[p.Name] = p.Keys
+		}
+	}
+	return out
+}()
+
+// KeywordArgsFor returns the keyword keys an annotation accepts inside its
+// @name(...) form, or nil when it takes none.
+func KeywordArgsFor(name string) []ArgSpec {
+	return KeywordArgs[name]
+}
+
+// docFor returns the doc a placement shows: its own, or the name's.
+func docFor(p Placement) string {
+	if p.Doc != "" {
+		return p.Doc
+	}
+	return Docs[p.Name]
+}
+
+// placementsNamed returns every placement of name, in registry order.
+func placementsNamed(name string) []Placement {
+	var out []Placement
+	for _, p := range placements {
+		if p.Name == name {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// placements is the registry, sorted into Placements order at init.
+var placements = func() []Placement {
+	out := append([]Placement(nil), placementTable...)
+	sort.SliceStable(out, func(i, j int) bool {
+		ri, rj := receiverIndex[out[i].Receiver], receiverIndex[out[j].Receiver]
+		if ri != rj {
+			return ri < rj
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}()
+
+// placementIndex is receiver -> name -> placement.
+var placementIndex = func() map[Receiver]map[string]Placement {
+	out := map[Receiver]map[string]Placement{}
+	for _, p := range placements {
+		if out[p.Receiver] == nil {
+			out[p.Receiver] = map[string]Placement{}
+		}
+		out[p.Receiver][p.Name] = p
+	}
+	return out
+}()
+
+// lifecycle returns the three annotations almost every construct takes:
+// @description, @enabled, @disabled. Every @disabled placement carries the
+// same docDisabled, which says what disabling does to each kind of construct.
+func lifecycle(r Receiver, description string) []Placement {
+	return []Placement{
+		{Receiver: r, Name: "description", Forms: FormString, Example: `@description("` + description + `")`},
+		{Receiver: r, Name: "disabled", Forms: FormFlag, Example: "@disabled", Doc: docDisabled},
+	}
+}
+
+// Receiver-specific docs, for the names that mean something different on
+// different receivers.
+const (
+	docActorOnFunction = "Declares that the body reads the authenticated actor (actor.userId, actor.role, actor.identityId, actor.isClusterOwner, actor.primaryEmail, actor.now). The actor-binding load rule refuses a body that reads actor.* without it (memql#2621)."
+	docActorOnShape    = "Shape kind marker: the shape projects the authenticated actor's envelope (actor.userId / actor.role / ...), and carries no signature concept."
+)
+
+// Keyword key sets, shared by the placement and its docs.
+var (
+	triggerKeys = []ArgSpec{
+		{Name: "event", Type: "string", Doc: "Event pattern, e.g. \"node.created\" (with concept=) or a raw topic such as \"system.startup\"."},
+		{Name: "concept", Type: "string", Doc: "Concept id the triggering event targets; required by the structured node.* event kinds."},
+		{Name: "partition", Type: "string", Doc: "Partition selector, e.g. \"*\" for all partitions. Required while the event topic carries a partition segment (#56 phase 8)."},
+		{Name: "schedule", Type: "string", Doc: "Cron schedule with a leading seconds field, e.g. \"0 0 * * * *\"."},
+		{Name: "filter", Type: "expression", Doc: "The trigger filter as a keyword: a lambda of one parameter over the triggering row, filter=row => <predicate>. The standalone @filter(...) annotation is the usual spelling and sets the same filter."},
+		{Name: "on", Type: "string", Doc: "A synonym for event=: on=<concept>.<created|updated|deleted>, with the concept named through the file's `use` import, folds to the same graph.node.<action>.<concept> pattern event= names (resolved by the automation loader and the concept resolver). A later epic retires the synonyms (D15/D17)."},
+	}
+	handlerKeys = []ArgSpec{
+		{Name: "type", Type: "string", Doc: "Handler type: \"function\", \"query\", \"webhook\" or \"delegate\". Required."},
+		{Name: "name", Type: "string", Doc: "Function or builtin name (with type=\"function\")."},
+		{Name: "query", Type: "string", Doc: "MemQL query or mutation call (with type=\"query\")."},
+		{Name: "url", Type: "string", Doc: "Webhook URL (with type=\"webhook\")."},
+		{Name: "method", Type: "string", Doc: "HTTP method for a webhook handler, e.g. \"POST\"."},
+	}
+	cacheKeys = []ArgSpec{
+		{Name: "ttl", Type: "string", Doc: "Cache TTL in whole seconds. Positional preferred (#2618): @cache(300); keyword ttl=\"300\" keeps parsing."},
+	}
+	whenKeys = []ArgSpec{
+		{Name: "level", Type: "string", Doc: "The level the call declared: fast, strong, reasoning or embeddings."},
+		{Name: "modality", Type: "string", Doc: "The modality derived from the call site: chat, streamingChat, tools, streamingTools, structured, vision, embedding, speech, transcribe."},
+		{Name: "prompt", Type: "string", Doc: "The DSL prompt this call renders. Empty matches a Go call site with no prompt."},
+		{Name: "role", Type: "string", Doc: "The AGENT's role slug. Distinct from actorRole: this is what is acting."},
+		{Name: "actorRole", Type: "string", Doc: "The calling human's cluster role. Distinct from role: this is who is watching."},
+		{Name: "tag", Type: "string", Doc: "A call tag, e.g. \"background\" or \"backgroundEscalation\"."},
+		{Name: "touches", Type: "string", Doc: "A concept id PREFIX the call's footprint matches (startsWith semantics)."},
+	}
+	builtinArgsKeys = []ArgSpec{
+		{Name: "profile", Type: "string", Doc: "The argument profile: none, object, optionalObject, stringOrObject, optionalString or optionalStringOrObject. Inferred from the body when absent."},
+		{Name: "stringKey", Type: "string", Doc: "The key a bare string argument binds to, for the profiles that accept one."},
+		{Name: "additionalProperties", Type: "string", Doc: "Whether an object argument may carry keys the body does not declare (default false)."},
+		{Name: "when", Type: "string", Doc: "An inert note naming the type of routingRuleActivate's `when` argument, which its body cannot declare (`when` is a keyword). No loader reads it."},
+		{Name: "excludes", Type: "string", Doc: "An inert note naming the type of routingRuleActivate's `excludes` argument. No loader reads it."},
+	}
+	relationshipKeys = []ArgSpec{
+		{Name: "type", Type: "string", Doc: "STRUCTURAL type -- what the engine does with the edge. Closed set: parent, owns, createdBy, alias, equals, contains, references."},
+		{Name: "field", Type: "string", Doc: "Local field holding the foreign key; a dotted path reaches into a nested object block."},
+		{Name: "fieldSource", Type: "string", Doc: "Where the foreign key lives: \"payload\" (the default) or \"table\" (the edge table)."},
+		{Name: "target", Type: "string", Doc: "Target concept: a bare concept name resolved through a file-top `use` import."},
+		{Name: "direction", Type: "string", Doc: "\"outgoing\" or \"incoming\"."},
+		{Name: "as", Type: "string", Doc: "DOMAIN label -- what the edge means, e.g. as=\"assignedTo\". Optional. Any lowerCamelCase identifier; validated for form only and never checked against a list, so a new verb never needs an engine release (memql#3652)."},
+	}
+	rowAuthzKeys = []ArgSpec{
+		{Name: "public", Type: "flag", Doc: "The public tier: globally readable by intent."},
+		{Name: "clusterOwner", Type: "flag", Doc: "The administrative tier; beside owner=, the composite -- the owner, or a cluster owner (memql#4312)."},
+		{Name: "owner", Type: "string", Doc: "The owned tier: the payload field compared against actor.userId, or \"id\" for a self-owned concept (memql#3029)."},
+		{Name: "via", Type: "string", Doc: "The granted tier: the relationship spec that grants visibility."},
+		{Name: "account", Type: "string", Doc: "Beside owner=: also admits anyone whose group ties them to the row's account field (epic memql#5165)."},
+		{Name: "rankVisible", Type: "flag", Doc: "Beside owner=: reads widen to anyone at or above the owner's rank (epic memql#4832)."},
+		{Name: "rankStrict", Type: "flag", Doc: "Beside owner= and rankVisible: writes widen to rows owned strictly below the caller's rank, and the cluster-owner write escape is withdrawn."},
+		{Name: "unowned", Type: "string", Doc: "Beside owner= and rankVisible: the actor rank from which a row with an empty owner is readable."},
+		{Name: "requiresIdentity", Type: "flag", Doc: "Beside public: readable by authenticated callers only (memql#4809)."},
+		{Name: "rankFloor", Type: "string", Doc: "Beside clusterOwner: relaxes the READ to a rank floor while the write stays cluster-owner (memql#5216)."},
+	}
+	displayCardKeys = []ArgSpec{
+		{Name: "primary", Type: "string", Doc: "The field shown as the row's title. Required."},
+		{Name: "secondary", Type: "string", Doc: "The field shown under the title."},
+		{Name: "tertiary", Type: "string", Doc: "A third field shown in the row's detail line."},
+		{Name: "status", Type: "string", Doc: "The field shown as the row's status."},
+	}
+	composableKeys = []ArgSpec{
+		{Name: "as", Type: "string", Doc: "The label a composed file names the row kind by, e.g. \"invoice\"."},
+		{Name: "fields", Type: "string", Doc: "Comma-separated fields to compose from, e.g. \"number,issuedAt,total\"; each must be a field the concept declares or a row intrinsic."},
+		{Name: "list", Type: "string", Doc: "The bare name of the query that lists the rows to compose from."},
+	}
+	variantKeys = []ArgSpec{
+		{Name: "discriminator", Type: "string", Doc: "The field whose value picks the branch."},
+	}
+)
+
+// placementTable is the registry, receiver by receiver.
+var placementTable = concat(
+	// ---- Query ----------------------------------------------------------
+	lifecycle(Query, "List the caller's open tickets, newest first."),
+	[]Placement{
+		{Receiver: Query, Name: "actor", Forms: FormFlag, Example: "@actor", Doc: docActorOnFunction},
+		{Receiver: Query, Name: "cache", Forms: FormNumber | FormKeywords, Keys: cacheKeys, Example: "@cache(300)"},
+		{Receiver: Query, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
+		{Receiver: Query, Name: "public", Forms: FormFlag, Example: "@public"},
+		{Receiver: Query, Name: "requiresCapability", Forms: FormString | FormStrings, Example: `@requiresCapability("read", "principal")`},
+		{Receiver: Query, Name: "requiresRank", Forms: FormString, Example: `@requiresRank("developer")`},
+		{Receiver: Query, Name: "serverOnly", Forms: FormFlag, Example: "@serverOnly"},
+		{Receiver: Query, Name: "unbounded", Forms: FormString, Example: `@unbounded("a small catalog of fixed size")`},
+	},
+
+	// ---- Mutation -------------------------------------------------------
+	lifecycle(Mutation, "Rename one of the caller's tickets."),
+	[]Placement{
+		{Receiver: Mutation, Name: "actor", Forms: FormFlag, Example: "@actor", Doc: docActorOnFunction},
+		{Receiver: Mutation, Name: "addToSet", Forms: FormString | FormStrings, Example: `@addToSet("disabledDeployables")`, Doc: docAddToSet + "\n\n" + docSetMembershipRules},
+		{Receiver: Mutation, Name: "appendFields", Forms: FormString | FormStrings, Example: `@appendFields("attachmentIds")`},
+		{Receiver: Mutation, Name: "createOnly", Forms: FormString | FormStrings, Example: `@createOnly("status", "attempts")`},
+		{Receiver: Mutation, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
+		{Receiver: Mutation, Name: "mergeFields", Forms: FormString | FormStrings, Example: `@mergeFields("preferences")`},
+		{Receiver: Mutation, Name: "noUnset", Forms: FormString | FormStrings, Example: `@noUnset("bootstrappedAt")`, Doc: docNoUnset + "\n\n" + docNoUnsetEmpty},
+		{Receiver: Mutation, Name: "public", Forms: FormFlag, Example: "@public"},
+		{Receiver: Mutation, Name: "removeFromSet", Forms: FormString | FormStrings, Example: `@removeFromSet("disabledDeployables")`, Doc: docRemoveFromSet + "\n\n" + docSetMembershipRules},
+		{Receiver: Mutation, Name: "requiresCapability", Forms: FormString | FormStrings, Example: `@requiresCapability("execute", "app:deployables/publish")`},
+		{Receiver: Mutation, Name: "requiresRank", Forms: FormString, Example: `@requiresRank("admin")`},
+		{Receiver: Mutation, Name: "scrubPii", Forms: FormFlag, Example: "@scrubPii"},
+		{Receiver: Mutation, Name: "serverOnly", Forms: FormFlag, Example: "@serverOnly"},
+	},
+
+	// ---- Logic ----------------------------------------------------------
+	lifecycle(Logic, "Close every ticket that has been idle for a week."),
+	[]Placement{
+		{Receiver: Logic, Name: "actor", Forms: FormFlag, Example: "@actor", Doc: docActorOnFunction},
+		{Receiver: Logic, Name: "eventField", Forms: FormString | FormStrings, Example: `@eventField("id", "status")`},
+		{Receiver: Logic, Name: "requiresCapability", Forms: FormString | FormStrings, Example: `@requiresCapability("execute", "app:deployables/deploy")`},
+		{Receiver: Logic, Name: "requiresRank", Forms: FormString, Example: `@requiresRank("admin")`},
+	},
+
+	// ---- Automation -----------------------------------------------------
+	lifecycle(Automation, "On a new ticket, notify its owner."),
+	[]Placement{
+		{Receiver: Automation, Name: "actor", Forms: FormFlag, Example: "@actor", Doc: docActorOnFunction},
+		{Receiver: Automation, Name: "filter", Forms: FormExpression, Example: `@filter(row => row.status == "open")`},
+		{Receiver: Automation, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
+		{Receiver: Automation, Name: "template", Forms: FormFlag, Example: "@template"},
+		{Receiver: Automation, Name: "trigger", Forms: FormKeywords, Keys: triggerKeys, Example: `@trigger(event="node.created", concept="v1:cluster:node")`},
+	},
+
+	// ---- Action / Capability --------------------------------------------
+	lifecycle(Action, "Tag a release in the repository."),
+	lifecycle(Capability, "Create a git tag and a GitHub release for a version."),
+	[]Placement{
+		{Receiver: Capability, Name: "sideEffect", Forms: FormString, Example: `@sideEffect("write")`},
+	},
+
+	// ---- Spec (spec and trait) --------------------------------------------
+	lifecycle(Spec, "Matches the rows that are still open."),
+
+	// ---- Tool -----------------------------------------------------------
+	lifecycle(Tool, "Create a to-do for the caller."),
+	[]Placement{
+		{Receiver: Tool, Name: "allowedRoles", Forms: FormString | FormStrings, Example: `@allowedRoles("assistant", "specialist")`},
+		{Receiver: Tool, Name: "destructive", Forms: FormFlag, Example: "@destructive"},
+		{Receiver: Tool, Name: "executionTime", Forms: FormString, Example: `@executionTime("fast")`},
+		{Receiver: Tool, Name: "handler", Forms: FormKeywords, Keys: handlerKeys, Example: `@handler(type="function", name="createTodo")`},
+		{Receiver: Tool, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
+		{Receiver: Tool, Name: "requiresConfirmation", Forms: FormFlag, Example: "@requiresConfirmation"},
+	},
+
+	// ---- Builtin --------------------------------------------------------
+	lifecycle(Builtin, "Preflight and start a campaign send."),
+	[]Placement{
+		{Receiver: Builtin, Name: "alias", Forms: FormString, Repeatable: true, Example: `@alias("memqlVersion")`},
+		{Receiver: Builtin, Name: "args", Forms: FormKeywords, Keys: builtinArgsKeys, Example: `@args(profile="object")`},
+		{Receiver: Builtin, Name: "executor", Forms: FormString, Example: `@executor("integration.campaigns.startSend")`},
+		{Receiver: Builtin, Name: "requiresCapability", Forms: FormString | FormStrings, Example: `@requiresCapability("execute", "app:deployables/deploy")`},
+		{Receiver: Builtin, Name: "sdk", Forms: FormFlag, Example: "@sdk"},
+	},
+
+	// ---- Prompt ---------------------------------------------------------
+	lifecycle(Prompt, "Distil a cluster of episodes into one memory."),
+	[]Placement{
+		{Receiver: Prompt, Name: "defaultProvider", Forms: FormString, Example: `@defaultProvider("fleet")`},
+		{Receiver: Prompt, Name: "level", Forms: FormString, Example: `@level("fast")`, Doc: "How much intelligence the call needs: fast, strong, reasoning or embeddings. The router's rules branch on it, so a prompt never names a model (epic memql#5127). Every prompt should declare one; a prompt without one is not yet refused at load (memql#5426)."},
+		{Receiver: Prompt, Name: "templateFile", Forms: FormString, Example: `@templateFile("prompts/consolidateMemory.tmpl")`, Doc: "The prompt's template: a .tmpl file beside the prompt, rendered with the input fields."},
+	},
+
+	// ---- Provider -------------------------------------------------------
+	lifecycle(Provider, "OpenAI GPT-5.4 Mini -- balanced cost and latency."),
+	[]Placement{
+		{Receiver: Provider, Name: "base", Forms: FormFlag, Example: "@base"},
+		{Receiver: Provider, Name: "default", Forms: FormFlag, Example: "@default", Doc: "Mark this provider as the default for its modality."},
+		{Receiver: Provider, Name: "extends", Forms: FormString, Example: `@extends("openai")`},
+		{Receiver: Provider, Name: "modality", Forms: FormString, Example: `@modality("embedding")`},
+		{Receiver: Provider, Name: "model", Forms: FormString, Example: `@model("gpt-5.4-mini")`},
+		{Receiver: Provider, Name: "vendor", Forms: FormString, Example: `@vendor("OpenAI")`, Doc: docProviderVendor},
+	},
+
+	// ---- Shape ----------------------------------------------------------
+	[]Placement{
+		{Receiver: Shape, Name: "actor", Forms: FormFlag, Example: "@actor", Doc: docActorOnShape},
+		{Receiver: Shape, Name: "description", Forms: FormString, Example: `@description("Ticket summary card.")`},
+		{Receiver: Shape, Name: "row", Forms: FormFlag, Example: "@row"},
+	},
+
+	// ---- Policy ---------------------------------------------------------
+	[]Placement{
+		{Receiver: Policy, Name: "description", Forms: FormString, Example: `@description("Local strongest, then an app, then the cheapest federated model.")`},
+		{Receiver: Policy, Name: "fallback", Forms: FormString, Repeatable: true, Example: `@fallback("app:*")`},
+		{Receiver: Policy, Name: "primary", Forms: FormString, Example: `@primary("fleet:strongest")`},
+	},
+
+	// ---- Rule -----------------------------------------------------------
+	lifecycle(Rule, "Operator turns reason locally first."),
+	[]Placement{
+		{Receiver: Rule, Name: "exclude", Forms: FormString | FormStrings, Repeatable: true, Example: `@exclude("fleet:qwen3.5:7b")`},
+		{Receiver: Rule, Name: "level", Forms: FormString, Example: `@level("strong")`, Doc: "The level to resolve the call at: fast, strong, reasoning or embeddings, OVERRIDING what the call declared."},
+		{Receiver: Rule, Name: "locked", Forms: FormFlag, Example: "@locked"},
+		{Receiver: Rule, Name: "onUnavailable", Forms: FormString, Example: `@onUnavailable("degrade")`},
+		{Receiver: Rule, Name: "policy", Forms: FormString, Example: `@policy("localFirst")`},
+		{Receiver: Rule, Name: "precedence", Forms: FormNumber, Example: "@precedence(60)"},
+		{Receiver: Rule, Name: "when", Forms: FormEmpty | FormKeywords, Keys: whenKeys, Example: `@when(level="fast")`},
+	},
+
+	// ---- Seed -----------------------------------------------------------
+	lifecycle(Seed, "Knowledge baseline for every professional role."),
+	[]Placement{
+		{Receiver: Seed, Name: "scope", Forms: FormString, Example: `@scope("perUser")`, Doc: "Seed scope: \"global\" seeds once for the cluster, \"perUser\" once for every user."},
+		{Receiver: Seed, Name: "templateFile", Forms: FormString, Example: `@templateFile("templates/assistant.tmpl")`, Doc: "A template file whose rendered text is the seeded row's content."},
+		{Receiver: Seed, Name: "version", Forms: FormString, Example: `@version("1.0.0")`, Doc: "Version tag for the seed."},
+	},
+
+	// ---- Concept --------------------------------------------------------
+	[]Placement{
+		{Receiver: Concept, Name: "composable", Forms: FormFlag | FormKeywords, Keys: composableKeys, Example: `@composable(as="ticket", fields="title,status", list="openTickets")`},
+		{Receiver: Concept, Name: "description", Forms: FormString, Example: `@description("A support ticket raised by a customer.")`},
+		{Receiver: Concept, Name: "displayCard", Forms: FormKeywords, Keys: displayCardKeys, Example: `@displayCard(primary="title", secondary="status")`},
+		{Receiver: Concept, Name: "mirroredTo", Forms: FormString | FormStrings, Example: `@mirroredTo("shopify")`},
+		{Receiver: Concept, Name: "origin", Forms: FormString, Example: `@origin("memql")`},
+		{Receiver: Concept, Name: "rowAuthz", Forms: FormKeywords, Keys: rowAuthzKeys, Example: `@rowAuthz(owner="ownerUserId", clusterOwner)`},
+		{Receiver: Concept, Name: "type", Forms: FormString, Example: `@type("collection")`, Doc: "The concept's row kind: \"object\" (the default), \"collection\" or \"reference\"."},
+		{Receiver: Concept, Name: "version", Forms: FormString, Example: `@version("1.0.0")`, Doc: docVersionConcept},
+	},
+
+	// ---- ConceptBody ----------------------------------------------------
+	[]Placement{
+		{Receiver: ConceptBody, Name: "relationship", Forms: FormKeywords, Keys: relationshipKeys, Repeatable: true, Example: `@relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")`},
+	},
+
+	// ---- ConceptField ---------------------------------------------------
+	[]Placement{
+		{Receiver: ConceptField, Name: "description", Forms: FormString, Example: `@description("The ticket's one-line title.")`, Doc: "The field's description, emitted into the concept schema."},
+		{Receiver: ConceptField, Name: "internal", Forms: FormFlag, Example: "@internal"},
+		{Receiver: ConceptField, Name: "maxLength", Forms: FormNumber, Example: "@maxLength(120)"},
+		{Receiver: ConceptField, Name: "maximum", Forms: FormNumber, Example: "@maximum(100)"},
+		{Receiver: ConceptField, Name: "minLength", Forms: FormNumber, Example: "@minLength(1)"},
+		{Receiver: ConceptField, Name: "minimum", Forms: FormNumber, Example: "@minimum(0)"},
+		{Receiver: ConceptField, Name: "open", Forms: FormFlag, Example: "@open"},
+		{Receiver: ConceptField, Name: "pattern", Forms: FormString, Example: `@pattern("^[a-z][a-z0-9-]*$")`},
+		{Receiver: ConceptField, Name: "pii", Forms: FormFlag, Example: "@pii"},
+		{Receiver: ConceptField, Name: "required", Forms: FormFlag, Example: "@required"},
+		{Receiver: ConceptField, Name: "secret", Forms: FormFlag, Example: "@secret", Doc: docSecretField},
+		{Receiver: ConceptField, Name: "serverSet", Forms: FormFlag, Example: "@serverSet"},
+		{Receiver: ConceptField, Name: "variant", Forms: FormKeywords, Keys: variantKeys, Example: `@variant(discriminator="kind")`},
+	},
+
+	// ---- ArgsField ------------------------------------------------------
+	[]Placement{
+		{Receiver: ArgsField, Name: "enum", Forms: FormString | FormStrings, Example: `@enum("open", "closed")`},
+		{Receiver: ArgsField, Name: "maxLength", Forms: FormNumber, Example: "@maxLength(120)", Doc: "The most characters a string argument may carry (a rune count, enforced on strings)."},
+		{Receiver: ArgsField, Name: "maximum", Forms: FormNumber, Example: "@maximum(60)", Doc: "The INCLUSIVE upper bound on a numeric argument (memql#4522)."},
+		{Receiver: ArgsField, Name: "minimum", Forms: FormNumber, Example: "@minimum(30)", Doc: "The INCLUSIVE lower bound on a numeric argument (memql#4522)."},
+		{Receiver: ArgsField, Name: "pattern", Forms: FormString, Example: `@pattern("^[A-Za-z]{2,3}$")`, Doc: "A regular expression a string argument must match, compiled once at load."},
+		{Receiver: ArgsField, Name: "required", Forms: FormFlag, Example: "@required", Doc: "The caller must pass the argument. The `!` sigil after the type is the same thing."},
+	},
+
+	// ---- ToolField ------------------------------------------------------
+	[]Placement{
+		{Receiver: ToolField, Name: "autoInjected", Forms: FormFlag, Example: "@autoInjected"},
+		{Receiver: ToolField, Name: "default", Forms: FormString, Example: `@default("5")`, Doc: "The default the tool's input schema advertises to the model."},
+		{Receiver: ToolField, Name: "description", Forms: FormString, Example: `@description("Max results to return.")`, Doc: "The field's description, shown to the model in the tool's input schema."},
+		{Receiver: ToolField, Name: "enum", Forms: FormString | FormStrings, Example: `@enum("exec", "fs_read")`},
+		{Receiver: ToolField, Name: "required", Forms: FormFlag, Example: "@required"},
+	},
+
+	// ---- PromptField ----------------------------------------------------
+	[]Placement{
+		{Receiver: PromptField, Name: "default", Forms: FormString | FormNumber, Example: `@default("en")`, Doc: "The default the prompt's input schema declares for the field."},
+		{Receiver: PromptField, Name: "description", Forms: FormString, Example: `@description("The episodes to distil.")`, Doc: "The field's description, carried into the prompt's input schema."},
+		{Receiver: PromptField, Name: "enum", Forms: FormString | FormStrings, Example: `@enum("short", "long")`},
+		{Receiver: PromptField, Name: "required", Forms: FormFlag, Example: "@required"},
+	},
+
+	// ---- BuiltinField ---------------------------------------------------
+	[]Placement{
+		{Receiver: BuiltinField, Name: "description", Forms: FormString, Example: `@description("The campaign to send.")`, Doc: "The field's description, read into the generated SDKs' docs."},
+		// epic memql#5375 (D16): a builtin field's body IS the input schema,
+		// and every annotation but @required used to be dropped without a
+		// word -- so a declared enum reached no schema and constrained
+		// nothing. It gets what a prompt field has, for the same reason.
+		{Receiver: BuiltinField, Name: "default", Forms: FormString | FormNumber, Example: `@default("10")`, Doc: "The default the builtin's input schema declares for the field."},
+		{Receiver: BuiltinField, Name: "enum", Forms: FormString | FormStrings, Example: `@enum("patch", "minor")`},
+		{Receiver: BuiltinField, Name: "required", Forms: FormFlag, Example: "@required"},
+	},
+)
+
+func concat(groups ...[]Placement) []Placement {
+	var out []Placement
+	for _, g := range groups {
+		out = append(out, g...)
+	}
+	return out
+}
+
+// Docs maps an annotation name to its one-line hover/completion doc. A
+// placement whose name means something different on its receiver carries its
+// own Placement.Doc; every other placement shows this one (enforced by
+// TestEveryPlacementHasADoc).
 var Docs = map[string]string{
 	// Lifecycle / shared.
 	"disabled":           "Disable this definition.",
@@ -138,21 +460,20 @@ var Docs = map[string]string{
 	"requiresCapability": "The CAPABILITY a caller must hold to invoke the construct -- @requiresCapability(\"read\", \"principal\") (epic memql#5166, D11). The sibling of @requiresRank, and the difference is the point: a RANK is a floor on the cluster's ladder, a CAPABILITY is a (verb x resource) grant a role was given, and a cluster can hold one without the other -- developer ranks above admin and holds strictly fewer principal verbs. Declared together, BOTH must pass. VALIDATED AT LOAD against the five verbs and the resource kinds any role in this cluster holds a grant on, so a misspelling refuses boot rather than gating a surface into silence; ENFORCED at execution through the runtime capability catalog, on the direct call and on every plan that expands the construct. It replaces the slug-comparing specs (requiresAdmin, requiresOwnerOrAdmin, requiresDeveloperOrAbove), which could not see a custom role at all: `role == \"admin\"` is false for a rank-250 role holding every principal verb. It gates WHO MAY CALL; @rowAuthz still decides WHICH ROWS come back.",
 	"requiresRank":       "The actor-rank FLOOR: only a caller holding this role, or one ranked above it, may invoke the construct -- @requiresRank(\"developer\") (epic memql#4832, D6). ENFORCED at execution and VALIDATED AT LOAD against the role ladder in dsl/rbac, so a typo refuses boot rather than gating on rank 0 and admitting everyone. This is the server-side counterpart to MemQL OS's per-surface role requirement: the shell keeps hiding what a caller cannot reach (hiding an action beats letting them click it and reading a refusal) and this makes the hidden surface a REFUSED one. Declared on the CONSTRUCT because a surface is a set of constructs and an app id from a browser is a claim, not a fact. It gates WHO MAY CALL; @rowAuthz still decides WHICH ROWS come back.",
 	"serverOnly":         "Bars the construct from client-originated calls while leaving server-side Go free to call it (memql#2800). ENFORCED at execution against auth.CallOrigin -- unlike the retired @internal, which only hid a construct from discovery. Use only when caller-scoping is impossible: the auth path resolving `sub` -> user before an actor exists, or an automation acting on a user other than the actor. Callers must stamp auth.ContextWithInternalOrigin.",
-	"actor":              "On a mutation: resolves auth-context (`actor.X`) fields. On a shape: kind marker -- projects the auth-context envelope (actor.userId / role / ...).",
+	"actor":              "On a query / mutation / logic / automation: declares that the body reads the authenticated actor (actor.*). On a shape: kind marker -- projects the auth-context envelope (actor.userId / role / ...).",
 	"mergeFields":        "On an update mutation: deep-merge the named object-typed payload fields into the stored object instead of replacing them wholesale, so sibling keys survive a single-key write. Format: @mergeFields(\"preferences\").",
 	"appendFields":       "On an update mutation: append the named array-typed payload fields' elements to the stored array instead of replacing it wholesale, so a single-writer mutation can accumulate list items (e.g. attach one id). Format: @appendFields(\"attachmentIds\").",
-	"addToSet":           "On an update mutation: treat the named array-typed payload fields as SETS and UNION the written elements into the stored array -- deduped, existing order kept, new members appended in the order given. The membership half @appendFields is not: append is not deduped and has no counterpart that removes, so a toggle built on it duplicates on a double click. Pairs with @removeFromSet. Format: @addToSet(\"disabledDeployables\"). See memql#4951.",
-	"removeFromSet":      "On an update mutation: treat the named array-typed payload fields as SETS and REMOVE the written elements from the stored array, keeping the order of what remains. Removing something absent is a no-op rather than an error, so the mutation is idempotent and two callers removing the same member both succeed. Pairs with @addToSet, and the pair is what lets a set be edited one member at a time instead of read-modify-written whole. Format: @removeFromSet(\"disabledDeployables\"). See memql#4951.",
+	"addToSet":           docAddToSet,
+	"removeFromSet":      docRemoveFromSet,
 	"createOnly":         "On an insert (create-or-upsert) mutation: write the named payload fields ONLY when creating the row. If the target id already exists, the fields are dropped from the delta before the engine read-merge, so the stored value is preserved rather than clobbered -- making a deterministic-id re-stage idempotent for lifecycle fields another writer owns after creation (e.g. stageOutboundRequest seeds status but must not reset a row the outbound worker moved to sent). The inverse of @mergeFields/@appendFields: only valid on insert-kind mutations. Format: @createOnly(\"status\", \"attempts\"). See fylo#63.",
-	"noUnset":            "On any mutation: declare the named payload fields ONE-WAY -- a write may set them or change one non-empty value to another, but may never take a stored non-empty value back to empty. On the read-merge path a named field arriving empty is dropped from the delta when the stored row holds a non-empty value. Closes the gap read-merge cannot (it only inherits fields ABSENT from a delta, so a body writing `f: args.f ?? \"\"` blanks the stored value with an explicit empty string). Distinct from @createOnly, which forbids any post-create write; @noUnset forbids only set -> unset, so a legitimately-later stamp still lands. Format: @noUnset(\"bootstrappedAt\"). See memql#3415.",
+	"noUnset":            docNoUnset,
 	"scrubPii":           "On an update mutation (the hard-delete / data-deletion path): after the partial payload merges, zero EVERY field the bound concept marks @pii. The field set is derived from the schema, so a newly-annotated PII field is scrubbed automatically with no change to the mutation. Bare flag, no arguments. See memql#1711.",
 	// Automation.
-	"trigger":  "How an automation is reached: @trigger(event=\"graph.node.created.*.v1:ns:concept\") for the graph, or @trigger(schedule=\"0 0 * * * *\") for the clock. ONE annotation for both, which is what keeps \"triggered\" and \"called\" distinguishable from @template. The separate @schedule(cron=...) spelling is retired in memql#5375.",
-	"filter":   "Filter expression for automation triggers.",
+	"trigger":  "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",
+	"filter":   "Filter for automation triggers: a lambda of one parameter over the triggering row, as in @filter(row => row.status == \"open\").",
 	"template": "On an automation: this is a work-spine TEMPLATE, invoked by a v1:work:run that named it rather than fired by the graph (memql#5048). It is the third way an automation can be reachable, alongside an event trigger and a schedule. A @template automation must carry NEITHER @trigger nor @schedule -- the load-time gate refuses both combinations, so \"called\" and \"triggered\" stay distinct.",
-	// Action (memql#2218, behavioral-constructs ADR §2.3).
-	"kind":       "On an action: the action kind. @kind(\"primitive\") = one external capability rendered from params (the only kind today; composites collapse into automations, ADR §2.2).",
-	"sideEffect": "On an action: coarse risk class @sideEffect(\"read\"|\"write\"|\"exec\") carried for authoring + the surface-aware trust gate. The AUTHORITATIVE sideEffectClass lives on the capability (ADR §7) so an authored/generated action cannot spoof it.",
+	// Capability (memql#2218, behavioral-constructs ADR §2.3).
+	"sideEffect": "On a capability: the coarse risk class @sideEffect(\"read\"|\"write\"|\"exec\"). It is the authoritative side-effect class: it lives on the capability, not on the action that calls it, and must equal the class of the Go capability the declaration names, so an authored or generated action cannot claim a lower one.",
 	// Pagination opt-out (epic 5, memql#1965).
 	"unbounded": "On a list-returning query: opt out of the pagination authoring rule and the implicit 50-row runtime cap. Format: @unbounded(\"reason\"). The reason string is REQUIRED -- it documents why this query is a legitimate full-set read (small bounded catalog, sweep job, etc.) and is enumerated by the pagination audit report. A query that paginates/sorts is already bounded and must NOT carry @unbounded; the engine clamps the realized window to MEMQL_MEMORY_ENGINE_MAX_WINDOW regardless. See docs/public/language/authoring-rules.md.",
 	// Temporal-access visibility (core-builtins ADR §2.3, memql#2305).
@@ -163,20 +484,20 @@ var Docs = map[string]string{
 	"executionTime":        "Expected execution time hint: \"fast\", \"medium\", or \"slow\".",
 	"destructive":          "Mark a tool as destructive (mutates/deletes); the tool loop gates it behind a confirmation.",
 	"requiresConfirmation": "Require explicit user confirmation before the tool executes.",
-	"allowedRoles":         "Restrict the tool to a set of AGENT roles: @allowedRoles(\"assistant\", \"specialist\"). An EMPTY list means every agent role. ENFORCED on every path -- the predicate is Tool.AllowedRoles in component/memql/tool_types.go, applied by component/grpc/server.go before dispatch and by tool_execution.go on the in-engine path. This is the agent-role axis, NOT the actor's catalog rank: @requiresRank is a floor on the human caller and @requiresCapability is a grant over a resource, and neither can say \"a specialist may not call this\". memql#5375 proposed replacing it with those two, re-verified it live, and kept it for that reason.",
+	"allowedRoles":         "Restrict the tool to a set of agent roles. Enforced on every path: tool_types.go, component/grpc/server.go and tool_execution.go. It gates the AGENT role (assistant / specialist), which is a different axis from @requiresRank (actor rank) and @requiresCapability (verb over a resource) -- neither can express it.",
 	// Builtin.
 	"executor": "Go executor name for builtin functions (integration.X.Y).",
 	"args":     "Parse-time argument contract for builtin functions.",
-	"alias":    "Additional name the builtin is registered under.",
+	"alias":    "Additional name the builtin is registered under. Repeatable.",
 	"sdk":      "Generator marker (sdk/gen reads from source); no engine effect.",
 	// Prompt.
-	"defaultProvider": "Default AI provider for prompt execution.",
-	"templateFile":    "External template file path for prompts.",
+	"defaultProvider": "Default AI provider for prompt execution: an explicit pin that wins over every routing rule.",
+	"templateFile":    "A template file beside the construct: on a prompt, the .tmpl rendered with the input fields; on a seed, the text of the seeded row's content.",
 	// Provider.
-	"type":     "On a CONCEPT: the row kind -- \"object\" (default), \"collection\" or \"reference\". Drives the collection/reference node-type invariants. A provider's vendor is @vendor, renamed off this spelling in memql#5375 so one name means one thing.",
+	"type":     "Provider vendor type (e.g., \"OpenAI\", \"Anthropic\"); on a concept, the row kind (\"object\"/\"collection\"/\"reference\").",
 	"model":    "Model identifier (e.g., \"gpt-5.4-mini\", \"claude-sonnet-4-6\").",
 	"modality": "Provider modality (e.g., \"chat\", \"audio\", \"image\", \"embedding\").",
-	"default":  "On a PROVIDER: mark it the default for its modality. On a TOOL, PROMPT or BUILTIN field: the JSON-Schema default the model reads when the caller omits the field -- those bodies ARE the schema, which is why it survives there. RETIRED on a concept field and on an args field (memql#5375): neither was ever applied on insert, so a field carrying it did not default; fill the value with `??` in the mutation that writes it.",
+	"default":  "Mark this provider as the default for its modality; on a field, the value used when the caller omits it.",
 	"base":     "Mark a vendor-level base provider (auth + type only).",
 	"extends":  "Inherit configuration from a base provider.",
 	// Shape.
@@ -196,10 +517,12 @@ var Docs = map[string]string{
 	"exclude":       "On a rule: remove one concrete entry from the chain's resolution, e.g. @exclude(\"fleet:qwen3.5:7b\"). Repeatable.",
 	"locked":        "On a rule: evaluate before every unlocked rule regardless of precedence. Accepted only in the embedded tree -- the loader refuses it elsewhere.",
 	// Concept.
-	"version":    "Version tag for a concept.",
-	"scope":      "Partition scope. @scope(\"global\") places rows in the reserved _system partition; default is partition-scoped.",
-	"visibility": "Which node types load this concept. @visibility(\"*\"), @visibility(\"cognition\", \"bff\"), or @visibility(!\"planner\").",
-	"cache":      "Override the result-cache TTL for the query, in whole seconds: @cache(300). @cache(0) is the explicit \"never cache\" -- use it for reads where even brief staleness is wrong (auth, monotonic counters, presence). Pure reads cache BY DEFAULT with a 60s backstop, so @cache sets a DIFFERENT TTL rather than turning caching on. The keyword form @cache(ttl=\"300\") and the @nocache alias are both retired in memql#5375: one value, one spelling, and a single-arg annotation has no ambiguity for a keyword to resolve. The engine keys the cache on the plan signature (query/sort/limit/depth/shape + the keyset cursor) and evicts on any write to the read concept via the cache.invalidate.* broadcast channel, so cross-node eviction needs no per-concept routing rule.",
+	"vendor":      "The AI vendor whose client serves this provider. Renamed from @type in epic memql#5375 -- one spelling per meaning, and a concept's @type (the row kind) is a different annotation.",
+	"version":     "Version tag for a concept or a seed: a semver string, @version(\"1.0.0\"). Metadata only -- canonical ids are not versioned by it (#2613).",
+	"scope":       "On a seed: \"global\" seeds once for the cluster, \"perUser\" once for every user. (On a concept @scope is retired -- every concept lives in the default partition, #56.)",
+	"cache":       "Override the result-cache TTL for the query. Preferred form (#2618): @cache(300) -- the single ttl arg makes position unambiguous. The keyword form @cache(ttl=\"300\") keeps parsing. Pure reads cache BY DEFAULT (a 60s backstop) without this annotation; @cache sets a different TTL, longer or shorter. @cache(ttl=\"0\") is the explicit \"never cache\" opt-out (or use @nocache). The engine keys the cache on the plan signature (query/sort/limit/depth/shape + the keyset cursor) and evicts on any write to the read concept via the cache.invalidate.* broadcast channel -- cross-node eviction needs no per-concept routing rule.",
+	"displayCard": "Rendering hints for concept-agnostic clients (memql#160): the field shown as a row's title (primary=, required) and the fields for the secondary, tertiary and status slots. Each must be a displayable field the concept declares, checked once the property set is known. Read by clients/os (src/apps/concepts/displayCard.ts, consumed by RowsPanel.tsx); test/dslconformance's displaycard_inventory_test.go requires every concept to declare or decline one.",
+	"composable":  "The Materializer's mark (epic memql#4977, D2): this concept's rows are worth composing a file FROM. Bare, it takes the defaults; as= names the row kind, fields= lists the fields to compose from and list= names the query that lists the rows. Read by clients/os (src/apps/materializer/useCompose.ts) through integration.compose.composableConcepts.",
 	// Two independent axes: `type` is what the ENGINE DOES with the edge (a
 	// closed set), `as` is what the edge MEANS (open, form-validated only).
 	// The target is a BARE concept name resolved through a file-top `use`
@@ -207,92 +530,24 @@ var Docs = map[string]string{
 	// by memql#1067, so the editor was teaching an author the one spelling the
 	// conformance gate rejects (memql#3661).
 	"relationship": "Foreign-key relationship metadata. Format: @relationship(type=\"parent\", field=\"x\", target=concept, direction=\"outgoing\"), plus an optional as=\"domainVerb\" label.",
-	"rowAuthz":     "Declares WHO MAY SEE this concept's rows, once on the concept, instead of as an `actor.*` term every filter over it must remember to carry. Four tiers, one spelling each: @rowAuthz(public) (globally readable by intent -- spelled explicitly, because \"no annotation\" and \"declared public\" are different states), @rowAuthz(clusterOwner) (administrative), @rowAuthz(owner=\"<field>\") (the field is compared against actor.userId; it must be a field the concept declares, OR the literal \"id\" for a SELF-OWNED concept whose owner is the row itself -- memql#3029; `id` and only `id`, since createdBy means who WROTE the row, not whose row it is), @rowAuthz(via=\"<spec>\") (a relationship spec grants visibility). A fifth FORM, not a fifth tier: @rowAuthz(owner=\"<field>\", clusterOwner) is the composite -- the owner, OR a cluster owner (memql#4312) -- the only two-argument list, order-independent, and the form an operator console needs over per-user rows since a plain owner= tier has no cluster-owner bypass. ENFORCED ON THE READ PATH since Phase 3 (memql#3172): declaring a tier CHANGES WHAT READS RETURN. Two mechanisms, and neither consults the filter to decide whether to engage -- the tier's predicate is ANDed into the plan before the read runs (resolved from the construct's declared binding, so the narrowing pushes down into SQL), and every row leaving the engine is separately admitted against the tier ITS OWN concept declares, which is the only mechanism available to a raw client-supplied query string, to graph expansion, or to a TOP-LEVEL BUILTIN CALL whose rows come out of a Go handler (memql#3982) -- none of which has a filter to AND anything into. SUBSCRIPTIONS are gated by the same row admission (memql#4309): a graph.node.* event reaches a stream only if the tier admits the row for that stream's actor, a `granted` row arrives id-only with payload_omitted set for the client to re-read, and an UNDECLARED concept is delivered to everyone exactly as its reads already return to everyone -- the live feed mirrors the read path rather than running a second rulebook. The write side is enforced too: update/delete refuse when the target row's declared owner is not the actor (memql#3174). Implementation: component/memql/rowauthz_enforce.go, called from parser.go. MEASURED BY TestClusterOwnerTierInjectsTheAdminGate, TestFilteredReadPathAppliesTheRowGate, TestGraphExpansionAppliesTheTraversalGateBeforeItEmitsTheRow TestTopLevelBuiltinAppliesTheRowGate and TestSubscriptionFanOutAppliesTheRowGate -- named so a reader can check whether this is still true rather than trust the sentence. Trusting it would have been wrong before: this paragraph described the tier as parsed-but-unread for as long as Phase 3 had been live, which is false in the one direction that costs a reader a wrong authorization assumption, and it feeds editor hover, so the reach was wider than this file (memql#3727). See docs/public/operate/auth/per-row-authz-audit.md and memql#2803.",
+	"rowAuthz":     docRowAuthz,
 	// Data origins (epic memql#4378). Two declarations, three derived
 	// states, no fourth.
-	"origin": "Declares WHERE CHANGES TO THIS CONCEPT ARE MADE -- the system that owns the data. @origin(\"memql\") (the default when the annotation is absent) means MemQL originates it; @origin(\"<connector>\") names an external system, which makes the concept a MIRROR. A mirror is READ-ONLY BY CONSTRUCTION: component/memql refuses every write to it -- mutation, tool handler, raw insert or staged write -- that does not come from the connector the origin names, so what the badge says is what a reader may assume. The name must be a registered connector or the engine REFUSES BOOT naming the concept: a mirror nobody fills is a lie. Pairs with @mirroredTo to derive dataState (mirror | origin | native), which the registry, both SDKs and the portal badge read. See docs/public/concepts/data-origins.md.",
-	"vendor": "The AI vendor a provider speaks to: @vendor(\"OpenAI\") or @vendor(\"Anthropic\"). Renamed from @type in memql#5375 so one name means one thing -- a concept's @type is its row kind, and the two shared a spelling for no reason beyond history. Declared on a @base provider; a child @extends the base and inherits it.",
-
-	// The two concept annotations memql#5378 verified are READ, declared
-	// here beside the rest. Each doc NAMES its reader, so the next audit
-	// can check whether it is still true rather than re-deriving the grep.
-	"displayCard": "Per-concept rendering hints for concept-agnostic surfaces: @displayCard(primary=\"name\", secondary=\"role\", tertiary=\"ownerUserId\", status=\"active\"). Each slot names a declared property or a row intrinsic. READ BY clients/os -- src/apps/concepts/displayCard.ts resolves the slots and RowsPanel.tsx renders them, so a concept with no card shows its id and nothing else. Every concept must declare one or decline it with a `// @no-displayCard: <reason>` comment (test/dslconformance/displaycard_inventory_test.go). Verified still read in memql#5378, which is why D17's retirement of it was not carried out.",
-	"composable":  "Marks a concept available to the Materializer's composer, optionally naming the composable fields: @composable(as=\"invoice\", fields=\"number,issuedAt,total\"). Every named field must be a declared property or a row intrinsic (validateComposable). READ BY clients/os -- served through integration.compose.composableConcepts and read by src/apps/materializer/useCompose.ts, so retiring it would empty the composer's list. ABSENT means not composable, which is a different statement from composable-with-no-fields (epic memql#4977, D2). Verified still read in memql#5378.",
-
+	"origin":     "Declares WHERE CHANGES TO THIS CONCEPT ARE MADE -- the system that owns the data. @origin(\"memql\") (the default when the annotation is absent) means MemQL originates it; @origin(\"<connector>\") names an external system, which makes the concept a MIRROR. A mirror is READ-ONLY BY CONSTRUCTION: component/memql refuses every write to it -- mutation, tool handler, raw insert or staged write -- that does not come from the connector the origin names, so what the badge says is what a reader may assume. The name must be a registered connector or the engine REFUSES BOOT naming the concept: a mirror nobody fills is a lie. Pairs with @mirroredTo to derive dataState (mirror | origin | native), which the registry, both SDKs and the portal badge read. See docs/public/concepts/data-origins.md.",
 	"mirroredTo": "Declares WHO ELSE HOLDS A COPY of this MemQL-origin concept: @mirroredTo(\"shopify\"), or several names in one annotation. Every write to the concept appends one v1:platform:outboxEntry per target, in the write's own transaction, which a per-connector drain worker delivers with an idempotency key, backoff, dead-lettering and audit. Only valid on a MemQL-origin concept -- @mirroredTo beside an external @origin is REFUSED at load, because re-mirroring somebody else's data onward is the origin's job and a mirror that also publishes is a second origin wearing the first one's badge. Each named connector must be registered or the engine refuses boot: a mirror target nobody drains is a silent drop. See docs/public/concepts/data-origins.md.",
-}
-
-// Set returns the receiver's accepted annotation names as a membership
-// set. Unknown receivers yield an empty (non-nil) set. The result is a
-// fresh map the caller may keep; mutating it does not affect the
-// registry.
-func Set(receiver string) map[string]bool {
-	names := ByReceiver[receiver]
-	out := make(map[string]bool, len(names))
-	for _, n := range names {
-		out[n] = true
-	}
-	return out
-}
-
-// ArgSpec is one keyword argument an annotation accepts inside @name(...).
-type ArgSpec struct {
-	Name string // keyword-arg name, e.g. "event"
-	Type string // "string", "int", ...
-	Doc  string // one-line completion/hover doc
-}
-
-// KeywordArgs maps an annotation name to the keyword arguments its
-// parenthesized form accepts, i.e. @name(arg=value, ...). It is the source of
-// truth for the editor's completion inside an annotation's argument list, so
-// the Sense surface no longer hand-maintains its own copy. Only annotations
-// whose form is a set of key=value pairs appear here; single-value annotations
-// (@description("..."), @model("...")) and flag annotations (@enabled) do not.
-// Every key must be an annotation the ByReceiver/Docs surface knows (guarded by
-// a test in component/memql/sense).
-var KeywordArgs = map[string][]ArgSpec{
-	"trigger": {
-		{Name: "event", Type: "string", Doc: "Event pattern, e.g. \"graph.node.created.*.v1:ns:concept\"."},
-		{Name: "schedule", Type: "string", Doc: "Cron schedule, e.g. \"0 0 * * * *\"."},
-		{Name: "concept", Type: "string", Doc: "Concept id the triggering event targets."},
-		{Name: "partition", Type: "string", Doc: "Partition selector, e.g. \"*\" for all partitions. Required while the event topic carries a partition segment (#56 phase 8)."},
-	},
-	"handler": {
-		{Name: "type", Type: "string", Doc: "Handler type: \"query\", \"function\", or \"webhook\"."},
-		{Name: "query", Type: "string", Doc: "MemQL query expression (with type=\"query\")."},
-		{Name: "name", Type: "string", Doc: "Function name (with type=\"function\")."},
-	},
-	"when": {
-		{Name: "level", Type: "string", Doc: "The level the call declared: fast, strong, reasoning or embeddings."},
-		{Name: "modality", Type: "string", Doc: "The modality derived from the call site: chat, streamingChat, tools, streamingTools, structured, vision, embedding, speech, transcribe."},
-		{Name: "prompt", Type: "string", Doc: "The DSL prompt this call renders. Empty matches a Go call site with no prompt."},
-		{Name: "role", Type: "string", Doc: "The AGENT's role slug. Distinct from actorRole: this is what is acting."},
-		{Name: "actorRole", Type: "string", Doc: "The calling human's cluster role. Distinct from role: this is who is watching."},
-		{Name: "tag", Type: "string", Doc: "A call tag, e.g. \"background\" or \"backgroundEscalation\"."},
-		{Name: "touches", Type: "string", Doc: "A concept id PREFIX the call's footprint matches (startsWith semantics)."},
-	},
-	"displayCard": {
-		{Name: "primary", Type: "string", Doc: "Property or row intrinsic for the card's first line."},
-		{Name: "secondary", Type: "string", Doc: "Property or row intrinsic for the card's second line."},
-		{Name: "tertiary", Type: "string", Doc: "Property or row intrinsic for the card's third line."},
-		{Name: "status", Type: "string", Doc: "Property whose value renders as the card's status chip."},
-	},
-	"composable": {
-		{Name: "as", Type: "string", Doc: "Singular label the composer offers this concept under."},
-		{Name: "fields", Type: "string", Doc: "Comma-separated declared properties or row intrinsics the composer may pull."},
-	},
-	"relationship": {
-		{Name: "type", Type: "string", Doc: "STRUCTURAL type -- what the engine does with the edge. Closed set: parent, owns, createdBy, alias, equals, contains, references."},
-		{Name: "field", Type: "string", Doc: "Local field holding the foreign key."},
-		{Name: "target", Type: "string", Doc: "Target concept id, e.g. \"v1:ns:concept\"."},
-		{Name: "direction", Type: "string", Doc: "\"outgoing\" or \"incoming\"."},
-		{Name: "as", Type: "string", Doc: "DOMAIN label -- what the edge means, e.g. as=\"assignedTo\". Optional. Any lowerCamelCase identifier; validated for form only and never checked against a list, so a new verb never needs an engine release (memql#3652)."},
-	},
-}
-
-// KeywordArgsFor returns the keyword arguments an annotation accepts inside its
-// @name(...) form, or nil when it takes none (or takes a single value rather
-// than keyword pairs).
-func KeywordArgsFor(name string) []ArgSpec {
-	return KeywordArgs[name]
+	// Fields.
+	"required":     "The field is required: a concept write without it fails the schema, and a caller must pass an args / tool / prompt / builtin field that carries it. The `!` sigil after the type is the same thing.",
+	"enum":         "The closed set of string values the field accepts: @enum(\"a\", \"b\"). The `enum(\"a\", \"b\")` type is the same constraint in one statement.",
+	"pattern":      "A regular expression a string value must match.",
+	"minLength":    "The fewest characters a string value may carry.",
+	"maxLength":    "The most characters a string value may carry.",
+	"minimum":      "The INCLUSIVE lower bound on a numeric value.",
+	"maximum":      "The INCLUSIVE upper bound on a numeric value.",
+	"secret":       "The field holds a secret: emitted as x-secret, and every validation surface that quotes a rejected value redacts it (memql#3036). Not a secrecy guarantee -- see Concept.SecretFields for the limits.",
+	"pii":          "The field is personally identifying: emitted as x-pii, and the hard-delete scrub (@scrubPii, memql#1711) zeroes every such field generically.",
+	"serverSet":    "The field is stamped server-side (createdAt, createdBy, status, ...): never accepted from a mutation's caller args, but projected like any other field. Emitted as x-serverSet (memql#2035).",
+	"open":         "On a nested object block: the block accepts keys it does not declare, suppressing the closed-by-default additionalProperties: false (memql#3641). For a block whose keys are data rather than schema.",
+	"variant":      "A discriminated union: @variant(discriminator=\"kind\") on an object field, followed by one block per branch; the discriminator field's value picks the branch.",
+	"internal":     "On a concept field: server-only (memql#2035) -- never projected by a shape's default projection and never accepted from a mutation's caller args; emitted as x-internal. (On a construct, @internal is retired, #2708.)",
+	"autoInjected": "The field is filled by the runtime rather than the model: it is kept out of the input schema the model sees and stamped server-side (the calling agent's id, for example).",
 }

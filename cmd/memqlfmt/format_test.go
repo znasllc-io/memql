@@ -25,7 +25,7 @@ query participant queryActiveParticipantsForSpace {
   args {
     partitionId  string  @required
   }
-  filter participant.partitionId == args.partitionId
+  filter row => row.partitionId == args.partitionId
   shape  participantFull
 }`
 

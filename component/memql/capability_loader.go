@@ -19,6 +19,7 @@ package memql
 // registry lives next to the cross-ref resolver that consumes it.
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"regexp"
@@ -75,6 +76,7 @@ func loadCapabilityNamesFromFS(tree fs.FS) (map[string]bool, error) {
 	if tree == nil {
 		return out, nil
 	}
+	lines, _ := ResolveLanguageLines(tree)
 	err := fs.WalkDir(tree, ".", func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -91,6 +93,19 @@ func loadCapabilityNamesFromFS(tree fs.FS) (map[string]bool, error) {
 		raw, rerr := fs.ReadFile(tree, p)
 		if rerr != nil {
 			return fmt.Errorf("capability loader: read %s: %w", p, rerr)
+		}
+		// Through the edition the file's domain declares (memql#5358). A
+		// refused domain is skipped without a word (Init reports it once); a
+		// file its front end refuses is warned about and not read -- this
+		// walker also reads a disabled pack's files, which boot does not, so
+		// it warns rather than refuses. Init refuses an enabled one's.
+		raw, prepErr := lines.Prepare(p, raw)
+		if errors.Is(prepErr, languageParser.ErrLanguageLineRefused) {
+			return nil
+		}
+		if prepErr != nil {
+			warnEditionRefused("memql.capabilityLoader", p, prepErr)
+			return nil
 		}
 		for _, slice := range extractCapabilitySlices(string(raw)) {
 			decl, perr := languageParser.ParseCapabilityDecl(slice)

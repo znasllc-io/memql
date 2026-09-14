@@ -80,19 +80,19 @@ automation registerNode {
   }
   step record {
     createNode {
-      id:           coalesce(node.id, ""),
-      nodeType:     coalesce(node.type, ""),
-      address:      coalesce(node.address, ""),
-      deploymentId: coalesce(deploymentId, ""),
-      provider:     coalesce(provider, ""),
-      environment:  coalesce(environment, ""),
-      region:       coalesce(region, "")
+      id:           node.id ?? "",
+      nodeType:     node.type ?? "",
+      address:      node.address ?? "",
+      deploymentId: deploymentId ?? "",
+      provider:     provider ?? "",
+      environment:  environment ?? "",
+      region:       region ?? ""
     }
   }
   step spawn {
     createSpawnEvent {
-      nodeId:   coalesce(node.id, ""),
-      nodeType: coalesce(node.type, ""),
+      nodeId:   node.id ?? "",
+      nodeType: node.type ?? "",
       action:   "spawned",
       reason:   "system.startup"
     }

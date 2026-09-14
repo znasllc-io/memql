@@ -1,0 +1,5 @@
+/// The triage assistant every cluster starts with; its system prompt is the template beside this file.
+@templateFile
+seed supportAssistant triageAssistant {
+  name: "Triage"
+}

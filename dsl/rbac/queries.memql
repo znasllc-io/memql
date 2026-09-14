@@ -25,7 +25,7 @@ use common.traits.{ isActiveRecord }
 @unbounded("rbac role catalog -- a small bounded registry consumed whole")
 @cache(300)
 query role activeRoles {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   roleFull
 }
 
@@ -39,7 +39,7 @@ query role roleBySlug {
   args {
     slug  string!
   }
-  filter  slug==args.slug && isActiveRecord
+  filter  row => row.slug == args.slug && isActiveRecord(row)
   shape   roleFull
 }
 
@@ -50,7 +50,7 @@ query role roleBySlug {
 @unbounded("rbac capability catalog -- a small seed-defined bounded registry consumed whole")
 @cache(300)
 query capability activeCapabilities {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   capabilityFull
 }
 
@@ -66,7 +66,7 @@ query capability capabilitiesForRole {
   args {
     roleSlug  string!
   }
-  filter  roleSlug==args.roleSlug && isActiveRecord
+  filter  row => row.roleSlug == args.roleSlug && isActiveRecord(row)
   shape   capabilityFull
 }
 
@@ -83,7 +83,10 @@ query capability capabilityGrant {
     verb          string!
     resourceType  string!
   }
-  filter  roleSlug==args.roleSlug && verb==args.verb && resourceType==args.resourceType && isActiveRecord
+  filter  row => row.roleSlug == args.roleSlug
+              && row.verb == args.verb
+              && row.resourceType == args.resourceType
+              && isActiveRecord(row)
   shape   capabilityFull
 }
 
@@ -97,7 +100,7 @@ query capability capabilitiesForResourceType {
   args {
     resourceType  string!
   }
-  filter  resourceType==args.resourceType && isActiveRecord
+  filter  row => row.resourceType == args.resourceType && isActiveRecord(row)
   shape   capabilityFull
 }
 
@@ -120,7 +123,7 @@ query grant grantsForSubject {
     subjectKind  enum("user", "group")!
     subjectId    string!
   }
-  filter  subjectKind==args.subjectKind && subjectId==args.subjectId && isActiveRecord
+  filter  row => row.subjectKind == args.subjectKind && row.subjectId == args.subjectId && isActiveRecord(row)
   sort    "resourceType", "asc"
   shape   grantCard
 }
@@ -131,7 +134,7 @@ query grant grantsForResource {
   args {
     resourceType  string!
   }
-  filter  resourceType==args.resourceType && isActiveRecord
+  filter  row => row.resourceType == args.resourceType && isActiveRecord(row)
   sort    "subjectId", "asc"
   shape   grantCard
 }
@@ -143,6 +146,6 @@ query grant grantById {
   args {
     grantId  string!
   }
-  filter  row.id==args.grantId
+  filter  row => row.id == args.grantId
   shape   grantCard
 }

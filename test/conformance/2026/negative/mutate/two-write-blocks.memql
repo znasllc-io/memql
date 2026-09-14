@@ -1,0 +1,11 @@
+mutate ticket probe {
+  args {
+    id  string!
+  }
+  insert {
+    id: args.id
+  }
+  update {
+    id: args.id
+  }
+}

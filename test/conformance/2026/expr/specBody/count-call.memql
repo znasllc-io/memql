@@ -1,0 +1,2 @@
+/// Tickets with more than one tag.
+spec ticket sbCount = row => count(row.tags) > 1

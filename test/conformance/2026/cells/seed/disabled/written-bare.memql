@@ -1,0 +1,5 @@
+/// The maintenance banner, written and switched off: not seeded while @disabled stays.
+@disabled
+seed queueBanner maintenanceBanner {
+  message: "The queue is paused for maintenance."
+}

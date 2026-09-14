@@ -123,14 +123,10 @@ package dslconformance
 
 import (
 	"fmt"
-	"github.com/znasllc-io/memql/dsl"
-	"io"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
-
-	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // personScopedConcepts are the bound concepts whose rows identify a PERSON, so
@@ -157,12 +153,10 @@ var personScopedConcepts = map[string]bool{
 	"invitation":       true,
 }
 
-// callerArgIdSelection matches row SELECTION by the `id` intrinsic against a
-// caller-supplied arg, in either spelling. Rule 22 moved filter intrinsics to
-// the `row.` namespace, so both are accepted -- matching only the current
-// spelling is how the previous detector came to report a meaningless zero
-// (see the note on userScopeFieldRe).
-var callerArgIdSelection = regexp.MustCompile(`(?m)(?:^[ \t]*id:[ \t]*args\.|(?:\brow\.)?\bid[ \t]*==[ \t]*args\.)[A-Za-z_]`)
+// callerArgIdLine matches an update block's `id:` line taking a
+// caller-supplied arg -- the other half of a construct's row selection, beside
+// its filter (rowFieldComparedToArg).
+var callerArgIdLine = regexp.MustCompile(`(?m)^[ \t]*id:[ \t]*args\.[A-Za-z_]`)
 
 // callerArgSelectionExemptions records constructs that select a person-scoped
 // row by a caller-supplied id with no caller check, and are known-outstanding
@@ -304,42 +298,30 @@ var (
 	// actorShapeDeclRe matches an `@actor` shape declaration -- the annotation,
 	// then the header, allowing other annotations and doc comments between.
 	actorShapeDeclRe = regexp.MustCompile(`(?m)^@actor[ \t]*\r?\n(?:[ \t]*(?:@[^\n]*|//[^\n]*)\r?\n)*[ \t]*shape[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
-	specDeclRe       = regexp.MustCompile(`(?m)^[ \t]*spec[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+	// specDeclRe matches a spec declaration: `spec <binding> <name> {`, or
+	// edition 2026's brace-less `spec <binding> <name> = row => ...` (epic
+	// memql#5363). Without the `=` arm every spec in the tree is
+	// declared nowhere, and the gates that compute their vocabulary from the
+	// declarations -- this one, the admin-gate pair -- lose all of it at once.
+	specDeclRe = regexp.MustCompile(`(?m)^[ \t]*spec[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*[{=]`)
 )
 
 // actorBoundSpecNames returns every spec whose signature binds an `@actor`
 // shape -- the context-specs. They are the canonical way to express a caller
 // check and carry no literal `actor.` where they are used, so a gate that
 // substring-tests for `actor.` reports them as unguarded.
-func actorBoundSpecNames(t *testing.T) map[string]bool {
+func actorBoundSpecNames(t *testing.T, c corpus) map[string]bool {
 	t.Helper()
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
-
 	actorShapes := map[string]bool{}
-	sources := make(map[string]string, len(paths))
-	for _, p := range paths {
-		f, openErr := tree.Open(p)
-		if openErr != nil {
-			t.Fatalf("open %s: %v", p, openErr)
-		}
-		raw, readErr := io.ReadAll(f)
-		f.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", p, readErr)
-		}
-		sources[p] = string(raw)
-		for _, m := range actorShapeDeclRe.FindAllStringSubmatch(sources[p], -1) {
+	for _, p := range c.paths {
+		for _, m := range actorShapeDeclRe.FindAllStringSubmatch(c.files[p], -1) {
 			actorShapes[m[1]] = true
 		}
 	}
 
 	specs := map[string]bool{}
-	for _, src := range sources {
-		for _, m := range specDeclRe.FindAllStringSubmatch(src, -1) {
+	for _, p := range c.paths {
+		for _, m := range specDeclRe.FindAllStringSubmatch(c.files[p], -1) {
 			if actorShapes[m[1]] {
 				specs[m[2]] = true
 			}
@@ -352,33 +334,71 @@ func actorBoundSpecNames(t *testing.T) map[string]bool {
 }
 
 func TestCallerSuppliedRowSelectionOnPersonScopedConcepts(t *testing.T) {
-	contextSpecs := actorBoundSpecNames(t)
+	onTree(t, func(t *testing.T, c corpus) {
+		flagged, seen, scanned := callerArgFindings(t, c)
+		// Measured when the floor was set: 103.
+		if scanned < 80 {
+			t.Fatalf("scanned %d person-scoped constructs -- the detector is not measuring what its name says (the failure mode that made the previous user-scope detector report a meaningless zero); check constructHeaderRe and personScopedConcepts against the tree", scanned)
+		}
+		t.Logf("scanned %d person-scoped constructs", scanned)
+		for _, f := range flagged {
+			t.Errorf("%s\n\tThe row names a PERSON, so a caller-supplied id means acting on an arbitrary human's record or credentials. Scope it to actor.userId, gate it with @serverOnly (#2860) if its only caller is server-side, or add it to callerArgSelectionExemptions with the issue that tracks it.", f)
+		}
+
+		// A stale exemption is worse than a missing one: it reports that a
+		// finding is tracked when the construct it names no longer exists, so
+		// the next author trusts a line that measures nothing.
+		for _, m := range []struct {
+			name    string
+			entries map[string]string
+		}{
+			{"callerArgSelectionExemptions", callerArgSelectionExemptions},
+			{"callerArgSelectionAccepted", callerArgSelectionAccepted},
+		} {
+			for key := range m.entries {
+				if !seen[key] {
+					t.Errorf("%s has a stale entry %q -- the construct no longer matches this detector (renamed, fixed, gated, or deleted). Remove the entry.", m.name, key)
+				}
+			}
+		}
+	})
+}
+
+// selectsByCallerSuppliedId reports whether a construct body selects rows by
+// the `id` intrinsic compared against a caller-supplied argument: its filter,
+// or an `update` block's `id:` line.
+//
+// The filter is read as a tree (rowFieldComparedToArg): a comparison, in
+// EITHER operand order, between the lambda parameter's `id` and an `args.*`
+// path, or a membership test of the parameter's `id` in one.
+func selectsByCallerSuppliedId(body string) bool {
+	clause := filterClauseOf(body)
+	// The surface is the filter line, when there is one, and then the update
+	// block's `id:` lines.
+	ids := rowSelectionSurface(body)
+	if clause != "" {
+		_, ids, _ = strings.Cut(ids, "\n")
+	}
+	if callerArgIdLine.MatchString(ids) {
+		return true
+	}
+	return rowFieldComparedToArg(clause, "id", true)
+}
+
+// callerArgFindings runs the gate over one corpus and returns what it flagged,
+// every exemption key it reached, and how many person-scoped constructs it
+// examined.
+func callerArgFindings(t *testing.T, c corpus) (flagged []string, seen map[string]bool, scanned int) {
+	t.Helper()
+	contextSpecs := actorBoundSpecNames(t, c)
 	specRefs := make(map[string]*regexp.Regexp, len(contextSpecs))
 	for name := range contextSpecs {
 		specRefs[name] = regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`)
 	}
+	seen = map[string]bool{}
 
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
-
-	var flagged []string
-	seen := map[string]bool{}
-	scanned := 0
-
-	for _, p := range paths {
-		f, openErr := tree.Open(p)
-		if openErr != nil {
-			t.Fatalf("open %s: %v", p, openErr)
-		}
-		raw, readErr := io.ReadAll(f)
-		f.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", p, readErr)
-		}
-		src := string(raw)
+	for _, p := range c.paths {
+		src := c.files[p]
 
 		for _, m := range constructHeaderRe.FindAllStringSubmatchIndex(src, -1) {
 			concept := boundConceptOf(src[m[0]:m[1]])
@@ -397,7 +417,7 @@ func TestCallerSuppliedRowSelectionOnPersonScopedConcepts(t *testing.T) {
 			// update block's `id:` line. Matching the whole body would flag
 			// every insert that stamps an id it was handed, which is a
 			// different question (and always legitimate).
-			if !callerArgIdSelection.MatchString(rowSelectionSurface(body)) {
+			if !selectsByCallerSuppliedId(body) {
 				continue
 			}
 
@@ -478,30 +498,6 @@ func TestCallerSuppliedRowSelectionOnPersonScopedConcepts(t *testing.T) {
 			flagged = append(flagged, fmt.Sprintf("%s: %s selects a %s row by a caller-supplied id with no caller check", p, name, concept))
 		}
 	}
-
-	if scanned == 0 {
-		t.Fatal("scanned 0 person-scoped constructs -- the detector is not measuring what its name says (the failure mode that made the previous user-scope detector report a meaningless zero); check constructHeaderRe and personScopedConcepts against the tree")
-	}
-
 	sort.Strings(flagged)
-	for _, f := range flagged {
-		t.Errorf("%s\n\tThe row names a PERSON, so a caller-supplied id means acting on an arbitrary human's record or credentials. Scope it to actor.userId, gate it with @serverOnly (#2860) if its only caller is server-side, or add it to callerArgSelectionExemptions with the issue that tracks it.", f)
-	}
-
-	// A stale exemption is worse than a missing one: it reports that a finding
-	// is tracked when the construct it names no longer exists, so the next
-	// author trusts a line that measures nothing.
-	for _, m := range []struct {
-		name    string
-		entries map[string]string
-	}{
-		{"callerArgSelectionExemptions", callerArgSelectionExemptions},
-		{"callerArgSelectionAccepted", callerArgSelectionAccepted},
-	} {
-		for key := range m.entries {
-			if !seen[key] {
-				t.Errorf("%s has a stale entry %q -- the construct no longer matches this detector (renamed, fixed, gated, or deleted). Remove the entry.", m.name, key)
-			}
-		}
-	}
+	return flagged, seen, scanned
 }

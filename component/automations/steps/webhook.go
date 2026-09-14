@@ -67,8 +67,12 @@ func (e *WebhookExecutor) Execute(ctx context.Context, step *automations.Step, s
 
 	webhook := step.Webhook
 
-	// Evaluate URL with $ expressions
-	url, err := stepCtx.Evaluator.EvaluateString(webhook.URL)
+	// The URL: its expression, parsed at load (memql#5367).
+	x, err := preparedExprs(step)
+	var url string
+	if err == nil {
+		url, err = v1RequiredText(ctx, stepCtx.Evaluator, x.URL, "webhook url")
+	}
 	if err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("failed to evaluate URL: %v", err)
@@ -102,8 +106,8 @@ func (e *WebhookExecutor) Execute(ctx context.Context, step *automations.Step, s
 			}
 		}
 	} else if webhook.Body != nil {
-		// Evaluate $ expressions in body
-		evaluatedBody, err := stepCtx.Evaluator.EvaluateMap(webhook.Body)
+		// The body: each leaf a literal or an expression parsed at load.
+		evaluatedBody, err := stepCtx.Evaluator.ResolveV1Map(ctx, webhook.Body)
 		if err != nil {
 			result.Status = "failed"
 			result.Error = fmt.Sprintf("failed to evaluate body: %v", err)
@@ -141,9 +145,11 @@ func (e *WebhookExecutor) Execute(ctx context.Context, step *automations.Step, s
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	// Set headers with $ expression evaluation
-	for key, value := range webhook.Headers {
-		evaluatedValue, err := stepCtx.Evaluator.EvaluateString(value)
+	// Set headers: the step's parsed value leaves (Exprs.Headers) -- a header
+	// whose value is an expression is not in the string map at all
+	// (value_leaves.go), so the parsed leaves are the whole header set.
+	for key, node := range x.Headers {
+		evaluatedValue, err := v1Text(ctx, stepCtx.Evaluator, node)
 		if err != nil {
 			result.Status = "failed"
 			result.Error = fmt.Sprintf("failed to evaluate header %s: %v", key, err)

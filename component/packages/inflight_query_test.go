@@ -5,6 +5,10 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/dslclause"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // The sweep's reach, held to the Go set that decides what "terminal" means.
@@ -27,24 +31,68 @@ import (
 
 var inFlightFilter = regexp.MustCompile(`(?s)query packageDeployment packageDeploymentsInFlight \{(.*?)\n\}`)
 
+// inFlightExclusions reads the statuses packageDeploymentsInFlight excludes.
+//
+// The filter is PARSED (`row => row.status != "x" && ...`, wrapped across
+// lines at its top-level `&&`), and an exclusion is a top-level conjunct
+// comparing the row's `status` with `!=` against a string literal, which is
+// also the only place one excludes anything. A pattern over the text would
+// match nothing once the spelling moved -- and the fatal below would then be
+// the only thing standing between that and a sweep with no exclusions.
 func inFlightExclusions(t *testing.T) map[string]bool {
 	t.Helper()
 	src, err := os.ReadFile("../../dsl/platform/queries.memql")
 	if err != nil {
 		t.Fatalf("read queries.memql: %v", err)
 	}
-	m := inFlightFilter.FindSubmatch(src)
+	m := inFlightFilter.FindStringSubmatch(string(src))
 	if m == nil {
 		t.Fatal("packageDeploymentsInFlight not found in dsl/platform/queries.memql")
 	}
+	clause := inFlightClause(m[1])
+	if !dslclause.OpensLambda(clause) {
+		t.Fatalf("packageDeploymentsInFlight's filter %q is not a `row => ...` lambda", clause)
+	}
+	lam, err := langparser.ParseV1Lambda(clause)
+	if err != nil {
+		t.Fatalf("packageDeploymentsInFlight's filter does not parse: %v", err)
+	}
 	out := map[string]bool{}
-	for _, hit := range regexp.MustCompile(`status!="([a-z_]+)"`).FindAllStringSubmatch(string(m[1]), -1) {
-		out[hit[1]] = true
+	for _, c := range ast.Conjuncts(lam.Body) {
+		b, ok := c.(*ast.BinaryExpr)
+		if !ok || b.Op != "!=" {
+			continue
+		}
+		root, fields, isPath := ast.MemberPath(ast.Unparen(b.Left))
+		lit, isLit := ast.Unparen(b.Right).(*ast.LiteralExpr)
+		if isPath && isLit && root == lam.Params[0] && len(fields) == 1 && fields[0] == "status" {
+			if s, ok := lit.Value.(string); ok {
+				out[s] = true
+			}
+		}
 	}
 	if len(out) == 0 {
 		t.Fatal("the filter excludes no status at all; the sweep would close every run")
 	}
 	return out
+}
+
+// inFlightClause returns the filter clause of a query body, continuation lines
+// included (dslclause.ClauseExtent).
+func inFlightClause(body string) string {
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		trim := strings.TrimSpace(line)
+		if !dslclause.StartsWith(trim, "filter") {
+			continue
+		}
+		parts := []string{strings.TrimSpace(strings.TrimPrefix(trim, "filter"))}
+		for j, last := i+1, dslclause.ClauseExtent(lines, i); j <= last; j++ {
+			parts = append(parts, strings.TrimSpace(lines[j]))
+		}
+		return strings.Join(parts, " ")
+	}
+	return ""
 }
 
 func TestInFlightQueryExcludesEveryTerminalStatus(t *testing.T) {

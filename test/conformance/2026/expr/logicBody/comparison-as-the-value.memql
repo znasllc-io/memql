@@ -1,0 +1,9 @@
+/// Whether a ticket is closed, returned as a bare comparison.
+logic ticketIsClosed {
+  args {
+    status  string!
+  }
+  body {
+    return args.status == "closed"
+  }
+}

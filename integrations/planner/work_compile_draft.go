@@ -70,8 +70,9 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 	// Runtime variables keep fork overrides in the work instruction while
 	// the validated semantic output choices remain in the stored template.
 	const inputHeading = "\n\nGoal input (JSON):\n"
+	x := workDraftExpressions()
 	delivery := func(statement, draft string) string {
-		instruction := fmt.Sprintf("concat(%s, field(event, \"payload\"))", langparser.QuoteString(statement+inputHeading))
+		instruction := x.join(langparser.QuoteString(statement+inputHeading), x.goalInput)
 		if nativeFile {
 			args := fmt.Sprintf("name: %s, format: %s, statement: %s", langparser.QuoteString(fileName), langparser.QuoteString(string(fileFormat)), instruction)
 			if draft != "" {
@@ -80,7 +81,7 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 			return "builtin composeMaterialize(" + args + ")"
 		}
 		if draft != "" {
-			instruction = fmt.Sprintf("concat(%s, field(event, \"payload\"), %s, steps.sections.result)", langparser.QuoteString(statement+inputHeading), langparser.QuoteString("\n\nCompleted sections:\n"))
+			instruction = x.join(langparser.QuoteString(statement+inputHeading), x.goalInput, langparser.QuoteString("\n\nCompleted sections:\n"), x.sections)
 		}
 		return fmt.Sprintf("builtin runAgentTurn(agentId: %s, prompt: %s)", langparser.QuoteString(agentId), instruction)
 	}
@@ -98,7 +99,7 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 		b.WriteString("  step sections {\n    parallel {\n      wait: \"all\"\n      failFast: true\n      branches: [\n")
 		for n, section := range sections {
 			prompt := "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): " + goal + "\n\nSection: " + section.Spec.Label + "\n" + section.Spec.Instruction
-			fmt.Fprintf(&b, "        step %s { builtin runAgentTurn(agentId: %s, prompt: concat(%s, field(event, \"payload\"))) }", section.Name, langparser.QuoteString(agentId), langparser.QuoteString(prompt+inputHeading))
+			fmt.Fprintf(&b, "        step %s { builtin runAgentTurn(agentId: %s, prompt: %s) }", section.Name, langparser.QuoteString(agentId), x.join(langparser.QuoteString(prompt+inputHeading), x.goalInput))
 			if n < len(sections)-1 {
 				b.WriteString(",")
 			}
@@ -106,10 +107,38 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 		}
 		b.WriteString("      ]\n    }\n  }\n")
 		assembly := goal + "\n\nAssemble the completed independent sections into the requested deliverable. Verify completeness. " + dec.Assembly
-		fmt.Fprintf(&b, "  step assemble {\n    if steps.sections.status == \"success\" {\n      %s\n    }\n  }\n", delivery(assembly, `concat("", steps.sections.result)`))
+		fmt.Fprintf(&b, "  step assemble {\n    if steps.sections.status == \"success\" {\n      %s\n    }\n  }\n", delivery(assembly, x.sectionsText))
 	}
 	b.WriteString("}\n")
 	return authoringBundle{AutomationName: headline, Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: headline, Source: b.String()}}}, nil
+}
+
+// workDraftText is the expression text a work draft's step arguments are
+// written in: the run's goal input, the completed sections, and joining text
+// onto them, in edition 2026's `+` and toString(). The prompt a step passes
+// writes a map or a list as its JSON, which is what the draft's "Goal input
+// (JSON)" heading says.
+type workDraftText struct {
+	// goalInput is the run's goal input, as text.
+	goalInput string
+	// sections is the parallel section step's result, as a join operand.
+	sections string
+	// sectionsText is that result as a standalone text argument.
+	sectionsText string
+}
+
+func workDraftExpressions() workDraftText {
+	// The goal input is the run's trigger payload (adopt.go). The draft
+	// declares no args block, so it reads it as `payload`, the envelope's key
+	// read bare -- a dotted `event.payload` is refused at load (G5).
+	// toString(), not the bare value: `+` over an absent operand is absent,
+	// and toString() reads absent as "".
+	return workDraftText{goalInput: "toString(payload)", sections: "toString(steps.sections.result)", sectionsText: "toString(steps.sections.result)"}
+}
+
+// join is text operands joined in order.
+func (x workDraftText) join(parts ...string) string {
+	return strings.Join(parts, " + ")
 }
 
 // A compile draft is durable and bound to one run, never globally activated.

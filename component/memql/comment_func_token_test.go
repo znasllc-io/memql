@@ -18,19 +18,20 @@ import (
 // offsets) before any header detection runs. These tests pin that a
 // comment-embedded receiver token no longer breaks the load.
 
-func bug1074Registry() memoryNodes.Registry {
+func bug1074Registry(t *testing.T) memoryNodes.Registry {
 	return newMemoryRegistry(map[string]*memoryNodes.Concept{
-		"v1:cognition:space": {Name: "v1:cognition:space"},
+		"v1:cognition:space": fixtureConcept(t, "v1:cognition:space",
+			"concept space {\n  name    string\n  status  string\n}\n"),
 	})
 }
 
 func TestLoader_QueryWithFuncTokenInLineComment(t *testing.T) {
-	registry := bug1074Registry()
+	registry := bug1074Registry(t)
 	src := "use cognition.concepts.{ space }\n\n" +
 		"// Migrated from the legacy `func (Query)` procedural form -- see memql#1074.\n" +
 		"@description(\"recent active spaces\")\n" +
 		"query space queryRecentSpacesLine {\n" +
-		"  filter  payload.status == \"active\"\n" +
+		"  filter  row => row.status == \"active\"\n" +
 		"  shape   space\n" +
 		"}"
 
@@ -42,14 +43,14 @@ func TestLoader_QueryWithFuncTokenInLineComment(t *testing.T) {
 }
 
 func TestLoader_QueryWithFuncTokenInBlockComment(t *testing.T) {
-	registry := bug1074Registry()
+	registry := bug1074Registry(t)
 	src := "use cognition.concepts.{ space }\n\n" +
 		"/*\n" +
 		" * Was once `func (Query) queryRecentSpaces(ctx any) (any, error)`.\n" +
 		" * Now struct form. memql#1074.\n" +
 		" */\n" +
 		"query space queryRecentSpacesBlock {\n" +
-		"  filter  payload.status == \"active\"\n" +
+		"  filter  row => row.status == \"active\"\n" +
 		"  shape   space\n" +
 		"}"
 
@@ -60,7 +61,7 @@ func TestLoader_QueryWithFuncTokenInBlockComment(t *testing.T) {
 }
 
 func TestLoader_MutationWithFuncTokenInLineComment(t *testing.T) {
-	registry := bug1074Registry()
+	registry := bug1074Registry(t)
 	src := "use cognition.concepts.{ space }\n\n" +
 		"// Replaces the retired `func (Mutation)` author form (memql#1074).\n" +
 		"@description(\"create a space\")\n" +
@@ -86,7 +87,7 @@ func TestLoader_MutationWithFuncTokenInLineComment(t *testing.T) {
 }
 
 func TestLoader_MutationWithFuncTokenInBlockComment(t *testing.T) {
-	registry := bug1074Registry()
+	registry := bug1074Registry(t)
 	src := "use cognition.concepts.{ space }\n\n" +
 		"/* legacy: func (Mutation) mutationCreateSpace(ctx any) error { ... } */\n" +
 		"@actor\n" +
@@ -116,7 +117,7 @@ func TestExtractFunctionSlices_IgnoresFuncTokenInComment(t *testing.T) {
 	src := "use cognition.concepts.{ space }\n\n" +
 		"// once a `func (Query)` procedural form -- memql#1074\n" +
 		"query space queryRecentSpacesSlice {\n" +
-		"  filter  payload.status == \"active\"\n" +
+		"  filter  row => row.status == \"active\"\n" +
 		"  shape   space\n" +
 		"}\n\n" +
 		"/* func (Mutation) legacyWrite(ctx any) error */\n" +

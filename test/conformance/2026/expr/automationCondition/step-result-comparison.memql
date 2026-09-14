@@ -1,0 +1,12 @@
+/// When a node joins the cluster, raise a ticket if it is an agent node.
+@trigger(event="node.created", concept="v1:cluster:node", partition="*")
+automation welcomeAgentNodes {
+  step kind {
+    logic joinedNodeType (event)
+  }
+  step raise {
+    if steps.kind.result == "agent" {
+      mutation raiseAgentTicket (title: "An agent node joined the cluster")
+    }
+  }
+}

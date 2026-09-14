@@ -1,0 +1,4 @@
+query ticket probe {
+  filter status == "open"
+  project title
+}

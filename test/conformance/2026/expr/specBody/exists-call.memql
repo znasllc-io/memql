@@ -1,0 +1,2 @@
+/// Tickets with a close time.
+spec ticket sbExists = row => exists(row.closedAt)

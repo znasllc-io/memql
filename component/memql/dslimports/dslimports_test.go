@@ -7,14 +7,38 @@ import (
 	"testing"
 	"testing/fstest"
 
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/dslfs"
 )
 
-// TestLoad_HappyPath_NewSyntax locks the end-to-end pipeline on a
-// small synthetic tree that uses the new import syntax. Walker
-// finds files, parser extracts imports, build pipeline resolves
-// paths + aliases, graph emits topo order.
-func TestLoad_HappyPath_NewSyntax(t *testing.T) {
+// loadRefusingImportBlocks loads a fixture whose files import one another
+// with the retired `import ( ... )` block -- still the only syntax that feeds
+// the import graph -- and returns the tree. Load refuses each block, as boot
+// does (construct_unknown, memql#5356), and those refusals must be the ONLY
+// diagnostics, so what the caller checks was built from a tree that otherwise
+// loaded clean.
+func loadRefusingImportBlocks(t *testing.T, root fstest.MapFS) *Tree {
+	t.Helper()
+	tree, err := Load(withLanguageLines(root))
+	var loadErr *LoadError
+	if !errors.As(err, &loadErr) {
+		t.Fatalf("Load: want each import block refused, got %v", err)
+	}
+	for _, d := range loadErr.Diagnostics {
+		var refused *ConstructKeywordError
+		if !errors.As(d, &refused) || refused.Refusal.Keyword != "import" {
+			t.Fatalf("Load: want only the import blocks refused, got: %v", d)
+		}
+	}
+	return tree
+}
+
+// TestLoad_ImportBlocksBuildTheGraph locks the end-to-end pipeline on a small
+// synthetic tree whose files import one another with import blocks. Walker
+// finds files, parser extracts imports, build pipeline resolves paths +
+// aliases, graph emits topo order -- and each block is refused, as boot
+// refuses it.
+func TestLoad_ImportBlocksBuildTheGraph(t *testing.T) {
 	root := fstest.MapFS{
 		"common/space.memql": {Data: []byte(`
 // space concept
@@ -40,10 +64,7 @@ func (Query) listParticipants(_ any) (any, error) {
 `)},
 	}
 
-	tree, err := Load(root)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	tree := loadRefusingImportBlocks(t, root)
 
 	// Every walked file present in Files.
 	want := []string{
@@ -96,7 +117,7 @@ func (Query) legacyQuery(_ any) (any, error) {
 }
 `)},
 	}
-	_, err := Load(root)
+	_, err := Load(withLanguageLines(root))
 	if err == nil {
 		t.Fatal("expected Form A rejection, got nil")
 	}
@@ -115,7 +136,7 @@ import (
 )
 `)},
 	}
-	_, err := Load(root)
+	_, err := Load(withLanguageLines(root))
 	if err == nil {
 		t.Fatal("expected missing-target error, got nil")
 	}
@@ -139,7 +160,7 @@ import (
 )
 `)},
 	}
-	_, err := Load(root)
+	_, err := Load(withLanguageLines(root))
 	if err == nil {
 		t.Fatal("expected cycle error, got nil")
 	}
@@ -160,7 +181,7 @@ import (
 )
 `)},
 	}
-	_, err := Load(root)
+	_, err := Load(withLanguageLines(root))
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -183,7 +204,7 @@ func (Query) noop(_ any) (any, error) { return nil, nil }
 		"_skip.memql":       {Data: body},
 		"_disabled/x.memql": {Data: body},
 	}
-	tree, err := Load(root)
+	tree, err := Load(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -221,7 +242,7 @@ logic logicValid {
 }
 `)},
 	}
-	_, err := Load(root)
+	_, err := Load(withLanguageLines(root))
 	if err == nil {
 		t.Fatal("Load should surface the orphan-logic parse error; got nil")
 	}
@@ -246,15 +267,15 @@ func TestLoad_NonProceduralFileParsesNatively(t *testing.T) {
 	cases := map[string]string{
 		// annotation-led (the dominant authoring shape)
 		"shapes.memql": "@row\n@description(\"ok\")\nshape spaceCard {\n  row.id\n}\n",
-		"specs.memql":  "@description(\"ok\")\nspec activeRowTrait specIsActive {\n  return active==true\n}\n",
-		"traits.memql": "@description(\"ok\")\ntrait isActiveRecord {\n  return active==true\n}\n",
+		"specs.memql":  "@description(\"ok\")\nspec activeRowTrait specIsActive = row => row.active == true\n",
+		"traits.memql": "@description(\"ok\")\ntrait isActiveRecord = row => row.active == true\n",
 		// import-led, annotation-free construct
-		"traitsCB.memql": "use common.traits.{ activeRowTrait }\n\ntrait isActiveRecord {\n  return active==true\n}\n",
+		"traitsCB.memql": "use common.traits.{ activeRowTrait }\n\ntrait isActiveRecord = row => row.active == true\n",
 	}
 	for filename, body := range cases {
 		t.Run(filename, func(t *testing.T) {
 			root := fstest.MapFS{filename: {Data: []byte(body)}}
-			_, err := Load(root)
+			_, err := Load(withLanguageLines(root))
 			if err != nil {
 				t.Errorf("Load(%s) returned a diagnostic for a valid non-procedural file: %v", filename, err)
 			}
@@ -280,7 +301,7 @@ func TestLoad_MalformedNonProceduralBodySurfaces(t *testing.T) {
 	for filename, body := range cases {
 		t.Run(filename, func(t *testing.T) {
 			root := fstest.MapFS{filename: {Data: []byte(body)}}
-			_, err := Load(root)
+			_, err := Load(withLanguageLines(root))
 			if err == nil {
 				t.Fatalf("Load(%s) returned no diagnostic for a malformed non-procedural body; the strip regressed and the body is being swallowed again", filename)
 			}
@@ -291,9 +312,107 @@ func TestLoad_MalformedNonProceduralBodySurfaces(t *testing.T) {
 	}
 }
 
+// TestLoad_ReportsARefusedLanguageLine: a mounted domain with no memql.toml
+// refuses boot (memql#5357), so Load reports it -- memql-cockpit's `memql
+// lint` runs Load alone, and a nil error there would call a tree that refuses
+// boot clean. The refusal is the domain's ONE diagnostic: its files stay
+// opaque, so the query bound to its concept cascades nothing.
+func TestLoad_ReportsARefusedLanguageLine(t *testing.T) {
+	root := fstest.MapFS{
+		"shop/concepts.memql": {Data: []byte("@description(\"an order\")\nconcept order {\n  total int\n}\n")},
+		"shop/queries.memql": {Data: []byte("use shop.concepts.{ order }\n\n@description(\"orders\")\n" +
+			"query order ordersOver {\n  args {\n    min int @required\n  }\n  filter row => row.total > args.min\n  paginate\n}\n")},
+	}
+	tree, err := Load(root)
+	if err == nil {
+		t.Fatal("Load returned no error for a domain with no language line, which refuses boot")
+	}
+	for _, want := range []string{"[language_line_missing]", `domain "shop"`, "add shop/memql.toml containing"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the error must carry %q, got:\n%v", want, err)
+		}
+	}
+	var le *LoadError
+	if !errors.As(err, &le) || len(le.Diagnostics) != 1 {
+		t.Fatalf("want exactly one diagnostic, the refused line, got: %v", err)
+	}
+	var lle *LanguageLineError
+	if !errors.As(err, &lle) || lle.Problem.Domain != "shop" || lle.Problem.Source != "shop/memql.toml" ||
+		lle.Problem.Code != languageParser.CodeLanguageLineMissing || lle.Error() != lle.Problem.Message {
+		t.Errorf("the diagnostic must be a *LanguageLineError carrying the resolver's problem, got %#v", lle)
+	}
+	for _, p := range []string{"shop/concepts.memql", "shop/queries.memql"} {
+		if !tree.ImportsOnly[p] || len(tree.Files[p].Definitions) != 0 {
+			t.Errorf("%s of the refused domain must be in the tree opaque (read by no loader), got %+v", p, tree.Files[p])
+		}
+	}
+
+	// Positive control: the same tree declaring shop's line loads clean, so
+	// the query is one that parses and its silence above is the refused
+	// domain being unread.
+	if _, err := Load(withLanguageLines(root)); err != nil {
+		t.Errorf("the tree declaring every line must load clean: %v", err)
+	}
+}
+
+// TestLoad_ReportsAStatementNoConstructKeywordOpens (memql#5356): a top-level
+// statement opened by a word no construct is spelled with loads as nothing,
+// and boot refuses it (the construct-keyword gate). Load refuses it too, so a
+// caller that runs Load alone -- memql-cockpit's `memql lint` -- is not told a
+// tree boot refuses is clean: the retired import block, which the parser
+// still reads, and a typo'd keyword, which the parser refuses as well. Each is
+// ONE diagnostic naming the file and the line the author wrote: the typo sits
+// below a query the rewriter lowers to more lines, so the parser's own copy
+// is a copy only once its line is the file's.
+func TestLoad_ReportsAStatementNoConstructKeywordOpens(t *testing.T) {
+	const concepts = "@description(\"an order\")\nconcept order {\n  total int\n}\n"
+	const queries = "use shop.concepts.{ order }\n\n" +
+		"@description(\"orders over\")\nquery order ordersOver {\n  args {\n    min int @required\n  }\n  filter row => row.total > args.min\n}\n\n" +
+		"@description(\"orders under\")\nquery order ordersUnder {\n  args {\n    max int @required\n  }\n  filter row => row.total < args.max\n}\n"
+	cases := []struct {
+		name, queries, keyword string
+		line                   int
+		want                   string
+	}{
+		{"the retired import block", "import (\n\t\"./concepts\"\n)\n\n" + queries, "import", 1,
+			"shop/queries.memql: line 1: the import ( ... ) block is retired"},
+		{"a typo'd construct keyword", strings.Replace(queries, "query order ordersUnder", "qurey order ordersUnder", 1), "qurey", 12,
+			"shop/queries.memql: line 12: qurey is not a construct keyword: did you mean query?"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Load(withLanguageLines(fstest.MapFS{
+				"shop/concepts.memql": {Data: []byte(concepts)},
+				"shop/queries.memql":  {Data: []byte(tc.queries)},
+			}))
+			var le *LoadError
+			if !errors.As(err, &le) || len(le.Diagnostics) != 1 {
+				t.Fatalf("want exactly one diagnostic, the refused statement, got: %v", err)
+			}
+			var refused *ConstructKeywordError
+			if !errors.As(le.Diagnostics[0], &refused) || refused.File != "shop/queries.memql" ||
+				refused.Refusal.Keyword != tc.keyword || refused.Refusal.Line != tc.line {
+				t.Fatalf("want a *ConstructKeywordError for %q on line %d, got %#v", tc.keyword, tc.line, le.Diagnostics[0])
+			}
+			if msg := refused.Error(); !strings.HasPrefix(msg, tc.want) || !strings.HasSuffix(msg, "[construct_unknown]") {
+				t.Errorf("the refusal must read %q ... [construct_unknown], got %q", tc.want, msg)
+			}
+		})
+	}
+
+	// Positive control: the queries as written load clean, so the refusals
+	// above are the statements, not a fixture that fails for another reason.
+	if _, err := Load(withLanguageLines(fstest.MapFS{
+		"shop/concepts.memql": {Data: []byte(concepts)},
+		"shop/queries.memql":  {Data: []byte(queries)},
+	})); err != nil {
+		t.Errorf("the control must load clean: %v", err)
+	}
+}
+
 // TestLoad_EmptyTree locks the no-files case.
 func TestLoad_EmptyTree(t *testing.T) {
-	tree, err := Load(fstest.MapFS{})
+	tree, err := Load(withLanguageLines(fstest.MapFS{}))
 	if err != nil {
 		t.Fatalf("Load empty tree: %v", err)
 	}

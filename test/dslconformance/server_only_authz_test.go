@@ -224,5 +224,11 @@ func constructNameAfter(src string, from int) (string, bool) {
 // whitespace and flexible spacing, so an indented `func (Query) ...` loaded
 // and registered. Widening the guard to match the slicer is what makes this
 // comment's premise actually true.
+//
+// The header ends at `{`, or -- for edition 2026's brace-less `spec b n = row
+// => ...` / `trait n = row => ...` (epic memql#5363) -- at `=`. Without the
+// second arm the locator walked past a brace-less spec to the NEXT header and
+// attributed an annotation above the spec to that construct: the automation
+// defect above, for another brace-less form.
 var namedConstructHeaderRe = regexp.MustCompile(
-	`(?m)^[ \t]*(query|mutation|seed|logic|automation|concept|builtin|shape|spec|trait|tool|prompt|provider|action|capability)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*\{`)
+	`(?m)^[ \t]*(query|mutation|seed|logic|automation|concept|builtin|shape|spec|trait|tool|prompt|provider|action|capability)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*(?:\{|=[^=>])`)

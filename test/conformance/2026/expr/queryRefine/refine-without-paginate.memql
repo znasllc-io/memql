@@ -1,0 +1,5 @@
+/// Open tickets whose title mentions a disk, refined with no page to refine.
+query ticket qrUnpaginated {
+  filter row => row.status == "open"
+  refine row => row.title.includes("disk")
+}

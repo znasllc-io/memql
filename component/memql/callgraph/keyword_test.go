@@ -84,7 +84,7 @@ func TestMutationKeywordIsMutation(t *testing.T) {
 }
 
 // The retired spelling must produce NO constructs, so a fixture that drifts
-// back to `mutate node x {` fails loudly instead of silently exercising the
+// back to `mutation node x {` fails loudly instead of silently exercising the
 // rules against a keyword the parser no longer accepts.
 //
 // The retired word is `mutate` now, not `mutation` -- epic memql#5375
@@ -94,7 +94,7 @@ func TestMutationKeywordIsMutation(t *testing.T) {
 // keyword moved.
 func TestRetiredMutationSpellingSplitsToNothing(t *testing.T) {
 	retired := `use cluster.concepts.{ node }
-mutate node twoWrites {
+mutation node twoWrites {
   args { id string @required }
   insert { id: args.id }
   update { id: args.id, health: "up" }
@@ -108,7 +108,7 @@ mutate node twoWrites {
 }
 
 // The live spelling splits and is judged. Guards the concept segment being
-// optional (`mutate <name>` as well as `mutate <Concept> <name>`).
+// optional (`mutation <name>` as well as `mutation <Concept> <name>`).
 func TestLiveMutateSpellingSplits(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -140,7 +140,7 @@ func TestLiveMutateSpellingSplits(t *testing.T) {
 // stayed broken.
 func TestEveryRestrictedKindSplitsItsLiveForm(t *testing.T) {
 	for _, tc := range []struct{ kind, src string }{
-		{"query", "query node q {\n  filter row.id == args.id\n}"},
+		{"query", "query node q {\n  filter row => row.id == args.id\n}"},
 		{"mutation", "mutation node m {\n  insert { id: args.id }\n}"},
 		{"logic", "logic decide {\n  body { return true }\n}"},
 		{"action", "action run {\n  args { x string }\n}"},

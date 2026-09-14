@@ -1,0 +1,5 @@
+/// Every open ticket at once, with no page.
+@unbounded("the open-ticket queue is small enough to read whole")
+query ticket openTicketsUnbounded {
+  filter row => row.status == "open"
+}

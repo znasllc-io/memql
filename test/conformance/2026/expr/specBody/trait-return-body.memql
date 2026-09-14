@@ -1,0 +1,4 @@
+/// Closed tickets, with the pre-v1 body.
+trait sbTraitReturnBody {
+  return status == "closed"
+}

@@ -1,0 +1,8 @@
+/// Tickets in the given status, when one is given.
+query ticket qfWhenGuard {
+  args {
+    status  string
+  }
+  filter row => row.priority > 1 && when(args.status) { row.status == args.status }
+  paginate 20
+}

@@ -28,7 +28,7 @@ var structFormSamples = map[string]structFormSample{
   args {
     id string @required
   }
-  filter row.id==args.id
+  filter row => row.id == args.id
   shape spaceCard
 }
 `,

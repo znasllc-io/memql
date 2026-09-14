@@ -18,7 +18,7 @@
 //
 // Authorization (owned tier): ownerUserId is the per-row authz key, stamped
 // from actor.userId by the recording mutation; the read path filters on
-// payload.ownerUserId == actor.userId.
+// `row.ownerUserId == actor.userId`.
 
 use identity.concepts.{ user }
 

@@ -1,0 +1,6 @@
+/// A note whose owner field is written as an expression.
+@rowAuthz(owner=args.ownerField)
+concept raArgsOwner {
+  ownerUserId  string
+  body         string
+}

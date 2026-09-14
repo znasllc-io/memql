@@ -26,6 +26,15 @@ type FunctionSlice struct {
 	Source string                      // slice text (preamble + declaration body)
 	Kind   languageParser.FunctionType // Query / Mutation / Logic / Automation / Spec / Shape / Tool / etc.
 	Name   string                      // function name from the header
+
+	// Line is the line of the source file the declaration's own text starts
+	// on -- its preamble, or its header when it has none -- and BodyOffset
+	// where that text starts in Source, after the file-top `use` block every
+	// slice inherits. The loader anchors the slice there, so a parse error
+	// names the file's line rather than the slice's (memql#5364). Zero Line
+	// is unknown.
+	Line       int
+	BodyOffset int
 }
 
 // functionDeclHeader matches every top-level function-style header
@@ -104,7 +113,16 @@ var kindFromString = map[string]languageParser.FunctionType{
 // (the path that turns the bare `concept` keyword in procedural
 // queries into a real comparison) can't determine which concept the
 // function targets.
+//
+// Memoized per process by source (functionSlices): the result is a pure
+// function of it, and a boot slices every file here from the loader and the
+// duplicate detector both.
 func ExtractFunctionSlices(source string) []FunctionSlice {
+	return functionSlices.get(source, "", func() []FunctionSlice { return extractFunctionSlices(source) })
+}
+
+// extractFunctionSlices is ExtractFunctionSlices without the memo.
+func extractFunctionSlices(source string) []FunctionSlice {
 	// Detect headers on a comment-blanked view so a `func (Receiver)
 	// ...` or `<kind> <name> {` token that only appears inside a `//`
 	// or `/* */` comment is never extracted as a standalone construct
@@ -210,9 +228,11 @@ func ExtractFunctionSlices(source string) []FunctionSlice {
 			body = usePreamble + body
 		}
 		slices = append(slices, FunctionSlice{
-			Source: body,
-			Kind:   kind,
-			Name:   name,
+			Source:     body,
+			Kind:       kind,
+			Name:       name,
+			Line:       1 + strings.Count(source[:preambleStart], "\n"),
+			BodyOffset: len(usePreamble),
 		})
 	}
 

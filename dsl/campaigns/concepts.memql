@@ -36,7 +36,7 @@
 // @rowAuthz(owner="ownerUserId", clusterOwner) (memql#4820, program P2). Every
 // row carries ownerUserId, every mutation stamps that field from actor.userId
 // rather than from a caller argument, and every query names the composite
-// predicate `(ownerUserId==actor.userId || actor.isClusterOwner==true)` as a
+// predicate `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` as a
 // top-level conjunct.
 //
 // WHY THE SECOND TERM, AND WHAT IT DOES NOT BUY. These rows became a
@@ -60,7 +60,7 @@
 // load-bearing part of the sending design (memql#3348).
 //
 //   `sendJob` is the queue the worker scans. A worker cannot scan an OWNED
-//   concept at all -- the owned tier injects `ownerUserId==actor.userId` into
+//   concept at all -- the owned tier injects `row.ownerUserId == actor.userId` into
 //   every read and has no cluster-owner bypass (rowauthz_enforce.go), so
 //   "find every campaign that wants sending" is not a question an owned row
 //   can answer. It is also not a question that SHOULD be answerable by a
@@ -99,7 +99,7 @@ use platform.concepts.{ outboundRequest }
 /// and referenced by campaigns; membership lives on v1:campaigns:recipient rows pointing back here
 /// rather than as a list on this row, so a hundred-thousand-address audience is a hundred thousand
 /// rows rather than one enormous payload. Per-row authz: owned -- ownerUserId is stamped from
-/// actor.userId on every write and every read gates on ownerUserId==actor.userId.
+/// actor.userId on every write and every read gates on `row.ownerUserId == actor.userId`.
 @displayCard(primary="name", secondary="description", tertiary="ownerUserId", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept audience {
@@ -336,7 +336,7 @@ concept engagementEvent {
 /// this domain the worker can find without already knowing whose it is.
 ///
 /// WHY THIS IS clusterOwner AND NOT owned. A worker cannot scan an owned concept: the owned tier
-/// injects `ownerUserId==actor.userId` into every read and there is no cluster-owner bypass on it
+/// injects `row.ownerUserId == actor.userId` into every read and there is no cluster-owner bypass on it
 /// (component/memql/rowauthz_enforce.go), so "which campaigns want sending" is not a question an
 /// owned row can answer. Nor should it be answerable from a row a caller can write: whichever row
 /// says "send campaign X as user Y" is an instruction the engine carries out under Y's authority, so
@@ -352,7 +352,7 @@ concept engagementEvent {
 ///
 /// A SCHEDULED CAMPAIGN IS A JOB IN THE `scheduled` STATUS (memql#3459), and that is why scheduling
 /// needed no new concept and no cross-owner scan. "Which campaigns are due?" is not a question an
-/// OWNED row can answer -- the owned tier injects ownerUserId==actor.userId into every read with no
+/// OWNED row can answer -- the owned tier injects `row.ownerUserId == actor.userId` into every read with no
 /// cluster-owner bypass -- so a clock-driven scan over v1:campaigns:campaign is not expressible at
 /// all. The scheduling builtin therefore does what campaignStartSend already does: it reads the
 /// campaign under the CALLER'S own actor, and writes a job here carrying the owner it derived. The
@@ -559,8 +559,8 @@ concept emailRule {
   name              string!  @description("Operator-facing rule name, e.g. 'Tell the owner about new admins'. The primary display field, and the basis of the generated construct's name, so it is what an operator sees in both places.")
   description       string   @description("What this rule is for, in the operator's own words. Rendered under the name; also carried onto the generated construct so somebody reading the DSL knows why it exists.")
   triggerConcept    string!  @description("The canonical concept id whose rows fire this rule, e.g. 'v1:identity:user'. Offered from the LIVE concepts registry rather than a hardcoded list, so a rule can name a concept a product bundle added after this release. It becomes the generated @trigger's concept argument verbatim.")
-  eventKind         enum("created", "updated")!  @description("Which row event fires the rule. 'created' maps to node.created, 'updated' to node.updated. Deliberately only two: a delete has no row to read recipients or merge data from, so a rule triggered by one could describe nothing about what was deleted.")
-  condition         string   @description("Optional boolean expression over the triggering event, evaluated by the automation's own condition step -- e.g. role==\"admin\". Empty fires on every event of the kind. It is the runtime STRING evaluator's grammar, which is the one surface where ! is legal; the generator validates it before the bundle is written rather than letting a typo become a construct that fails to load.")
+  eventKind         enum("created", "updated")!  @description("Which row event fires the rule. 'created' fires once per row, on the write that creates it: every write publishes node.created, so the generated trigger admits only the event marked firstVersion, and the fire path claims (rule, row) so two writes racing on a new row send once. 'updated' fires on every later change (node.updated). Deliberately only two: a delete has no row to read recipients or merge data from, so a rule triggered by one could describe nothing about what was deleted.")
+  condition         string   @description("Optional predicate over row, the record that was created or changed -- e.g. row.role == \"admin\". Empty fires on every event of the kind. It may read row, now, event and the automation's id, never actor: nobody is signed in when a rule fires. Turning the rule on parses it into the generated automation's trigger filter, a lambda over row, and refuses a condition with a mistake in plain words rather than generating a construct that fails to load. A condition stored in the older payload.<field> spelling is converted then too.")
   templateId        string!  @description("v1:campaigns:template.id supplying the subject and bodies. The same templates campaigns use, so copy is authored once -- and merge tags resolve against whichever lane runs, with {{fields.*}} empty on the operational lane, which has no recipient row.")
   recipientMode     enum("cluster_roles", "audience", "row_address")!  @description("WHO receives, which is also what picks the delivery lane (P5). 'cluster_roles' = this cluster's own people, operational lane. 'audience' = a campaign audience, marketing lane. 'row_address' = an address read off the triggering row, marketing lane. The app presents this as a question about recipients and never as a lane toggle: the lane is a consequence.")
   recipientRoles    []string  @description("For recipientMode=cluster_roles, which roles receive -- owner / admin / developer / writer / reader. Empty means the cluster owner alone, which is the common 'tell me when this happens' case.")

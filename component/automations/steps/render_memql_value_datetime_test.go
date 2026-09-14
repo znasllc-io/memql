@@ -3,7 +3,7 @@ package steps
 // render_memql_value_datetime_test.go -- regression guards for memql#2543.
 //
 // A logic call's resolved args are stringified into query text by
-// renderMemQLValue and re-parsed by engine.Execute. The type switch had no
+// renderMemQLData and re-parsed by engine.Execute. The type switch had no
 // datetime cases, so a row's createdAt (a live time.Time off the DB model,
 // component/database/memory-nodes/models.go) fell through to the reflect
 // tail's fmt.Sprintf("%v") and rendered in Go's default format
@@ -27,7 +27,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-func TestRenderMemQLValue_DatetimeScalars(t *testing.T) {
+func TestRenderMemQLData_DatetimeScalars(t *testing.T) {
 	cet := time.FixedZone("CET", 3600)
 	ts := time.Date(2026, 7, 14, 9, 30, 0, 0, cet)
 	utc := time.Date(2026, 7, 14, 8, 30, 0, 0, time.UTC)
@@ -95,27 +95,27 @@ func TestRenderMemQLValue_DatetimeScalars(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := renderMemQLValue(tc.value)
+			got := renderMemQLData(tc.value)
 			if got != tc.want {
-				t.Errorf("renderMemQLValue:\n  got:  %s\n  want: %s", got, tc.want)
+				t.Errorf("renderMemQLData:\n  got:  %s\n  want: %s", got, tc.want)
 			}
 			// The load-bearing invariant #2543 violated: no Go default
 			// datetime / proto-text markers may leak into query text.
 			for _, bad := range []string{" MST", " CET", "+0100", "seconds:", "m=+"} {
 				if strings.Contains(got, bad) {
-					t.Errorf("renderMemQLValue leaked Go-format datetime marker %q: %s", bad, got)
+					t.Errorf("renderMemQLData leaked Go-format datetime marker %q: %s", bad, got)
 				}
 			}
 		})
 	}
 }
 
-// TestRenderFunctionArgs_DatetimeRowsParse pins the serialize->re-parse
+// TestRenderV1CallArgs_DatetimeRowsParse pins the serialize->re-parse
 // boundary itself: the query text a function step builds for a logic call
 // whose arg carries datetime rows must PARSE through the langparser (the
 // engine's sole runtime parser, parseViaLangparser). Before the fix this
 // was the #2543 crash: `expected '}', got "-07"`.
-func TestRenderFunctionArgs_DatetimeRowsParse(t *testing.T) {
+func TestRenderV1CallArgs_DatetimeRowsParse(t *testing.T) {
 	ts := time.Date(2026, 7, 14, 9, 30, 0, 0, time.FixedZone("CET", 3600))
 	args := map[string]any{
 		"rows": []any{
@@ -124,7 +124,7 @@ func TestRenderFunctionArgs_DatetimeRowsParse(t *testing.T) {
 		"day": "2026-07-14",
 	}
 
-	query := "logicDayRollup(" + renderFunctionArgs(args) + ")"
+	query := "logicDayRollup(" + renderV1CallArgs(args) + ")"
 	parsed, err := langparser.ParseExpression(query)
 	if err != nil {
 		t.Fatalf("re-parse of the rendered logic call failed (the #2543 crash): %v\nquery: %s", err, query)

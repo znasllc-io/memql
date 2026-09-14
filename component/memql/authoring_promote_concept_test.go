@@ -48,7 +48,7 @@ mutation trainedWidget mutationCreateTrainedWidget {
     widgetId  string  @required
   }
   insert {
-    id:    canonicalId(args.widgetId, trainedWidget)
+    id:    canonicalId(args.widgetId, "trainedWidget")
     label: "x"
   }
 }`
@@ -118,6 +118,7 @@ func conceptEngineOver(t *testing.T, registry *memoryNodes.MemoryRegistry) *MemQ
 		schemaIdx:     schemaIdx,
 		functions:     newFunctionRegistry(),
 		specs:         newSpecRegistry(),
+		shapes:        coreShapesForTest(t),
 	}
 }
 

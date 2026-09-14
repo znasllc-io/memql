@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/dslclause"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
@@ -32,14 +33,16 @@ import (
 // is still a construct keyword; the classifier never got the memo.
 var ConstructHeaderRe = regexp.MustCompile(`(?m)^[ \t]*(query|mutation|seed)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 
-// UserScopeFieldRe matches a user-scope payload field referenced BARE.
+// UserScopeFieldRe matches a user-scope field named BARE, as an update block's
+// `id:` line names it. A filter's selection is read on its tree instead
+// (v1ReadsUserScopeField): there every field is a member of the parameter,
+// `row.ownerUserId`, which this pattern deliberately cannot see.
 //
-// The detector this replaces looked for the `payload.`-prefixed spelling
-// (`payload.ownerUserId`, ...), which epic #2292 retired -- payload properties
-// are referenced bare in filters now. So it was searching for a spelling the
-// corpus had migrated off, reported 0 flagged across ~198 constructs, and that
-// zero read as "audited and clean" rather than "not measuring what its name
-// says" (memql#2799).
+// A detector that searches for a spelling the corpus has migrated off reports
+// a clean corpus rather than failing: its predecessor looked for the retired
+// `payload.`-prefixed form, reported 0 flagged across ~198 constructs, and
+// that zero read as "audited and clean" rather than "not measuring what its
+// name says" (memql#2799).
 //
 // The leading `(^|[^.\w])` group is what keeps `actor.userId`, `args.userId`
 // and `row.createdBy` out: a dotted reference is a caller/envelope/intrinsic
@@ -51,12 +54,12 @@ var UserScopeFieldRe = regexp.MustCompile(`(^|[^.\w])(ownerUserId|userId|actorUs
 //
 // POLARITY is load-bearing, and a bare strings.Contains does not carry it: the
 // composition rule asks whether a FALSE gate zeroes the row set, so the leaf
-// must be a term that is false for a non-admin. `actor.isClusterOwner!=true`
-// and `==false` contain the same identifier and invert the meaning -- under
+// must be a term that is false for a non-admin. `actor.isClusterOwner != true`
+// and `== false` contain the same identifier and invert the meaning -- under
 // them a non-owner who satisfies the other conjunct gets rows and the cluster
-// owner gets none, which is the very failure this gate exists to refuse.
-// StripLeadingNot deliberately leaves `!=` alone (it is a comparison, not a
-// negation), so nothing upstream catches it either.
+// owner gets none, which is the very failure this gate exists to refuse. `!=`
+// is a comparison, not a negation, so the tree's negation rule does not catch
+// it either: the leaf's own text must.
 //
 // Word boundaries matter for the same reason: `requiresClusterOwnerXyz` is a
 // different identifier, and a substring test accepted it as the gate.
@@ -269,8 +272,14 @@ func MatchingClose(src string, openIdx int) int {
 // by a user-scope column without checking the caller? Restricting to the filter
 // clause asks exactly that, and takes the corpus from 43 matches to 1.
 //
-// A struct-form filter is a single line -- the parser rejects a multi-line
-// clause -- so line extraction is sufficient here.
+// THE FILTER IS THE WHOLE CLAUSE, continuation lines included. This used to
+// say a struct-form filter is a single line because the parser rejected a
+// multi-line clause; memql#4123 made the normaliser fold continuation lines,
+// and this kept reading the first line only -- so a user-scope column moved
+// onto a wrapped `&& ownerUserId==args.x` line was outside the surface. The
+// edition-2026 codemod wraps every long filter that way (epic memql#5363),
+// which would have made it the common case rather than a corner.
+//
 // The update block is tracked by BRACE DEPTH, not by the first line that
 // trims to `}`. A nested object closes with its own `}`, so the naive version
 // left the block early and every `id:` after a nested field became invisible
@@ -287,19 +296,63 @@ func MatchingClose(src string, openIdx int) int {
 // the brace is scanned like any other line, so the one-line spelling is not an
 // escape hatch either.
 func RowSelectionSurface(body string) string {
-	body = BlankComments(body)
+	clause, ids := rowSelectionParts(body)
 	var b strings.Builder
+	if clause != "" {
+		b.WriteString("filter  ")
+		b.WriteString(clause)
+		b.WriteByte('\n')
+	}
+	for _, id := range ids {
+		b.WriteString(id)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// SelectsByUserScopeField reports whether a construct body SELECTS rows by a
+// user-scope column: whether its row-selection surface (RowSelectionSurface)
+// reads one of UserScopeFields as the row's own column.
+//
+// The filter is read as a tree. Every field is a member of the lambda
+// parameter -- `row.ownerUserId == args.x` -- so the selection is a member
+// chain rooted at the parameter whose first field is a user-scope column
+// (v1ReadsUserScopeField). A clause that does not parse is read as text,
+// looking for `<param>.<field>`: the loader refuses it with the parser's own
+// message, and what this gate must not do is pass over a user-scope selection
+// because the parse failed. A clause with no lambda header at all is the
+// retired `filter <predicate>` form, which the parser refuses at load and the
+// retired-operator gate reports.
+func SelectsByUserScopeField(body string) bool {
+	clause, ids := rowSelectionParts(body)
+	if lam, isV1, err := v1Clause(clause); isV1 {
+		switch {
+		case err != nil || lam == nil:
+			if v1TextReadsUserScopeField(clause) {
+				return true
+			}
+		case v1ReadsUserScopeField(lam):
+			return true
+		}
+	}
+	for _, id := range ids {
+		if UserScopeFieldRe.MatchString(id) {
+			return true
+		}
+	}
+	return false
+}
+
+// rowSelectionParts returns a body's filter clause (FilterClauseOf) and every
+// `id:` assignment of its update block.
+func rowSelectionParts(body string) (clause string, ids []string) {
+	body = BlankComments(body)
+	clause = FilterClauseOf(body)
 	depth := 0
 	awaitingOpen := false
 
 	for _, line := range strings.Split(body, "\n") {
 		t := strings.TrimSpace(line)
-
-		if strings.HasPrefix(t, "filter") {
-			b.WriteString(t)
-			b.WriteByte('\n')
-			continue
-		}
 
 		rest := t
 		switch {
@@ -334,8 +387,7 @@ func RowSelectionSurface(body string) string {
 		for _, seg := range strings.Split(rest, ",") {
 			seg = strings.TrimSpace(seg)
 			if strings.HasPrefix(seg, "id:") {
-				b.WriteString(seg)
-				b.WriteByte('\n')
+				ids = append(ids, seg)
 			}
 		}
 		// Braces are counted on the STRUCTURE of the line -- string literals
@@ -347,237 +399,42 @@ func RowSelectionSurface(body string) string {
 			depth = 0
 		}
 	}
-	return b.String()
-}
-
-// MaxPredicateNesting bounds the recursion in the clause walkers. Nothing in
-// the corpus approaches it; it exists so a malformed clause cannot spin.
-const MaxPredicateNesting = 64
-
-// SplitTopLevelOn splits on a DOUBLED connective (`||`, `&&`) at
-// paren/brace/bracket depth 0, outside string literals.
-//
-// The distinction between the two connectives is irrelevant to the
-// violation-hunting gates (a bad predicate is bad on either side of either)
-// and load-bearing to classification (memql#2832): a conjunct NARROWS what a
-// query returns, a disjunct WIDENS it.
-func SplitTopLevelOn(s string, conn byte) []string {
-	return splitTopLevelSep(s, conn, true)
-}
-
-// SplitTopLevelSingle splits on a SINGLE-character separator.
-//
-// The retired `,` OR separator is one character, so the doubled form above
-// could never split it -- which is why the `,` arm of clauseGuaranteesAt found
-// nothing and the classifier reported an OR-widened clause as owner-scoped
-// (memql#3612).
-func SplitTopLevelSingle(s string, conn byte) []string {
-	return splitTopLevelSep(s, conn, false)
-}
-
-func splitTopLevelSep(s string, conn byte, doubled bool) []string {
-	var raw []string
-	depth := 0
-	inStr := false
-	start := 0
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		// An escaped quote does not end the literal. Without this, odd quote
-		// parity leaves inStr stuck true for the rest of the clause and a
-		// top-level connective after it goes unseen -- respelling the exact
-		// hole this gate closes (`name=="a\"b" || ownerUserId==actor.userId`).
-		case inStr && c == '\\' && i+1 < len(s):
-			i++
-		case c == '"':
-			inStr = !inStr
-		case inStr:
-			// skip
-		case c == '(' || c == '{' || c == '[':
-			depth++
-		case c == ')' || c == '}' || c == ']':
-			depth--
-		case depth == 0 && c == conn && doubled && i+1 < len(s) && s[i+1] == conn:
-			raw = append(raw, s[start:i])
-			i++
-			start = i + 1
-		case depth == 0 && c == conn && !doubled:
-			raw = append(raw, s[start:i])
-			start = i + 1
-		}
-	}
-	return append(raw, s[start:])
-}
-
-// DelimitersBalanced reports whether every bracket and string literal in s
-// closes. An authz gate must refuse to reason about text that does not.
-func DelimitersBalanced(s string) bool {
-	depth := 0
-	inStr := false
-	for i := 0; i < len(s); i++ {
-		switch c := s[i]; {
-		case inStr && c == '\\' && i+1 < len(s):
-			i++
-		case c == '"':
-			inStr = !inStr
-		case inStr:
-			// skip
-		case c == '(' || c == '{' || c == '[':
-			depth++
-		case c == ')' || c == '}' || c == ']':
-			depth--
-			if depth < 0 {
-				return false
-			}
-		}
-	}
-	return depth == 0 && !inStr
-}
-
-// StripLeadingNot removes a negation prefix. `!=` is a comparison operator,
-// never a leading negation, so it is left alone.
-func StripLeadingNot(p string) (string, bool) {
-	if !strings.HasPrefix(p, "!") || strings.HasPrefix(p, "!=") {
-		return p, false
-	}
-	return strings.TrimSpace(p[1:]), true
-}
-
-// StripOuterParens peels a paren pair wrapping the WHOLE predicate. It declines
-// when the opener closes early (`(a) == (b)`), which is a comparison between
-// groups rather than one parenthesized predicate.
-func StripOuterParens(p string) (string, bool) {
-	if len(p) < 2 || p[0] != '(' || p[len(p)-1] != ')' {
-		return p, false
-	}
-	depth := 0
-	inStr := false
-	for i := 0; i < len(p); i++ {
-		c := p[i]
-		switch {
-		case c == '"':
-			inStr = !inStr
-		case inStr:
-			// skip
-		case c == '(':
-			depth++
-		case c == ')':
-			depth--
-			if depth == 0 && i != len(p)-1 {
-				return p, false
-			}
-		}
-	}
-	if depth != 0 {
-		return p, false
-	}
-	return strings.TrimSpace(p[1 : len(p)-1]), true
-}
-
-// UnwrapWhenPredicate returns the inner predicate of a `when(args.x) { <inner> }`
-// guard, or the predicate unchanged when it is not a guard.
-func UnwrapWhenPredicate(p string) string {
-	// The lexer is token-based, so `when (args.x) { ... }` with a space is
-	// legal MemQL, and memqlfmt does not normalise it away (it is a lexical
-	// formatter). A HasPrefix(p, "when(") test missed that spelling entirely,
-	// which for the guard rule in ClauseGuarantees silently turned a
-	// CONDITIONAL predicate back into a guarantee (memql#2832).
-	rest, isWhen := strings.CutPrefix(p, "when")
-	if !isWhen || !strings.HasPrefix(strings.TrimLeft(rest, " \t"), "(") {
-		return p
-	}
-	open := strings.Index(p, "{")
-	closeIdx := strings.LastIndex(p, "}")
-	if open < 0 || closeIdx <= open {
-		return p
-	}
-	return strings.TrimSpace(p[open+1 : closeIdx])
+	return clause, ids
 }
 
 // ClauseGuarantees reports whether EVERY row a filter clause can admit
 // satisfies `leaf` -- i.e. whether the guarantee holds on all paths through
 // the clause's boolean structure, not merely somewhere in its text.
 //
-// The rules follow from what each connective does to a result set:
+// The clause is read as a tree (ast.Guarantees over the parsed lambda body),
+// and the rules follow from what each connective does to a result set:
 //
 //   - DISJUNCTION widens. `A || B` guarantees the property only if BOTH arms
 //     do; one unscoped arm returns rows the property does not cover.
 //   - CONJUNCTION narrows. `A && B` guarantees it if EITHER conjunct does;
 //     the other can only remove rows.
-//   - NEGATION inverts. `!A` is never a guarantee -- `!(ownerUserId ==
+//   - NEGATION inverts. `!A` is never a guarantee -- `!(row.ownerUserId ==
 //     actor.userId)` is precisely "rows I do not own".
-//   - A `when(args.x) { A }` guard is CONDITIONAL: when the arg is absent the
-//     predicate is dropped as if never written, so it cannot guarantee
-//     anything on its own.
 //
-// Parens are peeled before each test so `(A || B) && C` is read as a
-// conjunction, not as text containing `||`.
+// The optional-argument guard needs no rule of its own: `(args.x == nil || e)`
+// is a disjunction whose first arm guarantees nothing, so it is conditional --
+// when the argument is absent the predicate admits every row -- and
+// `(args.x != nil && e)` under a `||` admits only rows e admits.
+//
+// Each leaf is judged by `leaf` over its canonical source with string contents
+// blanked (v1LeafText), so a quoted word is never read as a reference and the
+// vocabulary of what counts as an owner or admin check is one list of text
+// predicates. A clause that does not parse, that binds other than one
+// parameter, or whose parameter shadows a reserved root (`actor => ...` would
+// make `actor.userId` a ROW field) guarantees nothing -- and so does a clause
+// with no lambda header, the retired `filter <predicate>` form the parser
+// refuses at load. Unreadable structure never counts as a guarantee.
 func ClauseGuarantees(clause string, leaf func(string) bool) bool {
-	return clauseGuaranteesAt(clause, leaf, 0)
-}
-
-func clauseGuaranteesAt(clause string, leaf func(string) bool, depth int) bool {
-	if depth > MaxPredicateNesting {
-		return false // Unreadable structure never counts as a guarantee.
-	}
-	s := strings.TrimSpace(clause)
-	// Refuse to reason about text that does not close cleanly. The
-	// struct-query parser rejects such a clause long before the gate sees it,
-	// so this is unreachable today -- but a depth counter with no floor reads
-	// `) || ownerUserId==actor.userId` as one scoped predicate, and failing
-	// OPEN is the wrong default for an authz gate.
-	if depth == 0 && !DelimitersBalanced(s) {
+	lam, isV1, err := v1Clause(clause)
+	if !isV1 || err != nil || lam == nil || len(lam.Params) != 1 || isReservedRoot(lam.Params[0]) {
 		return false
 	}
-	if inner, ok := StripOuterParens(s); ok {
-		return clauseGuaranteesAt(inner, leaf, depth+1)
-	}
-	if s == "" {
-		return false
-	}
-	if arms := SplitTopLevelOn(s, '|'); len(arms) > 1 {
-		for _, a := range arms {
-			if !clauseGuaranteesAt(a, leaf, depth+1) {
-				return false
-			}
-		}
-		return true
-	}
-	// The retired `,` separator is a pure alias for `||` in the engine, at the
-	// same OR precedence -- so it is split HERE, before '&', or `a && b, c`
-	// would be read as a conjunction (memql#3612).
-	//
-	// Without this arm the function fell through to a leaf check on the whole
-	// joined text, found the `actor.userId` substring, and reported
-	// `(ownerUserId==actor.userId, visibility=="public")` OWNER-SCOPED -- while
-	// the engine returned every public row regardless of owner. An
-	// authorization bypass produced by an operator nobody expected to still
-	// work. HasTopLevelComma now refuses the spelling outright; this is the
-	// second lock, because a classifier that cannot see an operator the engine
-	// honours is wrong whether or not another gate happens to catch it first.
-	if arms := SplitTopLevelSingle(s, ','); len(arms) > 1 {
-		for _, a := range arms {
-			if !clauseGuaranteesAt(a, leaf, depth+1) {
-				return false
-			}
-		}
-		return true
-	}
-	if arms := SplitTopLevelOn(s, '&'); len(arms) > 1 {
-		for _, a := range arms {
-			if clauseGuaranteesAt(a, leaf, depth+1) {
-				return true
-			}
-		}
-		return false
-	}
-	if _, isNot := StripLeadingNot(s); isNot {
-		return false
-	}
-	if inner := UnwrapWhenPredicate(s); inner != s {
-		return false
-	}
-	return leaf(s)
+	return ast.Guarantees(lam.Body, func(n ast.ExpressionNode) bool { return leaf(v1LeafText(n)) })
 }
 
 // FilterClauseOf returns a struct-form construct's `filter` clause with its
@@ -586,24 +443,56 @@ func clauseGuaranteesAt(clause string, leaf func(string) bool, depth int) bool {
 // It exists separately from every other filter extractor in the repo because
 // those FLATTEN the clause into a predicate list, and flattening is exactly
 // what classification cannot use: see ClauseGuarantees.
+//
+// Which lines belong to the clause is dslclause.ClauseExtent's answer -- the
+// fold the struct-query normaliser applies -- so the text classified is the
+// text the engine runs. It used to run to the next blank line, annotation,
+// brace or keyword, which agreed with the normaliser on the clauses it had met
+// and differed on others: a blank line inside a wrapped clause ended it here
+// and not there, so a conjunct after the blank was invisible to the classifier
+// while the engine applied it.
 func FilterClauseOf(body string) string {
-	var out []string
-	inFilter := false
-	for _, line := range strings.Split(BlankComments(body), "\n") {
-		trim := strings.TrimSpace(line)
-		if !inFilter {
-			if rest, ok := strings.CutPrefix(trim, "filter"); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t') {
-				inFilter = true
-				out = append(out, strings.TrimSpace(rest))
-			}
-			continue
+	lines := strings.Split(BlankComments(body), "\n")
+	for i, line := range lines {
+		if isFilterOpener(strings.TrimSpace(line)) {
+			parts, _ := filterClauseLines(lines, i)
+			return joinClauseLines(parts)
 		}
-		if trim == "" || strings.HasPrefix(trim, "@") || strings.HasPrefix(trim, "}") || IsClauseEndKeyword(trim) {
-			break
-		}
-		out = append(out, trim)
 	}
-	return strings.TrimSpace(strings.Join(out, " "))
+	return ""
+}
+
+// isFilterOpener reports whether a trimmed, comment-free line opens a
+// `filter` clause.
+func isFilterOpener(trim string) bool {
+	rest, ok := strings.CutPrefix(trim, "filter")
+	return ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t')
+}
+
+// filterClauseLines returns the filter clause that opens on lines[i], one
+// entry per physical line: the text after the keyword, then every line
+// dslclause.ClauseExtent folds into it, each trimmed. A blank line inside the
+// clause is an empty entry, so an entry's index is its line offset from i and
+// a position the v1 parser reports maps back onto the source. last is the
+// index of the clause's final line. lines must be comment-free.
+func filterClauseLines(lines []string, i int) (parts []string, last int) {
+	last = dslclause.ClauseExtent(lines, i)
+	parts = append(parts, strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[i]), "filter")))
+	for j := i + 1; j <= last; j++ {
+		parts = append(parts, strings.TrimSpace(lines[j]))
+	}
+	return parts, last
+}
+
+// joinClauseLines renders a clause's lines as one line of text.
+func joinClauseLines(parts []string) string {
+	kept := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			kept = append(kept, p)
+		}
+	}
+	return strings.Join(kept, " ")
 }
 
 // IsClauseEndKeyword reports whether a line starts the next clause of a

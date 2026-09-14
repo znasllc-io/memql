@@ -30,6 +30,14 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	report := newLoadReport()
 	e.loadReport = report
 
+	// THE LANGUAGE LINE FIRST (memql#5357). Every domain declares the language
+	// it is written in, and a domain the engine will not read -- no line, a
+	// newer one, an edition it has no front end for -- is recorded here,
+	// before any loader runs, so strict boot refuses the tree below and
+	// MEMQL_DSL_ALLOW_SKIPS is the break-glass. The domain still parses, with
+	// the engine's own edition, so one boot reports every problem it has.
+	e.resolveLanguageLines(report)
+
 	if concepts == nil {
 		return fmt.Errorf("concept registry is required")
 	}
@@ -162,6 +170,23 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	if rsErr := resolveSpecBindings(e.Logger, specRegistry, shapeRegistry, e.concepts); rsErr != nil {
 		e.Logger.Warn("spec binding resolver reported violations",
 			"component", "memql.engine", "error", rsErr)
+	}
+
+	// THE ONE LOWERING, at load (epic memql#5363, task memql#5366, D11).
+	// Runs here -- the first point at which every spec's binding and kind are
+	// resolved and every query is registered -- and before anything below
+	// reads a spec body: every edition-2026 spec and trait body is lowered
+	// into its Expr, every v1 query filter is lowered again with the spec
+	// registry (the predicate kind check), every lowered tree is dry-compiled,
+	// and every refine lambda is validated. Each failure is a strict-boot
+	// problem on the report, so a pushdown expression that does not lower is
+	// refused at boot, naming the node, the position and the nearest spelling,
+	// instead of failing on a live call.
+	for _, problem := range e.lowerAllPushdownPositions(report, specRegistry, shapeRegistry, functionRegistry) {
+		if e.Component != nil && e.Logger != nil {
+			e.Logger.Error("pushdown expression does not lower",
+				"component", "memql.engine", "detail", problem.Error())
+		}
 	}
 
 	// Pass 2: overlay builtins from the new tree (struct-form

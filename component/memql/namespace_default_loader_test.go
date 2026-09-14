@@ -16,9 +16,9 @@ import (
 
 func TestLoadUnifiedConcepts_NamespaceDefault(t *testing.T) {
 	t.Run("absent-derives-domain", func(t *testing.T) {
-		memqldsl.RegisterTree("nsprobe", fstest.MapFS{
+		memqldsl.RegisterTree("nsprobe", withLanguageLine(fstest.MapFS{
 			"concepts.memql": {Data: []byte("concept probeThing {\n  ownerUserId string!\n}\n")},
-		})
+		}))
 		defer memqldsl.UnregisterTree("nsprobe")
 		if _, err := LoadUnifiedConcepts(nil); err != nil {
 			t.Fatalf("derived-namespace load must succeed: %v", err)
@@ -40,9 +40,9 @@ func TestLoadUnifiedConcepts_NamespaceDefault(t *testing.T) {
 	// error rather than a silently-ignored one -- the same position in the
 	// same walk.
 	t.Run("retired-annotation-is-a-load-error", func(t *testing.T) {
-		memqldsl.RegisterTree("nsprobe", fstest.MapFS{
+		memqldsl.RegisterTree("nsprobe", withLanguageLine(fstest.MapFS{
 			"concepts.memql": {Data: []byte("@namespace(\"identity\")\nconcept probeThing {\n  ownerUserId string!\n}\n")},
-		})
+		}))
 		defer memqldsl.UnregisterTree("nsprobe")
 		_, err := LoadUnifiedConcepts(nil)
 		if err == nil || !strings.Contains(err.Error(), "is retired") {
@@ -50,10 +50,10 @@ func TestLoadUnifiedConcepts_NamespaceDefault(t *testing.T) {
 		}
 	})
 	t.Run("pin-allows-divergence", func(t *testing.T) {
-		memqldsl.RegisterTree("nsprobe", fstest.MapFS{
+		memqldsl.RegisterTree("nsprobe", withLanguageLine(fstest.MapFS{
 			"namespace.pin":  {Data: []byte("identity\n")},
 			"concepts.memql": {Data: []byte("concept probeThing {\n  ownerUserId string!\n}\n")},
-		})
+		}))
 		defer memqldsl.UnregisterTree("nsprobe")
 		if _, err := LoadUnifiedConcepts(nil); err != nil {
 			t.Fatalf("pinned divergence must load: %v", err)
@@ -66,10 +66,10 @@ func TestLoadUnifiedConcepts_NamespaceDefault(t *testing.T) {
 	// grain it moved to. Without the rewrite the fixture would be a copy of
 	// "absent-derives-domain" above and would measure nothing.
 	t.Run("colon-scoped-pin-allowed", func(t *testing.T) {
-		memqldsl.RegisterTree("nsprobe", fstest.MapFS{
+		memqldsl.RegisterTree("nsprobe", withLanguageLine(fstest.MapFS{
 			"namespace.pin":  {Data: []byte("nsprobe:sub\n")},
 			"concepts.memql": {Data: []byte("concept probeThing {\n  ownerUserId string!\n}\n")},
-		})
+		}))
 		defer memqldsl.UnregisterTree("nsprobe")
 		if _, err := LoadUnifiedConcepts(nil); err != nil {
 			t.Fatalf("a colon-scoped namespace.pin must load: %v", err)

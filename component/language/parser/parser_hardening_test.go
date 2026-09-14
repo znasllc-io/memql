@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"reflect"
 	"sort"
 	"strings"
@@ -11,7 +12,7 @@ import (
 // #2351). These tests pin the three parser holes the 2026-07-03 audit found,
 // each of which previously turned a typo into SILENCE:
 //
-//  1. an unknown invocation-kind prefix (`mutate createNode(...)` -- the
+//  1. an unknown invocation-kind prefix (`mutation createNode(...)` -- the
 //     mutation *declaration* verb in *call* position) lowered the leading word
 //     to a bare SpecReferenceExpr and dropped the entire call;
 //  2. the Parser.Parse() expression fall-through had no expect-EOF, so trailing
@@ -44,9 +45,9 @@ func parseViaMethod(t *testing.T, src string) (Node, error) {
 func TestReject_UnknownInvocationKind_MutateVsMutation(t *testing.T) {
 	// The audit's exact probe: `mutate` (declaration verb) used where the
 	// invocation noun `mutation` belongs.
-	_, err := ParseExpression(`mutate createNode(id:"x")`)
+	_, err := ParseExpression(`mutation createNode(id:"x")`)
 	if err == nil {
-		t.Fatal("expected an error for `mutate createNode(...)`, got nil (the call was silently dropped)")
+		t.Fatal("expected an error for `mutation createNode(...)`, got nil (the call was silently dropped)")
 	}
 	msg := err.Error()
 	for _, want := range []string{
@@ -64,9 +65,9 @@ func TestReject_UnknownInvocationKind_MutateVsMutation(t *testing.T) {
 func TestReject_UnknownInvocationKind_NotSilentlyDropped(t *testing.T) {
 	// Via the Parser.Parse() METHOD -- historically this returned
 	// SpecReferenceExpr{Name:"mutate"} with err=nil and dropped `createNode(...)`.
-	node, err := parseViaMethod(t, `mutate createNode(id:"x")`)
+	node, err := parseViaMethod(t, `mutation createNode(id:"x")`)
 	if err == nil {
-		t.Fatalf("Parse() method silently accepted `mutate createNode(...)`, returned %#v", node)
+		t.Fatalf("Parse() method silently accepted `mutation createNode(...)`, returned %#v", node)
 	}
 	if _, ok := err.(*ParseError); !ok {
 		t.Errorf("want *ParseError, got %T: %v", err, err)
@@ -79,7 +80,7 @@ func TestReject_UnknownInvocationKind_InLogicBody(t *testing.T) {
 	// body's `return <expr>` carries the malformed call.
 	src := `logic doThing {
   body {
-    return mutate createNode(id: "x")
+    return mutation createNode(id: "x")
   }
 }`
 	rewritten, err := NormaliseAll(src)
@@ -88,7 +89,7 @@ func TestReject_UnknownInvocationKind_InLogicBody(t *testing.T) {
 	}
 	_, err = parseViaMethod(t, rewritten)
 	if err == nil {
-		t.Fatal("expected the logic body to reject `mutate createNode(...)`, got nil")
+		t.Fatal("expected the logic body to reject `mutation createNode(...)`, got nil")
 	}
 	if !strings.Contains(err.Error(), "did you mean 'mutation'?") {
 		t.Errorf("logic-body error should carry the mutation hint; got: %v", err)
@@ -167,24 +168,37 @@ func TestRequireEOF_TrailingSemicolonsTolerated(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Fix 3: parseDefinition's expected-keyword hint is the full set + did-you-mean.
+// Fix 3 (#2358), now one refusal (memql#5356): a top-level statement opened by
+// a word that is no construct keyword is refused with construct_unknown's own
+// refusal -- the one the load gate gives the line.
 // ---------------------------------------------------------------------------
 
-func TestParseDefinition_UnknownKeyword_ListsRewriterHandledKinds(t *testing.T) {
+func TestParseDefinition_UnknownKeyword_IsTheConstructUnknownRefusal(t *testing.T) {
 	// A file that reaches parseDefinition (leading annotation) with a typo'd
-	// construct keyword. The previously-omitted rewriter-handled keywords
-	// (query/mutate/logic/automation) must now appear in the hint.
-	_, err := ParseFile("conept foo { }")
+	// construct keyword.
+	src := "conept foo { }"
+	_, err := ParseFile(src)
 	if err == nil {
 		t.Fatal("expected an error for the typo'd `conept` keyword, got nil")
 	}
-	msg := err.Error()
-	for _, want := range []string{"'query'", "'mutation'", "'logic'", "'automation'"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("expected-keyword hint should list %s (it omitted these before #2358)\n  full: %s", want, msg)
-		}
+	gate := FindUnknownConstructKeywords(src)
+	if len(gate) != 1 {
+		t.Fatalf("the load gate must refuse the line too, got %+v", gate)
 	}
-	if !strings.Contains(msg, "did you mean 'concept'?") {
+	var cause *UnknownConstructKeyword
+	if !errors.As(err, &cause) || cause.Keyword != "conept" || cause.Message != gate[0].Message {
+		t.Fatalf("the parse error must carry the load gate's refusal as its cause\n  parse: %v\n  gate:  %q", err, gate[0].Message)
+	}
+	msg := err.Error()
+	if !strings.HasSuffix(msg, gate[0].Message) {
+		t.Errorf("the parse error must read as the gate's refusal; got: %s", msg)
+	}
+	// One table: every construct keyword, the rewriter-handled family the
+	// hint once omitted included, and `use`; no internal `func`.
+	if !strings.Contains(msg, "The constructs are: "+strings.Join(ConstructKeywords(), ", ")+" [construct_unknown]") {
+		t.Errorf("the refusal must list ConstructKeywords(); got: %s", msg)
+	}
+	if !strings.Contains(msg, "did you mean concept?") {
 		t.Errorf("expected a `concept` suggestion for `conept`; got: %s", msg)
 	}
 }
@@ -194,9 +208,9 @@ func TestParseDefinition_UnknownKeyword_SuggestsNearest(t *testing.T) {
 		src  string
 		want string
 	}{
-		{"@description(\"x\")\nquer participant qFoo { }", "did you mean 'query'?"},
-		{"use cognition.concepts.{ space }\n\nshaep space s { row.id }", "did you mean 'shape'?"},
-		{"mutaton space createSpace { }", "did you mean 'mutation'?"},
+		{"@description(\"x\")\nquer participant qFoo { }", "did you mean query?"},
+		{"use cognition.concepts.{ space }\n\nshaep space s { row.id }", "did you mean shape?"},
+		{"mutaton space createSpace { }", "did you mean mutate?"},
 	}
 	for _, tc := range cases {
 		_, err := ParseFile(tc.src)
@@ -240,9 +254,9 @@ func TestLevenshtein(t *testing.T) {
 
 func TestDidYouMean_ThresholdBoundary(t *testing.T) {
 	pool := kindSuggestionCandidates()
-	// mutate -> mutation is distance 3 == threshold: suggested.
+	// mutation -> mutation is distance 3 == threshold: suggested.
 	if got := didYouMean("mutate", pool); !strings.Contains(got, "'mutation'") {
-		t.Errorf("mutate should suggest mutation; got %q", got)
+		t.Errorf("mutation should suggest mutation; got %q", got)
 	}
 	// nearestKeyword skips the exact match, so a keyword typed verbatim never
 	// suggests itself.

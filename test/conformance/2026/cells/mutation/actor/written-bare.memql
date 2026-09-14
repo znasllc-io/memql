@@ -1,0 +1,11 @@
+/// Assign a ticket to the caller.
+@actor
+mutate ticket takeTicketActor {
+  args {
+    ticketId  string!
+  }
+  update {
+    id: args.ticketId
+    ownerUserId: actor.userId
+  }
+}

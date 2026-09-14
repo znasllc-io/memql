@@ -456,22 +456,22 @@ func TestTheStampRunsAfterTheReadMergeAndBeforeTheStore(t *testing.T) {
 	}
 }
 
-// AC 6: on the TEMPLATE path, `stamp` beats `accept` when both name the
-// same key -- asserted rather than assumed.
+// AC 6: on the TEMPLATE path, a caller can never displace a `stamp` through
+// an `accept` naming the same key -- asserted rather than assumed.
 //
-// The behaviour is real but emergent, and nothing pinned it. The
-// rewriter emits accept's auto-bound lines first and stamp's lines
-// after (component/language/parser/rewriter.go), and parseObjectLiteral
-// is last-key-wins, so the server-set value overwrites the caller-bound
-// one. That is the SAFE direction -- and it is exactly the direction the
-// raw-path stamp above takes for the surface that has no `stamp { }` to
-// win with, so the two surfaces agree. The only related check that
-// existed was the duplicate-`id:` rejection in the rewriter, which says
-// nothing about any other key.
+// CHANGED at the flip. The rewriter emits accept's auto-bound lines first and
+// stamp's lines after (component/language/parser/rewriter.go), and the object
+// literal the string evaluator read was last-key-wins, so the server-set value
+// overwrote the caller-bound one: stamp won, emergently. The edition-2026 map
+// literal refuses a key written twice -- "the first value would be discarded
+// with no signal" -- so the collision no longer loads at all. That is the SAFE
+// direction taken further: a mutation that both accepts and stamps an authz
+// field is refused where the tree is read, rather than resolved by an ordering
+// nobody wrote down. The raw-path stamp above is still the surface that has no
+// `stamp { }` to win with.
 //
-// Driven through the real loader and the real renderer: the claim is
-// about what the pipeline produces, and a hand-built template would be
-// asserting on a fixture instead.
+// Driven through the real loader: the claim is about what the pipeline
+// produces, and a hand-built template would be asserting on a fixture instead.
 func TestStampBeatsAcceptOnAKeyCollision(t *testing.T) {
 	if _, err := LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
@@ -495,52 +495,27 @@ mutation note collisionProbe {
     }
   }
 }`
-	fn, err := tryParseNewFunctionSyntax("collisionProbe", "mutation", src, "test.memql", memorynodes.DefaultRegistry())
-	if err != nil {
-		t.Fatalf("loading the collision probe: %v", err)
+	_, err := tryParseNewFunctionSyntax("collisionProbe", "mutation", src, "test.memql", memorynodes.DefaultRegistry())
+	if err == nil {
+		t.Fatalf("a mutation that both accepts and stamps %s loaded. It must be refused: with the "+
+			"collision resolved by key order, every mutation that both accepts and stamps an authz "+
+			"field is one reordering away from taking the caller's word for it (memql#3175 AC 6).", decl.Owner)
 	}
-	if fn.MutationTemplate == nil {
-		t.Fatal("the probe loaded without a mutation template")
-	}
-
-	eng := &MemQLEngine{}
-	node, err := eng.renderMutationTemplate(callerCtx("user-actor"), fn.MutationTemplate, map[string]any{
-		"noteId":      "note-collision",
-		"ownerUserId": "user-victim",
-		"body":        "b",
-	})
-	if err != nil {
-		t.Fatalf("rendering the collision probe: %v", err)
-	}
-	var payload map[string]any
-	if uerr := json.Unmarshal([]byte(node.PayloadRaw), &payload); uerr != nil {
-		t.Fatalf("unmarshal rendered payload: %v", uerr)
-	}
-	if got := payload[decl.Owner]; got != "user-actor" {
-		t.Fatalf("%s = %v, want the STAMPED actor value %q. `accept` and `stamp` naming the "+
-			"same key must resolve stamp-wins: the rewriter emits accept's lines first and "+
-			"the object literal is last-key-wins, so the server-set value overwrites the "+
-			"caller-bound one. If this ever flips, every mutation that both accepts and "+
-			"stamps an authz field starts taking the caller's word for it (memql#3175 AC 6).",
-			decl.Owner, got, "user-actor")
-	}
-	// CONTROL 1: the caller's OTHER accepted field is untouched, so the
-	// assertion above is about precedence rather than accept being broken.
-	if payload["body"] != "b" {
-		t.Fatalf("body = %v, want the caller's accepted value; the probe is not measuring "+
-			"precedence if accept never bound anything", payload["body"])
+	if !strings.Contains(err.Error(), "duplicate key `"+decl.Owner+"`") {
+		t.Fatalf("the collision was refused for the wrong reason: %v -- want the map literal's "+
+			"duplicate-key refusal naming %s", err, decl.Owner)
 	}
 
-	// CONTROL 2: the same probe WITHOUT the stamp line renders the
-	// caller's value. This is what makes the assertion above evidence of
-	// precedence -- accept genuinely binds this key, and stamp is what
-	// displaces it, rather than accept having quietly dropped it.
+	// CONTROL: the same probe WITHOUT the stamp line loads, and renders the
+	// caller's value. This is what makes the refusal above evidence about the
+	// collision rather than about a probe that never loads.
 	noStamp := strings.Replace(src, "      ownerUserId: actor.userId\n", "", 1)
 	noStamp = strings.Replace(noStamp, "collisionProbe", "collisionControlProbe", 1)
 	controlFn, err := tryParseNewFunctionSyntax("collisionControlProbe", "mutation", noStamp, "test.memql", memorynodes.DefaultRegistry())
 	if err != nil {
 		t.Fatalf("loading the control probe: %v", err)
 	}
+	eng := &MemQLEngine{}
 	controlNode, err := eng.renderMutationTemplate(callerCtx("user-actor"), controlFn.MutationTemplate, map[string]any{
 		"noteId":      "note-collision-control",
 		"ownerUserId": "user-victim",
@@ -553,9 +528,9 @@ mutation note collisionProbe {
 	if uerr := json.Unmarshal([]byte(controlNode.PayloadRaw), &controlPayload); uerr != nil {
 		t.Fatalf("unmarshal control payload: %v", uerr)
 	}
-	if controlPayload[decl.Owner] != "user-victim" {
-		t.Fatalf("the control did not bind %s from caller args (%v), so the collision "+
-			"assertion above proves nothing", decl.Owner, controlPayload[decl.Owner])
+	if controlPayload[decl.Owner] != "user-victim" || controlPayload["body"] != "b" {
+		t.Fatalf("the control did not bind %s and body from caller args (%v), so the collision "+
+			"refusal above proves nothing", decl.Owner, controlPayload)
 	}
 }
 

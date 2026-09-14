@@ -1,0 +1,10 @@
+/// A support ticket: the row the mutations here write.
+concept ticket {
+  title     string
+  status    string
+  priority  int
+  tags      []string
+}
+
+/// Tickets that are open.
+trait mvIsOpen = row => row.status == "open"

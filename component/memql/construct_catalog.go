@@ -924,32 +924,41 @@ func buildConstructSourceIndex() constructSourceIndex {
 		// problem, not this index's: whichever the loader kept is what the
 		// catalog reports, and pointing at the first file found is no more
 		// wrong than pointing at the last.
-		record := func(kind, name, source string) {
+		forEachConstructSource(f.Content, func(kind, name, source string) {
 			key := DocumentConstructKey(kind, name, domain)
 			if _, exists := index.byKindName[key]; exists {
 				return
 			}
 			index.byKindName[key] = constructSource{path: f.Path, source: source}
-		}
-
-		for kind, keyword := range constructKeyword {
-			for _, slice := range languageParser.ExtractDeclarationSlices(f.Content, keywordHeaderRegexp(keyword)) {
-				record(kind, slice.Name, slice.Source)
-			}
-		}
-
-		// The terse single-step automation form has no braces, so the header
-		// regexp above -- which is anchored on the declaration's opening `{` --
-		// cannot see it. Ten automations in the tree are authored that way, and
-		// without this they were catalogued with an EMPTY source hash while the
-		// language server computed a real one for the same line: a construct
-		// that reads as `drifted` forever, because no edit can make an empty
-		// hash match a real one (memql#3758, caught by the corpus parity gate).
-		for _, slice := range languageParser.ExtractTerseAutomationSlices(f.Content) {
-			record(ConstructKindAutomation, slice.Name, slice.Source)
-		}
+		})
 	}
 	return index
+}
+
+// forEachConstructSource calls fn with every construct one file declares, as
+// the catalog slices it: its kind, its name, and its authored source.
+func forEachConstructSource(content string, fn func(kind, name, source string)) {
+	for kind, keyword := range constructKeyword {
+		// constructDeclarationSlices, not the brace slicer alone: an
+		// edition-2026 spec or trait has no brace, and without its own
+		// extent rule it was catalogued with an empty source hash and no
+		// origin path (epic memql#5363) -- the terse-automation defect
+		// below, for another brace-less form.
+		for _, slice := range constructDeclarationSlices(content, keyword) {
+			fn(kind, slice.Name, slice.Source)
+		}
+	}
+
+	// The terse single-step automation form has no braces, so the header
+	// regexp above -- which is anchored on the declaration's opening `{` --
+	// cannot see it. Ten automations in the tree are authored that way, and
+	// without this they were catalogued with an EMPTY source hash while the
+	// language server computed a real one for the same line: a construct
+	// that reads as `drifted` forever, because no edit can make an empty
+	// hash match a real one (memql#3758, caught by the corpus parity gate).
+	for _, slice := range languageParser.ExtractTerseAutomationSlices(content) {
+		fn(ConstructKindAutomation, slice.Name, slice.Source)
+	}
 }
 
 // packDomainOrigins maps each top-level DSL domain to the pack browser's own

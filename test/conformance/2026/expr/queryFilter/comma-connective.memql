@@ -1,0 +1,5 @@
+/// Open or urgent tickets.
+query ticket qfComma {
+  filter row => row.status == "open", row.urgent == true
+  paginate 20
+}

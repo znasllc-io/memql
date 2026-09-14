@@ -40,9 +40,14 @@ error. Defined in `component/memql/keyword_slices.go` and enforced
 during args parsing.
 
 These names, plus `row`, `meta`, and `payload`, are also the
-**reserved filter heads**: the path roots a query `filter` resolves to
-an engine namespace instead of the bound concept's payload. That makes
-them reserved on a concept's payload schema too -- see section 2.
+**reserved filter heads**: in the engine's internal query form (the
+string an SDK sends to `Execute`), a bare path rooted at one of them
+reads an engine namespace instead of the bound concept's payload. That
+makes them reserved on a concept's payload schema too -- see section 2.
+An authored expression never reads a payload field bare: a filter reads
+`row.status` through its lambda parameter, and a bare name is a lambda
+parameter, a reserved root, a local, or a function or predicate being
+called (see [Expressions](memql.md#expressions)).
 
 ---
 
@@ -108,28 +113,31 @@ so `Provenance` and `ACTOR` are refused as well. Only whole names are
 reserved: `arguments`, `metadata`, `configuration`, and `rowCount` are
 ordinary properties.
 
-### Naming an intrinsic in a filter: the `row.` namespace
+### Naming an intrinsic in a filter
 
-In a query `filter` clause an intrinsic is addressed through the `row.`
-namespace -- `row.id`, `row.createdAt`, `row.provenance.kind` -- never
-bare (memql#2779, `TestFilterIntrinsicsUseRowNamespace`). Payload
-properties in the same clause are bare, so the namespace is what keeps
-the two surfaces apart:
+A filter, spec or trait reads every field through its lambda parameter.
+`row.id`, `row.createdAt` and `row.provenance.kind` are intrinsics, and
+`row.status` is a payload property: the intrinsic names are reserved on
+every payload schema, so `row.<name>` reads the intrinsic when the name
+is one and the payload property otherwise, and the two can never
+collide.
 
 ```memql fragment
-filter  row.id == args.folderId && status == "active"
-//      ^^^^^^ row envelope      ^^^^^^ payload property
+filter  row => row.id == args.folderId && row.status == "active"
+//             ^^^^^^ intrinsic           ^^^^^^^^^^ payload property
 ```
 
-`row.` accepts only the intrinsics the filter compiler pushes down:
-`id`, `concept`, `type`, `createdAt`, `createdBy`, and
-`provenance.<leaf>`. `row.<anything else>` is an error rather than a
-silent fall-through to a payload lookup -- that fall-through is the
-defect the namespace closed. `schema` is a real stamped column but is
-not filter-comparable, so it has no `row.` form either. `partition` is
-reserved on the payload schema (see section 1 above) but, post-#56, is
-not a row intrinsic at all -- there is no `partition` column to have a
-`row.` form.
+The intrinsics a filter pushes down are `id`, `concept`, `type`,
+`createdAt`, `createdBy` and `provenance.<leaf>`. `schema` is a real
+stamped column but is not filter-comparable. `partition` is reserved on
+the payload schema (see section 1 above) but, post-#56, is not a row
+intrinsic at all -- there is no `partition` column to compare.
+
+Before edition 2026 a filter named payload properties bare and
+intrinsics through a `row.` namespace (memql#2779), because a bare `id`
+could not be told apart from a payload property of the same name. The
+lambda parameter removed the bare form, and with it the second
+spelling.
 
 A **sort key** takes the same namespace -- `sort "row.createdAt", "desc"` --
 and rejects a non-sortable leaf rather than silently ordering on a JSONB path
@@ -151,10 +159,10 @@ Otherwise the bare spelling remains valid at RUNTIME, where callers pass sort
 keys in through the SDK and the query API; the `.memql` gate covers authored
 sort clauses only.
 
-Other surfaces are unchanged: a shape body already projects `row.id` /
-`row.createdAt`; a spec/trait body reads its signature-bound fields bare
-and rejects `row.*` (epic #2281); a mutation `insert`/`update` block
-writes `id:` / `createdAt:` as target keys rather than references.
+Other surfaces: a shape body projects `row.id` / `row.createdAt`; a spec
+or trait body reads through its lambda parameter exactly as a filter
+does; a mutation `insert`/`update` block writes `id:` / `createdAt:` as
+target keys rather than references.
 
 ---
 
@@ -193,10 +201,12 @@ mutation, logic, or automation whose body references `actor.*` must
 carry a bare `@actor` annotation in its preamble, or it fails load
 with a file-attributed error (used-requires-declared, the same shape
 as the logic event-binding rule). Declared-but-unused is legal. Spec
-and trait bodies keep the inverse rule -- direct `actor.*` reads are
-load-rejected there; bind an `@actor` shape instead. The seed-file
-`@actor("system")` (a seed-write identity) is a different construct
-and is unaffected.
+and trait bodies do not take `@actor`: a spec reads the envelope by
+binding an `@actor` shape, and its lambda parameter is then spelled
+`actor` and is the envelope --
+`spec actorEnvelope requiresOwner = actor => actor.role == "owner"`.
+The seed-file `@actor("system")` (a seed-write identity) is a different
+construct and is unaffected.
 
 ---
 
@@ -237,7 +247,7 @@ cannot be used as identifier names anywhere in the author surface:
 | `spec` | Atomic boolean predicate. |
 | `trait` | Concept-agnostic atomic predicate. |
 | `query` | Read function. |
-| `mutation` | Write function. |
+| `mutate` | Write function, called as `mutation <name>(...)`. |
 | `logic` | Imperative orchestration block. |
 | `automation` | Event-triggered workflow. |
 | `tool` | AI-callable surface. |
@@ -252,25 +262,30 @@ Plus body-level keywords inside specific constructs: `args`, `body`,
 `include`. Their reservation is scoped to the construct that defines
 them.
 
-The filter-expression keywords are reserved wherever an expression is
-parsed: `in`, `not` (only as `not in`), `when`, and `startsWith`
-(memql#4208). A payload property or an arg named `startsWith` cannot be
-referenced bare.
+The expression keywords `in` and `startsWith` (memql#4208) are reserved
+wherever an expression is parsed, so neither can name a lambda parameter
+or a local. `when`, `has` and `not` are still lexer keywords, and in an
+authored expression the parser refuses each by name with its
+replacement: `when(args.x) { ... }` is written
+`(args.x == nil || <predicate>)`, `x has v` is `v in x`, and
+`x not in list` is `!(x in list)`.
 
 ---
 
 ## 6. Reserved annotation names
 
-The full annotation surface is per-construct and enforced by each
-parser's allow-list (search `allowedXAnnotations` in
-`component/memql/`). Cross-construct annotations:
+The full annotation surface is per-construct and enforced at parse time
+by the annotation registry (`component/language/annotations`, memql#5359),
+the one check every construct parser and field list runs; a refusal names
+the construct, the annotation and what to write, and ends with a stable
+`annotation_*` code. Cross-construct annotations:
 
 | Annotation | Where it applies |
 |------------|------------------|
 | `@description("...")` | Every construct. |
 | `@enabled` / `@disabled` | Lifecycle on queries / mutations / logic / automations / traits / tools / builtins / prompts / providers / specs / seeds. Enabled is the default on every kind (#2604-#2608); `@enabled` is an accepted no-op. `@disabled` means "not loaded right now", not "deprecated" -- that axis is `@deprecated`. `@disabled` on a `@base` provider propagates to every child that `@extends` it. |
-| `@deprecated("hint")` | Removed from the allow-lists (#989) and rejected at load on every construct; the parser still folds it but no loader reads it. Use `@disabled` to deactivate. |
-| `@internal` | RETIRED at construct level under the 2026.08 epoch (#2620 ruling / #2708) -- it only hid a callable construct from discovery surfaces; the load gate rejects it with a migration hint. Field-level `@internal` on concept properties remains live, and is enforced (rejected from caller args + excluded from a shape's default projection). Its neighbours are not uniform: `@pii` is enforced (`@scrubPii` + the memql#2883 projection gate), while `@secret` is enforced on **every validation surface that quotes a rejected value** -- and is still not a secrecy guarantee. The list comes from an EXHAUSTIVE enumeration of validators, not from appending one entry at a time: three incremental passes each walked past a surface the next found, and the exhaustive sweep turned up two more the original four-surface model did not contain. It redacts in the **function-args validator** (memql#3036); the **tool-args validator** (`validateToolArgs`), compiled from the same args schema and running BEFORE the function-args validator on the agent path, in both the message returned to the model and the WARN, which now redacts per key instead of serializing the entire args map (memql#3182); the **automation args binder**, in all three refusal messages and in the WARN log they are written to, closing the one path by which a concept row value could reach a **structured log** (memql#3183); **concept payload validation**, where `@minimum` / `@maximum` / `@format` declared on the concept are actually enforced, across all six jsonschema keywords that interpolate the instance value (memql#3184); and the DSL-callable **`validate` / `preflight` builtins**, which surface leaf messages in a result payload returned to the caller. The last two resolve secrecy through the schema at the failing instance location, so they cover nested and inherited `@secret` -- unlike `SecretFields()`, which is top-level only. On the two args-validator surfaces matching is by argument NAME rather than by write target (a mutation writing `apiKey: args.credential` leaves `credential` unredacted). It does NOT redact from **query results** (an authorization decision deferred under memql#2803). Length is never redacted anywhere, deliberately and uniformly (`value too long` and the jsonschema `minLength`/`maxLength` messages report a rune count for a secret field too). **Prompt input-schema validation** (`PromptTemplate.ValidateData`) is UNCLASSIFIED: it interpolates the instance the same way but its schema is not concept-derived, so there is no `x-secret` to read -- treat it as uncovered, not as safe. |
+| `@deprecated("hint")` | Removed (#989): no registry placement lists it, so it is refused everywhere (`annotation_unknown`, memql#5359) -- at parse time on every construct and field list, and at load on a concept, its body and its fields, which the concept translator checks. Use `@disabled` to deactivate. |
+| `@internal` | RETIRED at construct level under the 2026.08 epoch (#2620 ruling / #2708) -- it only hid a callable construct from discovery surfaces; the annotation registry refuses it with a migration hint (`annotation_retired`, memql#5359) on every construct and on the args, tool, prompt and builtin field lists -- at parse time on those, and at load on a concept. Field-level `@internal` on concept properties remains live -- a concept field is the one place the registry accepts it -- and is enforced (rejected from caller args + excluded from a shape's default projection). Its neighbours are not uniform: `@pii` is enforced (`@scrubPii` + the memql#2883 projection gate), while `@secret` is enforced on **every validation surface that quotes a rejected value** -- and is still not a secrecy guarantee. The list comes from an EXHAUSTIVE enumeration of validators, not from appending one entry at a time: three incremental passes each walked past a surface the next found, and the exhaustive sweep turned up two more the original four-surface model did not contain. It redacts in the **function-args validator** (memql#3036); the **tool-args validator** (`validateToolArgs`), compiled from the same args schema and running BEFORE the function-args validator on the agent path, in both the message returned to the model and the WARN, which now redacts per key instead of serializing the entire args map (memql#3182); the **automation args binder**, in all three refusal messages and in the WARN log they are written to, closing the one path by which a concept row value could reach a **structured log** (memql#3183); **concept payload validation**, where `@minimum` / `@maximum` / `@format` declared on the concept are actually enforced, across all six jsonschema keywords that interpolate the instance value (memql#3184); and the DSL-callable **`validate` / `preflight` builtins**, which surface leaf messages in a result payload returned to the caller. The last two resolve secrecy through the schema at the failing instance location, so they cover nested and inherited `@secret` -- unlike `SecretFields()`, which is top-level only. On the two args-validator surfaces matching is by argument NAME rather than by write target (a mutation writing `apiKey: args.credential` leaves `credential` unredacted). It does NOT redact from **query results** (an authorization decision deferred under memql#2803). Length is never redacted anywhere, deliberately and uniformly (`value too long` and the jsonschema `minLength`/`maxLength` messages report a rune count for a secret field too). **Prompt input-schema validation** (`PromptTemplate.ValidateData`) is UNCLASSIFIED: it interpolates the instance the same way but its schema is not concept-derived, so there is no `x-secret` to read -- treat it as uncovered, not as safe. |
 
 **Cross-construct dependencies do NOT go through annotations.** The
 legacy `@useConcept` / `@useShape` / `@useQuery` / `@useMutation` /
@@ -287,8 +302,16 @@ is rejected at parse time. The canonical post-migration shape:
   `query <Concept> <name> { ... }`, `mutate <Concept> <name> { ... }`,
   `shape <Concept> <name> { ... }`, `seed <Concept> <name> { ... }`.
 
-The legacy `@input` wrapper and `@template` body annotation are also
-retired -- the parser rejects them with a migration hint.
+Inside a prompt's body, two legacy forms are refused with a migration hint:
+the `@input { ... }` wrapper (declare the fields directly in the body) and an
+inline `@template(...)` (use `@templateFile("...")` with a `.tmpl` file beside
+the prompt). They are forms of the prompt body, not annotations, so the
+attribute matrix does not list them. `@template` written before an
+automation is a live annotation: it marks a work-spine template.
+
+The [attribute matrix](attribute-matrix.md), generated from the registry,
+lists every annotation, the constructs and fields that accept it, the form it
+is written in, and every retired annotation with what to write instead.
 
 ---
 
@@ -302,8 +325,8 @@ several Go files. When the list below changes, update this doc:
 | Top-level engine names | `component/memql/keyword_slices.go` |
 | Row intrinsics | `component/memql/intrinsic_fields.go` |
 | Caller envelope | `component/memql/sense/builtins.go` + `runtime_evaluator.go` |
-| Construct keywords | per-construct parser allow-lists in `component/memql/` |
-| Annotation allow-lists | per-construct parser allow-lists in `component/memql/` |
+| Construct keywords | `parser.TopLevelDeclKeywords` and `parser.StructFormKeywords` in `component/language/parser`, projected by `component/language/dslspec` |
+| Annotations | the registry in `component/language/annotations`; the [attribute matrix](attribute-matrix.md) is generated from it (`make docs-matrix`) |
 | Imported names (`use`) | `component/memql/dslimports/dslimports.go` |
 
 ---

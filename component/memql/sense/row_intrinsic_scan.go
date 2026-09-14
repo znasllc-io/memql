@@ -71,13 +71,20 @@ var canonicalScalarIntrinsic = map[string]string{
 // not truncate the rest of the line, and commented-out code in a `/* */`
 // block is not authored code.
 //
-// Only a line that OPENS a filter clause is scanned. A filter clause cannot
-// span lines: parseStructQueryBody (component/language/parser/rewriter.go)
-// walks a struct-query body line by line and hard-errors on any line that is
-// not a clause keyword, so a continuation line never reaches the engine
-// anyway. An earlier version carried multi-line tracking for that shape; it
-// protected a grammar the parser rejects while giving a block comment a way
-// to escape the single-line bound.
+// A filter clause is its opening line PLUS every continuation line. This read
+// the opening line alone, on the ground that parseStructQueryBody hard-errored
+// on any line that was not a clause keyword; memql#4123 made that normaliser
+// fold continuation lines (dslclause.ContinuesClause), and the ground went
+// with it -- a bare intrinsic on a wrapped `&& id == args.x` line reached the
+// engine and was invisible here. The edition-2026 codemod wraps every long
+// filter that way, so the extent is now dslclause.ClauseExtent's, the fold the
+// normaliser applies, with the construct's own closing brace excluded.
+//
+// In an edition-2026 clause (`row => ...`) a field is a member of the lambda
+// parameter, so a row intrinsic is `row.id` and the dotted context excludes it
+// exactly as it excludes `args.id`. What remains is a NAME a lambda binds --
+// `row.items.any(id => id == args.x)` compares the element, not the row id --
+// and every such name is excluded for the whole clause (lambdaBoundNames).
 //
 // One shape that DOES reach the engine is excluded by a gate rather than by
 // the grammar (memql#2817): the language accepts a clause on the same line as
@@ -113,39 +120,78 @@ func ScanBareRowIntrinsics(source string) []BareRowIntrinsic {
 	// rune column after it. Byte offsets are preserved by that substitution,
 	// so a byte index from the blanked line indexes the original correctly.
 	original := strings.Split(source, "\n")
+	blanked := strings.Split(BlankBlockComments(source), "\n")
+	code := make([]string, len(blanked))
+	for i, line := range blanked {
+		code[i] = blankLineCommentsAndStrings(line)
+	}
 
-	for i, line := range strings.Split(BlankBlockComments(source), "\n") {
-		code := blankLineCommentsAndStrings(line)
-		if !isFilterClauseOpener(strings.TrimSpace(code)) {
+	for i := 0; i < len(code); i++ {
+		if !isFilterClauseOpener(strings.TrimSpace(code[i])) {
 			continue
 		}
-		for _, m := range bareRowIntrinsicRE.FindAllStringSubmatchIndex(code, -1) {
-			start, text, name := -1, "", ""
-			switch {
-			case m[4] >= 0: // scalar intrinsic
-				start, text = m[4], code[m[4]:m[5]]
-				name = canonicalScalarIntrinsic[strings.ToLower(text)]
-			case m[6] >= 0: // provenance.<leaf>
-				start, text = m[6], code[m[6]:m[7]]
-				_, leaf, _ := strings.Cut(text, ".")
-				name = "provenance." + leaf
+		last := dslclause.ClauseExtent(code, i)
+		bound := lambdaBoundNames(code[i : last+1])
+		for j := i; j <= last; j++ {
+			for _, m := range bareRowIntrinsicRE.FindAllStringSubmatchIndex(code[j], -1) {
+				start, text, name := -1, "", ""
+				switch {
+				case m[4] >= 0: // scalar intrinsic
+					start, text = m[4], code[j][m[4]:m[5]]
+					name = canonicalScalarIntrinsic[strings.ToLower(text)]
+				case m[6] >= 0: // provenance.<leaf>
+					start, text = m[6], code[j][m[6]:m[7]]
+					_, leaf, _ := strings.Cut(text, ".")
+					name = "provenance." + leaf
+				}
+				if name == "" || bound[strings.ToLower(strings.SplitN(text, ".", 2)[0])] {
+					continue
+				}
+				prefix := blanked[j][:start]
+				if j < len(original) && start <= len(original[j]) {
+					prefix = original[j][:start]
+				}
+				found = append(found, BareRowIntrinsic{
+					Line:   j + 1,
+					Column: utf8.RuneCountInString(prefix) + 1,
+					Text:   text,
+					Name:   name,
+				})
 			}
-			if name == "" {
-				continue
-			}
-			prefix := line[:start]
-			if i < len(original) && start <= len(original[i]) {
-				prefix = original[i][:start]
-			}
-			found = append(found, BareRowIntrinsic{
-				Line:   i + 1,
-				Column: utf8.RuneCountInString(prefix) + 1,
-				Text:   text,
-				Name:   name,
-			})
 		}
+		i = last
 	}
 	return found
+}
+
+// lambdaHeaderRe matches an edition-2026 lambda header: one parameter (`x =>`)
+// or a parenthesised list (`(a, b) =>`).
+var lambdaHeaderRe = regexp.MustCompile(`(?:\(([^()]*)\)|\b([A-Za-z_][A-Za-z0-9_]*))\s*=>`)
+
+// lambdaBoundNames returns every name a lambda header in the clause's lines
+// binds, lower-cased to match the scanner's case-insensitive intrinsic set.
+// The lines are expected with comments and string contents blanked, so a `=>`
+// inside a literal binds nothing.
+//
+// The exclusion is per CLAUSE, not per lambda scope: a name bound anywhere in
+// the clause is skipped everywhere in it. That can only miss a genuine bare
+// intrinsic in a clause that also binds the same name, and in edition 2026 a
+// bare name the clause does not bind is refused by the loader regardless, so
+// the precision is spent where a false positive would refuse a boot.
+func lambdaBoundNames(lines []string) map[string]bool {
+	bound := map[string]bool{}
+	for _, m := range lambdaHeaderRe.FindAllStringSubmatch(strings.Join(lines, "\n"), -1) {
+		names := []string{m[2]}
+		if m[2] == "" {
+			names = strings.Split(m[1], ",")
+		}
+		for _, n := range names {
+			if n = strings.TrimSpace(n); n != "" {
+				bound[strings.ToLower(n)] = true
+			}
+		}
+	}
+	return bound
 }
 
 // isFilterClauseOpener reports whether a trimmed line opens a `filter` clause.

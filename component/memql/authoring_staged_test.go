@@ -28,9 +28,7 @@ import (
 // accidentally read a promoted one's row.
 const stagedSpecSrc = `
 @description("A staged spec")
-trait stagedOnlyTrait {
-  return active == true
-}
+trait stagedOnlyTrait = row => row.active == true
 `
 
 // fakeStagedRowStore is a stagedRowStore over an in-memory row set, recording

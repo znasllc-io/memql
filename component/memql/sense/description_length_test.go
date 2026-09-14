@@ -40,7 +40,7 @@ func parseWithDocs(t *testing.T, src string) *parser.File {
 
 func TestDescriptionLengthRule(t *testing.T) {
 	long := strings.Repeat("alpha beta gamma delta ", 24) // ~552 chars, over the 500 target
-	logicBody := "logic lengthProbe {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}\n"
+	logicBody := "logic lengthProbe {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}\n"
 
 	t.Run("over-target-hints", func(t *testing.T) {
 		src := "/// " + long + "\n" + logicBody
@@ -113,7 +113,7 @@ func TestDescriptionLengthRule(t *testing.T) {
 			"/// " + long + "\n" +
 			"logic lengthProbe {\n" +
 			"  args {\n    a string @required\n  }\n" +
-			"  body {\n    return coalesce(args.a, \"\")\n  }\n" +
+			"  body {\n    return args.a ?? \"\"\n  }\n" +
 			"}\n"
 		file := parseWithDocs(t, src)
 		diags := descriptionLengthRule(file, src)
@@ -148,7 +148,7 @@ func TestDescriptionLengthRule(t *testing.T) {
 			"    /// " + long + "\n" +
 			"    a string @required\n" +
 			"  }\n" +
-			"  body {\n    return coalesce(args.a, \"\")\n  }\n" +
+			"  body {\n    return args.a ?? \"\"\n  }\n" +
 			"}\n"
 		file := parseWithDocs(t, src)
 		diags := descriptionLengthRule(file, src)
@@ -167,7 +167,7 @@ func TestDescriptionLengthRule(t *testing.T) {
 // rule function in isolation.
 func TestDescriptionLengthThroughDiagnose(t *testing.T) {
 	long := strings.Repeat("alpha beta gamma delta ", 24)
-	src := "/// " + long + "\nlogic lengthProbe {\n  args {\n    a string @required\n  }\n  body {\n    return coalesce(args.a, \"\")\n  }\n}\n"
+	src := "/// " + long + "\nlogic lengthProbe {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}\n"
 	s := New(&stubRegistry{})
 	found := false
 	for _, d := range s.Diagnose(src, "probe.memql") {

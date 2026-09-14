@@ -1,0 +1,7 @@
+/// A support ticket raised by a customer.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}

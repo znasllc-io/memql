@@ -37,7 +37,7 @@ query invocation recentInvocations {
   args {
     ownerUserId  string  @required
   }
-  filter  ownerUserId == args.ownerUserId
+  filter  row => row.ownerUserId == args.ownerUserId
 }
 `
 

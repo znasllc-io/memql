@@ -171,8 +171,8 @@ type adoptionContextProbe struct {
 }
 
 func (p *adoptionContextProbe) Execute(_ context.Context, step *Step, ctx *StepContext) (*StepResult, error) {
-	p.event, _ = ctx.Evaluator.EvaluateValue("$event")
-	p.ctxInput, _ = ctx.Evaluator.EvaluateValue("$ctx.input")
+	p.event, _ = evalV1(ctx.Evaluator, "event")
+	p.ctxInput, _ = evalV1(ctx.Evaluator, "ctx.input")
 	return &StepResult{StepId: step.ID, Status: "completed"}, nil
 }
 

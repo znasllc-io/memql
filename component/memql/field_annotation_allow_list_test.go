@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"github.com/znasllc-io/memql/component/language/annotations"
 	"strings"
 	"testing"
 
@@ -127,19 +128,27 @@ func TestBuiltinFieldKeepsItsSchemaAnnotations(t *testing.T) {
 }
 
 // TestOneFieldAllowListForEveryBody pins the single-surface property itself.
-// Three separate lists is the state D16 replaced, and the cheapest way back
-// to it is a second literal added beside this one.
+// Three separate hand-written lists is the state D16 replaced; since #5359 the
+// one surface is the annotation registry, and the cheapest way back to three
+// lists is a literal added beside it.
+//
+// The shared core is what a field body means as a SCHEMA -- a description, a
+// default the model reads, an enum, and whether it is required. @autoInjected
+// is deliberately tool-only, so this asserts a shared core rather than three
+// identical sets.
 func TestOneFieldAllowListForEveryBody(t *testing.T) {
-	for _, want := range []string{"required", "description", "default", "enum", "maxLength", "pattern", "minimum", "maximum"} {
-		if !fieldAnnotations[want] {
-			t.Errorf("the field allow-list should hold @%s", want)
+	for _, r := range []annotations.Receiver{annotations.ToolField, annotations.PromptField, annotations.BuiltinField} {
+		for _, want := range []string{"required", "description", "default", "enum"} {
+			if _, ok := annotations.Lookup(r, want); !ok {
+				t.Errorf("%s should accept @%s -- its body IS the schema handed to the model", r, want)
+			}
 		}
-	}
-	// The retired names must NOT be here, or the ledger's refusal is
-	// unreachable from a field body.
-	for _, unwanted := range []string{"unique", "immutable", "enabled", "latestMode"} {
-		if fieldAnnotations[unwanted] {
-			t.Errorf("the field allow-list must not hold retired @%s", unwanted)
+		// The retired names must NOT be reachable from a field body, or the
+		// registry's retirement refusal is unreachable there.
+		for _, unwanted := range []string{"unique", "immutable", "enabled", "latestMode"} {
+			if _, ok := annotations.Lookup(r, unwanted); ok {
+				t.Errorf("%s must not accept retired @%s", r, unwanted)
+			}
 		}
 	}
 }

@@ -91,8 +91,8 @@ func TestRetiredGrammarFormsAbsent(t *testing.T) {
 func TestRegistryBackedConstructsResolve(t *testing.T) {
 	for _, c := range Build().Constructs {
 		_, inRegistry := annotations.ByReceiver[c.AnnotationReceiver]
-		// The concept (empty receiver) and use (import) legitimately key on
-		// "" -- only the concept claims RegistryBacked. use is not backed.
+		// use (the import) keys on "" and is not backed; the concept keys on
+		// "Concept" since memql#5359.
 		if c.RegistryBacked && !inRegistry {
 			t.Errorf("construct %q claims RegistryBacked but receiver %q is not in annotations.ByReceiver",
 				c.Keyword, c.AnnotationReceiver)
@@ -130,10 +130,10 @@ func TestAnnotationsAreProjectionOfRegistry(t *testing.T) {
 		if a.Doc != annotations.Docs[a.Name] {
 			t.Errorf("annotation %q doc diverges from the registry", a.Name)
 		}
-		if len(a.Receivers) == 0 {
-			t.Errorf("annotation %q has no receivers", a.Name)
+		if len(a.Receivers) == 0 && len(a.Fields) == 0 {
+			t.Errorf("annotation %q has no receivers and no fields", a.Name)
 		}
-		for _, r := range a.Receivers {
+		for _, r := range append(append([]string(nil), a.Receivers...), a.Fields...) {
 			if !constructKeywords[r] {
 				t.Errorf("annotation %q lists receiver %q which is not a construct keyword", a.Name, r)
 			}

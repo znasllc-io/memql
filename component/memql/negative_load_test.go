@@ -34,7 +34,10 @@ import (
 // loadMemFS runs the full lint pipeline over a single in-memory file and
 // returns the aggregate error (nil on clean load).
 func loadMemFS(name, body string) error {
-	_, err := dslimports.Load(fstest.MapFS{name: {Data: []byte(body)}})
+	// The fixture's domain declares its line: Load, like boot, reads no file
+	// of a domain without one, and a negative case must fail for its own
+	// defect (memql#5357).
+	_, err := dslimports.Load(withLanguageLines(fstest.MapFS{name: {Data: []byte(body)}}))
 	return err
 }
 
@@ -48,10 +51,10 @@ func TestNegativeLoad_MalformedBodyPerKind(t *testing.T) {
 	cases := []struct{ kind, file, body string }{
 		{"concept", "x/concepts.memql", "@version(\"1.0.0\")\nconcept c {\n  name string @@@ !!! broken\n}\n"},
 		{"shape", "x/shapes.memql", "@row\nshape s {\n  row.id\n  123 456 789\n}\n"},
-		{"spec", "x/specs.memql", "@description(\"d\")\nspec activeRowTrait s {\n  return status ==== \"x\" &&&& true\n}\n"},
-		{"trait", "x/traits.memql", "@description(\"d\")\ntrait t {\n  return active ==== true\n}\n"},
-		{"mutation", "x/mutations.memql", "use cognition.concepts.{ space }\nmutation space m {\n  ?? !! garbage\n}\n"},
-		{"query", "x/queries.memql", "use cognition.concepts.{ space }\nquery space q {\n  filter @@@ !!! broken\n  shape spaceFull\n}\n"},
+		{"spec", "x/specs.memql", "spec activeRowTrait s = row => row.status ==== \"x\" &&&& true\n"},
+		{"trait", "x/traits.memql", "trait t = row => row.active ==== true\n"},
+		{"mutation", "x/mutations.memql", "use cognition.concepts.{ space }\nmutate space m {\n  ?? !! garbage\n}\n"},
+		{"query", "x/queries.memql", "use cognition.concepts.{ space }\nquery space q {\n  filter row => @@@ !!! broken\n  shape spaceFull\n}\n"},
 		{"logic", "x/logic.memql", "logic l {\n  args { event object @required }\n  return 1\n}\n"}, // missing body{}
 		{"automation", "x/automations.memql", "@trigger(event=)\nautomation a {\n  step run { logic doThing { event: event } }\n}\n"},
 		{"policy", "x/policies.memql", "@primary(\"x\")\npolicy p {\n"}, // unterminated brace
@@ -110,7 +113,7 @@ func TestNegativeLoad_TypoTopLevelKeyword(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load accepted a typo'd top-level keyword `conept`")
 	}
-	if !strings.Contains(err.Error(), "did you mean 'concept'") {
+	if !strings.Contains(err.Error(), "did you mean concept?") {
 		t.Errorf("expected a did-you-mean hint for `conept`; got: %v", err)
 	}
 }
@@ -119,7 +122,7 @@ func TestNegativeLoad_TypoTopLevelKeyword(t *testing.T) {
 // a valid shape body line and must surface a diagnostic rather than be
 // swallowed.
 func TestNegativeLoad_ConstructNestedAtWrongDepth(t *testing.T) {
-	const nested = "@row\nshape s {\n  row.id\n  spec activeRowTrait inner { return active == true }\n}\n"
+	const nested = "@row\nshape s {\n  row.id\n  spec activeRowTrait inner = row => row.active == true\n}\n"
 	if err := loadMemFS("x/shapes.memql", nested); err == nil {
 		t.Fatal("Load accepted a spec nested inside a shape body")
 	}
@@ -132,8 +135,8 @@ func TestNegativeLoad_ConstructNestedAtWrongDepth(t *testing.T) {
 // closure and asserts (a) only one construct registers and (b) the drop is
 // surfaced as a WARN the load-clean gate (skipLike) catches.
 func TestNegativeLoad_DuplicateNamesWarnSkip(t *testing.T) {
-	const dup = "spec activeRowTrait sA {\n  return active == true\n}\n" +
-		"spec activeRowTrait sA {\n  return active == false\n}\n"
+	const dup = "spec activeRowTrait sA = row => row.active == true\n" +
+		"spec activeRowTrait sA = row => row.active == false\n"
 	capture := newCaptureHandler()
 	logger := slog.New(capture)
 	files := []baseloader.RawFile{{Path: "x/specs.memql", Content: dup}}

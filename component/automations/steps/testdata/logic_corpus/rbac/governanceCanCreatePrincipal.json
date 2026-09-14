@@ -1,0 +1,1381 @@
+{
+  "construct": "rbac/logic.memql governanceCanCreatePrincipal",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 200,
+              "newRank": 100
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 200,
+            "newRank": 100
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 300,
+              "newRank": 100
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 300,
+            "newRank": 100
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true,
+              "actorRank": 400,
+              "newRank": 100
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true,
+            "actorRank": 400,
+            "newRank": 100
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 100,
+              "newRank": 100
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 100,
+            "newRank": 100
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 200,
+              "newRank": 100
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 200,
+            "newRank": 100
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 300,
+              "newRank": 100
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 300,
+            "newRank": 100
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true,
+              "actorRank": 400,
+              "newRank": 100
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true,
+            "actorRank": 400,
+            "newRank": 100
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "newRoleSlug": "s-newRoleSlug"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-newRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 100,
+              "newRank": 100
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 100,
+            "newRank": 100
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "newRoleSlug": "user"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "newRoleSlug": "user"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 200,
+              "newRank": 100
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 200,
+            "newRank": 100
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "newRoleSlug": "user"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "newRoleSlug": "user"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 300,
+              "newRank": 100
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 300,
+            "newRank": 100
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "newRoleSlug": "user"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "newRoleSlug": "user"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true,
+              "actorRank": 400,
+              "newRank": 100
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true,
+            "actorRank": 400,
+            "newRank": 100
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "newRoleSlug": "user"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "newRoleSlug": "user"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 100,
+              "newRank": 100
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 100,
+            "newRank": 100
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "newRoleSlug": "owner"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "newRoleSlug": "owner"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 200,
+              "newRank": 400
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 200,
+            "newRank": 400
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "newRoleSlug": "owner"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "newRoleSlug": "owner"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 300,
+              "newRank": 400
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 300,
+            "newRank": 400
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "newRoleSlug": "owner"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "newRoleSlug": "owner"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true,
+              "actorRank": 400,
+              "newRank": 400
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true,
+            "actorRank": 400,
+            "newRank": 400
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "newRoleSlug": "owner"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    },
+    "variant 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "newRoleSlug": "owner"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacCanCreatePrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 100,
+              "newRank": 400
+            },
+            "kind": "builtin",
+            "name": "rbacCanCreatePrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 100,
+            "newRank": 400
+          },
+          "builtin": "rbacCanCreatePrincipal"
+        }
+      }
+    }
+  }
+}

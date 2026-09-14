@@ -10,12 +10,15 @@ import (
 // (memql#2801).
 //
 // Every evaluator that can reach an `actor.*` read must bind this, and
-// must bind it UNCONDITIONALLY. Leaving `actor` unbound is not neutral:
-// the evaluator renders an unresolved dotted path as its own path TEXT,
-// so `actor.isClusterOwner != false` evaluated TRUE -- fail-open, on the
-// one field that gates admin work. auth.ActorEnvelopeMap denies on a nil
+// must bind it UNCONDITIONALLY. Leaving `actor` unbound was not neutral:
+// the string evaluator rendered an unresolved dotted path as its own path
+// TEXT, so `actor.isClusterOwner != false` evaluated TRUE -- fail-open, on
+// the one field that gates admin work -- and under the v1 absence table an
+// ABSENT actor would do the same. auth.ActorEnvelopeMap denies on a nil
 // context (owner bits false, identity empty), so binding always is both
-// safer and simpler than guarding on presence.
+// safer and simpler than guarding on presence. RunScope answers an
+// unseeded `actor` with that same denying envelope, as the second guard
+// (run_scope.go).
 //
 // One helper rather than four call-site copies: the bug this closes was
 // four evaluators each inventing their own representation of "no actor"

@@ -2,8 +2,7 @@ package parser
 
 import (
 	"fmt"
-
-	"github.com/znasllc-io/memql/core/baseparser"
+	"github.com/znasllc-io/memql/component/language/annotations"
 )
 
 // ParseExpression parses a single MemQL expression from source text
@@ -38,7 +37,7 @@ func ParseExpression(source string) (ExpressionNode, error) {
 		// and `?.` is a form an author could reasonably believe in, since
 		// `??` is live one character away.
 		if p.current.Literal == "?." {
-			return nil, fmt.Errorf("`?.` is retired -- guard the nil explicitly (`owner != nil && owner.id == ...`) or coalesce with `??` (memql#5375). %s", baseparser.AttributeRewriteHint)
+			return nil, fmt.Errorf("`?.` is retired -- guard the nil explicitly (`owner != nil && owner.id == ...`) or coalesce with `??` (memql#5375). %s", annotations.AttributeRewriteHint)
 		}
 		return nil, fmt.Errorf("unexpected token after expression: %q", p.current.Literal)
 	}

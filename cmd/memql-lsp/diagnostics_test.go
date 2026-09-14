@@ -66,7 +66,7 @@ func newTestServerWithSense(t *testing.T, svc *sense.Service) *server {
 	t.Helper()
 	commonlog.Configure(-4, nil)
 	s := newServer(".", commonlog.GetLogger(lsName))
-	s.setSense(svc)
+	s.setBuild(svc, memql.WorkspaceLanguageLines{})
 	return s
 }
 

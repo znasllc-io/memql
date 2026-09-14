@@ -101,9 +101,9 @@ concept spoke {
 func mountIncomingFixture(t *testing.T) {
 	t.Helper()
 	before := memorynodes.All()
-	memqldsl.RegisterTree(incomingFixtureDomain, fstest.MapFS{
+	memqldsl.RegisterTree(incomingFixtureDomain, withLanguageLine(fstest.MapFS{
 		"concepts.memql": {Data: []byte(incomingFixtureConcepts)},
-	})
+	}))
 	t.Cleanup(func() {
 		memqldsl.UnregisterTree(incomingFixtureDomain)
 		memorynodes.ReplaceAll(before)

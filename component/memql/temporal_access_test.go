@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/tiers"
 )
 
 // temporal_access_test.go proves the temporal-access (`asOf`) visibility
@@ -15,9 +17,9 @@ import (
 //     is deterministic and is NOT marked;
 //   - `asOf` used outside a query (a spec body here) is a load error.
 
-func temporalLoadRegistry() memoryNodes.Registry {
+func temporalLoadRegistry(t *testing.T) memoryNodes.Registry {
 	return newMemoryRegistry(map[string]*memoryNodes.Concept{
-		"v1:cluster:node": {Name: "v1:cluster:node"},
+		"v1:cluster:node": fixtureConcept(t, "v1:cluster:node", "concept node {\n  active  bool\n}\n"),
 	})
 }
 
@@ -36,10 +38,10 @@ func loadTemporalQuery(t *testing.T, name, asOfClause string) *Function {
 		"query node " + name + " {\n" +
 		argsBlock +
 		"  " + asOfClause + "\n" +
-		"  filter  payload.active == true\n" +
+		"  filter  row => row.active == true\n" +
 		"  shape   nodeCard\n" +
 		"}"
-	fn, err := tryParseNewFunctionSyntax(name, "query", src, "cluster.queries.memql", temporalLoadRegistry())
+	fn, err := tryParseNewFunctionSyntax(name, "query", src, "cluster.queries.memql", temporalLoadRegistry(t))
 	require.NoError(t, err)
 	require.NotNil(t, fn)
 	return fn
@@ -65,28 +67,42 @@ func TestQueryNoAsOfNotMarked(t *testing.T) {
 	src := "use cluster.concepts.{ node }\n\n" +
 		"" +
 		"query node queryPlainNodes {\n" +
-		"  filter  payload.active == true\n" +
+		"  filter  row => row.active == true\n" +
 		"  shape   nodeCard\n" +
 		"}"
-	fn, err := tryParseNewFunctionSyntax("queryPlainNodes", "query", src, "cluster.queries.memql", temporalLoadRegistry())
+	fn, err := tryParseNewFunctionSyntax("queryPlainNodes", "query", src, "cluster.queries.memql", temporalLoadRegistry(t))
 	require.NoError(t, err)
 	require.False(t, fn.LatestMode)
 }
 
 // TestSpecRejectsAsOf: a spec body is an atomic boolean predicate, not a
-// temporal read -- `asOf` is a load error.
+// temporal read -- `asOf` is a load error. The path every v1 spec loads
+// through, the shared parser, refuses it with the query-only message a logic
+// body gets, at the author's `asOf` (memql#5364). Lower at the spec-body
+// position stays the backstop for a lambda no declaration parsed -- the
+// context-free parse this test builds one with -- and names asOf for what it
+// is there too, a query clause and not a function, rather than refusing it as
+// a predicate of the wrong arity with `asOf(row)` as the fix.
 func TestSpecRejectsAsOf(t *testing.T) {
-	src := []byte(`@description("Boom: asOf in a spec body.")
-spec specReadsAsOf {
-  asOf(payload.active == true, latest)
-}`)
-	_, err := parseSpecMemQL("test.memql", src)
-	if err == nil {
-		t.Fatal("expected a load error for asOf in a spec body, got nil")
-	}
-	if !strings.Contains(err.Error(), "query-only") {
-		t.Fatalf("expected query-only error, got: %v", err)
-	}
+	src := `@description("Boom: asOf in a spec body.")
+spec thing specReadsAsOf = row => asOf(row.active == true, latest)`
+	_, err := languageParser.ParseSpecDecl(src)
+	require.Error(t, err, "asOf in a spec body must not parse")
+	require.Contains(t, err.Error(), "`asOf` is a query-only clause and cannot appear in a spec body")
+	require.Contains(t, err.Error(), "line 2, column 35:")
+
+	lam, err := languageParser.ParseV1Lambda("row => asOf(row.active == true, latest)")
+	require.NoError(t, err)
+	_, err = Lower(lam.Body, LowerEnv{
+		Position:  tiers.PositionSpecBody,
+		Param:     lam.Params[0],
+		Predicate: (&MemQLEngine{specs: newSpecRegistry()}).predicateLookup(),
+	})
+	require.Error(t, err, "asOf in a spec body must not lower")
+	require.Contains(t, err.Error(), "does not lower in a spec or trait body")
+	require.Contains(t, err.Error(), "asOf(")
+	require.Contains(t, err.Error(), "`asOf` is a query clause, not a function")
+	require.Contains(t, err.Error(), "`asOf args.at`", "the fix is the query's own clause")
 }
 
 // The ruling that authorised `asOf args.X ?? latest` rested on one property:

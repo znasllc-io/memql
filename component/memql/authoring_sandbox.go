@@ -28,6 +28,7 @@ package memql
 // reported as `skipped` rather than silently passing.
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -35,6 +36,7 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/baseloader"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
@@ -139,6 +141,10 @@ type SandboxDiagnostic struct {
 	Column    int `json:"column,omitempty"`
 	EndLine   int `json:"endLine,omitempty"`
 	EndColumn int `json:"endColumn,omitempty"`
+	// Code is the failure's stable rule id when it carries one -- a lowering
+	// refusal's `lower_*` (D24) -- and empty otherwise. Error carries it too,
+	// in brackets at the end; this is the field a client keys on.
+	Code string `json:"code,omitempty"`
 }
 
 // SandboxReport is the bundle-level Gate 1 result.
@@ -174,8 +180,12 @@ var sandboxSupportedKinds = map[string]bool{
 // mutated. Nothing is registered into any live registry, so it is safe to
 // call against a running engine. Returns a per-construct diagnostic report;
 // the bundle is OK only if every non-skipped construct compiled.
+//
+// It takes no engine: an edition-2026 query, spec or trait is lowered against
+// the bundle alone (authoring_lower.go), and what only an engine's registries
+// can decide is left to SandboxCompileBundleWithEngine and to registration.
 func SandboxCompileBundle(constructs []SandboxConstruct) SandboxReport {
-	rep, _ := compileBundle(constructs)
+	rep, _, _ := compileBundleWith(constructs, engineFreeLowering)
 	return rep
 }
 
@@ -344,8 +354,10 @@ func buildCandidateConcept(c SandboxConstruct) (string, *memoryNodes.Concept, er
 	} else {
 		id, err = languageAst.AssembleConceptIdFromDecl(decl)
 	}
-	if err != nil {
-		return "", nil, fmt.Errorf("%s: %v", origin, err)
+	// The registry answers first about an annotation it refuses, as at boot
+	// (conceptIdRefusal).
+	if err = conceptIdRefusal(decl, err); err != nil {
+		return "", nil, fmt.Errorf("%s: %w", origin, err)
 	}
 	if id == "" {
 		return "", nil, fmt.Errorf("%s: concept %q cannot be placed -- the bundle carries no origin path, and a concept's namespace comes from its domain directory (or that directory's namespace.pin) since @namespace was retired in epic memql#5375. Send the document's tree-relative path", origin, c.Name)
@@ -397,7 +409,15 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		}
 		actualName = slice.Name
 		if _, err := dispatchPerConstructParser(slice, origin, concepts); err != nil {
-			return attachPos(fail(d, err.Error()), c, err)
+			msg := err.Error()
+			var lerr *LowerError
+			if errors.As(err, &lerr) {
+				// A filter that does not lower is refused while the query
+				// compiles (memql#5366); print the refusal itself rather
+				// than the converter's walk down to it.
+				msg = lowerDiagnosticMessage(c, err)
+			}
+			return attachPos(fail(d, msg), c, err)
 		}
 
 	case "spec", "trait":
@@ -587,6 +607,9 @@ func attachPos(d SandboxDiagnostic, c SandboxConstruct, err error) SandboxDiagno
 		pos = constructAnchor(c)
 	}
 	d.Line, d.Column, d.EndLine, d.EndColumn = pos.Line, pos.Column, pos.EndLine, pos.EndColumn
+	if code := baseloader.RuleCode(err); code != "" {
+		d.Code = code
+	}
 	return d
 }
 

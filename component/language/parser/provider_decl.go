@@ -1,11 +1,12 @@
 package parser
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	"github.com/znasllc-io/memql/component/language/ast"
-	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // parseProviderDecl parses a struct-form `provider NAME { ... }`
@@ -42,10 +43,12 @@ func (p *Parser) parseProviderDecl(attrs []*ast.Attribute) (*ast.ProviderDecl, e
 		return nil, newParseErrorf(&p.current, "expected provider name, got empty token")
 	}
 
-	// Translate the leading attribute set into typed ProviderDecl
-	// fields. Unknown attributes are tolerated -- a future annotation
-	// will be picked up at the loader/registry layer rather than
-	// rejected here.
+	// Which annotations a provider takes is the registry's answer
+	// (memql#5359); the switch below translates the legal ones into typed
+	// ProviderDecl fields.
+	if err := p.checkAnnotations(annotations.Provider, fmt.Sprintf("provider %q", decl.Name), attrs); err != nil {
+		return nil, err
+	}
 	for _, attr := range attrs {
 		if attr == nil {
 			continue
@@ -60,7 +63,7 @@ func (p *Parser) parseProviderDecl(attrs []*ast.Attribute) (*ast.ProviderDecl, e
 			decl.Vendor = attrStringValue(attr)
 		case "type":
 			return nil, newParseErrorf(&p.current, "provider %q: @type is retired -- write @vendor(%q) instead. A concept's @type is its row kind, and the two shared a spelling for no reason beyond history (memql#5375). %s",
-				decl.Name, attrStringValue(attr), baseparser.AttributeRewriteHint)
+				decl.Name, attrStringValue(attr), annotations.AttributeRewriteHint)
 		case "model":
 			decl.Model = attrStringValue(attr)
 		case "modality":
@@ -78,11 +81,6 @@ func (p *Parser) parseProviderDecl(attrs []*ast.Attribute) (*ast.ProviderDecl, e
 			// register it or resolve auth); on a @base it propagates
 			// to every @extends child.
 			decl.Disabled = true
-		default:
-			if hint, retired := baseparser.RetiredConstructAnnotation(attr.Name); retired {
-				return nil, newParseErrorf(&p.current, "provider %q: @%s is retired -- %s", decl.Name, attr.Name, hint)
-			}
-			return nil, newParseErrorf(&p.current, "provider %q: unknown annotation @%s -- supported: @base, @default, @description, @disabled, @extends, @modality, @model, @vendor", decl.Name, attr.Name)
 		}
 	}
 

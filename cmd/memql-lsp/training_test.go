@@ -29,19 +29,19 @@ const trainingDoc = `use worker.concepts.{ registration }
 
 @description("Promoted, and the local source matches -- trained.")
 query participant trainedQuery {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   participantFull
 }
 
 @description("Promoted, and the local source has moved on -- drifted.")
 query participant driftedQuery {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   participantFull
 }
 
 @description("The cluster has never heard of it -- untrained.")
 query participant untrainedQuery {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   participantFull
 }
 
@@ -427,8 +427,8 @@ func TestTrainingState_UnsavedBufferEditReportsDrifted(t *testing.T) {
 	// A whole-document didChange, with no didSave after it: exactly the state a
 	// buffer is in between a keystroke and Ctrl-S.
 	edited := strings.Replace(trainingDoc,
-		"query participant trainedQuery {\n  filter  isActiveRecord",
-		"query participant trainedQuery {\n  filter  isActiveRecord && status==\"open\"", 1)
+		"query participant trainedQuery {\n  filter  row => isActiveRecord(row)",
+		"query participant trainedQuery {\n  filter  row => isActiveRecord(row) && row.status == \"open\"", 1)
 	if edited == trainingDoc {
 		t.Fatal("the fixture edit matched nothing: this test would assert on an unchanged buffer")
 	}
@@ -474,7 +474,7 @@ capability rolloutScript {
 
 @description("An ordinary query, to prove the catalog is being consulted at all.")
 query participant knownQuery {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
 }
 `
 	openDoc(t, s, uri, doc)
@@ -542,7 +542,7 @@ concept state {
 func TestTrainingState_EmptyHashNeverReadsAsTrained(t *testing.T) {
 	h, s := newInitializedHandler(t)
 	const uri = "file:///w/dsl/worker/queries.memql"
-	const doc = "query participant reservedName {\n  filter  isActiveRecord\n}\n"
+	const doc = "query participant reservedName {\n  filter  row => isActiveRecord(row)\n}\n"
 	openDoc(t, s, uri, doc)
 
 	pushCatalog(t, h, `[{"name":"reservedName","kind":"query","origin":"promoted","sourceHash":""}]`)
@@ -567,7 +567,7 @@ func TestTrainingState_EmptyHashNeverReadsAsTrained(t *testing.T) {
 func TestTrainingState_SeededBecomesEditedWhenTheLocalSourceDiffers(t *testing.T) {
 	h, s := newInitializedHandler(t)
 	const uri = "file:///w/dsl/worker/queries.memql"
-	const doc = "query participant coreQuery {\n  filter  isActiveRecord && status==\"moved\"\n}\n"
+	const doc = "query participant coreQuery {\n  filter  row => isActiveRecord(row) && row.status == \"moved\"\n}\n"
 	openDoc(t, s, uri, doc)
 
 	for _, origin := range []string{"core", "bundle"} {
@@ -633,7 +633,7 @@ func TestTrainingState_UnknownURIReturnsEmptyConstructs(t *testing.T) {
 func TestTrainingState_MalformedBufferStillAnswers(t *testing.T) {
 	h, s := newInitializedHandler(t)
 	const uri = "file:///w/dsl/worker/queries.memql"
-	openDoc(t, s, uri, "query participant finished {\n  filter  isActiveRecord\n}\n\n@description(\"wip\")\nquery partici")
+	openDoc(t, s, uri, "query participant finished {\n  filter  row => isActiveRecord(row)\n}\n\n@description(\"wip\")\nquery partici")
 	pushCatalog(t, h, `[]`)
 
 	states := statesByName(decodeTraining(t, h, uri))

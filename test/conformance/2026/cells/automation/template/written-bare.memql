@@ -1,0 +1,12 @@
+/// A work-spine template: opens a ticket with the title the run names.
+@template
+automation raiseRequestedTicketTemplate {
+  args {
+    /// The ticket's title.
+    title  string!
+  }
+
+  step raise {
+    mutation raiseTicketTemplate (title: args.title)
+  }
+}

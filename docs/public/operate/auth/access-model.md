@@ -574,7 +574,7 @@ row, including the first-party browser-cookie session (`source=oidc_cookie`)
 revoked (memql#4303).
 
 - `authSessionsForSelf` (`dsl/identity/queries.memql`) is the self-scoped
-  read: `userId==actor.userId`, no arguments, live rows only, and a shape
+  read: `row.userId == actor.userId`, no arguments, live rows only, and a shape
   that carries **no token hashes**.
 - `/me/devices` renders it server-side, marks the current session, and
   offers per-session and revoke-all sign-out.

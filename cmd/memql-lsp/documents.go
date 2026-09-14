@@ -42,6 +42,17 @@ func (s *documentStore) get(uri protocol.DocumentUri) (string, bool) {
 	return text, ok
 }
 
+// snapshot returns a copy of every open document's text, by URI.
+func (s *documentStore) snapshot() map[protocol.DocumentUri]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[protocol.DocumentUri]string, len(s.docs))
+	for uri, text := range s.docs {
+		out[uri] = text
+	}
+	return out
+}
+
 // uris returns the URIs of every open document.
 func (s *documentStore) uris() []protocol.DocumentUri {
 	s.mu.RLock()

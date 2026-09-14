@@ -1,0 +1,12 @@
+/// Close a ticket. Once set, closedAt is never taken back to empty.
+@noUnset("closedAt")
+mutate ticket closeTicketNoUnset {
+  args {
+    ticketId  string!
+  }
+  update {
+    id: args.ticketId
+    status: "closed"
+    closedAt: now
+  }
+}

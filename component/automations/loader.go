@@ -11,6 +11,7 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/compiler"
+	"github.com/znasllc-io/memql/component/language/dslclause"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -218,15 +219,18 @@ func invokedLogicNames(a *Automation) []string {
 //   - Can have supporting queries (helpers)
 //   - Cannot have mutations (mutations go in functions/ directory)
 func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
-	// Close the annotation silent-tolerance gap (#2712): automations reach
-	// this dedicated loader instead of the function slicer's gate, so an
-	// unknown / dead / retired annotation would otherwise be silently
-	// dropped. Run the same allow-list + retired-name gate every function
-	// kind uses. The source is already terse-lowered here (unified_loader),
-	// and the helper re-lowers idempotently for any direct caller.
-	if err := memql.ValidateAutomationAnnotations(source); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
+	return l.compileMemQLFrom(source, source, path)
+}
+
+// compileMemQLFrom is compileMemQL for a source derived from authored -- a
+// slice of a file placed on its line there, or a terse automation's lowered
+// longhand compiled against the one-line header the author wrote: a parse
+// error or a rewriter refusal is reported where authored has it (memql#5364).
+func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, error) {
+	// An unknown / dead / retired annotation on an automation (#2712) is
+	// refused by the parser below, against the annotation registry, when
+	// parseResolveCompile parses the lowered source (memql#5359) -- the same
+	// gate every construct runs, so there is no second text scan here.
 
 	// The three raw-text gates below scan a COMMENT-BLANKED view, not the raw
 	// slice (memql#2872).
@@ -281,8 +285,10 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 		return nil, fmt.Errorf("parsing automation preconditions: %w", err)
 	}
 
-	// Parse, resolve concept references, then compile
-	result, err := l.parseResolveCompile(source, path)
+	// Parse, resolve concept references, then compile. The text compileMemQL
+	// was handed is what the author wrote (or its slice): parse positions are
+	// reported against it, not against the precondition-stripped lowering.
+	result, err := l.parseResolveCompile(authored, source, path)
 	if err != nil {
 		return nil, fmt.Errorf("compiling .memql: %w", err)
 	}
@@ -337,6 +343,15 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 		return nil, fmt.Errorf("invalid steps: %w", err)
 	}
 
+	// A v1 automation's expressions are parsed ONCE, here, and cached on the
+	// steps (memql#5367): a parse error or an expression over the M tier's
+	// static cost limit refuses the automation at load rather than at its
+	// first run. Before the args-resolution gate, which reads the parsed
+	// nodes of a v1 automation.
+	if err := prepareExpressions(&automation, l.registry); err != nil {
+		return nil, err
+	}
+
 	// G2 (memql#2364, ADR Decision 3): for args-block automations, reject
 	// shadowing and unresolvable bare identifiers at compile time -- both the
 	// tree loader and the authoring-sandbox hook flow through here, so
@@ -378,9 +393,12 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 	return &automation, nil
 }
 
-// parseResolveCompile parses source, runs concept resolution on the AST, then compiles.
-// This replaces compiler.CompileSource to insert the resolution step.
-func (l *Loader) parseResolveCompile(source, path string) (*compiler.CompileResult, error) {
+// parseAutomationFile lowers an automation slice's struct forms and parses it,
+// with the author's positions (authored) carried in the tokens. It is the
+// parse half of parseResolveCompile, shared with the step-order gate, which
+// reads the step order the compiler is handed. file is nil when the source
+// parses to something other than a file; lowered is the lowered source.
+func parseAutomationFile(authored, source string) (file *languageParser.File, lowered string, err error) {
 	// Apply struct-form rewriters before tokenisation. The automation
 	// loader bypasses compiler.CompileSource (so it can interleave
 	// concept resolution between parse and compile), which means it
@@ -388,25 +406,27 @@ func (l *Loader) parseResolveCompile(source, path string) (*compiler.CompileResu
 	if languageParser.LooksLikeStructLogic(source) {
 		rewritten, err := languageParser.NormaliseLogicSource(source)
 		if err != nil {
-			return nil, fmt.Errorf("logic rewrite: %w", err)
+			return nil, "", languageParser.PositionRewriteError(authored, fmt.Errorf("logic rewrite: %w", err))
 		}
 		source = rewritten
 	}
 	if languageParser.LooksLikeStructAutomation(source) {
 		rewritten, err := languageParser.NormaliseAutomationSource(source)
 		if err != nil {
-			return nil, fmt.Errorf("automation rewrite: %w", err)
+			return nil, "", languageParser.PositionRewriteError(authored, fmt.Errorf("automation rewrite: %w", err))
 		}
 		source = rewritten
 	} else if languageParser.LooksLikeLegacyAutomation(source) {
-		return nil, fmt.Errorf("automation source: `func (Automation) NAME(...)` is retired -- author the struct form: `automation NAME { step <name> { logic <bareName> { ... } } }`. See dsl/v1/automations/v1/identity/expireDelegations/automation.memql for a worked example.")
+		return nil, "", fmt.Errorf("automation source: `func (Automation) NAME(...)` is retired -- author the struct form: `automation NAME { step <name> { logic <bareName> { ... } } }`. See dsl/v1/automations/v1/identity/expireDelegations/automation.memql for a worked example.")
 	}
 
-	// Tokenize
-	lexer := languageParser.NewLexer(source)
+	// Tokenize the lowering with the author's positions carried in it, so a
+	// refusal names the author's line and column; source itself stays
+	// unmarked for the fallback compile below.
+	lexer := languageParser.NewLexer(languageParser.PositionLowering(authored, source))
 	tokens, err := lexer.Tokenize()
 	if err != nil {
-		return nil, fmt.Errorf("lexer error: %w", err)
+		return nil, "", fmt.Errorf("lexer error: %w", err)
 	}
 
 	// Parse
@@ -414,13 +434,26 @@ func (l *Loader) parseResolveCompile(source, path string) (*compiler.CompileResu
 	p.SetDocComments(lexer.DocComments())
 	ast, err := p.Parse()
 	if err != nil {
-		return nil, fmt.Errorf("parser error: %w", err)
+		return nil, "", fmt.Errorf("parser error: %w", err)
 	}
 
-	file, ok := ast.(*languageParser.File)
-	if !ok {
+	f, _ := ast.(*languageParser.File)
+	return f, source, nil
+}
+
+// parseResolveCompile parses source, runs concept resolution on the AST, then compiles.
+// This replaces compiler.CompileSource to insert the resolution step.
+//
+// authored is the text source was derived from; parse positions are reported
+// against it (languageParser.PositionLowering, memql#5364).
+func (l *Loader) parseResolveCompile(authored, source, path string) (*compiler.CompileResult, error) {
+	file, lowered, err := parseAutomationFile(authored, source)
+	if err != nil {
+		return nil, err
+	}
+	if file == nil {
 		// Fall back to CompileSource for non-file AST (shouldn't happen for automations)
-		return compiler.CompileSource(source)
+		return compiler.CompileSource(lowered)
 	}
 
 	// Resolve use declarations if present
@@ -639,10 +672,9 @@ func resolveConceptByTrailingSegment(registry memoryNodes.Registry, name, nsHint
 // which case existence is not checked; every production construction site
 // passes the live registry.
 //
-// Three load-time refusals live here (memql#3614):
-//
-//   - Exactly one @trigger per automation. The parser folds attributes in
-//     order, so a second @trigger silently overwrote the first.
+// Two load-time refusals live here (memql#3614); the third, exactly one
+// @trigger per automation, is the annotation registry's repeat rule at parse
+// time (memql#5359):
 //
 //   - An unrecognised `event=` may not carry concept= / partition=. Those
 //     kwargs are meaningful ONLY to the structured node.* form: for any other
@@ -668,23 +700,6 @@ func normalizeStructuredTriggers(file *languageParser.File, registry memoryNodes
 			continue
 		}
 		autoBody, _ := fd.Body.(*languageParser.AutomationDef)
-
-		// One @trigger, and only one. The parser's attribute fold is
-		// last-write-wins per kwarg, so two triggers produced an automation
-		// wired to whichever one happened to come second -- with the first
-		// discarded and no signal at all.
-		triggers := 0
-		for _, attr := range fd.Attributes {
-			if attr.Name == languageParser.AttrTrigger {
-				triggers++
-			}
-		}
-		if triggers > 1 {
-			return fmt.Errorf("automation %q carries %d @trigger annotations -- exactly one is allowed. "+
-				"The parser folds them in order, so all but the last are silently discarded. "+
-				"Merge them into one @trigger, or split the automation",
-				fd.Name, triggers)
-		}
 
 		for _, attr := range fd.Attributes {
 			if attr.Name != languageParser.AttrTrigger {
@@ -838,6 +853,12 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 	// Validate steps
 	if err := l.validateSteps(automation.Steps); err != nil {
 		return nil, fmt.Errorf("invalid steps: %w", err)
+	}
+
+	// The same one-time parse compileMemQL runs, for a body compiled from
+	// the v1 grammar (memql#5367).
+	if err := prepareExpressions(&automation, l.registry); err != nil {
+		return nil, err
 	}
 
 	// Validate trigger for potential misconfigurations
@@ -1050,28 +1071,31 @@ func extractConceptFromTopic(topic string) string {
 	return concept
 }
 
-// extractConceptFromFilter extracts the concept from a filter like "concept==v1:cognition:participant;...".
-// Returns empty string if no concept filter is found.
+// extractConceptFromFilter extracts the concept a trigger filter narrows to:
+// a top-level conjunct `<param>.concept == "<id>"` of the filter's lambda
+// (`@filter(row => ...)`), read as a tree. Returns "" when there is none, and
+// for a filter that is not a one-parameter lambda -- which PrepareExpressions
+// refuses, so no loaded automation carries one (memql#5367).
 func extractConceptFromFilter(filter string) string {
-	if filter == "" {
+	if filter == "" || !dslclause.OpensLambda(filter) {
 		return ""
 	}
-
-	// Split by semicolons (AND) and commas (OR)
-	// Look for concept== patterns
-	for _, part := range strings.FieldsFunc(filter, func(r rune) bool {
-		return r == ';' || r == ','
-	}) {
-		part = strings.TrimSpace(part)
-
-		// Check for concept== pattern
-		if strings.HasPrefix(part, "concept==") {
-			value := strings.TrimPrefix(part, "concept==")
-			// Remove quotes if present
-			value = strings.Trim(value, `"'`)
-			return value
+	lam, err := languageParser.ParseV1Lambda(filter)
+	if err != nil || len(lam.Params) != 1 {
+		return ""
+	}
+	for _, c := range ast.Conjuncts(lam.Body) {
+		b, ok := c.(*ast.BinaryExpr)
+		if !ok || b.Op != "==" {
+			continue
+		}
+		root, fields, isPath := ast.MemberPath(ast.Unparen(b.Left))
+		lit, isLit := ast.Unparen(b.Right).(*ast.LiteralExpr)
+		if isPath && isLit && root == lam.Params[0] && len(fields) == 1 && fields[0] == "concept" {
+			if s, ok := lit.Value.(string); ok {
+				return s
+			}
 		}
 	}
-
 	return ""
 }

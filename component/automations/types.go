@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/env"
 	"github.com/znasllc-io/memql/core/id"
@@ -86,7 +87,7 @@ type Automation struct {
 	Trigger *TriggerConfig `json:"trigger,omitempty"`
 
 	// Input defines the initial data query for the automation.
-	// The result is available as $input in step expressions.
+	// The result is available as `input` in step expressions.
 	Input *AutomationInput `json:"input,omitempty"`
 
 	// Preconditions are first-class deterministic checks (Epic 4 /
@@ -144,6 +145,11 @@ type Automation struct {
 
 	// Origin tracks where this automation was loaded from (file path).
 	Origin string `json:"-"`
+
+	// exprsPrepared records that PrepareExpressions parsed this automation's
+	// expressions. The executor prepares one that was built in Go before its
+	// first run (ensurePrepared).
+	exprsPrepared bool
 }
 
 // TriggerConfig defines event-based triggers for an automation.
@@ -152,9 +158,14 @@ type TriggerConfig struct {
 	// Supports glob patterns: "graph.node.*", "automation.#", etc.
 	Event string `json:"event"`
 
-	// Filter is an optional condition expression that must be true for the trigger to fire.
-	// Example: "$event.payload.status == 'completed'"
+	// Filter is an optional condition that must be true for the trigger to
+	// fire: a one-parameter lambda over the triggering row.
+	// Example: `row => row.status == "completed"`
 	Filter string `json:"filter,omitempty"`
+
+	// FilterLambda is Filter parsed once (PrepareExpressions): the
+	// `row => <condition>` lambda whose parameter binds the triggering row.
+	FilterLambda *ast.LambdaExpr `json:"-"`
 }
 
 // ArgsSchema is an automation's declared input contract -- the `args { }`
@@ -285,9 +296,9 @@ func (a *Automation) DefinitionFingerprint(engine *id.Engine) string {
 // the automation's steps run, and a miss is the clean repair trigger.
 //
 // A precondition is intentionally minimal and DETERMINISTIC -- it never
-// calls an LLM. The harness evaluates Check via the same boolean
-// evaluator that powers Step.Condition + trigger filters, so the full
-// expression grammar ($event.*, $input.*, $config.*, $var.*, comparisons,
+// calls an LLM. The harness evaluates Check the way it evaluates
+// Step.Condition and trigger filters (EvalCondition over the run), so the
+// full expression grammar (event.*, input.*, config.*, var.*, comparisons,
 // &&/||/!) is available. The deploy spine stays authored/deterministic:
 // preconditions guard it but are never themselves LLM-healed.
 type Precondition struct {
@@ -299,8 +310,8 @@ type Precondition struct {
 
 	// Check is the deterministic boolean expression that must hold for
 	// the automation to proceed. Evaluated false => the precondition
-	// MISSES. Required. Example: "$config.MEMQL_ENV == \"staging\"" or
-	// "$event.payload.imageDigest != \"\"".
+	// MISSES. Required. Example: `config.MEMQL_ENV == "staging"` or
+	// `event.payload.imageDigest != ""`.
 	Check string `json:"check"`
 
 	// Literal optionally names the machine-specific literal this
@@ -314,6 +325,12 @@ type Precondition struct {
 	// Description is human-readable context surfaced in the miss signal
 	// and in the cockpit healed-pack UI (E4.6). Optional.
 	Description string `json:"description,omitempty"`
+
+	// checkExpr is Check parsed once (PrepareExpressions). Unexported: it is
+	// a load-time cache, not part of
+	// the precondition's shape, which healing.PatchPrecondition mirrors field
+	// for field (TestPatchPreconditionShapeParity).
+	checkExpr ast.ExpressionNode
 }
 
 // AutomationInput defines the initial data source for an automation.
@@ -386,7 +403,7 @@ const (
 // Step represents a single operation in an automation.
 type Step struct {
 	// ID is a unique identifier for this step within the automation.
-	// Used to reference results: $steps.{id}.result
+	// Used to reference results: `steps.<id>.result`, or the bare `<id>`.
 	ID string `json:"id"`
 
 	// Name is a human-readable description of the step.
@@ -402,7 +419,7 @@ type Step struct {
 	RetryCount int `json:"retryCount,omitempty"`
 
 	// Condition is an optional expression that must be true for the step to run.
-	// Example: "$steps.classify.result.length > 0"
+	// Example: `classify.count() > 0`
 	Condition string `json:"condition,omitempty"`
 
 	// Configuration for specific step types (only one should be set):
@@ -445,30 +462,35 @@ type Step struct {
 
 	// EmitConceptCard configuration (type: "emitConceptCard")
 	EmitConceptCard *EmitConceptCardStepConfig `json:"emitConceptCard,omitempty"`
+
+	// Exprs holds this step's expressions parsed once at load
+	// (PrepareExpressions): the step executors evaluate them with EvalExpr,
+	// and read every string leaf of its value maps as a literal. Nil for a
+	// step that was never prepared, which the executors refuse.
+	Exprs *StepExprs `json:"-"`
 }
 
 // QueryStepConfig configures a query step.
 type QueryStepConfig struct {
-	// Query is the MemQL expression to execute.
-	// Supports $ expressions for data substitution.
+	// Query is the step's expression: a construct call the engine runs, or
+	// any other expression, evaluated in process.
 	Query string `json:"query"`
 }
 
-// MutationStepConfig configures a mutation (insert) step.
-// Unlike QueryStepConfig, this stores structured data that is evaluated at runtime,
-// allowing dynamic expressions in the payload to be properly resolved before
-// building the final JSON for the MemQL engine.
+// MutationStepConfig configures a mutation (insert) step. Its payload is
+// structured data whose leaves are evaluated at run time, before the insert
+// for the MemQL engine is built.
 type MutationStepConfig struct {
 	// Concept is the target concept name (e.g., "v1:identity:user").
 	Concept string `json:"concept"`
 
-	// ID is an optional explicit ID for the record.
-	// Can be a literal string or an expression like "$event.payload.subject".
+	// ID is an optional explicit ID for the record: a string literal, or an
+	// expression leaf such as `{"$expr": "event.payload.subject"}`
+	// (value_leaves.go).
 	ID string `json:"id,omitempty"`
 
-	// Payload is the mutation payload as a structured map.
-	// Values can be literals or expression strings (prefixed with $).
-	// The evaluator will resolve all expressions at runtime.
+	// Payload is the mutation payload as a structured map. Each leaf is a
+	// literal or an expression leaf, resolved at run time.
 	Payload map[string]any `json:"payload"`
 
 	// Parent is an optional parent reference for relationship hints.
@@ -476,12 +498,16 @@ type MutationStepConfig struct {
 
 	// AliasOf is an optional alias reference for relationship hints.
 	AliasOf string `json:"aliasOf,omitempty"`
+
+	// leaves are the value leaves carried in id / parent / aliasOf when they
+	// are not strings (value_leaves.go).
+	leaves leafFields
 }
 
 // ShapeStepConfig configures a shape transformation step.
 type ShapeStepConfig struct {
-	// Source is a $ expression pointing to the input data.
-	// Example: "$input", "$steps.fetch.result"
+	// Source is an expression naming the input data.
+	// Example: `input`, `fetch`
 	Source string `json:"source"`
 
 	// Template is the shape template as a JSON object.
@@ -495,17 +521,17 @@ type ShapeStepConfig struct {
 
 // WebhookStepConfig configures an HTTP request step.
 type WebhookStepConfig struct {
-	// URL is the endpoint to call. Supports $ expressions.
+	// URL is the endpoint to call: a string literal or an expression leaf.
 	URL string `json:"url"`
 
 	// Method is the HTTP method. Defaults to POST.
 	Method string `json:"method,omitempty"`
 
-	// Headers to include in the request. Values support $ expressions.
+	// Headers to include in the request: string literals here, and an
+	// expression-valued header lifted into leaves.
 	Headers map[string]string `json:"headers,omitempty"`
 
-	// Body is a static or templated JSON body.
-	// Supports $ expressions for dynamic values.
+	// Body is the JSON body: each leaf a literal or an expression leaf.
 	Body map[string]any `json:"body,omitempty"`
 
 	// IncludeResult sends the previous step's result as the body.
@@ -517,17 +543,22 @@ type WebhookStepConfig struct {
 
 	// Timeout for the request. Defaults to 30s.
 	Timeout string `json:"timeout,omitempty"`
+
+	// leaves are the value leaves carried in url and the header values when
+	// they are not strings (value_leaves.go).
+	leaves leafFields
 }
 
 // EventStepConfig configures an event publication step.
 type EventStepConfig struct {
-	// Topic is the event topic. Supports $ expressions.
+	// Topic is the event topic: a string literal or an expression leaf.
 	Topic string `json:"topic"`
 
 	// Kind is the event kind. Defaults to "message".
 	Kind string `json:"kind,omitempty"`
 
-	// Payload is the event payload. Supports $ expressions.
+	// Payload is the event payload: each leaf a literal or an expression
+	// leaf.
 	Payload map[string]any `json:"payload,omitempty"`
 
 	// IncludeResult includes a step's result in the payload.
@@ -535,6 +566,10 @@ type EventStepConfig struct {
 
 	// ResultFrom specifies which step's result to include.
 	ResultFrom string `json:"resultFrom,omitempty"`
+
+	// leaves are the value leaves carried in topic when it is not a string
+	// (value_leaves.go).
+	leaves leafFields
 }
 
 // FunctionStepConfig configures a MemQL function invocation.
@@ -579,17 +614,17 @@ type AutomationStepConfig struct {
 
 // ForEachStepConfig configures iteration over a collection.
 type ForEachStepConfig struct {
-	// Source is a $ expression pointing to the collection.
-	// Example: "$input", "$steps.classify.result"
+	// Source is an expression naming the collection.
+	// Example: `input`, `classify`
 	Source string `json:"source"`
 
 	// Filter is an optional condition to filter items.
-	// Example: "item.classification == 'hot'"
+	// Example: `item.classification == "hot"`
 	// The current item is available as "item".
 	Filter string `json:"filter,omitempty"`
 
 	// As defines the variable name for the current item.
-	// Defaults to "item". Available as $item or ${as} in nested steps.
+	// Defaults to "item". Available under that name in nested steps.
 	As string `json:"as,omitempty"`
 
 	// Do contains the steps to execute for each item.
@@ -617,7 +652,7 @@ type ParallelStepConfig struct {
 // SwitchStepConfig configures conditional branching.
 type SwitchStepConfig struct {
 	// Expression is evaluated to determine which case to execute.
-	// Example: "$item.classification"
+	// Example: `item.classification`
 	Expression string `json:"expression"`
 
 	// Cases maps expression values to steps.
@@ -638,7 +673,7 @@ type SwitchCase struct {
 
 // DetectLeadSignalStepConfig configures a detect lead signal step.
 type DetectLeadSignalStepConfig struct {
-	// Source is a $ expression pointing to the text to analyze.
+	// Source is an expression naming the text to analyze.
 	Source string `json:"source"`
 
 	// CustomIntentKeywords allows adding deployment-specific intent signals.
@@ -655,16 +690,20 @@ type EmitConceptCardStepConfig struct {
 	CardType string `json:"cardType"`
 
 	// PartitionId is the space to emit the card to.
-	// Supports $ expressions.
+	// A string literal or an expression leaf (value_leaves.go).
 	PartitionId string `json:"partitionId"`
 
 	// ConceptRef is a reference to the created concept (e.g., the lead ID).
-	// Supports $ expressions.
+	// A string literal or an expression leaf (value_leaves.go).
 	ConceptRef string `json:"conceptRef"`
 
 	// Data contains fields to display on the card.
-	// Values support $ expressions.
+	// Each value is a literal or an expression leaf.
 	Data map[string]any `json:"data,omitempty"`
+
+	// leaves are the value leaves carried in cardType / partitionId /
+	// conceptRef when they are not strings (value_leaves.go).
+	leaves leafFields
 }
 
 // StepResult contains the outcome of executing a step.

@@ -49,9 +49,7 @@ func designJSON(t *testing.T, deps []designDependency) string {
 // A real, parseable spec source the catalog key + matcher can ingest.
 const specCandidateSource = `
 @description("Matches active digest items")
-spec activeRowTrait specDigestItemActive {
-  return active == true
-}`
+spec activeRowTrait specDigestItemActive = row => row.active == true`
 
 // A real, parseable query source.
 const queryCandidateSource = `use cognition.concepts.{ space }
@@ -59,7 +57,7 @@ use cognition.shapes.{ spaceCard }
 
 @description("List the owner's active spaces")
 query space queryOwnerActiveSpaces {
-  filter  payload.ownerUserId == actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   spaceCard
 }`
 

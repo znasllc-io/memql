@@ -1,9 +1,14 @@
 package campaigns
 
 import (
+	"context"
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
+
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql"
 )
 
 // delivery_id_test.go -- the drift gate on a derivation the DSL owns and Go
@@ -23,20 +28,26 @@ import (
 // assert it still has the shape the Go assumes. That is the one check
 // available that is not a copy of the thing being checked.
 
-// TestDeliveryIdDerivationMatchesTheMutation reads the actual mutation and
-// asserts each element the Go depends on.
+// TestDeliveryIdDerivationMatchesTheMutation reads the actual mutation,
+// asserts each element the Go depends on, and then EVALUATES it.
 //
 // It asserts on the SHAPE rather than on a byte-for-byte string, because the
 // file is formatted and reflowed by tooling: what matters is that it is still
-// hash(concat(hash(canonicalId(campaignId, campaign)),
-// hash(canonicalId(recipientId, recipient)))) in that ORDER, per-part hashed.
+// hash(hash(canonicalId(campaignId, "campaign")) +
+// hash(canonicalId(recipientId, "recipient"))) in that ORDER, per-part hashed.
+// That is the edition-2026 spelling the codemod wrote at the flip -- `+` for
+// concat(), the concept names quoted -- and a spelling change is not a
+// derivation change. So the assertion that matters is the second one: the
+// expression as the file writes it, parsed and evaluated by the engine's
+// evaluator (EvalExpr), derives the ids deliveryRowID derives, and one of them
+// is pinned as a literal so the two cannot move together.
 func TestDeliveryIdDerivationMatchesTheMutation(t *testing.T) {
 	src := campaignsDSL(t, "mutations.memql")
 	block := mutationBlock(t, src, "mutation delivery recordCampaignDelivery")
 
 	idExpr := collapsedExprAt(t, block, "id:")
-	const want = "id: hash(concat( hash(canonicalId(args.campaignId, campaign)), " +
-		"hash(canonicalId(args.recipientId, recipient)) ))"
+	const want = `id: hash( hash(canonicalId(args.campaignId, "campaign")) + ` +
+		`hash(canonicalId(args.recipientId, "recipient")) )`
 	if idExpr != want {
 		t.Fatalf("recordCampaignDelivery's derived id has changed.\n got: %s\nwant: %s\n\n"+
 			"component/campaigns/delivery_id.go re-implements this expression in Go so a tracking token "+
@@ -44,6 +55,52 @@ func TestDeliveryIdDerivationMatchesTheMutation(t *testing.T) {
 			"v1:campaigns:engagementEvent would reference a row that does not exist, the counts would "+
 			"still tally, and nothing would raise an error. Update deliveryRowID to match, or stop "+
 			"deriving the id in Go.", idExpr, want)
+	}
+
+	expr, err := languageParser.ParseV1Expression(strings.TrimPrefix(idExpr, "id: "))
+	if err != nil {
+		t.Fatalf("the id expression does not parse: %v", err)
+	}
+	// canonicalId resolves its quoted short name to the concept the file
+	// imports; the canonicalisation itself is the one deliveryRowID uses, so
+	// what is compared below is the derivation's STRUCTURE -- which parts are
+	// hashed, in which order, joined how.
+	concepts := map[string]string{"campaign": campaignConcept, "recipient": recipientConcept}
+	opts := memql.EvalOptions{CanonicalID: func(_ context.Context, value any, concept string) (string, error) {
+		c, ok := concepts[concept]
+		if !ok {
+			return "", fmt.Errorf("canonicalId names %q, which is neither campaign nor recipient", concept)
+		}
+		return canonicalIDFor(c, fmt.Sprint(value)), nil
+	}}
+	derive := func(campaignID, recipientID string) string {
+		t.Helper()
+		v, err := memql.EvalExpr(context.Background(), expr,
+			memql.MapScope{"args": map[string]any{"campaignId": campaignID, "recipientId": recipientID}}, opts)
+		if err != nil {
+			t.Fatalf("evaluating the id for (%q, %q): %v", campaignID, recipientID, err)
+		}
+		id, ok := v.(string)
+		if !ok {
+			t.Fatalf("the id for (%q, %q) is %T, not text", campaignID, recipientID, v)
+		}
+		return id
+	}
+	for _, pair := range [][2]string{
+		{"camp-1", "rec-1"},
+		{"v1:campaigns:campaign:camp-1", "v1:campaigns:recipient:rec-1"},
+		{"camp-1", "v1:campaigns:recipient:rec-1"},
+		{"a:b", "c"},
+	} {
+		if got, want := derive(pair[0], pair[1]), deliveryRowID(pair[0], pair[1]); got != want {
+			t.Errorf("for (%q, %q) the mutation derives %s and deliveryRowID derives %s -- every "+
+				"engagement event for this pair would reference a delivery row that does not exist",
+				pair[0], pair[1], got, want)
+		}
+	}
+	const pinned = "9314634c0d8d2e9e189563b1974d63bc197561262375106aac19b00aeb615773"
+	if got := deliveryRowID("camp-1", "rec-1"); got != pinned {
+		t.Errorf("deliveryRowID(camp-1, rec-1) = %s, want the id the delivery rows already written carry, %s", got, pinned)
 	}
 }
 

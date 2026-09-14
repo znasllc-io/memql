@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -467,6 +468,17 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 			if err != nil {
 				return nil, err
 			}
+			// A body with plan constants must be expanded for THIS call
+			// before anything executes it -- the SpecReferenceExpression arm
+			// of expandExpressionWithArgs says why. Every other body is
+			// returned as registered, as it always was.
+			if v.specBodyNeedsExpansion(key, map[string]struct{}{}) {
+				inlined, err := v.expandExpressionWithArgs(cloneExpressionNode(spec.Expr), map[string]any{})
+				if err != nil {
+					return nil, fmt.Errorf("spec %q: %w", key, err)
+				}
+				return inlined, nil
+			}
 			return cloneExpressionNode(spec.Expr), nil
 		}
 		return nil, fmt.Errorf("function %q not found", key)
@@ -671,6 +683,17 @@ func (v *functionValidator) substituteArgRefsAndCallArgs(expr ExpressionNode, ar
 		// the first place. No shipped logic currently returns a mutation leaf,
 		// so this is not a live failure; it is the next instance of the class,
 		// pre-empted rather than left for whoever writes that construct.
+		if pc, isV1 := val.(*PlanConstExpression); isV1 {
+			// A v1 logic body's argument expression (logic_body_v1.go).
+			value, present, err := evaluateLogicArgumentV1(pc, args, v.ambient)
+			if err != nil {
+				return nil, fmt.Errorf("argument %q of mutation-leaf call %q: %w", k, call.Name, err)
+			}
+			if present {
+				newArgs[k] = value
+			}
+			continue
+		}
 		folded, err := foldArgExpression(substituteArgRefValue(val, args, v.ambient), args)
 		if err != nil {
 			return nil, fmt.Errorf("argument %q of mutation-leaf call %q: %w", k, call.Name, err)
@@ -1105,6 +1128,18 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		if args != nil && len(node.Args) > 0 {
 			folded := make(map[string]any, len(node.Args))
 			for k, val := range node.Args {
+				if pc, isV1 := val.(*PlanConstExpression); isV1 {
+					// A v1 logic body's argument expression, evaluated here
+					// where the call's arguments are known (logic_body_v1.go).
+					value, present, err := evaluateLogicArgumentV1(pc, args, v.ambient)
+					if err != nil {
+						return nil, fmt.Errorf("argument %q of call %q: %w", k, node.Name, err)
+					}
+					if present {
+						folded[k] = value
+					}
+					continue
+				}
 				fv, err := foldArgExpression(val, args)
 				if err != nil {
 					return nil, fmt.Errorf("argument %q of call %q: %w", k, node.Name, err)
@@ -1121,6 +1156,13 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		if err != nil {
 			return nil, err
 		}
+		// A plan constant on the LEFT that decides the operator ends the
+		// expansion here, and the right operand is NOT expanded: that is what
+		// makes `args.x == nil || row.f == args.x` safe to call with `args.x`
+		// absent. See planConstantDecides.
+		if decided, ok := planConstantDecides(node.Op, left); ok {
+			return decided, nil
+		}
 		right, err := v.expandExpressionWithArgs(node.Right, args)
 		if err != nil {
 			return nil, err
@@ -1135,11 +1177,73 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		if right == nil {
 			return left, nil
 		}
+		// The identities over a plan constant (TRUE && x -> x, x || FALSE ->
+		// x, ...), so a folded guard reaches SQL as the term it guards or as
+		// a constant, never as a disjunction with a constant in it.
+		if folded, ok := foldPlanConstantLogical(node.Op, left, right); ok {
+			return folded, nil
+		}
 		return &LogicalExpression{
 			Op:    node.Op,
 			Left:  left,
 			Right: right,
 		}, nil
+
+	case *NotExpression:
+		target, err := v.expandExpressionWithArgs(node.Target, args)
+		if err != nil {
+			return nil, err
+		}
+		// A NOT whose operand a when-guard dropped is dropped with it: the
+		// guard's rule is "as if never written", and a negation of nothing is
+		// nothing -- NOT "true", which is what negating an absent conjunct
+		// would otherwise have to mean.
+		if target == nil {
+			return nil, nil
+		}
+		// !TRUE -> FALSE and !FALSE -> TRUE, keeping the plan-constant mark
+		// so the operator around it can fold over the result.
+		if c, ok := target.(*constantBoolExpression); ok {
+			return &constantBoolExpression{value: !c.value, planConstant: c.planConstant}, nil
+		}
+		return &NotExpression{Target: target}, nil
+
+	case *PlanConstExpression:
+		// PREDICATE position. See expr_plan_const.go for the replacement
+		// rule, and for why an unwired evaluator refuses rather than guesses.
+		value, err := evaluatePlanConstant(context.Background(), node, planConstantBindings(args, v.ambient))
+		if err != nil {
+			return nil, err
+		}
+		return planConstantPredicate(node, value)
+
+	case *ArrayPredicateExpression:
+		// The element predicate is a predicate like any other: its plan
+		// constants fold (`row.items.any(i => i.qty > args.min)`) and its
+		// `args.X` values substitute, against the same call.
+		out := cloneExpressionNode(node).(*ArrayPredicateExpression)
+		if node.Pred != nil {
+			pred, err := v.expandExpressionWithArgs(node.Pred, args)
+			if err != nil {
+				return nil, err
+			}
+			if pred == nil {
+				// Only a when-guard drops a predicate, and edition 2026 has
+				// none; an element predicate that expanded to nothing has no
+				// "as if never written" reading (any() of nothing?), so it is
+				// refused rather than guessed.
+				return nil, fmt.Errorf("the element predicate of %s expanded to nothing", canonicalExpression(node))
+			}
+			out.Pred = pred
+		}
+		if pc, ok := node.CountValue.(*PlanConstExpression); ok {
+			value, err := evaluatePlanConstant(context.Background(), pc, planConstantBindings(args, v.ambient))
+			if err != nil {
+				return nil, err
+			}
+			return foldPlanConstantCount(out, value)
+		}
+		return out, nil
 
 	case *RelationshipExpression:
 		target, err := v.expandExpressionWithArgs(node.Target, args)
@@ -1170,6 +1274,23 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		return &PaginateExpression{
 			Target: target,
 			Limit:  node.Limit,
+		}, nil
+
+	case *RefineExpression:
+		// The refine clause (memql#5366). Its target expands like any other;
+		// its lambda is evaluated in process at execution, per row, and what
+		// it may read besides the row -- the call's arguments, the actor,
+		// the clock, config -- is captured HERE, the one point the arguments
+		// are known, with the same bindings a plan constant is evaluated
+		// against (planConstantBindings), so the two read one envelope.
+		target, err := v.expandExpressionWithArgs(node.Target, args)
+		if err != nil {
+			return nil, err
+		}
+		return &RefineExpression{
+			Target:   target,
+			Lambda:   node.Lambda,
+			Bindings: planConstantBindings(args, v.ambient),
 		}, nil
 
 	case *SelectExpression:
@@ -1351,6 +1472,19 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		return &ArgRefExpression{Path: node.Path}, nil
 
 	case *ComparisonExpression:
+		// A plan constant in the comparison's VALUE position
+		// (`row.expiresAt < addDuration(now, "P1D")`, `row.f == args.x` when
+		// the lowering made `args.x` one): evaluated here, once per call, and
+		// the comparison rebuilt around the value -- with an absent value
+		// decided by the absence table rather than handed to the compilers.
+		// See foldPlanConstantComparison.
+		if pc, ok := node.Value.(*PlanConstExpression); ok {
+			value, err := evaluatePlanConstant(context.Background(), pc, planConstantBindings(args, v.ambient))
+			if err != nil {
+				return nil, err
+			}
+			return v.foldPlanConstantComparison(node, value, args)
+		}
 		// A caller argument on the LEFT of the comparison (memql#4814).
 		//
 		// The arm below binds `<row field> == args.X`, which is how every
@@ -1452,9 +1586,34 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		// Clone the comparison as-is
 		return cloneExpressionNode(expr), nil
 
+	case *SpecReferenceExpression:
+		// A spec whose body carries a plan constant is INLINED here, per
+		// call, and every other spec is left as a reference for the executor
+		// to inline, exactly as before.
+		//
+		// The executor inlines spec.Expr AS REGISTERED (tryCompileCombinedFilter
+		// and expandSpecReferences both read the registry), and a registered
+		// body still holds its plan constants unevaluated -- `now` has no
+		// value until there is a call to be "now" for. So such a spec can
+		// only run if the call that uses it expands it. It is expanded with
+		// an EMPTY argument map, not the enclosing call's: a spec takes no
+		// arguments, and binding the caller's would make `args.x` inside a
+		// spec body mean whatever the query happened to be called with.
+		if v.specBodyNeedsExpansion(node.Name, map[string]struct{}{}) {
+			spec, err := v.specs.Get(node.Name)
+			if err != nil {
+				return nil, fmt.Errorf("spec reference %q: %w", node.Name, err)
+			}
+			inlined, err := v.expandExpressionWithArgs(cloneExpressionNode(spec.Expr), map[string]any{})
+			if err != nil {
+				return nil, fmt.Errorf("spec %q: %w", node.Name, err)
+			}
+			return inlined, nil
+		}
+		return cloneExpressionNode(expr), nil
+
 	default:
-		// For other expression types (SpecReferenceExpression, etc.),
-		// just clone and return
+		// For other expression types, just clone and return
 		return cloneExpressionNode(expr), nil
 	}
 }
@@ -1616,6 +1775,8 @@ func boundConceptForPlanRoot(expr ExpressionNode, functions *FunctionRegistry) s
 		return boundConceptForPlanRoot(node.Target, functions)
 	case *PaginateExpression:
 		return boundConceptForPlanRoot(node.Target, functions)
+	case *RefineExpression:
+		return boundConceptForPlanRoot(node.Target, functions)
 	case *SelectExpression:
 		return boundConceptForPlanRoot(node.Target, functions)
 	case *TimestampExpression:
@@ -1668,6 +1829,8 @@ func queryFunctionNameForPlanRoot(expr ExpressionNode, functions *FunctionRegist
 		return queryFunctionNameForPlanRoot(node.Target, functions)
 	case *PaginateExpression:
 		return queryFunctionNameForPlanRoot(node.Target, functions)
+	case *RefineExpression:
+		return queryFunctionNameForPlanRoot(node.Target, functions)
 	case *SelectExpression:
 		return queryFunctionNameForPlanRoot(node.Target, functions)
 	case *TimestampExpression:
@@ -1702,6 +1865,8 @@ func hasFunctionCalls(expr ExpressionNode) bool {
 		return hasFunctionCalls(node.Target)
 	case *PaginateExpression:
 		return hasFunctionCalls(node.Target)
+	case *RefineExpression:
+		return hasFunctionCalls(node.Target)
 	case *SelectExpression:
 		return hasFunctionCalls(node.Target)
 	case *TimestampExpression:
@@ -1714,7 +1879,14 @@ func hasFunctionCalls(expr ExpressionNode) bool {
 		return hasFunctionCalls(node.Target)
 	case *ConditionalFilterExpression:
 		return hasFunctionCalls(node.Filter)
+	case *NotExpression:
+		return hasFunctionCalls(node.Target)
+	case *ArrayPredicateExpression:
+		return hasFunctionCalls(node.Pred)
 	default:
+		// A PlanConstExpression carries a v1 AST, not IR: any call inside it
+		// is a catalog function the in-process evaluator runs, never a
+		// registered construct to expand, so it has none of these.
 		return false
 	}
 }

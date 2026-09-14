@@ -13,9 +13,15 @@
 //
 // Subcommands:
 //
-//	gen-grammar <out.json>   generate the TextMate grammar from dslspec and write
-//	                         it to <out.json> (regenerate on every GrammarVersion
-//	                         bump); see internal/grammar.
+//	gen-grammar <out.json>          generate the TextMate grammar from dslspec
+//	                                and write it to <out.json> (regenerate on
+//	                                every GrammarVersion bump); see
+//	                                internal/grammar.
+//	gen-language-config <out.json>  generate the VS Code language configuration
+//	                                from dslspec's punctuation table and write it
+//	                                to <out.json>; see internal/grammar.
+//
+// `make vscode-grammar` runs both.
 package main
 
 import (
@@ -34,8 +40,13 @@ func main() {
 
 func run(args []string) int {
 	// Subcommands are dispatched before the server flag set.
-	if len(args) > 0 && args[0] == "gen-grammar" {
-		return runGenGrammar(args[1:])
+	if len(args) > 0 {
+		switch args[0] {
+		case "gen-grammar":
+			return runGenGrammar(args[1:])
+		case "gen-language-config":
+			return runGenLanguageConfig(args[1:])
+		}
 	}
 
 	fs := flag.NewFlagSet(lsName, flag.ContinueOnError)

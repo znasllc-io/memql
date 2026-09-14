@@ -210,6 +210,18 @@ func specKeywordDoc(name string) string {
 	return ""
 }
 
+// specClauseDoc returns the spec's doc for a body clause keyword (`filter`,
+// `step`, ...), or "" when the spec does not document it. Distinct from
+// specKeywordDoc, which answers `shape` with the shape CONSTRUCT's doc.
+func specClauseDoc(name string) string {
+	for _, kw := range dslSpec.Keywords {
+		if kw.Kind == "clause" && kw.Name == name {
+			return kw.Doc
+		}
+	}
+	return ""
+}
+
 // specBlockContextLabel maps an enclosing construct + its innermost
 // named block to the dslspec NextRule Context label for that block
 // (#2628). The block labels have existed in nextrules.go since the

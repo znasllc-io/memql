@@ -27,7 +27,7 @@
 // validateRbacBaseRoleImmutable does for predefined roles.
 //
 // Per-row authz tier: owned. A healed override is owned by the user whose
-// construct was healed; every read gates on ownerUserId==actor.userId and
+// construct was healed; every read gates on `row.ownerUserId == actor.userId` and
 // every write stamps ownerUserId from actor.userId server-side. The repair
 // loop + validation flow run as that user (or a system actor for embedded
 // base materialization). Multi-node consistent: overrides live in the
@@ -46,7 +46,7 @@ use identity.concepts.{ user }
 /// validateHealingBaseImmutable Go guard rejects any non-system-actor write to it, so an override
 /// can never be forged as base to escape the override-is-data contract); a tier=overlay row is the
 /// healed data an actor may add. Per-row authz: owned -- ownerUserId is stamped from actor.userId
-/// on every write and every read gates on ownerUserId==actor.userId. Multi-node consistent via the
+/// on every write and every read gates on `row.ownerUserId == actor.userId`. Multi-node consistent via the
 /// shared Postgres + the cache.invalidate broadcast.
 @displayCard(primary="baseConstructId", secondary="tier", tertiary="reason", status="validationStatus")
 @rowAuthz(owner="ownerUserId")

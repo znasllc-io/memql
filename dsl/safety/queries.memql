@@ -4,7 +4,7 @@
 /// Command Safety view will layer more targeted queries on top.
 @unbounded("safety classification catalog -- a bounded config set consumed whole")
 query classification allSafetyClassifications {
-  filter  surface!=""
+  filter  row => row.surface != ""
   shape   classificationFull
 }
 
@@ -19,7 +19,7 @@ query approvalRequest activeApprovalsByCorrelationKey {
   args {
     correlationKey string!
   }
-  filter  correlationKey==args.correlationKey && status!="denied" && status!="expired"
+  filter  row => row.correlationKey == args.correlationKey && row.status != "denied" && row.status != "expired"
   shape   approvalRequestFull
 }
 
@@ -29,7 +29,7 @@ query approvalRequest approvalRequestById {
   args {
     id string!
   }
-  filter  row.id==args.id
+  filter  row => row.id == args.id
   shape   approvalRequestFull
 }
 
@@ -38,6 +38,6 @@ query approvalRequest approvalRequestById {
 /// queries on top.
 @unbounded("output screening catalog -- a bounded config set consumed whole")
 query outputScreening allOutputScreenings {
-  filter  contentType!=""
+  filter  row => row.contentType != ""
   shape   outputScreeningFull
 }

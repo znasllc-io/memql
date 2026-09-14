@@ -112,7 +112,9 @@ func (e *ParallelExecutor) Execute(ctx context.Context, step *automations.Step, 
 						"condition", branchCopy.Condition,
 					)
 				}
-				shouldRun, err := branchCtx.Evaluator.EvaluateCondition(branchCopy.Condition)
+				// StepCondition evaluates the condition parsed at load
+				// (branchCopy is a copy, so it carries the parsed Exprs).
+				shouldRun, err := branchCtx.Evaluator.StepCondition(ctx, &branchCopy)
 				if err != nil {
 					if stepCtx.Logger != nil {
 						stepCtx.Logger.Warn("step condition evaluation failed",

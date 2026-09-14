@@ -17,7 +17,7 @@
 /// storage gate (core/id.ValidateShortId). hash() gives a bare slug -- the form the gate names,
 /// derived identically on every replica.
 ///
-/// UNPREFIXED, per authoring-rules.md section 20: `concat("desktop-", hash(...))` would repeat
+/// UNPREFIXED, per authoring-rules.md section 20: `"desktop-" + hash(...)` would repeat
 /// in the shortId what the canonical id already says one colon to its left. (The gate that
 /// rejects that, TestNoShortIdConceptPrefix, works off a hardcoded list of known prefixes and
 /// would not have caught `desktop-`; the rule is the rule regardless of whether a list has

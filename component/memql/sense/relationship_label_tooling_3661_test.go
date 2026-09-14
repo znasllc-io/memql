@@ -277,105 +277,98 @@ func TestRelationshipAxesDiagnosticsStayQuietOnValidInput(t *testing.T) {
 
 // TestRelationshipWrapperSignatureHelp covers the traversal half. Before
 // memql#3661 the wrappers were invisible to sense entirely -- absent from
-// BuiltinFunctions, so SignatureHelp returned nil on `references(` -- and
-// nothing in the stack could express two arities anyway.
+// BuiltinFunctions, so SignatureHelp returned nil on `references(`.
+//
+// memql#3661 then modelled each traversal as TWO hand-kept readings, because
+// nothing could say "optional". The v1 catalog (memql#5365) says it: every
+// traversal is ONE signature whose leading `as` label is an optional
+// parameter, and the active parameter skips the label when the call leaves it
+// out. The properties below are the ones #3661 pinned, restated for that shape.
 func TestRelationshipWrapperSignatureHelp(t *testing.T) {
 	svc := New(nil)
 
-	t.Run("both readings are offered for a labelled function", func(t *testing.T) {
+	t.Run("the signature states the optional leading label", func(t *testing.T) {
 		src := "references("
 		res := svc.SignatureHelp(src, 1, len(src)+1)
 		if res == nil {
 			t.Fatal("no signature help for references( -- the traversal surface is invisible again")
 		}
-		if len(res.Signatures) != 2 {
-			t.Fatalf("expected both readings, got %d: %+v", len(res.Signatures), res.Signatures)
+		if len(res.Signatures) != 1 {
+			t.Fatalf("expected the catalog's one signature, got %d: %+v", len(res.Signatures), res.Signatures)
 		}
-		if res.Signatures[0].Label != "references(expr)" {
-			t.Errorf("the unscoped reading should come first, got %q", res.Signatures[0].Label)
+		sig := res.Signatures[0]
+		if sig.Label != "references(label? string, match lambda) rows" {
+			t.Errorf("signature = %q, want the catalog's", sig.Label)
 		}
-		if res.Signatures[1].Label != "references(as, expr)" {
-			t.Errorf("second reading should be the label-scoped form, got %q", res.Signatures[1].Label)
+		if len(sig.Parameters) != 2 || sig.Parameters[0].Label != "label? string" || sig.Parameters[1].Label != "match lambda" {
+			t.Errorf("parameters = %+v, want the optional label then the match", sig.Parameters)
 		}
-		if res.ActiveSignature != 0 {
-			t.Errorf("at argument 0 the unscoped reading should be active, got %d", res.ActiveSignature)
+		if res.ActiveParameter != 0 {
+			t.Errorf("before anything is typed the (optional) label is active, got %d", res.ActiveParameter)
 		}
 	})
 
-	t.Run("past the comma the label-scoped reading is active", func(t *testing.T) {
+	t.Run("past a label the match is active", func(t *testing.T) {
 		src := `references("assignedTo", `
 		res := svc.SignatureHelp(src, 1, len(src)+1)
 		if res == nil {
 			t.Fatal("no signature help past the comma")
 		}
-		if res.ActiveSignature != 1 {
-			t.Errorf("past the comma only the label-scoped reading is possible, got signature %d",
-				res.ActiveSignature)
+		if res.ActiveParameter != 1 {
+			t.Errorf("expected the match to be active, got %d", res.ActiveParameter)
+		}
+	})
+
+	t.Run("without a label the first argument is the match", func(t *testing.T) {
+		src := `references(r => r.`
+		res := svc.SignatureHelp(src, 1, len(src)+1)
+		if res == nil {
+			t.Fatal("no signature help inside the match lambda")
 		}
 		if res.ActiveParameter != 1 {
-			t.Errorf("expected the second parameter to be active, got %d", res.ActiveParameter)
+			t.Errorf("a first argument that is not a string is the match, got parameter %d", res.ActiveParameter)
 		}
 	})
 
-	t.Run("every function that takes the form offers both", func(t *testing.T) {
+	t.Run("every traversal but ids takes the optional label", func(t *testing.T) {
+		// contains is in this list since memql#5365: its two-argument slot was
+		// the substring search, which is string.includes now, so the reason it
+		// could not take a label is gone.
 		for _, fn := range []string{"parentOf", "childOf", "aliasOf", "equals",
-			"references", "owns", "createdBy"} {
+			"references", "owns", "createdBy", "contains"} {
 			src := fn + "("
 			res := svc.SignatureHelp(src, 1, len(src)+1)
-			if res == nil || len(res.Signatures) != 2 {
-				t.Errorf("%s should offer both readings, got %+v", fn, res)
+			if res == nil || len(res.Signatures) != 1 || len(res.Signatures[0].Parameters) != 2 ||
+				res.Signatures[0].Parameters[0].Label != "label? string" {
+				t.Errorf("%s should take an optional leading label, got %+v", fn, res)
 			}
 		}
 	})
 
-	// The claim here is about the LABEL axis: these two take no `as` label, so
-	// neither offers a label-scoped reading. It is asserted as exactly that.
-	//
-	// It used to be asserted as `len(Signatures) != 1`, which conflated "no
-	// label-scoped reading" with "one reading in total" -- true of both names
-	// at the time, and no longer true of `contains`, which is ALSO the
-	// two-argument substring builtin and now offers that reading second
-	// (memql#3779). Nothing about the label claim changed; the count was
-	// incidental to it, and the builtin's own doc has always said the two forms
-	// are "discriminated by arg count".
-	t.Run("contains and ids offer no label-scoped reading", func(t *testing.T) {
-		for _, fn := range []string{"contains", "ids"} {
-			src := fn + "("
-			res := svc.SignatureHelp(src, 1, len(src)+1)
-			if res == nil {
-				t.Fatalf("%s should still have signature help", fn)
-			}
-			for _, sig := range res.Signatures {
-				if strings.Contains(sig.Label, "(as, ") {
-					t.Errorf("%s takes no label, so no reading may be label-scoped, got %q", fn, sig.Label)
-				}
-			}
-			if !strings.Contains(res.Signatures[0].Documentation, "no `as` label") {
-				t.Errorf("%s should say WHY it takes no label, got: %s",
-					fn, res.Signatures[0].Documentation)
-			}
-		}
-	})
-
-	// `ids` follows no relationship and is not a builtin, so it stays at
-	// exactly one reading -- which is what keeps the case above from passing
-	// vacuously if the label check ever stopped matching anything.
-	t.Run("ids has exactly one reading", func(t *testing.T) {
+	// `ids` follows no relationship, so it takes no label, and says so rather
+	// than leaving the absence unexplained.
+	t.Run("ids takes no label", func(t *testing.T) {
 		src := "ids("
 		res := svc.SignatureHelp(src, 1, len(src)+1)
 		if res == nil || len(res.Signatures) != 1 {
-			t.Errorf("ids should offer exactly one reading, got %+v", res)
+			t.Fatalf("ids should have exactly one signature, got %+v", res)
+		}
+		if n := len(res.Signatures[0].Parameters); n != 1 {
+			t.Errorf("ids takes exactly one parameter, got %d", n)
+		}
+		if !strings.Contains(res.Signatures[0].Documentation, "takes no label") {
+			t.Errorf("ids should say WHY it takes no label, got: %s", res.Signatures[0].Documentation)
 		}
 	})
 
 	t.Run("the label parameter names no closed set", func(t *testing.T) {
 		src := "owns("
 		res := svc.SignatureHelp(src, 1, len(src)+1)
-		if res == nil || len(res.Signatures) != 2 {
-			t.Fatal("expected both readings for owns(")
+		if res == nil || len(res.Signatures) != 1 {
+			t.Fatal("expected the signature for owns(")
 		}
-		doc := res.Signatures[1].Parameters[0].Documentation + res.Signatures[1].Documentation
-		if !strings.Contains(doc, "OPEN") {
+		doc := res.Signatures[0].Parameters[0].Documentation
+		if !strings.Contains(doc, "open") {
 			t.Errorf("the label parameter should say the vocabulary is open, got: %s", doc)
 		}
 		for _, invented := range []string{"assignedTo\", \"", "one of:"} {

@@ -25,6 +25,7 @@ package automations
 // same deterministic boolean evaluator that powers Step.Condition.
 
 import (
+	"context"
 	"fmt"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"regexp"
@@ -237,7 +238,7 @@ func validatePreconditions(preconditions []*Precondition) error {
 
 // EvaluatePreconditions runs each precondition's deterministic check
 // against the supplied evaluator (the same one the steps use, already
-// loaded with $event / $input / $config / $var context). It returns the
+// seeded with the run's event, input, config and var context). It returns the
 // FIRST precondition that misses (evaluates false or errors), or nil when
 // all hold. A check that errors is treated as a miss -- the conservative
 // choice for a self-healing trigger: an unevaluable literal on this
@@ -248,7 +249,13 @@ func EvaluatePreconditions(preconditions []*Precondition, eval *Evaluator) (*Pre
 		if pc == nil || strings.TrimSpace(pc.Check) == "" {
 			continue
 		}
-		ok, err := eval.EvaluateCondition(pc.Check)
+		// The check, parsed at load: booleans only, so a check that is not
+		// boolean is a MISS -- the same conservative reading an erroring
+		// check gets, and a check its automation never prepared gets too.
+		if pc.checkExpr == nil {
+			return pc, true
+		}
+		ok, err := eval.EvalV1Condition(context.Background(), pc.checkExpr)
 		if err != nil || !ok {
 			return pc, true
 		}

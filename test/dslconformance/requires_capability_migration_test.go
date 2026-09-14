@@ -213,9 +213,10 @@ func readDslFile(t *testing.T, rel string) string {
 	return string(body)
 }
 
-// headBefore returns the text between the previous construct's closing brace
-// and this construct's signature -- the annotation block, and nothing from the
-// construct above it.
+// headBefore returns the text between the end of the previous construct and
+// this construct's signature -- the annotation block, and nothing from the
+// construct above it. The bound is constructHead's, shared with
+// carriesAnnotationGate so the two cannot disagree about where a head starts.
 func headBefore(t *testing.T, src, name, file string) string {
 	t.Helper()
 	sig := regexp.MustCompile(`(?m)^(?:query|mutation|logic)\s+\w+\s+` + regexp.QuoteMeta(name) + `\s*\{`)
@@ -224,13 +225,7 @@ func headBefore(t *testing.T, src, name, file string) string {
 		t.Fatalf("no construct named %q in %s -- if it was renamed, update the migration table; "+
 			"a table pointing at nothing checks nothing", name, file)
 	}
-	head := src[:loc[0]]
-	// Walk back to the end of the previous construct so an annotation belonging
-	// to something further up the file cannot be read as this one's.
-	if end := strings.LastIndex(head, "\n}\n"); end >= 0 {
-		head = head[end:]
-	}
-	return head
+	return constructHead(src, loc[0])
 }
 
 // stripMemqlComments blanks `//` and `///` lines so a spec DISCUSSED in prose

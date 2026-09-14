@@ -66,7 +66,7 @@ func TestProviderVendorReplacedType(t *testing.T) {
 	if has("Provider", "type") {
 		t.Error("Provider should no longer accept @type -- @vendor is the one spelling")
 	}
-	if !has("", "type") {
+	if !has("Concept", "type") {
 		t.Error("a concept's @type (the row kind) is a different annotation and must survive")
 	}
 	if _, ok := Docs["vendor"]; !ok {

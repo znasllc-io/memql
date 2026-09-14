@@ -54,7 +54,7 @@ through.
 Role determines *capability* (may this caller perform this class of
 operation at all). *Which rows* a caller can read or write is governed
 separately by **per-row authorization**: every query and mutation in the
-DSL classifies as **owned** (filter on `ownerUserId == actor.userId`),
+DSL classifies as **owned** (filter on `row.ownerUserId == actor.userId`),
 **granted** (relationship predicate gates on `actor.userId`), **admin**
 (cluster-owner spec), or **public** (`@public` annotation). See this
 repo's `CLAUDE.md` "Authorization model" section for the canonical

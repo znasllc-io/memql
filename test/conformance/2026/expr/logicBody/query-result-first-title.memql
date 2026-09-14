@@ -1,0 +1,1 @@
+query lbTickets().first().title ?? "none"

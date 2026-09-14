@@ -75,7 +75,7 @@ mutation belief decayMemoryBelief {
 }
 
 /// Prune a decayed v1:memory:belief: status -> 'pruned' (soft-delete; the append-only
-/// model has no row removal). Recall (#585) + consolidation dedup filter status=='active', so a
+/// model has no row removal). Recall (#585) + consolidation dedup filter `row.status == "active"`, so a
 /// pruned belief drops out of both while staying in the audit trail. ownerUserId re-stamped from
 /// actor.userId (owned tier).
 @actor

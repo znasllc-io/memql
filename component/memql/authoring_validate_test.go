@@ -32,7 +32,7 @@ func TestValidateBundle_OK(t *testing.T) {
 // The validate-fail path: a syntactically broken construct comes back OK=false
 // with a populated, non-skipped diagnostic explaining the failure.
 func TestValidateBundle_FailCarriesDiagnostics(t *testing.T) {
-	report := ValidateBundle(`spec actorEnvelope broken { return role == }`, "trainingns/concepts.memql")
+	report := ValidateBundle(`spec actorEnvelope broken = actor => actor.role ==`, "")
 	if report.OK {
 		t.Fatal("expected OK=false for a broken bundle")
 	}

@@ -33,7 +33,7 @@ import (
 	"sort"
 	"strings"
 
-	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
 // OwnerProvenance is the verdict on one (concept, field) pair.
@@ -78,20 +78,19 @@ const (
 // content comes from.
 //
 // RECURSIVE, and deliberately so even though the tree has no live
-// compound owner write today. A whole-string prefix test happens to
-// give the right answer on every current mutation; it is one authored
+// compound owner write today. A whole-value test happens to give the
+// right answer on every current mutation; it is one authored
 // `ownerUserId: args.ownerUserId ?? actor.userId` away from silently
 // passing a forgeable field, and that is precisely the shape an author
 // reaches for when a mutation needs to serve two call paths.
 //
-// Quoted literals are stripped first: a description string containing
-// the word "args." is prose, not a reference.
+// A template's leaves are parsed nodes (mutation_values_v1.go), read by
+// classifyV1Expr: a quoted literal is a literal, so a description string
+// containing the word "args." is prose, not a reference.
 func classifyTemplateValue(v any) valueProvenance {
 	switch t := v.(type) {
 	case nil:
 		return provNone
-	case string:
-		return classifyExpressionText(t)
 	case map[string]any:
 		// A nested object: the field is caller-controllable if ANY leaf
 		// is, and stamped only if some leaf is stamped and none is
@@ -107,10 +106,13 @@ func classifyTemplateValue(v any) valueProvenance {
 				yield(classifyTemplateValue(e))
 			}
 		})
-	case bool, int, int64, float64:
-		return provNone
-	case langparser.ExpressionNode:
-		return classifyParserExpression(t)
+	case ast.ExpressionNode:
+		// A node of the internal query form has no place in a template;
+		// it is a value this analyzer cannot read, so it fails closed.
+		if ast.KindOf(t) == ast.KindUnknown {
+			return provUnknown
+		}
+		return classifyV1Expr(t, nil)
 	default:
 		// FAIL CLOSED. An earlier version rendered the value with
 		// fmt.Sprintf("%v") and classified the result as text, which is
@@ -120,59 +122,7 @@ func classifyTemplateValue(v any) valueProvenance {
 		// that IS a caller reference classified as provNone -- it then
 		// contributed to neither StampedBy nor WritableBy, and a sibling
 		// mutation that stamped the field carried the concept to a PASS.
-		//
-		// AST nodes in a value slot are a supported runtime shape:
-		// evalValue has an explicit `case languageParser.ExpressionNode`
-		// arm, IDTemplate is a lowered node for most mutations today, and
-		// memql#2840 was precisely an actor reference landing in one.
-		return provUnknown
-	}
-}
-
-// classifyParserExpression walks a lowered expression node.
-//
-// It mirrors evalParserExpression's arms rather than re-deriving them:
-// what this needs to know is exactly what that function resolves from,
-// so the two must agree about which nodes read caller args and which
-// read the actor. Anything it does not recognise returns provUnknown,
-// so a new node kind surfaces as "could not classify" instead of
-// silently reading as "no reference".
-func classifyParserExpression(expr langparser.ExpressionNode) valueProvenance {
-	switch t := expr.(type) {
-	case nil:
-		return provNone
-	case *langparser.LiteralExpr:
-		return provNone
-	case *langparser.ArgRefExpr:
-		// The parser routes BOTH `args.X` and `actor.X` through
-		// ArgRefExpr with the prefix as the only discriminator, which is
-		// the memql#2840 trap. Read the prefix the same way
-		// evalParserExpression does.
-		if strings.HasPrefix(t.Path, "actor.") {
-			if strings.TrimPrefix(t.Path, "actor.") == "userId" {
-				return provStamp
-			}
-			// Some other actor field: server-derived, but not the owner
-			// identity. Not a caller reference either.
-			return provNone
-		}
-		return provAccept
-	case *langparser.VarRefExpr:
-		// An engine variable: server-side, and not the actor.
-		return provNone
-	case *langparser.TimestampExprFunc:
-		return provNone
-	case *langparser.ConcatExpr:
-		return foldProvenance(func(yield func(valueProvenance)) {
-			for _, a := range t.Args {
-				yield(classifyParserExpression(a))
-			}
-		})
-	case *langparser.HashExpr:
-		return classifyParserExpression(t.Target)
-	case *langparser.CanonicalIdExpr:
-		return classifyParserExpression(t.Value)
-	default:
+		// Text -- which a template no longer holds -- lands here too.
 		return provUnknown
 	}
 }
@@ -190,49 +140,6 @@ func foldProvenance(each func(func(valueProvenance))) valueProvenance {
 		}
 	})
 	return out
-}
-
-// classifyExpressionText classifies a rendered expression.
-//
-// Caller-reference wins over actor-reference: a value mentioning both
-// is caller-controllable in at least one evaluation, and the point of
-// this analysis is what a caller CAN do.
-func classifyExpressionText(text string) valueProvenance {
-	bare := stripQuotedLiterals(text)
-	callerRef := strings.Contains(bare, "args.") || strings.Contains(bare, "ctx.")
-	actorRef := strings.Contains(bare, "actor.userId")
-	switch {
-	case callerRef:
-		return provAccept
-	case actorRef:
-		return provStamp
-	default:
-		return provNone
-	}
-}
-
-// stripQuotedLiterals blanks the contents of double-quoted strings so
-// prose inside a description cannot read as a reference.
-func stripQuotedLiterals(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	inStr := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case inStr && c == '\\' && i+1 < len(s):
-			b.WriteString("  ")
-			i++
-		case c == '"':
-			inStr = !inStr
-			b.WriteByte(c)
-		case inStr:
-			b.WriteByte(' ')
-		default:
-			b.WriteByte(c)
-		}
-	}
-	return b.String()
 }
 
 // isPayloadSplat reports whether a PayloadTemplate is a whole-object

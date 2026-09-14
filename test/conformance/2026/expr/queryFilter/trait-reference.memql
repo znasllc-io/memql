@@ -1,0 +1,5 @@
+/// Open tickets, through a trait named with the retired keyword.
+query ticket qfTraitReference {
+  filter row => trait qfIsOpen
+  paginate 20
+}

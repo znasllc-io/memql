@@ -16,12 +16,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/core/baseparser"
 	"github.com/znasllc-io/memql/core/num"
 )
 
@@ -440,18 +439,14 @@ type parsedConcept struct {
 	rowAuthz *parser.RowAuthzDecl
 
 	// origin / mirroredTo are the data-origins declaration (epic
-	// memql#4378). Held as the raw declaration plus a "was it written"
-	// bit each, because the two annotations are only jointly valid --
-	// @mirroredTo beside an external @origin is refused -- and that
-	// check needs BOTH in hand, which is only true once the attribute
-	// loop has finished. The bits are what make a SECOND @origin a load
-	// error rather than a silent last-one-wins, the same rule @rowAuthz
-	// carries and for the same reason: a reader scanning top-down must
-	// not see a declaration the engine does not use.
-	origin             string
-	originDeclared     bool
-	mirroredTo         []string
-	mirroredToDeclared bool
+	// memql#4378), held as the raw declaration because the two
+	// annotations are only jointly valid -- @mirroredTo beside an external
+	// @origin is refused -- and that check needs BOTH in hand, which is
+	// only true once the attribute loop has finished. A SECOND @origin is
+	// refused by the annotation registry's repeat rule (memql#5359), the
+	// same rule that holds @rowAuthz to one declaration.
+	origin     string
+	mirroredTo []string
 }
 
 // parsedProperty mirrors the legacy internal type so the JSON-Schema
@@ -538,6 +533,29 @@ type parsedPropertyVariant struct {
 func conceptDeclToParsed(decl *parser.ConceptDecl) (*parsedConcept, error) {
 	out := &parsedConcept{noAdditional: true}
 
+	// Which annotations a concept, its body and its fields take -- names,
+	// argument forms, keyword keys, repeats -- is the annotation registry's
+	// answer (memql#5359); applyConceptAttribute and applyPropertyAttribute
+	// keep only what a legal value MEANS. The field check runs in
+	// propertyDeclToParsed, so nested blocks and variant branches reach it.
+	if ref := annotations.CheckAll(annotations.Concept, parser.AnnotationUses(decl.Attributes)); ref != nil {
+		return nil, ref
+	}
+	var relationships []*parser.RelationshipDecl
+	var relationshipUses []annotations.Use
+	for _, rel := range decl.Relationships {
+		if rel != nil && rel.Attribute != nil {
+			relationships = append(relationships, rel)
+			relationshipUses = append(relationshipUses, parser.AnnotationUse(rel.Attribute))
+		}
+	}
+	for i := range relationshipUses {
+		if ref := annotations.CheckAll(annotations.ConceptBody, relationshipUses[:i+1]); ref != nil {
+			// The refusal says "on a concept body"; say which relationship.
+			return nil, fmt.Errorf("the relationship %s: %w", relationshipLabel(relationships[i]), ref)
+		}
+	}
+
 	for _, attr := range decl.Attributes {
 		if err := applyConceptAttribute(out, attr); err != nil {
 			return nil, err
@@ -586,6 +604,10 @@ func conceptDeclToParsed(decl *parser.ConceptDecl) (*parsedConcept, error) {
 // nested object blocks.
 func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 	out := parsedProperty{name: prop.Name}
+
+	if ref := annotations.CheckAll(annotations.ConceptField, parser.AnnotationUses(prop.Attributes)); ref != nil {
+		return parsedProperty{}, ref
+	}
 
 	if prop.Type != nil {
 		out.typeName = prop.Type.Kind
@@ -1104,7 +1126,10 @@ func elementFromTypeRef(ref *parser.TypeRef) *parsedProperty {
 }
 
 // applyConceptAttribute folds an @annotation into the intermediate
-// concept representation.
+// concept representation. The annotation registry has already decided the
+// annotation is legal here, in this form, and written once
+// (conceptDeclToParsed); this reads what it means. The retired @scope,
+// @visibility and @cache are refused there with their hints.
 func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 	if attr == nil {
 		return nil
@@ -1114,18 +1139,6 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		c.description = attrString(attr)
 	case "type":
 		c.conceptType = strings.ToLower(attrString(attr))
-	case "scope":
-		// `@scope` was retired in #56 (partition removal). Every
-		// concept lives in one partition; the per-concept scope
-		// distinction is gone. Reject explicitly so stale concept
-		// files surface a clear error instead of silently parsing
-		// to the post-removal default.
-		return fmt.Errorf("`@scope` is retired -- remove the annotation; every concept lives in the default partition post-#56")
-	// @visibility was removed in the genesis simplification. Every
-	// binary now loads every concept; functional specialization
-	// happens at the build-tag layer (which integrations are active),
-	// not the DSL layer. The parser no longer recognizes @visibility;
-	// the strip-from-files migration removed it from every .memql.
 	case "version":
 		// @version("MAJOR.MINOR.PATCH") -- strict semver, metadata
 		// only (canonical ids are PARTITION-prefixed -- v1: is the
@@ -1144,16 +1157,6 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 			return err
 		}
 		c.version = fmt.Sprintf("v%d", v.Major)
-	case "namespace":
-		// Retired in memql#5375. AssembleConceptIdFromDeclInDir derives
-		// the namespace from the domain directory, or from that
-		// directory's one-line namespace.pin, so the annotation could only
-		// restate one of those or disagree with it -- and a disagreement
-		// is the moved-file guard firing, not a feature. Every one of the
-		// 69 occurrences in the tree restated a pin or its own directory,
-		// which is why the removal moved no canonical id.
-		hint, _ := baseparser.RetiredConstructAnnotation("namespace")
-		return fmt.Errorf("@namespace is retired -- %s", hint)
 	case "displayCard":
 		// @displayCard(primary="name", secondary="role", tertiary="ownerUserId", status="active")
 		//   -- per-concept rendering hints for concept-agnostic
@@ -1172,19 +1175,16 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		//   -- the Materializer's mark: this concept's rows are worth
 		//   composing a file FROM (epic memql#4977, design D2).
 		//
-		//   Declared at most once, for the reason @rowAuthz and
-		//   @origin are: the parser folds attributes in source order,
-		//   so a second declaration would silently win and a reader
-		//   scanning top-down would see a projection the engine does
-		//   not use.
+		//   Declared at most once (the registry's repeat rule), for the
+		//   reason @rowAuthz and @origin are: the parser folds attributes
+		//   in source order, so a second declaration would silently win
+		//   and a reader scanning top-down would see a projection the
+		//   engine does not use.
 		//
 		//   The `fields` existence check runs in BuildConceptFromDecl
 		//   AFTER the property pass, exactly as @displayCard's slot
 		//   check does -- attributes are folded before properties on
 		//   this code path, so there is nothing to check against yet.
-		if c.composable != nil {
-			return fmt.Errorf("@composable declared more than once -- name every composable field in one annotation, e.g. @composable(fields=\"a,b\")")
-		}
 		mark, err := parseComposableAttr(attr)
 		if err != nil {
 			return err
@@ -1209,16 +1209,12 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		//   about what a declaration means (#2621's lesson).
 		//
 		//   A SECOND @rowAuthz is a load error, not a silent
-		//   overwrite. The parser folds attributes in source order, so
-		//   without this a concept carrying two declarations loaded
-		//   with the LAST one winning -- a reader scanning top-down
-		//   sees a tier the engine does not use. "One tier per
-		//   concept" has to be enforced for the declaration to mean
-		//   anything.
-		if c.rowAuthz != nil {
-			return fmt.Errorf("@%s declared more than once -- a concept declares exactly one tier",
-				parser.RowAuthzAnnotation)
-		}
+		//   overwrite: the registry's repeat rule refuses it. The parser
+		//   folds attributes in source order, so without that a concept
+		//   carrying two declarations loaded with the LAST one winning --
+		//   a reader scanning top-down sees a tier the engine does not
+		//   use. "One tier per concept" has to be enforced for the
+		//   declaration to mean anything.
 		decl, err := parser.ParseRowAuthz(attr)
 		if err != nil {
 			return err
@@ -1231,48 +1227,51 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		//   component/memql's write guard enforces as read-only by
 		//   construction.
 		//
-		//   Declared at most once, for the reason @rowAuthz is: the
-		//   parser folds attributes in source order, so without this a
-		//   concept carrying two origins would load with the LAST one
-		//   winning, and "where is this data owned" would have a
-		//   different answer for a reader than for the engine.
-		if c.originDeclared {
-			return fmt.Errorf("@%s declared more than once -- a concept has exactly one origin",
-				parser.OriginAnnotation)
-		}
+		//   Declared at most once (the registry's repeat rule), for the
+		//   reason @rowAuthz is: the parser folds attributes in source
+		//   order, so without it a concept carrying two origins would load
+		//   with the LAST one winning, and "where is this data owned"
+		//   would have a different answer for a reader than for the
+		//   engine.
 		name, err := parser.ParseOrigin(attr)
 		if err != nil {
 			return err
 		}
 		c.origin = name
-		c.originDeclared = true
 	case parser.MirroredToAnnotation:
 		// @mirroredTo("<connector>", ...) -- WHO ELSE holds a copy of
 		//   this MemQL-origin concept (D2/D5). The pairing check --
 		//   refused beside an external @origin -- runs after the whole
 		//   attribute loop, in conceptDeclToParsed, because it needs
 		//   both annotations and attributes arrive one at a time.
-		if c.mirroredToDeclared {
-			return fmt.Errorf("@%s declared more than once -- name every mirror target in one annotation, e.g. @%s(\"a\", \"b\")",
-				parser.MirroredToAnnotation, parser.MirroredToAnnotation)
-		}
 		targets, err := parser.ParseMirroredTo(attr)
 		if err != nil {
 			return err
 		}
 		c.mirroredTo = targets
-		c.mirroredToDeclared = true
-	default:
-		return fmt.Errorf("unknown concept annotation @%s", attr.Name)
 	}
 	return nil
 }
 
+// relationshipLabel names a relationship for a refusal about it: by the field
+// that holds its key, or its domain label, or its target.
+func relationshipLabel(rel *parser.RelationshipDecl) string {
+	switch {
+	case rel.Field != "":
+		return fmt.Sprintf("on field %q", rel.Field)
+	case rel.As != "":
+		return fmt.Sprintf("as %q", rel.As)
+	case rel.Target != "":
+		return fmt.Sprintf("to %q", rel.Target)
+	}
+	return "with no field"
+}
+
 // parseDisplayCardAttr extracts the named args from
 // @displayCard(primary=..., secondary=..., tertiary=..., status=...).
-// Validates that `primary` is non-empty and that no unrecognised
-// argument name was supplied; field-existence checks happen later.
-// Reference: memql#160.
+// Validates that `primary` is non-empty; the argument names are the
+// registry's closed key set (memql#5359), and field-existence checks
+// happen later. Reference: memql#160.
 func parseDisplayCardAttr(attr *parser.Attribute) (*DisplayCard, error) {
 	if attr == nil {
 		return nil, fmt.Errorf("@displayCard: nil attribute")
@@ -1292,8 +1291,6 @@ func parseDisplayCardAttr(attr *parser.Attribute) (*DisplayCard, error) {
 			out.Tertiary = val
 		case "status":
 			out.Status = val
-		default:
-			return nil, fmt.Errorf("@displayCard: unknown argument %q (allowed: primary, secondary, tertiary, status)", k)
 		}
 	}
 	if out.Primary == "" {
@@ -1331,8 +1328,6 @@ func parseComposableAttr(attr *parser.Attribute) (*Composable, error) {
 			}
 		case "list":
 			out.List = val
-		default:
-			return nil, fmt.Errorf("@composable: unknown argument %q (allowed: as, fields, list)", k)
 		}
 	}
 	// FORM ONLY. The query registry does not exist during the concept
@@ -1380,7 +1375,9 @@ func asString(v any) string {
 
 // applyPropertyAttribute folds an @annotation into the property
 // intermediate. Phase 3 expanded the vocabulary: @unique, @pattern,
-// @minLength, @maxLength, @minimum, @maximum, @immutable, @secret.
+// @minLength, @maxLength, @minimum, @maximum, @immutable, @secret. The
+// registry has already decided the annotation is legal on a concept field
+// (propertyDeclToParsed); this reads what it means.
 func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error {
 	if attr == nil {
 		return nil
@@ -1433,48 +1430,23 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 		// attribute itself is kept on the AST node so the folder
 		// can read its discriminator arg.
 		return nil
-	default:
-		// @unique and @immutable reach here (memql#5375). Each was
-		// declared metadata with nothing behind it -- no uniqueness check
-		// (memql#2960) and no write guard -- so each read as a constraint
-		// while constraining nothing, and surfaced as an x- keyword that
-		// promised the storage layer something no storage layer honoured.
-		if hint, retired := baseparser.RetiredFieldAnnotation(attr.Name); retired {
-			return fmt.Errorf("field %q: @%s is retired -- %s", prop.name, attr.Name, hint)
-		}
-		// @default has its own sentence because the retirement is SCOPED
-		// to this receiver. On a concept field it was published as the
-		// JSON-Schema `default` keyword, which no validator applies and no
-		// insert path consults, so a field carrying it did not default --
-		// and an author who wrote @default("true") and believed otherwise
-		// was wrong silently, on every row. On a TOOL, PROMPT or BUILTIN
-		// field it stays: those bodies ARE the schema handed to the model,
-		// where `default` is a value the model reads.
-		if attr.Name == "default" {
-			return fmt.Errorf("field %q: @default on a concept field is retired -- it was never applied on insert, so the field did not default; fill the value with `??` in the mutation that writes it (docs/public/language/authoring-rules.md section 28); %s",
-				prop.name, baseparser.AttributeRewriteHint)
-		}
-		return fmt.Errorf("unknown property annotation @%s on field %q", attr.Name, prop.name)
 	}
 	return nil
 }
 
-// attrNumeric returns the first likely-numeric value attached to an
-// attribute. Accepts both single-value form (`@minLength(5)`) and
-// named-arg form (`@minLength(value=5)`).
+// attrNumeric returns the number an annotation was written with
+// (`@minLength(5)`). The registry takes these placements as one number only
+// (memql#5359), so the keyword spelling `@minLength(value=5)` the loader used
+// to read -- and read ANY key of -- never reaches here.
 func attrNumeric(attr *parser.Attribute) any {
 	if attr == nil {
 		return nil
 	}
-	if attr.Value != nil {
-		return attr.Value
-	}
-	for _, v := range attr.Args {
-		return v
-	}
-	return nil
+	return attr.Value
 }
 
+// toFloat64 reads an annotation's number. A quoted number (`@minimum("5")`)
+// is refused by the registry before this runs (memql#5359).
 func toFloat64(v any) (float64, error) {
 	switch t := v.(type) {
 	case int:
@@ -1483,25 +1455,20 @@ func toFloat64(v any) (float64, error) {
 		return float64(t), nil
 	case float64:
 		return t, nil
-	case string:
-		return strconv.ParseFloat(t, 64)
 	default:
 		return 0, fmt.Errorf("unsupported type %T", v)
 	}
 }
 
-// attrString extracts the text value of an attribute, preferring the
-// single-string form (`@description("text")`) and falling back to a
-// stringified `value` argument.
+// attrString extracts the text an annotation was written with
+// (`@description("text")`). The keyword spelling `@description(value="...")`
+// the loader used to accept is refused by the registry (memql#5359).
 func attrString(attr *parser.Attribute) string {
 	if attr == nil {
 		return ""
 	}
 	if s, ok := attr.Value.(string); ok {
 		return s
-	}
-	if v, ok := attr.Args["value"]; ok {
-		return fmt.Sprintf("%v", v)
 	}
 	return ""
 }
@@ -1541,9 +1508,6 @@ func attrLiteral(attr *parser.Attribute) string {
 		}
 		return fmt.Sprintf("%v", attr.Value)
 	}
-	if v, ok := attr.Args["value"]; ok {
-		return fmt.Sprintf("%v", v)
-	}
 	// The bare-argument shape, and the reason attrString reports "" for it.
 	// The parser has no value to bind an unquoted token to, so it records the
 	// TOKEN ITSELF AS AN ARGS KEY with a true flag value -- measured, not
@@ -1552,12 +1516,13 @@ func attrLiteral(attr *parser.Attribute) string {
 	//	@default(false)     Value=<nil>    Args=map["false":true]
 	//	@default("false")   Value="false"  Args=map[]
 	//
-	// So the written text is the key. Guarded on exactly one entry carrying a
-	// true flag, which is what a single bare argument produces; a named or
-	// multi-argument attribute is not this shape and falls through.
+	// So the written text is the key. The registry lets exactly one such word
+	// through -- `true` or `false`, the Bool form (memql#5359) -- so any other
+	// bare word, and the keyword spelling `@default(value=...)`, never reach
+	// here.
 	if len(attr.Args) == 1 {
 		for k, v := range attr.Args {
-			if flag, ok := v.(bool); ok && flag {
+			if flag, ok := v.(bool); ok && flag && (k == "true" || k == "false") {
 				return k
 			}
 		}
@@ -1565,8 +1530,9 @@ func attrLiteral(attr *parser.Attribute) string {
 	return ""
 }
 
-// toInt64 coerces an annotation argument value into int64. Accepts
-// actual integers and stringified decimals; anything else is an error.
+// toInt64 coerces an annotation's number into int64. A quoted number
+// (`@maxLength("5")`) is refused by the registry before this runs
+// (memql#5359).
 func toInt64(v any) (int64, error) {
 	switch t := v.(type) {
 	case int:
@@ -1579,8 +1545,6 @@ func toInt64(v any) (int64, error) {
 		// (memql#4779). This is a magnitude, so saturation is the answer that
 		// keeps its order.
 		return num.ClampFloat64ToInt64(t), nil
-	case string:
-		return strconv.ParseInt(t, 10, 64)
 	default:
 		return 0, fmt.Errorf("unsupported type %T", v)
 	}

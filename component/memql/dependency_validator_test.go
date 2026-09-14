@@ -39,12 +39,12 @@ use guide.shapes.{ card }
 @description("get a guide by id")
 query guide byId {
   args { id string @required }
-  filter id==args.id
+  filter row => row.id == args.id
   shape card
 }
 `)},
 	}
-	if err := validateDependencyTree(tree); err != nil {
+	if err := validateDependencyTree(withLanguageLines(tree)); err != nil {
 		t.Fatalf("prefix-free same-concept reference must resolve, got: %v", err)
 	}
 }
@@ -65,12 +65,12 @@ shape tour card {
 use tour.shapes.{ card }
 
 query guide listGuides {
-  filter id==args.id
+  filter row => row.id == args.id
   shape tour.card
 }
 `)},
 	}
-	if err := validateDependencyTree(tree); err != nil {
+	if err := validateDependencyTree(withLanguageLines(tree)); err != nil {
 		t.Fatalf("qualified cross-concept reference must resolve, got: %v", err)
 	}
 }
@@ -89,12 +89,12 @@ shape tour card {
 `)},
 		"guide/queries.memql": &fstest.MapFile{Data: []byte(`
 query guide listGuides {
-  filter id==args.id
+  filter row => row.id == args.id
   shape card
 }
 `)},
 	}
-	err := validateDependencyTree(tree)
+	err := validateDependencyTree(withLanguageLines(tree))
 	if err == nil {
 		t.Fatal("unqualified cross-concept shape reference must fail")
 	}
@@ -127,12 +127,12 @@ shape actorEnvelope {
 use common.shapes.{ actorEnvelope }
 
 query guide whoAmI {
-  filter id==args.id
+  filter row => row.id == args.id
   shape actorEnvelope
 }
 `)},
 	}
-	if err := validateDependencyTree(tree); err != nil {
+	if err := validateDependencyTree(withLanguageLines(tree)); err != nil {
 		t.Fatalf("@actor-only shape must be universally referenceable, got: %v", err)
 	}
 }
@@ -158,7 +158,7 @@ shape guide card {
 }
 `)},
 	}
-	err := validateDependencyTree(tree)
+	err := validateDependencyTree(withLanguageLines(tree))
 	if err == nil {
 		t.Fatal("unqualified cross-concept include must fail")
 	}
@@ -183,7 +183,7 @@ func TestValidateDependencyTree_NoReferencePathsWalked(t *testing.T) {
 	// The invalid _reference/ files would make validation fail IF they
 	// were walked. They are not, so validation succeeds -- which is the
 	// whole reason the skip branch was dead.
-	if err := validateDependencyTree(tree); err != nil {
+	if err := validateDependencyTree(withLanguageLines(tree)); err != nil {
 		t.Fatalf("validation must not touch _reference/ files (walker skips them): %v", err)
 	}
 }

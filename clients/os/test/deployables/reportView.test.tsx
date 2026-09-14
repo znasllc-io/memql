@@ -48,6 +48,31 @@ describe("the analysis report", () => {
     expect(shown.closest("li")?.textContent).toContain("mobile");
   });
 
+  it("draws the notes beside a Go pack too, and the Go pack's note once", () => {
+    // The foot of the report used to vanish whenever the Go section drew, so
+    // every OTHER note went with it: a package with a bff/ was never told its
+    // dsl/memql.toml is read by nothing (epic memql#5356).
+    const goNote = "reported, not deployable through this path";
+    const goPack = { code: "go_pack_not_deployable", message: goNote, scope: "bff", fatal: false };
+    const unread = {
+      code: "dsl_language_line_unread",
+      message: "memql.toml at the root of this tree is never read [language_line_unread]",
+      scope: "dsl/memql.toml",
+      fatal: false,
+    };
+    render(
+      <ReportView
+        report={report({ goPacks: [{ path: "bff", module: "example.com/acme/bff", note: goNote }], problems: [NOT_OFFERED, goPack, unread] })}
+      />,
+    );
+    expect(screen.getByText(unread.message)).toBeTruthy();
+    expect(screen.getByText("A memql.toml at the root of dsl/ is never read")).toBeTruthy();
+    // The Go pack's note is said in its own section, and not again at the foot.
+    expect(screen.getAllByText(goNote)).toHaveLength(1);
+    expect(screen.queryByText("The Go pack was not deployed")).toBeNull();
+    expect(screen.getAllByText("iOS is not offered on this cluster yet")).toHaveLength(1);
+  });
+
   it("still shows a non-fatal problem that belongs to NO app", () => {
     // The reachable positive. Without it, the filter could suppress every note
     // and the test above would pass for the wrong reason -- a report whose

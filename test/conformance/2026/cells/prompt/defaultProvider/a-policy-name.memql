@@ -1,0 +1,7 @@
+/// Summarise a ticket in one sentence, pinned to a policy rather than a provider.
+@level("fast")
+@templateFile("summariseTicket.tmpl")
+@defaultProvider("localFirst")
+prompt summariseTicketByPolicy {
+  title  string!  @description("The ticket's title.")
+}

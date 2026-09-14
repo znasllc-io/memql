@@ -69,7 +69,7 @@ func codesFor(diags []Diagnostic, code string) []Diagnostic {
 	return out
 }
 
-const useConstructTail = "\n\nquery order listOrders {\n  filter id == \"x\"\n}\n"
+const useConstructTail = "\n\nquery order listOrders {\n  filter row => row.id == \"x\"\n}\n"
 
 func TestImportDiagnostics_WrongKindSegment(t *testing.T) {
 	// symptom 1: `use fylo.concept.{ order }` -- namespace owned, kind is wrong.

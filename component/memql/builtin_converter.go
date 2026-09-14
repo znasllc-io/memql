@@ -12,9 +12,9 @@ package memql
 //   * Annotation surface: @enabled / @disabled / @sdk (no-ops at the
 //     converter layer -- the loader pipeline reads them elsewhere),
 //     @description, @executor (REQUIRED), @alias (multi-valued),
-//     @args(profile=..., stringKey=..., additionalProperties=...).
-//     Unknown annotations are tolerated silently (mirroring the
-//     drain-and-skip behaviour of parseBuiltinDecorator).
+//     @args(profile=..., stringKey=..., additionalProperties=...). Which
+//     annotations a builtin takes is decided at parse time by the
+//     annotation registry (memql#5359); this reads what they mean.
 //   * Body fields populate BuiltinArgContract.Properties (name->type
 //     map) and BuiltinArgContract.Required (slice of @required names).
 //   * Profile is read from @args(profile=...) when present; otherwise
@@ -27,8 +27,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // builtinDeclToFunction converts a langparser BuiltinDecl into the
@@ -65,8 +65,6 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 			enabled = false
 		case "sdk":
 			// Generator marker (sdk/gen reads from source). No engine effect.
-		case "requiresCapability":
-			// Consumed above; listed here so it is not an unknown annotation.
 		case "description":
 			val, ok := attr.Value.(string)
 			if !ok {
@@ -103,14 +101,6 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 					argAdditionalProperties = &flag
 				}
 			}
-		default:
-			// Unknown annotation -- hard-rejected (#990). Closes the
-			// silent-tolerance gap so typos and stale annotations on
-			// builtins fail at load instead of being dropped.
-			if hint, retired := baseparser.RetiredConstructAnnotation(attr.Name); retired {
-				return nil, fmt.Errorf("%s: builtin %q: @%s is retired -- %s", origin, decl.Name, attr.Name, hint)
-			}
-			return nil, fmt.Errorf("%s: builtin %q: unknown annotation @%s -- supported: @alias, @args, @description, @disabled, @executor, @requiresCapability, @sdk", origin, decl.Name, attr.Name)
 		}
 	}
 
@@ -160,13 +150,9 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 			// SDKs generate -- the same annotation that is load-bearing one
 			// construct over. D16 gives this surface the allow-list args
 			// fields have.
-			for _, attr := range field.Attributes {
-				if attr == nil {
-					continue
-				}
-				if err := validateFieldAnnotation(origin, "builtin", field.Name, attr.Name); err != nil {
-					return nil, err
-				}
+			// One registry check (#5359), on the BuiltinField receiver.
+			if ref := annotations.CheckAll(annotations.BuiltinField, languageParser.AnnotationUses(field.Attributes)); ref != nil {
+				return nil, fmt.Errorf("%s: builtin %q field %q: %w", origin, decl.Name, field.Name, ref)
 			}
 			contract.Properties[field.Name] = field.Type
 			if field.Required {

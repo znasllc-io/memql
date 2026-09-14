@@ -19,7 +19,6 @@ package memql
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -310,12 +309,17 @@ func (s *engineActivationStore) SetBundleRetired(ctx context.Context, bundleId s
 	return err
 }
 
+// SetConstructStatus renders the named-argument form, as the promote path's
+// write of the same mutation does. It used to hand the engine
+// `setConstructStatus({...})` -- a marshalled map in the parens, the
+// object-literal form the parser has refused since memql#2335 -- so every
+// activation that reached this step failed at parse, and the fake store the
+// orchestrator's tests drive never rendered anything to parse.
 func (s *engineActivationStore) SetConstructStatus(ctx context.Context, constructId, status string) error {
-	args, err := json.Marshal(map[string]string{"constructId": constructId, "status": status})
-	if err != nil {
-		return err
-	}
-	_, err = s.engine.Execute(ctx, "setConstructStatus("+string(args)+")")
+	_, err := s.engine.Execute(ctx, mutationCall("setConstructStatus",
+		[2]string{"constructId", constructId},
+		[2]string{"status", status},
+	))
 	return err
 }
 

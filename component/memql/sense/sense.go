@@ -12,6 +12,9 @@ type RegistryProvider interface {
 	ConceptNames() []string
 	ConceptGet(name string) (*ConceptInfo, bool)
 	SpecNames() []string
+	// SpecGet answers what a spec or trait predicates over, so completion can
+	// apply it to the right receiver: `isActiveRecord(row)`, `requiresOwner(actor)`.
+	SpecGet(name string) (*SpecInfo, bool)
 	ToolNames() []string
 	ToolGet(name string) (*ToolInfo, bool)
 	PromptNames() []string
@@ -59,6 +62,22 @@ type FieldInfo struct {
 	Description string
 	Required    bool
 	Enum        []string
+}
+
+// SpecInfo is a lightweight projection of a spec or trait: what it predicates
+// over, which is what decides the argument a v1 expression applies it to.
+type SpecInfo struct {
+	Name        string
+	Description string
+	// Kind is "row" for a predicate over a row -- a spec bound to a concept or
+	// an @row shape, and every trait -- and "context" for one over the actor
+	// envelope (a spec bound to an @actor shape), which is applied as
+	// `name(actor)`.
+	Kind string
+	// Bound is the concept or shape the spec's signature binds; "" for a trait.
+	Bound string
+	// Trait marks the deliberately-unbound predicate.
+	Trait bool
 }
 
 // ToolInfo is a lightweight projection of a tool definition.
@@ -122,6 +141,21 @@ type CompletionItem struct {
 	// WITHOUT this flag inserts literally -- dollar signs visible in
 	// the buffer -- which is why the flag exists rather than sniffing.
 	IsSnippet bool
+	// AdditionalEdits are edits the completion makes ELSEWHERE in the
+	// document, never overlapping where InsertText goes: the file-top `use`
+	// import a concept completion adds for a concept the file does not import
+	// yet (memql#5359). The LSP layer sends them as additionalTextEdits. A
+	// consumer that cannot apply them must not offer the item: its insert text
+	// alone is not what its label promises.
+	AdditionalEdits []TextEdit
+}
+
+// TextEdit is one edit a completion makes besides its insert text. Positions
+// are 1-based, like every Sense position; a Range whose start and end meet is
+// an insertion.
+type TextEdit struct {
+	Range   Range
+	NewText string
 }
 
 // PlainInsertText renders an item's insert text for a consumer without

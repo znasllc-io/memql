@@ -60,7 +60,7 @@ mutation healedOverride proposeOverride {
 /// unless the actor's role rank meets the override's blastRadius-required rank (personal->user,
 /// shared->admin, spine_adjacent->developer; owner always allowed). Once validated the override
 /// becomes resolution-eligible -- the two-tier resolver prefers it over base. Owned: gated by
-/// ownerUserId==actor.userId in the update read-merge.
+/// `row.ownerUserId == actor.userId` in the update read-merge.
 @actor
 mutation healedOverride validateOverride {
   args {
@@ -80,7 +80,7 @@ mutation healedOverride validateOverride {
 /// Reject a proposed healed override (E4.5 / memql#2143). Read-merges the existing row and sets
 /// validationStatus=rejected (valid stays false, so the override is never resolution-eligible),
 /// stamping validatedBy=actor.userId + validatedAt + the rejectionReason. A rejected proposal is
-/// RECORDED for audit, not silently dropped. Owned: gated by ownerUserId==actor.userId in the
+/// RECORDED for audit, not silently dropped. Owned: gated by `row.ownerUserId == actor.userId` in the
 /// update read-merge.
 @actor
 mutation healedOverride rejectOverride {

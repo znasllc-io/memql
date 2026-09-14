@@ -1,0 +1,14 @@
+/// A support ticket, and where to reply: an email address or a phone number, whichever replyVia names.
+concept ticket {
+  title     string
+  status    string
+  replyVia  enum("email", "phone")!
+  replyTo   object!  @variant("replyVia") {
+    email {
+      address  string!
+    }
+    phone {
+      number  string!
+    }
+  }
+}

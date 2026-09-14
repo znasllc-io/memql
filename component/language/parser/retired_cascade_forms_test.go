@@ -1,10 +1,9 @@
 package parser
 
 import (
+	"github.com/znasllc-io/memql/component/language/annotations"
 	"strings"
 	"testing"
-
-	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // TestRetiredCascadeFormsRefuse is one negative cell per form D17 removes
@@ -44,7 +43,7 @@ func TestRetiredCascadeFormsRefuse(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.wants) {
 				t.Errorf("the refusal should name the surviving form %s.\n  got: %v", tc.wants, err)
 			}
-			if !strings.Contains(err.Error(), baseparser.AttributeRewriteHint) {
+			if !strings.Contains(err.Error(), annotations.AttributeRewriteHint) {
 				t.Errorf("the refusal should name the rewrite.\n  got: %v", err)
 			}
 		})
@@ -58,7 +57,7 @@ func TestRetiredCascadeFormsRefuse(t *testing.T) {
 		if !strings.Contains(err.Error(), "use <domain>") {
 			t.Errorf("the refusal should name the `use` form.\n  got: %v", err)
 		}
-		if !strings.Contains(err.Error(), baseparser.AttributeRewriteHint) {
+		if !strings.Contains(err.Error(), annotations.AttributeRewriteHint) {
 			t.Errorf("the refusal should name the rewrite.\n  got: %v", err)
 		}
 	})

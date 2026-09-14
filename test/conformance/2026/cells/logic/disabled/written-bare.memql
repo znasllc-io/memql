@@ -1,0 +1,10 @@
+/// The headline a ticket shows. Switched off: not loaded while @disabled stays.
+@disabled
+logic ticketHeadlineDisabled {
+  args {
+    title  string
+  }
+  body {
+    return args.title ?? "(untitled)"
+  }
+}

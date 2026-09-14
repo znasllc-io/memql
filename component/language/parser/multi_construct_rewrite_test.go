@@ -27,13 +27,13 @@ import (
 func TestRewriter_MultipleQueriesDifferentConcepts(t *testing.T) {
 	source := `@description("Active participants in a space.")
 query participant queryActiveParticipants {
-  filter participant.partitionId == args.partitionId
+  filter row => row.partitionId == args.partitionId
   shape  participantFull
 }
 
 @description("Active spaces for a user.")
 query space queryActiveSpaces {
-  filter space.ownerId == args.userId
+  filter row => row.ownerId == args.userId
   shape  spaceFull
 }`
 
@@ -109,7 +109,7 @@ mutation participant mutationAddParticipant {
 func TestRewriter_MissingConceptBindingErrors(t *testing.T) {
 	source := `@description("Bare-signature query, no concept binding.")
 query queryActiveSpaces {
-  filter space.ownerId == args.userId
+  filter row => row.space.ownerId == args.userId
   shape  spaceFull
 }`
 

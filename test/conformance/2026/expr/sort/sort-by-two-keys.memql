@@ -1,0 +1,5 @@
+/// Tickets by priority, then newest first.
+query ticket soByPriority {
+  sort "priority", "desc", "row.createdAt", "desc"
+  paginate 20
+}

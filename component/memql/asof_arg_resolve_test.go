@@ -204,7 +204,7 @@ query deployment probeDeployments {
     clusterId  string!
     asOf       datetime
   }
-  filter  clusterId == args.clusterId
+  filter  row => row.clusterId == args.clusterId
   asOf    args.asOf ?? latest
 }
 `

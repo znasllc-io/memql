@@ -1,0 +1,5 @@
+/// Tickets never closed.
+query ticket qfNull {
+  filter row => row.closedAt == null
+  paginate 20
+}

@@ -279,11 +279,37 @@ func (s *AuthoredScheduler) Stop() {
 
 // subscribeEvent wires an event-triggered authored automation. The handler
 // runs under the author's authz envelope.
+//
+// THE @filter DECIDES WHETHER THE EVENT FIRES THE AUTOMATION AT ALL, and it
+// is asked here exactly as the core scheduler's subscriber asks it: the args
+// contract is bound first, then the filter -- a `row => ...` lambda --
+// through the one evaluateTriggerFilter. This subscriber
+// used to run every event matching the trigger pattern with the filter
+// unread, so an email rule's "only when" condition changed nothing: a rule
+// for the users at one domain mailed on every user change.
 func (s *AuthoredScheduler) subscribeEvent(owner string, automation *Automation) func() {
 	a := automation
 	pattern := automation.Trigger.Event
 	return s.eventBus.Subscribe(pattern, func(event events.Event) {
 		ev := event
+		bound, _, argErr := bindEventArgs(a, &ev)
+		if argErr != nil {
+			refuseFireForArgs(s.logger, a.Name, ev.Topic, argErr)
+			return
+		}
+		if a.Trigger.Filter != "" {
+			shouldRun, err := evaluateTriggerFilter(a, &ev, bound)
+			if err != nil {
+				if s.logger != nil {
+					s.logger.Warn("authored automation trigger filter evaluation failed",
+						"owner", owner, "automation", a.Name, "filter", a.Trigger.Filter, "error", err)
+				}
+				return
+			}
+			if !shouldRun {
+				return
+			}
+		}
 		s.runUnderAuthor(owner, a, &ev)
 	}, events.WithSubscriberName("authored:"+owner+":"+a.Name))
 }

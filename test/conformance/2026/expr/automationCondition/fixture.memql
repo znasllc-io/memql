@@ -1,0 +1,47 @@
+/// A support ticket: the row the conditions here are written about.
+concept ticket {
+  title     string
+  status    string
+  priority  int
+  urgent    bool
+}
+
+/// A note about a goal, written when the goal changes.
+concept goalNote {
+  goalId  string
+  note    string
+}
+
+/// High-priority tickets.
+trait acIsHigh = row => row.priority > 3
+
+/// Raise a ticket with a title.
+mutate ticket raiseAgentTicket {
+  args {
+    title  string!
+  }
+  insert {
+    title: args.title
+    status: "open"
+  }
+}
+
+/// The kind of node the triggering event is about.
+logic joinedNodeType {
+  args {
+    event  object!
+  }
+  body {
+    return args.event.payload.nodeType
+  }
+}
+
+/// When the node the triggering event is about was last seen.
+logic joinedNodeLastSeen {
+  args {
+    event  object!
+  }
+  body {
+    return args.event.payload.lastSeen
+  }
+}

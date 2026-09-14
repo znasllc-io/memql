@@ -1,9 +1,7 @@
 package memql
 
 import (
-	"context"
 	"os"
-	"strings"
 	"testing"
 
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
@@ -11,7 +9,7 @@ import (
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// memql#2925 blocker 2: shortId() parses in an `id:` slot and dies at render.
+// memql#2925 blocker 2: shortId() parsed in an `id:` slot and died at render.
 //
 // `authoring-rules.md` §20 requires a hashed FK arg to be NORMALISED before it
 // is hashed, because the hash is byte-level -- two callers passing the same
@@ -24,123 +22,17 @@ import (
 // this tree mints -- though NOT idempotent in general. memql#2981 measured the
 // residual class and closed it at the argument boundary rather than by changing
 // the primitive, which stays on the wire-egress path untouched; see
-// shortid_fixpoint_2981_test.go. It passes memqllint
-// in the `id:` position, then fails at render with
+// shortid_fixpoint_2981_test.go. It passed memqllint in the `id:` position and
+// then failed at render, because the evaluator that rendered id slots then had
+// no case for it -- the memql#2909 lint-clean-then-render-fail class.
 //
-//	evaluate id: unsupported expression in mutation template: *ast.ShortIdExpr
-//
-// because evalParserExpression has cases for ConcatExpr and HashExpr and none
-// for ShortIdExpr. So the builtin works in payload positions
-// (dsl/forge/mutations.memql `requestId: shortId(args.requestId)`) and not in
-// the id derivation -- the position §20 is about.
-//
-// That lint-clean-then-render-fail split is the memql#2909 class, and worth
-// closing on its own regardless of which normaliser a given mutation picks.
-func TestShortId_RendersInAnIdDerivation(t *testing.T) {
-	eval := &mutationTemplateEvaluator{args: map[string]any{
-		"deploymentId": "v1:cluster:deployment:abc123",
-	}}
-	expr := &languageParser.ShortIdExpr{
-		Target: &languageParser.ArgRefExpr{Path: "deploymentId"},
-	}
-	got, err := eval.evalParserExpression(context.Background(), expr)
-	if err != nil {
-		if strings.Contains(err.Error(), "unsupported expression in mutation template") {
-			t.Fatalf("memql#2925 verbatim: shortId() lints clean in an `id:` slot and cannot "+
-				"render, so the normaliser authoring-rules.md §20 requires is unavailable in "+
-				"the one position §20 is about.\n  error: %v", err)
-		}
-		t.Fatalf("shortId() in an id derivation: %v", err)
-	}
-	if got != "abc123" {
-		t.Errorf("shortId(canonical) must yield the bare short id; got %#v", got)
-	}
-}
-
-// The property §20 actually wants: canonical and bare inputs must derive the
-// SAME id. This is the test the issue asks to restore -- it was written during
-// memql#2885 and removed when the normalisation could not land.
-func TestShortId_CanonicalAndBareDeriveTheSameId(t *testing.T) {
-	derive := func(t *testing.T, deploymentID string) any {
-		t.Helper()
-		eval := &mutationTemplateEvaluator{args: map[string]any{
-			"deploymentId": deploymentID,
-			"nodeType":     "bff",
-		}}
-		// hash(concat(shortId(args.deploymentId), ":", args.nodeType)) --
-		// §20's prescribed shape: normalise the FK, then hash the composite.
-		expr := &languageParser.HashExpr{
-			Target: &languageParser.ConcatExpr{Args: []languageParser.ExpressionNode{
-				&languageParser.ShortIdExpr{
-					Target: &languageParser.ArgRefExpr{Path: "deploymentId"},
-				},
-				&languageParser.LiteralExpr{Value: ":"},
-				&languageParser.ArgRefExpr{Path: "nodeType"},
-			}},
-		}
-		got, err := eval.evalParserExpression(context.Background(), expr)
-		if err != nil {
-			t.Fatalf("deriving from %q: %v", deploymentID, err)
-		}
-		return got
-	}
-
-	bare := derive(t, "abc123")
-	canonical := derive(t, "v1:cluster:deployment:abc123")
-	if bare != canonical {
-		t.Errorf("§20's invariant: the same logical deployment under two shapes must derive ONE "+
-			"id, or the same (deployment, nodeType) gets two timelines and "+
-			"nodeSpecsForDeployment returns both.\n  bare      -> %v\n  canonical -> %v",
-			bare, canonical)
-	}
-}
-
-// TestShortId_IsANoOpForEveryInTreeProducer is the safety argument for adding
-// shortId() to dsl/deployment/mutations.memql, asserted rather than assumed.
-//
-// The only in-tree producer of these mutations is examples/deploypack, whose
-// argString trims and forwards a bare id minted by id.NewShortId. (Not
-// component/deploycontrol -- it calls createDeployment and
-// updateDeploymentStatus, which this does not touch.) shortId() is a fixed
-// point on a bare id, so the derived id for that caller is byte-identical
-// before and after.
-//
-// Inputs that DO change are canonical ids, whitespace-padded ids, and SOME
-// v<digits>-shaped strings ("foo:v1:bar:baz:qux" strips to "qux";
-// "a:v1:b:c" is unchanged) -- not canonical ids alone, which is what this
-// comment claimed until review round 6 caught it standing after the same claim
-// had been corrected in dsl/deployment/mutations.memql and the PR body. None
-// is sent by an in-tree caller, and no rows exist to migrate (the mutation
-// could not write at all until memql#2885).
-func TestShortId_IsANoOpForEveryInTreeProducer(t *testing.T) {
-	derive := func(t *testing.T, normalise bool) any {
-		t.Helper()
-		eval := &mutationTemplateEvaluator{args: map[string]any{
-			"deploymentId": "9f8e7d6c-1234-4abc-9def-000000000001", // id.NewShortId shape
-			"nodeType":     "bff",
-		}}
-		var fk languageParser.ExpressionNode = &languageParser.ArgRefExpr{Path: "deploymentId"}
-		if normalise {
-			fk = &languageParser.ShortIdExpr{Target: fk}
-		}
-		got, err := eval.evalParserExpression(context.Background(), &languageParser.HashExpr{
-			Target: &languageParser.ConcatExpr{Args: []languageParser.ExpressionNode{
-				fk,
-				&languageParser.LiteralExpr{Value: ":"},
-				&languageParser.ArgRefExpr{Path: "nodeType"},
-			}},
-		})
-		if err != nil {
-			t.Fatalf("deriving (normalise=%v): %v", normalise, err)
-		}
-		return got
-	}
-	if before, after := derive(t, false), derive(t, true); before != after {
-		t.Errorf("adding shortId() must not change the id any in-tree producer derives -- there "+
-			"is no migration in this PR because there is nothing to migrate.\n"+
-			"  without shortId -> %v\n  with shortId    -> %v", before, after)
-	}
-}
+// The evaluator's half of this file -- shortId renders in an id derivation,
+// canonical and bare derive one id, it is a no-op for every in-tree producer,
+// and the separator aliasing is still live at the evaluator -- is pinned since
+// the flip by TestMutationValuesV1ShortIdInAnIdDerivation, over the one
+// evaluator mutation values have. What stays here is the part that is not
+// about an evaluator: what BareShortId strips, and the argument-boundary
+// closure of the aliasing (memql#2980).
 
 // TestShortId_DoesNotMakeAColonBearingArgSafe records what shortId() does NOT
 // do. memql#2980 closed the separator aliasing, but NOT here -- the two halves
@@ -166,30 +58,11 @@ func TestShortId_DoesNotMakeAColonBearingArgSafe(t *testing.T) {
 				"dsl/deployment/mutations.memql's comment about it needs updating.", in, got)
 		}
 	}
-	// The aliasing at the evaluator level, still live BY DESIGN -- #2980 fixed
-	// this by rejecting the input, not by changing the derivation, precisely so
-	// that no already-derived id moves.
-	derive := func(dep, node string) any {
-		eval := &mutationTemplateEvaluator{args: map[string]any{"deploymentId": dep, "nodeType": node}}
-		got, err := eval.evalParserExpression(context.Background(), &languageParser.HashExpr{
-			Target: &languageParser.ConcatExpr{Args: []languageParser.ExpressionNode{
-				&languageParser.ShortIdExpr{Target: &languageParser.ArgRefExpr{Path: "deploymentId"}},
-				&languageParser.LiteralExpr{Value: ":"},
-				&languageParser.ArgRefExpr{Path: "nodeType"},
-			}},
-		})
-		if err != nil {
-			t.Fatalf("deriving (%q,%q): %v", dep, node, err)
-		}
-		return got
-	}
-	if a, b := derive("d:x", "y"), derive("d", "x:y"); a != b {
-		t.Errorf("the evaluator no longer aliases -- the id DERIVATION changed. #2980 was closed "+
-			"by rejecting a colon-bearing nodeType at the argument boundary, specifically so that "+
-			"every already-derived id stays byte-identical. If the derivation itself moved, every "+
-			"existing v1:cluster:deploymentNodeSpec row needs re-keying and this is a migration.\n"+
-			"  (\"d:x\",\"y\") -> %v\n  (\"d\",\"x:y\") -> %v", a, b)
-	}
+	// The aliasing at the evaluator level is still live BY DESIGN -- #2980
+	// fixed this by rejecting the input, not by changing the derivation,
+	// precisely so that no already-derived id moves.
+	// TestMutationValuesV1ShortIdInAnIdDerivation asserts it over a rendered
+	// id derivation.
 }
 
 // TestNodeTypePatternClosesTheSeparatorAliasing is memql#2980's assertion.

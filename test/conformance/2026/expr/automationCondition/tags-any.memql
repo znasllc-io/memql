@@ -1,0 +1,1 @@
+args.tags.any(t => t == "urgent")

@@ -52,12 +52,26 @@ import (
 // reputation event.
 const maxFanout = 200
 
+// FirstFireClaim records that a created rule has fired for a row and reports
+// whether THIS firing is the one that did: true for exactly one caller per
+// (rule, row), on any replica. A false is a duplicate -- or a claim that could
+// not be recorded, which is treated the same, because a created rule that
+// cannot prove it is first must not send.
+type FirstFireClaim func(ctx context.Context, ruleID, rowID string) bool
+
 // Firer executes one rule against one triggering event.
 type Firer struct {
 	store *Store
+	claim FirstFireClaim
 }
 
 func NewFirer(engine Engine) *Firer { return &Firer{store: NewStore(engine)} }
+
+// WithFirstFireClaim returns the Firer with the claim a created rule needs.
+func (f *Firer) WithFirstFireClaim(claim FirstFireClaim) *Firer {
+	f.claim = claim
+	return f
+}
 
 // FireOutcome is what one firing did, for the result node and the log line.
 type FireOutcome struct {
@@ -67,6 +81,9 @@ type FireOutcome struct {
 	Sent       int
 	Skipped    int
 	Refusals   []string
+	// Duplicate is a created rule's second firing for one row -- two writes
+	// raced on a new row -- which sends nothing and is not counted as a firing.
+	Duplicate bool
 }
 
 // Fire resolves the rule, decides the lane from who receives, and sends.
@@ -102,9 +119,24 @@ func (f *Firer) Fire(ctx context.Context, ruleID, nodeID string, event map[strin
 		return out, nil
 	}
 
+	// A CREATED RULE SENDS ONCE PER ROW. Its trigger already admits only the
+	// write that materialised a row's first version (firstVersionGuard); this
+	// closes the one gap the trigger cannot see. Two writes racing on a new id
+	// both read "no prior version", so both events say firstVersion, and on
+	// the marketing lanes nothing downstream collapses the two sends. The
+	// claim is a primary-key insert, so exactly one firing -- on any replica,
+	// with no local state -- wins. The loser is a duplicate of a creation that
+	// already fired: it sends nothing and is not recorded as a firing.
+	if strings.TrimSpace(rule.EventKind) == "created" {
+		if f.claim == nil || !f.claim(ctx, rule.ID, nodeID) {
+			out.Duplicate = true
+			return out, nil
+		}
+	}
+
 	switch rule.RecipientMode {
 	case ModeClusterRoles:
-		err = f.fireOperational(ctx, rule, nodeID, &out)
+		err = f.fireOperational(ctx, rule, nodeID, event, &out)
 	case ModeAudience:
 		err = f.fireAudience(ctx, rule, &out)
 	case ModeRowAddress:
@@ -139,7 +171,7 @@ func (f *Firer) Fire(ctx context.Context, ruleID, nodeID string, event map[strin
 // that the author never learns anything from it: the addresses are used to
 // ADDRESS mail and are not returned, the outbox's own egress allowlist still
 // applies, and arming a rule at all is gated on the authoring tier.
-func (f *Firer) fireOperational(ctx context.Context, rule Rule, nodeID string, out *FireOutcome) error {
+func (f *Firer) fireOperational(ctx context.Context, rule Rule, nodeID string, event map[string]any, out *FireOutcome) error {
 	tmpl, ok, err := f.store.TemplateByID(ctx, rule.TemplateID)
 	if err != nil {
 		return err
@@ -174,10 +206,18 @@ func (f *Firer) fireOperational(ctx context.Context, rule Rule, nodeID string, o
 			break
 		}
 		// The dedupe key makes a redelivered trigger collapse rather than mail
-		// twice. It names the rule, the triggering row and the recipient --
-		// the three things that together identify "this notice, about this
-		// row, to this person".
+		// twice: the rule, the triggering row and the recipient identify "this
+		// notice, about this row, to this person". A CHANGED rule's notice is
+		// about one change, so its key also names the triggering write (the
+		// event's own time, to the second: changes inside one second are one
+		// notice) -- without it every change after a row's first re-staged the
+		// same outbound request, which keeps the status the worker gave it,
+		// and the owner heard about one change per row, ever.
 		key := dedupeKey(rule.ID, nodeID, email)
+		if strings.TrimSpace(rule.EventKind) == "updated" {
+			stamp, _ := event["timestamp"].(string)
+			key = dedupeKey(rule.ID, nodeID, stamp, email)
+		}
 		if err := f.store.StageOutbound(ctx, "obr"+key, email, subject, body, key, rule.OwnerUserID); err != nil {
 			out.Refusals = append(out.Refusals, err.Error())
 			continue

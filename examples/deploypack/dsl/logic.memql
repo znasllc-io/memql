@@ -8,20 +8,17 @@
 // (behavioral-constructs ADR section 2.1). Rewritten for #2400 after strict
 // boot (#2357) surfaced that the original bodies never parsed.
 //
-// Grammar note (#2400, updated #2407/#2410): every `:=` step RHS is a CALL,
-// an `if cond { call }`, or a collection chain -- the only forms the
-// logic-step grammar accepts. The original bodies used bare scalar/boolean
-// expression assignments and were silently skipped at load for their entire
-// life; branching values are built with cond(...) calls instead. Since
-// #2410, cond() predicates accept a single infix comparison (`x == "y"`,
-// `!=`) and COMPARISON/CONNECTIVE predicates evaluate through the full
-// condition evaluator at runtime; the expression-arg parser still rejects
-// connectives with a hint (nest cond() or move the compound condition to an
-// `if` step). Prefer the intermediate-step form (`ok := coalesce(...)` then
-// `cond(ok == true, ...)`) -- call-LHS comparisons inside cond() are not
-// parseable in expression contexts. Collection-chain reads
-// (result.First().payload.x) are still extracted into their own coalesce()
-// steps first.
+// Grammar note (#2400, updated #2407/#2410). These bodies were written for
+// the legacy logic-step grammar, where every `:=` step RHS had to be a CALL,
+// an `if cond { call }`, or a collection chain. The original bodies used bare
+// scalar/boolean expression assignments and were silently skipped at load
+// for their entire life, so the rewrite built branching values with
+// cond(...) calls, one infix comparison per predicate, and pulled every
+// collection-chain read (result.First().payload.x) into its own coalesce()
+// step first. Edition 2026 takes an expression on the right of `:=` and
+// evaluates it in process, so the migration turned those steps into the
+// `? :` and `??` forms below; the one-value-per-step layout is the legacy
+// grammar's, kept as the codemod wrote it.
 //
 // No environment is read off the event (epic memql#3943). The pack drives ONE
 // installation, so there is no environment to map and no promote to aim: the
@@ -38,22 +35,22 @@ logic driveDeploymentInProgress {
     event object @required
   }
   body {
-    status := coalesce(args.event.payload.status, "")
-    provider := coalesce(args.event.payload.provider, "")
-    deploymentId := coalesce(args.event.payload.deploymentId, "")
-    version := coalesce(args.event.payload.version, "")
-    previousDeploymentId := coalesce(args.event.payload.previousDeploymentId, "")
-    isAzure := cond(provider == "azure", true, cond(provider == "", true, false))
+    status := args.event.payload.status ?? ""
+    provider := args.event.payload.provider ?? ""
+    deploymentId := args.event.payload.deploymentId ?? ""
+    version := args.event.payload.version ?? ""
+    previousDeploymentId := args.event.payload.previousDeploymentId ?? ""
+    isAzure := provider == "azure" ? true : provider == "" ? true : false
     result := if status == "in_progress" && isAzure == true && version != "" && deploymentId != "" {
       deployObserveReconciledState(app: "")
     }
-    observedProbe := coalesce(result.First().payload.effect, "")
-    syncedVal := coalesce(result.First().payload.synced, false)
-    healthyVal := coalesce(result.First().payload.healthy, false)
-    observed := cond(observedProbe == "", false, true)
-    reconciled := cond(syncedVal == true, cond(healthyVal == true, true, false), false)
-    isRollback := cond(previousDeploymentId == "", false, true)
-    outcome := cond(reconciled == true, cond(isRollback == true, "rolled_back", "succeeded"), cond(observed == true, "failed", ""))
+    observedProbe := result.First().payload.effect ?? ""
+    syncedVal := result.First().payload.synced ?? false
+    healthyVal := result.First().payload.healthy ?? false
+    observed := observedProbe == "" ? false : true
+    reconciled := syncedVal == true ? (healthyVal == true ? true : false) : false
+    isRollback := previousDeploymentId == "" ? false : true
+    outcome := reconciled == true ? (isRollback == true ? "rolled_back" : "succeeded") : observed == true ? "failed" : ""
     return { deploymentId: deploymentId, outcome: outcome }
   }
 }
@@ -66,24 +63,24 @@ logic recordReconciledState {
     event object @required
   }
   body {
-    status := coalesce(args.event.payload.status, "")
-    provider := coalesce(args.event.payload.provider, "")
-    deploymentId := coalesce(args.event.payload.deploymentId, "")
-    version := coalesce(args.event.payload.version, "")
-    imageDigest := coalesce(args.event.payload.imageDigest, "")
-    isAzure := cond(provider == "azure", true, cond(provider == "", true, false))
+    status := args.event.payload.status ?? ""
+    provider := args.event.payload.provider ?? ""
+    deploymentId := args.event.payload.deploymentId ?? ""
+    version := args.event.payload.version ?? ""
+    imageDigest := args.event.payload.imageDigest ?? ""
+    isAzure := provider == "azure" ? true : provider == "" ? true : false
     observation := if status == "succeeded" && isAzure == true && deploymentId != "" {
       deployObserveReconciledState(app: "")
     }
-    obsProbe := coalesce(observation.First().payload.effect, "")
-    syncedVal := coalesce(observation.First().payload.synced, false)
-    healthyVal := coalesce(observation.First().payload.healthy, false)
-    observed := cond(obsProbe == "", false, true)
-    reconciled := cond(syncedVal == true, cond(healthyVal == true, true, false), false)
+    obsProbe := observation.First().payload.effect ?? ""
+    syncedVal := observation.First().payload.synced ?? false
+    healthyVal := observation.First().payload.healthy ?? false
+    observed := obsProbe == "" ? false : true
+    reconciled := syncedVal == true ? (healthyVal == true ? true : false) : false
     recorded := if reconciled == true {
       deployRecordBack(deploymentId: deploymentId, nodeType: "bff", version: version, replicas: 2, imageDigest: imageDigest)
     }
-    verdict := cond(reconciled == true, "recorded", cond(observed == true, "correct", ""))
+    verdict := reconciled == true ? "recorded" : observed == true ? "correct" : ""
     return { deploymentId: deploymentId, verdict: verdict }
   }
 }

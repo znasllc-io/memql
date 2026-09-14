@@ -97,9 +97,7 @@ func TestCrossRef_DanglingShapeImportFails(t *testing.T) {
 			Source: `use crossns.shapes.{ ghostShapeThatDoesNotExist }
 
 @description("references a missing shape")
-spec ghostShapeThatDoesNotExist crossDanglingSpec {
-  return role == "admin"
-}`,
+spec ghostShapeThatDoesNotExist crossDanglingSpec = row => row.role == "admin"`,
 		},
 	}, "crossns/concepts.memql"), eng)
 
@@ -146,7 +144,7 @@ use crossns.shapes.{ crossThingCard }
 
 @description("query over the bundle concept via the bundle shape")
 query crossThing queryCrossThing {
-  filter  name == "x"
+  filter  row => row.name == "x"
   shape   crossThingCard
 }`,
 		},

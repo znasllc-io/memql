@@ -71,15 +71,18 @@ func TestStrictBoot_EmbeddedTreeIsClean(t *testing.T) {
 func TestStrictBoot_FixtureWithBadConstruct(t *testing.T) {
 	const domain = "s2fixturebadboot"
 	// A spec with a garbage body (the exact `====` / `&&&&` shape from the
-	// epic #2351 audit). Balanced braces so slice extraction finds it, but
-	// ParseSpecDecl rejects the body -> LoadUnifiedSpecs skips it and
-	// records the drop on the report. No concept / query references it, so
+	// epic #2351 audit), written in the edition-2026 `=` form so slice
+	// extraction finds it and ParseSpecDecl rejects the BODY -- not the
+	// retired `{ return ... }` form, which would be refused for that
+	// instead -> LoadUnifiedSpecs skips it and records the drop on the
+	// report. No concept / query references it, so
 	// it trips ONLY the strict-boot gate, not the dependency-tree or CQS
 	// validators that run earlier.
 	fixture := fstest.MapFS{
-		"specs.memql": {Data: []byte("@description(\"bad\")\nspec activeRowTrait fixtureBadSpec {\n  return status ==== \"x\" &&&& true\n}\n")},
+		"specs.memql": {Data: []byte("@description(\"bad\")\nspec activeRowTrait fixtureBadSpec = row => row.status ==== \"x\" &&&& true\n")},
 	}
-	memqldsl.RegisterTree(domain, fixture)
+	// The fixture declares its language line, so the bad spec is its ONE problem.
+	memqldsl.RegisterTree(domain, withLanguageLine(fixture))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	// engine.Init normalizes (mutates) the concept registry's relationships

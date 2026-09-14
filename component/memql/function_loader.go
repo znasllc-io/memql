@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -110,9 +111,17 @@ func extractLeadingCommentBlock(content string) string {
 // rewrite error names the exact construct and the migration, so callers
 // (and the unifiedFunctionLoader's skip-slice warning) see why the slice
 // failed rather than a misleading token complaint.
+//
+// A refusal the rewrite placed at the author's clause (memql#5364) is the
+// failure itself: the parse error only says the parser met the construct
+// unlowered, and would lead the report with the construct's header.
 func withRewriteCause(parseErr, rewriteErr error) error {
 	if rewriteErr == nil {
 		return parseErr
+	}
+	var placed *languageParser.PositionedRewriteError
+	if errors.As(rewriteErr, &placed) {
+		return rewriteErr
 	}
 	return fmt.Errorf("%w (struct-form rewrite failed: %v)", parseErr, rewriteErr)
 }
@@ -127,6 +136,22 @@ func withRewriteCause(parseErr, rewriteErr error) error {
 //   - Unlimited queries per file
 //   - Automations should be in automations/ directory, not queries/mutations
 func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin string, registry memoryNodes.Registry) (*Function, error) {
+	return tryParseFunctionSlice(expectedName, expectedKind, content, origin, registry, 0, 0)
+}
+
+// tryParseFunctionSlice is tryParseNewFunctionSyntax for a slice cut from a
+// file: the declaration text starting at bodyOffset of content sits on line
+// `line` of that file (FunctionSlice.Line / BodyOffset), so every position a
+// parse error reports is the file's (memql#5364). line 0 leaves positions
+// relative to content.
+func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, registry memoryNodes.Registry, line, bodyOffset int) (*Function, error) {
+	// What the author wrote, placed in the file when the slice's line is
+	// known: the positions the lexer reports below come from here.
+	authored := content
+	if line > 0 && bodyOffset >= 0 && bodyOffset <= len(content) {
+		authored = content[:bodyOffset] + languageParser.AnchorSource(content[bodyOffset:], line)
+	}
+
 	// Author-facing retirement (memql#303): reject the legacy
 	// procedural form `func (Receiver) name(ctx any) ...` before any
 	// rewriting runs. The internal IR is still procedural (the
@@ -134,7 +159,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// author may write that shape directly. The compiler test fixtures
 	// that consume procedural source bypass this loader entirely.
 	if err := languageParser.RejectLegacyProceduralAuthorForm(content); err != nil {
-		return nil, fmt.Errorf("%s: %w", origin, err)
+		return nil, fmt.Errorf("%s: %w", origin, languageParser.PositionRewriteError(authored, err))
 	}
 
 	// Snapshot the signature-bound concepts BEFORE NormaliseAll
@@ -156,7 +181,9 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	if rewritten, rerr := languageParser.NormaliseAll(content); rerr == nil {
 		content = rewritten
 	} else {
-		rewriteErr = rerr
+		// Placed at the author's clause, in the file when the slice was
+		// anchored to it.
+		rewriteErr = languageParser.PositionRewriteError(authored, rerr)
 	}
 
 	// Keep the pre-translation source for the declared-usage validator
@@ -178,7 +205,22 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// The signature concepts were captured from the PRE-rewrite
 	// source above; we apply the translation against the post-rewrite
 	// content here.
+	//
+	// NOT for a query with an edition-2026 lambda (memql#5366). The
+	// translation is textual, and a v1 filter names every row read through
+	// its parameter -- `row => row.<concept>.x == 1` would become
+	// `row.payload.x`, and a parameter the author named after the concept
+	// (`registration => registration.revoked`) would become a read of an
+	// undefined `payload`. A query never needs the translation in the first
+	// place: its filter reads payload fields bare (legacy) or through the
+	// parameter (v1), and the conformance gate refuses `<concept>.<field>` in
+	// a filter. `=>` appears in a query only as a v1 lambda: a legacy filter
+	// refuses lambdas, and collection-method lambdas live in logic bodies.
+	v1Query := strings.Contains(content, "func (Query)") && strings.Contains(content, "=>")
 	for _, name := range signatureConcepts {
+		if v1Query {
+			break
+		}
 		content = translateSignatureConceptPathsToPayload(content, name)
 	}
 
@@ -207,8 +249,13 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		content = resolved
 	}
 
-	// Try parsing with the full parser
-	lexer := languageParser.NewLexer(content)
+	// Try parsing with the full parser. The text lexed carries the author's
+	// positions (languageParser.PositionLowering), marked after every text
+	// transform above so none of them reads a marker: a refusal names the
+	// author's line and column, not the lowered text's. content itself stays
+	// unmarked for the text-reading validators below.
+	lexed := languageParser.PositionLowering(authored, content)
+	lexer := languageParser.NewLexer(lexed)
 	tokens, err := lexer.Tokenize()
 	if err != nil {
 		return nil, withRewriteCause(err, rewriteErr)
@@ -216,10 +263,6 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 
 	p := languageParser.NewParser(tokens)
 	p.SetDocComments(lexer.DocComments())
-	// Record the (fully-rewritten) source so a collection-chain logic step
-	// RHS can be sliced back to its exact span during parsing (#2317). The
-	// tokens were lexed from this same `content`, so the rune offsets line up.
-	p.SetSource(content)
 	ast, err := p.Parse()
 	if err != nil {
 		return nil, withRewriteCause(err, rewriteErr)
@@ -539,9 +582,22 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				return nil, fmt.Errorf("function %q mutation body must be an insert() statement, got %T", expectedName, funcDef.Body)
 			}
 
-			payloadObj, err := parsePayloadRawToTemplate(stmt.PayloadRaw)
+			// If the mutation body didn't specify a concept (implicit from
+			// use), fill it from BoundConcept. It is also the concept C5
+			// checks the fields of.
+			mutationConcept := stmt.Concept
+			if mutationConcept == "" && boundConcept != "" {
+				mutationConcept = boundConcept
+			}
+
+			// The values: the statement's parsed nodes -- PayloadExpr and
+			// the four slots -- built, checked and laid out by
+			// newMutationTemplateV1 (mutation_values_v1.go). Every mutation
+			// builds from its edition-2026 parse; a statement that was not
+			// parsed that way is refused there.
+			tmpl, err := mutationTemplateFromStmtV1(stmt, mutationConcept)
 			if err != nil {
-				return nil, fmt.Errorf("function %q: parse payload: %w", expectedName, err)
+				return nil, fmt.Errorf("function %q: %w", expectedName, err)
 			}
 
 			// C5 (memql#2035): a caller-supplied arg can never write a
@@ -550,16 +606,10 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 			// accept/stamp sugar safe (an `accept { internalField }`
 			// desugars to `internalField: args.internalField`, which is
 			// rejected here) AND catches a hand-written `insert` that
-			// binds a sensitive field straight from caller args. The
-			// concept is resolved from the signature/use binding; an
-			// unannotated concept (today's whole tree) has no sensitive
-			// fields, so this is a no-op until concepts adopt the
-			// annotations.
-			sensitiveConcept := stmt.Concept
-			if sensitiveConcept == "" {
-				sensitiveConcept = boundConcept
-			}
-			if err := validateMutationCallerArgs(registry, sensitiveConcept, expectedName, payloadObj); err != nil {
+			// binds a sensitive field straight from caller args. It reads
+			// the block's fields: the laid-out payload and overlay, with
+			// parsed nodes at the leaves.
+			if err := validateMutationCallerArgs(registry, mutationConcept, expectedName, mutationBlockFieldsV1(tmpl)); err != nil {
 				return nil, err
 			}
 
@@ -602,69 +652,14 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
 			}
 
-			// Handle object-literal syntax: insert("concept", { id: ..., payload: {...} })
-			// If the payloadObj includes an id or payload key, normalize them.
-			var idTemplate any = stmt.IDTemplate
-			var createdAtTemplate any = stmt.CreatedAtTemplate
-			var payloadTemplate any = payloadObj
-			var payloadOverlay map[string]any
-			if payloadObj != nil {
-				if idVal, ok := payloadObj["id"]; ok && idTemplate == nil {
-					idTemplate = idVal
-				}
-				if createdAtVal, ok := payloadObj["createdAt"]; ok && createdAtTemplate == nil {
-					createdAtTemplate = createdAtVal
-				}
-				payloadVal, hasPayloadKey := payloadObj["payload"]
-				if hasPayloadKey {
-					// payload can itself be an expression (e.g., args.payload) that evaluates to an object at runtime.
-					payloadTemplate = payloadVal
-				}
-				// Remove id if it was embedded inside the object literal.
-				delete(payloadObj, "id")
-				delete(payloadObj, "createdAt")
-				delete(payloadObj, "payload")
-				// If we didn't have an explicit payload wrapper, payloadTemplate remains the entire object.
-				if payloadTemplate == nil {
-					payloadTemplate = payloadObj
-				} else if hasPayloadKey && len(payloadObj) > 0 {
-					// The insert block mixed `args.payload` (the splat) with
-					// explicit fields like `ownerUserId: actor.userId`. Keep
-					// the explicit fields as an overlay -- renderMutationTemplate
-					// evaluates the splat first, then overlays these, so an
-					// authz-relevant server-side stamp wins over any caller-
-					// supplied value in the splat payload (memql#401). Without
-					// this branch the explicit fields were silently dropped.
-					payloadOverlay = payloadObj
-				}
-			}
-
-			parentTemplate := stmt.ParentTemplate
-			aliasOfTemplate := stmt.AliasOfTemplate
-
-			// If the mutation body didn't specify a concept (implicit from use),
-			// fill it from BoundConcept.
-			mutationConcept := stmt.Concept
-			if mutationConcept == "" && boundConcept != "" {
-				mutationConcept = boundConcept
-			}
-			fn.MutationTemplate = &FunctionMutationTemplate{
-				Kind:                   stmt.Kind,
-				Concept:                mutationConcept,
-				IDTemplate:             idTemplate,
-				CreatedAtTemplate:      createdAtTemplate,
-				PayloadTemplate:        payloadTemplate,
-				PayloadOverlayTemplate: payloadOverlay,
-				ParentTemplate:         parentTemplate,
-				AliasOfTemplate:        aliasOfTemplate,
-				MergeFields:            mergeFields,
-				AppendFields:           appendFields,
-				AddToSetFields:         addToSetFields,
-				RemoveFromSetFields:    removeFromSetFields,
-				CreateOnlyFields:       createOnlyFields,
-				NoUnsetFields:          noUnsetFields,
-				ScrubPii:               scrubPii,
-			}
+			tmpl.MergeFields = mergeFields
+			tmpl.AppendFields = appendFields
+			tmpl.AddToSetFields = addToSetFields
+			tmpl.RemoveFromSetFields = removeFromSetFields
+			tmpl.CreateOnlyFields = createOnlyFields
+			tmpl.NoUnsetFields = noUnsetFields
+			tmpl.ScrubPii = scrubPii
+			fn.MutationTemplate = tmpl
 			fn.ExprSource = extractExpressionFromContent(content)
 
 		case languageParser.FunctionTypeLogic:
@@ -692,26 +687,19 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				if err != nil {
 					return nil, fmt.Errorf("function %q: %w", expectedName, err)
 				}
-				// Logic bodies admit the Story 4 collection-method + lambda
-				// surface (ADR §2.2). Specs and query filters use the default
-				// converter, which rejects it.
-				converter := NewASTConverter(WithCollectionMethods())
-				engineExpr, err := converter.ConvertExpression(retExpr)
+				// The body is bridged onto the two runners logic has by
+				// logic_body_v1.go (memql#5367): a pure body is fn.Expr, and
+				// one with intermediate steps also runs on the LogicRunner,
+				// which walks the steps in order, binds each result for later
+				// step references, and evaluates the `_return` expression as
+				// the function's return.
+				engineExpr, onRunner, err := loadLogicBodyV1(auto, retExpr)
 				if err != nil {
-					return nil, fmt.Errorf("convert function %q body: %w", expectedName, err)
-				}
-				if boundConcept != "" {
-					engineExpr = resolveBareConcept(engineExpr, boundConcept)
+					return nil, fmt.Errorf("function %q body: %w", expectedName, err)
 				}
 				fn.Expr = engineExpr
 				fn.ExprSource = extractExpressionFromContent(content)
-				// F.5: when the body has intermediate steps, stash the
-				// full AutomationDef on the function so the engine can
-				// dispatch through the wired LogicRunner. The runner
-				// walks the intermediate steps in order, binds each
-				// result for later step references, and evaluates the
-				// `_return` expression as the function's return.
-				if nonReturnStepCount(auto.Steps) > 0 {
+				if onRunner {
 					fn.LogicSteps = auto
 				}
 			} else {
@@ -721,7 +709,30 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		default:
 			// Query functions: convert the expression AST to executable engine AST.
 			if parserExpr, ok := funcDef.Body.(languageParser.ExpressionNode); ok {
-				converter := NewASTConverter()
+				// An edition-2026 filter -- the lambda the struct-form
+				// rewriter joins onto the concept binding -- lowers through
+				// Lower, against the bound concept's declared fields and the
+				// query's declared arguments (memql#5366). The spec registry
+				// is not loaded yet, so a predicate application's kind is
+				// checked later, by the Init pass, from fn.V1Filter.
+				var lowerOpts []ASTConverterOption
+				if funcDef.Type == languageParser.FunctionTypeQuery {
+					var bound *memoryNodes.Concept
+					if registry != nil && boundConcept != "" {
+						if c, err := registry.Get(boundConcept); err == nil {
+							bound = c
+						}
+					}
+					argTypes := argTypesFromSchema(fn.ArgsSchema)
+					lowerOpts = append(lowerOpts, WithPredicateLowering(func(lam *languageParser.LambdaExpr) (ExpressionNode, error) {
+						if fn.V1Filter != nil {
+							return nil, fmt.Errorf("a query has one filter, and %q has a second lambda where a condition goes", expectedName)
+						}
+						fn.V1Filter = lam
+						return lowerQueryFilter(lam, bound, argTypes, nil)
+					}))
+				}
+				converter := NewASTConverter(lowerOpts...)
 				engineExpr, err := converter.ConvertExpression(parserExpr)
 				if err != nil {
 					return nil, fmt.Errorf("convert function %q body: %w", expectedName, err)
@@ -908,6 +919,11 @@ func stampConceptCacheHint(expr ExpressionNode, seconds int) bool {
 		left := stampConceptCacheHint(n.Left, seconds)
 		right := stampConceptCacheHint(n.Right, seconds)
 		return left || right
+	case *NotExpression:
+		// Not descended: `!(concept == X)` is the concept the query does NOT
+		// read, and a TTL is a statement about the concept it does.
+		// collectCacheHints skips the same node for the same reason.
+		return false
 	case *RelationshipExpression:
 		return stampConceptCacheHint(n.Target, seconds)
 	case *SortExpression:
@@ -924,6 +940,8 @@ func stampConceptCacheHint(expr ExpressionNode, seconds int) bool {
 		return stampConceptCacheHint(n.Target, seconds)
 	case *ShapeExpression:
 		return stampConceptCacheHint(n.Target, seconds)
+	case *RefineExpression:
+		return stampConceptCacheHint(n.Target, seconds)
 	default:
 		return false
 	}
@@ -938,6 +956,9 @@ func ensureBoundConceptFilter(expr ExpressionNode, boundConcept string) Expressi
 		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
 		return n
 	case *PaginateExpression:
+		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
+		return n
+	case *RefineExpression:
 		n.Target = ensureBoundConceptFilter(n.Target, boundConcept)
 		return n
 	case *SelectExpression:
@@ -988,6 +1009,10 @@ func containsBoundConceptEquality(expr ExpressionNode, boundConcept string) bool
 		}
 		return containsBoundConceptEquality(n.Left, boundConcept) ||
 			containsBoundConceptEquality(n.Right, boundConcept)
+	case *NotExpression:
+		// A negated equality is the opposite of a binding: `!(concept == X)`
+		// excludes X, so the bound-concept conjunct is still owed.
+		return false
 	default:
 		return false
 	}
@@ -1021,6 +1046,8 @@ func resolveBareConcept(expr ExpressionNode, boundConcept string) ExpressionNode
 			Left:  resolveBareConcept(n.Left, boundConcept),
 			Right: resolveBareConcept(n.Right, boundConcept),
 		}
+	case *NotExpression:
+		return &NotExpression{Target: resolveBareConcept(n.Target, boundConcept)}
 	case *RelationshipExpression:
 		return &RelationshipExpression{
 			Function: n.Function,
@@ -1036,6 +1063,12 @@ func resolveBareConcept(expr ExpressionNode, boundConcept string) ExpressionNode
 		return &PaginateExpression{
 			Limit:  n.Limit,
 			Target: resolveBareConcept(n.Target, boundConcept),
+		}
+	case *RefineExpression:
+		return &RefineExpression{
+			Target:   resolveBareConcept(n.Target, boundConcept),
+			Lambda:   n.Lambda,
+			Bindings: n.Bindings,
 		}
 	case *ShapeExpression:
 		return &ShapeExpression{
@@ -1278,11 +1311,22 @@ func collectFunctionRefsRecursive(expr ExpressionNode, refs *[]string) {
 	case *LogicalExpression:
 		collectFunctionRefsRecursive(node.Left, refs)
 		collectFunctionRefsRecursive(node.Right, refs)
+	case *NotExpression:
+		collectFunctionRefsRecursive(node.Target, refs)
+	case *ArrayPredicateExpression:
+		collectFunctionRefsRecursive(node.Pred, refs)
+	case *PlanConstExpression:
+		// A v1 AST: its calls are catalog functions, not constructs.
 	case *RelationshipExpression:
 		collectFunctionRefsRecursive(node.Target, refs)
 	case *SortExpression:
 		collectFunctionRefsRecursive(node.Target, refs)
 	case *PaginateExpression:
+		collectFunctionRefsRecursive(node.Target, refs)
+	case *RefineExpression:
+		// The target: the refine lambda is a v1 AST whose calls are catalog
+		// functions and predicates, never constructs (validateRefine refuses
+		// a construct call in it).
 		collectFunctionRefsRecursive(node.Target, refs)
 	case *SelectExpression:
 		collectFunctionRefsRecursive(node.Target, refs)
@@ -1363,6 +1407,10 @@ func walkForImpureLambda(expr ExpressionNode, functions map[string]*Function) er
 			return err
 		}
 		return walkForImpureLambda(node.Right, functions)
+	case *NotExpression:
+		return walkForImpureLambda(node.Target, functions)
+	case *ArrayPredicateExpression:
+		return walkForImpureLambda(node.Pred, functions)
 	case *BinaryComparisonExpression:
 		// An expression-led comparison operand can itself carry a collection
 		// chain with a lambda (`rows.any(r => mutate()) == true`); traverse
@@ -1374,6 +1422,11 @@ func walkForImpureLambda(expr ExpressionNode, functions map[string]*Function) er
 	case *CountExpression:
 		return walkForImpureLambda(node.Target, functions)
 	case *ShapeExpression:
+		return walkForImpureLambda(node.Target, functions)
+	case *RefineExpression:
+		// The target. The refine lambda cannot call a construct at all
+		// (validateRefine refuses one), so there is no impure call in it
+		// for this walk to find.
 		return walkForImpureLambda(node.Target, functions)
 	}
 	return nil
@@ -1400,6 +1453,10 @@ func findImpureCall(expr ExpressionNode, functions map[string]*Function) string 
 			return bad
 		}
 		return findImpureCall(node.Right, functions)
+	case *NotExpression:
+		return findImpureCall(node.Target, functions)
+	case *ArrayPredicateExpression:
+		return findImpureCall(node.Pred, functions)
 	case *CollectionMethodExpression:
 		if bad := findImpureCall(node.Receiver, functions); bad != "" {
 			return bad
@@ -1693,19 +1750,17 @@ func convertArgsField(field *languageParser.ArgsField) (*FunctionArgsField, erro
 	return result, nil
 }
 
-// valueReferencesCallerArg reports whether a parsed payload-template
-// value is bound to caller-supplied input. The struct-form rewriter
-// passes `args.X` references through verbatim; the object-literal
-// parser also recognises the legacy `ctx.X` shorthand for the same
-// thing. Non-string values (literals, nested objects) are never
-// caller-args. Backs the C5 (memql#2035) sensitive-field gate.
+// valueReferencesCallerArg reports whether a laid-out payload-template value
+// is exactly a read of caller-supplied input -- `args.<path>`
+// (v1CallerArgPath). A nested object or list is not one: C5 asks about the
+// field's own value. Backs the C5 (memql#2035) sensitive-field gate.
 func valueReferencesCallerArg(v any) bool {
-	s, ok := v.(string)
+	n, ok := v.(languageParser.ExpressionNode)
 	if !ok {
 		return false
 	}
-	s = strings.TrimSpace(s)
-	return strings.HasPrefix(s, "args.") || strings.HasPrefix(s, "ctx.")
+	_, isArg := v1CallerArgPath(n)
+	return isArg
 }
 
 // validateMutationCallerArgs enforces the C5 (memql#2035) invariant

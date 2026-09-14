@@ -1,0 +1,7 @@
+/// A one-sentence digest of a ticket, for a reader who asked for one.
+@level("fast")
+@templateFile("ticketDigest.tmpl")
+prompt ticketDigestDescription {
+  title     string!  @description("The ticket's title.")
+  language  string  @description
+}

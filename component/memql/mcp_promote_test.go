@@ -19,7 +19,7 @@ mutation mcpWidget mutationCreatePromotedWidget {
     widgetId  string  @required
   }
   insert {
-    id:    canonicalId(args.widgetId, mcpWidget)
+    id:    canonicalId(args.widgetId, "mcpWidget")
     label: "x"
   }
 }`

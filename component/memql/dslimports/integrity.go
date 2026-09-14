@@ -1546,42 +1546,11 @@ func filterEnumViolations(n languageAst.Node, enums map[string][]string) []enumV
 		switch v := node.(type) {
 		case *languageAst.QueryStmt:
 			walk(v.Expression)
-		case *languageAst.ComparisonExpr:
-			if len(v.Field.Parts) != 1 {
-				return
-			}
-			allowed, isEnum := enums[strings.TrimSpace(v.Field.Parts[0])]
-			if !isEnum {
-				return
-			}
-			switch v.Operator {
-			case languageAst.OpEq, languageAst.OpNe, languageAst.OpIn, languageAst.OpOut:
-			default:
-				return
-			}
-			member := make(map[string]bool, len(allowed))
-			for _, a := range allowed {
-				member[a] = true
-			}
-			for _, lit := range stringLiterals(v.Value) {
-				if !member[lit] {
-					out = append(out, enumViolation{
-						field:       v.Field.Parts[0],
-						value:       lit,
-						allowed:     allowed,
-						consequence: enumConsequence(v.Operator),
-					})
-				}
-			}
 		case *languageAst.LogicalExpr:
+			// The lowered query joins its concept term to the filter
+			// lambda: `concept==<id> && (row => ...)`.
 			walk(v.Left)
 			walk(v.Right)
-		case *languageAst.ConditionalFilterExpr:
-			walk(v.Filter)
-		case *languageAst.NotExpr:
-			walk(v.Target)
-		case *languageAst.RelationshipExpr:
-			walk(v.Target)
 		case *languageAst.ShapeExpr:
 			walk(v.Target)
 		case *languageAst.SortExpr:
@@ -1599,30 +1568,103 @@ func filterEnumViolations(n languageAst.Node, enums map[string][]string) []enumV
 			walk(v.Target)
 		case *languageAst.CountExpr:
 			walk(v.Target)
+		case *languageAst.RefineExpr:
+			// `refine row => ...` (memql#5364) is a predicate over the rows
+			// the paginated target reads -- the same row, the same enums.
+			walk(v.Target)
+			if v.Lambda != nil {
+				walk(v.Lambda)
+			}
+		case *languageAst.LambdaExpr:
+			out = append(out, v1EnumViolations(v, enums)...)
 		}
 	}
 	walk(n)
 	return out
 }
 
-// stringLiterals extracts the string literal(s) a comparison value carries --
-// one for `==` / `!=`, a list for `in`. A non-literal yields none.
-func stringLiterals(value any) []string {
-	switch v := value.(type) {
-	case string:
-		return []string{v}
-	case []string:
-		return v
-	case []any:
-		var out []string
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
+// v1EnumViolations is filterEnumViolations for one predicate (epic
+// memql#5363): `filter row => ...` or a spec's `row => ...`.
+//
+// The comparisons inspected: `==` / `!=` between the parameter's field and a
+// string literal (either operand order), and `in` between the parameter's
+// field and a list of them, a `!` directly over the `in` taking the `not in`
+// consequence. Only a single-field member of the PARAMETER is the enum --
+// `args.status` and a nested lambda's own parameter are not the row's field.
+func v1EnumViolations(lam *languageAst.LambdaExpr, enums map[string][]string) []enumViolation {
+	if lam == nil || len(lam.Params) != 1 || len(enums) == 0 {
+		return nil
+	}
+	param := lam.Params[0]
+	rowField := func(n languageAst.ExpressionNode) (string, bool) {
+		root, fields, ok := languageAst.MemberPath(languageAst.Unparen(n))
+		if !ok || root != param || len(fields) != 1 {
+			return "", false
+		}
+		_, isEnum := enums[fields[0]]
+		return fields[0], isEnum
+	}
+	literal := func(n languageAst.ExpressionNode) (string, bool) {
+		l, ok := languageAst.Unparen(n).(*languageAst.LiteralExpr)
+		if !ok {
+			return "", false
+		}
+		s, ok := l.Value.(string)
+		return s, ok
+	}
+	var out []enumViolation
+	check := func(field, value string, op languageAst.ComparisonOperator) {
+		allowed := enums[field]
+		for _, a := range allowed {
+			if a == value {
+				return
 			}
 		}
-		return out
+		out = append(out, enumViolation{field: field, value: value, allowed: allowed, consequence: enumConsequence(op)})
 	}
-	return nil
+	negated := map[languageAst.ExpressionNode]bool{}
+	languageAst.WalkV1(lam.Body, func(n languageAst.ExpressionNode) bool {
+		switch e := n.(type) {
+		case *languageAst.UnaryExpr:
+			if e.Op == "!" {
+				negated[languageAst.Unparen(e.Operand)] = true
+			}
+		case *languageAst.BinaryExpr:
+			switch e.Op {
+			case "==", "!=":
+				op := languageAst.OpEq
+				if e.Op == "!=" {
+					op = languageAst.OpNe
+				}
+				if field, ok := rowField(e.Left); ok {
+					if lit, ok := literal(e.Right); ok {
+						check(field, lit, op)
+					}
+				} else if field, ok := rowField(e.Right); ok {
+					if lit, ok := literal(e.Left); ok {
+						check(field, lit, op)
+					}
+				}
+			case "in":
+				field, ok := rowField(e.Left)
+				list, isList := languageAst.Unparen(e.Right).(*languageAst.ListExpr)
+				if !ok || !isList {
+					break
+				}
+				op := languageAst.OpIn
+				if negated[n] {
+					op = languageAst.OpOut
+				}
+				for _, el := range list.Elems {
+					if lit, ok := literal(el); ok {
+						check(field, lit, op)
+					}
+				}
+			}
+		}
+		return true
+	})
+	return out
 }
 
 // filterRowIntrinsics are the row intrinsics a FILTER may name, lower-cased.
@@ -1694,23 +1736,11 @@ func filterFieldHeads(n languageAst.Node) []string {
 		switch v := node.(type) {
 		case *languageAst.QueryStmt:
 			walk(v.Expression)
-		case *languageAst.ComparisonExpr:
-			add(v.Field)
-			for _, sel := range v.FieldSelections {
-				add(sel)
-			}
 		case *languageAst.LogicalExpr:
+			// The lowered query joins its concept term to the filter
+			// lambda: `concept==<id> && (row => ...)`.
 			walk(v.Left)
 			walk(v.Right)
-		case *languageAst.ConditionalFilterExpr:
-			walk(v.Filter)
-		case *languageAst.NotExpr:
-			walk(v.Target)
-		case *languageAst.RelationshipExpr:
-			// The engine's rewriteFilterFieldRefs walks this, so a bare
-			// property under childOf(...) IS payload-prefixed -- omitting it
-			// here left the lane blind to the exact defect it exists to catch.
-			walk(v.Target)
 		case *languageAst.ShapeExpr:
 			walk(v.Target)
 		case *languageAst.SortExpr:
@@ -1725,6 +1755,30 @@ func filterFieldHeads(n languageAst.Node) []string {
 			walk(v.Target)
 		case *languageAst.CountExpr:
 			walk(v.Target)
+		case *languageAst.RefineExpr:
+			// `refine row => ...` (memql#5364) reads the same row's fields,
+			// in process, over the page the paginated target returns.
+			walk(v.Target)
+			if v.Lambda != nil {
+				walk(v.Lambda)
+			}
+		case *languageAst.LambdaExpr:
+			// The predicate (epic memql#5363): every field is a member of the
+			// lambda's parameter, `row.status`, so the head is the FIRST
+			// FIELD of each chain rooted at it -- not the root, which would
+			// report `row` for every reference. A chain rooted anywhere else
+			// (`args.x`, `actor.userId`, a traversal's own parameter) is not
+			// the row's field and contributes nothing. A field of the row read
+			// inside a traversal (`childOf(p => p.id == row.parentId)`) is
+			// still the row's, and is reached.
+			if len(v.Params) != 1 {
+				return
+			}
+			languageAst.MemberPaths(v.Body, func(root string, fields []string) {
+				if root == v.Params[0] && len(fields) > 0 {
+					add(languageAst.FieldReference{Parts: fields})
+				}
+			})
 		}
 	}
 	walk(n)
@@ -2344,24 +2398,35 @@ func (t *Tree) verifySpecBodyFields(path string, f *languageAst.File, idx *declI
 	var errs []error
 	for _, def := range f.Definitions {
 		spec, ok := def.(*languageAst.SpecDecl)
-		if !ok || spec.IsTrait || spec.BoundName == "" || spec.Body == nil {
+		if !ok || spec.IsTrait || spec.BoundName == "" || spec.Lambda == nil {
 			continue
+		}
+		// A spec takes no arguments: the engine's lowering refuses an
+		// `args.x` read in a spec body at load, so the lane says so rather
+		// than lint clean and refuse at boot. It needs no binding.
+		if len(spec.Lambda.Params) == 1 {
+			languageAst.MemberPaths(spec.Lambda.Body, func(root string, fields []string) {
+				if root == "args" && root != spec.Lambda.Params[0] && len(fields) > 0 {
+					errs = append(errs, fmt.Errorf(
+						"%s: spec %q: body reads args.%s, and a spec does not take arguments",
+						path, spec.Name, fields[0]))
+				}
+			})
 		}
 		allowed, kind := t.resolveSpecBindingFields(path, f, idx, spec.BoundName)
 		if allowed == nil {
 			continue // unresolved -- lane 2 reports it
 		}
-		for _, head := range filterFieldHeads(spec.Body) {
+		// Each head is the first field of a chain rooted at the lambda's
+		// parameter; a chain rooted at actor, config or now is the predicate's
+		// scope, not the binding's, and is not a head.
+		for _, head := range filterFieldHeads(spec.Lambda) {
 			if allowed[head] {
 				continue
 			}
-			// A concept-bound (row) spec may name a BARE row intrinsic.
-			// It may NOT name a reserved head (args / actor / config ...):
-			// conceptFieldMapper reads "the bound concept by bare name
-			// only" and rejects any dotted reference, so admitting those
-			// -- as lane 5 does for a filter, where they ARE legal -- would
-			// lint clean and refuse at boot. A shape-bound spec gets
-			// neither: its mapper resolves projected keys and nothing else.
+			// A concept-bound (row) spec may name a row intrinsic
+			// (`row.createdAt`). A shape-bound spec may not: its mapper
+			// resolves projected keys and nothing else.
 			if kind == "concept" && filterRowIntrinsics[strings.ToLower(head)] {
 				continue
 			}

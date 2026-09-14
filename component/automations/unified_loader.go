@@ -15,6 +15,7 @@ package automations
 // isolation.
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -81,13 +82,23 @@ var automationLooseHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Z
 // Directories whose name starts with `_` or `.` are skipped as soft-disabled,
 // matching every other DSL walker.
 func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
-	tree := memqldsl.Tree()
+	return l.loadFromTree(memqldsl.Tree())
+}
+
+// loadFromTree is LoadFromUnifiedTree over tree: `<domain>/...` directories,
+// each carrying its memql.toml. The step-order gate hands it the DSL bundles
+// the engine tree does not hold (deploy/fleet/dsl, examples/<pack>/dsl).
+func (l *Loader) loadFromTree(tree fs.FS) ([]*Automation, error) {
 	var out []*Automation
 	// Hard load problems collected across the whole walk (memql#2830). We
 	// keep walking after the first one so the operator gets the COMPLETE
 	// list in a single boot attempt rather than peeling them off one per
 	// restart.
 	var problems []automationLoadProblem
+	// This walker reads the tree itself, so it reads each file through the
+	// front end of the edition the file's domain declares (memql#5358), as
+	// baseloader.ReadAll does for every other construct kind.
+	lines, _ := memql.ResolveLanguageLines(tree)
 
 	err := fs.WalkDir(tree, ".", func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -132,6 +143,26 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 			})
 			return nil
 		}
+		// Before anything interprets it -- the terse lowering and the slice
+		// extractor below both read the core grammar. A file the front end
+		// refuses is a load problem like any other, and is not read at all.
+		data, prepErr := lines.Prepare(path, data)
+		if errors.Is(prepErr, languageParser.ErrLanguageLineRefused) {
+			// The domain's language line is refused, so none of it is read;
+			// engine Init reports that once, and an automation-level echo
+			// per file would bury it.
+			return nil
+		}
+		if prepErr != nil {
+			if l.logger != nil {
+				l.logger.Warn("unified automation loader: file refused by its edition's front end",
+					"component", ComponentName, "path", path, "error", prepErr)
+			}
+			problems = append(problems, automationLoadProblem{
+				Path: path, Phase: "edition", Err: prepErr.Error(),
+			})
+			return nil
+		}
 		source := string(data)
 		// An unterminated `/*` comments out the rest of the file, so every
 		// automation below it is ABSENT -- correct per the lexer, and now
@@ -161,10 +192,11 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 					"component", ComponentName, "path", path, "error", lerr)
 			}
 			problems = append(problems, automationLoadProblem{
-				Path: path, Phase: "terseLowering", Err: lerr.Error(),
+				Path: path, Phase: "terseLowering", Err: languageParser.PositionRewriteError(source, lerr).Error(),
 			})
 			return nil
 		}
+		authoredFile := source
 		source = lowered
 		slices, unextracted := extractAutomationSlicesReporting(source)
 		for _, name := range unextracted {
@@ -179,7 +211,7 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 		}
 		for _, slice := range slices {
 			origin := "unified:" + path + ":" + slice.Name
-			automation, compileErr := l.compileMemQL(slice.Source, origin)
+			automation, compileErr := l.compileUnifiedSlice(authoredFile, slice, origin)
 			if compileErr != nil {
 				// EVERY compile error is a hard problem -- there is no
 				// by-design skip left to carve out. The old code exempted
@@ -567,3 +599,32 @@ var _ = io.ReadAll
 // silenceUnused keeps the data_lifecycle import in scope if a
 // future revision needs it.
 var _ = fs.ValidPath
+
+// compileUnifiedSlice compiles one automation slice of the terse-lowered file,
+// reporting positions against what the author wrote in authoredFile.
+func (l *Loader) compileUnifiedSlice(authoredFile string, slice automationSlice, origin string) (*Automation, error) {
+	return l.compileMemQLFrom(authoredAutomationText(authoredFile, slice), slice.Source, origin)
+}
+
+// authoredAutomationText is what the author wrote for the automation a slice
+// of the terse-lowered file holds, placed on its line of the file
+// (languageParser.AnchorSource), for compileMemQLFrom to report positions
+// against (memql#5364). A longhand automation's slice is the author's text
+// verbatim and is found in the file. A terse one's is the lowering's longhand,
+// found nowhere in it, so the text is the terse header the author wrote, with
+// its preamble: the position markers align the longhand's tokens with it, and
+// a refusal inside the header's @filter lands on the author's token. A slice
+// the file holds twice, where either line would be a guess, keeps positions
+// relative to itself.
+func authoredAutomationText(authoredFile string, slice automationSlice) string {
+	if i := strings.Index(authoredFile, slice.Source); i >= 0 {
+		if (i > 0 && authoredFile[i-1] != '\n') || strings.Contains(authoredFile[i+1:], slice.Source) {
+			return slice.Source
+		}
+		return languageParser.AnchorSource(slice.Source, 1+strings.Count(authoredFile[:i], "\n"))
+	}
+	if text, start, ok := languageParser.TerseAutomationSource(authoredFile, slice.Name); ok {
+		return languageParser.AnchorSource(text, 1+strings.Count(authoredFile[:start], "\n"))
+	}
+	return slice.Source
+}

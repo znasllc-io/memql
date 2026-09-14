@@ -1,0 +1,4 @@
+/// OpenAI GPT-5.4 Nano under a bundle's own name; the base supplies the vendor and the credential.
+@model("gpt-5.4-nano")
+@extends(openai)
+provider bundleNanoExtends { }

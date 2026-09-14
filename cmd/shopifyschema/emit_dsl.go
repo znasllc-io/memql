@@ -178,6 +178,21 @@ func conceptField(f FieldPlan) string {
 // default projection, and the two reads reconciliation and the
 // compliance export walk.
 
+// The two reads' filter clauses, spelled as `memqlmigrate
+// --rewrite=expressions` wrote the tree's own -- the lambda header, `row.` on
+// every payload field, the trait applied to its row, the optional `since` as
+// the guard its `&&` ignores when absent, and the long clause broken one `&&`
+// operand per line under its first operand -- so the generated domain reads
+// like the rest of the tree.
+const (
+	byGidFilter = "  filter  row => row.storeId == args.storeId && row.gid == args.gid && actor.isClusterOwner == true\n"
+
+	forStoreFilter = "  filter    row => row.storeId == args.storeId\n" +
+		"                && isNotDeleted(row)\n" +
+		"                && actor.isClusterOwner == true\n" +
+		"                && (args.since == nil || row.updatedAt >= args.since)\n"
+)
+
 // emitReads renders the two reads every mirrored domain needs: one row by
 // GID, and a store's live rows. Reconciliation walks the second to find what
 // the origin no longer returns, and the compliance export walks it to collect
@@ -188,7 +203,7 @@ func emitReads(p *TypePlan) string {
 	b.WriteString("@actor\n")
 	fmt.Fprintf(&b, "query %s %s {\n", p.Concept, byGidName(p))
 	b.WriteString("  args {\n    storeId  string!\n    gid      string!\n  }\n")
-	b.WriteString("  filter  storeId==args.storeId && gid==args.gid && actor.isClusterOwner==true\n")
+	b.WriteString(byGidFilter)
 	fmt.Fprintf(&b, "  shape   %s\n", shapeName(p))
 	b.WriteString("}\n\n")
 
@@ -199,7 +214,7 @@ func emitReads(p *TypePlan) string {
 	b.WriteString("@actor\n")
 	fmt.Fprintf(&b, "query %s %s {\n", p.Concept, forStoreName(p))
 	b.WriteString("  args {\n    storeId  string!\n    since    datetime\n  }\n")
-	b.WriteString("  filter    storeId==args.storeId && isNotDeleted && actor.isClusterOwner==true && when(args.since) { updatedAt>=args.since }\n")
+	b.WriteString(forStoreFilter)
 	b.WriteString("  sort      \"updatedAt\", \"desc\"\n")
 	b.WriteString("  paginate  100\n")
 	fmt.Fprintf(&b, "  shape     %s\n", shapeName(p))

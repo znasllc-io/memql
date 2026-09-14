@@ -1,0 +1,1 @@
+row => row.expiresAt < addDuration(now, "P1D")

@@ -238,7 +238,7 @@ query board queryExampleappBoard {
   args {
     boardId  string  @required
   }
-  filter  payload.boardId==args.boardId
+  filter  row => row.boardId == args.boardId
   shape   boardCard
 }
 `)
@@ -331,7 +331,7 @@ query space queryActiveSpaces {
   args {
     ownerId  string  @required
   }
-  filter  payload.ownerId==args.ownerId
+  filter  row => row.ownerId == args.ownerId
   shape   spaceCard
 }
 
@@ -340,7 +340,7 @@ query space queryArchivedSpaces {
   args {
     ownerId  string  @required
   }
-  filter  payload.ownerId==args.ownerId
+  filter  row => row.ownerId == args.ownerId
   shape   spaceCard
 }
 `)
@@ -365,7 +365,7 @@ query board queryExampleappBoard {
   args {
     boardId  string  @required
   }
-  filter  payload.boardId==args.boardId
+  filter  row => row.boardId == args.boardId
   shape   boardCard
 }
 
@@ -434,7 +434,7 @@ query space querySpaces {
   args {
     ownerId  string  @required
   }
-  filter  payload.ownerId==args.ownerId
+  filter  row => row.ownerId == args.ownerId
   shape   spaceCard
 }
 `)
@@ -445,7 +445,7 @@ query space querySpaces {
   args {
     boardId  string  @required
   }
-  filter  payload.boardId==args.boardId
+  filter  row => row.boardId == args.boardId
   shape   boardCard
 }
 `)
@@ -477,7 +477,7 @@ query space queryActiveSpaces {
   args {
     ownerId  string  @required
   }
-  filter  payload.ownerId==args.ownerId
+  filter  row => row.ownerId == args.ownerId
   shape   spaceCard
 }
 `)
@@ -487,7 +487,7 @@ query board queryExampleappBoard {
   args {
     boardId  string  @required
   }
-  filter  payload.boardId==args.boardId
+  filter  row => row.boardId == args.boardId
   shape   boardCard
 }
 `)

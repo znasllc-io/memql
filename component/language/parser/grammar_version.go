@@ -45,7 +45,69 @@ package parser
 // bumping was unaffordable while a bump quarantined every stored row, and that
 // -- not carelessness alone -- is why the constant stopped moving.
 //
-// # Narrowings this bump covers
+// # Narrowings the 2026.09-dsl-v1-foundations bump covers (memql#5359)
+//
+// The annotation registry (component/language/annotations) became the one
+// annotation gate, at PARSE time, for every construct and field list. Each
+// form below parsed on the authored path (NormaliseAll + ParseFile) before it
+// and is refused now, with an `annotation_*` code; the corpus in
+// grammar_surface_drift_test.go carries one entry per kind. None has in-tree
+// usage -- dsl/, examples/ and both local product bundles lint clean -- except
+// two corpus defects removed in the same change (an orphaned @actor("system")
+// in dsl/platform/mutations.memql, and two orphaned @sdk lines that stacked
+// three @sdk onto one builtin), so no rewrite mode ships:
+//
+//   - an unknown annotation on a prompt field, a builtin field, an action or a
+//     capability (the four places nothing checked);
+//   - an unknown annotation on a query, mutation, logic or automation, now
+//     refused by the parser where only a load-time text scan of the names
+//     refused it before;
+//   - an annotation written in an argument form its receiver does not take:
+//     a flag given an argument (`@serverOnly("yes")`), `@cache("300")`, a bare
+//     `@when` on a rule, an `@args({...})` object on a builtin, a number or a
+//     bare word as a tool field's `@default`, and every other form the
+//     registry's placement does not list;
+//   - an unknown keyword key (`@trigger(evnt=...)`);
+//   - a keyword key written in the shape its placement does not take: a
+//     valued key written bare (`@rateLimit(maxCalls, periodSeconds)`, which
+//     registered the tool with no limit; `@cache(ttl)`) or a flag key given a
+//     value (`@rowAuthz(clusterOwner="x")`);
+//   - a non-repeatable annotation written twice;
+//   - a clause a logic, automation or mutation body does not take: the logic
+//     and automation emitters kept the clauses they recognised and dropped
+//     everything else (a `filter` line in an automation, a `step` block in a
+//     logic), and the mutation body dropped a top-level line that was
+//     neither a block nor a field. A `step` or `precondition` block without
+//     its name, and a second `args` or `body` block in a logic or
+//     automation, are refused with them.
+//
+// `@trigger(on=<concept>.<event>)` stays legal: the synonym for event= that
+// the automation loader and the concept resolver fold, which the first cut of
+// the registry had refused.
+//
+// Four narrowings happen at LOAD, in the concept translator
+// (component/database), not on this path, so the digest cannot record them;
+// the concept tests pin them instead: the key-shape rule for a concept's
+// keyword annotations (@rowAuthz, @composable, @displayCard, @relationship,
+// @variant); an unknown @relationship key, which the translator used to
+// ignore; the repeat rule on a concept's annotations; and the field spellings
+// its readers accepted and dropped -- a `value=` keyword on a numeric bound or
+// a description (`@minLength(value=5)`), a quoted number (`@minimum("5")`), and
+// a bare word other than true/false as a @default (`@default(open)`).
+//
+// One more narrowing happens at LOAD, in the construct-keyword gate
+// (FindUnknownConstructKeywords, construct_unknown), so the digest cannot
+// record it either: the file-top `import ( ... )` block. It loaded on the
+// engine before this epic (8a063ec3f) -- no loader ever read it -- and is
+// refused now, by name, naming its replacement, a file-top
+// `use <domain>.<file>.{ names }` line. This path still parses the block
+// (dslimports builds its import graph from it), which is why the corpus case
+// test/conformance/2026/negative/use/import-block.memql pins it as
+// refuse_load. No rewrite mode ships: the tree has no usage, and a `use` line
+// names constructs where the block named files, so the replacement is not
+// mechanical.
+//
+// # Narrowings the 2026.08 bump covered
 //
 // The constant last moved in cb62512c (2026-07-21). Everything below reshaped an
 // authored form without bumping it, and is recorded here rather than migrated:
@@ -63,6 +125,71 @@ package parser
 //   - 93b365ed (2026-07-21, memql#2707) -- eight zero-use expression builtins
 //     hard-retired (year, quarter, month, dayOfMonth, isAnniversary,
 //     isFirstDayOfQuarter, memqlVersion, subtractTimestamps).
+//
+// # 2026.09-dsl-v1-expressions (memql#5364)
+//
+// The edition-2026 predicate positions, accepted BESIDE the legacy spellings
+// until the flip that came with the tree's migration: a struct
+// query's `filter row => ...`, `spec <bound> <name> = row => ...`,
+// `trait <name> = row => ...`, `@filter(row => ...)` (also inline on a terse
+// automation header, and as @trigger's filter=), and the new `refine <lambda>`
+// clause, legal only with `paginate`. Every one is a WIDENING, so no rewrite
+// mode is owed for this bump; memqlmigrate --rewrite=expressions is what the
+// later flip ships.
+//
+// One narrowing: a call named `refine(...)` in the internal query form is now
+// the refine directive, which takes refine(paginate(...), row => ...). No
+// construct in the tree calls a function by that name.
+//
+// Not a surface change, recorded because it changes an internal string: a
+// struct query's filter joins its concept as `concept==<id> && (<filter>)`,
+// not `concept==<id>;<filter>`. The `;` bound at `&&` level, so a filter whose
+// top level was an `||` split around it; every such filter in the tree was
+// already parenthesised, so no shipped query changes meaning.
+//
+// # The edition-2026 flip (memql#5364, memql#5368)
+//
+// The tree's migration made the edition-2026 expression grammar the only
+// authoring grammar, so every authored position parses it; the switch that
+// chose between the two grammars while the tree migrated is gone. The
+// internal query form -- ParseExpression, the string an SDK sends to Execute
+// -- keeps its grammar; nothing below reaches it.
+//
+// NARROWINGS. Each parsed on the authored path before the flip and is refused
+// now, naming its replacement. The tree used them, and was migrated in the
+// same change, so this bump owes a rewrite mode and ships it: memqlmigrate
+// --rewrite=expressions (dsl/ and the product bundles), with
+// scripts/migrations/expressions_go_fixtures for Go test fixtures.
+// V1RetiredForms (v1_refusals.go) is the list with rule ids; by position:
+//
+//   - the predicate positions' legacy spellings: a `filter` with no lambda
+//     header, a spec or trait `{ return ... }` body, a raw-text @filter, and
+//     @trigger's filter= written as a string;
+//   - in a logic statement, a mutation value, a step's arguments and its
+//     condition: the calls an operator or a method replaces -- cond(),
+//     concat(), coalesce(), exists(), len(), count(), mean(), first(), last(),
+//     and(), or(), lt(), gt(), lte(), gte() -- and `null`, `.contains(...)`, a
+//     key-less map entry (`{ args.x }`), the `;` connective and `has`;
+//   - two spellings the v1 grammar refuses outside that table: a named
+//     argument written `name=value` (it is `name: value`) and a quoted map key
+//     (`{"k": 1}`, authoring rule 18);
+//   - a canonical id written bare in an expression (`concept == v1:crm:lead`):
+//     it is a string, and is written quoted.
+//
+// Not narrowings, because the legacy grammar refused them too: not(),
+// timestamp(), now() and `$args.x`. The #2707 builtins, caller() and an
+// `asOf` outside a query keep the refusals the legacy grammar gave them; the
+// v1 call parser repeats each, so none reads as a call to an undefined
+// function.
+//
+// WIDENINGS. A step's right-hand side is any expression -- `n := 5` is a
+// query step the runtime evaluates, where the legacy grammar required a call
+// or a collection chain -- and a member read may be optional, `x.?field`.
+//
+// A durably-promoted `v1:authoring:construct` row written in a retired
+// spelling stops recompiling at this version; the inverted stamp guard names
+// the stale stamp as the reason, and memqlmigrate --rewrite=expressions is
+// the way back.
 
 import (
 	"crypto/sha256"
@@ -77,7 +204,7 @@ import (
 // The digest suffix is not decoration: TestGrammarVersionCarriesTheSurfaceDigest
 // recomputes it and requires this string to end with it, which is what makes a
 // grammar move impossible to land without editing this line (memql#3089).
-const GrammarVersion = "2026.08-asof-fallback-and-annotation-arg-narrowings-c0eedce6"
+const GrammarVersion = "2026.09-dsl-v1-expressions-52d9aeb1"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test

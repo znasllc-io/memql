@@ -1,0 +1,5 @@
+/// List the tickets, with a disjunction for a default.
+@handler(type="query", query="paginate(query tdTickets(), args.limit)")
+tool tdOr {
+  limit  integer  @default(true || false) @description("How many tickets to return.")
+}

@@ -1,39 +1,44 @@
 package automations
 
-import "testing"
+import (
+	"context"
+	"testing"
 
-// Regression for the #2256 condition-evaluator hardening (#2254 date windows,
-// #2257 empty-string compares). These conditions are exactly the per-row gates
-// the #2235 forEach sweeps evaluate; before the fix they were constant-false
-// (date windows) or over-fired (`!= ""`), so the tests below FAIL against the
-// pre-fix evaluator and PASS after.
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
+)
+
+// Regression for the #2256 condition hardening (#2254 date windows, #2257
+// empty-string compares). These conditions are exactly the per-row gates the
+// #2235 forEach sweeps evaluate; in the string evaluator they were
+// constant-false (date windows) or over-fired (`!= ""`). They are written the
+// edition-2026 way and evaluated through EvalCondition over the run, as a
+// forEach filter is.
 //
-// Multi-node note: this is the engine's pure-Go condition evaluator, run by the
-// automation scheduler / logic runner on whichever node consumes the event.
-// No node-local state is read; the triggering row travels with the event, so
-// the behaviour is identical across the 2-replica mesh.
+// Multi-node note: no node-local state is read; the triggering row travels
+// with the event, so the behaviour is identical across the 2-replica mesh.
 
 // evalItemCond evaluates `cond` with `item` bound as the forEach loop item and
-// a fixed `timestamp()` clock, mirroring the sweep's per-row gate.
+// a fixed run clock (the seeded `timestamp`, which `now` reads), mirroring the
+// sweep's per-row gate.
 func evalItemCond(t *testing.T, item map[string]any, now, cond string) bool {
 	t.Helper()
 	e := NewEvaluator()
 	e.SetItem(item, "item")
 	e.SetCustom("timestamp", now)
-	got, err := e.EvaluateCondition(cond)
+	got, err := evalV1Cond(t, e, cond)
 	if err != nil {
-		t.Fatalf("EvaluateCondition(%q): %v", cond, err)
+		t.Fatalf("%s: %v", cond, err)
 	}
 	return got
 }
 
-// #2254 gap (i)+(ii): a date-window gate `addDuration(ts, "P30D") < timestamp()`
+// #2254 gap (i)+(ii): a date-window gate `addDuration(ts, "P30D") < now`
 // must fire for a row whose cooldown elapsed long ago. Pre-fix this was
 // `0 < 0` -> false and the account-deletion / access-expiry / worker-retention
 // crons never ran.
 func TestCondition_DateWindow_Past_Fires(t *testing.T) {
 	item := map[string]any{"payload": map[string]any{"deletionScheduledAt": "2020-01-01T00:00:00Z"}}
-	cond := `addDuration(item.payload.deletionScheduledAt, "P30D") < timestamp()`
+	cond := `addDuration(item.payload.deletionScheduledAt, "P30D") < now`
 	if !evalItemCond(t, item, "2026-06-27T00:00:00Z", cond) {
 		t.Errorf("%s = false for a row 5y past its cooldown, want true (#2254)", cond)
 	}
@@ -42,7 +47,7 @@ func TestCondition_DateWindow_Past_Fires(t *testing.T) {
 // The same gate must NOT fire when the window has not yet elapsed.
 func TestCondition_DateWindow_Future_DoesNotFire(t *testing.T) {
 	item := map[string]any{"payload": map[string]any{"deletionScheduledAt": "2026-06-20T00:00:00Z"}}
-	cond := `addDuration(item.payload.deletionScheduledAt, "P30D") < timestamp()`
+	cond := `addDuration(item.payload.deletionScheduledAt, "P30D") < now`
 	// 2026-06-20 + 30d = 2026-07-20, which is AFTER now (2026-06-27).
 	if evalItemCond(t, item, "2026-06-27T00:00:00Z", cond) {
 		t.Errorf("%s = true before the window elapsed, want false (#2254)", cond)
@@ -53,29 +58,28 @@ func TestCondition_DateWindow_Future_DoesNotFire(t *testing.T) {
 // coerce both sides to 0. Pre-fix `<` returned false for any RFC3339 operand.
 func TestCondition_BareTimestampCompare(t *testing.T) {
 	item := map[string]any{"payload": map[string]any{"scheduledAt": "2020-01-01T00:00:00Z"}}
-	if !evalItemCond(t, item, "2026-06-27T00:00:00Z", "item.payload.scheduledAt < timestamp()") {
-		t.Errorf("item.payload.scheduledAt < timestamp() = false for a 2020 date, want true (#2254)")
+	if !evalItemCond(t, item, "2026-06-27T00:00:00Z", "item.payload.scheduledAt < now") {
+		t.Errorf("item.payload.scheduledAt < now = false for a 2020 date, want true (#2254)")
 	}
 	itemFuture := map[string]any{"payload": map[string]any{"scheduledAt": "2030-01-01T00:00:00Z"}}
-	if evalItemCond(t, itemFuture, "2026-06-27T00:00:00Z", "item.payload.scheduledAt < timestamp()") {
-		t.Errorf("item.payload.scheduledAt < timestamp() = true for a 2030 date, want false (#2254)")
+	if evalItemCond(t, itemFuture, "2026-06-27T00:00:00Z", "item.payload.scheduledAt < now") {
+		t.Errorf("item.payload.scheduledAt < now = true for a 2030 date, want false (#2254)")
 	}
 }
 
 // The full compound gate from the issue: the cooldown is derived through
-// concat(...) + coalesce(...) inside addDuration(...). Exercises gap (ii)
-// builtin evaluation (concat/coalesce) feeding gap (i) date arithmetic.
+// `+` and `??` inside addDuration(...), feeding gap (i) date arithmetic.
 func TestCondition_DateWindow_ConcatCoalesceCooldown(t *testing.T) {
 	// cooldown present -> "P" + "15" + "D" = P15D; 2026-06-01 + 15d = 2026-06-16 < now.
 	item := map[string]any{"payload": map[string]any{
 		"deletionScheduledAt": "2026-06-01T00:00:00Z",
 		"cooldownDays":        "15",
 	}}
-	cond := `addDuration(item.payload.deletionScheduledAt, concat("P", coalesce(item.payload.cooldownDays, "30"), "D")) < timestamp()`
+	cond := `addDuration(item.payload.deletionScheduledAt, "P" + (item.payload.cooldownDays ?? "30") + "D") < now`
 	if !evalItemCond(t, item, "2026-06-27T00:00:00Z", cond) {
 		t.Errorf("compound P15D window = false, want true (#2254/#2256)")
 	}
-	// cooldown absent -> coalesce falls back to "30" -> P30D; 2026-06-20 + 30d = 2026-07-20 > now.
+	// cooldown absent -> ?? falls back to "30" -> P30D; 2026-06-20 + 30d = 2026-07-20 > now.
 	itemDefault := map[string]any{"payload": map[string]any{"deletionScheduledAt": "2026-06-20T00:00:00Z"}}
 	if evalItemCond(t, itemDefault, "2026-06-27T00:00:00Z", cond) {
 		t.Errorf("compound default-P30D window = true before elapsing, want false (#2254/#2256)")
@@ -138,7 +142,7 @@ func TestCondition_KillSwitchCompound(t *testing.T) {
 // daysBetween as a comparison operand: the streak gate "today is exactly one
 // day after the last activity".
 func TestCondition_DaysBetweenOperand(t *testing.T) {
-	cond := `daysBetween(item.payload.lastActiveAt, timestamp()) == 1`
+	cond := `daysBetween(item.payload.lastActiveAt, now) == 1`
 	item := map[string]any{"payload": map[string]any{"lastActiveAt": "2026-07-13T09:00:00Z"}}
 	if !evalItemCond(t, item, "2026-07-14T09:00:00Z", cond) {
 		t.Errorf("%s = false for a row exactly one day old, want true (#2541)", cond)
@@ -150,28 +154,35 @@ func TestCondition_DaysBetweenOperand(t *testing.T) {
 }
 
 // #2707 (the #2620 ruling): the seven calendar builtins retired under the
-// 2026.08 epoch are no longer condition operands. A string condition naming
-// one falls through matchBuiltinCall unrecognised to the literal-string
-// fallback, so the gate is constant-false rather than resolving a calendar
-// value -- the pre-#2541 behavior, now permanent for the retired names. (The
-// authored => form rejects them earlier, at parse.) addDuration and
-// daysBetween remain first-class operands (tests above).
+// 2026.08 epoch are not condition operands. In the string evaluator a
+// condition naming one fell through to a constant-false literal; in edition
+// 2026 it is refused -- it never resolves a calendar value, and never reads
+// true. addDuration and daysBetween remain first-class operands (tests above).
 func TestCondition_RetiredCalendarBuiltinsDoNotResolve(t *testing.T) {
 	item := map[string]any{"payload": map[string]any{
 		"startedAt": "2024-07-14T00:00:00Z",
 	}}
-	now := "2026-07-14T09:00:00Z"
-
 	cases := []string{
-		`quarter(timestamp()) == 3`,
-		`isAnniversary(item.payload.startedAt, timestamp()) == true`,
+		`quarter(now) == 3`,
+		`isAnniversary(item.payload.startedAt, now) == true`,
 		`year(now) == 2026`,
 	}
 	for _, cond := range cases {
 		cond := cond
 		t.Run(cond, func(t *testing.T) {
-			if evalItemCond(t, item, now, cond) {
+			e := NewEvaluator()
+			e.SetItem(item, "item")
+			e.SetCustom("timestamp", "2026-07-14T09:00:00Z")
+			n, err := languageParser.ParseV1Expression(cond)
+			if err != nil {
+				return // refused at parse
+			}
+			got, err := e.EvalV1Condition(context.Background(), n)
+			if err == nil && got {
 				t.Errorf("%s = true; retired builtins must not resolve as condition operands (#2707)", cond)
+			}
+			if err == nil {
+				t.Errorf("%s evaluated without error; a retired builtin must be refused, not read as false", cond)
 			}
 		})
 	}

@@ -23,10 +23,7 @@ concept participant {
 func (Query) foo(_ any) (any, error) { return nil, nil }`)},
 	}
 
-	tree, err := Load(root)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	tree := loadRefusingImportBlocks(t, root)
 
 	res, err := tree.ResolveSymbol("queries/foo.memql", "cog.participant")
 	if err != nil {
@@ -67,10 +64,7 @@ func (Query) listUsers(_ any) (any, error) { return nil, nil }`)},
 // the import-alias resolution path, not the tool declaration.`)},
 	}
 
-	tree, err := Load(root)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	tree := loadRefusingImportBlocks(t, root)
 
 	res, err := tree.ResolveSymbol("tools/userTool.memql", "q.listUsers")
 	if err != nil {
@@ -92,7 +86,7 @@ func TestResolveSymbol_LocalReference(t *testing.T) {
 func (Query) selfQuery(_ any) (any, error) { return nil, nil }`)},
 	}
 
-	tree, err := Load(root)
+	tree, err := Load(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -114,7 +108,7 @@ func (Query) a(_ any) (any, error) { return nil, nil }`)},
 		"b.memql": {Data: []byte(`@description("b")
 func (Query) b(_ any) (any, error) { return nil, nil }`)},
 	}
-	tree, err := Load(root)
+	tree, err := Load(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -141,12 +135,9 @@ func (Query) realName(_ any) (any, error) { return nil, nil }`)},
 @description("caller")
 func (Query) caller(_ any) (any, error) { return nil, nil }`)},
 	}
-	tree, err := Load(root)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	tree := loadRefusingImportBlocks(t, root)
 
-	_, err = tree.ResolveSymbol("caller.memql", "t.bogusName")
+	_, err := tree.ResolveSymbol("caller.memql", "t.bogusName")
 	if err == nil {
 		t.Fatal("expected error for unknown name, got nil")
 	}
@@ -165,10 +156,7 @@ concept oldStyle { name string }`)},
 @description("c")
 func (Query) c(_ any) (any, error) { return nil, nil }`)},
 	}
-	tree, err := Load(root)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	tree := loadRefusingImportBlocks(t, root)
 	res, err := tree.ResolveSymbol("caller.memql", "x.oldStyle")
 	if err != nil {
 		t.Fatalf("ResolveSymbol: %v", err)
@@ -187,7 +175,7 @@ func TestResolveSymbol_BadShape(t *testing.T) {
 		"a.memql": {Data: []byte(`@description("a")
 func (Query) a(_ any) (any, error) { return nil, nil }`)},
 	}
-	tree, err := Load(root)
+	tree, err := Load(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -215,10 +203,7 @@ func TestResolveSymbol_PinnedDivergenceKeepsExplicitId(t *testing.T) {
 		"deployment/concepts.memql": {Data: []byte("concept deployment {\n  name string\n}\n")},
 		"caller.memql":              {Data: []byte("import (\n\t\"./deployment/concepts\" as dep\n)\nquery deployment queryX {\n}\n")},
 	}
-	tree, err := Load(root)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
+	tree := loadRefusingImportBlocks(t, root)
 	res, err := tree.ResolveSymbol("caller.memql", "dep.deployment")
 	if err != nil {
 		t.Fatalf("ResolveSymbol: %v", err)

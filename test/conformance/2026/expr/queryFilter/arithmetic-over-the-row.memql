@@ -1,0 +1,5 @@
+/// Tickets whose next priority is above two: arithmetic over the row.
+query ticket qfArithmeticOverRow {
+  filter row => row.priority + 1 > 2
+  paginate 20
+}

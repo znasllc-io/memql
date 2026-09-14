@@ -1,0 +1,44 @@
+/// A support ticket: the row the steps here write.
+concept ticket {
+  title     string
+  status    string
+  priority  int
+}
+
+/// A note about a goal, written when the goal changes.
+concept goalNote {
+  goalId  string
+  note    string
+}
+
+/// Write a note about a goal.
+mutate goalNote saNoteGoal {
+  args {
+    goalId  string  @required
+    note    string
+  }
+  insert {
+    id:      args.goalId
+    goalId:  args.goalId
+    note:    args.note ?? ""
+  }
+}
+
+/// Every ticket, a page at a time.
+query ticket saTickets {
+  paginate 20
+}
+
+/// Tickets that are open.
+trait saIsOpen = row => row.status == "open"
+
+/// Raise a ticket with a title.
+mutate ticket raiseTicketFromStep {
+  args {
+    title  string!
+  }
+  insert {
+    title: args.title
+    status: "open"
+  }
+}

@@ -9,14 +9,15 @@ package dslspec
 // grammar (the parser's top-level dispatch + the struct-form rewriter)
 // or the annotations registry moves ahead of the spec.
 //
-// A _test.go file may import component/language/parser and
-// component/language/annotations without a production import cycle:
-// dslspec's PRODUCTION code imports only annotations (a leaf), and the
-// parser does NOT import dslspec. The exported parser vars
-// (parser.TopLevelDeclKeywords, parser.StructFormKeywords) are the
-// authoritative, introspectable lists the live switch/rewriter
-// reference -- this test compares the spec against THEM, not against a
-// hand-copied literal.
+// dslspec imports component/language/parser and
+// component/language/annotations without an import cycle: the parser does
+// NOT import dslspec. Since memql#5359 the construct set, the body clauses
+// and the clause keywords are DERIVED from the parser's exported tables
+// (parser.ConstructKeywords -- itself parser.TopLevelDeclKeywords,
+// parser.StructFormKeywords and `use` -- and parser.BodyClauses), so this
+// test pins the hand-authored remainder -- constructCatalog, clauseDocs,
+// the next-rules -- to those tables, and asserts the derived projections
+// against them by name.
 //
 // Each assertion names the exact drifted symbol so a future failure is
 // self-explaining ("add X to dslspec constructs()" / "remove Y").
@@ -27,6 +28,7 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
+	"github.com/znasllc-io/memql/component/language/functions"
 	"github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -34,7 +36,9 @@ import (
 // author-facing construct in dslspec but is handled by the parser
 // BEFORE parseDefinition (so it is not in TopLevelDeclKeywords) and is
 // not a struct-form rewrite stage (so it is not in StructFormKeywords).
-// The drift test adds it explicitly to the expected union.
+// The drift test adds it explicitly to the expected union, which it builds
+// on its own rather than reading parser.ConstructKeywords, the table
+// dslspec's construct set comes from.
 const useImportKeyword = "use"
 
 // specConstructKeywords returns the set of construct keywords dslspec
@@ -98,6 +102,185 @@ func TestConstructsMatchParserGrammar(t *testing.T) {
 	}
 }
 
+// TestConstructCatalogCoversTheParserExactly: the construct SET is derived
+// from the parser, so what can drift is the hand-authored catalog beside it.
+// Every keyword the parser recognises must have an entry with a doc and a
+// category, and the catalog may not describe a keyword the parser has
+// dropped.
+func TestConstructCatalogCoversTheParserExactly(t *testing.T) {
+	parserSet := map[string]bool{useImportKeyword: true}
+	for _, kw := range parser.StructFormKeywords {
+		parserSet[kw] = true
+	}
+	for _, kw := range parser.TopLevelDeclKeywords {
+		parserSet[kw] = true
+	}
+	catalog := map[string]Construct{}
+	for _, c := range constructCatalog() {
+		if _, dup := catalog[c.Keyword]; dup {
+			t.Errorf("constructCatalog lists %q twice", c.Keyword)
+		}
+		catalog[c.Keyword] = c
+	}
+	for kw := range parserSet {
+		c, ok := catalog[kw]
+		if !ok || c.Doc == "" || c.Category == "" {
+			t.Errorf("DRIFT: the parser recognises construct %q but constructCatalog "+
+				"(component/language/dslspec/constructs.go) has no entry with a doc and a category for it", kw)
+		}
+	}
+	for kw := range catalog {
+		if !parserSet[kw] {
+			t.Errorf("DRIFT: constructCatalog describes %q, which no parser surface recognises -- delete the entry", kw)
+		}
+	}
+}
+
+// TestBodyBlocksCarryTheFactsTheHandListGotWrong (memql#5359): BodyBlocks is
+// projected from parser.BodyClauses, and the parser's own tests pin that table
+// to the switch each body parser dispatches on and to what the parsers accept
+// and refuse (component/language/parser/body_clauses_test.go). What is checked
+// HERE is the published spec: the facts the hand list it replaced got wrong,
+// derived by hand rather than read back from the table the spec was built
+// from.
+func TestBodyBlocksCarryTheFactsTheHandListGotWrong(t *testing.T) {
+	has := func(kw, clause string) bool {
+		for _, b := range Build().ConstructByKeyword(kw).BodyBlocks {
+			if b == clause {
+				return true
+			}
+		}
+		return false
+	}
+	if has("automation", "body") {
+		t.Error("an automation has no body block -- its body is step blocks (emitAutomation refuses `body { }`)")
+	}
+	for _, clause := range []string{"args", "step", "precondition"} {
+		if !has("automation", clause) {
+			t.Errorf("automation BodyBlocks lack %q", clause)
+		}
+	}
+	for _, clause := range []string{"sort", "paginate", "asOf", "count"} {
+		if !has("query", clause) {
+			t.Errorf("query BodyBlocks lack %q", clause)
+		}
+	}
+	for _, clause := range []string{"accept", "stamp"} {
+		if !has("mutate", clause) {
+			t.Errorf("mutate BodyBlocks lack %q", clause)
+		}
+	}
+}
+
+// TestClauseKeywordsMatchTheParserClauseTables: the lexicon's clause keywords
+// are exactly the clauses some construct body accepts, each with a doc, and
+// clauseDocs describes nothing else.
+func TestClauseKeywordsMatchTheParserClauseTables(t *testing.T) {
+	want := map[string]bool{}
+	for _, c := range constructs() {
+		for _, clause := range c.BodyBlocks {
+			want[clause] = true
+		}
+	}
+	got := map[string]bool{}
+	for _, k := range keywords() {
+		if k.Kind != "clause" {
+			continue
+		}
+		got[k.Name] = true
+		if k.Doc == "" {
+			t.Errorf("clause keyword %q has no doc -- add it to clauseDocs (lexicon.go)", k.Name)
+		}
+	}
+	if !sameStringSet(got, want) {
+		t.Errorf("DRIFT: clause keywords = %s, the parser's clause tables name %s", sortedKeys(got), sortedKeys(want))
+	}
+	for clause := range clauseDocs {
+		if !want[clause] {
+			t.Errorf("clauseDocs documents %q, which no construct body accepts", clause)
+		}
+	}
+}
+
+// TestFieldAnnotationsFollowTheFieldLists: every field receiver the registry
+// has is reached by at least one construct, and each construct's
+// FieldAnnotations is the field list its body actually has -- facts derived
+// by hand: a concept's fields take @pii, a tool's @autoInjected, a prompt's
+// @default, a builtin's exactly @description and @required, and every
+// construct with an args block its args-field set; a construct with no field
+// list has none.
+func TestFieldAnnotationsFollowTheFieldLists(t *testing.T) {
+	reached := map[annotations.Receiver]bool{}
+	for _, c := range constructs() {
+		if r := fieldReceiverFor(c); r != "" {
+			reached[r] = true
+		}
+	}
+	for _, r := range []annotations.Receiver{annotations.ConceptField, annotations.ArgsField, annotations.ToolField, annotations.PromptField, annotations.BuiltinField} {
+		if !reached[r] {
+			t.Errorf("field receiver %s is reached by no construct", r)
+		}
+	}
+	spec := Build()
+	carries := func(kw, name string) bool {
+		c := spec.ConstructByKeyword(kw)
+		if c == nil {
+			return false
+		}
+		for _, a := range c.FieldAnnotations {
+			if a == name {
+				return true
+			}
+		}
+		return false
+	}
+	for kw, name := range map[string]string{
+		"concept": "pii", "tool": "autoInjected", "prompt": "default",
+		"query": "maxLength", "mutate": "required", "logic": "enum", "automation": "pattern",
+		"action": "minimum", "capability": "maximum",
+	} {
+		if !carries(kw, name) {
+			t.Errorf("%s fields take @%s, but FieldAnnotations lacks it", kw, name)
+		}
+	}
+	if got := strings.Join(spec.ConstructByKeyword("builtin").FieldAnnotations, ","); got != "description,required" {
+		t.Errorf("builtin FieldAnnotations = [%s], want [description,required]", got)
+	}
+	for _, kw := range []string{"shape", "spec", "trait", "policy", "rule", "seed", "provider", "use"} {
+		if c := spec.ConstructByKeyword(kw); c != nil && len(c.FieldAnnotations) != 0 {
+			t.Errorf("%s has no field list, but FieldAnnotations = %v", kw, c.FieldAnnotations)
+		}
+	}
+}
+
+// TestTopLevelNextRuleNamesEveryConstruct: the top-level rule's keyword list
+// is derived from the construct set; the hand list it replaced never offered
+// `rule`.
+func TestTopLevelNextRuleNamesEveryConstruct(t *testing.T) {
+	var doc string
+	for _, r := range nextRules() {
+		if r.Context == "topLevel" {
+			doc = r.Doc
+		}
+	}
+	if doc == "" {
+		t.Fatal("no topLevel next-rule")
+	}
+	for _, c := range constructs() {
+		if !strings.Contains(doc, c.Keyword) {
+			t.Errorf("the topLevel next-rule does not name construct %q: %s", c.Keyword, doc)
+		}
+	}
+	// The filter rule teaches the edition-2026 form (memql#5364), in which
+	// `!` is an ordinary negation and every field is read through the lambda
+	// parameter.
+	for _, r := range nextRules() {
+		if r.Context == "inFilterClause" && !strings.Contains(r.Doc, "filter row =>") {
+			t.Errorf("the inFilterClause rule does not teach the lambda form `filter row => <predicate>`: %s", r.Doc)
+		}
+	}
+}
+
 // TestStructFormConstructsAreFunctionCategory asserts the rewriter's
 // recognised keywords are exactly the constructs dslspec buckets as
 // CategoryFunction. This pins the categorisation: a construct the
@@ -130,18 +313,41 @@ func TestStructFormConstructsAreFunctionCategory(t *testing.T) {
 	}
 }
 
+// receiverKeyToConstructKeywords maps an annotations-registry receiver key to
+// the author-facing construct keyword(s) it governs, derived from
+// constructs(): a construct receiver governs the constructs naming it as
+// their AnnotationReceiver (the "Spec" receiver backs both `spec` and
+// `trait`); a field receiver governs the constructs whose field list it
+// checks; ConceptBody governs the concept. A key no construct names, and no
+// construct's field list is checked by, maps to nothing. Only this test
+// needs the mapping, so it lives here rather than in the spec.
+func receiverKeyToConstructKeywords(receiverKey string) []string {
+	set := map[string]bool{}
+	if receiverKey == string(annotations.ConceptBody) {
+		set["concept"] = true
+	}
+	for _, c := range constructs() {
+		if c.AnnotationReceiver == receiverKey && receiverKey != "" {
+			set[c.Keyword] = true
+		}
+		if string(fieldReceiverFor(c)) == receiverKey && receiverKey != "" {
+			set[c.Keyword] = true
+		}
+	}
+	return sortedSet(set)
+}
+
 // TestAnnotationsProjectRegistryFromRegistrySide asserts -- from the
 // REGISTRY side (#2124 assertion 2) -- that dslspec's Annotations is an
 // exact projection of annotations.ByReceiver + annotations.Docs:
 //
 //   - every annotation name in the registry appears exactly once in the
 //     spec, with its registry doc,
-//   - every receiver key in the registry maps (via
-//     receiverKeyToConstructKeywords) to at least one REAL construct
-//     keyword dslspec declares,
-//   - and -- the new-receiver guard -- no receiver key falls through
-//     receiverKeyToConstructKeywords' default branch (which would surface
-//     the raw key as a fake "construct").
+//   - and -- the new-receiver guard -- every receiver key in the registry
+//     maps (receiverKeyToConstructKeywords, above) to at least one REAL
+//     construct keyword dslspec declares. The mapping reads constructs(),
+//     so a receiver key no construct names and no construct's field list
+//     is checked by maps to nothing, and fails here by name.
 //
 // The spec_test.go side already checks the projection from the spec
 // side; this checks it from the registry side and additionally fails on
@@ -151,22 +357,23 @@ func TestAnnotationsProjectRegistryFromRegistrySide(t *testing.T) {
 
 	// New-receiver guard: every registry receiver key must map to
 	// construct keywords dslspec actually declares. A new key added to
-	// annotations.ByReceiver that receiverKeyToConstructKeywords does not
-	// handle falls through to its default branch (returns the raw key),
-	// which is NOT a construct keyword -- caught here.
+	// annotations.ByReceiver that no construct names as its
+	// AnnotationReceiver, and that fieldReceiverFor gives to no construct,
+	// maps to nothing -- caught here.
 	for receiverKey := range annotations.ByReceiver {
 		mapped := receiverKeyToConstructKeywords(receiverKey)
 		if len(mapped) == 0 {
-			t.Errorf("DRIFT: annotations.ByReceiver receiver key %q maps to no construct keywords", receiverKey)
+			t.Errorf("DRIFT: annotations.ByReceiver receiver key %q maps to no construct keywords -- "+
+				"name it as a construct's AnnotationReceiver, or give fieldReceiverFor "+
+				"(component/language/dslspec/constructs.go) the construct whose fields it checks", receiverKey)
 			continue
 		}
 		for _, kw := range mapped {
 			if !specConstructs[kw] {
-				t.Errorf("DRIFT: annotations.ByReceiver has a NEW receiver key %q that "+
-					"receiverKeyToConstructKeywords maps to %q, which is not a dslspec construct keyword -- "+
-					"add a case for %q in receiverKeyToConstructKeywords "+
-					"(component/language/dslspec/spec.go) mapping it to its construct keyword(s)",
-					receiverKey, kw, receiverKey)
+				t.Errorf("DRIFT: annotations.ByReceiver receiver key %q maps to %q, which is not a dslspec "+
+					"construct keyword -- fix the mapping in receiverKeyToConstructKeywords (drift_test.go) "+
+					"or the construct catalog (component/language/dslspec/constructs.go)",
+					receiverKey, kw)
 			}
 		}
 	}
@@ -199,10 +406,10 @@ func TestAnnotationsProjectRegistryFromRegistrySide(t *testing.T) {
 			t.Errorf("DRIFT: annotation %q doc diverges -- spec=%q registry=%q "+
 				"(dslspec must project annotations.Docs verbatim)", n, a.Doc, annotations.Docs[n])
 		}
-		if len(a.Receivers) == 0 {
-			t.Errorf("annotation %q projects with no receivers", n)
+		if len(a.Receivers) == 0 && len(a.Fields) == 0 {
+			t.Errorf("annotation %q projects with no receivers and no fields", n)
 		}
-		for _, r := range a.Receivers {
+		for _, r := range append(append([]string(nil), a.Receivers...), a.Fields...) {
 			if !specConstructs[r] {
 				t.Errorf("DRIFT: annotation %q lists receiver %q which is not a dslspec construct keyword", n, r)
 			}
@@ -395,41 +602,92 @@ func TestRegistryBackedHonesty(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// #2155: expression-builtins drift pin.
+// #2155 / memql#5365: expression-builtins drift pin.
 //
-// dslspec.Builtins is the SoT for builtin metadata; sense/builtins.go is driven
-// from it. These assertions pin the grammar-recognised builtin subset to the
-// parser's introspectable callable table (parser.CallableBuiltins, derived from
-// parser/callable.go's callableParsers), so the editor builtin surface can
-// never drift from the grammar again -- the same guarantee the #2124 test gives
-// the top-level construct surface.
+// dslspec.Builtins is the SoT Sense's builtin surface is driven from. Since
+// memql#5365 its expression builtins (CategoryBuiltinExpr) are PROJECTED from
+// the v1 function catalog (component/language/functions) -- the one list of
+// functions a v1 expression calls -- so this pin now holds three tables
+// together, where it used to hold two:
+//
+//   - dslspec's expression builtins ARE the catalog's functions, name,
+//     signature and doc (TestBuiltinsProjectTheCatalog);
+//   - every name the parser special-cases as a builtin (parser.CallableBuiltins,
+//     derived from parser/callable.go's callableParsers) is a catalog function
+//     or a retired spelling the catalog names a replacement for
+//     (functions.RetiredFunctions) -- so a builtin the parser still accepts
+//     cannot drop out of the editor without the "write this instead" line
+//     (TestParserBuiltinsAreCatalogFunctionsOrRetired);
+//   - every catalog function is a name the parser recognises in some category,
+//     or one of the configuration lookups resolved from a generic call at run
+//     time (TestCatalogFunctionsAreParserRecognised).
+//
+// The pre-v1 parser still accepts the retired spellings (concat / coalesce /
+// cond / first / last) until the tree is migrated, which is why the second
+// assertion is "catalog OR retired" rather than "catalog". When the parser
+// stops recognising them they leave parser.CallableBuiltins and that branch
+// simply stops being taken -- no assertion here has to change.
 // ---------------------------------------------------------------------------
+
+// runtimeResolvedFunctions are the catalog functions the parser has no rule
+// for: a generic call the mutation-template evaluator resolves by name at run
+// time. They are the configuration lookups, and they are the ONLY catalog
+// functions allowed to be unknown to the parser -- a new catalog function the
+// parser does not recognise fails TestCatalogFunctionsAreParserRecognised until
+// it is wired into the grammar or listed here with its reason.
+var runtimeResolvedFunctions = map[string]string{
+	"systemVar":    "configuration lookup resolved by the mutation-template evaluator",
+	"secret":       "configuration lookup resolved by the mutation-template evaluator",
+	"systemSecret": "configuration lookup resolved by the mutation-template evaluator",
+}
+
+// catalogFunctions returns the catalog's functions (not its methods) keyed by
+// their one spelling.
+func catalogFunctions() map[string]functions.Function {
+	out := map[string]functions.Function{}
+	for _, f := range functions.Catalog() {
+		if f.Receiver == "" {
+			out[f.Name] = f
+		}
+	}
+	return out
+}
+
+// lowered returns the keys of m lower-cased: the parser's callable tables are
+// keyed by the LOWERCASED dispatch name (shortid), the catalog by the author
+// spelling (shortId).
+func lowered[V any](m map[string]V) map[string]bool {
+	out := map[string]bool{}
+	for k := range m {
+		out[strings.ToLower(k)] = true
+	}
+	return out
+}
 
 // builtinAllowList documents every parser-recognised callable name that is
 // DELIBERATELY not a dslspec expression builtin (CategoryBuiltinExpr), with the
-// reason. The drift test asserts the parser's full recognised callable set,
-// MINUS this allow-list, equals dslspec's expression-builtin name-set. Adding a
-// new recognised name to the parser forces a decision here: model it as a
-// dslspec builtin, or add it to this allow-list with a reason.
+// reason. Adding a new recognised name to the parser forces a decision: model
+// it in the catalog, name it in RetiredFunctions, or add it here with a reason.
 //
 // Categories (all keyed by the parser's LOWERCASED dispatch name):
 //
 //   - Accessors (parser.CallableAccessors): item / event / step / input /
-//     field / var / actor / now / timestamp / error. They are context
-//     accessors, not expression builtins. now / actor are also reserved
-//     keywords (keywords()). dslspec models them as CategoryBuiltinAccessor
-//     (asserted separately below), so they are NOT expression builtins.
+//     field / var / actor / error. Context accessors; var and error are ALSO
+//     catalog functions, which TestBuiltinAccessorsAreParserAccessors accounts
+//     for.
 //   - Keyword-functions: case / default -- control-flow-shaped, modelled
 //     nowhere as a plain builtin.
 //   - Query directives: paginate / sort / select / asof / withdepth / count /
 //     shape -- they wrap an inner expression / produce specialised AST.
 //   - Relationship wrappers: parentof / childof / aliasof / equals /
-//     references / owns / createdby / ids -- produce a RelationshipExpr.
-//   - Retired: caller -- recognised only to emit a migration hint (#221).
+//     references / owns / createdby / ids -- produce a RelationshipExpr (and
+//     are catalog functions too).
+//   - Retired: caller / now / timestamp and the 2026.08 set -- recognised
+//     only to emit a migration hint.
 func builtinAllowList() map[string]string {
 	allow := map[string]string{}
 	for _, n := range parser.CallableAccessors {
-		allow[n] = "accessor (parser.CallableAccessors) -- modelled as CategoryBuiltinAccessor, not an expression builtin"
+		allow[n] = "accessor (parser.CallableAccessors)"
 	}
 	for _, n := range parser.CallableKeywordFuncs {
 		allow[n] = "keyword-function (case/default) -- control-flow-shaped, not a plain builtin"
@@ -446,52 +704,122 @@ func builtinAllowList() map[string]string {
 	return allow
 }
 
-// TestBuiltinsMatchParserCallables is the central #2155 drift pin. The
-// expression-builtin subset of dslspec.Builtins must EXACTLY equal
-// parser.CallableBuiltins (both directions), and the parser's full recognised
-// callable set minus the documented allow-list must be exactly that same set.
-func TestBuiltinsMatchParserCallables(t *testing.T) {
-	// dslspec's expression-builtin name-set, lower-cased to match the parser's
-	// lower-cased dispatch keys (dslspec carries the author spelling shortId /
-	// canonicalId; the parser dispatches on shortid / canonicalid).
+// TestBuiltinsProjectTheCatalog: dslspec's expression builtins are EXACTLY the
+// catalog's functions, in both directions, and carry the catalog's signature
+// and doc verbatim -- dslspec restates nothing about a function.
+func TestBuiltinsProjectTheCatalog(t *testing.T) {
+	catalog := catalogFunctions()
+	if len(catalog) == 0 {
+		t.Fatal("the catalog has no functions: this test examined nothing, which is not a pass")
+	}
+	spec := map[string]Builtin{}
+	for _, b := range builtins() {
+		if b.Category != CategoryBuiltinExpr {
+			continue
+		}
+		if _, dup := spec[b.Name]; dup {
+			t.Errorf("dslspec lists expression builtin %q twice", b.Name)
+		}
+		spec[b.Name] = b
+	}
+
+	for name, f := range catalog {
+		b, ok := spec[name]
+		if !ok {
+			t.Errorf("DRIFT: catalog function %q has no CategoryBuiltinExpr entry in dslspec.Builtins -- "+
+				"the projection in component/language/dslspec/builtins.go dropped it", name)
+			continue
+		}
+		if b.Signature != f.Signature() {
+			t.Errorf("DRIFT: %s signature = %q, the catalog's is %q (dslspec must project it verbatim)", name, b.Signature, f.Signature())
+		}
+		if b.Doc != f.Doc {
+			t.Errorf("DRIFT: %s doc diverges from the catalog's (dslspec must project it verbatim)", name)
+		}
+		if b.Tier != string(f.Tier) {
+			t.Errorf("DRIFT: %s tier = %q, the catalog's is %q", name, b.Tier, f.Tier)
+		}
+		if len(b.Params) != len(f.Params) {
+			t.Errorf("DRIFT: %s has %d params, the catalog's has %d", name, len(b.Params), len(f.Params))
+		}
+	}
+	for name := range spec {
+		if _, ok := catalog[name]; !ok {
+			t.Errorf("DRIFT: dslspec marks %q CategoryBuiltinExpr but the catalog has no such function -- "+
+				"an expression builtin is a catalog entry (component/language/functions) or it is not one", name)
+		}
+	}
+}
+
+// TestParserBuiltinsAreCatalogFunctionsOrRetired: every name the parser
+// special-cases as a builtin is a catalog function or a retired spelling with a
+// named replacement. The retired set is what makes a spelling like concat(...)
+// legitimately absent from the editor while the parser still accepts it: the
+// hover says what to write instead, rather than the name silently vanishing.
+func TestParserBuiltinsAreCatalogFunctionsOrRetired(t *testing.T) {
+	catalog := lowered(catalogFunctions())
+	retired := lowered(functions.RetiredFunctions())
+	if len(parser.CallableBuiltins) == 0 {
+		t.Fatal("parser.CallableBuiltins is empty: this test examined nothing, which is not a pass")
+	}
+	for _, n := range parser.CallableBuiltins {
+		if !catalog[n] && !retired[n] {
+			t.Errorf("DRIFT: parser.CallableBuiltins recognises %q, which is neither a catalog function nor a "+
+				"retired spelling with a replacement -- add it to component/language/functions "+
+				"(an entry in catalog.go, or a RetiredFunctions line naming what to write instead)", n)
+		}
+	}
+}
+
+// TestCatalogFunctionsAreParserRecognised is the reverse direction: the
+// catalog invents no function the grammar cannot parse. A catalog function is a
+// parser builtin, accessor or relationship wrapper, or one of the documented
+// run-time lookups.
+func TestCatalogFunctionsAreParserRecognised(t *testing.T) {
+	recognised := map[string]bool{}
+	for _, set := range [][]string{parser.CallableBuiltins, parser.CallableAccessors, parser.CallableRelationshipWrappers} {
+		for _, n := range set {
+			recognised[n] = true
+		}
+	}
+	for name := range catalogFunctions() {
+		if recognised[strings.ToLower(name)] {
+			continue
+		}
+		if _, ok := runtimeResolvedFunctions[name]; ok {
+			continue
+		}
+		t.Errorf("DRIFT: catalog function %q is not recognised by the parser (not a builtin, accessor or "+
+			"relationship wrapper) and is not a documented run-time lookup -- wire it into "+
+			"component/language/parser/callable.go or add it to runtimeResolvedFunctions with its reason", name)
+	}
+	// The exception list may not outlive its reason: every name on it must still
+	// be a catalog function the parser does not recognise.
+	catalog := catalogFunctions()
+	for name := range runtimeResolvedFunctions {
+		if _, ok := catalog[name]; !ok {
+			t.Errorf("runtimeResolvedFunctions names %q, which is not a catalog function", name)
+		}
+		if recognised[strings.ToLower(name)] {
+			t.Errorf("runtimeResolvedFunctions names %q, which the parser now recognises -- drop it from the list", name)
+		}
+	}
+}
+
+// TestParserRecognisedCallablesAreAllClassified is the cross-check over the
+// parser's FULL recognised callable set (builtins + accessors + keyword-funcs +
+// directives + wrappers + retired): every name is allow-listed with a reason,
+// a dslspec expression builtin, or a retired spelling. A NEW recognised name
+// cannot slip past all three.
+func TestParserRecognisedCallablesAreAllClassified(t *testing.T) {
+	allow := builtinAllowList()
 	specExpr := map[string]bool{}
 	for _, b := range builtins() {
 		if b.Category == CategoryBuiltinExpr {
 			specExpr[strings.ToLower(b.Name)] = true
 		}
 	}
-
-	parserExpr := map[string]bool{}
-	for _, n := range parser.CallableBuiltins {
-		parserExpr[n] = true
-	}
-
-	// Direction 1: every parser builtin is modelled in dslspec.
-	for n := range parserExpr {
-		if !specExpr[n] {
-			t.Errorf("DRIFT: parser.CallableBuiltins recognises %q but dslspec.Builtins has no "+
-				"CategoryBuiltinExpr entry for it -- add a Builtin{Name: %q, Category: CategoryBuiltinExpr, ...} "+
-				"in component/language/dslspec/builtins.go", n, n)
-		}
-	}
-	// Direction 2: dslspec invents no expression builtin the parser lacks.
-	for n := range specExpr {
-		if !parserExpr[n] {
-			t.Errorf("DRIFT: dslspec.Builtins marks %q CategoryBuiltinExpr but the parser does not "+
-				"special-case it (not in parser.CallableBuiltins) -- either wire it into "+
-				"component/language/parser/callable.go as a CallableBuiltin, re-categorise it "+
-				"(CategoryBuiltinAccessor / CategoryBuiltinRegistry), or remove it", n)
-		}
-	}
-
-	// Cross-check via the allow-list: the parser's FULL recognised callable set
-	// (builtins + accessors + keyword-funcs + directives + wrappers + retired)
-	// minus the documented allow-list must equal the expression-builtin set.
-	// This is what guarantees a NEW recognised parser name cannot silently slip
-	// past the spec -- it lands either in CallableBuiltins (caught above) or in
-	// one of the allow-listed kinds (which the allow-list enumerates from the
-	// same exported parser vars).
-	allow := builtinAllowList()
+	retired := lowered(functions.RetiredFunctions())
 	recognised := map[string]bool{}
 	for _, n := range parser.CallableBuiltins {
 		recognised[n] = true
@@ -500,24 +828,22 @@ func TestBuiltinsMatchParserCallables(t *testing.T) {
 		recognised[n] = true
 	}
 	for n := range recognised {
-		if allow[n] != "" {
-			continue // allow-listed: not expected to be an expression builtin
+		if allow[n] != "" || specExpr[n] || retired[n] {
+			continue
 		}
-		if !specExpr[n] {
-			t.Errorf("DRIFT: parser recognises callable %q which is neither a dslspec expression "+
-				"builtin nor in builtinAllowList() -- decide its category and update "+
-				"dslspec.Builtins or the allow-list", n)
-		}
+		t.Errorf("DRIFT: parser recognises callable %q which is neither a dslspec expression builtin, a "+
+			"retired spelling, nor in builtinAllowList() -- decide its category", n)
 	}
 }
 
-// TestBuiltinAccessorsAreParserAccessors asserts dslspec's
-// CategoryBuiltinAccessor entries are exactly the parser's recognised accessors
-// (parser.CallableAccessors) plus the documented `index` exception. `index` is
-// special-cased in parseFunctionCall (the no-arg form is the loop accessor,
-// index(arr,i) reads an array element) so it is NOT in callableParsers /
-// CallableAccessors, but Sense still offers it as a call -- hence the explicit
-// exception here.
+// TestBuiltinAccessorsAreParserAccessors asserts every parser accessor (plus the
+// documented `index` exception) is modelled in dslspec -- as a
+// CategoryBuiltinAccessor entry, or as the catalog function it also is (var and
+// error: a v1 expression calls them as functions) -- and that dslspec's
+// accessors are all parser accessors. `index` is special-cased in
+// parseFunctionCall (the no-arg form is the loop accessor, index(arr,i) reads an
+// array element) so it is NOT in callableParsers / CallableAccessors, but Sense
+// still offers it as a call -- hence the explicit exception.
 func TestBuiltinAccessorsAreParserAccessors(t *testing.T) {
 	const indexException = "index"
 
@@ -532,12 +858,18 @@ func TestBuiltinAccessorsAreParserAccessors(t *testing.T) {
 			specAcc[strings.ToLower(b.Name)] = true
 		}
 	}
+	catalog := lowered(catalogFunctions())
 
 	for n := range parserAcc {
-		if !specAcc[n] {
-			t.Errorf("DRIFT: parser recognises accessor %q (or the index exception) but dslspec.Builtins "+
-				"has no CategoryBuiltinAccessor entry for it -- add it in "+
+		if !specAcc[n] && !catalog[n] {
+			t.Errorf("DRIFT: parser recognises accessor %q (or the index exception) but dslspec models it "+
+				"neither as a CategoryBuiltinAccessor entry nor as a catalog function -- add it in "+
 				"component/language/dslspec/builtins.go", n)
+		}
+		// One entry per name: an accessor the catalog also lists is the
+		// catalog's, and a second accessor entry would describe it twice.
+		if specAcc[n] && catalog[n] {
+			t.Errorf("%q is both a CategoryBuiltinAccessor entry and a catalog function -- keep the catalog's", n)
 		}
 	}
 	for n := range specAcc {
@@ -545,6 +877,26 @@ func TestBuiltinAccessorsAreParserAccessors(t *testing.T) {
 			t.Errorf("DRIFT: dslspec.Builtins marks %q CategoryBuiltinAccessor but the parser does not "+
 				"recognise it as an accessor (not in parser.CallableAccessors, and not the index "+
 				"exception) -- re-check the category or wire callable.go", n)
+		}
+	}
+}
+
+// TestOperatorsProjectTheTable: dslspec's operators are the operator table
+// (functions.Operators) row for row, so Sense, the grammar generator and the
+// JSON export read the same prose.
+func TestOperatorsProjectTheTable(t *testing.T) {
+	table := functions.Operators()
+	got := operators()
+	if len(got) != len(table) {
+		t.Fatalf("dslspec has %d operators, the table has %d", len(got), len(table))
+	}
+	for i, op := range table {
+		want := Operator{
+			Symbol: op.Symbol, Name: op.Name, Kind: op.Kind, Form: op.Form,
+			Doc: op.Doc, Absence: op.Absence, Level: op.Level,
+		}
+		if got[i] != want {
+			t.Errorf("operator %d = %+v, the table's is %+v", i, got[i], want)
 		}
 	}
 }

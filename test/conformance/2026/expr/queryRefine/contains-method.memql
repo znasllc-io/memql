@@ -1,0 +1,6 @@
+/// Open tickets tagged urgent, with the retired .contains().
+query ticket qrContainsMethod {
+  filter row => row.status == "open"
+  paginate 50
+  refine row => row.tags.contains("urgent")
+}

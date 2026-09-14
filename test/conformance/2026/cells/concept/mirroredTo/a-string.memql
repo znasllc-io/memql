@@ -1,0 +1,7 @@
+/// A support ticket raised by a customer.
+@mirroredTo("shopify")
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}

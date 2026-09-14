@@ -37,126 +37,58 @@ func isSharedRuleCall(call *ast.CallExpr) bool {
 
 // cond_truthiness_agreement_test.go -- memql#2963.
 //
-// `cond(args.allowed, "Y", "N")` is evaluated by two different code paths
-// depending on the shape of the logic body it sits in:
+// `cond(args.allowed, "Y", "N")` was evaluated by two code paths depending on
+// the shape of the logic body it sat in -- component/memql for a single
+// `return cond(...)`, this package's string evaluator for `x := cond(...)` --
+// and they carried SEPARATE truthiness rules: the strings "false" and "0" read
+// truthy on one path and falsy on the other. Those are exactly the shapes a
+// JSON, HTTP or MCP caller sends for a stringified boolean, so a gate opened
+// or closed depending on the body's shape.
 //
-//	single-statement   `return cond(...)`        -> component/memql, evalCollCond
-//	multi-statement    `x := cond(...)  return x` -> this package, evaluateCondLocally
-//
-// They used to carry SEPARATE truthiness rules, and the divergence was real
-// rather than theoretical. Measured across the full input set before the fix:
-//
-//	input        single   multi
-//	nil          N        N
-//	false        N        N
-//	true         Y        Y
-//	""           N        N
-//	"false"      Y        N     <- diverged
-//	"0"          Y        N     <- diverged
-//	"true"       Y        Y
-//	0            N        N
-//	1            Y        Y
-//	"nonempty"   Y        Y
-//	2.5          Y        Y
-//
-// Two inputs, and both of them the shape a JSON, HTTP or MCP caller sends for a
-// stringified boolean. A gate written `return cond(args.allowed, true, false)`
-// therefore opened on the string "false" in one body shape and closed in the
-// other.
-//
-// There is one implementation now (memql.IsTruthy, strict). This test is the
-// gate that keeps it that way, and it is the sibling of
-// TestPositionalBuiltinEvaluatorsAgree, whose own premise is exactly this:
-// "the same source must produce the same value either way." That test covers
-// concat and coalesce, not cond.
-//
-// Direction of the ruling: STRICT. The permissive rule is the one that fails
-// OPEN on a gate, and an author who writes "false" means false.
+// Edition 2026 retires cond() for `p ? a : b`, and every body shape evaluates
+// through EvalExpr. There is no truthiness at all (D8, expr_eval.go): a
+// condition is a bool, or absent (false), or it is refused as
+// condition_not_boolean. A stringified boolean therefore never opens a gate
+// -- it fails the evaluation, naming its type.
 
-// condTruthinessCases is the input set memql#2963 asks to be measured. Shared
-// by both halves of this file so neither can quietly test a narrower set.
-var condTruthinessCases = []struct {
+// ternaryConditionCases is the input set memql#2963 asked to be measured,
+// with the v1 answer: "Y" / "N", or "refused".
+var ternaryConditionCases = []struct {
 	name string
 	in   any
-	want string // "Y" (truthy) or "N" (falsy)
+	want string
 }{
 	{"nil", nil, "N"},
 	{"bool false", false, "N"},
 	{"bool true", true, "Y"},
-	{"empty string", "", "N"},
-	{`the string "false"`, "false", "N"},
-	{`the string "0"`, "0", "N"},
-	{`the string "true"`, "true", "Y"},
-	{"zero", 0, "N"},
-	{"one", 1, "Y"},
-	{"non-empty string", "nonempty", "Y"},
-	{"non-zero float", 2.5, "Y"},
+	{"empty string", "", "refused"},
+	{`the string "false"`, "false", "refused"},
+	{`the string "0"`, "0", "refused"},
+	{`the string "true"`, "true", "refused"},
+	{"zero", 0, "refused"},
+	{"one", 1, "refused"},
+	{"non-empty string", "nonempty", "refused"},
+	{"non-zero float", 2.5, "refused"},
 }
 
-// The multi-statement path, driven through the evaluator a logic body's
-// intermediate step actually uses.
-func TestCondTruthinessMultiStatementPath(t *testing.T) {
-	for _, tc := range condTruthinessCases {
+// TestTernaryConditionIsBooleanOnly drives a logic step's ternary over a run
+// holding each input, and asserts the v1 answer: only a bool (or absence)
+// decides a branch.
+func TestTernaryConditionIsBooleanOnly(t *testing.T) {
+	for _, tc := range ternaryConditionCases {
 		t.Run(tc.name, func(t *testing.T) {
 			ev := NewEvaluator()
 			ev.SetCustom("args", map[string]any{"allowed": tc.in})
-			got, handled, err := tryEvaluateBuiltinLocally(`cond(args.allowed, "Y", "N")`, ev)
+			got, err := evalV1(ev, `args.allowed ? "Y" : "N"`)
+			answer := fmt.Sprint(got)
 			if err != nil {
-				t.Fatalf("evaluating cond with allowed=%#v: %v", tc.in, err)
+				if !strings.Contains(err.Error(), "condition_not_boolean") && !strings.Contains(err.Error(), "must be boolean") {
+					t.Fatalf("allowed=%#v: %v, want a condition_not_boolean refusal", tc.in, err)
+				}
+				answer = "refused"
 			}
-			if !handled {
-				t.Fatalf("cond was not handled locally for allowed=%#v, so this measures nothing", tc.in)
-			}
-			if fmt.Sprint(got) != tc.want {
-				t.Errorf("multi-statement `cond(args.allowed, \"Y\", \"N\")` with allowed=%#v = %v, want %s",
-					tc.in, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestCondTruthinessPathMatchesTheSharedRule is the agreement itself, and WHAT
-// it compares is the whole point: for every input, the answer the
-// multi-statement PATH ACTUALLY PRODUCES must equal the answer memql.IsTruthy
-// gives. Path output against rule output -- not the rule against a table.
-//
-// That distinction is the difference between a gate and a tautology. An earlier
-// spelling asserted only `memql.IsTruthy(tc.in) == want`, which says nothing
-// whatever about the path: repoint evaluator.go's call site at a local
-// permissive rule and the two genuinely disagree, yet that version PASSED,
-// because it never evaluated the path. This version fails, because it
-// evaluates both sides and compares them.
-//
-// This package cannot drive the single-statement shape, and the reason is
-// structural rather than a missing harness: `return cond(...)` alone compiles
-// to an automation with no steps ("automation must have at least one step"),
-// which is exactly WHY that shape takes component/memql's path instead. It is
-// pinned there by TestCond_TruthinessIsPinnedIndependently over the same
-// values, and TestThereIsOnlyOneTruthinessRuleImplementation below is what
-// stops a second rule appearing for either side to drift onto.
-func TestCondTruthinessPathMatchesTheSharedRule(t *testing.T) {
-	for _, tc := range condTruthinessCases {
-		t.Run(tc.name, func(t *testing.T) {
-			ev := NewEvaluator()
-			ev.SetCustom("args", map[string]any{"allowed": tc.in})
-			got, handled, err := tryEvaluateBuiltinLocally(`cond(args.allowed, "Y", "N")`, ev)
-			if err != nil {
-				t.Fatalf("evaluating cond with allowed=%#v: %v", tc.in, err)
-			}
-			if !handled {
-				t.Fatalf("cond was not handled locally for allowed=%#v, so this measures nothing", tc.in)
-			}
-
-			pathSaysTruthy := fmt.Sprint(got) == "Y"
-			ruleSaysTruthy := memql.IsTruthy(tc.in)
-			if pathSaysTruthy != ruleSaysTruthy {
-				t.Errorf("the multi-statement PATH and the shared RULE disagree on %#v: "+
-					"path chose %q (truthy=%v), memql.IsTruthy says truthy=%v.\n\n"+
-					"That is the divergence memql#2963 was filed about, reopened. cond's branch "+
-					"must come from one rule on every path -- and the direction matters: the "+
-					"permissive spelling (any non-empty string is truthy) fails OPEN on a gate "+
-					"written `cond(args.allowed, true, false)`.",
-					tc.in, got, pathSaysTruthy, ruleSaysTruthy)
+			if answer != tc.want {
+				t.Errorf("`args.allowed ? \"Y\" : \"N\"` with allowed=%#v = %s, want %s", tc.in, answer, tc.want)
 			}
 		})
 	}

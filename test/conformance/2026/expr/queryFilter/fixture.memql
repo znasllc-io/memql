@@ -1,0 +1,19 @@
+/// A support ticket: the row every query-filter case here reads.
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+  code         string
+  region       string
+  priority     int
+  urgent       bool
+  closedAt     datetime
+  expiresAt    datetime
+  tags         []string
+  lineage {
+    planId  string
+  }
+}
+
+/// Tickets that are open.
+trait qfIsOpen = row => row.status == "open"

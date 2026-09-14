@@ -172,6 +172,13 @@ import {
 } from './state/deploymentHistory.js';
 import { resolveInstallRoot } from './install/root.js';
 import { readBuildStamp } from './version/buildStamp.js';
+import {
+  OPEN_IN_EXTENSIONS,
+  extensionLanguageFacts,
+  watchLanguageSkew,
+  type LanguageFacts,
+  type LanguageSkewNotice,
+} from './version/editionSkew.js';
 import { ClusterVersionRefresher } from './version/learners.js';
 import { createVersionCollector } from './version/collectors.js';
 import { releaseCache } from './version/releaseCache.js';
@@ -307,7 +314,7 @@ function noteDiagnostic(output: OutputChannel | undefined, headline: string, det
  * caller's action when one was clicked; reveal is handled here.
  */
 async function offerDetails(
-  severity: 'error' | 'warning',
+  severity: 'error' | 'warning' | 'information',
   output: OutputChannel | undefined,
   headline: string,
   ...actions: string[]
@@ -315,12 +322,70 @@ async function offerDetails(
   const details = 'Show details';
   const choice = await (severity === 'error'
     ? window.showErrorMessage(headline, ...actions, details)
-    : window.showWarningMessage(headline, ...actions, details));
+    : severity === 'warning'
+      ? window.showWarningMessage(headline, ...actions, details)
+      : window.showInformationMessage(headline, ...actions, details));
   if (choice === details) {
     output?.show(true);
     return undefined;
   }
   return choice;
+}
+
+/**
+ * Shows the connect-time language notice (memql#5362, D25): the adapter half
+ * of src/version/editionSkew.ts, which decides whether there is one, what it
+ * says, how loud it is and which action it offers.
+ *
+ * The details go to the MemQL Connection channel first, as every other
+ * connect-time record does, and the toast's "Show details" reveals them. The
+ * one action beyond that -- "Open in Extensions", on a cluster newer than this
+ * extension -- opens this extension's own page, where the update is, by the id
+ * the host reported. With no id to give `extension.open` the button is not
+ * drawn: a control that cannot work is not drawn. Only the fake contexts the
+ * activation tests build lack one, and they carry no pin, so they never reach
+ * a notice at all.
+ */
+function presentLanguageSkew(
+  notice: LanguageSkewNotice,
+  clusterName: string,
+  extensionId: string | undefined
+): void {
+  noteDiagnostic(
+    connectionOutput,
+    `MemQL language on "${clusterName}": ${notice.headline}`,
+    notice.details.join('\n')
+  );
+  const actions =
+    extensionId === undefined ? notice.actions.filter((action) => action !== OPEN_IN_EXTENSIONS) : notice.actions;
+  void (async () => {
+    const choice = await offerDetails(notice.severity, connectionOutput, notice.headline, ...actions);
+    if (choice === OPEN_IN_EXTENSIONS && extensionId !== undefined) {
+      await commands.executeCommand('extension.open', extensionId);
+    }
+  })();
+}
+
+/**
+ * Wires the connect-time language comparison onto a connection manager and
+ * returns the function that stops it. registerRuntimeSurface calls it once,
+ * on the manager activation builds, with this extension's manifest and the id
+ * the host reports for it (`context.extension`), so the memory it carries is
+ * this session's: each cluster is told about each grammar once.
+ *
+ * Exported for test/languageSkewWiring.test.ts, which drives it with a real
+ * ConnectionManager over a fake dial: activation's own manager dials a real
+ * cluster, which no unit test can reach. That file also scans
+ * registerRuntimeSurface for the call, so removing it fails a test.
+ */
+export function wireLanguageSkewNotice(
+  manager: ConnectionManager,
+  readExtension: () => LanguageFacts,
+  extensionId: string | undefined
+): () => void {
+  return watchLanguageSkew(manager, readExtension, (notice, clusterName) =>
+    presentLanguageSkew(notice, clusterName, extensionId)
+  );
 }
 
 /** The action an enrolment failure toast carries when the link survives it. */
@@ -532,9 +597,16 @@ function startLanguageClient(context: ExtensionContext): void {
     // on cluster documents, which is the defect this fixed.
     documentSelector: [{ language: 'memql', scheme: 'file' }],
     synchronize: {
-      // The server rebuilds its registry on watched .memql changes so a concept
-      // added in one file becomes visible to completion/hover in the others.
-      fileEvents: workspace.createFileSystemWatcher('**/*.memql'),
+      // The server rebuilds its registry on every watched change: a .memql
+      // file, so a concept added in one file becomes visible to
+      // completion/hover in the others, and a memql.toml, so a domain's
+      // language line -- written by the quick fix or by hand -- clears the
+      // domain's refusal and brings completion back without a reload
+      // (memql#5362).
+      fileEvents: [
+        workspace.createFileSystemWatcher('**/*.memql'),
+        workspace.createFileSystemWatcher('**/memql.toml'),
+      ],
     },
   };
 
@@ -1292,6 +1364,23 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         state.message
       );
     }
+  });
+
+  // The connect-time language comparison (memql#5362, D25): on every
+  // "connected", the cluster's edition and grammar against the ones this
+  // extension was built from, read from its own package.json. A listener on
+  // the manager covers every connect path at once. The id "Open in Extensions"
+  // opens is the one the host reports, never a copy of it. `context.extension`
+  // is guarded because the fake contexts the activation tests build have none,
+  // and a build with no pin compares as unknown, which shows nothing.
+  // test/languageSkewWiring.test.ts scans this function for the call.
+  const extensionId: string | undefined = context.extension?.id;
+  context.subscriptions.push({
+    dispose: wireLanguageSkewNotice(
+      connections,
+      () => extensionLanguageFacts(context.extension?.packageJSON),
+      extensionId
+    ),
   });
 
   // The version machinery (epic memql#3989). Constructed here, driven by the

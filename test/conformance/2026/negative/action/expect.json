@@ -1,0 +1,10 @@
+{
+  "cases": [
+    {
+      "file": "missing-required-capability-arg.memql",
+      "verdict": "refuse_load",
+      "message": "calls capability \"fs.readFile\" but is missing required arg(s): path",
+      "note": "An action's single capability call is typed against the capability's declared args at load (strict arg-typing, memql#2330)."
+    }
+  ]
+}

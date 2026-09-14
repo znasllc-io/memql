@@ -27,9 +27,9 @@ import (
 // TestPromoteBundleDurable_ValidateFail: a broken bundle promotes nothing and
 // returns an error with OK=false + diagnostics.
 func TestPromoteBundleDurable_ValidateFail(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry(), functions: newFunctionRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), functions: newFunctionRegistry(), shapes: coreShapesForTest(t)}
 	store := &fakePromoteStore{}
-	res, err := e.promoteBundleDurableWithStore(context.Background(), store, "owner-1", `spec actorEnvelope broken { return role == }`, "", false)
+	res, err := e.promoteBundleDurableWithStore(context.Background(), store, "owner-1", `spec actorEnvelope broken = actor => actor.role ==`, "", false)
 	if err == nil {
 		t.Fatal("expected a validation error for a broken bundle")
 	}
@@ -47,7 +47,7 @@ func TestPromoteBundleDurable_ValidateFail(t *testing.T) {
 // TestPromoteBundleDurable_PromotesAndCallable: a valid bundle's plain construct
 // is durably promoted and callable on the promoting engine (shared registry).
 func TestPromoteBundleDurable_PromotesAndCallable(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry(), functions: newFunctionRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), functions: newFunctionRegistry(), shapes: coreShapesForTest(t)}
 	store := &fakePromoteStore{}
 	res, err := e.promoteBundleDurableWithStore(context.Background(), store, "owner-1", sessionSpecSrc, "", false)
 	if err != nil {
@@ -112,13 +112,13 @@ func TestAuthoringPromotePropagation_CrossNode(t *testing.T) {
 	})
 
 	// Engine A: handles the promote, registers locally, and broadcasts.
-	engA := &MemQLEngine{specs: newSpecRegistry(), functions: newFunctionRegistry()}
+	engA := &MemQLEngine{specs: newSpecRegistry(), functions: newFunctionRegistry(), shapes: coreShapesForTest(t)}
 	engA.SetEventBus(busA)
 
 	// Engine B: a DIFFERENT engine with its OWN empty spec registry. It only
 	// learns about the promote via the broadcast + re-hydration from the shared
 	// DB (the crossNodeRehydrateStore).
-	engB := &MemQLEngine{specs: newSpecRegistry(), functions: newFunctionRegistry()}
+	engB := &MemQLEngine{specs: newSpecRegistry(), functions: newFunctionRegistry(), shapes: coreShapesForTest(t)}
 	engB.SetEventBus(busB)
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -8,15 +8,14 @@ package memql
 // -- run through the same shared baseloader pipeline.
 //
 // memql#334 (sub-epic #329 / #310 Stage 1C) migrated the parsing
-// half off the hand-rolled parseSpecMemQL onto
+// half off the hand-rolled spec parser onto
 // languageParser.ParseSpecDecl + the in-package specDeclToSpec
-// converter. The hand-rolled parser is unreferenced from production
-// after this child; spec_parser_test.go still exercises it pending
-// the final deletion in sub-epic #329's cleanup PR.
+// converter; the hand-rolled parser was deleted with memql#5359.
 
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
@@ -36,20 +35,57 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry, report ...*Lo
 	}
 	files := baseloader.ReadAll(logger)
 
+	// Each file's `use` imports, by the path the loader stamps into an origin
+	// ("unified:<path>:<name>"). A spec's binding resolves through the
+	// imports of the file it was written in first (specBindingConcept), as a
+	// query's signature concept does; the slice the parser reads carries no
+	// imports, so they ride on the Spec. A file whose imports do not parse
+	// leaves its specs with none -- the dslimports lanes report the import.
+	//
+	// Parsed on demand, once per file that yields a spec or trait: every boot
+	// runs this, and parsing the imports of every file in the tree -- most of
+	// which declare no predicate -- cost a boot ~60ms for nothing.
+	contentByPath := make(map[string]string, len(files))
+	for _, f := range files {
+		contentByPath[f.Path] = f.Content
+	}
+	usesByPath := make(map[string][]*languageParser.UseDeclaration)
+	usesOf := func(path string) []*languageParser.UseDeclaration {
+		if uses, done := usesByPath[path]; done {
+			return uses
+		}
+		uses, err := parsedUseDeclarations(contentByPath[path])
+		if err != nil {
+			uses = nil
+		}
+		usesByPath[path] = uses
+		return uses
+	}
+
 	parse := func(origin string, raw []byte) (*Spec, error) {
 		decl, err := languageParser.ParseSpecDecl(string(raw))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", origin, err)
 		}
-		spec, err := specDeclToSpec(decl, origin)
+		spec, disabled, err := convertSpecDecl(decl, origin)
 		if err != nil {
 			return nil, err
 		}
+		if spec != nil {
+			spec.Uses = usesOf(unifiedOriginPath(origin, decl.Name))
+		}
 		// nil, nil = @disabled (the intentional-skip contract). Reserve
 		// the name: promotion guards refuse it and diagnostics say
-		// "disabled" instead of "not found" (#2607).
-		if spec == nil {
+		// "disabled" instead of "not found" (#2607). An edition-2026 body
+		// comes back whole and is kept for the Init pass to lower, never
+		// registered: disabling a spec must not ship a body that does not
+		// lower, or re-enabling it bricks boot (SpecRegistry.disabledBodies).
+		if disabled {
 			registry.MarkDisabled(decl.Name)
+			if spec != nil && spec.Lambda != nil {
+				registry.addDisabledBody(spec)
+			}
+			return nil, nil
 		}
 		return spec, nil
 	}
@@ -61,7 +97,7 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry, report ...*Lo
 		"memql.unifiedSpecLoader",
 		"spec",
 		files,
-		extractAdapter,
+		anchoredExtractAdapter,
 		parse,
 		registry.add,
 		sink,
@@ -76,11 +112,33 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry, report ...*Lo
 		"memql.unifiedSpecLoader",
 		"trait",
 		files,
-		extractAdapter,
+		anchoredExtractAdapter,
 		parse,
 		registry.add,
 		sink,
 	)
 	rep.FoldSink("specs", traits, sink)
 	return specs + traits, err
+}
+
+// anchoredExtractAdapter is extractAdapter with every slice anchored at its
+// line in the file (languageParser.AnchorSource): ParseSpecDecl lexes the
+// slice alone, and without the anchor a refusal inside a spec's lambda names
+// the line within the slice -- line 2 for a spec whose doc comment is line 1
+// -- instead of the file's (memql#5364). Only the parse sees the anchor; the
+// registry keeps nothing of the slice's text.
+func anchoredExtractAdapter(content, keyword string) []baseloader.Slice {
+	src := constructDeclarationSlices(content, keyword)
+	out := make([]baseloader.Slice, len(src))
+	for i, s := range src {
+		line := 1 + strings.Count(content[:s.Start], "\n")
+		out[i] = baseloader.Slice{Name: s.Name, Source: languageParser.AnchorSource(s.Source, line)}
+	}
+	return out
+}
+
+// unifiedOriginPath is the file path inside a unified loader origin,
+// "unified:<path>:<name>".
+func unifiedOriginPath(origin, name string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(origin, "unified:"), ":"+name)
 }

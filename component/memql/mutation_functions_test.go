@@ -12,59 +12,6 @@ import (
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-func TestParseObjectLiteral_Basic(t *testing.T) {
-	obj := parseObjectLiteral(`{
-		"name": "Test",
-		active: true,
-		count: 123,
-		ratio: 1.5,
-		nested: { enabled: false },
-		arr: ["a", 2, {x: "y"}],
-		expr: args.userId
-	}`)
-	require.NotNil(t, obj)
-	require.Equal(t, "Test", obj["name"])
-	require.Equal(t, true, obj["active"])
-	require.Equal(t, int64(123), obj["count"])
-	require.Equal(t, 1.5, obj["ratio"])
-	require.Equal(t, `args.userId`, obj["expr"])
-}
-
-// TestParseObjectLiteral_CtxShorthand covers the `ctx.ident` shorthand
-// that infers the map key from the path. `{ctx.name}` is equivalent
-// to `{name: ctx.name}`. parseObjectLiteral runs after the mutation
-// rewriter has translated `args.X` -> `ctx.X`, so the engine-internal
-// view of an author-written `args.name` is `ctx.name`. The verbose
-// form must keep working in the same object.
-func TestParseObjectLiteral_CtxShorthand(t *testing.T) {
-	obj := parseObjectLiteral(`{
-		ctx.name,
-		ctx.region,
-		environment: ctx.environment,
-		active: true
-	}`)
-	require.NotNil(t, obj)
-	require.Equal(t, `ctx.name`, obj["name"])
-	require.Equal(t, `ctx.region`, obj["region"])
-	require.Equal(t, `ctx.environment`, obj["environment"])
-	require.Equal(t, true, obj["active"])
-}
-
-// Shorthand is rejected when the path is not a simple identifier
-// (dotted paths, empty string, etc.) so we don't invent garbage field
-// names. The caller should write the verbose form in those cases.
-func TestParseObjectLiteral_CtxShorthandRejectsDottedPath(t *testing.T) {
-	// Dotted paths must still be written as `key: ctx.user.id`.
-	obj := parseObjectLiteral(`{ userId: ctx.user.id }`)
-	require.NotNil(t, obj)
-	require.Equal(t, `ctx.user.id`, obj["userId"])
-
-	// Shorthand with a dotted path is malformed (no `key:`) and parses
-	// as an invalid entry -> nil map.
-	bad := parseObjectLiteral(`{ ctx.user.id }`)
-	require.Nil(t, bad)
-}
-
 func TestMutationFunctionTemplate_LoadAndRender_CreateSpace(t *testing.T) {
 	t.Skip("legacy dsl/v1 tree retired; unified-tree coverage lives in component/memql/unified_*_test.go and test/dslconformance/embed_test.go.")
 	path := filepath.Join("..", "..", "dsl", "v1", "mutations", "v1", "cognition", "createSpace.memql")
@@ -106,9 +53,9 @@ func TestMutationFunctionTemplate_LoadAndRender_CreateSpace(t *testing.T) {
 }
 
 // Locks in the bare `args.<name>` shorthand inside an `insert <X> {
-// ... }` block: the engine's `tryParseShorthandCtx` (after the
-// rewriter's `args.X` -> `ctx.X` translation) infers the payload key
-// from the path. `args.name` alone produces `{ name: <arg-value> }`.
+// ... }` block: the rewriter expands it to the explicit entry
+// (expandBareMirror, component/language/parser/rewriter.go), so
+// `args.name` alone produces `{ name: <arg-value> }`.
 func TestMutationInsertShorthand_ArgsRefInfersKey(t *testing.T) {
 	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
 		"v1:cognition:space": {Name: "v1:cognition:space"},

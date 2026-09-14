@@ -24,8 +24,8 @@ onto the row, so delivery state is ordinary graph state.
 Call the platform mutation from any automation or logic body:
 
 ```
-stageOutboundRequest(
-  requestId: hash(concat("orderShipped:", args.orderId)),
+mutation stageOutboundRequest(
+  requestId: hash("orderShipped:" + args.orderId),
   medium: "webhook",
   target: "https://hooks.internal.example/notify",
   body: payloadJson,
@@ -34,7 +34,7 @@ stageOutboundRequest(
 )
 ```
 
-- `requestId` is caller-supplied; derive it with `hash(concat(...))`
+- `requestId` is caller-supplied; derive it with `hash("orderShipped:" + args.orderId)`
   for staging-time idempotency. A re-stage onto an existing `requestId`
   re-targets the same row and refreshes the deliverable content
   (`target`/`subject`/`body`/`dedupeKey`), but PRESERVES the worker-owned

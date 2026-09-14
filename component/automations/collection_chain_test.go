@@ -1,13 +1,19 @@
 package automations
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
+
+// collection_chain_test.go -- collection chains over step results and args
+// (#2317 / #2318), evaluated over the run the way a logic step, a return, a
+// forEach source and a forEach filter are.
 
 // TestLogicCollectionChain_IntermediateStepThenReturn pins gap 2 (#2317): a
 // multi-statement logic body whose intermediate `:=` step is a collection
 // chain over a prior step result, followed by a `return active.count()` over
-// that bound collection. The intermediate chain evaluates in-memory (the base
-// receiver -- a query-result Bundle step -- is unwrapped to its node slice),
-// the result binds as the step value, and the trailing step-accessor count
+// that bound collection. The query-result Bundle step stands for its node
+// list, the chain's value binds as the step value, and the trailing count
 // reads it correctly.
 func TestLogicCollectionChain_IntermediateStepThenReturn(t *testing.T) {
 	e := NewEvaluator()
@@ -23,14 +29,10 @@ func TestLogicCollectionChain_IntermediateStepThenReturn(t *testing.T) {
 		},
 	})
 
-	// `active := rows.where(r => r.status == "active")` -- the intermediate
-	// chain RHS short-circuit binds a []any of the two active rows.
-	val, handled, err := tryEvaluateCollectionChainLocally(`rows.where(r => r.status == "active")`, e)
+	// `active := rows.where(r => r.status == "active")`
+	val, err := evalV1(e, `rows.where(r => r.status == "active")`)
 	if err != nil {
 		t.Fatalf("intermediate chain: %v", err)
-	}
-	if !handled {
-		t.Fatalf("intermediate chain `rows.where(...)` must be handled by the collection evaluator")
 	}
 	items, ok := val.([]any)
 	if !ok || len(items) != 2 {
@@ -38,25 +40,18 @@ func TestLogicCollectionChain_IntermediateStepThenReturn(t *testing.T) {
 	}
 	e.SetStepResult("active", &StepResult{Status: "success", Result: val})
 
-	// `return active.count()` -- a step-result accessor over the []any-valued
-	// step. GetStepNodes now treats a collection step result as the node list,
-	// so the count is correct (was 0 before the #2317 fix).
-	got, handled, err := EvaluateLocalExpr("active.count()", e)
+	// `return active.count()` over the []any-valued step.
+	got, err := evalV1(e, "active.count()")
 	if err != nil {
 		t.Fatalf("return active.count(): %v", err)
 	}
-	if !handled {
-		t.Fatalf("`active.count()` must resolve locally")
-	}
-	if got != 2 {
+	if fmt.Sprint(got) != "2" {
 		t.Errorf("active.count() = %#v, want 2", got)
 	}
 }
 
 // TestLogicCollectionChain_FullChainReturn pins gap 2 (#2317): a `return`
-// expression that is a full collection chain (`rows.where(...).count()`) --
-// which the single step-method short-circuit does not handle -- resolves
-// through the collection evaluator via EvaluateLocalExpr.
+// expression that is a full collection chain (`rows.where(...).count()`).
 func TestLogicCollectionChain_FullChainReturn(t *testing.T) {
 	e := NewEvaluator()
 	e.SetStepResult("rows", &StepResult{
@@ -68,23 +63,19 @@ func TestLogicCollectionChain_FullChainReturn(t *testing.T) {
 		},
 	})
 
-	got, handled, err := EvaluateLocalExpr(`rows.where(r => r.role == "admin").count()`, e)
+	got, err := evalV1(e, `rows.where(r => r.role == "admin").count()`)
 	if err != nil {
 		t.Fatalf("full chain return: %v", err)
 	}
-	if !handled {
-		t.Fatalf("full chain `rows.where(...).count()` must resolve locally")
-	}
-	if got != 2 {
+	if fmt.Sprint(got) != "2" {
 		t.Errorf("admin count = %#v, want 2", got)
 	}
 }
 
-// TestLogicCollectionChain_LegacyStepAccessorUnchanged pins that a bare
-// single step-method accessor over a query-result Bundle keeps its legacy
-// resolution (NOT routed into the collection evaluator), so #2317 does not
-// regress the `return X.count()` / `.empty()` / `.first()` family.
-func TestLogicCollectionChain_LegacyStepAccessorUnchanged(t *testing.T) {
+// TestLogicCollectionChain_StepAccessorOverBundle: a bare step accessor over
+// a query-result Bundle -- the `return X.count()` / `.empty()` / `.first()`
+// family -- reads the step's node list.
+func TestLogicCollectionChain_StepAccessorOverBundle(t *testing.T) {
 	e := NewEvaluator()
 	e.SetStepResult("expiredDelegations", &StepResult{
 		Status: "success",
@@ -95,130 +86,60 @@ func TestLogicCollectionChain_LegacyStepAccessorUnchanged(t *testing.T) {
 		}}},
 	})
 
-	// isGenuineCollectionChain rejects a bare accessor, so it never reaches the
-	// new collection branch.
-	if isGenuineCollectionChain("expiredDelegations.count()") {
-		t.Fatalf("a bare step accessor must not be treated as a genuine collection chain")
-	}
-	got, handled, err := EvaluateLocalExpr("expiredDelegations.count()", e)
+	got, err := evalV1(e, "expiredDelegations.count()")
 	if err != nil {
-		t.Fatalf("legacy accessor: %v", err)
+		t.Fatalf("accessor: %v", err)
 	}
-	if !handled || got != 3 {
-		t.Errorf("expiredDelegations.count() = (handled=%v val=%#v), want (true, 3)", handled, got)
+	if fmt.Sprint(got) != "3" {
+		t.Errorf("expiredDelegations.count() = %#v, want 3", got)
 	}
 }
 
 // TestCollectionChain_SourceOuterArgSubstitution pins gap 3b (#2318): a
 // collection chain whose lambda body references an outer `args.X` (not the
-// bound element) resolves it against the caller args threaded into the
-// in-memory evaluator. This is the forEach-source resolution path
-// (EvaluateStepReference), so it covers both the source and the threading.
+// bound element) resolves it against the run's args -- the forEach-source
+// position.
 func TestCollectionChain_SourceOuterArgSubstitution(t *testing.T) {
-	e := NewEvaluator()
-	e.SetCustom("args", map[string]any{
-		"members": []any{
-			map[string]any{"name": "alice", "score": 5.0},
-			map[string]any{"name": "bob", "score": 1.0},
-			map[string]any{"name": "carol", "score": 9.0},
-		},
-		"threshold": 3.0,
-	})
-
-	val, err := e.EvaluateStepReference(`args.members.where(m => m.score > args.threshold)`)
-	if err != nil {
-		t.Fatalf("outer-arg chain: %v", err)
+	members := []any{
+		map[string]any{"name": "alice", "score": 5.0},
+		map[string]any{"name": "bob", "score": 1.0},
+		map[string]any{"name": "carol", "score": 9.0},
 	}
-	items, ok := val.([]any)
-	if !ok {
-		t.Fatalf("chain resolved to %T, want []any", val)
-	}
-	if len(items) != 2 {
-		t.Fatalf("members over threshold = %d, want 2 (alice, carol)", len(items))
-	}
-
-	// Sanity: the same chain with a HIGHER threshold leaves only carol.
-	e.SetCustom("args", map[string]any{
-		"members":   e.custom["args"].(map[string]any)["members"],
-		"threshold": 6.0,
-	})
-	val, err = e.EvaluateStepReference(`args.members.where(m => m.score > args.threshold)`)
-	if err != nil {
-		t.Fatalf("outer-arg chain (raised threshold): %v", err)
-	}
-	if items, ok := val.([]any); !ok || len(items) != 1 {
-		t.Errorf("members over raised threshold = %#v, want 1 (carol)", val)
+	for threshold, want := range map[float64]int{3.0: 2, 6.0: 1} {
+		e := NewEvaluator()
+		e.SetCustom("args", map[string]any{"members": members, "threshold": threshold})
+		val, err := evalV1(e, `args.members.where(m => m.score > args.threshold)`)
+		if err != nil {
+			t.Fatalf("outer-arg chain (threshold %v): %v", threshold, err)
+		}
+		items, ok := val.([]any)
+		if !ok || len(items) != want {
+			t.Errorf("members over threshold %v = %#v, want %d", threshold, val, want)
+		}
 	}
 }
 
-// TestEvaluateForEachFilter_ChainAndLegacy pins gap 3a (#2318): a forEach
-// filter that is a genuine collection chain over the bound item evaluates
-// through the in-memory surface, while a plain string-condition filter keeps
-// the legacy EvaluateCondition path.
-func TestEvaluateForEachFilter_ChainAndLegacy(t *testing.T) {
+// TestForEachFilter_ChainAndComparison pins gap 3a (#2318): a forEach filter
+// that is a collection chain over the bound item, and one that is a plain
+// comparison, both decide over the item.
+func TestForEachFilter_ChainAndComparison(t *testing.T) {
 	e := NewEvaluator()
 	e.SetItem(map[string]any{
 		"id":   "x",
 		"tags": []any{"vip", "beta"},
 	}, "item")
 
-	// Collection-chain filter: item has a "vip" tag.
-	match, err := e.EvaluateForEachFilter(`item.tags.any(t => t == "vip")`)
-	if err != nil {
-		t.Fatalf("chain filter: %v", err)
-	}
-	if !match {
-		t.Errorf("item.tags.any(t => t == \"vip\") = false, want true")
-	}
-
-	// Same chain, a tag the item does NOT carry.
-	match, err = e.EvaluateForEachFilter(`item.tags.any(t => t == "gold")`)
-	if err != nil {
-		t.Fatalf("chain filter (absent tag): %v", err)
-	}
-	if match {
-		t.Errorf("item.tags.any(t => t == \"gold\") = true, want false")
-	}
-
-	// Legacy string-condition filter still works unchanged.
-	match, err = e.EvaluateForEachFilter(`item.id == "x"`)
-	if err != nil {
-		t.Fatalf("legacy condition filter: %v", err)
-	}
-	if !match {
-		t.Errorf("legacy `item.id == \"x\"` filter = false, want true")
-	}
-}
-
-// TestIsGenuineCollectionChain pins the gate that keeps the #2317/#2318
-// short-circuits from hijacking legacy single step-result accessors: only a
-// lambda or a non-accessor collection operator counts as genuine.
-func TestIsGenuineCollectionChain(t *testing.T) {
-	genuine := []string{
-		`rows.where(r => r.active)`,
-		`args.members.select(m => m.id)`,
-		`item.tags.any(t => t == "vip")`,
-		`xs.orderBy(x => x.n).take(3)`,
-		`xs.contains("y")`,
-	}
-	for _, s := range genuine {
-		if !isGenuineCollectionChain(s) {
-			t.Errorf("isGenuineCollectionChain(%q) = false, want true", s)
+	for cond, want := range map[string]bool{
+		`item.tags.any(t => t == "vip")`:  true,
+		`item.tags.any(t => t == "gold")`: false,
+		`item.id == "x"`:                  true,
+	} {
+		got, err := evalV1Cond(t, e, cond)
+		if err != nil {
+			t.Fatalf("%s: %v", cond, err)
 		}
-	}
-	notGenuine := []string{
-		`rows.count()`,
-		`existing.first()`,
-		`rows.empty()`,
-		`rows.last()`,
-		`rows.nodes()`,
-		`coalesce(a, b)`,
-		`item.status == "active"`,
-		``,
-	}
-	for _, s := range notGenuine {
-		if isGenuineCollectionChain(s) {
-			t.Errorf("isGenuineCollectionChain(%q) = true, want false", s)
+		if got != want {
+			t.Errorf("%s = %v, want %v", cond, got, want)
 		}
 	}
 }

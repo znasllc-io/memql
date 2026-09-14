@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/tiers"
 )
 
 // ContextKind describes the syntactic context at a cursor position.
@@ -52,6 +53,26 @@ type CursorContext struct {
 	// top-level annotation, the construct it precedes (#2626). It is the
 	// ONE enclosure answer; ReceiverType is stamped from its Receiver.
 	Enclosing EnclosingConstruct
+
+	// Position is the tier-manifest position (component/language/tiers) the
+	// expression under the cursor is written in, or "" outside every
+	// expression position. Completion and hover ask the manifest what it
+	// admits there (memql#5365; detected by exprpos.go).
+	Position tiers.Position
+	// Param is the position's own lambda parameter -- `row` in `filter row
+	// => ...`, `actor` in a spec over an @actor shape -- or "" when the
+	// position has no lambda header.
+	Param string
+	// Params lists every lambda parameter in scope at the cursor, outermost
+	// first: Param, then each nested lambda the cursor sits inside (`t` in
+	// `row.tags.any(t => t.`).
+	Params []LambdaParam
+	// Bound is the concept (or shape) the position's parameter reads: the
+	// query's signature concept, the spec's bound name, the trigger's concept.
+	Bound string
+	// Lambda reports that the position is written in the v1 lambda form. A
+	// pushdown position without it is still in its pre-v1 spelling.
+	Lambda bool
 }
 
 // analyzeCursorContext determines the syntactic context at a cursor position.
@@ -75,6 +96,15 @@ func analyzeCursorContext(source string, line, col int) CursorContext {
 	// Thread the full source through so completers can scan file-scope `use`
 	// imports (the construct-concept import-suggestion path needs it).
 	ctx.Source = source
+
+	// The expression position (memql#5365): which tier-manifest position the
+	// cursor's expression is in, and the lambda parameters in scope there.
+	ep := detectExprPosition(source, line, col)
+	ctx.Position, ctx.Param, ctx.Bound, ctx.Lambda = ep.position, ep.param, ep.bound, ep.lambda
+	if ep.param != "" {
+		ctx.Params = append(ctx.Params, LambdaParam{Name: ep.param})
+	}
+	ctx.Params = append(ctx.Params, ep.nested...)
 	return ctx
 }
 
@@ -637,7 +667,12 @@ func checkConceptDefContext(tokens []parser.Token, prefix string) (CursorContext
 			braceDepth--
 			if braceDepth < 0 {
 				// Inside unmatched brace. Check if preceded by concept Name.
-				if i >= 2 && tokens[i-2].Type == parser.TokenKeywordConcept {
+				// The lexer reads `concept` as an IDENTIFIER (it is a field
+				// name too, lexer.go), so matching only TokenKeywordConcept --
+				// which it never produces -- left this context unreachable and
+				// a concept body completing as a function body (memql#5359).
+				if i >= 2 && (tokens[i-2].Type == parser.TokenKeywordConcept ||
+					(tokens[i-2].Type == parser.TokenIdentifier && tokens[i-2].Literal == "concept")) {
 					return CursorContext{Kind: ContextConceptDef, Prefix: prefix}, true
 				}
 			}

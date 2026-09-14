@@ -21,9 +21,20 @@ import (
 
 	"github.com/znasllc-io/memql/component/automations"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
+
+// withLanguageLine adds the engine's own language line to a throwaway domain
+// tree, as every real bundle domain must carry one (memql#5357), so each test
+// sees only the problem its fixture is about.
+func withLanguageLine(tree fstest.MapFS) fstest.MapFS {
+	line := dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}
+	tree[dslfs.ManifestFile] = &fstest.MapFile{Data: []byte(line.Render())}
+	return tree
+}
 
 // loadedRegistry mirrors app/database.go's concept load so these tests run
 // against the same registry a booting node has.
@@ -181,7 +192,7 @@ func TestStrictAutomationBoot_MalformedAutomationRefusesBoot(t *testing.T) {
 				"  }\n" +
 				"}\n")},
 	}
-	memqldsl.RegisterTree(domain, fixture)
+	memqldsl.RegisterTree(domain, withLanguageLine(fixture))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	t.Run("refuses without escape hatch", func(t *testing.T) {
@@ -239,7 +250,7 @@ func TestStrictAutomationBoot_TerseLoweringRejectionRefusesBoot(t *testing.T) {
 				"}\n\n" +
 				"automation fixtureTerseRejected @trigger(event=\"system.startup\") => logic logicSomething\n")},
 	}
-	memqldsl.RegisterTree(domain, fixture)
+	memqldsl.RegisterTree(domain, withLanguageLine(fixture))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	t.Run("refuses without escape hatch", func(t *testing.T) {
@@ -294,7 +305,7 @@ func TestStrictAutomationBoot_SoftDisabledDirsAreSkipped(t *testing.T) {
 	for _, dir := range []string{"_disabled", ".attic"} {
 		t.Run(dir, func(t *testing.T) {
 			const domain = "s2830fixturesoftdisabled"
-			memqldsl.RegisterTree(domain, fstest.MapFS{dir + "/automations.memql": broken})
+			memqldsl.RegisterTree(domain, withLanguageLine(fstest.MapFS{dir + "/automations.memql": broken}))
 			t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 			t.Setenv(memql.AllowSkipsEnvVar, "")
@@ -336,7 +347,7 @@ func TestStrictAutomationBoot_UnextractableHeaderRefusesLoad(t *testing.T) {
 	for name, src := range cases {
 		t.Run(name, func(t *testing.T) {
 			const domain = "s2830fixtureunextractable"
-			memqldsl.RegisterTree(domain, fstest.MapFS{"automations.memql": {Data: []byte(src)}})
+			memqldsl.RegisterTree(domain, withLanguageLine(fstest.MapFS{"automations.memql": {Data: []byte(src)}}))
 			t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 			t.Setenv(memql.AllowSkipsEnvVar, "")

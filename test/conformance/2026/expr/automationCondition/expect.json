@@ -1,0 +1,230 @@
+{
+  "cases": [
+    {
+      "file": "condition-on-args.memql",
+      "verdict": "load_ok",
+      "note": "An automation condition reads the automation's args."
+    },
+    {
+      "file": "event-payload-read.memql",
+      "verdict": "refuse_load",
+      "message": "dotted `event.<field>` reads are retired",
+      "note": "The trigger payload is bound into the automation's args; the dotted event read is refused naming the args block."
+    },
+    {
+      "file": "status-and-role.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "status": "open"
+      },
+      "actor": {
+        "role": "admin"
+      },
+      "expect": true
+    },
+    {
+      "file": "status-and-role.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "status": "open"
+      },
+      "actor": {
+        "role": "writer"
+      },
+      "expect": false
+    },
+    {
+      "file": "optional-ticket-status.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "ticket": {
+          "status": "open"
+        }
+      },
+      "expect": true
+    },
+    {
+      "file": "optional-ticket-status.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {},
+      "expect": false,
+      "note": "`.?` reads through an absent arg as absent, and absent equals nothing but nil and the empty string."
+    },
+    {
+      "file": "lowered-status.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "status": "OPEN"
+      },
+      "expect": true
+    },
+    {
+      "file": "tags-any.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "tags": [
+          "billing",
+          "urgent"
+        ]
+      },
+      "expect": true
+    },
+    {
+      "file": "tags-any.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {},
+      "expect": false,
+      "note": "any() over an absent list is false."
+    },
+    {
+      "file": "not-in-closed.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "status": "open"
+      },
+      "expect": true
+    },
+    {
+      "file": "not-in-closed.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {},
+      "expect": true,
+      "note": "An absent status is in no list of set values, so its negation is true."
+    },
+    {
+      "file": "negated-delta.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "delta": 2
+      },
+      "expect": true
+    },
+    {
+      "file": "doubled-count.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "count": 3
+      },
+      "expect": true
+    },
+    {
+      "file": "coalesced-status.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "status": "  "
+      },
+      "expect": true,
+      "note": "`??` falls through on a whitespace-only string (rule 30)."
+    },
+    {
+      "file": "coalesced-status.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "status": "held"
+      },
+      "expect": false
+    },
+    {
+      "file": "code-prefix.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "code": "INC-7"
+      },
+      "expect": true
+    },
+    {
+      "file": "urgent-or-high.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "urgent": false,
+        "priority": 4
+      },
+      "expect": true
+    },
+    {
+      "file": "ternary-threshold.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "escalated": true,
+        "priority": 2
+      },
+      "expect": true
+    },
+    {
+      "file": "map-literal-member.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "status": "open"
+      },
+      "expect": true
+    },
+    {
+      "file": "closed-at-is-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {},
+      "expect": true
+    },
+    {
+      "file": "predicate-applied.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "ticket": {
+          "priority": 5
+        }
+      },
+      "expect": true,
+      "note": "A trait is applied to its receiver, here a ticket the automation was handed."
+    },
+    {
+      "file": "absent-is-false.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {},
+      "expect": false,
+      "note": "An absent condition is false; there is no other truthiness."
+    },
+    {
+      "file": "absent-is-false.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "flag": true
+      },
+      "expect": true
+    },
+    {
+      "file": "step-result-comparison.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "a-retired-function.memql",
+      "verdict": "refuse_parse",
+      "message": "year() is retired under the 2026.08 grammar epoch",
+      "note": "A retired expression function is refused wherever the parser reads a condition."
+    },
+    {
+      "file": "no-condition.memql",
+      "verdict": "refuse_parse",
+      "message": "conditional step: missing condition between `if` and `{`"
+    }
+  ]
+}
