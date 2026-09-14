@@ -438,6 +438,16 @@ function RuleDetail({
  * removes the automation and keeps the rule's history, and the circuit breaker
  * tripping is a fourth thing that happens without anybody asking. All four are
  * visible as separate statuses, so nobody has to guess which one happened.
+ *
+ * A REFUSAL IS SAID ONCE. When activation fails the engine records why on the
+ * rule (`lastError`), and the rule's own notice above renders that sentence
+ * -- so this panel repeating the call's error put one refusal on the page
+ * twice, the second time wrapped in "MemQL engine failed to execute query.
+ * Details:". Here a refusal appears only when the rule does not carry it: the
+ * engine refused before recording anything (who may author, which rule), or
+ * its record has not reached this window yet -- and the moment it does, this
+ * copy steps aside. A refused activation also closes the question: the line
+ * below then says the cluster refused it and where the reason is.
  */
 function ArmingPanel({
   rule,
@@ -449,6 +459,8 @@ function ArmingPanel({
   const [asking, setAsking] = useState(false);
   const active = rule.status === "active";
   const paused = rule.status === "paused";
+  const refusal = arming.error;
+  const refusalIsOnTheRule = refusal !== "" && refusal === rule.lastError.trim();
 
   return (
     <Panel label="Turn this rule on or off">
@@ -462,22 +474,16 @@ function ArmingPanel({
             with no further confirmation. Send yourself a test from the template first if you have
             not.
           </Caption>
-          {arming.error === "" ? null : (
-            <Notice
-              tone="error"
-              sentence="The cluster refused to arm this rule."
-              next="Nothing is running. What it says below is what stopped it."
-              detail={arming.error}
-            />
-          )}
           <div className="os-campaign-actions">
             <Button
               tone="primary"
               busy={arming.busy}
               busyLabel="Turning on"
               onClick={async () => {
-                const ok = await arming.activate(rule.id);
-                if (ok) setAsking(false);
+                await arming.activate(rule.id);
+                // Asked and answered either way: armed, or refused for a
+                // reason this page now shows once.
+                setAsking(false);
               }}
             >
               Turn it on
@@ -505,7 +511,15 @@ function ArmingPanel({
                 Pause
               </Button>
             ) : (
-              <Button tone="primary" onClick={() => setAsking(true)}>
+              <Button
+                tone="primary"
+                onClick={() => {
+                  // A new question starts clean: an earlier act's refusal is
+                  // not an answer to this one.
+                  arming.reset();
+                  setAsking(true);
+                }}
+              >
                 {paused ? "Start it again" : "Turn it on"}
               </Button>
             )}
@@ -527,12 +541,12 @@ function ArmingPanel({
               existed.
             </Caption>
           )}
-          {arming.error === "" ? null : (
+          {refusal === "" || refusalIsOnTheRule ? null : (
             <Notice
               tone="error"
               sentence="The cluster refused that."
               next="Nothing changed."
-              detail={arming.error}
+              detail={refusal}
             />
           )}
         </>
