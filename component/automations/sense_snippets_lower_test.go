@@ -2,6 +2,7 @@ package automations
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -20,14 +21,23 @@ import (
 // component/memql/sense because an automation's precondition lowers only
 // through this package's extraction, which sense cannot import.
 
-// snippetStubRegistry answers every registry question with nothing: the
-// snippets come from the DSL spec and the parser, not from the registries.
+// snippetStubRegistry answers the registry questions with one concept from a
+// domain other than the probe file's -- the case that makes the concept slot
+// of query / mutate / seed / shape offer to import it -- and nothing else:
+// the other snippets come from the DSL spec and the parser.
 type snippetStubRegistry struct{}
+
+const snippetProbeConcept = "v1:library:folder"
 
 func (snippetStubRegistry) FunctionNames() []string                        { return nil }
 func (snippetStubRegistry) FunctionGet(string) (*sense.FunctionInfo, bool) { return nil, false }
-func (snippetStubRegistry) ConceptNames() []string                         { return nil }
-func (snippetStubRegistry) ConceptGet(string) (*sense.ConceptInfo, bool)   { return nil, false }
+func (snippetStubRegistry) ConceptNames() []string                         { return []string{snippetProbeConcept} }
+func (snippetStubRegistry) ConceptGet(name string) (*sense.ConceptInfo, bool) {
+	if name != snippetProbeConcept {
+		return nil, false
+	}
+	return &sense.ConceptInfo{Name: name, Description: "a Library folder"}, true
+}
 func (snippetStubRegistry) SpecNames() []string                            { return nil }
 func (snippetStubRegistry) ToolNames() []string                            { return nil }
 func (snippetStubRegistry) ToolGet(string) (*sense.ToolInfo, bool)         { return nil, false }
@@ -45,12 +55,25 @@ var (
 )
 
 // fillSnippet fills a snippet the way an author would: each placeholder
-// keeps its default text, the final cursor ($0) takes cursor, and any other
-// tabstop is left empty.
+// keeps its default text, the final cursor ($0) takes cursor, any other
+// tabstop is left empty, and the literals snippet syntax escapes (`\$`, `\}`,
+// `\\`) read as themselves.
 func fillSnippet(text, cursor string) string {
 	out := snippetPlaceholder.ReplaceAllString(text, "$1")
 	out = strings.ReplaceAll(out, "$0", cursor)
-	return snippetTabstop.ReplaceAllString(out, "")
+	out = snippetTabstop.ReplaceAllString(out, "")
+	out = strings.ReplaceAll(out, `\$`, "$")
+	out = strings.ReplaceAll(out, `\}`, "}")
+	return strings.ReplaceAll(out, `\\`, `\`)
+}
+
+// conceptSlots is, per concept-binding construct, the text before its concept
+// slot and the rest of a construct that lowers once a concept fills the slot.
+var conceptSlots = map[string][2]string{
+	"query":  {"query ", " probe {\n  filter row.id != \"\"\n}\n"},
+	"mutate": {"mutate ", " probe {\n  insert {\n    id: \"x\"\n  }\n}\n"},
+	"seed":   {"seed ", " probe {\n  name: \"x\"\n}\n"},
+	"shape":  {"shape ", " probe {\n  row.id\n}\n"},
 }
 
 // lowerAuthored runs src down the path an authored file takes: the
@@ -193,4 +216,57 @@ func TestEverySnippetCompletionLowers(t *testing.T) {
 			t.Errorf("%s: the body offered no snippets -- this test drove nothing for it", keyword)
 		}
 	}
+
+	// The concept slot of every concept-binding construct: EVERY item it
+	// offers -- the bare concept, and the one that also imports it -- must
+	// lower once applied. The import is the one data-driven completion: with no
+	// concept in the registry it is never produced, and it inserted a whole
+	// `use` line at the slot (`query use library.concepts.{ folder }`).
+	// Each slot is driven in a file with no imports and in one that already
+	// has one, so the import lands both at the top and after the last `use`.
+	for keyword, slot := range conceptSlots {
+		for _, preamble := range []string{"", "use cluster.concepts.{ node }\n"} {
+			open := preamble + slot[0]
+			lines := strings.Split(open, "\n")
+			offered, imports := 0, 0
+			for _, it := range s.Complete(open, len(lines), len(lines[len(lines)-1])+1, "probe.memql") {
+				offered++
+				if len(it.AdditionalEdits) > 0 {
+					imports++
+				}
+				src := applyEdits(t, open+fillSnippet(it.InsertText, "")+slot[1], it.AdditionalEdits)
+				if _, err := lowerAuthored(t, keyword, src); err != nil {
+					t.Errorf("%s: the concept-slot completion %q does not lower once applied:\n%s\n%v", keyword, it.Label, src, err)
+				}
+			}
+			if offered == 0 || imports == 0 {
+				t.Errorf("%s: the concept slot offered %d items, %d of them imports -- this test drove nothing for it", keyword, offered, imports)
+			}
+		}
+	}
+}
+
+// applyEdits applies a completion's additional edits, which sit before its
+// insert position (the file's imports), to src. Positions are 1-based lines
+// and columns, as Sense reports them.
+func applyEdits(t *testing.T, src string, edits []sense.TextEdit) string {
+	t.Helper()
+	offset := func(p sense.Position) int {
+		lines := strings.Split(src, "\n")
+		if p.Line < 1 || p.Line > len(lines)+1 {
+			t.Fatalf("edit line %d is outside the %d-line document", p.Line, len(lines))
+		}
+		at := 0
+		for i := 0; i < p.Line-1; i++ {
+			at += len(lines[i]) + 1
+		}
+		return at + p.Column - 1
+	}
+	ordered := append([]sense.TextEdit(nil), edits...)
+	sort.Slice(ordered, func(i, j int) bool { return offset(ordered[i].Range.Start) > offset(ordered[j].Range.Start) })
+	for _, e := range ordered {
+		start, end := offset(e.Range.Start), offset(e.Range.End)
+		src = src[:start] + e.NewText + src[end:]
+	}
+	return src
 }

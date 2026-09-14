@@ -538,31 +538,59 @@ func (s *Service) completeConstructConcept(ctx CursorContext) []CompletionItem {
 			Documentation: doc, InsertText: short,
 			SortPriority: priority,
 		})
-		// Secondary: a fully-formed `use <domain>.concepts.{ short }` import
-		// when the concept isn't already in file scope, the domain is known,
-		// and the spec rule asks for it -- the owner's "no concept in scope ->
-		// suggest importing one" behaviour. A concept of the file's OWN
-		// domain is ambient (#2617) -- in scope with no import -- so the
-		// import suggestion is suppressed there (the bare suggestion above
-		// already binds it).
+		// Secondary: bind the concept AND import it, when it isn't already in
+		// file scope, the domain is known, and the spec rule asks for it -- the
+		// owner's "no concept in scope -> suggest importing one" behaviour. A
+		// concept of the file's OWN domain is ambient (#2617) -- in scope with
+		// no import -- so the import suggestion is suppressed there (the bare
+		// suggestion above already binds it), as it is when the file already
+		// imports the concept.
+		//
+		// The slot gets the NAME; the `use <domain>.concepts.{ short }` line is
+		// an edit of its own, placed with the file's imports (memql#5359). It
+		// used to be inserted AT the slot, which made `query use
+		// library.concepts.{ folder }` -- a file that does not parse.
 		if suggestImport && domain != "" && !inScope[short] && domain != fileDomain(ctx.FilePath) {
 			useLine := "use " + domain + ".concepts.{ " + short + " }"
 			items = append(items, CompletionItem{
-				Label:         useLine,
-				Kind:          "snippet",
-				Detail:        "import concept",
-				Documentation: "Import `" + short + "` from `" + domain + "` into file scope, then bind it.",
-				// AUDITED (#2629): this was multi-line PLAIN text -- no
-				// snippet syntax, so it never suffered the literal-insert
-				// bug; it simply left the cursor at the end of the bound
-				// name. Now a real snippet, with the literals escaped.
-				InsertText:   escapeSnippetLiteral(useLine) + "\n" + escapeSnippetLiteral(short) + "$0",
-				IsSnippet:    true,
-				SortPriority: 2,
+				Label:           useLine,
+				Kind:            "snippet",
+				Detail:          "import concept",
+				Documentation:   "Bind `" + short + "` and import it from `" + domain + "`: the `use` line goes with the file's imports.",
+				InsertText:      short,
+				SortPriority:    2,
+				AdditionalEdits: []TextEdit{importEdit(ctx.Source, useLine)},
 			})
 		}
 	}
 	return items
+}
+
+// importEdit places a file-top `use` line: after the file's last `use`
+// declaration (whose braced list may span lines), or at the top of the file,
+// followed by a blank line, when it has none.
+func importEdit(source, useLine string) TextEdit {
+	lines := strings.Split(source, "\n")
+	last := 0 // 1-based line of the last `use` declaration's final line
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(trimmed, "use ") {
+			continue
+		}
+		end := i
+		if strings.Contains(trimmed, "{") && !strings.Contains(trimmed, "}") {
+			for end < len(lines)-1 && !strings.Contains(lines[end], "}") {
+				end++
+			}
+		}
+		last, i = end+1, end
+	}
+	if last == 0 {
+		at := Position{Line: 1, Column: 1}
+		return TextEdit{Range: Range{Start: at, End: at}, NewText: useLine + "\n\n"}
+	}
+	at := Position{Line: last + 1, Column: 1}
+	return TextEdit{Range: Range{Start: at, End: at}, NewText: useLine + "\n"}
 }
 
 // splitConceptID splits a canonical concept id (v1:<domain>:<...>:<leaf>) into
