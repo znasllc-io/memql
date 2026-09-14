@@ -259,7 +259,7 @@ type ForStatement struct {
 	Mods    StatementMods  // OnError only
 	Span    Span
 }
-type CaseClause struct {
+type CaseArm struct {
 	Labels  []ExpressionNode // literals; empty for default
 	Default bool
 	Body    []BodyStatement
@@ -267,7 +267,7 @@ type CaseClause struct {
 }
 type SwitchStatement struct {
 	Subject ExpressionNode
-	Cases   []CaseClause
+	Cases   []CaseArm
 	Span    Span
 }
 type ParallelBranch struct {
