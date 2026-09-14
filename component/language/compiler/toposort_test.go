@@ -107,3 +107,73 @@ func TestTopoSortSteps_PreservesSourceOrderForIndependentSteps(t *testing.T) {
 		t.Errorf("A must precede D: %v", sorted)
 	}
 }
+
+// The order is a STABLE topological sort: of the steps ready to run, the one
+// written first runs first. These pin exact orders, which the relative-order
+// checks above cannot: a breadth-first sort satisfies every one of them.
+
+// TestTopoSortSteps_SourceOrderWhenDependenciesPointBack is forge's
+// routeRequest: `advance` reads `steps.decide`, `persistRouted` reads neither.
+// The source is already in dependency order, so it is the order. A
+// breadth-first sort ran persistRouted (ready in the first round) ahead of
+// advance (ready in the second) -- the reverse of what was written
+// (memql#5367).
+func TestTopoSortSteps_SourceOrderWhenDependenciesPointBack(t *testing.T) {
+	order := []string{"decide", "advance", "persistRouted"}
+	deps := map[string]map[string]struct{}{
+		"decide":        {},
+		"advance":       {"decide": {}},
+		"persistRouted": {},
+	}
+	sorted, err := topoSortSteps("routeRequest", order, deps)
+	if err != nil {
+		t.Fatalf("topoSort: %v", err)
+	}
+	if got := strings.Join(sorted, ","); got != "decide,advance,persistRouted" {
+		t.Errorf("got %s, want the source order decide,advance,persistRouted", got)
+	}
+}
+
+// TestTopoSortSteps_StepsReleasedTogetherKeepSourceOrder: several steps that
+// become ready when the same provider runs keep their source order. A
+// breadth-first sort released them in the iteration order of a Go map, so
+// the order differed between runs; the loop gives that a chance to show.
+func TestTopoSortSteps_StepsReleasedTogetherKeepSourceOrder(t *testing.T) {
+	order := []string{"a", "b", "c", "d", "e"}
+	deps := map[string]map[string]struct{}{
+		"a": {},
+		"b": {"a": {}},
+		"c": {"a": {}},
+		"d": {"a": {}},
+		"e": {"a": {}},
+	}
+	for i := 0; i < 100; i++ {
+		sorted, err := topoSortSteps("test", order, deps)
+		if err != nil {
+			t.Fatalf("topoSort: %v", err)
+		}
+		if got := strings.Join(sorted, ","); got != "a,b,c,d,e" {
+			t.Fatalf("run %d: got %s, want a,b,c,d,e", i, got)
+		}
+	}
+}
+
+// TestTopoSortSteps_ForwardReferenceMovesOnlyTheProvider: a step that reads a
+// step written after it pulls that provider ahead of itself, and nothing else
+// moves.
+func TestTopoSortSteps_ForwardReferenceMovesOnlyTheProvider(t *testing.T) {
+	order := []string{"x", "a", "b", "y"}
+	deps := map[string]map[string]struct{}{
+		"x": {},
+		"a": {"b": {}},
+		"b": {},
+		"y": {},
+	}
+	sorted, err := topoSortSteps("test", order, deps)
+	if err != nil {
+		t.Fatalf("topoSort: %v", err)
+	}
+	if got := strings.Join(sorted, ","); got != "x,b,a,y" {
+		t.Errorf("got %s, want x,b,a,y: b moves ahead of a, and y stays last", got)
+	}
+}
