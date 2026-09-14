@@ -113,7 +113,16 @@ var kindFromString = map[string]languageParser.FunctionType{
 // (the path that turns the bare `concept` keyword in procedural
 // queries into a real comparison) can't determine which concept the
 // function targets.
+//
+// Memoized per process by source (functionSlices): the result is a pure
+// function of it, and a boot slices every file here from the loader and the
+// duplicate detector both.
 func ExtractFunctionSlices(source string) []FunctionSlice {
+	return functionSlices.get(source, "", func() []FunctionSlice { return extractFunctionSlices(source) })
+}
+
+// extractFunctionSlices is ExtractFunctionSlices without the memo.
+func extractFunctionSlices(source string) []FunctionSlice {
 	// Detect headers on a comment-blanked view so a `func (Receiver)
 	// ...` or `<kind> <name> {` token that only appears inside a `//`
 	// or `/* */` comment is never extracted as a standalone construct

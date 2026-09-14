@@ -111,6 +111,11 @@ func ExtractKeywordSlices(source, keyword string) []KeywordSlice {
 // message and the replacement; a slicer that dropped it would turn that
 // refusal into a construct that silently does not exist.
 func constructDeclarationSlices(source, keyword string) []languageParser.DeclarationSlice {
+	return declarationSlices.get(source, keyword, func() []languageParser.DeclarationSlice { return sliceDeclarations(source, keyword) })
+}
+
+// sliceDeclarations is constructDeclarationSlices without the memo.
+func sliceDeclarations(source, keyword string) []languageParser.DeclarationSlice {
 	slices := languageParser.ExtractDeclarationSlices(source, keywordHeaderRegexp(keyword))
 	if keyword != "spec" && keyword != "trait" {
 		return slices
@@ -122,4 +127,75 @@ func constructDeclarationSlices(source, keyword string) []languageParser.Declara
 	slices = append(slices, braceLess...)
 	sort.SliceStable(slices, func(i, j int) bool { return slices[i].Start < slices[j].Start })
 	return slices
+}
+
+// declarationSlices memoizes constructDeclarationSlices, which is a pure
+// function of (source, keyword), and functionSlices ExtractFunctionSlices, a
+// pure function of source.
+//
+// Slicing was half of an engine boot: one Init slices every file of the tree
+// once per keyword in each of three passes -- the loaders, the duplicate
+// detector and the contract gates -- and every boot in a process slices the
+// same files again (the embedded tree does not change under a process; a test
+// binary boots a hundred engines over it). With the memos a file is sliced
+// once per keyword per process.
+var (
+	declarationSlices = &sourceMemo[languageParser.DeclarationSlice]{maxBytes: 64 << 20}
+	functionSlices    = &sourceMemo[FunctionSlice]{maxBytes: 64 << 20}
+)
+
+// sourceMemo caches a pure function of a source text (and a key: the
+// keyword a slicer is asked for), by source then key.
+//
+// Bounded by the bytes of the distinct sources it holds, and CLEARED rather
+// than evicted when a new source would take it past the bound: authored
+// bundles are sliced through here too, and a long-running node must not hold
+// every source it was ever asked to validate. A clear costs one recomputation
+// of whatever is asked next, never a wrong answer. Entries are handed out as
+// copies, so a caller that appends to or reorders what it got cannot reach the
+// memo's; the elements themselves are plain values.
+type sourceMemo[T any] struct {
+	mu sync.Mutex
+	// bySource holds each distinct source once, so the bound counts its
+	// bytes once however many keys ask about it.
+	bySource map[string]map[string][]T
+	bytes    int
+	maxBytes int
+}
+
+func (m *sourceMemo[T]) get(source, key string, compute func() []T) []T {
+	m.mu.Lock()
+	cached, hit := m.bySource[source][key]
+	m.mu.Unlock()
+	if hit {
+		return copyOrNil(cached)
+	}
+	computed := compute()
+	if len(source) <= m.maxBytes {
+		m.mu.Lock()
+		perKey, known := m.bySource[source]
+		if !known {
+			if m.bySource == nil || m.bytes+len(source) > m.maxBytes {
+				m.bySource = map[string]map[string][]T{}
+				m.bytes = 0
+			}
+			perKey = map[string][]T{}
+			m.bySource[source] = perKey
+			m.bytes += len(source)
+		}
+		if _, raced := perKey[key]; !raced {
+			perKey[key] = copyOrNil(computed)
+		}
+		m.mu.Unlock()
+	}
+	return computed
+}
+
+// copyOrNil is a fresh slice holding the same values; nil stays nil, which
+// the callers read as "none".
+func copyOrNil[T any](in []T) []T {
+	if in == nil {
+		return nil
+	}
+	return append(make([]T, 0, len(in)), in...)
 }
