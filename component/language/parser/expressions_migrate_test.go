@@ -1051,3 +1051,58 @@ func TestRewriteExpressions_KeylessMapEntriesRefusals(t *testing.T) {
 		}
 	}
 }
+
+// A bare name in a trigger @filter is a field of the triggering row, as
+// `payload.<field>` is -- unless the filter scope binds it (now, event, actor,
+// args, ...) or the automation's args block declares it, which the G2 tier
+// resolves to the bound argument in both grammars (epic memql#5363).
+func TestRewriteExpressions_TriggerFilterBareNames(t *testing.T) {
+	trigger := "@trigger(event=\"node.updated\", concept=\"v1:x:y\", partition=\"*\")\n"
+	body := "automation a {\n  step s {\n    logic l ( event )\n  }\n}\n"
+	for _, tc := range []struct{ in, want string }{
+		{`@filter(status == "archived")`, `@filter(row => row.status == "archived")`},
+		{`@filter(status == "archived" && payload.kind == "file")`, `@filter(row => row.status == "archived" && row.kind == "file")`},
+		// A row intrinsic takes its canonical spelling.
+		{`@filter(id == "v1:x:y:1")`, `@filter(row => row.id == "v1:x:y:1")`},
+		{`@filter(createdat < now)`, `@filter(row => row.createdAt < now)`},
+		// Names the scope binds keep them; so does a rooted path.
+		{`@filter(event.topic == "t" && actor.userId == "u")`, `@filter(row => event.topic == "t" && actor.userId == "u")`},
+		{`@filter(createdBy == actor.userId)`, `@filter(row => row.createdBy == actor.userId)`},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			src := trigger + tc.in + "\n" + body
+			got := xmtRewrite(t, src, nil)
+			if !strings.Contains(got, "\n"+tc.want+"\n") {
+				t.Errorf("\n got:\n%s\nwant the line %s", got, tc.want)
+			}
+			if again := xmtRewrite(t, got, nil); again != got {
+				t.Errorf("a second run changed the output:\n%s", again)
+			}
+		})
+	}
+
+	// An args-block automation's field keeps its bare name, on either side:
+	// G2 resolves it to the bound argument, before and after.
+	argsAuto := trigger + "@filter(status == \"archived\" && kind == \"file\" && payload.ownerUserId == owner)\n" +
+		"automation a {\n  args {\n    status string\n    owner string\n  }\n  step s {\n    logic l ( status )\n  }\n}\n"
+	if got := xmtRewrite(t, argsAuto, nil); !strings.Contains(got, `@filter(row => status == "archived" && row.kind == "file" && row.ownerUserId == owner)`) {
+		t.Errorf("args-block automation:\n%s", got)
+	}
+
+	// A bare word on the RIGHT is not converted: the legacy evaluator fell
+	// back to the word's own text there, so `== active` compared "active",
+	// and neither reading can be picked for the author.
+	ambiguous := trigger + "@filter(payload.status == active)\n" + body
+	if out, err := RewriteExpressions([]byte(ambiguous), nil); err == nil || string(out) != ambiguous ||
+		!strings.Contains(err.Error(), "the bare word active is a path or a literal") {
+		t.Errorf("want the right-hand bare word refused, got err=%v\n%s", err, out)
+	}
+
+	// A terse automation has no args block, and the braced automation below
+	// it does not lend it one.
+	terse := trigger + "@filter(status == \"archived\")\nautomation t @trigger(event=\"node.created\", concept=\"v1:x:y\", partition=\"*\") => logic l\n\n" +
+		"automation b {\n  args {\n    status string\n  }\n  step s {\n    logic l ( status )\n  }\n}\n"
+	if got := xmtRewrite(t, terse, nil); !strings.Contains(got, `@filter(row => row.status == "archived")`) {
+		t.Errorf("terse automation:\n%s", got)
+	}
+}

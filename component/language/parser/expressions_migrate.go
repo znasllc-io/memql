@@ -81,6 +81,8 @@ var (
 
 	xmAnnotation        = regexp.MustCompile(`@([A-Za-z_][A-Za-z0-9_]*)`)
 	xmFilterAnnotation  = regexp.MustCompile(`@filter[ \t]*\(`)
+	xmAutomationHeader  = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+[A-Za-z_][A-Za-z0-9_]*`)
+	xmArgsField         = regexp.MustCompile(`(?m)^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z\[]`)
 	xmTriggerAnnotation = regexp.MustCompile(`@trigger[ \t]*\(`)
 	xmHandlerAnnotation = regexp.MustCompile(`@handler[ \t]*\(`)
 
@@ -596,7 +598,7 @@ func (r *xmRewrite) triggerFilter(open, end int) {
 		}
 		exprText = toks[0].Literal
 	}
-	expr, err := xmConvertChecked(exprText, xmConverter{mode: xmTrigger, param: "row", preds: r.preds})
+	expr, err := xmConvertChecked(exprText, xmConverter{mode: xmTrigger, param: "row", preds: r.preds, argsFields: xmAutomationArgsAfter(f, end)})
 	if err != nil {
 		r.fail(open, "@filter(%s): %v", inner, err)
 		return
@@ -768,6 +770,10 @@ type xmConverter struct {
 	// need different answers for one value -- and only the tokens know which
 	// spelling the author used.
 	bare map[string]bool
+	// argsFields holds, in trigger mode, the fields the automation's args
+	// block declares: a bare one resolves to the bound argument (G2,
+	// memql#2364) in both grammars, so it keeps its bare name.
+	argsFields map[string]bool
 }
 
 // xmConvertChecked converts src and verifies the result: the conversion is run
@@ -1018,11 +1024,7 @@ func (c xmConverter) field(parts []string) (ast.ExpressionNode, error) {
 	head := parts[0]
 	switch c.mode {
 	case xmTrigger:
-		// `payload` is the triggering row; every other root keeps its name.
-		if head == "payload" && len(parts) > 1 {
-			return xmPath("row", parts[1:]...), nil
-		}
-		return xmPath(head, parts[1:]...), nil
+		return c.triggerPath(parts), nil
 	case xmSpecBody:
 		if len(parts) != 1 {
 			return nil, fmt.Errorf("%s: a spec or trait body reads its bound fields by bare name, and the engine refuses a dotted path there", strings.Join(parts, "."))
@@ -1109,10 +1111,95 @@ func (c xmConverter) path(parts []string) (ast.ExpressionNode, error) {
 			return nil, fmt.Errorf("the path %s has a segment %q that is not an identifier", strings.Join(parts, "."), p)
 		}
 	}
+	if c.mode == xmTrigger {
+		return c.triggerPath(parts), nil
+	}
 	if parts[0] == "payload" && len(parts) > 1 {
 		return xmPath("row", parts[1:]...), nil
 	}
 	return xmPath(parts[0], parts[1:]...), nil
+}
+
+// xmTriggerScopeRoots are the names a trigger filter's scope binds itself --
+// the automation run scope's fixed and seeded roots (component/automations
+// RunScope, reservedAutomationRoots), which this package cannot import. A bare
+// one keeps its name; every other bare name is a field of the triggering row.
+var xmTriggerScopeRoots = map[string]bool{
+	"now": true, "actor": true, "partition": true, "config": true, "trace": true,
+	"event": true, "args": true, "steps": true, "timestamp": true, "ctx": true,
+	"input": true, "item": true, "index": true, "var": true, "systemVar": true,
+	"secret": true, "systemSecret": true, "automation": true, "error": true,
+	"row": true,
+}
+
+// triggerPath converts a path in a trigger @filter (a dotted path's segments
+// are already checked identifiers).
+//
+// `payload.<field>` is the triggering row's field, as it always was
+// (`row.<field>`). A BARE name is too: edition 2026 reads a trigger filter as a
+// lambda over the row, so `status == "archived"` means `row.status ==
+// "archived"` -- unless the name is one the filter scope binds itself
+// (xmTriggerScopeRoots: now, event, actor, args, ...) or a field of the
+// automation's own args block, which the G2 tier resolves to the bound argument
+// in both grammars. A row intrinsic takes its canonical spelling (`id` ->
+// `row.id`). Every other rooted path keeps its root.
+//
+// The legacy string evaluator gave a bare name NO row meaning: with no dot it
+// was not a path, so outside an args-block automation it fell through to its
+// own text -- `status == "archived"` compared the word "status", constant-false
+// -- and inside one it was the args field. The row reading is what the author
+// meant and what edition 2026 can say; a bare args field keeps the meaning it
+// had.
+func (c xmConverter) triggerPath(parts []string) ast.ExpressionNode {
+	head := parts[0]
+	if head == "payload" && len(parts) > 1 {
+		return xmPath("row", parts[1:]...)
+	}
+	if len(parts) == 1 && !xmTriggerScopeRoots[head] && !c.argsFields[head] {
+		if canon, ok := xmIntrinsic(head); ok {
+			return xmPath("row", canon)
+		}
+		return xmPath("row", head)
+	}
+	return xmPath(head, parts[1:]...)
+}
+
+// xmAutomationArgsAfter returns the fields declared by the args block of the
+// automation an annotation ending at pos belongs to: the first top-level
+// automation header after it. A terse automation, or one with no args block,
+// declares none.
+func xmAutomationArgsAfter(f *xmFile, pos int) map[string]bool {
+	loc := xmAutomationHeader.FindStringIndex(f.mask[pos:])
+	if loc == nil {
+		return nil
+	}
+	// A terse automation (`automation x @trigger(...) => logic y`) has no
+	// body, so no args block -- and the next braced header below it belongs
+	// to a different automation.
+	rest := strings.TrimLeft(f.mask[pos+loc[1]:], " \t")
+	if !strings.HasPrefix(rest, "{") {
+		return nil
+	}
+	open := pos + loc[1] + strings.IndexByte(f.mask[pos+loc[1]:], '{')
+	end := MatchingCloseBrace(f.code, open)
+	if end < 0 {
+		return nil
+	}
+	body := f.mask[open+1 : end]
+	args := argsBlockHeader.FindStringIndex(body)
+	if args == nil {
+		return nil
+	}
+	brace := open + 1 + args[0] + strings.LastIndexByte(body[args[0]:args[1]], '{')
+	close := MatchingCloseBrace(f.code, brace)
+	if close < 0 {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, m := range xmArgsField.FindAllStringSubmatch(f.mask[brace+1:close], -1) {
+		out[m[1]] = true
+	}
+	return out
 }
 
 // value converts a comparison's right-hand side, which the legacy parser hands
@@ -1155,9 +1242,16 @@ func (c xmConverter) stringValue(s string) (ast.ExpressionNode, error) {
 	if c.mode == xmTrigger && c.bare[s] {
 		// The trigger evaluator resolved a bare word as a path. A rooted
 		// dotted word keeps that meaning; a colon-bearing one is an id,
-		// which v1 writes as a string; anything else is ambiguous.
+		// which v1 writes as a string; a field of the automation's args
+		// block is the bound argument in both grammars (G2); anything else
+		// is ambiguous -- the legacy evaluator fell back to the word's own
+		// text, so `payload.status == active` compared "active", and
+		// neither reading can be picked for the author.
 		if strings.Contains(s, ":") {
 			return &ast.LiteralExpr{Value: s}, nil
+		}
+		if c.argsFields[s] {
+			return &ast.IdentExpr{Name: s}, nil
 		}
 		if i := strings.IndexByte(s, '.'); i > 0 {
 			switch s[:i] {
