@@ -742,7 +742,7 @@ mutate authCode createAuthCode {
 // column. redirectURIsJSON is a JSON array string (the engine doesn't
 // support nested arrays of objects in concept fields, mirroring
 // clusterSettings.registeredClientsJSON). The optional grant /
-// response / auth-method strings default to "" via coalesce.
+// response / auth-method strings default to "" via `??`.
 //
 // Arguments:
 //   clientId                 (string)            - Public client_id (id of the row)

@@ -12,13 +12,15 @@
 // joined client-side; on a busy cluster a module's history scrolled out
 // of the cap. This is the server-side read that cap stood in for.
 //
-// Selection, never a pass-through. `codeReference startsWith
+// Selection, never a pass-through. `row.codeReference startsWith
 // args.prefixes` matches nothing for an empty list and for a list of
 // blanks (the engine rule, component/memql/executor_filter.go), and the
-// exact key is a when()-guarded equality, so a call with no prefixes and
-// no codeReference returns an EMPTY result rather than a cluster-wide
-// scan. prefixes is REQUIRED precisely so that an absent list is a refused
-// call and never an unconstrained one; an empty list is accepted.
+// exact key is a guarded equality, `(args.codeReference != nil && ...)`,
+// which admits nothing when codeReference is unset, so a call with no
+// prefixes and no codeReference returns an EMPTY result rather than a
+// cluster-wide scan. prefixes is REQUIRED precisely so that an absent list
+// is a refused call and never an unconstrained one; an empty list is
+// accepted.
 //
 // Authz: codeMetric declares no @rowAuthz tier and carries no user-scope
 // field. This read carries the same gate the generic concept browse gives

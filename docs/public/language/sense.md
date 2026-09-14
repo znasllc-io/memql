@@ -134,7 +134,7 @@ live in `component/grpc/sense_handlers.go`.
 |---|---|
 | **Tokenize** | Semantic tokens for syntax highlighting -- keywords, identifiers, strings, annotations, concept ids, and the operators (`\|\|`, `.?` and `=>` each one token) |
 | **Complete** | Context-aware autocompletion -- constructs, annotations, concepts, builtins, keywords; at an expression position, exactly what the tier manifest admits there (see [Expressions](#expressions-position-aware-completion-and-hover)) |
-| **Diagnose** | Errors and warnings from the lexer, parser, and semantic validation |
+| **Diagnose** | Errors and warnings from the lexer, parser, and semantic validation. A retired spelling is a parser error whose code is the parser's rule id (`retired_cond_call`), which the language server's [rewrite quick fix](#the-rewrite-quick-fix) keys on |
 | **Hover** | Symbol info at the cursor -- function docs, concept schemas, annotation docs, tool and prompt docs, and cards for operators, catalog functions and retired spellings that say where the item runs at the cursor's position. Resolves a BARE concept short name too (#2753): `candidate` in `shape candidate candidateFull` is ambient under rule 25, so it is matched by trailing segment against the registry. A collision across namespaces (`invocation` is both `v1:worker:invocation` and `v1:observability:invocation`) is broken by the document's own domain; where that cannot decide, hover returns nothing rather than the wrong concept. The domain comes from the document path, carried by `SenseHoverMsg.file_path` on the gRPC surface (#2760) and by the document URI over LSP |
 | **SignatureHelp** | Parameter help inside call arguments, from the function catalog first, then the builtins and the registry's declared args |
 | **Definition** | Go-to-definition (F12) -- resolves the construct reference under the cursor to the file and position that declares it (#2754). Backed by `dslimports.Index.DeclarationSites`, which finds the declaring file from the declaration index and recovers the line/column by re-lexing that file's raw source (the AST carries no positions). Colliding names are narrowed by the referencing file's own domain, and where that cannot decide it returns nothing rather than jumping to the wrong file. Exposed on both surfaces: `textDocument/definition` over LSP and `SenseDefinitionMsg` / `SenseDefinitionResult` over gRPC (#2760). The result carries a WORKSPACE-RELATIVE path, never a URI -- the LSP maps it to `file://` while the Cockpit addresses pack files as `(domain, path)`, so the wire stays neutral between them |
@@ -250,7 +250,8 @@ is whatever name the author wrote. A lambda opened inside the expression --
 `row.tags.any(t => ...` -- puts its parameter in scope until the bracket it
 sits in closes. The pre-v1 spellings of the pushdown positions (a filter with
 no lambda header, a `filter { }` block, a `spec ... { return ... }` body) are
-detected too, so a file that has not been migrated keeps its completion.
+detected too. The parser refuses each of them, and a file that still carries
+one keeps its completion and hover while it is rewritten.
 
 ### Completion
 
@@ -291,9 +292,10 @@ the row is a load refusal. `args.tags.` offers every method the position
 admits, since an arg does not read the row.
 
 The two clauses that open with a lambda header offer the header first. A
-filter with no header yet offers `row => ...` beside the reserved heads and
-the bound concept's fields of its pre-v1 spelling; a refine clause offers
-`row => ...` and nothing else until the header is written.
+filter with no header yet offers `row => ...` above the reserved heads and the
+bound concept's fields its pre-v1 spelling read, which the parser refuses
+until the header is written; a refine clause offers `row => ...` and nothing
+else until the header is written.
 
 No retired spelling is ever offered: `cond`, `concat` and `coalesce` do not
 reach the list anywhere.
@@ -358,6 +360,31 @@ because Sense runs that rewrite over the construct under the cursor:
 `filter row => row.status == args.owner && isActiveRecord(row)`. Where the
 rewrite refuses the construct, the card shows the table's form.
 
+Every retired spelling is also a parse error, which Diagnose reports with the
+parser's rule id as its code, so the hover explains the squiggle and the quick
+fix below removes it.
+
+### The rewrite quick fix
+
+The language server (`cmd/memql-lsp/codeaction.go`) turns
+`memqlmigrate --rewrite=expressions` into two code actions:
+
+- **Rewrite to edition 2026**, a quick fix on a diagnostic the rewrite clears:
+  a retired spelling, or another parse error that rewriting its construct
+  removes.
+- **Rewrite the file to edition 2026** (`source.fixAll.memql`), the same for
+  every construct in the file. VS Code runs it on save when `source.fixAll`
+  is in `editor.codeActionsOnSave`.
+
+The edit is the one the codemod makes, against the specs and traits the
+workspace and the engine's core domains declare, with open buffers as they
+are rather than as saved. The unit is one construct with the annotations above
+it: a construct holding a clause the rewrite refuses, such as a relationship
+traversal, is offered nothing and keeps its diagnostic, and so is a construct
+whose rewrite would not parse. The edit replaces only the lines that change, so
+undo and the cursor behave as they do after a hand-made edit. The gRPC surface
+has no code action; a client there runs the codemod.
+
 ### Signature help
 
 Inside a call's arguments signature help reads the catalog first: one
@@ -383,8 +410,8 @@ editors and agents can key on them:
 | `unknown-import-symbol` | Warning | An imported id that the resolved module does not declare (`use fylo.concepts.{ oder }`). |
 | `signature-binds-wrong-kind` | Error | A `query`/`mutate`/`shape`/`seed` signature binds a name that IS declared, just not as a concept -- `shape todos ...` where `todos` is a query (#2762). The sibling rule below only asks whether the name exists at all, so a wrong-kind binding sailed through and surfaced as a boot failure instead. An explicit import does NOT suppress it: importing the query is exactly how the author got here. A name the workspace has never seen is left to `unknown-signature-concept`, since it may arrive at runtime via `MEMQL_DSL_PATH`. `spec` is out of scope by construction -- it binds a shape XOR concept, and the extractor covers only the four concept-binding keywords. Measured over `dsl/`: 680 signature bindings, zero flagged |
 | `unknown-signature-concept` | Error | A `query`/`mutate`/`shape`/`seed <Concept> <name>` whose bound concept exists nowhere and is not imported (`mutate full ...` with no concept `full`). Error, because boot itself CrashLoops on an unresolvable signature concept. Extracted with the boot-pinned regex (`dslimports.SignatureConceptRefs`) and resolved with the load side's own `missingIsProvable` conservatism, so an external or unimported-but-global concept is never flagged (#2731). |
-| `bare-row-intrinsic` | Warning | A filter still in its pre-v1 spelling (no lambda header) names a row intrinsic bare (`filter id == args.x`) instead of through the `row.` namespace (#2779). A v1 filter reads every field through its parameter (`filter row => row.id == args.x`), so it never trips the rule. Warning, not Error: the engine still resolves bare intrinsics correctly -- only the authoring gates retired the spelling -- so this never CrashLoops boot, though `test/dslconformance/conformance_test.go` does fail CI on it. Detection is the same `sense.ScanBareRowIntrinsics` the tree-wide gate calls, so squiggle and CI cannot disagree; it reads clause TEXT rather than parsed predicate structure, so `\|\|`-joined and parenthesized predicates are covered, and string-literal contents are excluded. |
-| `bare-row-intrinsic-sort-key` | Warning | A sort key names a row intrinsic bare (`sort "createdAt", "desc"`) instead of through the `row.` namespace (#2786) -- the ordering half of the rule above, with the same ambiguity (`sort "id"` can name the row id or a payload property called `id`) and the same Warning rationale. Detection is the same `sense.ScanBareRowIntrinsicSortKeys` the tree-wide `TestSortKeysUseRowNamespace` calls. It is a SIBLING of the filter scanner, not a branch inside it: a filter names fields as code (so that scanner blanks string literals) while a sort names them as string literals, so this one reads literal contents. It opens a clause only on `sort` followed by a string literal, which keeps a construct field of the form `sort string @enum("createdAt", ...)` from being read as a sort clause; the whitespace skip is unicode-aware so it agrees with the rewriter's `TrimSpace`. It does NOT separate a provider `params` entry spelled `sort "createdAt"` from a directionless sort clause -- the two are byte-identical, and telling them apart needs enclosing-construct state the scanner does not carry. |
+| `bare-row-intrinsic` | Warning | A filter names a row intrinsic bare instead of through its parameter -- `id` on a continuation line of `filter row => row.a == 1`, where `row.id` was meant (#2779). The engine refuses the load for it (`id` is not defined here), and `test/dslconformance/conformance_test.go` fails CI on it; this rule is the edit-time half, which lands on the token and names `row.id`. A filter with no lambda header never reaches it: the parser refuses that first, and the rule runs only on a file that parses. Detection is the same `sense.ScanBareRowIntrinsics` the tree-wide gate calls, so squiggle and CI cannot disagree; it reads clause TEXT rather than parsed predicate structure, so `\|\|`-joined and parenthesized predicates are covered, and string-literal contents are excluded. |
+| `bare-row-intrinsic-sort-key` | Warning | A sort key names a row intrinsic bare (`sort "createdAt", "desc"`) instead of through the `row.` namespace (#2786) -- the ordering half of the rule above, with the same ambiguity (`sort "id"` can name the row id or a payload property called `id`). The engine refuses it in an authored file at load, where both `row.` namespace gates run (memql#3629); the runtime and SDK sort surfaces still accept a bare key from a caller. Detection is the same `sense.ScanBareRowIntrinsicSortKeys` the tree-wide `TestSortKeysUseRowNamespace` calls. It is a SIBLING of the filter scanner, not a branch inside it: a filter names fields as code (so that scanner blanks string literals) while a sort names them as string literals, so this one reads literal contents. It opens a clause only on `sort` followed by a string literal, which keeps a construct field of the form `sort string @enum("createdAt", ...)` from being read as a sort clause; the whitespace skip is unicode-aware so it agrees with the rewriter's `TrimSpace`. It does NOT separate a provider `params` entry spelled `sort "createdAt"` from a directionless sort clause -- the two are byte-identical, and telling them apart needs enclosing-construct state the scanner does not carry. |
 | `redundant-enabled` | Hint | `@enabled` restates the default (#2610). |
 | `redundant-version` | Hint | `@version("1.0.0")` restates the default (#2613). |
 
@@ -428,7 +455,7 @@ until the classifier computes its label, which is what this closes:
 | Block | Offers |
 |---|---|
 | `args { }` | Field types (`string`, `bool`, `enum(...)`, ...). `enum` completes to the TYPE form (#2618); the `!` required sigil is documented on the item rather than offered as one. |
-| `filter { }` (pre-v1) | The engine's reserved filter heads (`payload`, `actor`, `args`, `now`, `config`, `trace`, `meta`, `schema`, `partition`, `provenance`) plus the bound concept's fields. A v1 filter is a clause, and completes as an expression position (see [Expressions](#expressions-position-aware-completion-and-hover)). |
+| `filter { }` (pre-v1, refused at parse) | The engine's reserved filter heads (`payload`, `actor`, `args`, `now`, `config`, `trace`, `meta`, `schema`, `partition`, `provenance`) plus the bound concept's fields, so a file still in that form keeps its completion while it is rewritten. A v1 filter is a clause, and completes as an expression position (see [Expressions](#expressions-position-aware-completion-and-hover)). |
 | `insert { }` / `update { }` | `accept` / `stamp` in the post-#2616 short form, plus the bound concept's fields. |
 | `shape { }` | The bound concept's fields. |
 
@@ -497,7 +524,7 @@ or concepts, and an unknown root offers nothing:
 | `event.actor.` | `id` only -- the emitter's identity stamp (G4), a different object from the auth envelope. |
 | `args.` | The enclosing construct's declared args fields (any function kind; the automation BARE-name completion shares the same declared-field scanner, so the two can never disagree). In a trigger filter, which is written above its automation, the fields are the args of the automation the annotation decorates. |
 | `row.` (the position's lambda parameter) | The bound concept's fields, each with its declared type, then the row intrinsics. `actor.` in a spec over an @actor shape offers the envelope. |
-| `payload.` | The enclosing construct's bound-concept fields (via the registry's concept projection) -- the pre-v1 spelling; a v1 expression reads `row.<field>`. |
+| `payload.` | The enclosing construct's bound-concept fields (via the registry's concept projection) -- the pre-v1 spelling, which edition 2026 refuses; a v1 expression reads `row.<field>`. |
 
 Both lexer shapes are detected: a trailing dot (`actor.`) and a
 mid-member position (`actor.us`, where the prefix filters).

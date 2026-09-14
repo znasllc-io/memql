@@ -110,7 +110,7 @@ QueryClient.prototype.auditEventRetentionSweep = function (this: QueryClient, ar
   return this.executeNamed("auditEventRetentionSweep", buildAuditEventRetentionSweep(args), opts);
 };
 
-/** Decides whether to run the cluster bootstrap writes on first startup (ADR S2.1 pure logic, #2235). Reads existingCluster() and returns the boolean `create` -- true only when no cluster row exists yet AND this node is the bff (both idempotency guards). The calling automation gates the three conditional creates (v1:cluster:database / :identityProvider / :cluster) on `steps.decide.result == true`, with the idp create additionally requiring an identityProvider block in the startup envelope. */
+/** Decides whether to create the cluster row on first startup (ADR S2.1 pure logic, #2235). Reads existingCluster() and returns the boolean `create` -- true only when no cluster row exists yet AND this node is the bff (both idempotency guards). The calling automation gates the v1:cluster:cluster create on `steps.decide.result == true`; the database and identity-provider creates are gated on clusterInfraRefresh instead (memql#4766), the idp create additionally requiring an identityProvider block in the startup envelope. */
 export interface BootstrapClusterArgs {
   event: Record<string, unknown>;
 }
@@ -451,7 +451,7 @@ QueryClient.prototype.onDelegationCreated = function (this: QueryClient, args: O
   return this.executeNamed("onDelegationCreated", buildOnDelegationCreated(args), opts);
 };
 
-/** Decides which departed cluster nodes to retire (ADR S2.1 pure logic, #2235). Reads MEMQL_NODE_STALE_PRUNE_MINUTES (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns staleClusterNodes({olderThan: cutoff}).nodes() -- the LATEST non-stopped rows whose lastSeen is past the window (the olderThan arg pushes a payload.lastSeen<cutoff predicate onto the query, #1642). The calling automation appends the terminal health='stopped' row per returned node via a forEach updateNodeHealth step. */
+/** Decides which departed cluster nodes to retire (ADR S2.1 pure logic, #2235). Reads MEMQL_NODE_STALE_PRUNE_MINUTES (default 30), computes cutoff = now - window via addDuration with a negative ISO duration, and returns staleClusterNodes(olderThan: cutoff).nodes() -- the LATEST non-stopped rows whose lastSeen is past the window (the olderThan arg pushes a `row.lastSeen < args.olderThan` predicate onto the query, #1642). The calling automation appends the terminal health='stopped' row per returned node via a forEach updateNodeHealth step. */
 export interface PruneStaleClusterNodesArgs {
   event: Record<string, unknown>;
 }

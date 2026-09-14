@@ -729,7 +729,7 @@ func AgentRoleSlugsInUseBuild(args AgentRoleSlugsInUseArgs) string {
 	return "query agentRoleSlugsInUse()"
 }
 
-// AgentsForPlan -- The agents raised while working one goal -- every agent whose lineage.originatingPlanId names the plan. Backs the Nexus map's agent lane (memql#4371). Non-owned by design: v1:agents:agent declares no row-authz tier and a planner-raised specialist carries no reliable owner pointer, so the plan id is the narrowing and the residual is recorded in the per-row-authz audit rather than masked by a conjunct that would only ever return an empty map. The plan's own ownerAgentId is resolved separately through agentById.
+// AgentsForPlan -- The agents raised while working one goal -- every agent whose lineage.originatingRunId names the goal's run, passed as planId. Backs the Nexus map's agent lane (memql#4371). Non-owned by design: v1:agents:agent declares no row-authz tier and a planner-raised specialist carries no reliable owner pointer, so the run id is the narrowing and the residual is recorded in the per-row-authz audit rather than masked by a conjunct that would only ever return an empty map. The plan's own ownerAgentId is resolved separately through agentById.
 //
 // Bound concept: v1:agents:agent (machine-readable: BoundConcepts["agentsForPlan"] in generated_concepts.go).
 type AgentsForPlanArgs struct {
@@ -2023,7 +2023,7 @@ func ClientAccountByIdBuild(args ClientAccountByIdArgs) string {
 }
 
 // ClientAccountsAll -- Every account this caller may see -- their own, or every account in the cluster when the caller is a cluster owner. The Accounts app's primary screen, and the source every account picker in the OS reads.
-// ARCHIVED ROWS ARE EXCLUDED BY DEFAULT and returned under the filter (D8). The archive term is a DISJUNCTION rather than a `when(args.includeArchived)` guard, and the difference is not stylistic: `when(...)` drops its block on the argument's ABSENCE, not on its falsity, so a caller passing `includeArchived: false` -- which is exactly what a checkbox bound to a boolean sends -- would have widened the read to every archived row. Written as `isNotArchived || args.includeArchived==true` the three cases are the three answers: absent resolves nil and fails the comparison (active only), false fails it (active only), true admits everything.
+// ARCHIVED ROWS ARE EXCLUDED BY DEFAULT and returned under the filter (D8). The archive term compares the argument with true rather than testing its presence (`args.includeArchived != nil`, the optional-argument guard), and the difference is not stylistic: a presence test answers whether the argument was PASSED, not whether it is true, so a caller passing `includeArchived: false` -- which is exactly what a checkbox bound to a boolean sends -- would have widened the read to every archived row. Written as `isNotArchived(row) || args.includeArchived == true` the three cases are the three answers: unset fails the comparison (active only), false fails it (active only), true admits everything.
 // "Everything", note, and not "the archived ones": a person looking for a client they filed away wants it in its place in the list, marked, not in a separate list of the forgotten.
 // The caller term is the composite tier's own predicate written out, which is what TestRowAuthzEnforcementLandGate requires of an authored query over a tier-declaring concept.
 // IT CARRIES A THIRD DISJUNCT NOW, and the reason is worth stating because the term looks wider than it is. The concept declares `rankVisible` plus an `unowned="admin"` floor (epic memql#4832), so the tier admits more than owner-or-cluster-owner -- and an authored conjunct narrower than the tier would silently re-close what the declaration opened, leaving an admin the zero rows memql#4837 exists to end.
@@ -4096,7 +4096,7 @@ func LibraryArtifactsByKindBuild(args LibraryArtifactsByKindArgs) string {
 	return b.String()
 }
 
-// LibraryArtifactsByLabel -- List the caller's Library rows carrying a given label -- backs the label facet filter. Owned: ownerUserId==actor.userId gates the row set as a top-level, unguarded conjunct (it must hold even when args.label is absent); the when() membership predicate narrows to rows whose labels include the given value.
+// LibraryArtifactsByLabel -- List the caller's Library rows carrying a given label -- backs the label facet filter. Owned: `row.ownerUserId == actor.userId` gates the row set as a top-level, unguarded conjunct (it must hold even when args.label is unset); the guarded membership predicate, `(args.label == nil || args.label in row.labels)`, narrows to rows whose labels include the given value.
 //
 // Bound concept: v1:library:artifact (machine-readable: BoundConcepts["libraryArtifactsByLabel"] in generated_concepts.go).
 type LibraryArtifactsByLabelArgs struct {
@@ -6907,7 +6907,7 @@ func ScheduledSendJobsBuild(args ScheduledSendJobsArgs) string {
 }
 
 // SearchUsers -- Search users, optionally gated by active status. Omit `active` to list active and deactivated users alike; pass true to return only active users or false for only deactivated ones. Developer-or-above only. Backs the searchUsers tool.
-// memql#2883: `when(args.active)` is DROPPED when the arg is absent (authoring rules), so before this gate `searchUsers()` with no arguments applied no predicate at all and returned every user in the cluster in userFull -- every @pii field plus the cluster-wide auth role. It is also on the agent tool surface (dsl/memql/tools.memql), so a prompt-injected or over-eager agent could pull the whole user table.
+// memql#2883: the `args.active == nil || ...` guard folds away when the arg is unset (authoring rules), so before this gate `searchUsers()` with no arguments applied no predicate at all and returned every user in the cluster in userFull -- every @pii field plus the cluster-wide auth role. It is also on the agent tool surface (dsl/memql/tools.memql), so a prompt-injected or over-eager agent could pull the whole user table.
 // A ROLE GATE rather than @serverOnly, because unlike its three siblings this one has a genuine client caller: the MCP tool. Gating by origin would delete the tool; gating by role keeps it working for the administrators it was built for.
 // WIDENED FROM owner-or-admin to developer-and-above (memql#4917), which restores what the capability catalog already said: dsl/rbac/seeds.memql grants developer `read` on `principal`, described as "see the user list; no management". The narrower gate contradicted that seed -- and once developers could invite people (auth.CanAdmitPeople) they would have been inviting them into a cluster whose roster they could not see.
 // A FLOOR RATHER THAN A GRANT (epic memql#5166). This is `@requiresRank("developer")` and not `@requiresCapability("read", "principal")`, and the two are genuinely different questions here: the read is bounded by "who works on this cluster", which is a rung, rather than by a permission a role was given. The three credential-adjacent siblings below go the other way, because what excludes a developer from those is a GRANT it does not hold.

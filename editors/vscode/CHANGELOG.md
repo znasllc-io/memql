@@ -33,10 +33,12 @@ someone deciding whether to install rather than for someone reading the repo.
   expression shows its signature, whether it runs in the database or in the
   engine at that position, and the spellings it replaced: `x.count()` replaces
   `len(x)` and `count(x)`.
-- Retired spellings are underlined, and the message names the replacement and
-  the command that rewrites a whole tree, `memqlmigrate --rewrite=expressions`.
-  Hovering one shows your own construct rewritten: on
-  `filter status == args.owner`, the hover shows
+- The spellings edition 2026 retires, such as `cond(...)`, `when(...)` or a
+  filter without its `row =>`, no longer load: the engine refuses a file that
+  uses one. The editor underlines each as an error, and the message names the
+  replacement and the command that rewrites a whole tree,
+  `memqlmigrate --rewrite=expressions`. Hovering one shows your own construct
+  rewritten: on `filter status == args.owner`, the hover shows
   `filter row => row.status == args.owner`.
 - An underlined spelling offers a quick fix, **Rewrite to edition 2026**, which
   rewrites that construct the way `memqlmigrate` would and changes only the

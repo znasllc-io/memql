@@ -3,7 +3,7 @@
 // Event-driven population of the Library index. Each backing-row creation
 // event folds into a v1:library:artifact index row. The createArtifact write
 // lives directly in the automation's mutation step, binding its args from the
-// trigger event payload (which IS the created row), with coalesce on the
+// trigger event payload (which IS the created row), with `??` on the
 // optional fields. #2235: this replaces the former promotion-logic indirection
 // (each index* logic did the write inline -- an ADR §2.1 logic-purity
 // violation). Mirrors the cluster registerNode/deregisterNode form: the logic

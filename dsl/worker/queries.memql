@@ -252,11 +252,14 @@ query appSession appSessionsForUser {
   // (auth.ContextWithUserActor), the same borrowed-authority pattern the
   // campaign sender uses, so the engine never out-ranks the user whose
   // rows it is reading.
-  // No when() guard here on purpose: a ConditionalFilterExpression makes
-  // the whole filter undecidable to the row-authz analyzer, so it cannot
-  // prove the ownership floor holds. A decidable filter that always
-  // enforces the floor is worth more than an optional app narrowing the
-  // one consumer does not use.
+  // No optional app narrowing. It was a when(args.app) guard, dropped
+  // because the row-authz analyzer of the time read that guard as making
+  // the whole filter undecidable, so it could not prove the ownership floor
+  // held -- and a decidable filter that always enforces the floor was worth
+  // more than a narrowing the one consumer does not use. The edition-2026
+  // guard, `(args.app == nil || row.app == args.app)`, is one more conjunct
+  // beside the owner comparison, which the analyzer still reads, so the
+  // narrowing can come back when a consumer needs it.
   filter   row => row.ownerUserId == actor.userId
   sort     "row.createdAt", "desc"
   paginate 50

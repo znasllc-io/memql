@@ -12,26 +12,26 @@
 use platform.queries.{ globalVariable }
 
 // PURE decision logic (ADR S2.1 logic-purity, #2235). It performs the
-// existingCluster() read + the bff-only / no-cluster gating and returns a
-// two-field decision object; the three conditional create writes
-// (createDatabase / createIdentityProvider / createCluster) moved onto the
-// bootstrapCluster automation as `if`-gated mutation steps. No graph write
-// survives in the logic, so the logic-purity baseline entry was removed in the
-// same change.
+// existingCluster() read + the bff-only / no-cluster gating and returns the
+// decision; the three conditional create writes (createDatabase /
+// createIdentityProvider / createCluster) moved onto the bootstrapCluster
+// automation as `if`-gated mutation steps. No graph write survives in the
+// logic, so the logic-purity baseline entry was removed in the same change.
 //
 // Returns a single boolean `create`: true only when NO cluster row exists yet
 // AND this node is the bff. That captures BOTH idempotency guards (skip-if-
 // exists + bff-only) the three original `if existing.empty() &&
-// node.type=="bff"` guards shared. The automation ANDs this with an
-// `exists(payload.identityProvider)` event check for the idp create alone, so
-// the identityProvider row lands only on the bff create path AND when a
-// provider is configured (the extra guard the idp create had).
-/// Decides whether to run the cluster bootstrap writes on first startup (ADR S2.1 pure logic,
-/// #2235). Reads existingCluster() and returns the boolean `create` -- true only when no cluster
-/// row exists yet AND this node is the bff (both idempotency guards). The calling automation gates
-/// the three conditional creates (v1:cluster:database / :identityProvider / :cluster) on
-/// `steps.decide.result == true`, with the idp create additionally requiring an identityProvider
-/// block in the startup envelope.
+// node.type=="bff"` guards shared. Since memql#4766 it gates the cluster
+// create alone: the database and identity-provider creates read
+// clusterInfraRefresh below, and the idp create also checks
+// `payload.identityProvider != nil`, so that row lands only when a provider
+// is configured (the extra guard the idp create had).
+/// Decides whether to create the cluster row on first startup (ADR S2.1 pure logic, #2235). Reads
+/// existingCluster() and returns the boolean `create` -- true only when no cluster row exists yet
+/// AND this node is the bff (both idempotency guards). The calling automation gates the
+/// v1:cluster:cluster create on `steps.decide.result == true`; the database and identity-provider
+/// creates are gated on clusterInfraRefresh instead (memql#4766), the idp create additionally
+/// requiring an identityProvider block in the startup envelope.
 logic bootstrapCluster {
   args {
     event object!
@@ -66,11 +66,13 @@ logic clusterInfraRefresh {
     event object!
   }
   body {
-  // `cond(...)` rather than a bare `return <comparison>`: an identifier-led
-  // comparison in a terminal return position returns its own SOURCE TEXT
-  // instead of evaluating (#2655/#2693), and the loader refuses it. Its
-  // sibling above gets away with the same shape only because the comparison
-  // is one half of an `&&`.
+  // The `? true : false` is the codemod's rendering of what was
+  // `cond(<comparison>, true, false)`. That wrapper was there because a bare
+  // `return <comparison>` used to return its own SOURCE TEXT instead of
+  // evaluating (#2655/#2693), and the loader refused it; the sibling above
+  // got away with the same shape only because its comparison is one half of
+  // an `&&`. An edition-2026 body evaluates a returned expression in process,
+  // so a bare comparison would do now.
   return args.event.payload.node.type == "bff" ? true : false
   }
 }
@@ -107,7 +109,7 @@ logic clusterInfraRefresh {
 //   1. The stale window is read from the global variable registry
 //      (MEMQL_NODE_STALE_PRUNE_MINUTES), so only CONFIG differs per env
 //      -- the code/architecture is identical local-cluster and staging.
-//      Default 30 minutes via coalesce: comfortably longer than the
+//      Default 30 minutes via `?? "30"`: comfortably longer than the
 //      in-memory peer windows (offline=25s, stale-gossip=60s) so a node
 //      that is merely mid-restart is not pruned, but short enough that a
 //      genuinely-departed pod clears within an hour. Set
@@ -118,8 +120,8 @@ logic clusterInfraRefresh {
 //      This replaces the old per-row `lastSeen + window < now` `if` guard --
 //      the window math now lives ONCE here instead of per row, and the
 //      comparison pushes down into the query (next step).
-//   3. staleClusterNodes({ olderThan: cutoff }) pushes a
-//      `payload.lastSeen < cutoff` predicate onto the query (#1642), so the
+//   3. staleClusterNodes(olderThan: cutoff) pushes a
+//      `row.lastSeen < args.olderThan` predicate onto the query (#1642), so the
 //      query returns ONLY the latest-non-stopped rows past the window --
 //      already filtered, idempotent (asOf latest), and excluding rows already
 //      health="stopped". The logic returns that node list for the automation
@@ -136,10 +138,11 @@ logic clusterInfraRefresh {
 // fresh shortly after a rollover.
 /// Decides which departed cluster nodes to retire (ADR S2.1 pure logic, #2235). Reads
 /// MEMQL_NODE_STALE_PRUNE_MINUTES (default 30), computes cutoff = now - window via addDuration with
-/// a negative ISO duration, and returns staleClusterNodes({olderThan: cutoff}).nodes() -- the
+/// a negative ISO duration, and returns staleClusterNodes(olderThan: cutoff).nodes() -- the
 /// LATEST non-stopped rows whose lastSeen is past the window (the olderThan arg pushes a
-/// payload.lastSeen<cutoff predicate onto the query, #1642). The calling automation appends the
-/// terminal health='stopped' row per returned node via a forEach updateNodeHealth step.
+/// `row.lastSeen < args.olderThan` predicate onto the query, #1642). The calling automation
+/// appends the terminal health='stopped' row per returned node via a forEach updateNodeHealth
+/// step.
 logic pruneStaleClusterNodes {
   args {
     event object!
