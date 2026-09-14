@@ -100,6 +100,32 @@ func TestTheImportBlockIsRefusedNamingUse(t *testing.T) {
 	}
 }
 
+// The parser refuses a top-level token by its KIND. Only a word is a
+// statement the load gate reads, so only a word gets construct_unknown: a
+// stray string keeps the unexpected-token error, and the gate says nothing
+// about it either. A `use` line after a construct is told where use lines go,
+// and `use` is not offered among the words expected there.
+func TestTheParserRefusesATopLevelTokenByItsKind(t *testing.T) {
+	src := "concept a {\n  b string\n}\n\"hello\"\n"
+	_, err := ParseFile(src)
+	var cause *UnknownConstructKeyword
+	if err == nil || errors.As(err, &cause) || strings.Contains(err.Error(), "[construct_unknown]") ||
+		!strings.Contains(err.Error(), `unexpected token "hello"`) {
+		t.Errorf("a stray string must be an unexpected token, not construct_unknown; got: %v", err)
+	}
+	if got := FindUnknownConstructKeywords(src); len(got) != 0 {
+		t.Errorf("the load gate reads no statement in a stray string, and must say nothing; got %+v", got)
+	}
+
+	_, err = ParseFile("concept a {\n  b string\n}\nuse shop.concepts.{ order }\n")
+	if err == nil || !strings.Contains(err.Error(), "a use line must come before the file's first construct") {
+		t.Fatalf("a use line after a construct must be told where use lines go; got: %v", err)
+	}
+	if strings.Contains(err.Error(), "one of") {
+		t.Errorf("the refusal of a late use line must not list `use` among the words expected; got: %v", err)
+	}
+}
+
 // Braces, parens and brackets that open and close on one line, and an
 // unbalanced closer, leave the scan in step with the file.
 func TestFindUnknownConstructKeywordsStaysInStep(t *testing.T) {
