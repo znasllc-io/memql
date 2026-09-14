@@ -15,6 +15,7 @@ package parser
 //	C. a trigger filter `@filter(e)`           -> @filter(row => <v1>)
 //	D. inside logic, automation and mutation bodies:
 //	     cond(p, a, b) -> p ? a : b      concat(a, b) -> a + b
+//	     coalesce(a, b) -> a ?? b
 //	     exists(x)     -> x != nil       null -> nil
 //	     canonicalId(v, concept) -> canonicalId(v, "concept")
 //	E. a query tool handler's `$args.x`       -> args.x
@@ -1404,7 +1405,7 @@ func xmRefuse(pos int, format string, args ...any) error {
 	return &xmPosError{pos: pos, msg: fmt.Sprintf(format, args...)}
 }
 
-var xmInProcessCalls = []string{"cond", "concat", "exists"}
+var xmInProcessCalls = []string{"cond", "concat", "coalesce", "exists"}
 
 // xmRewriteInProcess rewrites the in-process call forms of one construct body.
 // Calls are taken innermost first -- the call that starts furthest right can
@@ -1577,6 +1578,30 @@ func xmContextOf(mask string, start, end int) xmCallContext {
 // keyword, or an operator that binds LOOSER than a comparison (`&&`, `||`, the
 // ternary's `?` and `:`). Anything tighter -- `!`, `+`, `??`, another
 // comparison, a postfix `.` -- would capture one side of it.
+// xmTightNeighbours reports whether an operator binding TIGHTER than `??`
+// sits against the span: an arithmetic operator or a unary `!` before it, or
+// an arithmetic operator or a member access after it. Such a neighbour would
+// capture one arm of a bare `a ?? b`, so the fold is bracketed. A comparison
+// or a connective is looser than `??` and needs nothing: `a ?? b == "x"`
+// already reads `(a ?? b) == "x"` (D9).
+func xmTightNeighbours(mask string, start, end int) bool {
+	i := start - 1
+	for i >= 0 && xmIsSpace(mask[i]) {
+		i--
+	}
+	if i >= 0 && strings.IndexByte("+-*/%!", mask[i]) >= 0 {
+		// A `!` that is the first half of `!=` is a comparison, not a unary.
+		if !(mask[i] == '!' && i+1 < len(mask) && mask[i+1] == '=') {
+			return true
+		}
+	}
+	j := end
+	for j < len(mask) && (mask[j] == ' ' || mask[j] == '\t') {
+		j++
+	}
+	return j < len(mask) && strings.IndexByte(".+-*/%", mask[j]) >= 0
+}
+
 func xmLooseNeighbours(mask string, start, end int) bool {
 	i := start - 1
 	for i >= 0 && xmIsSpace(mask[i]) {
@@ -1863,6 +1888,34 @@ func xmRewriteCall(s, mask string, start int, name string) (string, error) {
 			b.WriteByte(')')
 		}
 		out = b.String()
+
+	case "coalesce":
+		// The longhand the null-coalesce rewrite (memql#3627) already retired
+		// from dsl/ but that bundles and examples still carry. Folding it here
+		// makes `expressions` the one rewrite a tree needs to reach the v1
+		// grammar, which refuses coalesce( outright. `??` is the same
+		// blank-coalescing fold (rule 30) and is associative, so a chain needs
+		// no inner grouping; an argument holding an operator LOOSER than `??`
+		// (a comparison, `in`, `startsWith`, a connective, a ternary, a lambda)
+		// is bracketed so it cannot capture its neighbour.
+		if len(args) < 2 {
+			return "", xmRefuse(start, "coalesce(...) with fewer than two arguments has no ?? spelling")
+		}
+		if gapComment() {
+			return "", xmRefuse(start, "a comment between coalesce's arguments would be lost; move it and rerun")
+		}
+		parts := make([]string, len(args))
+		for k, a := range args {
+			t := text(a)
+			if o := ops(a); o.ternary || o.lambda || o.logical || o.compare {
+				t = xmParen(t, mask[a.lo:a.hi])
+			}
+			parts[k] = t
+		}
+		out = strings.Join(parts, " ?? ")
+		if xmTightNeighbours(mask, start, end+1) {
+			out = "(" + out + ")"
+		}
 
 	case "exists":
 		if len(args) != 1 {
