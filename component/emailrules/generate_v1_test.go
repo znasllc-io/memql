@@ -3,7 +3,8 @@ package emailrules
 // generate_v1_test.go -- the rule condition as an edition-2026 predicate over
 // `row` (epic memql#5363, memql#5368): both stored spellings generate one
 // automation, the generated construct parses and compiles as a v1 automation
-// and loads today, and every refusal speaks to the person who typed it.
+// and loads through the authoring pipeline, and every refusal speaks to the
+// person who typed it.
 
 import (
 	"encoding/json"
@@ -108,8 +109,7 @@ func TestV1ConditionsAccepted(t *testing.T) {
 // rule is most often written with (an exact address, a domain) are accepted
 // by the form check, generate with the literal intact, and load through the
 // real compiler on every path a rule takes: Gate 1, which activation runs;
-// the legacy load path the authoring pipeline uses today; and the v1 compile
-// and runtime preparation the flip turns on.
+// the authoring pipeline's load; and the v1 compile and runtime preparation.
 func TestConditionsWithAnAtInAStringLoad(t *testing.T) {
 	for _, c := range []struct{ cond, filter string }{
 		{`row.email == "boss@acme.com"`, `row.email == "boss@acme.com"`},
@@ -139,12 +139,12 @@ func loadsThroughTheRealCompiler(t *testing.T, src string) {
 	if report := memqlengine.ValidateBundle(src, "campaigns/automations.memql"); !report.OK {
 		t.Fatalf("Gate 1 refused the construct:\n%s\ndiagnostics: %+v", src, report.Diagnostics)
 	}
-	legacy, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(src, "authored:emailrules")
+	authored, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(src, "authored:emailrules")
 	if err != nil {
-		t.Fatalf("the legacy load path refused the construct: %v\n%s", err, src)
+		t.Fatalf("the authoring pipeline's load refused the construct: %v\n%s", err, src)
 	}
-	if legacy.Trigger == nil || legacy.Trigger.FilterLambda == nil {
-		t.Fatalf("the legacy load path lost the lambda filter: %+v", legacy.Trigger)
+	if !authored.IsV1() || authored.Trigger == nil || authored.Trigger.FilterLambda == nil {
+		t.Fatalf("the authoring pipeline did not load a v1 automation with its lambda filter: v1=%v trigger=%+v", authored.IsV1(), authored.Trigger)
 	}
 	normalised, err := langparser.NormaliseAll(src)
 	if err != nil {
@@ -277,17 +277,18 @@ func TestGeneratedAutomationIsV1(t *testing.T) {
 	}
 }
 
-// TestGeneratedAutomationLoadsBeforeTheFlip: today the authoring pipeline
-// parses with the legacy grammar, which accepts the lambda filter (a pushdown
-// position). The construct loads as a legacy automation whose filter is still
-// evaluated as the lambda it is.
-func TestGeneratedAutomationLoadsBeforeTheFlip(t *testing.T) {
+// TestGeneratedAutomationLoadsThroughTheAuthoringPipeline: the authoring
+// pipeline -- the loader activation arms a rule through, with its own parse
+// options rather than the explicit ones TestGeneratedAutomationIsV1 passes --
+// loads the construct as a v1 automation whose filter is the lambda it
+// generated.
+func TestGeneratedAutomationLoadsThroughTheAuthoringPipeline(t *testing.T) {
 	src := generate(t, `row.role == "admin"`)
 	a, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(src, "authored:emailrules")
 	if err != nil {
-		t.Fatalf("the legacy load path refused the construct: %v\n%s", err, src)
+		t.Fatalf("the authoring pipeline refused the construct: %v\n%s", err, src)
 	}
-	if a.IsV1() || a.Trigger == nil || a.Trigger.FilterLambda == nil {
-		t.Fatalf("v1=%v trigger=%+v: want a legacy automation whose lambda filter was parsed", a.IsV1(), a.Trigger)
+	if !a.IsV1() || a.Trigger == nil || a.Trigger.FilterLambda == nil {
+		t.Fatalf("v1=%v trigger=%+v: want a v1 automation whose lambda filter was parsed", a.IsV1(), a.Trigger)
 	}
 }

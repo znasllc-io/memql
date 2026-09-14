@@ -8,7 +8,8 @@ import (
 // startswith_test.go -- the editor surfaces for the `startsWith` predicate
 // (memql#4208): it colours as a keyword like `in`, it hovers with a doc, and
 // the bare-row-intrinsic scanner treats it as a comparison operator so
-// `filter id startsWith "v1:"` is flagged like `filter id in args.ids`.
+// `filter row => id startsWith "v1:"` is flagged like
+// `filter row => id in args.ids`.
 
 func TestTokenize_StartsWithIsKeyword(t *testing.T) {
 	svc := &Service{}
@@ -26,9 +27,10 @@ func TestTokenize_StartsWithIsKeyword(t *testing.T) {
 // asked for. It used to hover as a bare keyword doc.
 func TestHover_StartsWithKeyword(t *testing.T) {
 	s := New(&stubRegistry{})
-	// "  filter codeReference startsWith \"integration.\"" -- hover inside the keyword.
+	// "  filter row => row.codeReference startsWith \"integration.\"" -- column
+	// 39 is inside the keyword.
 	src := "query codeMetric q {\n  filter row => row.codeReference startsWith \"integration.\"\n}"
-	res := hoverAt(t, s, src, 2, 28)
+	res := hoverAt(t, s, src, 2, 39)
 	if res == nil || !strings.HasPrefix(res.Contents, "```memql\ns startsWith p\n```") {
 		t.Fatalf("expected the startsWith operator card, got %+v", res)
 	}
@@ -38,7 +40,7 @@ func TestHover_StartsWithKeyword(t *testing.T) {
 }
 
 func TestBareRowIntrinsicRuleFlagsStartsWith(t *testing.T) {
-	got := bareRowIntrinsicRule("query widget q {\n  filter row => row.id startsWith \"v1:widget:\"\n}\n")
+	got := bareRowIntrinsicRule("query widget q {\n  filter row => id startsWith \"v1:widget:\"\n}\n")
 	if len(got) != 1 {
 		t.Fatalf("expected exactly 1 diagnostic for a bare `id startsWith`, got %d", len(got))
 	}

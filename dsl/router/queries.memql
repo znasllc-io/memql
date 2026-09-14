@@ -79,7 +79,7 @@ query call routerDecisionsRecent {
 /// SCOPED BY SURFACE, NOT BY OWNER, and the difference is a wrong answer rather
 /// than a style choice. `machineOwnerUserId` is deliberately EMPTY for a call a
 /// person ran on their own machine -- it names whose machine served a call when
-/// that machine was somebody ELSE's -- so `machineOwnerUserId==actor.userId`
+/// that machine was somebody ELSE's -- so `row.machineOwnerUserId == actor.userId`
 /// would return only the calls OTHER people ran on your hardware and none of
 /// your own. The fold counts the owner's own calls alongside everybody else's,
 /// because the figure answers "how busy has this machine been" rather than "how

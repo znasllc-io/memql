@@ -130,10 +130,11 @@ concept Space {
 `, "v1/cognition/space")
 	reg := conceptRegistry(concept)
 
-	// @serverSet field written from args -> rejected.
+	// @serverSet field written from args -> rejected. A template's values
+	// are parsed nodes (mutation_values_v1.go).
 	err := validateMutationCallerArgs(reg, "v1:cognition:space", "mutBad", map[string]any{
-		"name":   "args.name",
-		"status": "args.status",
+		"name":   v1Expr(t, `args.name`),
+		"status": v1Expr(t, `args.status`),
 	})
 	if err == nil || !strings.Contains(err.Error(), "status") {
 		t.Fatalf("expected rejection naming @serverSet field status; got %v", err)
@@ -141,7 +142,7 @@ concept Space {
 
 	// @internal field written from args -> rejected.
 	err = validateMutationCallerArgs(reg, "v1:cognition:space", "mutBad2", map[string]any{
-		"secretSalt": "args.secretSalt",
+		"secretSalt": v1Expr(t, `args.secretSalt`),
 	})
 	if err == nil || !strings.Contains(err.Error(), "secretSalt") {
 		t.Fatalf("expected rejection naming @internal field secretSalt; got %v", err)
@@ -161,10 +162,10 @@ concept Space {
 	// Public field from args + server-stamped (non-args) sensitive
 	// fields -> allowed. id is a row intrinsic (not a concept field).
 	err := validateMutationCallerArgs(reg, "v1:cognition:space", "mutGood", map[string]any{
-		"id":         "args.id",
-		"name":       "args.name",
-		"status":     `"active"`,     // literal, server-stamped -- OK
-		"secretSalt": "actor.userId", // server context, not args -- OK
+		"id":         v1Expr(t, `args.id`),
+		"name":       v1Expr(t, `args.name`),
+		"status":     v1Expr(t, `"active"`),     // literal, server-stamped -- OK
+		"secretSalt": v1Expr(t, `actor.userId`), // server context, not args -- OK
 	})
 	if err != nil {
 		t.Fatalf("expected no error for public-from-args + server-stamped sensitive; got %v", err)
@@ -181,8 +182,8 @@ concept Widget {
 	reg := conceptRegistry(concept)
 	// No annotations anywhere -> binding any field from args is fine.
 	err := validateMutationCallerArgs(reg, "v1:test:widget", "mut", map[string]any{
-		"label": "args.label",
-		"count": "args.count",
+		"label": v1Expr(t, `args.label`),
+		"count": v1Expr(t, `args.count`),
 	})
 	if err != nil {
 		t.Fatalf("unannotated concept must be a no-op; got %v", err)

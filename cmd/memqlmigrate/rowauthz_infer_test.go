@@ -710,12 +710,186 @@ func TestClassifyConstructReadsTheWholeClause(t *testing.T) {
 	}
 }
 
-// TestRowAuthzInferenceOverTheTree runs the inference over the real dsl/ tree,
-// which is written in edition 2026, and holds the reachable positive: concepts
-// the inference found evidence for. A reader that stopped seeing the tree's
-// filters would infer nothing and abstain everywhere, which reads as a clean
-// run. Nothing under dsl/ changes.
-func TestRowAuthzInferenceOverTheTree(t *testing.T) {
+// legacyEvidenceTree is a dsl/ tree in the legacy grammar, one domain per
+// kind of evidence the inference reads, spelled the way dsl/ spelled it before
+// the tree was migrated (memql#5368): a caller-scoped filter carrying a trait
+// and a when() guard beside its owner term, a cluster-owner gate, the @public
+// and @serverOnly surfaces that abstain, a disjunction that widens the owner
+// term away and one that does not, an unscoped query that blocks its
+// concept, a query over a concept imported from another domain, and a
+// mutation that neither votes nor blocks.
+var legacyEvidenceTree = map[string]string{
+	"common/traits.memql":   "trait isNotDeleted {\n  return deleted == false\n}\n",
+	"worker/concepts.memql": "concept invocation {\n  ownerUserId string\n  runId string\n  action string\n  deleted boolean\n}\n",
+	"worker/queries.memql": `use common.traits.{ isNotDeleted }
+
+@actor
+query invocation invocationsForRun {
+  args {
+    runId   string!
+    action  string
+  }
+  filter  runId==args.runId && ownerUserId==actor.userId && isNotDeleted && when(args.action) { action==args.action }
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape   workerInvocationFull
+}
+`,
+	"telephony/concepts.memql": "concept call {\n  fromE164 string\n}\n",
+	"telephony/queries.memql": `query call allCalls {
+  filter  actor.isClusterOwner==true && fromE164!=""
+  shape   callFull
+}
+`,
+	"identity/concepts.memql": "concept user {\n  primaryEmail string\n  ownerUserId string\n}\n",
+	"identity/queries.memql": `@public
+query user userById {
+  args {
+    id  string!
+  }
+  filter  row.id==args.id
+  shape   userFull
+}
+
+@serverOnly
+query user resolveUser {
+  filter  ownerUserId==actor.userId
+  shape   userFull
+}
+`,
+	"library/concepts.memql": "concept artifact {\n  ownerUserId string\n  visibility string\n}\n",
+	"library/queries.memql": `query artifact artifacts {
+  filter  ownerUserId==actor.userId || visibility=="public"
+  shape   artifactFull
+}
+`,
+	"tasks/concepts.memql": "concept task {\n  ownerUserId string\n  status string\n}\n",
+	"tasks/queries.memql": `query task myOpenOrDone {
+  filter  ownerUserId==actor.userId && (status=="open" || status=="done")
+  shape   taskFull
+}
+`,
+	"flags/concepts.memql": "concept flag {\n  ownerUserId string\n  status string\n}\n",
+	"flags/queries.memql": `query flag myFlags {
+  filter  ownerUserId==actor.userId
+  shape   flagFull
+}
+
+query flag flagsOn {
+  filter  status=="on"
+  shape   flagFull
+}
+`,
+	"notes/concepts.memql": "concept note {\n  authorUserId string\n}\n",
+	"notes/mutations.memql": `mutate note createNote {
+  args {
+    id  string!
+  }
+  insert {
+    id: args.id
+    authorUserId: actor.userId
+  }
+}
+`,
+	"boards/concepts.memql": "concept board {\n  title string\n}\n",
+	"boards/queries.memql": `use notes.concepts.{ note }
+
+query note myNotes {
+  filter  authorUserId==actor.userId
+  shape   noteFull
+}
+`,
+}
+
+// TestRowAuthzInferenceReadsAMigratedBundle: a bundle that has not run the
+// expressions codemod yet -- legacyEvidenceTree -- gets its tiers inferred once
+// it has, and none before.
+//
+// The inference reads edition 2026 only. A legacy clause is one the engine
+// refuses, so it evidences nothing: every concept a legacy query reads is
+// blocked, with a reason naming the codemod, and no tier is inferred from text
+// the engine would not load. Once migrated, the same tree yields the verdicts
+// the fixture was written to produce -- the reachable positive over every kind
+// of evidence the inference reads, since a tree it could no longer read would
+// infer nothing at all. TestRowAuthzInferenceReadsTheMigratedTree holds the
+// tree-scale positive over dsl/.
+func TestRowAuthzInferenceReadsAMigratedBundle(t *testing.T) {
+	files := map[string][]byte{}
+	for p, src := range legacyEvidenceTree {
+		files[p] = []byte(src)
+	}
+	changed, err := rewriteExpressions("", files)
+	if err != nil {
+		t.Fatalf("expressions rewrite: %v", err)
+	}
+	// Every file carrying a predicate must come out rewritten, or the
+	// migrated tree below is still the legacy one.
+	for p := range legacyEvidenceTree {
+		if !strings.HasSuffix(p, "/queries.memql") && p != "common/traits.memql" {
+			continue
+		}
+		if _, ok := changed[p]; !ok {
+			t.Errorf("the codemod left %s as it was", p)
+		}
+	}
+	migrated := map[string]string{}
+	for p, src := range legacyEvidenceTree {
+		migrated[p] = src
+		if next, ok := changed[p]; ok {
+			migrated[p] = string(next)
+		}
+	}
+
+	got := inferOne(t, migrated)
+	owned := func(owner string) langparser.RowAuthzDecl {
+		return langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: owner}
+	}
+	wantTiers := []struct {
+		domain, name string
+		decl         langparser.RowAuthzDecl
+	}{
+		{"worker", "invocation", owned("ownerUserId")},
+		{"telephony", "call", langparser.RowAuthzDecl{Tier: langparser.RowAuthzClusterOwner}},
+		{"tasks", "task", owned("ownerUserId")},
+		{"notes", "note", owned("authorUserId")},
+	}
+	for _, want := range wantTiers {
+		if decl := got.Tiers[want.domain][want.name]; decl != want.decl {
+			t.Errorf("%s.%s: the migrated tree infers %+v, want %+v (abstained: %q)", want.domain, want.name, decl, want.decl, got.Abstained[conceptKey{Domain: want.domain, Name: want.name}])
+		}
+	}
+	for _, key := range []conceptKey{
+		{Domain: "identity", Name: "user"},
+		{Domain: "library", Name: "artifact"},
+		{Domain: "flags", Name: "flag"},
+	} {
+		if _, ok := got.Abstained[key]; !ok {
+			t.Errorf("%v: the migrated tree infers %+v, want an abstention", key, got.Tiers[key.Domain][key.Name])
+		}
+	}
+
+	// The same bundle before the codemod: nothing is inferred, and each
+	// concept the migrated tree gave a tier to is blocked by name.
+	legacy := inferOne(t, legacyEvidenceTree)
+	for domain, tiers := range legacy.Tiers {
+		for name, decl := range tiers {
+			t.Errorf("%s.%s: inferred %+v from a pre-2026 filter the engine refuses", domain, name, decl)
+		}
+	}
+	for _, want := range wantTiers {
+		key := conceptKey{Domain: want.domain, Name: want.name}
+		if reason := legacy.Abstained[key]; !strings.Contains(reason, "memqlmigrate --rewrite=expressions") {
+			t.Errorf("%v: the legacy tree abstains with %q; want the reason to name the codemod", key, reason)
+		}
+	}
+}
+
+// TestRowAuthzInferenceReadsTheMigratedTree is the tree-scale positive: over
+// dsl/ as it is -- edition 2026 since memql#5368 -- the inference still reads
+// its evidence, and blocks nothing for being pre-2026. Measured when the floor
+// was set: 57 inferred tiers and 104 abstentions, the same numbers the legacy
+// tree gave.
+func TestRowAuthzInferenceReadsTheMigratedTree(t *testing.T) {
 	got, err := inferRowAuthz(filepath.Join("..", "..", "dsl"))
 	if err != nil {
 		t.Fatalf("infer over dsl/: %v", err)
@@ -724,7 +898,6 @@ func TestRowAuthzInferenceOverTheTree(t *testing.T) {
 	for _, tiers := range got.Tiers {
 		inferred += len(tiers)
 	}
-	// Measured when the floor was set: 57 inferred tiers, 104 abstentions.
 	if inferred < 40 {
 		t.Errorf("inferred %d tiers over dsl/ -- the inference has stopped reading evidence", inferred)
 	}
@@ -733,5 +906,5 @@ func TestRowAuthzInferenceOverTheTree(t *testing.T) {
 			t.Errorf("%v abstains on a pre-2026 clause in the migrated tree: %s", key, reason)
 		}
 	}
-	t.Logf("%d tiers and %d abstentions", inferred, len(got.Abstained))
+	t.Logf("%d tiers and %d abstentions over dsl/", inferred, len(got.Abstained))
 }

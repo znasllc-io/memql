@@ -25,7 +25,7 @@ func TestQueryStructFormSortDirective(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := `shape(sort(concept==space && (payload.active==true), "createdAt", "desc"), "spaceFull")`
+	want := `shape(sort(concept==space && (row => row.active == true), "createdAt", "desc"), "spaceFull")`
 	if !strings.Contains(out, want) {
 		t.Errorf("expected output to contain %q, got:\n%s", want, out)
 	}
@@ -41,7 +41,7 @@ func TestQueryStructFormSortDirectiveMultipleFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := `sort(concept==space && (payload.active==true), "createdAt", "desc", "payload.name", "asc")`
+	want := `sort(concept==space && (row => row.active == true), "createdAt", "desc", "payload.name", "asc")`
 	if !strings.Contains(out, want) {
 		t.Errorf("expected multi-field sort wrap, got:\n%s", out)
 	}
@@ -57,7 +57,7 @@ func TestQueryStructFormPaginateDirective(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := `paginate(concept==space && (payload.active==true), 10)`
+	want := `paginate(concept==space && (row => row.active == true), 10)`
 	if !strings.Contains(out, want) {
 		t.Errorf("expected paginate wrap, got:\n%s", out)
 	}
@@ -95,7 +95,7 @@ func TestQueryStructFormAsOfLatest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := `asOf(concept==space && (payload.active==true), latest)`
+	want := `asOf(concept==space && (row => row.active == true), latest)`
 	if !strings.Contains(out, want) {
 		t.Errorf("expected asOf-latest wrap, got:\n%s", out)
 	}
@@ -111,7 +111,7 @@ func TestQueryStructFormAsOfRFC3339(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := `asOf(concept==space && (payload.active==true), "2026-01-01T00:00:00Z")`
+	want := `asOf(concept==space && (row => row.active == true), "2026-01-01T00:00:00Z")`
 	if !strings.Contains(out, want) {
 		t.Errorf("expected asOf-rfc3339 wrap, got:\n%s", out)
 	}
@@ -134,7 +134,7 @@ func TestQueryStructFormAllDirectivesWrappingOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := `shape(paginate(sort(asOf(concept==space && (payload.active==true), latest), "createdAt", "desc"), 1), "spaceFull")`
+	want := `shape(paginate(sort(asOf(concept==space && (row => row.active == true), latest), "createdAt", "desc"), 1), "spaceFull")`
 	if !strings.Contains(out, want) {
 		t.Errorf("expected canonical wrapping order, got:\n%s", out)
 	}
@@ -152,7 +152,7 @@ func TestQueryStructFormDirectivesWithoutShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := `paginate(sort(concept==space && (payload.active==true), "createdAt", "desc"), 5)`
+	want := `paginate(sort(concept==space && (row => row.active == true), "createdAt", "desc"), 5)`
 	if !strings.Contains(out, want) {
 		t.Errorf("expected unshaped wrap, got:\n%s", out)
 	}
@@ -175,7 +175,7 @@ func TestQueryStructFormBackwardCompatPlainFilterShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := `shape(concept==space && (payload.active==true), "spaceFull")`
+	want := `shape(concept==space && (row => row.active == true), "spaceFull")`
 	if !strings.Contains(out, want) {
 		t.Errorf("backward-compat output broken, got:\n%s", out)
 	}
@@ -194,7 +194,7 @@ func TestQueryStructFormCountDirective(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := `count(concept==user && (isActiveRecord))`
+	want := `count(concept==user && (row => isActiveRecord(row)))`
 	if !strings.Contains(out, want) {
 		t.Errorf("expected count wrap %q, got:\n%s", want, out)
 	}

@@ -3,7 +3,6 @@ package memql
 import (
 	"context"
 	"encoding/json"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -17,33 +16,34 @@ import (
 // arguments evaluated through EvalExpr, and the call rendered from their
 // values -- never substituted into text.
 
-// toolHandlerCorpus is every query handler the tree ships, as it reads today
-// and as it reads in edition 2026, migrated by hand with the codemod's one
-// rule for handlers: `\"$args.x\"` and `$args.x` both become `args.x`.
-// TestToolHandlerV1CorpusIsComplete holds this table to the loaded tree, so a
-// handler added to the tree without a row here fails.
+// toolHandlerCorpus is every query handler the tree ships, as it loads, and
+// the call it renders when every argument is filled (filledToolArgs). The
+// rendered calls were measured against the retired `$args.` substitution
+// before the flip deleted it, and were the same bytes -- so a handler renders
+// the call it always has. TestToolHandlerV1CorpusIsComplete holds this table
+// to the loaded tree, so a handler added to the tree without a row here fails.
 var toolHandlerCorpus = []struct {
-	tool, legacy, v1 string
+	tool, v1, rendered string
 }{
-	{"todosList", `query todos(done: $args.done)`, `query todos(done: args.done)`},
-	{"todosComplete", `mutation completeTodo(todoId: "$args.todoId", payload: $args.payload)`, `mutation completeTodo(todoId: args.todoId, payload: args.payload)`},
-	{"todosUpdate", `mutation updateTodo(todoId: "$args.todoId", payload: $args.payload)`, `mutation updateTodo(todoId: args.todoId, payload: args.payload)`},
+	{"todosList", `query todos(done: args.done)`, `query todos(done: true)`},
+	{"todosComplete", `mutation completeTodo(todoId: args.todoId, payload: args.payload)`, `mutation completeTodo(todoId: "v-todoId", payload: {"done":true,"n":2,"title":"T payload"})`},
+	{"todosUpdate", `mutation updateTodo(todoId: args.todoId, payload: args.payload)`, `mutation updateTodo(todoId: "v-todoId", payload: {"done":true,"n":2,"title":"T payload"})`},
 	{"forgeActiveProjects", `query activeProjects()`, `query activeProjects()`},
-	{"forgeResolveProject", `query projectBySlug(slug: "$args.slug")`, `query projectBySlug(slug: args.slug)`},
+	{"forgeResolveProject", `query projectBySlug(slug: args.slug)`, `query projectBySlug(slug: "v-slug")`},
 	{"forgeMyRequests", `query myRequests()`, `query myRequests()`},
-	{"forgeRequestById", `query requestById(requestId: "$args.requestId")`, `query requestById(requestId: args.requestId)`},
-	{"forgeRequestHistory", `query requestEvents(requestId: "$args.requestId")`, `query requestEvents(requestId: args.requestId)`},
+	{"forgeRequestById", `query requestById(requestId: args.requestId)`, `query requestById(requestId: "v-requestId")`},
+	{"forgeRequestHistory", `query requestEvents(requestId: args.requestId)`, `query requestEvents(requestId: "v-requestId")`},
 	{"forgeValidationQueue", `query validationQueue()`, `query validationQueue()`},
 	{"forgeApprovalQueue", `query approvalQueue()`, `query approvalQueue()`},
-	{"describeFunction", `builtin help(name: "$args.name")`, `builtin help(name: args.name)`},
-	{"searchUsers", `paginate(query searchUsers(active: $args.active), $args.limit)`, `paginate(query searchUsers(active: args.active), args.limit)`},
-	{"calendarList", `query upcomingEvents(windowStart: "$args.windowStart", windowEnd: "$args.windowEnd")`, `query upcomingEvents(windowStart: args.windowStart, windowEnd: args.windowEnd)`},
-	{"calendarFind", `query findEvents(title: "$args.title")`, `query findEvents(title: args.title)`},
-	{"calendarUpdate", `mutation updateCalendarEvent(eventId: "$args.eventId", payload: "$args.payload")`, `mutation updateCalendarEvent(eventId: args.eventId, payload: args.payload)`},
-	{"calendarDelete", `mutation deleteCalendarEvent(eventId: "$args.eventId")`, `mutation deleteCalendarEvent(eventId: args.eventId)`},
+	{"describeFunction", `builtin help(name: args.name)`, `builtin help(name: "v-name")`},
+	{"searchUsers", `paginate(query searchUsers(active: args.active), args.limit)`, `paginate(query searchUsers(active: true), 7)`},
+	{"calendarList", `query upcomingEvents(windowStart: args.windowStart, windowEnd: args.windowEnd)`, `query upcomingEvents(windowStart: "v-windowStart", windowEnd: "v-windowEnd")`},
+	{"calendarFind", `query findEvents(title: args.title)`, `query findEvents(title: "v-title")`},
+	{"calendarUpdate", `mutation updateCalendarEvent(eventId: args.eventId, payload: args.payload)`, `mutation updateCalendarEvent(eventId: "v-eventId", payload: {"done":true,"n":2,"title":"T payload"})`},
+	{"calendarDelete", `mutation deleteCalendarEvent(eventId: args.eventId)`, `mutation deleteCalendarEvent(eventId: "v-eventId")`},
 	{"notesList", `query notes()`, `query notes()`},
-	{"notesUpdate", `mutation updateNote(noteId: "$args.noteId", payload: $args.payload)`, `mutation updateNote(noteId: args.noteId, payload: args.payload)`},
-	{"notesSearch", `query notesByTag(tag: "$args.tag")`, `query notesByTag(tag: args.tag)`},
+	{"notesUpdate", `mutation updateNote(noteId: args.noteId, payload: args.payload)`, `mutation updateNote(noteId: "v-noteId", payload: {"done":true,"n":2,"title":"T payload"})`},
+	{"notesSearch", `query notesByTag(tag: args.tag)`, `query notesByTag(tag: "v-tag")`},
 }
 
 // loadCorpusQueryTools loads the tree's tools and returns its query-handler
@@ -94,47 +94,35 @@ func filledToolArgs(t *testing.T, tool *Tool) map[string]any {
 }
 
 // TestToolHandlerV1CorpusIsComplete: the table above is the tree's query
-// handlers, exactly -- and the legacy spelling in the table is the one the
-// tree loads.
+// handlers, exactly, each parsed when it loaded.
 func TestToolHandlerV1CorpusIsComplete(t *testing.T) {
 	loaded := loadCorpusQueryTools(t)
 	require.Len(t, loaded, len(toolHandlerCorpus), "a query handler was added to or removed from the tree without a row in toolHandlerCorpus")
 	for _, row := range toolHandlerCorpus {
 		tool, ok := loaded[row.tool]
 		require.Truef(t, ok, "tool %s is in the table and not in the tree", row.tool)
-		require.Equal(t, row.legacy, strings.TrimSpace(tool.Handler.Query), "tool %s", row.tool)
-		// What the tree loads today: a `$args.` handler is legacy and parses
-		// to nothing; a handler with no placeholder is already read as v1.
-		if toolQueryIsLegacy(row.legacy) {
-			require.Nilf(t, tool.Handler.queryV1, "%s is legacy until the tree is migrated", row.tool)
-		} else {
-			require.NotNilf(t, tool.Handler.queryV1, "%s has no placeholder, so it is parsed as v1 at load", row.tool)
-		}
+		require.Equal(t, row.v1, strings.TrimSpace(tool.Handler.Query), "tool %s", row.tool)
+		require.NotNilf(t, tool.Handler.queryV1, "%s is parsed at load", row.tool)
 	}
 }
 
-// TestToolHandlerV1RendersTheLegacyCall is the equivalence the migration
-// rests on: for every handler in the tree, with every argument filled, the
-// v1 handler renders the very call the substitution rendered, byte for byte.
-func TestToolHandlerV1RendersTheLegacyCall(t *testing.T) {
+// TestToolHandlerV1RendersThePinnedCall: for every handler in the tree, with
+// every argument filled, the handler renders the call pinned in the table --
+// the call the retired substitution rendered, byte for byte.
+func TestToolHandlerV1RendersThePinnedCall(t *testing.T) {
 	loaded := loadCorpusQueryTools(t)
 	for _, row := range toolHandlerCorpus {
 		t.Run(row.tool, func(t *testing.T) {
 			tool := loaded[row.tool]
-			plan, err := prepareToolQueryV1(row.v1)
-			require.NoError(t, err, "the v1 handler parses at load")
-			require.NotNil(t, plan)
-
 			args := applyToolDefaults(context.Background(), tool, filledToolArgs(t, tool), nil)
-			legacy := substituteArgsInMemqlQuery(row.legacy, args)
-			got, err := plan.render(context.Background(), args)
+			got, err := tool.Handler.queryV1.render(context.Background(), args)
 			require.NoError(t, err)
-			require.Equal(t, legacy, got, "the executed query differs between the two paths")
+			require.Equal(t, row.rendered, got, "the executed query moved")
 
 			// And through the handler itself, the way ExecuteTool asks.
-			viaHandler, err := (&ToolHandler{Type: "query", Query: row.v1, queryV1: plan}).renderToolQuery(context.Background(), args)
+			viaHandler, err := tool.Handler.renderToolQuery(context.Background(), args)
 			require.NoError(t, err)
-			require.Equal(t, legacy, viaHandler)
+			require.Equal(t, row.rendered, viaHandler)
 		})
 	}
 }
@@ -163,9 +151,6 @@ func TestToolHandlerV1UnfilledArgumentsAreOmitted(t *testing.T) {
 			require.Equal(t, call[:strings.Index(call, "(")]+"()", got, "every unfilled argument is omitted")
 		})
 	}
-
-	// The legacy quirk this replaces, for the record.
-	require.Equal(t, `mutation m(planId: "null")`, substituteArgsInMemqlQuery(`mutation m(planId: "$args.planId")`, map[string]any{}))
 }
 
 // TestToolHandlerV1ExplicitNilIsNull: an argument the caller sent as JSON
@@ -178,7 +163,6 @@ func TestToolHandlerV1ExplicitNilIsNull(t *testing.T) {
 	got, err := plan.render(context.Background(), map[string]any{"done": nil})
 	require.NoError(t, err)
 	require.Equal(t, `query todos(done: null)`, got)
-	require.Equal(t, `query todos(done: "")`, substituteArgsInMemqlQuery(`query todos(done: $args.done)`, map[string]any{"done": nil}), "the legacy rendering")
 
 	// The rendered call parses, and the argument is a plain nil.
 	parsed, err := languageParser.ParseExpression(got)
@@ -316,6 +300,9 @@ func TestToolHandlerV1RefusedAtLoad(t *testing.T) {
 		{"paginate over a non-call", `paginate(args.x, 10)`, "paginate's first argument is the construct call"},
 		{"paginate's count reads ctx", `paginate(query searchUsers(), ctx.limit)`, "reads `ctx`"},
 		{"the retired dollar form inside a v1 handler", `query todos(done: $done)`, "does not parse"},
+		{"the retired placeholder", `query todos(done: $args.done)`, "$args.x is retired in edition 2026"},
+		{"the retired placeholder, quoted", `query projectBySlug(slug: "$args.slug")`, "$args.x is retired in edition 2026"},
+		{"the retired placeholder, paged", `paginate(query searchUsers(active: args.active), $args.limit)`, "memqlmigrate --rewrite=expressions"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := "/// probe\n@handler(type=\"query\", query=" + languageParser.QuoteString(tc.query) + ")\ntool zzProbe {\n  done boolean @description(\"d\")\n}\n"
@@ -376,17 +363,21 @@ func TestToolHandlerV1TargetsResolve(t *testing.T) {
 	require.Contains(t, errs[0].Error(), "zzNoSuchQuery")
 }
 
-// TestToolHandlerV1LegacyHandlerKeepsTheSubstitution: a handler that still
-// carries `$args.` is legacy until the tree is migrated, and renders exactly
-// as it always has.
-func TestToolHandlerV1LegacyHandlerKeepsTheSubstitution(t *testing.T) {
-	h := &ToolHandler{Type: "query", Query: `mutation m(id: "$args.id", key: "$args.idempotencyKey")`}
-	plan, err := prepareToolQueryV1(h.Query)
-	require.NoError(t, err)
-	require.Nil(t, plan, "a `$args.` handler is legacy")
-	got, err := h.renderToolQuery(context.Background(), map[string]any{"id": "abc", "idempotencyKey": "K-1"})
-	require.NoError(t, err)
-	require.Equal(t, `mutation m(id: "abc", key: "K-1")`, got)
+// TestToolHandlerV1RefusesTheRetiredPlaceholder: a handler built in Go that
+// still carries `$args.` is refused on its call, naming the spelling that
+// replaces it, and nothing reaches the engine. The QUOTED form is the one that
+// matters: read as v1 it is a string literal, and would have handed the
+// construct the text "$args.id" in place of the caller's value.
+func TestToolHandlerV1RefusesTheRetiredPlaceholder(t *testing.T) {
+	for _, query := range []string{
+		`mutation m(id: "$args.id", key: "$args.idempotencyKey")`,
+		`mutation m(id: $args.id)`,
+	} {
+		h := &ToolHandler{Type: "query", Query: query}
+		_, err := h.renderToolQuery(context.Background(), map[string]any{"id": "abc", "idempotencyKey": "K-1"})
+		require.ErrorContains(t, err, "$args.x is retired in edition 2026: write args.x", query)
+		require.Empty(t, toolHandlerTargets(&Tool{Name: "zzProbe", Handler: h}), "a handler that does not load names no target")
+	}
 }
 
 // TestToolHandlerV1GoBuiltHandlerIsParsedPerCall: a tool built in Go was never
@@ -444,18 +435,4 @@ func TestToolHandlerV1ArgumentOrderIsTheSource(t *testing.T) {
 	got, err := plan.render(context.Background(), map[string]any{"windowEnd": "E", "windowStart": "S"})
 	require.NoError(t, err)
 	require.Equal(t, `query upcomingEvents(windowStart: "S", windowEnd: "E")`, got)
-}
-
-// TestToolHandlerCorpusMigrationIsTheCodemodRule re-derives each v1 spelling
-// in the table from its legacy spelling with the handler rule the codemod
-// applies, so the table cannot drift into a hand edit the codemod would not
-// make.
-func TestToolHandlerCorpusMigrationIsTheCodemodRule(t *testing.T) {
-	quoted := regexp.MustCompile(`"\$args\.([A-Za-z_][A-Za-z0-9_]*)"`)
-	bare := regexp.MustCompile(`\$args\.([A-Za-z_][A-Za-z0-9_]*)`)
-	require.Len(t, toolHandlerCorpus, 19, "the tree ships nineteen query handlers")
-	for _, row := range toolHandlerCorpus {
-		migrated := bare.ReplaceAllString(quoted.ReplaceAllString(row.legacy, "args.$1"), "args.$1")
-		require.Equal(t, row.v1, migrated, row.tool)
-	}
 }

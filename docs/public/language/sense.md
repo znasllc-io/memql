@@ -250,8 +250,9 @@ is whatever name the author wrote. A lambda opened inside the expression --
 `row.tags.any(t => ...` -- puts its parameter in scope until the bracket it
 sits in closes. The pre-v1 spellings of the pushdown positions (a filter with
 no lambda header, a `filter { }` block, a `spec ... { return ... }` body) are
-detected too. The parser refuses each of them, and a file that still carries
-one keeps its completion and hover while it is rewritten.
+detected too. The parser refuses each of them: completion offers a filter with
+no header its header and nothing else, and hover shows the construct as the
+rewrite writes it.
 
 ### Completion
 
@@ -291,14 +292,15 @@ push down (`any`, `all`, `count` on a list), because an in-process method over
 the row is a load refusal. `args.tags.` offers every method the position
 admits, since an arg does not read the row.
 
-The two clauses that open with a lambda header offer the header first. A
-filter with no header yet offers `row => ...` above the reserved heads and the
-bound concept's fields its pre-v1 spelling read, which the parser refuses
-until the header is written; a refine clause offers `row => ...` and nothing
-else until the header is written.
+A clause whose value is a lambda -- a query's filter and refine, a trigger
+`@filter` -- offers its header, `row => ...`, and nothing else until the header
+is written: the parser refuses every other spelling of the clause, so no bare
+field name, `payload.` member or bare `row.` intrinsic is offered in its place.
+Past where the header goes, such a clause offers nothing (`filter status == |`).
+Once the header is written, the list above applies.
 
 No retired spelling is ever offered: `cond`, `concat` and `coalesce` do not
-reach the list anywhere.
+reach the list anywhere, and neither does `payload.`, which offers nothing.
 
 ### Hover
 
@@ -455,7 +457,7 @@ until the classifier computes its label, which is what this closes:
 | Block | Offers |
 |---|---|
 | `args { }` | Field types (`string`, `bool`, `enum(...)`, ...). `enum` completes to the TYPE form (#2618); the `!` required sigil is documented on the item rather than offered as one. |
-| `filter { }` (pre-v1, refused at parse) | The engine's reserved filter heads (`payload`, `actor`, `args`, `now`, `config`, `trace`, `meta`, `schema`, `partition`, `provenance`) plus the bound concept's fields, so a file still in that form keeps its completion while it is rewritten. A v1 filter is a clause, and completes as an expression position (see [Expressions](#expressions-position-aware-completion-and-hover)). |
+| `filter { }` (pre-v1, refused at parse) | Nothing. The parser reads the braces as a map literal and refuses a filter that is not a lambda, so every name the block once offered -- the reserved heads, the bound concept's bare fields -- is a spelling it refuses. A v1 filter is a clause, and completes as an expression position (see [Expressions](#expressions-position-aware-completion-and-hover)). |
 | `insert { }` / `update { }` | `accept` / `stamp` in the post-#2616 short form, plus the bound concept's fields. |
 | `shape { }` | The bound concept's fields. |
 
@@ -524,7 +526,7 @@ or concepts, and an unknown root offers nothing:
 | `event.actor.` | `id` only -- the emitter's identity stamp (G4), a different object from the auth envelope. |
 | `args.` | The enclosing construct's declared args fields (any function kind; the automation BARE-name completion shares the same declared-field scanner, so the two can never disagree). In a trigger filter, which is written above its automation, the fields are the args of the automation the annotation decorates. |
 | `row.` (the position's lambda parameter) | The bound concept's fields, each with its declared type, then the row intrinsics. `actor.` in a spec over an @actor shape offers the envelope. |
-| `payload.` | The enclosing construct's bound-concept fields (via the registry's concept projection) -- the pre-v1 spelling, which edition 2026 refuses; a v1 expression reads `row.<field>`. |
+| `payload.` | Nothing at an expression position: it was the pre-v1 spelling of a payload field, and edition 2026 refuses a bare `payload`. A v1 expression reads `row.<field>`. |
 
 Both lexer shapes are detected: a trailing dot (`actor.`) and a
 mid-member position (`actor.us`, where the prefix filters).

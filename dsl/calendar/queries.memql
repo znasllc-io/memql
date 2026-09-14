@@ -9,7 +9,7 @@
 
 use common.traits.{ isNotDeleted }
 
-/// Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate
+/// Get a single calendar event by node id. Self-scoped: the `row.ownerUserId == actor.userId` predicate
 /// guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete
 /// pre-read and the event detail view.
 @mcp

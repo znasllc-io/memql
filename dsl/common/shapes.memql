@@ -66,9 +66,8 @@ shape documentChunk documentChunkFull {
 
 // ---- shapes/v1/common/knowledgedomainFull.memql ----
 
-// Source + cadence + freshness fields (`payload.source`,
-// `payload.refreshCadenceDays`, `payload.lastSeededAt`,
-// `payload.seederRecipeVersion`) are required by:
+// Source + cadence + freshness fields (`source`, `refreshCadenceDays`,
+// `lastSeededAt`, `seederRecipeVersion`) are required by:
 //   - integrations/agent/replier.go citation registry (reads source)
 //   - integrations/planner/refresh_cron.go domainIsDue (reads
 //     lastSeededAt, seederRecipeVersion, refreshCadenceDays)
@@ -98,38 +97,38 @@ shape documentChunk documentChunkFull {
 // so the engine knows the predicate's field-reference universe without
 // committing to a single concept's schema.
 
-/// Concept-agnostic scaffold for predicates that check payload.active.
+/// Concept-agnostic scaffold for predicates that check `row.active`.
 @row
 shape activeRowTrait {
   active
 }
 
-/// Concept-agnostic scaffold for predicates that check payload.status.
+/// Concept-agnostic scaffold for predicates that check `row.status`.
 @row
 shape statusRowTrait {
   status
 }
 
-/// Concept-agnostic scaffold for predicates that check payload.deleted (soft-delete flag).
+/// Concept-agnostic scaffold for predicates that check `row.deleted` (soft-delete flag).
 @row
 shape deletedRowTrait {
   deleted
 }
 
-/// Concept-agnostic scaffold for predicates that check payload.archivedAt (archive timestamp).
+/// Concept-agnostic scaffold for predicates that check `row.archivedAt` (archive timestamp).
 @row
 shape archivedRowTrait {
   archivedAt
 }
 
-/// Concept-agnostic scaffold for predicates that check payload.savedAt (save timestamp).
+/// Concept-agnostic scaffold for predicates that check `row.savedAt` (save timestamp).
 @row
 shape savedRowTrait {
   savedAt
 }
 
 /// Concept-agnostic scaffold for predicates that check the validation lifecycle
-/// (payload.validationStatus + payload.checkedAt + payload.confirmedAt).
+/// (`row.validationStatus`, `row.checkedAt` and `row.confirmedAt`).
 @row
 shape validationRowTrait {
   validationStatus

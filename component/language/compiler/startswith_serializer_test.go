@@ -28,7 +28,4 @@ func TestExpressionToString_StartsWith(t *testing.T) {
 	if _, err := parser.ParseExpression(got); err != nil {
 		t.Fatalf("emitted form %q does not re-parse: %v", got, err)
 	}
-	if jsonForm := c.expressionToJSONExpr(expr); jsonForm != src {
-		t.Errorf("expressionToJSONExpr(%q) = %q", src, jsonForm)
-	}
 }

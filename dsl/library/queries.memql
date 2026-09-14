@@ -3,7 +3,7 @@ use common.traits.{ isNotDeleted, isOpen }
 // library domain -- Library reads.
 //
 // Authz tier: owned. Every filter gates on
-// payload.ownerUserId==actor.userId so a caller can only ever read
+// `row.ownerUserId == actor.userId` so a caller can only ever read
 // their own Library; no arg widens the row set beyond their ownership.
 //
 // MemQL query filters are equality / membership predicates with no OR
@@ -18,15 +18,15 @@ use common.traits.{ isNotDeleted, isOpen }
 // matters; search is the cheap client-side refinement on top.
 
 /// List the caller's entire Library (artifacts + records). Owned: the row set is gated by
-/// ownerUserId==actor.userId server-side. The default Library read; the panel filters by lens /
+/// `row.ownerUserId == actor.userId` server-side. The default Library read; the panel filters by lens /
 /// kind and searches client-side over this set, or calls the narrower facet queries below when a
 /// single facet dominates.
 @actor
 query artifact libraryArtifacts {
-  // archived!=true is what makes archiveArtifact a soft DELETE rather than a
+  // `row.archived != true` is what makes archiveArtifact a soft DELETE rather than a
   // flag nobody reads.
   //
-  // THE SPELLING IS LOAD-BEARING and `archived == false` is not the same
+  // THE SPELLING IS LOAD-BEARING and `row.archived == false` is not the same
   // predicate. Every artifact row promoted before memql#4340 has no `archived`
   // member at all, and the two forms disagree about those rows: `!= true`
   // returns them (measured against Postgres --
@@ -49,7 +49,7 @@ query artifact libraryArtifacts {
 }
 
 /// List the caller's Library rows for one lens (artifact | record) -- backs the Artifacts | Records
-/// toggle. Owned: ownerUserId==actor.userId gates the row set; payload.lens narrows to the selected
+/// toggle. Owned: `row.ownerUserId == actor.userId` gates the row set; `row.lens` narrows to the selected
 /// lens.
 @actor
 query artifact libraryArtifactsByLens {
@@ -67,7 +67,7 @@ query artifact libraryArtifactsByLens {
 
 /// List the caller's Library rows of one kind (document / generated_output / note / todo /
 /// calendar_event / memory / live_source) -- backs the kind facet filter. Owned:
-/// ownerUserId==actor.userId gates the row set; payload.kind narrows to the selected kind.
+/// `row.ownerUserId == actor.userId` gates the row set; `row.kind` narrows to the selected kind.
 @actor
 query artifact libraryArtifactsByKind {
   args {
@@ -109,7 +109,7 @@ query artifact libraryArtifactsByLabel {
 // with the space concept split (3.3, #1900).
 
 /// Fetch a single Library artifact index row by id, gated to the caller. Owned:
-/// ownerUserId==actor.userId is the load-bearing guard, so a caller can never read another user's
+/// `row.ownerUserId == actor.userId` is the load-bearing guard, so a caller can never read another user's
 /// row even with its id. Used by the detail / viewer to resolve the row + its sourceConceptRef
 /// before drilling into backing content.
 @mcp
@@ -125,7 +125,7 @@ query artifact libraryArtifactById {
 
 /// Internal read backing touchArtifact / the label-write capabilities (integrations/library/):
 /// resolve the CURRENT Library artifact index row for a backing source ref, gated to the caller.
-/// Owned: ownerUserId==actor.userId is the load-bearing guard. sourceConceptRef is the idempotency
+/// Owned: `row.ownerUserId == actor.userId` is the load-bearing guard. sourceConceptRef is the idempotency
 /// key createArtifact derives the row's id from (one index row per source ref), so this is bounded
 /// to at most one row without needing to re-derive that id in Go -- the coupling a Go-side
 /// re-implementation of createArtifact's hash expression would otherwise create.
@@ -149,7 +149,7 @@ query artifact libraryArtifactBySourceConceptRef {
 }
 
 /// Drill-in read: fetch a generated-output's full content (inline body or attachment ref) by id,
-/// gated to the caller. Owned: ownerUserId==actor.userId. Called by the Library viewer when opening
+/// gated to the caller. Owned: `row.ownerUserId == actor.userId`. Called by the Library viewer when opening
 /// a generated_output artifact resolved from its sourceConceptRef.
 @unbounded("generated output by id (guarded), gated to the owner -- bounded to a single row")
 @actor
@@ -161,7 +161,7 @@ query generatedOutput generatedOutputById {
   shape   generatedOutputFull
 }
 
-/// List the generated-output rows a Plan produced. Owned: ownerUserId==actor.userId. The planner
+/// List the generated-output rows a Plan produced. Owned: `row.ownerUserId == actor.userId`. The planner
 /// reads this as the authoritative 'did the deliverable actually get written?' signal for a
 /// produceArtifact plan -- promoteWorkbenchOutput stamps producedByRunId on the row when a
 /// workbench fs_write is promoted. The planner stamps the plan's owner as actor before calling, so
@@ -181,7 +181,7 @@ query generatedOutput generatedOutputsForRun {
 }
 
 /// Drill-in read: fetch a memory's full content by id, gated to the caller. Owned:
-/// ownerUserId==actor.userId. Called by the Library Records lens when opening a memory artifact
+/// `row.ownerUserId == actor.userId`. Called by the Library Records lens when opening a memory artifact
 /// resolved from its sourceConceptRef.
 @unbounded("memory by id (guarded), gated to the owner -- bounded to a single row")
 @actor
@@ -197,7 +197,7 @@ query memory memoryById {
 // here, but because an owner tier and an OWNERLESS row cannot both be true of
 // one concept.
 //
-// #723 gave workspace liveSources (liveSource.scope=="workspace") an empty
+// #723 gave workspace liveSources (`row.scope == "workspace"`) an empty
 // ownerUserId on purpose: partition-shared rows with no single owner, surfaced
 // through this one un-gated path while every sibling read stayed owner-scoped.
 // Declaring v1:library:artifact's tier (design D8) ends that shape. The tier's
@@ -214,7 +214,7 @@ query memory memoryById {
 // longer is; that is a design question for whoever brings liveSource promotion
 // into the engine tree, and it is deliberately not answered by a filter.
 /// List workspace-scoped live sources for the Library Records lens. Gated by
-/// ownerUserId==actor.userId -- NOT the un-gated partition-shared read it was
+/// `row.ownerUserId == actor.userId` -- NOT the un-gated partition-shared read it was
 /// before memql#4340, because v1:library:artifact now declares an owner tier and an ownerless row
 /// is unreachable on every path. See the note above (#723 for the original shape, D8 for the tier).
 @actor
@@ -233,13 +233,13 @@ query artifact libraryWorkspaceLiveSources {
 // History is grouped by the logical documentId. MemQL is append-only by
 // (id, createdAt); since each version is a DISTINCT row with its own id,
 // every version of a document persists and is returned by these reads.
-// Owned: ownerUserId==actor.userId so a caller can only ever read their
+// Owned: `row.ownerUserId == actor.userId` so a caller can only ever read their
 // own document history. The frontend orders the returned set by
 // versionNumber (or createdAt) -- both are monotonic.
 
 /// List the append-only version history of a logical document (every retained version, summary
 /// projection -- versionNumber, authorKind, author, note, createdAt -- WITHOUT the full body).
-/// Owned: ownerUserId==actor.userId gates the row set; payload.documentId narrows to the one
+/// Owned: `row.ownerUserId == actor.userId` gates the row set; `row.documentId` narrows to the one
 /// document. Backs the Library history drawer (memql#1230); the frontend orders by versionNumber.
 /// Each version is a distinct retained row, so no version is ever lost.
 @actor
@@ -257,7 +257,7 @@ query documentVersion documentVersions {
 }
 
 /// Fetch a single document version's FULL content (immutable body / attachment + provenance) by its
-/// version row id, gated to the caller. Owned: ownerUserId==actor.userId is the load-bearing guard.
+/// version row id, gated to the caller. Owned: `row.ownerUserId == actor.userId` is the load-bearing guard.
 /// Backs the 'open this version' viewer and the restore-source read (memql#1230).
 @unbounded("document version by id (guarded), gated to the owner -- bounded to a single row")
 @actor
@@ -280,7 +280,7 @@ query documentVersion documentVersionById {
 // description stays accurate.
 /// Internal read for the edit/restore handlers: the full version history of a document (full
 /// projection) so the handler can compute the next versionNumber + the parentVersionId from the
-/// current latest. Owned: ownerUserId==actor.userId; the handler runs under a threaded owner actor.
+/// current latest. Owned: `row.ownerUserId == actor.userId`; the handler runs under a threaded owner actor.
 /// Mirrors documentVersions' filter with the full content shape.
 @actor
 query documentVersion documentVersionsForOwner {
@@ -305,7 +305,7 @@ query documentVersion documentVersionsForOwner {
 // this is a narrowing of the owned Library rather than a new fact.
 //
 // Owned, exactly like every other read in this file: the row set is gated
-// by `ownerUserId==actor.userId` server-side and the plan id narrows it
+// by `row.ownerUserId == actor.userId` server-side and the plan id narrows it
 // further. Unlike `agentsForPlan` (whose own header explains why an owner
 // conjunct there would be a silent emptiness), the owner pointer on an
 // artifact is stamped from the actor on every write and is load-bearing --
@@ -317,7 +317,7 @@ query documentVersion documentVersionsForOwner {
 // artifact concept's own display card and what the map's artifact glyph
 // links to (/artifacts/:artifactId).
 /// The Library artifacts one goal produced -- index rows whose producedByRunId names the plan.
-/// Owned: ownerUserId==actor.userId gates the row set server-side and the plan id narrows it.
+/// Owned: `row.ownerUserId == actor.userId` gates the row set server-side and the plan id narrows it.
 /// Backs the Nexus map's artifact lane (memql#4371) and the completion card's "artifacts produced"
 /// count (memql#4376). Reads the Library INDEX rows, not the backing generatedOutput rows that
 /// generatedOutputsForRun returns.
@@ -344,9 +344,9 @@ query artifact artifactsForRun {
 //
 // WHAT THE COMPOSITE HALF DOES NOT DO, because the obvious reading is
 // wrong: it does NOT make these reads return every user's rows to a
-// cluster owner. The tier's injected term is `(owner==actor ||
-// isClusterOwner)`, but it is ANDed with the filter written here -- and
-// `ownerUserId==actor.userId` narrows the result right back to the
+// cluster owner. The tier's injected term is "the owner, or a cluster
+// owner", but it is ANDed with the filter written here -- and
+// `row.ownerUserId == actor.userId` narrows the result right back to the
 // caller's own rows. A cluster owner calling libraryFilesForOwner() sees
 // their own files, which is what the name says.
 //
@@ -356,7 +356,7 @@ query artifact artifactsForRun {
 // reach the composite tier buys, and an operator surface that wants the
 // cross-user LIST still needs a read that does not scope itself.
 
-/// Fetch one Library file by id, gated to the caller: ownerUserId==actor.userId, over a concept
+/// Fetch one Library file by id, gated to the caller: `row.ownerUserId == actor.userId`, over a concept
 /// declaring the composite tier. Backs the artifact detail view and the download / export route, which needs
 /// name, mimeType, size and blobUrl together to stream the bytes with correct headers.
 @unbounded("library file by id (guarded), gated to the owner -- bounded to a single row")
@@ -402,7 +402,7 @@ query file libraryFileByUploadedFrom {
   shape   libraryFileFull
 }
 
-/// List the caller's Library files, newest first, gated by ownerUserId==actor.userId. The
+/// List the caller's Library files, newest first, gated by `row.ownerUserId == actor.userId`. The
 /// file-level read behind the Artifacts page's upload and training surfaces --
 /// the artifact index is what the list renders, and this is what answers questions the index does
 /// not carry (analysis status, embedding coverage, which domains a file was trained into).
@@ -428,8 +428,8 @@ query file libraryFilesForOwner {
 }
 
 /// List the chunks of one Library file, for the analysis pass to confirm what it wrote and for a
-/// similarity hit to resolve back to its file. Gated by ownerUserId==actor.userId; payload.fileId
-/// narrows to the one file. The frontend orders by seq, which is
+/// similarity hit to resolve back to its file. Gated by `row.ownerUserId == actor.userId`;
+/// `row.fileId` narrows to the one file. The frontend orders by seq, which is
 /// monotonic in file order.
 @actor
 query fileChunk libraryFileChunksForFile {
@@ -450,7 +450,7 @@ query fileChunk libraryFileChunksForFile {
 /// The superseded versions of one Library file, newest first -- the Files inspector's history
 /// panel (design D1). The HEAD IS NOT HERE: the newest version is the v1:library:file row itself,
 /// which the caller already holds, and the panel folds the two together. Owned:
-/// ownerUserId==actor.userId gates the row set and payload.fileId narrows it to the one file, so a
+/// `row.ownerUserId == actor.userId` gates the row set and `row.fileId` narrows it to the one file, so a
 /// version of somebody else's file is a version that does not exist.
 ///
 /// PAGED AT 200 RATHER THAN UNBOUNDED, and the panel is told which it got. The head's own
@@ -504,8 +504,8 @@ query fileVersion libraryFileVersionSizesForOwner {
 
 // ---- folder: the Files app's tree reads (memql#4781) ----
 
-/// The caller's whole folder tree, live (memql#4781, design B1). Owned: ownerUserId==actor.userId
-/// gates the row set; `archived != true` is the null-safe soft-delete filter, for the reason
+/// The caller's whole folder tree, live (memql#4781, design B1). Owned: `row.ownerUserId == actor.userId`
+/// gates the row set; `row.archived != true` is the null-safe soft-delete filter, for the reason
 /// libraryArtifacts spells out at length, and isNotDeleted is the same null-safe spelling of the
 /// second disposition (the trait is mandatory where one covers the predicate, rule 22). The two are
 /// not redundant: an archived folder is one somebody can still find in the Bin, a deleted one held
@@ -523,7 +523,7 @@ query folder libraryFolders {
 
 /// The Bin's population: the caller's ARCHIVED artifact index rows, newest first (memql#4784).
 ///
-/// `archived == true` rather than the `!= true` spelling its siblings use, and the asymmetry is not
+/// `row.archived == true` rather than the `!= true` spelling its siblings use, and the asymmetry is not
 /// a slip. Every artifact promoted before memql#4340 has no `archived` member at all, so `!= true`
 /// is the null-safe way to ask "not archived" and returns them; asking "IS archived" is a positive
 /// test, and a row with no member genuinely is not archived. The two are inverses of each other in
@@ -546,11 +546,11 @@ query artifact libraryArchivedArtifacts {
   shape   artifactFull
 }
 
-/// The folders in the Bin (memql#4784). libraryFolders carries `archived != true`, so the default
+/// The folders in the Bin (memql#4784). libraryFolders carries `row.archived != true`, so the default
 /// tree read cannot see these at all -- an archived folder is invisible to every other surface in
 /// the product, which is exactly why the Bin needs its own read rather than a filter over one.
 ///
-/// isNotDeleted rides alongside `archived == true`, and the pairing is not belt-and-braces. The
+/// isNotDeleted rides alongside `row.archived == true`, and the pairing is not belt-and-braces. The
 /// two dispositions are independent fields on one row, so a folder that took the empty-branch
 /// disposition must not surface here just because something later stamped it archived as well --
 /// the Bin is where a person goes to get things back, and a folder that held no file has nothing
@@ -567,7 +567,7 @@ query folder libraryArchivedFolders {
   shape   libraryFolderFull
 }
 
-/// Fetch one folder by id, gated to the caller. Owned: ownerUserId==actor.userId is the
+/// Fetch one folder by id, gated to the caller. Owned: `row.ownerUserId == actor.userId` is the
 /// load-bearing guard. Backs the desk-folder popover's name refresh and the Files app's
 /// breadcrumb resolve; archived rows ARE returned here -- a caller asking about a specific id
 /// deserves the honest answer, and the archived field says which kind it got.
@@ -594,7 +594,7 @@ query folder libraryFolderById {
 /// Fetch one chunked upload session by id, gated to the caller -- THE per-chunk authorization read
 /// (design C2): every chunk PUT, the inventory and the complete resolve the session through this
 /// under the caller's own actor, so a session that is not theirs is a session that is not there.
-/// Owned: ownerUserId==actor.userId is the load-bearing guard.
+/// Owned: `row.ownerUserId == actor.userId` is the load-bearing guard.
 @unbounded("upload session by id (guarded), gated to the owner -- bounded to a single row")
 @actor
 query uploadSession uploadSessionById {
@@ -637,7 +637,7 @@ query file libraryFileSizesForOwner {
 /// ONE READ SERVES BOTH CONSUMERS, and that is deliberate. The Files app wants every watch the
 /// person has; a cockpit wants the watches for the one machine it is. Those are the same question
 /// with a guard on it, and a second query would be a second place for the owner filter and the
-/// soft-delete spelling to drift -- the `archived != true` / `== true` asymmetry two constructs up
+/// soft-delete spelling to drift -- the `row.archived != true` / `== true` asymmetry two constructs up
 /// is exactly the kind of drift a duplicate read acquires.
 ///
 /// `workerId` is GUARDED, so an absent argument is the whole list rather than a match on the empty

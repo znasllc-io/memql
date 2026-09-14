@@ -36,7 +36,7 @@
 // @rowAuthz(owner="ownerUserId", clusterOwner) (memql#4820, program P2). Every
 // row carries ownerUserId, every mutation stamps that field from actor.userId
 // rather than from a caller argument, and every query names the composite
-// predicate `(ownerUserId==actor.userId || actor.isClusterOwner==true)` as a
+// predicate `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` as a
 // top-level conjunct.
 //
 // WHY THE SECOND TERM, AND WHAT IT DOES NOT BUY. These rows became a
@@ -60,7 +60,7 @@
 // load-bearing part of the sending design (memql#3348).
 //
 //   `sendJob` is the queue the worker scans. A worker cannot scan an OWNED
-//   concept at all -- the owned tier injects `ownerUserId==actor.userId` into
+//   concept at all -- the owned tier injects `row.ownerUserId == actor.userId` into
 //   every read and has no cluster-owner bypass (rowauthz_enforce.go), so
 //   "find every campaign that wants sending" is not a question an owned row
 //   can answer. It is also not a question that SHOULD be answerable by a
@@ -99,7 +99,7 @@ use platform.concepts.{ outboundRequest }
 /// and referenced by campaigns; membership lives on v1:campaigns:recipient rows pointing back here
 /// rather than as a list on this row, so a hundred-thousand-address audience is a hundred thousand
 /// rows rather than one enormous payload. Per-row authz: owned -- ownerUserId is stamped from
-/// actor.userId on every write and every read gates on ownerUserId==actor.userId.
+/// actor.userId on every write and every read gates on `row.ownerUserId == actor.userId`.
 @displayCard(primary="name", secondary="description", tertiary="ownerUserId", status="status")
 @rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")
 concept audience {
@@ -336,7 +336,7 @@ concept engagementEvent {
 /// this domain the worker can find without already knowing whose it is.
 ///
 /// WHY THIS IS clusterOwner AND NOT owned. A worker cannot scan an owned concept: the owned tier
-/// injects `ownerUserId==actor.userId` into every read and there is no cluster-owner bypass on it
+/// injects `row.ownerUserId == actor.userId` into every read and there is no cluster-owner bypass on it
 /// (component/memql/rowauthz_enforce.go), so "which campaigns want sending" is not a question an
 /// owned row can answer. Nor should it be answerable from a row a caller can write: whichever row
 /// says "send campaign X as user Y" is an instruction the engine carries out under Y's authority, so
@@ -352,7 +352,7 @@ concept engagementEvent {
 ///
 /// A SCHEDULED CAMPAIGN IS A JOB IN THE `scheduled` STATUS (memql#3459), and that is why scheduling
 /// needed no new concept and no cross-owner scan. "Which campaigns are due?" is not a question an
-/// OWNED row can answer -- the owned tier injects ownerUserId==actor.userId into every read with no
+/// OWNED row can answer -- the owned tier injects `row.ownerUserId == actor.userId` into every read with no
 /// cluster-owner bypass -- so a clock-driven scan over v1:campaigns:campaign is not expressible at
 /// all. The scheduling builtin therefore does what campaignStartSend already does: it reads the
 /// campaign under the CALLER'S own actor, and writes a job here carrying the owner it derived. The

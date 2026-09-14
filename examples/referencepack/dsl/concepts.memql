@@ -7,7 +7,7 @@
 //
 // Authorization (owned tier): ownerUserId is the per-row authz key, the
 // same pattern every owned core concept uses -- a read path filters on
-// payload.ownerUserId == actor.userId, a write path stamps it from
+// `row.ownerUserId == actor.userId`, a write path stamps it from
 // actor.userId. The field is here so the pack demonstrates an authz-sane
 // concept, not just an empty schema.
 

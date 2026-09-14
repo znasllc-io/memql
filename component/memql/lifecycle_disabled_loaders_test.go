@@ -24,14 +24,14 @@ func discardLogger() *slog.Logger {
 
 func TestLoadUnifiedTools_DisabledSkipped(t *testing.T) {
 	overlay := fstest.MapFS{"tools.memql": {Data: []byte(`@disabled
-@handler(type="query", query="builtin help(name: \"$args.name\")")
+@handler(type="query", query="builtin help(name: args.name)")
 @description("retired probe tool")
 tool retiredProbeTool {
   name string @required @description("function name")
 }
 
 @enabled
-@handler(type="query", query="builtin help(name: \"$args.name\")")
+@handler(type="query", query="builtin help(name: args.name)")
 @description("live probe tool")
 tool liveProbeTool {
   name string @required @description("function name")

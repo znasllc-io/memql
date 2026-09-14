@@ -2,6 +2,10 @@ package parser
 
 // position_markers_test.go -- a refusal inside a construct the rewriter
 // lowered names the author's line and column (memql#5364).
+//
+// memqlmigrate:keep-file -- the legacy spellings in this file are its cases:
+// each is a refusal whose position is the assertion, so the fixture codemod
+// must leave them as written.
 
 import (
 	"errors"
@@ -187,7 +191,7 @@ query thing second {
   args {
     a string
   }
-  filter row => row.a == 1
+  filter a == 1
   paginate 5
 }
 `,
@@ -274,7 +278,7 @@ trait isB = row => row.b == null
   }
   insert {
     id: args.id
-    note: nil
+    note: null
   }
 }
 `,
@@ -287,7 +291,7 @@ trait isB = row => row.b == null
     a bool
   }
   body {
-    return args.a ? 1 : 2
+    return cond(args.a, 1, 2)
   }
 }
 `,
@@ -301,7 +305,7 @@ automation probe {
     logic runIt(mode: "x")
   }
   step second {
-    if event.payload.y != nil {
+    if event.payload.y != null {
       builtin doIt(id: event.payload.id)
     }
   }
@@ -314,7 +318,7 @@ automation probe {
 		src: `@trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
   step loop {
-    forEach t in event.payload.items where t.active == nil {
+    forEach t in event.payload.items where t.active == null {
       touch { id: t.id }
     }
   }
@@ -327,7 +331,7 @@ automation probe {
 		src: `@trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
   step first {
-    logic record(payload: { delegationId: event.payload.id, identityId: event.payload.identityId })
+    logic record(payload: { delegationId: event.payload.id, event.payload.identityId })
   }
 }
 `,
