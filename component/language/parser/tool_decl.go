@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
-
 	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/core/num"
 )

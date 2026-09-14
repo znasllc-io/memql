@@ -1,8 +1,9 @@
 package parser
 
 import (
-	"github.com/znasllc-io/memql/component/language/annotations"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/language/annotations"
 )
 
 func TestLexer_SimpleQuery(t *testing.T) {

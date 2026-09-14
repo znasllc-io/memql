@@ -2,13 +2,13 @@ package parser
 
 import (
 	"fmt"
-	"github.com/znasllc-io/memql/component/language/annotations"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/baseparser"
@@ -604,7 +604,7 @@ func (p *Parser) parseUseDeclaration() (*UseDeclaration, error) {
 // (consumed by the #2124 drift test) is derived from it. Adding a new
 // top-level construct means adding exactly one entry here.
 //
-// `concept` is the schema declaration (annotations.ByReceiver[""]).
+// `concept` is the schema declaration (the annotation registry's Concept receiver).
 // `spec` and `trait` share parseSpecDecl (trait=true); both are listed
 // so the keyword set is complete.
 var topLevelDeclParsers = map[string]func(p *Parser, attributes []*Attribute) (Node, error){

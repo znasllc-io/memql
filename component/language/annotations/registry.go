@@ -507,7 +507,7 @@ var Docs = map[string]string{
 	"sdk":      "Generator marker (sdk/gen reads from source); no engine effect.",
 	// Prompt.
 	"defaultProvider": "Default AI provider for prompt execution: an explicit pin that wins over every routing rule.",
-	"templateFile":    "External template file path for prompts.",
+	"templateFile":    "A template file beside the construct: on a prompt, the .tmpl rendered with the input fields; on a seed, the text of the seeded row's content.",
 	// Provider.
 	"type":     "Provider vendor type (e.g., \"OpenAI\", \"Anthropic\"); on a concept, the row kind (\"object\"/\"collection\"/\"reference\").",
 	"model":    "Model identifier (e.g., \"gpt-5.4-mini\", \"claude-sonnet-4-6\").",
@@ -532,9 +532,9 @@ var Docs = map[string]string{
 	"exclude":       "On a rule: remove one concrete entry from the chain's resolution, e.g. @exclude(\"fleet:qwen3.5:7b\"). Repeatable.",
 	"locked":        "On a rule: evaluate before every unlocked rule regardless of precedence. Accepted only in the embedded tree -- the loader refuses it elsewhere.",
 	// Concept.
-	"version":     "Version tag for a concept.",
+	"version":     "Version tag for a concept or a seed: a semver string, @version(\"1.0.0\"). Metadata only -- canonical ids are not versioned by it (#2613).",
 	"namespace":   "Concept namespace. DEFAULTS to the containing dsl/<domain>/ directory (#2614) -- write it only for a colon-scoped sub-namespace (\"cognition:client:tool\") or a pinned divergence (namespace.pin). An explicit value must equal the directory, extend it as <dir>:..., or match the domain pin; any other mismatch is a load error (the moved-file guard: file location is id-bearing, so moving a .memql file between domains changes canonical ids).",
-	"scope":       "Partition scope. @scope(\"global\") places rows in the reserved _system partition; default is partition-scoped.",
+	"scope":       "On a seed: \"global\" seeds once for the cluster, \"perUser\" once for every user. (On a concept @scope is retired -- every concept lives in the default partition, #56.)",
 	"cache":       "Override the result-cache TTL for the query. Preferred form (#2618): @cache(300) -- the single ttl arg makes position unambiguous. The keyword form @cache(ttl=\"300\") keeps parsing. Pure reads cache BY DEFAULT (60s backstop) without this annotation (5.6); @cache sets a different TTL, longer or shorter. @cache(ttl=\"0\") is the explicit \"never cache\" opt-out (or use @nocache). The engine keys the cache on the plan signature (query/sort/limit/depth/shape + the keyset cursor) and evicts on any write to the read concept via the cache.invalidate.* broadcast channel (5.4/5.6 invalidation) -- cross-node eviction needs no per-concept routing rule.",
 	"nocache":     "Opt this query OUT of caching entirely (force \"never cache\"). Clearer alias for @cache(ttl=\"0\"); use it for reads that must always be live (auth, monotonic counters, presence). Pure reads cache by default (5.6), so @nocache is the escape for the rare read where even brief staleness is wrong.",
 	"displayCard": "Rendering hints for concept-agnostic clients (memql#160): the field shown as a row's title (primary=, required) and the fields for the secondary, tertiary and status slots. Each must be a displayable field the concept declares, checked once the property set is known.",

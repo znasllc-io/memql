@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+
 	"github.com/znasllc-io/memql/component/language/annotations"
 	"github.com/znasllc-io/memql/component/language/ast"
 )
