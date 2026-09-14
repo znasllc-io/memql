@@ -180,9 +180,9 @@ func TestEvalExprAbsenceTable(t *testing.T) {
 		// `(x != nil && x != "")` rather than to `x != nil`.
 		//              absent null  ""   " "  0    false "é"  nested
 		{func(x ast.ExpressionNode) ast.ExpressionNode { return xbin("==", x, xnil()) },
-			[]any{T, T, F, F, F, F, F, T}},
+			[]any{T, T, T, F, F, F, F, T}},
 		{func(x ast.ExpressionNode) ast.ExpressionNode { return xbin("!=", x, xnil()) },
-			[]any{F, F, T, T, T, T, T, F}},
+			[]any{F, F, F, T, T, T, T, F}},
 		// `== ""`: an absent value EQUALS blank (rule 27, completed by D8:
 		// COALESCE(x, '') = ''). " " is not blank to `==` -- strings compare
 		// verbatim; only `??` trims.
@@ -220,10 +220,14 @@ func TestEvalExprAbsenceTable(t *testing.T) {
 			[]any{F, F, F, F, T, F, F, F}},
 		{func(x ast.ExpressionNode) ast.ExpressionNode { return xbin(">=", x, xlit(int64(0))) },
 			[]any{F, F, F, F, T, F, F, F}},
-		// `x in list`: an absent LHS is never a member.
+		// `x in list` is `==` against each element, so an unset LHS is a
+		// member of a list holding "" (and of nothing else here).
 		{func(x ast.ExpressionNode) ast.ExpressionNode {
 			return xbin("in", x, xlist(xlit(""), xlit(" "), xlit(int64(0)), xlit(false), xlit("é")))
-		}, []any{F, F, T, T, T, T, T, F}},
+		}, []any{T, T, T, T, T, T, T, T}},
+		{func(x ast.ExpressionNode) ast.ExpressionNode {
+			return xbin("in", x, xlist(xlit(" "), xlit(int64(0)), xlit(false), xlit("é")))
+		}, []any{F, F, F, T, T, T, T, F}},
 		// `v in x`: an absent list contains nothing; a present non-list is an
 		// authoring error, whatever the LHS.
 		{func(x ast.ExpressionNode) ast.ExpressionNode { return xbin("in", xlit("é"), x) },
@@ -347,20 +351,21 @@ func TestEvalExprEqualityIsNegationAndSymmetric(t *testing.T) {
 	}
 }
 
-// The one place the table distinguishes the nil LITERAL from a null VALUE,
-// pinned by name so nobody "simplifies" it. `x == nil` lowers to IS NULL, a
-// presence test, so a blank is present; a null value on either side of `==`
-// is compared by the table, where absent equals blank.
-func TestEvalExprNilLiteralIsAPresenceTest(t *testing.T) {
+// Unset is ONE value: an absent field, a JSON null, the `nil` literal and the
+// empty string compare equal to each other and to nothing else. Pinned by
+// name so nobody reintroduces a second, presence-only reading of `nil`.
+func TestEvalExprNilIsUnset(t *testing.T) {
 	runExprCases(t, []exprCase{
-		{"a blank is present", xbin("==", xpath("args", "x"), xnil()),
-			argsScope(map[string]any{"x": ""}), EvalOptions{}, false},
+		{"a blank is unset", xbin("==", xpath("args", "x"), xnil()),
+			argsScope(map[string]any{"x": ""}), EvalOptions{}, true},
 		{"a null value equals a blank", xbin("==", xpath("args", "x"), xpath("args", "v")),
 			argsScope(map[string]any{"x": "", "v": nil}), EvalOptions{}, true},
 		{"an absent value equals a blank", xbin("==", xpath("args", "x"), xpath("args", "missing")),
 			argsScope(map[string]any{"x": ""}), EvalOptions{}, true},
 		{"nil equals nil", xbin("==", xnil(), xnil()), nil, EvalOptions{}, true},
-		{"a parenthesised nil is still the literal", xbin("==", xlit(""), xparen(xnil())), nil, EvalOptions{}, false},
+		{"a parenthesised nil equals a blank", xbin("==", xlit(""), xparen(xnil())), nil, EvalOptions{}, true},
+		{"whitespace is a value, not unset", xbin("==", xlit(" "), xnil()), nil, EvalOptions{}, false},
+		{"zero is a value, not unset", xbin("==", xlit(int64(0)), xnil()), nil, EvalOptions{}, false},
 	})
 }
 
@@ -396,7 +401,7 @@ func TestEvalExprTypedEquality(t *testing.T) {
 		{"bools do not order", xbin("<", xlit(false), xlit(true)), scope, EvalOptions{}, false},
 		{"1 in [1.0]", xbin("in", xlit(int64(1)), xlist(xlit(float64(1)))), scope, EvalOptions{}, true},
 		{`"1" in [1]`, xbin("in", xlit("1"), xlist(xlit(int64(1)))), scope, EvalOptions{}, false},
-		{"a blank is not a member of [nil]", xbin("in", xlit(""), xlist(xnil())), scope, EvalOptions{}, false},
+		{"a blank is a member of [nil]: both are unset", xbin("in", xlit(""), xlist(xnil())), scope, EvalOptions{}, true},
 		{"membership in a typed slice", xbin("in", xlit("b"), xpath("args", "tags")),
 			argsScope(map[string]any{"tags": []string{"a", "b"}}), EvalOptions{}, true},
 		{"in over a map is refused", xbin("in", xlit("a"), xpath("args", "m")), scope, EvalOptions{}, errCode("in_requires_list")},
@@ -912,12 +917,12 @@ func TestEvalExprStringMethods(t *testing.T) {
 		{"includes misses", xmeth(s, "includes", xlit("xyz")), scope, EvalOptions{}, false},
 		{"includes on an absent receiver", xmeth(xpath("args", "missing"), "includes", xlit("a")), scope, EvalOptions{}, false},
 		{"an absent needle is false", xmeth(s, "includes", xpath("args", "missing")), scope, EvalOptions{}, false},
-		// The catalog's contract is "whether sub occurs in the string", and
-		// "" occurs in every string -- as in SQL's strpos, the twin a pushed-
-		// down includes() lowers to.
-		{"the empty string occurs in every string", xmeth(s, "includes", xlit("")), scope, EvalOptions{}, true},
-		{"whitespace is an ordinary needle", xmeth(s, "includes", xlit(" ")), scope, EvalOptions{}, false},
-		{"whitespace found", xmeth(xlit("hello world"), "includes", xlit(" ")), scope, EvalOptions{}, true},
+		// A blank needle matches NOTHING, as a blank startsWith prefix does
+		// (rule 32): a selection is never a pass-through, so an empty search
+		// cannot widen a read to every row.
+		{"a blank needle matches nothing", xmeth(s, "includes", xlit("")), scope, EvalOptions{}, false},
+		{"a whitespace-only needle matches nothing", xmeth(s, "includes", xlit(" ")), scope, EvalOptions{}, false},
+		{"a whitespace-only needle matches nothing even where it occurs", xmeth(xlit("hello world"), "includes", xlit(" ")), scope, EvalOptions{}, false},
 		{"includes on a number is false", xmeth(xpath("args", "n"), "includes", xlit("2")), scope, EvalOptions{}, false},
 		{"includes on a list is refused, naming membership", xmeth(xpath("args", "xs"), "includes", xlit("a")), scope, EvalOptions{}, errCode("operand_type")},
 		{"a non-string needle is refused", xmeth(s, "includes", xlit(int64(1))), scope, EvalOptions{}, errCode("invalid_argument")},

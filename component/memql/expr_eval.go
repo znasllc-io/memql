@@ -519,64 +519,44 @@ func (ev *exprEvaluator) binary(e *ast.BinaryExpr, scope ExprScope) (any, error)
 }
 
 // exprEqual is `==`, and THE absence table (D8, completing authoring rule
-// 27). Written out:
+// 27). An absent field, a JSON null, the `nil` literal and the empty string
+// are one value when compared: UNSET. Written out, for x absent or null:
 //
-//	x absent (missing or JSON null) and v:
-//	  x == nil   true    x != nil   false   the nil LITERAL is a presence test (IS NULL)
-//	  x == ""    true    x != ""    false   absent equals blank (COALESCE(x, '') = '')
-//	  x == "a"   false   x != "a"   true    null-safe inequality (IS DISTINCT FROM)
-//	  x == 0     false   x != 0     true
-//	  x == false false   x != false true
+//	x == nil   true    x != nil   false   unset is unset
+//	x == ""    true    x != ""    false   absent equals blank (rule 27)
+//	x == "a"   false   x != "a"   true    null-safe inequality (IS DISTINCT FROM)
+//	x == 0     false   x != 0     true
+//	x == false false   x != false true
 //
-// and for two present values, typed equality: numbers numerically across int
-// and float, strings verbatim (" " is not ""), bools as bools, lists and maps
-// deeply, and different types never equal (`1 == "1"` is false).
+// and for two set values, typed equality: numbers numerically across int and
+// float, strings verbatim (" " is a value, not unset), bools as bools, lists
+// and maps deeply, and different types never equal (`1 == "1"` is false).
 //
-// The nil LITERAL and a null VALUE differ in exactly one case, and on purpose.
-// `x == nil` lowers to IS NULL: it asks "is x present?", so a blank string IS
-// present and `"" == nil` is false -- which is why the codemod rewrites the
-// retired exists(x), which also treated a blank as absent, to
-// `(x != nil && x != "")` and not to `x != nil`. A null VALUE on either side
-// of `==` (a JSON-null field, an absent argument) is compared by the table,
-// where absent equals blank; so `x == y` with x blank and y absent is true,
-// and a plan constant that evaluates to absent lowers as the blank test, not
-// as IS NULL. Both halves are symmetric, so `==` is symmetric and `!=` is its
-// exact negation for every pair (TestEvalExprEqualityIsNegationAndSymmetric).
-func exprEqual(lnode, rnode ast.ExpressionNode, l, r any) bool {
-	lNil, rNil := exprIsNilLiteral(lnode), exprIsNilLiteral(rnode)
-	switch {
-	case lNil && rNil:
-		return true
-	case lNil:
-		return IsAbsent(r)
-	case rNil:
-		return IsAbsent(l)
-	}
-	la, ra := IsAbsent(l), IsAbsent(r)
-	if la || ra {
-		if la && ra {
-			return true
-		}
-		other := r
-		if ra {
-			other = l
-		}
-		s, ok := other.(string)
-		return ok && s == ""
+// One notion of unset rather than two is the point. Rule 27 already treats an
+// absent string as blank ("both mean not set"), and the retired automation
+// evaluator collapsed nil and blank everywhere; keeping the `nil` literal a
+// separate presence test would have made `x == nil` and `x == args.missing`
+// answer differently for a blank x. With one notion, `==` is symmetric, `!=`
+// is its exact negation for every pair, `!(x == v)` is exactly `x != v`
+// (TestEvalExprEqualityIsNegationAndSymmetric), and the SQL twin is one
+// expression: `COALESCE(x, ”) = ”` for any comparison against unset.
+func exprEqual(_, _ ast.ExpressionNode, l, r any) bool {
+	lu, ru := exprIsUnset(l), exprIsUnset(r)
+	if lu || ru {
+		return lu && ru
 	}
 	return exprStrictEqual(l, r)
 }
 
-// exprIsNilLiteral reports whether n is the `nil` literal, parenthesised or
-// not.
-func exprIsNilLiteral(n ast.ExpressionNode) bool {
-	switch e := ast.Unparen(n).(type) {
-	case *ast.NilExpr:
+// exprIsUnset is the one unset test the comparisons share: absent, JSON null
+// or the empty string. Whitespace is a value here -- only `??` (rule 30)
+// reads a whitespace-only string as blank.
+func exprIsUnset(v any) bool {
+	if IsAbsent(v) {
 		return true
-	case *ast.LiteralExpr:
-		return e != nil && e.Value == nil
 	}
-	return false
+	s, ok := v.(string)
+	return ok && s == ""
 }
 
 // exprStrictEqual is typed equality with no absence rules: nil equals only
@@ -675,9 +655,7 @@ func exprOrdered(op string, l, r any) bool {
 
 // exprIn is `v in list`. The right-hand side must be a list, or absent (which
 // contains nothing); anything else is in_requires_list -- checked BEFORE the
-// left side, so the refusal does not depend on the data. An absent left side
-// is never a member (rule 27: `in` is not null-safe). Membership is typed
-// equality.
+// left side, so the refusal does not depend on the data. Membership is `==`.
 func exprIn(e *ast.BinaryExpr, l, r any) (any, error) {
 	var list []any
 	switch x := r.(type) {
@@ -689,11 +667,12 @@ func exprIn(e *ast.BinaryExpr, l, r any) (any, error) {
 		return nil, exprErr(e.Right, "in_requires_list", "the right side of `in` must be a list; `%s` is %s",
 			ast.FormatExpr(e.Right), exprTypeName(r))
 	}
-	if IsAbsent(l) {
-		return false, nil
-	}
+	// `v in [a, b]` is exactly `v == a || v == b`, so membership uses the
+	// same equality: an unset v is a member only of a list holding an unset
+	// element ("" or nil), and never of ["a"] (rule 27: `in` is not
+	// null-safe for a set value).
 	for _, el := range list {
-		if exprStrictEqual(l, el) {
+		if exprEqual(nil, nil, l, el) {
 			return true, nil
 		}
 	}
@@ -1455,9 +1434,13 @@ func exprListMethod(f func(ev *exprEvaluator, e *ast.CallExpr, coll []any, scope
 }
 
 // includes is the string method `s.includes(sub)`, the substring test that
-// was contains(s, sub): whether sub occurs in s, as the catalog states it --
-// so "" occurs in every string, as it does in SQL's strpos.
+// was contains(s, sub): whether sub occurs in s.
 //
+//   - A BLANK sub (empty or whitespace-only) matches NOTHING, exactly as a
+//     blank startsWith prefix does (rule 32). "" occurs in every string, so
+//     the literal reading would let a caller who sends an empty search widen
+//     a selection to every row -- the fail-open shape rule 32 exists to
+//     refuse. A selection is never a pass-through.
 //   - A LIST receiver is refused: `.includes(v)` reads as list membership to
 //     anyone who writes JavaScript, and answering false would hide that the
 //     language spells membership `v in list`.
@@ -1481,6 +1464,9 @@ func (ev *exprEvaluator) includes(e *ast.CallExpr, recv any, scope ExprScope) (a
 	case nil, absentValue:
 		return false, nil
 	case string:
+		if strings.TrimSpace(n) == "" {
+			return false, nil
+		}
 		sub = n
 	default:
 		return nil, exprErr(e.Args[0], "invalid_argument", "includes() takes a string; `%s` is %s", ast.FormatExpr(e.Args[0]), exprTypeName(needle))
