@@ -1,0 +1,6 @@
+/// A support ticket, readable by the user who owns it.
+@rowAuthz(owner="ownerUserId")
+concept ticket {
+  ownerUserId  string
+  title        string
+}

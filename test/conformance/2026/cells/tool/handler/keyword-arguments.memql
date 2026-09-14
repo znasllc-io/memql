@@ -1,0 +1,5 @@
+/// Open a support ticket for the caller.
+@handler(type="function", name="openTicketHandler")
+tool openSupportTicketHandler {
+  title  string!  @description("The ticket's one-line title.")
+}

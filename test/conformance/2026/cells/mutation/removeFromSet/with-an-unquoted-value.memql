@@ -1,0 +1,12 @@
+/// Remove labels from a ticket; removing one it does not carry changes nothing.
+@removeFromSet(labels)
+mutate ticket unlabelTicketRemoveFromSet {
+  args {
+    ticketId  string!
+    labels    []string!
+  }
+  update {
+    id: args.ticketId
+    labels: args.labels
+  }
+}

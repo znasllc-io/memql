@@ -1,0 +1,10 @@
+/// The priority of the ticket in the triggering event -- a field the logic did not declare.
+@eventField("id", "status")
+logic ticketEventPriority {
+  args {
+    event  object!
+  }
+  body {
+    return args.event.payload.priority
+  }
+}

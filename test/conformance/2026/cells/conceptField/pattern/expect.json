@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-no-value.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_form",
+      "message": "@pattern on a concept field takes one string"
+    }
+  ]
+}

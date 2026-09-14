@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-no-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@model on a provider takes one string"
+    },
+    {
+      "file": "no-model.memql",
+      "verdict": "refuse_load",
+      "message": "@model is required"
+    }
+  ]
+}

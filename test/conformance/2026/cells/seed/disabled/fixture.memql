@@ -1,0 +1,16 @@
+/// The row this cell's seed writes.
+concept queueBanner {
+  message  string
+}
+
+/// The mutation the seed materializer writes this concept's rows through: create<Concept>.
+mutate queueBanner createQueueBanner {
+  args {
+    queueBannerId  string!
+    message        string!
+  }
+  insert {
+    id: args.queueBannerId
+    message: args.message
+  }
+}

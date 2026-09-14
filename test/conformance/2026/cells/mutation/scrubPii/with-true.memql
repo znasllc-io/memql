@@ -1,0 +1,11 @@
+/// Forget who reported a ticket: every field the concept marks @pii is zeroed.
+@scrubPii(true)
+mutate ticket forgetTicketReporterScrubPii {
+  args {
+    ticketId  string!
+  }
+  update {
+    id: args.ticketId
+    status: "redacted"
+  }
+}

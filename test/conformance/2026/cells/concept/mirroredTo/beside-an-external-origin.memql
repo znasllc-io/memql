@@ -1,0 +1,8 @@
+/// A support ticket another system owns, mirrored onward to that same system.
+@origin("shopify")
+@mirroredTo("shopify")
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}

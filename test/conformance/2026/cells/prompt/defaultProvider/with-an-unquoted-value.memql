@@ -1,0 +1,7 @@
+/// Summarise a ticket in one sentence, pinned to the fleet provider.
+@level("fast")
+@templateFile("summariseTicket.tmpl")
+@defaultProvider(fleet)
+prompt summariseTicketDefaultProvider {
+  title  string!  @description("The ticket's title.")
+}

@@ -1,0 +1,12 @@
+/// When a node joins the cluster, raise a ticket if it was last seen this year.
+@trigger(event="node.created", concept="v1:cluster:node", partition="*")
+automation welcomeNodesSeenThisYear {
+  step seen {
+    logic joinedNodeLastSeen (event)
+  }
+  step raise {
+    if year(steps.seen.result) == 2026 {
+      mutation raiseAgentTicket (title: "A node joined the cluster")
+    }
+  }
+}

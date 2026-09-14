@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "file": "a-collection.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-an-unquoted-kind.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_form",
+      "message": "@type on a concept takes one string"
+    },
+    {
+      "file": "a-collection-that-contains-nothing.memql",
+      "verdict": "refuse_load",
+      "message": "must declare contains relationship",
+      "note": "What @type(\"collection\") means: the row is a container, and the engine requires it to say what it contains."
+    }
+  ]
+}

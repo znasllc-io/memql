@@ -1,0 +1,6 @@
+/// Open a support ticket; the caller needs the operator scope.
+@handler(type="function", name="openTicketScopes")
+@scopes(operator)
+tool openSupportTicketScopes {
+  title  string!  @description("The ticket's one-line title.")
+}

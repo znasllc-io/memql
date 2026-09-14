@@ -1,0 +1,9 @@
+use identity.concepts.{ user }
+
+/// A support ticket, assigned to a user -- the domain verb written where the engine's edge type goes.
+concept ticket {
+  ownerUserId  string
+  title        string
+
+  @relationship(type="assignedTo", field="ownerUserId", target=user, direction="outgoing")
+}

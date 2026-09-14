@@ -25,7 +25,10 @@ import (
 // and @default parse, reach the emitted schema, and nothing in the engine acts
 // on them. The reference (dsl/_reference/_concept.memql section 8),
 // docs/public/language/attribute-matrix.md and reserved.md all now say so
-// plainly, having previously promised enforcement that does not exist.
+// plainly, having previously promised enforcement that does not exist. The
+// attribute matrix is generated from the annotation registry's docs
+// (component/language/annotations, memql#5360), so its half of the fix is made
+// in the registry and regenerated with `make docs-matrix`.
 //
 // A documentation-only fix would repeat the very failure memql#2960 is an
 // instance of -- a rule recorded somewhere and enforced nowhere. So the split
@@ -213,7 +216,8 @@ func TestDeclaredMetadataKeysAreReadByNothing(t *testing.T) {
 				"Update all of them in the same change:\n" +
 				"  - dsl/_reference/_concept.memql section 8 (move it out of DECLARED METADATA, " +
 				"and fix the @description on its worked example -- that string ships in the schema)\n" +
-				"  - docs/public/language/attribute-matrix.md\n" +
+				"  - docs/public/language/attribute-matrix.md, which is generated: change the @unique / " +
+				"@immutable docs in component/language/annotations/registry.go and run `make docs-matrix`\n" +
 				"  - docs/public/language/reserved.md"
 
 			hits := keyLiteralsInNonTestGo(t, root, key)
@@ -891,7 +895,8 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 				"and THREE documents now over-promise. Put x-secret back in "+
 				"TestDeclaredMetadataKeysAreReadByNothing and correct:\n"+
 				"  - dsl/_reference/_concept.memql section 8\n"+
-				"  - docs/public/language/attribute-matrix.md\n"+
+				"  - docs/public/language/attribute-matrix.md, which is generated: change the @secret "+
+				"doc (docSecretField) in component/language/annotations/long_docs.go and run `make docs-matrix`\n"+
 				"  - docs/public/language/reserved.md",
 				readerFile, joinHits(hits))
 		}
@@ -926,8 +931,16 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 				t.Fatalf("read %s: %v", doc, err)
 			}
 			text := strings.ToLower(string(raw))
+			// The attribute matrix is generated from the registry, so the
+			// repair for it is in the registry, never in the page.
+			regenerate := ""
+			if doc == "docs/public/language/attribute-matrix.md" {
+				regenerate = "\n\nThis page is generated (memql#5360): change the @secret doc in " +
+					"component/language/annotations/long_docs.go (docSecretField) and run `make docs-matrix`; " +
+					"a hand edit of the page is refused by TestAttributeMatrixIsGenerated."
+			}
 			if !strings.Contains(text, "@secret") && !strings.Contains(text, "x-secret") {
-				t.Fatalf("%s does not mention @secret at all, so it cannot describe its scope", doc)
+				t.Fatalf("%s does not mention @secret at all, so it cannot describe its scope%s", doc, regenerate)
 			}
 			// surface -> the alternative spellings that count as naming it,
 			// plus (for surfaces that are now ENFORCED) the stale spellings
@@ -993,8 +1006,8 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 							"now enforced.\n\nAn under-promising scope document is a real "+
 							"failure, not a harmless one: an author reading it writes a "+
 							"workaround for a leak that no longer exists, or concludes "+
-							"@secret is not worth using. Update the paragraph.",
-							doc, surface.name, stale)
+							"@secret is not worth using. Update the paragraph.%s",
+							doc, surface.name, stale, regenerate)
 					}
 				}
 				found := false
@@ -1022,7 +1035,7 @@ func TestSecretEnforcementIsRealAndScoped(t *testing.T) {
 						"without naming what it does NOT cover recreates the over-promise "+
 						"memql#2960 corrected -- one rung higher, and harder to spot now "+
 						"that it is mostly true.\n\n"+
-						"Accepted spellings: %v", doc, surface.name, surface.anyOf)
+						"Accepted spellings: %v%s", doc, surface.name, surface.anyOf, regenerate)
 				}
 			}
 		})

@@ -1,0 +1,6 @@
+/// Background calls resolve through the local-first chain, retrying when it is exhausted.
+@when(tag="background")
+@policy("localFirst")
+@precedence(24)
+@onUnavailable("retry")
+rule backgroundRetrying { }

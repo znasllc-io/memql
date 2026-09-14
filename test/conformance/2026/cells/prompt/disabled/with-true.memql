@@ -1,0 +1,7 @@
+/// Summarise a ticket in one sentence. Switched off: not loaded while @disabled stays.
+@level("fast")
+@templateFile("summariseTicket.tmpl")
+@disabled(true)
+prompt summariseTicketDisabled {
+  title  string!  @description("The ticket's title.")
+}

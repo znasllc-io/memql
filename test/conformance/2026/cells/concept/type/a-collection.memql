@@ -1,0 +1,8 @@
+/// A support queue: a collection of tickets. A collection declares what it contains.
+@type("collection")
+concept queue {
+  name       string
+  ticketIds  []string
+
+  @relationship(type="contains", field="ticketIds", target=ticket, direction="outgoing")
+}

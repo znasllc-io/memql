@@ -1,0 +1,7 @@
+/// The user a ticket taken now is assigned to: the caller.
+@actor(true)
+logic ticketAssigneeActor {
+  body {
+    return actor.userId
+  }
+}

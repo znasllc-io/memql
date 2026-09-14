@@ -1,0 +1,6 @@
+/// Summarise a ticket in one sentence, at a level that does not exist.
+@templateFile("summariseTicket.tmpl")
+@level("medium")
+prompt summariseTicketMedium {
+  title  string!  @description("The ticket's title.")
+}

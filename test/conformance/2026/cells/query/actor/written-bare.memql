@@ -1,0 +1,7 @@
+/// The caller's own open tickets, newest first.
+@actor
+query ticket openTicketsActor {
+  filter row => row.ownerUserId == actor.userId && row.status == "open"
+  sort "row.createdAt", "desc"
+  paginate 20
+}

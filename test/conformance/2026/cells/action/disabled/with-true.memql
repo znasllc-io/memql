@@ -1,0 +1,10 @@
+use capabilities.fs.{ readFile }
+
+/// Read a ticket's attachment from the runner's workspace. Switched off: not loaded while @disabled stays.
+@disabled(true)
+action readTicketAttachmentDisabled {
+  args {
+    path  string!
+  }
+  capability readFile(path: args.path)
+}

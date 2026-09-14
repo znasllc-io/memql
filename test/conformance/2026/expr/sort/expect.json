@@ -86,6 +86,19 @@
       "verdict": "refuse_parse",
       "message": "expected ',' before sort field",
       "note": "arithmetic: the key is the literal, and what follows it is not a direction."
+    },
+    {
+      "file": "row-namespace.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "payload-field.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "bare-intrinsic.memql",
+      "verdict": "refuse_load",
+      "message": "sort key names the row intrinsic \"createdAt\" bare -- write \"row.createdAt\""
     }
   ]
 }

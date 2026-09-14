@@ -1,0 +1,6 @@
+/// Every user's own queue, seeded once per user -- with an id of its own.
+@scope("perUser")
+seed personalQueue myTicketsWithId {
+  id: "my-tickets"
+  name: "My tickets"
+}

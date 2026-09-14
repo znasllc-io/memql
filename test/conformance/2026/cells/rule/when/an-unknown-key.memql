@@ -1,0 +1,5 @@
+/// Background calls resolve through the local-first chain -- matched on a key rules do not have.
+@when(stage="background")
+@policy("localFirst")
+@precedence(23)
+rule backgroundByStage { }

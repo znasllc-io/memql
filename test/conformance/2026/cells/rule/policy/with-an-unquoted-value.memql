@@ -1,0 +1,5 @@
+/// Background calls resolve through the local-first chain.
+@when(tag="background")
+@precedence(18)
+@policy(localFirst)
+rule backgroundLocalPolicy { }

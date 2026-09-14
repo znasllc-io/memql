@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-an-unquoted-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@sideEffect on a capability takes one string"
+    },
+    {
+      "file": "a-class-that-lies.memql",
+      "verdict": "refuse_load",
+      "message": "@sideEffect(\"read\") does not match the authoritative Go class \"write\"",
+      "note": "The side-effect class is unspoofable: it must equal the class the Go vocabulary gives the verb."
+    }
+  ]
+}

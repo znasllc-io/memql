@@ -1,0 +1,7 @@
+/// Today's date key in a timezone, for a caller holding execute on app:deployables/deploy.
+@executor("integration.timeutil.dateKeyInTimezone")
+@requiresCapability("execute", "app:deployables/deploy")
+builtin ticketDateKeyRequiresCapability {
+  timezone  string  @description("An IANA timezone; UTC when empty.")
+  now       string  @description("The instant to key, RFC3339.")
+}

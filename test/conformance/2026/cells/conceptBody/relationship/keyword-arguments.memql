@@ -1,0 +1,9 @@
+use identity.concepts.{ user }
+
+/// A support ticket, owned by the user who raised it.
+concept ticket {
+  ownerUserId  string
+  title        string
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}

@@ -1,0 +1,7 @@
+/// Every hour, open a ticket to review the queue.
+@schedule(3600)
+automation hourlyReviewSchedule {
+  step raise {
+    mutation raiseTicketSchedule (title: "Review the queue")
+  }
+}

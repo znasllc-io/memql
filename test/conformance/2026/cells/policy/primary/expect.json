@@ -1,0 +1,24 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-no-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@primary on a policy takes one string"
+    },
+    {
+      "file": "a-retired-entry.memql",
+      "verdict": "refuse_load",
+      "message": "policy entry \"fleet:*\" is retired: write fleet:strongest for the best local model, or fleet:fastest for the quickest one"
+    },
+    {
+      "file": "no-primary.memql",
+      "verdict": "refuse_load",
+      "message": "@primary is required"
+    }
+  ]
+}

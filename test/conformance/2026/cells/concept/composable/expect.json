@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "keyword-arguments.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_form",
+      "message": "@composable on a concept takes no arguments or keyword arguments"
+    },
+    {
+      "file": "a-field-the-concept-does-not-declare.memql",
+      "verdict": "refuse_load",
+      "message": "fields=\"title,resolution\" names \"resolution\", which is neither a declared property nor a row intrinsic"
+    }
+  ]
+}
