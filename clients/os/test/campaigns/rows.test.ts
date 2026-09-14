@@ -11,6 +11,7 @@ import {
   conditionRowIs,
   deliveryFromRow,
   emailReadinessFrom,
+  engineSentence,
   emailRuleFromRow,
   figureOf,
   formatFigure,
@@ -486,6 +487,35 @@ describe("a rule as a sentence", () => {
     expect(conceptEntity("v1:campaigns:senderIdentity")).toBe("senderIdentity");
     // A malformed id keeps itself rather than becoming an empty noun.
     expect(conceptEntity("nonsense")).toBe("nonsense");
+  });
+});
+
+describe("a refused call's sentence", () => {
+  const FRAME = "MemQL engine failed to execute query. Details: ";
+
+  it("takes off the call's name and the server's frame, and nothing else", () => {
+    const refused = 'Braces, @ and semicolons can only appear inside quotes, like row.email == "boss@acme.com".';
+    expect(engineSentence(`campaignActivateEmailRule: ${FRAME}${refused}`)).toBe(refused);
+    expect(engineSentence(`createEmailRule: ${FRAME}${refused}`)).toBe(refused);
+  });
+
+  it("keeps an engine sentence that opens with its own package name", () => {
+    // `emailrules:` and `authoring:` are the ENGINE's words, recorded on the
+    // rule exactly so; only the calls this surface makes are frames.
+    const refused = "emailrules: arming an event-email rule is owner or developer only";
+    expect(engineSentence(`campaignActivateEmailRule: ${FRAME}${refused}`)).toBe(refused);
+    expect(engineSentence("authoring: actor x cannot activate bundle owned by y")).toBe(
+      "authoring: actor x cannot activate bundle owned by y",
+    );
+  });
+
+  it("keeps a server frame with nothing in it, which is then all the cluster said", () => {
+    expect(engineSentence("setEmailRuleStatus: MemQL engine failed to execute query.")).toBe(
+      "MemQL engine failed to execute query.",
+    );
+    expect(engineSentence("Not connected to the cluster, so nothing was written.")).toBe(
+      "Not connected to the cluster, so nothing was written.",
+    );
   });
 });
 

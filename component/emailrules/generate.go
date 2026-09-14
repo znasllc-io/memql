@@ -206,6 +206,38 @@ func triggerEventFor(eventKind string) (string, error) {
 	}
 }
 
+// firstVersionGuard is what makes a created rule mean "created".
+//
+// The store is append-only, so EVERY write publishes graph.node.created, and a
+// rule reading the topic alone fired on every change to the row: a welcome
+// email when a user is created went out again on each later write to that user.
+// The write path marks the event with whether the write materialised the row's
+// first version (firstVersion, component/memql executeWrite), and a created
+// rule's filter admits only that. The marker is read the way a trigger reads
+// any payload field -- declared in the args block (firstVersionArg) and bound
+// from the event at fire time; a dotted `event.` read is refused at load. An
+// event without the marker -- from a replica still running an older engine --
+// fires nothing: missing one welcome is the recoverable failure, and repeating
+// it on every write is not.
+const firstVersionGuard = "args.firstVersion == true"
+
+// firstVersionArg is the args field the guard reads.
+const firstVersionArg = "firstVersion bool"
+
+// triggerFilterFor is the generated filter's lambda body: the rule's condition,
+// behind the first-version guard for a created rule. Empty means no filter.
+// The condition is parenthesised whole, so its own `||` cannot escape the
+// guard.
+func triggerFilterFor(eventKind, condition string) string {
+	if strings.TrimSpace(eventKind) != "created" {
+		return condition
+	}
+	if condition == "" {
+		return firstVersionGuard
+	}
+	return firstVersionGuard + " && (" + condition + ")"
+}
+
 // ConditionError is a refused condition, worded for the person who typed it:
 // the condition is the one place an end user writes an expression in the
 // product (the OS Campaigns app's "Only when" field), and this message is what
@@ -476,16 +508,23 @@ func GenerateAutomation(r Rule) (string, error) {
 		langparser.QuoteString(event), langparser.QuoteString(strings.TrimSpace(r.TriggerConcept)))
 	// The filter is the rule's condition in its canonical v1 form -- the
 	// PARSED condition, re-printed, never the text the operator typed -- as
-	// the body of a lambda over the triggering row.
+	// the body of a lambda over the triggering row; for a created rule,
+	// behind the first-version guard (triggerFilterFor).
 	cond, err := canonicalCondition(r.Condition)
 	if err != nil {
 		return "", err
 	}
-	if cond != "" {
-		fmt.Fprintf(&b, "@filter(row => %s)\n", cond)
+	if filter := triggerFilterFor(r.EventKind, cond); filter != "" {
+		fmt.Fprintf(&b, "@filter(row => %s)\n", filter)
 	}
 	fmt.Fprintf(&b, "automation %s {\n", name)
-	b.WriteString("  args {\n    id any\n  }\n")
+	b.WriteString("  args {\n    id any\n")
+	if strings.TrimSpace(r.EventKind) == "created" {
+		// Declared only where the guard reads it: an args field nothing
+		// reads is refused at load.
+		b.WriteString("    " + firstVersionArg + "\n")
+	}
+	b.WriteString("  }\n")
 	b.WriteString("  step send {\n")
 	// The arguments are COMMA-separated. A construct call's arguments are a
 	// list, and the parser refuses a second one that is not preceded by a
