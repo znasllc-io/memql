@@ -35,13 +35,13 @@ mutate record checkRecord {
 //   newConfirmCount (number, required)  - New confirm count (caller increments before calling)
 //   newState (string, required)         - New validation state (caller determines based on policy)
 //
-// Usage:
-//   confirmRecord({
+// Usage, as the string a client sends to Execute:
+//   confirmRecord(
 //     recordId: "record-uuid",
 //     identityId: "human-identity-uuid",
 //     newConfirmCount: 1,
 //     newState: "confirmed"
-//   })
+//   )
 //
 
 /// Human confirm a data record, updating confirm count and validation state
@@ -83,8 +83,8 @@ mutate record confirmRecord {
 //   sourceAttachmentId (string, optional) - Reference to source attachment
 //   confidence (number, optional)         - AI confidence score (0-1)
 //
-// Usage:
-//   createRecord({
+// Usage, as the string a client sends to Execute:
+//   createRecord(
 //     recordId: "uuid-123",
 //     partitionId: "space-456",
 //     recordType: "vehicle",
@@ -94,7 +94,7 @@ mutate record confirmRecord {
 //     importedBy: "identity-789",
 //     naturalKeyField: "vin",
 //     naturalKeyValue: "1HGBH41JXMN109186"
-//   })
+//   )
 //
 
 /// Create a data record in draft validation state awaiting check and confirmation
@@ -151,8 +151,8 @@ mutate record createRecord {
 //   naturalKeyValue (string, optional)    - Natural key value
 //   confidence (number, optional)         - AI confidence score
 //
-// Usage:
-//   createRecordBatch({
+// Usage, as the string a client sends to Execute:
+//   createRecordBatch(
 //     recordId: "uuid-1",
 //     partitionId: "space-456",
 //     recordType: "vehicle",
@@ -160,7 +160,7 @@ mutate record createRecord {
 //     data: { make: "Toyota", model: "Camry" },
 //     importSource: "chat-file-upload",
 //     importedBy: "identity-789"
-//   })
+//   )
 //
 
 /// Create a single data record from a batch import in draft validation state (called once per
@@ -204,8 +204,8 @@ mutate record createRecordBatch {
 //   recordId (string, required) - ID of the record to delete
 //   partitionId (string, required)  - Space ID for validation
 //
-// Usage:
-//   deleteRecord({ recordId: "record-uuid", partitionId: "space-456" })
+// Usage, as the string a client sends to Execute:
+//   deleteRecord(recordId: "record-uuid")
 //
 
 /// Soft-delete a data record (sets active=false)
@@ -239,13 +239,13 @@ mutate record deleteRecord {
 //   checkCount (number, required)   - New check count after revert
 //   confirmCount (number, required) - New confirm count after revert
 //
-// Usage:
-//   revertRecord({
+// Usage, as the string a client sends to Execute:
+//   revertRecord(
 //     recordId: "record-uuid",
 //     toState: "draft",
 //     checkCount: 0,
 //     confirmCount: 0
-//   })
+//   )
 //
 
 /// Revert a data record to a previous validation state with counter reset
@@ -283,14 +283,14 @@ mutate record revertRecord {
 //   checkedDataUsable (bool, optional)       - Whether checked data is usable live (default: false)
 //   revertMinRole (string, optional)         - Minimum role to revert (default: "admin")
 //
-// Usage:
-//   setPolicy({
+// Usage, as the string a client sends to Execute:
+//   setPolicy(
 //     policyId: "policy-uuid",
 //     targetRecordType: "vehicle",
 //     requiredChecks: 2,
 //     requiredConfirmations: 1,
 //     checkedDataUsable: true
-//   })
+//   )
 //
 
 /// Create or update a validation policy for a record type
@@ -336,12 +336,12 @@ mutate policy setPolicy {
 //   naturalKeyValue (string, optional) - Updated natural key value
 //   confidence (number, optional)      - Updated confidence score
 //
-// Usage:
-//   updateRecord({
+// Usage, as the string a client sends to Execute:
+//   updateRecord(
 //     recordId: "record-uuid",
 //     data: { make: "Toyota", model: "Camry", year: 2025 },
 //     label: "2025 Toyota Camry"
-//   })
+//   )
 //
 
 /// Update a data record (resets validation state to draft)

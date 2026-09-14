@@ -8,6 +8,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func newTestEngineForWebhook(allowedHosts ...string) *MemQLEngine {
@@ -26,6 +30,11 @@ func newTestEngineForWebhook(allowedHosts ...string) *MemQLEngine {
 func hostOf(srv *httptest.Server) string {
 	return strings.TrimPrefix(srv.URL, "http://")
 }
+
+// fixedURL is a webhook url expression naming one fixed address: a url is an
+// edition-2026 expression over the tool's args (webhookURL), so a fixed
+// address is a quoted string.
+func fixedURL(u string) string { return languageParser.QuoteString(u) }
 
 // agentCtxForTest returns a context.Background that carries an
 // acting-agent role -- ExecuteTool's universal agent-only enforcement
@@ -55,10 +64,10 @@ func TestExecuteWebhookBasicPOST(t *testing.T) {
 		Name: "testWebhook",
 		Handler: &ToolHandler{
 			Type:   "webhook",
-			URL:    srv.URL + "/test",
+			URL:    fixedURL(srv.URL + "/test"),
 			Method: "POST",
 			Body: map[string]any{
-				"message": "$args.task",
+				"message": "args.task",
 			},
 		},
 	}
@@ -91,7 +100,7 @@ func TestExecuteWebhookGET(t *testing.T) {
 		Name: "testGet",
 		Handler: &ToolHandler{
 			Type:   "webhook",
-			URL:    srv.URL + "/health",
+			URL:    fixedURL(srv.URL + "/health"),
 			Method: "GET",
 		},
 	}
@@ -108,7 +117,9 @@ func TestExecuteWebhookGET(t *testing.T) {
 	}
 }
 
-func TestExecuteWebhookURLSubstitution(t *testing.T) {
+// TestExecuteWebhookURLExpression: the url is an expression over args -- a
+// caller's value joined into the address with +, never text spliced into it.
+func TestExecuteWebhookURLExpression(t *testing.T) {
 	var receivedPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedPath = r.URL.Path
@@ -118,10 +129,10 @@ func TestExecuteWebhookURLSubstitution(t *testing.T) {
 
 	e := newTestEngineForWebhook(hostOf(srv))
 	tool := &Tool{
-		Name: "testURLSub",
+		Name: "testURLExpr",
 		Handler: &ToolHandler{
 			Type:   "webhook",
-			URL:    srv.URL + "/workspace/$args.workspace/files",
+			URL:    fixedURL(srv.URL+"/workspace/") + " + args.workspace + " + fixedURL("/files"),
 			Method: "GET",
 		},
 	}
@@ -140,7 +151,11 @@ func TestExecuteWebhookURLSubstitution(t *testing.T) {
 	}
 }
 
-func TestExecuteWebhookBodySubstitution(t *testing.T) {
+// TestExecuteWebhookBodyExpressions: a body template's string leaves are
+// expressions over args. A leaf reads a value of any type, fixed text is a
+// quoted string, an argument the caller did not supply omits its key, and a
+// caller's value -- a `$args.` of its own included -- is data.
+func TestExecuteWebhookBodyExpressions(t *testing.T) {
 	var receivedBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
@@ -151,37 +166,95 @@ func TestExecuteWebhookBodySubstitution(t *testing.T) {
 
 	e := newTestEngineForWebhook(hostOf(srv))
 	tool := &Tool{
-		Name: "testBodySub",
+		Name: "testBodyExpr",
 		Handler: &ToolHandler{
 			Type:   "webhook",
-			URL:    srv.URL,
+			URL:    fixedURL(srv.URL),
 			Method: "POST",
 			Body: map[string]any{
-				"command":   "$args.task",
-				"workspace": "$args.workspace",
+				"command":   "args.task",
+				"workspace": "args.workspace",
+				"count":     "args.count",
+				"kind":      fixedURL("fixed"),
+				"missing":   "args.notSupplied",
+				"retries":   3,
 				"nested": map[string]any{
-					"value": "$args.task",
+					"value": "args.task + \"!\"",
 				},
 			},
 		},
 	}
 
 	_, err := e.ExecuteTool(agentCtxForTest(), tool, map[string]any{
-		"task":      "write a script",
+		"task":      "write $args.workspace",
 		"workspace": "/workspaces/sofia",
+		"count":     float64(2),
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if receivedBody["command"] != "write a script" {
-		t.Fatalf("expected command='write a script', got %v", receivedBody["command"])
-	}
-	if receivedBody["workspace"] != "/workspaces/sofia" {
-		t.Fatalf("expected workspace='/workspaces/sofia', got %v", receivedBody["workspace"])
-	}
+	require.NoError(t, err)
+	require.Equal(t, "write $args.workspace", receivedBody["command"], "a caller's value is data")
+	require.Equal(t, "/workspaces/sofia", receivedBody["workspace"])
+	require.Equal(t, float64(2), receivedBody["count"], "a leaf reads a value, not its text")
+	require.Equal(t, "fixed", receivedBody["kind"])
+	require.Equal(t, float64(3), receivedBody["retries"])
+	require.NotContains(t, receivedBody, "missing", "an argument the caller did not supply omits its key")
 	nested, _ := receivedBody["nested"].(map[string]any)
-	if nested == nil || nested["value"] != "write a script" {
-		t.Fatalf("expected nested.value='write a script', got %v", nested)
+	require.Equal(t, "write $args.workspace!", nested["value"])
+}
+
+// TestWebhookURLAndBodyRefusals: a url that is not an expression, the retired
+// placeholder, an address that renders as something other than text, and a
+// body leaf that is not an expression are each refused before a request is
+// made, naming the spelling that works.
+func TestWebhookURLAndBodyRefusals(t *testing.T) {
+	e := newTestEngineForWebhook()
+	for _, tc := range []struct {
+		name string
+		h    *ToolHandler
+		want string
+	}{
+		{"a bare address", &ToolHandler{Type: "webhook", URL: "https://example.test/hook"}, `quote a fixed address, as in "https://example.test/hook"`},
+		{"the retired placeholder", &ToolHandler{Type: "webhook", URL: `"https://example.test/items/$args.id"`}, "$args.x is retired in edition 2026"},
+		{"an address that is not text", &ToolHandler{Type: "webhook", URL: "args.port"}, "not an address"},
+		{"a construct call", &ToolHandler{Type: "webhook", URL: `query everyone()`}, "constructCall"},
+		{"a body leaf that is not an expression", &ToolHandler{Type: "webhook", URL: fixedURL("http://93.184.216.34/x"), Body: map[string]any{"note": "hello world"}}, "a body leaf is an expression"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tool := &Tool{Name: "zzHook", Handler: tc.h}
+			_, err := e.ExecuteTool(agentCtxForTest(), tool, map[string]any{"id": "x", "port": float64(80)})
+			require.ErrorContains(t, err, tc.want)
+		})
+	}
+}
+
+// TestWebhookURLIsParsedAtLoad: a webhook declared in `.memql` parses its url
+// when it loads -- a registry clone keeps the parse -- and a url that is not
+// an expression refuses the load rather than the first call.
+func TestWebhookURLIsParsedAtLoad(t *testing.T) {
+	decl := func(url string) string {
+		return "/// probe\n@handler(type=\"webhook\", url=" + languageParser.QuoteString(url) + ", method=\"post\")\ntool zzHook {\n  id string @description(\"d\")\n}\n"
+	}
+	d, err := languageParser.ParseToolDecl(decl(`"https://example.test/items/" + args.id`))
+	require.NoError(t, err)
+	tools, err := toolDeclToTool(d, "probe.memql")
+	require.NoError(t, err)
+	require.NotNil(t, tools[0].Handler.urlV1, "parsed once, at load")
+	registry := newToolRegistry()
+	require.NoError(t, registry.Upsert(tools[0]))
+	got, err := registry.Get("zzHook")
+	require.NoError(t, err)
+	require.Same(t, tools[0].Handler.urlV1, got.Handler.urlV1, "a registry clone shares the parse")
+	url, err := got.Handler.webhookURL(context.Background(), map[string]any{"id": "i-1"})
+	require.NoError(t, err)
+	require.Equal(t, "https://example.test/items/i-1", url)
+
+	for src, want := range map[string]string{
+		"https://example.test/hook":     "is an expression in edition 2026",
+		"https://example.test/$args.id": "$args.x is retired in edition 2026",
+	} {
+		d, err := languageParser.ParseToolDecl(decl(src))
+		require.NoError(t, err)
+		_, err = toolDeclToTool(d, "probe.memql")
+		require.ErrorContains(t, err, want, src)
 	}
 }
 
@@ -197,7 +270,7 @@ func TestExecuteWebhookHTTPError(t *testing.T) {
 		Name: "testError",
 		Handler: &ToolHandler{
 			Type:   "webhook",
-			URL:    srv.URL,
+			URL:    fixedURL(srv.URL),
 			Method: "POST",
 		},
 	}
@@ -227,7 +300,7 @@ func TestExecuteWebhookCustomHeaders(t *testing.T) {
 		Name: "testHeaders",
 		Handler: &ToolHandler{
 			Type:   "webhook",
-			URL:    srv.URL,
+			URL:    fixedURL(srv.URL),
 			Method: "GET",
 			Headers: map[string]string{
 				"Authorization": "Bearer test-token",
@@ -259,7 +332,7 @@ func TestExecuteWebhookHostAllowlist(t *testing.T) {
 		Name: "testAllowed",
 		Handler: &ToolHandler{
 			Type:   "webhook",
-			URL:    srv.URL + "/test",
+			URL:    fixedURL(srv.URL + "/test"),
 			Method: "GET",
 		},
 	}
@@ -281,7 +354,7 @@ func TestExecuteWebhookHostAllowlist(t *testing.T) {
 		Name: "testBlocked",
 		Handler: &ToolHandler{
 			Type:   "webhook",
-			URL:    "http://93.184.216.34/test",
+			URL:    fixedURL("http://93.184.216.34/test"),
 			Method: "GET",
 		},
 	}
@@ -351,7 +424,7 @@ func TestExecuteWebhookDefaultMethodPOST(t *testing.T) {
 		Name: "testDefaultMethod",
 		Handler: &ToolHandler{
 			Type: "webhook",
-			URL:  srv.URL,
+			URL:  fixedURL(srv.URL),
 			// Method intentionally empty -- should default to POST.
 		},
 	}

@@ -13,7 +13,7 @@
 // asking callers to be careful is not.
 //
 // `subscriberFull` carries the @pii billing address, which is why every query
-// binding it names ownerUserId==actor.userId as a top-level conjunct -- the
+// binding it names `row.ownerUserId == actor.userId` as a top-level conjunct -- the
 // projection gate (memql#2883) requires a caller constraint from any query
 // projecting a PII-marked field, whatever the filter otherwise says.
 

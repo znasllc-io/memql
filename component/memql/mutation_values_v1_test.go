@@ -16,21 +16,20 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/literalparity"
 )
 
 // mutation_values_v1_test.go pins the edition-2026 mutation values (epic
 // memql#5363, memql#5367): a mutation whose insert/update block and slots
 // are parsed v1 nodes, rendered by EvalExpr (mutation_values_v1.go).
 //
-// The parser option that makes the loader build these templates for the
-// tree lands separately, so every template here is built the way that
-// option will build it: the block and the slots are parsed with
-// languageParser.ParseV1Expression and handed to newMutationTemplateV1.
+// Every template here is built the way the loader builds one: the block and
+// the slots are parsed with languageParser.ParseV1Expression and handed to
+// newMutationTemplateV1.
 //
-// Where a test is the twin of a pinned test of the string half, it names
-// it, and where the v1 table deliberately answers differently it says so at
-// the assertion. The legacy tests stay as they are: the string half renders
-// the tree until the flip.
+// Several tests below replaced a pinned test of the string evaluator the
+// flip deleted; each names the file it replaced, and where the v1 table
+// deliberately answers differently it says so at the assertion.
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -75,7 +74,6 @@ func mustV1Mutation(t *testing.T, concept string, src v1MutationSrc) *FunctionMu
 	t.Helper()
 	tmpl, err := buildV1Mutation(t, concept, src)
 	require.NoError(t, err)
-	require.True(t, tmpl.ValuesV1)
 	return tmpl
 }
 
@@ -227,7 +225,7 @@ func TestMutationValuesV1RenderingMatrix(t *testing.T) {
 }
 
 // TestMutationValuesV1NowIsOneClock: every `now` in one call reads one
-// instant, formatted RFC3339Nano UTC, as the string half's single e.now did.
+// instant, formatted RFC3339Nano UTC.
 func TestMutationValuesV1NowIsOneClock(t *testing.T) {
 	tmpl := mustV1Mutation(t, "v1:notes:note", v1MutationSrc{
 		block:     `{updatedAt: now, seenAt: args.seenAt ?? now, label: "now"}`,
@@ -378,22 +376,46 @@ func TestNewMutationTemplateV1RefusesADuplicateKey(t *testing.T) {
 	require.ErrorContains(t, err, `field "a" is written twice`)
 }
 
-// TestNewMutationTemplateV1RefusesANodeOutsideV1: a legacy node reaching the
-// v1 builder is a wiring defect, refused rather than rendered by guesswork.
+// TestNewMutationTemplateV1RefusesANodeOutsideV1: a node of the internal query
+// form reaching the builder is a wiring defect, refused rather than rendered by
+// guesswork.
 func TestNewMutationTemplateV1RefusesANodeOutsideV1(t *testing.T) {
 	_, err := newMutationTemplateV1("", "v1:x:y", nil, mutationSlotsV1{ID: &languageParser.ArgRefExpr{Path: "id"}})
 	require.ErrorContains(t, err, "not an edition-2026 expression node")
 }
 
+// TestAStatementTheGrammarDidNotParseIsRefused: a mutation statement whose
+// block is still text -- parsed without the edition-2026 grammar -- is
+// refused. There is no second evaluator to hand it to, and the builder would
+// otherwise read the missing block as an empty payload and write a row that
+// carries none of the fields the author wrote.
+func TestAStatementTheGrammarDidNotParseIsRefused(t *testing.T) {
+	_, err := mutationTemplateFromStmtV1(&languageParser.MutationStmt{
+		Kind:       ast.MutationKindInsert,
+		PayloadRaw: `{ name: args.name }`,
+	}, "v1:x:y")
+	require.ErrorContains(t, err, "was not parsed with the edition-2026 grammar")
+
+	// The same statement parsed is built.
+	tmpl, err := mutationTemplateFromStmtV1(&languageParser.MutationStmt{
+		Kind:        ast.MutationKindInsert,
+		PayloadRaw:  `{name: args.name}`,
+		PayloadExpr: v1Expr(t, `{name: args.name}`),
+	}, "v1:x:y")
+	require.NoError(t, err)
+	require.Contains(t, tmpl.PayloadTemplate, "name")
+}
+
 // ---------------------------------------------------------------------------
-// twins of the string half's pinned tests
+// the properties the string evaluator's pinned tests held
 // ---------------------------------------------------------------------------
 
-// TestMutationValuesV1TernaryComparison is the twin of
-// cond_quoted_string_3618_test.go: `cond(p, a, b)` is `p ? a : b` in v1, and a
-// quoted literal compares as its content (the lexer decoded it). Two of the
-// legacy rows answer differently BY DESIGN (D8, no truthiness, and no bare
-// name that is not bound), and are asserted below the table.
+// TestMutationValuesV1TernaryComparison replaced
+// cond_quoted_string_3618_test.go and binarycomparison_template_eval_test.go:
+// `cond(p, a, b)` is `p ? a : b` in v1, and a quoted literal compares as its
+// content (the lexer decoded it). Two of the old rows answer differently BY
+// DESIGN (D8, no truthiness, and no bare name that is not bound), and are
+// asserted below the table.
 func TestMutationValuesV1TernaryComparison(t *testing.T) {
 	args := map[string]any{"s": "active", "other": "active", "n": int64(5), "blank": ""}
 	for _, tc := range []struct {
@@ -426,21 +448,21 @@ func TestMutationValuesV1TernaryComparison(t *testing.T) {
 		})
 	}
 
-	// CHANGED (D8): a string is not a condition. The string half read
+	// CHANGED (D8): a string is not a condition. The string evaluator read
 	// `cond(args.s, ...)` for truthiness and took the THEN branch.
 	_, _, err := v1ValueOf(t, context.Background(), `args.s ? "T" : "F"`, args)
 	require.ErrorContains(t, err, "condition_not_boolean")
 
 	// CHANGED: `args.s == active` compared against the literal text
-	// "active" in the string half; in v1 `active` is a name, unbound here,
-	// and refused where the tree is read.
+	// "active" in the string evaluator; in v1 `active` is a name, unbound
+	// here, and refused where the tree is read.
 	_, _, err = v1ValueOf(t, context.Background(), `args.s == active ? "T" : "F"`, args)
 	require.ErrorContains(t, err, "reads `active`")
 }
 
-// TestMutationValuesV1BooleanIsNotTruthy is the twin of
+// TestMutationValuesV1BooleanIsNotTruthy replaced
 // TestTruthinessBlastRadius_MutationTemplateConditional. CHANGED (D8): the
-// string half read the historically-permissive values through IsTruthy
+// string evaluator read the historically-permissive values through IsTruthy
 // ("false", "0", 0, [] and {} false; a non-empty string true); v1 has no
 // truthiness, so each is REFUSED as a condition rather than read as one --
 // the fail-closed answer to a question the value cannot answer.
@@ -479,44 +501,51 @@ func TestMutationValuesV1BooleanIsNotTruthy(t *testing.T) {
 	}
 }
 
-// TestMutationValuesV1CoalesceIsTheOneSelectionRule is the twin of
-// coalesce_array_missing_3627_test.go: `??` is blank-coalescing, and the v1
-// spelling selects exactly what the string half's coalesce() selects for the
-// same inputs -- both are driven through coalesceSelect.
+// TestMutationValuesV1CoalesceIsTheOneSelectionRule replaced
+// coalesce_array_missing_3627_test.go: `??` is BLANK-coalescing, and every
+// chain selects through coalesceSelect. The expected values are the ones the
+// string evaluator's coalesce() selected for the same inputs, measured before
+// the flip deleted it, so the operator's meaning did not move with it.
+//
+// Blank-coalescing is pinned rather than changed (memql#1614, memql#3627):
+// `f: args.f ?? ""` has to be able to land an explicit empty instead of a
+// schema-failing null, and @noUnset (memql#3415) is the targeted opt-out for a
+// field a caller must not be able to blank.
 func TestMutationValuesV1CoalesceIsTheOneSelectionRule(t *testing.T) {
 	for _, tc := range []struct {
-		v1, legacy string
-		args       map[string]any
+		name string
+		src  string
+		args map[string]any
+		want any
 	}{
-		{`args.a ?? "" ?? args.c`, `coalesce(args.a, "", args.c)`, map[string]any{}},
-		{`args.a ?? "" ?? args.c`, `coalesce(args.a, "", args.c)`, map[string]any{"c": "C"}},
-		{`args.a ?? ""`, `coalesce(args.a, "")`, map[string]any{}},
-		{`args.a ?? "B" ?? "C"`, `coalesce(args.a, "B", "C")`, map[string]any{}},
-		{`args.a ?? "B"`, `coalesce(args.a, "B")`, map[string]any{"a": "A"}},
-		{`args.a ?? "B"`, `coalesce(args.a, "B")`, map[string]any{"a": "  "}},
-		{`args.a ?? args.b`, `coalesce(args.a, args.b)`, map[string]any{}},
-		{`args.v ?? "DEFAULT"`, `coalesce(args.v, "DEFAULT")`, map[string]any{"v": "\t\n"}},
-		{`args.v ?? "DEFAULT"`, `coalesce(args.v, "DEFAULT")`, map[string]any{"v": false}},
-		{`args.v ?? "DEFAULT"`, `coalesce(args.v, "DEFAULT")`, map[string]any{"v": int64(0)}},
+		{"blank middle arm, nothing else resolves", `args.a ?? "" ?? args.c`, map[string]any{}, nil},
+		{"blank middle arm, a later arm wins", `args.a ?? "" ?? args.c`, map[string]any{"c": "C"}, "C"},
+		{"a blank final arm is the default", `args.a ?? ""`, map[string]any{}, ""},
+		{"the first non-blank arm wins", `args.a ?? "B" ?? "C"`, map[string]any{}, "B"},
+		{"a present value wins", `args.a ?? "B"`, map[string]any{"a": "A"}, "A"},
+		{"a blank present value is skipped", `args.a ?? "B"`, map[string]any{"a": "  "}, "B"},
+		{"all arms missing", `args.a ?? args.b`, map[string]any{}, nil},
+		{"an empty string is rewritten", `args.v ?? "DEFAULT"`, map[string]any{"v": ""}, "DEFAULT"},
+		{"a single space is rewritten", `args.v ?? "DEFAULT"`, map[string]any{"v": " "}, "DEFAULT"},
+		{"a tab and a newline are rewritten", `args.v ?? "DEFAULT"`, map[string]any{"v": "\t\n"}, "DEFAULT"},
+		{"false is kept", `args.v ?? "DEFAULT"`, map[string]any{"v": false}, false},
+		{"zero is kept", `args.v ?? "DEFAULT"`, map[string]any{"v": int64(0)}, float64(0)},
+		{"an empty list is kept", `args.v ?? "DEFAULT"`, map[string]any{"v": []any{}}, []any{}},
+		{"an empty object is kept", `args.v ?? "DEFAULT"`, map[string]any{"v": map[string]any{}}, map[string]any{}},
+		{"a non-blank string wins", `args.v ?? "DEFAULT"`, map[string]any{"v": "value"}, "value"},
 	} {
-		t.Run(tc.v1, func(t *testing.T) {
-			legacy, err := (&mutationTemplateEvaluator{args: tc.args}).evalString(context.Background(), tc.legacy)
-			require.NoError(t, err)
-			got, present, err := v1ValueOf(t, context.Background(), tc.v1, tc.args)
+		t.Run(tc.name, func(t *testing.T) {
+			got, present, err := v1ValueOf(t, context.Background(), tc.src, tc.args)
 			require.NoError(t, err)
 			require.True(t, present, "a ?? chain always yields a value (nil for an all-missing chain)")
-			// JSON round trip on both sides: the payload is JSON.
-			raw, err := json.Marshal(legacy)
-			require.NoError(t, err)
-			var want any
-			require.NoError(t, json.Unmarshal(raw, &want))
-			require.Equal(t, want, got, "v1 %s and legacy %s select differently (memql#3627)", tc.v1, tc.legacy)
+			require.Equal(t, tc.want, got, "%s with %v (memql#3627)", tc.src, tc.args)
 		})
 	}
 }
 
-// TestMutationValuesV1ListOmitsMissingKeepsNil is the twin of
-// TestArrayLiteral_OmitsMissingArgs and TestArrayLiteral_KeepsExplicitNull.
+// TestMutationValuesV1ListOmitsMissingKeepsNil replaced
+// TestArrayLiteral_OmitsMissingArgs and TestArrayLiteral_KeepsExplicitNull:
+// one notion of missing per engine, not one per container (memql#3627).
 func TestMutationValuesV1ListOmitsMissingKeepsNil(t *testing.T) {
 	tmpl := mustV1Mutation(t, "v1:cognition:space", v1MutationSrc{block: `{v: [args.a, args.b, "c"], w: [nil, args.b]}`})
 	_, payload := renderV1Payload(t, &MemQLEngine{}, context.Background(), tmpl, map[string]any{"b": "B"})
@@ -525,10 +554,10 @@ func TestMutationValuesV1ListOmitsMissingKeepsNil(t *testing.T) {
 }
 
 // TestMutationValuesV1OverlayOmitsAMissingArgument pins the container rule on
-// the overlay. CHANGED: the string half wrote its missing sentinel into the
-// overlay unchecked, and the sentinel marshals as `{}` -- so
+// the overlay. CHANGED: the string evaluator wrote its missing sentinel into
+// the overlay unchecked, and the sentinel marshals as `{}` -- so
 // `{payload: args.payload, note: args.note}` without a note stored
-// `"note": {}`, an object nobody sent (measured on this branch). In v1 the
+// `"note": {}`, an object nobody sent (measured before the flip). In v1 the
 // missing argument omits its key and the splat's own value stands.
 func TestMutationValuesV1OverlayOmitsAMissingArgument(t *testing.T) {
 	tmpl := mustV1Mutation(t, "v1:x:y", v1MutationSrc{
@@ -544,9 +573,10 @@ func TestMutationValuesV1OverlayOmitsAMissingArgument(t *testing.T) {
 	require.Equal(t, "forged", caller["ownerUserId"], "rendering must not write into the caller's own map")
 }
 
-// TestMutationValuesV1ActorInsideACall is the twin of
-// actor_in_call_id_render_4746_test.go: an actor reference inside a call in
-// an id derivation renders, one person derives one id and two derive two.
+// TestMutationValuesV1ActorInsideACall replaced
+// actor_in_call_id_render_4746_test.go (memql#4746): an actor reference inside
+// a call in an id derivation renders, one person derives one id and two derive
+// two.
 func TestMutationValuesV1ActorInsideACall(t *testing.T) {
 	tmpl := mustV1Mutation(t, "v1:os:desktop", v1MutationSrc{id: `"desktop-" + hash(actor.userId)`, block: `{a: 1}`})
 	derive := func(user string) string {
@@ -560,20 +590,21 @@ func TestMutationValuesV1ActorInsideACall(t *testing.T) {
 	require.Equal(t, first, derive("user-abc"), "one person, one id")
 	require.NotEqual(t, first, derive("user-xyz"), "two people, two ids")
 
-	// An unknown actor path refuses at LOAD in v1 (the string half refused
-	// it at render); the render-time refusal is still there as the backstop
-	// for a template built past the check.
+	// An unknown actor path refuses at LOAD in v1 (the string evaluator
+	// refused it at render); the render-time refusal is still there as the
+	// backstop for a template built past the check.
 	_, err := buildV1Mutation(t, "v1:os:desktop", v1MutationSrc{id: `hash(actor.notAField)`})
 	require.ErrorContains(t, err, "actor.notAField is not a field")
-	past := &FunctionMutationTemplate{Concept: "v1:os:desktop", ValuesV1: true, IDTemplate: v1Expr(t, `hash(actor.notAField)`), PayloadTemplate: map[string]any{}}
+	past := &FunctionMutationTemplate{Concept: "v1:os:desktop", IDTemplate: v1Expr(t, `hash(actor.notAField)`), PayloadTemplate: map[string]any{}}
 	_, err = (&MemQLEngine{}).renderMutationTemplate(auth.ContextWithUserActor(context.Background(), "u"), past, nil)
 	require.ErrorContains(t, err, "unsupported actor reference path")
 }
 
-// TestMutationValuesV1ShortIdInAnIdDerivation is the twin of
-// shortid_id_render_2925_test.go: shortId renders in an id slot, canonical and
-// bare derive one id, it is a no-op on a bare id, and the separator aliasing
-// is still live at the evaluator (it is closed at the argument boundary).
+// TestMutationValuesV1ShortIdInAnIdDerivation holds what the evaluator half of
+// shortid_id_render_2925_test.go pinned (memql#2925): shortId renders in an id
+// slot, canonical and bare derive one id, it is a no-op on a bare id, and the
+// separator aliasing is still live at the evaluator (it is closed at the
+// argument boundary, TestNodeTypePatternClosesTheSeparatorAliasing).
 func TestMutationValuesV1ShortIdInAnIdDerivation(t *testing.T) {
 	derive := func(dep, node string, normalise bool) string {
 		fk := "args.deploymentId"
@@ -595,9 +626,9 @@ func TestMutationValuesV1ShortIdInAnIdDerivation(t *testing.T) {
 	require.Equal(t, "abc123", got)
 }
 
-// TestMutationValuesV1HashIsFixedWidth is the twin of
-// hash_fixed_width_test.go: hash() of every input, a missing one included,
-// is 64 characters, so an absent part cannot alias a composite id.
+// TestMutationValuesV1HashIsFixedWidth holds the mutation half of
+// hash_fixed_width_test.go (memql#3009): hash() of every input, a missing one
+// included, is 64 characters, so an absent part cannot alias a composite id.
 func TestMutationValuesV1HashIsFixedWidth(t *testing.T) {
 	args := map[string]any{"present": "x", "action": map[string]any{"type": "chat"}}
 	for _, src := range []string{`hash(args.present)`, `hash(args.absent)`, `hash(args.action.type)`, `hash(args.action.idempotencyKey)`, `hash("")`} {
@@ -612,10 +643,9 @@ func TestMutationValuesV1HashIsFixedWidth(t *testing.T) {
 	require.NotEqual(t, first, second, "(absent, x) and (x, absent) must derive two ids (memql#3009)")
 }
 
-// TestMutationValuesV1CoalesceInAnIdSlot is the twin of
-// TestIdTemplateCoalesce_*: a blank non-final arm is skipped, the final arm
-// is the fallback even when blank, and an all-missing chain is nil (so the
-// engine mints an id, as the string half's AST path did).
+// TestMutationValuesV1CoalesceInAnIdSlot replaced TestIdTemplateCoalesce_*: a
+// blank non-final arm is skipped, the final arm is the fallback even when
+// blank, and an all-missing chain is nil (so the engine mints an id).
 func TestMutationValuesV1CoalesceInAnIdSlot(t *testing.T) {
 	tmpl := mustV1Mutation(t, "v1:rbac:role", v1MutationSrc{id: `args.roleId ?? args.slug`, block: `{a: 1}`})
 	id := func(args map[string]any) string {
@@ -628,9 +658,9 @@ func TestMutationValuesV1CoalesceInAnIdSlot(t *testing.T) {
 	require.Equal(t, "", id(map[string]any{}), "an all-missing chain is no id, and the engine mints one")
 }
 
-// TestMutationValuesV1NullCoalesceShapes is the twin of
-// null_coalesce_payload_test.go's value shapes: a `??` arm that is an object
-// or a list literal renders, and a `??` inside a string is data.
+// TestMutationValuesV1NullCoalesceShapes replaced null_coalesce_payload_test.go:
+// a `??` arm that is an object or a list literal renders, and a `??` inside a
+// string is data.
 func TestMutationValuesV1NullCoalesceShapes(t *testing.T) {
 	tmpl := mustV1Mutation(t, "v1:x:y", v1MutationSrc{block: `{
 		labels: args.labels ?? {},
@@ -650,17 +680,58 @@ func TestMutationValuesV1NullCoalesceShapes(t *testing.T) {
 	require.NoError(t, err)
 
 	// A malformed `??` never reaches the builder: the v1 parser refuses it
-	// (the string half needed a sentinel and a load-time sweep for it).
+	// (the string evaluator needed a sentinel and a load-time sweep for it).
 	for _, src := range []string{`{active: args.a ?? }`, `{active: args.a ?? ?? args.b}`, `{tags: [args.a ??]}`} {
 		_, err := languageParser.ParseV1Expression(src)
 		require.Errorf(t, err, "%s must not parse", src)
 	}
 }
 
-// TestMutationValuesV1MalformedLiteralsRefuseAndTerminate is the twin of
-// mutation_templates_no_progress_test.go: every unbalanced literal that hung
-// the string half's hand-rolled scanner is refused by the v1 parser, and in
-// bounded time.
+// v1ParseDeadline is the watchdog window for a parse that must terminate,
+// shared with the two remaining copies of the retired payload-literal
+// scanner; see literalparity.ParserDeadline for the value and the
+// measurements behind it.
+const v1ParseDeadline = literalparity.ParserDeadline
+
+// v1ParseLeaked latches once a case abandons a non-terminating goroutine, so
+// every later case skips rather than adding another spinner to race the
+// runner's memory limit. Tests in this package run sequentially and t.Run
+// blocks until the subtest returns, so a plain bool needs no synchronisation.
+var v1ParseLeaked bool
+
+// mustTerminate runs fn and reports whether it returned in time. It returns
+// a bool rather than failing the test itself, and every caller STOPS its loop
+// on false: a leaked spinner is an unbounded allocation, and `t.Fatalf` inside
+// a `t.Run` subtest aborts only that SUBTEST, so the parent's loop would start
+// the next case -- a first cut of this helper measured 8 concurrent spinners at
+// 23 GiB peak RSS, an OOM-killed job with a truncated log instead of a
+// readable red test (memql#2785, memql#2835).
+func mustTerminate(t *testing.T, name string, fn func()) bool {
+	t.Helper()
+	if v1ParseLeaked {
+		t.Skipf("skipped: an earlier case left a non-terminating goroutine running; "+
+			"fix that one first (%s)", name)
+		return false
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fn()
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(v1ParseDeadline):
+		v1ParseLeaked = true
+		t.Errorf("%s did not terminate within %s -- the parser loop is not making progress", name, v1ParseDeadline)
+		return false
+	}
+}
+
+// TestMutationValuesV1MalformedLiteralsRefuseAndTerminate replaced
+// mutation_templates_no_progress_test.go (memql#2785): every unbalanced
+// literal that hung the string evaluator's hand-rolled scanner is refused by
+// the v1 parser, and in bounded time.
 func TestMutationValuesV1MalformedLiteralsRefuseAndTerminate(t *testing.T) {
 	for _, src := range []string{
 		"[}{]", "[}]", "[ } { ]", "[a, }{]", "[[}{]]", `["ok", }{]`, "[]]", "[{]", `["unterminated]`, "[[)]",
@@ -678,9 +749,9 @@ func TestMutationValuesV1MalformedLiteralsRefuseAndTerminate(t *testing.T) {
 	}
 }
 
-// TestMutationValuesV1ActorUserIdNeedsACaller is the twin of the write half
-// of actor_userid_no_caller_3620_test.go, over createWorkRun's insert block
-// as it reads in edition 2026.
+// TestMutationValuesV1ActorUserIdNeedsACaller pins the write half of
+// actor_userid_no_caller_3620_test.go (memql#3620) over createWorkRun's insert
+// block as it reads in edition 2026.
 func TestMutationValuesV1ActorUserIdNeedsACaller(t *testing.T) {
 	tmpl := mustV1Mutation(t, "v1:work:run", v1MutationSrc{block: `{
 		goalId: args.goalId, automationName: args.automationName,
@@ -742,7 +813,7 @@ func TestMutationValuesV1ActorIsReadLazily(t *testing.T) {
 }
 
 // TestMutationValuesV1SlotsTakeText: an id is text. CHANGED: a list or a map
-// in an id slot is refused; the string half wrote Go's own "%v" of it.
+// in an id slot is refused; the string evaluator wrote Go's own "%v" of it.
 func TestMutationValuesV1SlotsTakeText(t *testing.T) {
 	tmpl := mustV1Mutation(t, "v1:x:y", v1MutationSrc{id: `args.id`, block: `{a: 1}`})
 	for _, tc := range []struct {
@@ -764,41 +835,13 @@ func TestMutationValuesV1SlotsTakeText(t *testing.T) {
 }
 
 // TestMutationValuesV1SplatMustBeAnObject: the splat evaluates to an object
-// or the render refuses, as the string half's did.
+// or the render refuses.
 func TestMutationValuesV1SplatMustBeAnObject(t *testing.T) {
 	tmpl := mustV1Mutation(t, "v1:x:y", v1MutationSrc{block: `{payload: args.payload}`, id: `args.id`})
 	_, err := (&MemQLEngine{}).renderMutationTemplate(context.Background(), tmpl, map[string]any{"id": "x"})
 	require.ErrorContains(t, err, "payload must evaluate to an object")
 	_, err = (&MemQLEngine{}).renderMutationTemplate(context.Background(), tmpl, map[string]any{"id": "x", "payload": "text"})
 	require.ErrorContains(t, err, "payload must evaluate to an object")
-}
-
-// TestMutationValuesV1AgreesWithTheStringHalf renders one template through
-// both renderers -- the legacy layout the loader builds today and the v1
-// layout newMutationTemplateV1 builds -- over the values both spell the same
-// way, and requires one payload. It is the evidence that the flip changes no
-// stored row for these shapes.
-func TestMutationValuesV1AgreesWithTheStringHalf(t *testing.T) {
-	legacy, err := parsePayloadRawToTemplate(`{
-		name: args.name, status: "active", active: true, count: 3,
-		description: args.description, tags: [args.a, args.b, "c"],
-		meta: {kind: args.kind, note: coalesce(args.note, "none")},
-		mode: args.mode ?? "live", ref: concat("r-", hash(args.name))
-	}`)
-	require.NoError(t, err)
-	v1 := mustV1Mutation(t, "v1:x:y", v1MutationSrc{block: `{
-		name: args.name, status: "active", active: true, count: 3,
-		description: args.description, tags: [args.a, args.b, "c"],
-		meta: {kind: args.kind, note: args.note ?? "none"},
-		mode: args.mode ?? "live", ref: "r-" + hash(args.name)
-	}`})
-	args := map[string]any{"name": "N", "b": "B", "kind": "k"}
-	e := &MemQLEngine{}
-	wantNode, err := e.renderMutationTemplate(context.Background(), &FunctionMutationTemplate{Concept: "v1:x:y", PayloadTemplate: legacy}, args)
-	require.NoError(t, err)
-	gotNode, err := e.renderMutationTemplate(context.Background(), v1, args)
-	require.NoError(t, err)
-	require.JSONEq(t, wantNode.PayloadRaw, gotNode.PayloadRaw)
 }
 
 // TestExprMembersIsAskedOnlyForTheReadsThatHappen pins the EvalExpr hook the
@@ -862,13 +905,13 @@ func TestMutationValuesV1CheckReachesEveryPositiveShape(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// the layout gates read a v1 leaf
+// the layout gates read a parsed leaf
 // ---------------------------------------------------------------------------
 
-// TestMutationValuesV1CallerArgGate: C5 (memql#2035) refuses a v1 mutation
-// that writes an @internal or @serverSet field from caller args, exactly as
-// it refuses the string half's -- without the v1 reading it would pass every
-// v1 mutation, finding no "args." text in a parsed leaf.
+// TestMutationValuesV1CallerArgGate: C5 (memql#2035) refuses a mutation that
+// writes an @internal or @serverSet field from caller args -- a gate that
+// looked for "args." text would pass every mutation, finding no text in a
+// parsed leaf.
 func TestMutationValuesV1CallerArgGate(t *testing.T) {
 	concept := mustConcept(t, `
 concept Space {
@@ -891,9 +934,9 @@ concept Space {
 	err = validateMutationCallerArgs(reg, "v1:cognition:space", "mutGood", layout(`{name: args.name, status: "active", secretSalt: actor.userId}`))
 	require.NoError(t, err, "public from args and sensitive from a literal or the actor are allowed")
 
-	// The leaf test is the one the string half applied: a value that IS a
+	// The leaf test is the one the text gate applied: a value that IS a
 	// caller argument. A quoted "args.status" is a literal in v1 -- the
-	// string half could not tell the two apart.
+	// string evaluator could not tell the two apart.
 	err = validateMutationCallerArgs(reg, "v1:cognition:space", "mutQuoted", layout(`{status: "args.status"}`))
 	require.NoError(t, err)
 }
@@ -952,47 +995,30 @@ func TestMutationValuesV1OwnerProvenance(t *testing.T) {
 }
 
 // TestMutationValuesV1HashInASlotIsFixedWidth pins the one hash rule in the
-// id / createdAt / parent / aliasOf slots too. CHANGED: those slots were the
-// string half's lowered-AST path, whose hash() of a missing value returned ""
-// -- zero width, so `id: hash(args.missing)` minted a random id on every call
-// and a composite `hash(hash(a) + hash(b))` with a missing part aliased
-// (memql#3009's hazard, live in the one position it was about; measured on
-// this branch). The payload path already hashed "". In v1 every position
-// hashes a missing value as "" -- 64 characters -- so an id derived from a
-// missing OPTIONAL part is now deterministic. For a required part (every
-// per-part hashed id in the tree today) the derived id is byte-identical.
+// id / createdAt / parent / aliasOf slots too. CHANGED: before the flip those
+// slots were rendered by a lowered-AST path whose hash() of a missing value
+// returned "" -- zero width, so `id: hash(args.missing)` minted a random id on
+// every call and a composite `hash(hash(a) + hash(b))` with a missing part
+// aliased (memql#3009's hazard, live in the one position it was about;
+// measured before the flip). In v1 every position hashes a missing value as
+// "" -- 64 characters -- so an id derived from a missing OPTIONAL part is
+// deterministic. For a required part (every per-part hashed id in the tree)
+// the derived id is the one the old path derived, byte for byte, which the
+// literal digest below pins.
 func TestMutationValuesV1HashInASlotIsFixedWidth(t *testing.T) {
 	tmpl := mustV1Mutation(t, "v1:x:y", v1MutationSrc{id: `hash(args.absent)`, block: `{a: 1}`})
 	node, err := (&MemQLEngine{}).renderMutationTemplate(context.Background(), tmpl, nil)
 	require.NoError(t, err)
 	require.Equal(t, sha256Hex(""), node.ID)
 
-	legacy, err := (&MemQLEngine{}).renderMutationTemplate(context.Background(), &FunctionMutationTemplate{
-		Concept:         "v1:x:y",
-		IDTemplate:      &languageParser.HashExpr{Target: &languageParser.ArgRefExpr{Path: "absent"}},
-		PayloadTemplate: map[string]any{},
-	}, nil)
-	require.NoError(t, err)
-	require.Equal(t, "", legacy.ID, "the string half's slot path: zero width, then a minted id")
-
-	// Required parts: one id under both renderers.
 	parts := map[string]any{"a": "x", "b": "y"}
 	v1 := mustV1Mutation(t, "v1:x:y", v1MutationSrc{id: `hash(hash(args.a) + hash(args.b))`, block: `{a: 1}`})
-	gotV1, err := (&MemQLEngine{}).renderMutationTemplate(context.Background(), v1, parts)
+	got, err := (&MemQLEngine{}).renderMutationTemplate(context.Background(), v1, parts)
 	require.NoError(t, err)
-	gotLegacy, err := (&MemQLEngine{}).renderMutationTemplate(context.Background(), &FunctionMutationTemplate{
-		Concept: "v1:x:y",
-		IDTemplate: &languageParser.HashExpr{Target: &languageParser.ConcatExpr{Args: []languageParser.ExpressionNode{
-			&languageParser.HashExpr{Target: &languageParser.ArgRefExpr{Path: "a"}},
-			&languageParser.HashExpr{Target: &languageParser.ArgRefExpr{Path: "b"}},
-		}}},
-		PayloadTemplate: map[string]any{},
-	}, parts)
-	require.NoError(t, err)
-	require.Equal(t, gotLegacy.ID, gotV1.ID)
+	require.Equal(t, sha256Hex(sha256Hex("x")+sha256Hex("y")), got.ID, "a composite of required parts derives the id it always has")
 }
 
-// TestMutationValuesV1PlusIsNotConcat records where `+` and the string half's
+// TestMutationValuesV1PlusIsNotConcat records where `+` and the retired
 // concat() part ways. `+` is concatenation when EITHER side is a string (so
 // the codemod's concat(a, b) -> a + b is exact whenever the call has a
 // string operand, as every concat in the tree does); with no string operand

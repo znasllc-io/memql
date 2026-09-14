@@ -20,7 +20,7 @@ tool describeFunction {
 // Search for users in the system.
 
 // Pagination (epic #1964 / memql#1975): the dynamic `limit` bound is applied
-// HERE by the handler's outer paginate($args.limit) wrapper. The inner
+// HERE by the handler's outer paginate(..., args.limit) wrapper. The inner
 // searchUsers therefore declares ONLY `sort` (deterministic, keyset-
 // eligible order) and NO inner `paginate` -- two nested paginate() directives
 // are rejected by the engine ("multiple paginate() directives are not

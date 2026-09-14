@@ -4,10 +4,11 @@
 // story of this domain:
 //
 //   CALLER-SCOPED (everything except the two tier reads). Every filter names
-//   ownerUserId==actor.userId as a TOP-LEVEL conjunct -- never inside a when()
-//   guard, never as one arm of an ||. That placement is the gate: a guarded
-//   conjunct VANISHES when its argument is absent, which is exactly how a query
-//   that reads as scoped comes to return the whole table (memql#2883). No
+//   `row.ownerUserId == actor.userId` as a TOP-LEVEL conjunct -- never inside
+//   an optional-argument guard (`args.x == nil || ...`), never as one arm of
+//   an ||. That placement is the gate: a guarded conjunct VANISHES when its
+//   argument is unset, which is exactly how a query that reads as scoped
+//   comes to return the whole table (memql#2883). No
 //   argument in this file can widen the row set past the caller's own rows,
 //   which is what makes task memql#3855's "cross-tenant reads impossible"
 //   true of the server rather than of the console.
@@ -81,7 +82,7 @@ query subscriber mySubscriber {
 }
 
 /// The caller's subscriptions, newest first. Owned: the row set is gated by
-/// ownerUserId==actor.userId server-side. Optional status filter narrows to one lifecycle bucket.
+/// `row.ownerUserId == actor.userId` server-side. Optional status filter narrows to one lifecycle bucket.
 @actor
 query subscription mySubscriptions {
   args {
@@ -94,7 +95,7 @@ query subscription mySubscriptions {
 }
 
 /// One subscription by id, gated to its owner. Backs Orbit's plan panel. Owned --
-/// ownerUserId==actor.userId is the load-bearing guard, so a caller cannot read another account's
+/// `row.ownerUserId == actor.userId` is the load-bearing guard, so a caller cannot read another account's
 /// subscription even holding its id.
 @actor
 query subscription mySubscriptionById {

@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -85,9 +86,9 @@ func TestNegative_MalformedDeclBody(t *testing.T) {
 			func(s string) error { _, e := ParseProviderDecl(s); return e }},
 		{"policy", "@primary(\"x\")\npolicy p {\n", // unterminated brace
 			func(s string) error { _, e := ParsePolicyDecl(s); return e }},
-		{"spec", "@enabled\nspec activeRowTrait s {\n  return status ==== \"x\" &&&& true\n}\n",
+		{"spec", "@enabled\nspec activeRowTrait s = row => row.status ==== \"x\" &&&& true\n",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
-		{"trait", "@enabled\ntrait t {\n  return active ==== true\n}\n",
+		{"trait", "@enabled\ntrait t = row => row.active ==== true\n",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
 		{"seed", "seed agent sd {\n  name: @@@ broken !!!\n}\n",
 			func(s string) error { _, e := ParseSeedDecl(s); return e }},
@@ -128,10 +129,12 @@ func TestNegative_BodyRule(t *testing.T) {
 			"must not declare a `body { }` block")
 	})
 	t.Run("spec-with-body", func(t *testing.T) {
-		// Direct decl-parser site (spec): a body{} block is forbidden.
-		_, err := ParseSpecDecl("@enabled\nspec activeRowTrait s {\n  body { return active == true }\n}\n")
-		assertParseErr(t, "spec with body{}", err,
-			"must not declare a `body { }` block")
+		// Direct decl-parser site (spec). Edition 2026 has no braced spec, so
+		// a body{} block is refused as the retired braced form, at its `{`.
+		// memqlmigrate:keep -- the braced body is the case.
+		src := "@enabled\nspec activeRowTrait s {\n  body { return active == true }\n}\n"
+		_, err := ParseSpecDecl(src)
+		wantRetiredAt(t, err, ruleSpecReturnBody, src, "{\n  body", 1)
 	})
 }
 
@@ -261,6 +264,59 @@ func TestNegative_TrailingTokens(t *testing.T) {
 	})
 }
 
+// A spec or trait lambda is the one predicate clause no bracket or brace
+// closes, so its parse stops at the first token that cannot extend it: a word
+// the grammar does not know would end the predicate early and everything
+// after it would be dropped. That text is refused instead -- on the lambda's
+// own line in a file, anywhere after it in a slice -- at the token, naming
+// the operator an English connective stands for.
+func TestNegative_SpecLambdaRefusesWhatItWouldDrop(t *testing.T) {
+	cases := []struct {
+		name, src, want, at string
+		slice               bool
+	}{
+		{"`or` on the predicate's line, in a file", "spec thing s = row => row.a == 1 or row.b == 2\n", "`or` is not an operator: write `||`", "or", false},
+		{"`and` on the predicate's line, in a slice", "trait t = row => row.a == 1 and row.b == 2\n", "`and` is not an operator: write `&&`", "and", true},
+		{"a word on the next line, in a slice", "spec thing s = row => row.a == 1\n  bogus\n", "unexpected `bogus` after the spec \"s\"", "bogus", true},
+		{"a stray brace on the predicate's line, in a file", "spec thing s = row => row.a == 1 }\n", "unexpected `}` after the predicate of spec \"s\"", "}", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var err error
+			if tc.slice {
+				_, err = ParseSpecDecl(tc.src)
+			} else {
+				_, err = ParseFile(tc.src)
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want a refusal saying %q, got %v", tc.want, err)
+			}
+			var pe *ParseError
+			if !errors.As(err, &pe) {
+				t.Fatalf("the refusal carries no position: %v", err)
+			}
+			wantLine, wantCol := authoredAt(t, tc.src, tc.at, 1)
+			if line, col := pe.Position(); line != wantLine || col != wantCol {
+				t.Errorf("refused at %d:%d, want %d:%d, the %q", line, col, wantLine, wantCol, tc.at)
+			}
+		})
+	}
+	// A declaration that follows on a line of its own is not trailing text,
+	// and a predicate continued on the next line by an operator is one
+	// predicate.
+	for _, src := range []string{
+		"spec thing s = row => row.a == 1\ntrait t = row => row.b == 2\n",
+		"spec thing s = row => row.a == 1\n  || row.b == 2\n",
+	} {
+		if _, err := ParseFile(src); err != nil {
+			t.Errorf("%q: %v", src, err)
+		}
+	}
+	if decl, err := ParseSpecDecl("spec thing s = row => row.a == 1\n  || row.b == 2\n"); err != nil || decl.Lambda == nil {
+		t.Errorf("a continued predicate in a slice: %+v, %v", decl, err)
+	}
+}
+
 func TestNegative_WordLogicalOperators(t *testing.T) {
 	// The English `and` / `or` infix forms are not lexer keywords, so the parser
 	// rejects them (the EOF check / body parse trips). This is a parser-level
@@ -274,7 +330,7 @@ func TestNegative_WordLogicalOperators(t *testing.T) {
 		assertParseErr(t, "`or` infix", err)
 	})
 	t.Run("or-in-spec-body", func(t *testing.T) {
-		_, err := ParseSpecDecl("@enabled\nspec activeRowTrait s {\n  return a == 1 or b == 2\n}\n")
+		_, err := ParseSpecDecl("@enabled\nspec activeRowTrait s = row => row.a == 1 or row.b == 2\n")
 		assertParseErr(t, "`or` in spec body", err)
 	})
 }
@@ -296,6 +352,7 @@ func TestNegative_ErrorsCarryPosition(t *testing.T) {
 		},
 		"typo-top-level-keyword": func() error { _, e := ParseFile("@enabled\nconept foo { }"); return e },
 		"spec-body-block": func() error {
+			// memqlmigrate:keep -- the braced body is the case.
 			_, e := ParseSpecDecl("@enabled\nspec activeRowTrait s {\n  body { return active == true }\n}\n")
 			return e
 		},

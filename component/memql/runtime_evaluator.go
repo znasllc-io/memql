@@ -335,10 +335,11 @@ func (e *RuntimeEvaluator) EvaluateHash(str any) string {
 	//     reachable site is dsl/cognition/logic.memql, whose id parts are
 	//     event-payload fields that CAN be absent -- and logic evaluates
 	//     through here, not through the mutation-template evaluator.
-	//  2. The two evaluators disagreed. mutationTemplateEvaluator.evalHash
-	//     already normalises nil/missing to "" and returns 64 chars, so the
-	//     same authored `hash(x)` yielded different widths depending on which
-	//     construct it sat in. One rule for one builtin.
+	//  2. The two evaluators disagreed. The mutation-template evaluator's
+	//     hash() already normalised nil/missing to "" and returned 64 chars
+	//     (EvalExpr's does too), so the same authored `hash(x)` yielded
+	//     different widths depending on which construct it sat in. One rule
+	//     for one builtin.
 	//
 	// Empty-in-empty-out is deliberately NOT the convention here, unlike
 	// canonicalId/shortId: those pass a value through, while hash is a digest

@@ -9,7 +9,7 @@ use common.traits.{ identityIsApiKey, identityIsBadge, identityIsMagicLink, iden
 // ==========================================
 //
 // Both reads are OWNED, and owned twice over: the filters name
-// ownerUserId==actor.userId as a top-level conjunct, and the concept's
+// `row.ownerUserId == actor.userId` as a top-level conjunct, and the concept's
 // @rowAuthz(owner="ownerUserId") declaration makes the engine AND the
 // same term in whether the author wrote it or not (memql#3172). The
 // authored conjunct is kept rather than leaned off, for two reasons --
@@ -27,8 +27,8 @@ use common.traits.{ identityIsApiKey, identityIsBadge, identityIsMagicLink, iden
 // not compose".
 
 /// List the caller's accounts, newest first, optionally narrowed to one lifecycle status. Owned:
-/// ownerUserId==actor.userId gates the row set server-side, so an operator can never see another
-/// operator's customers. Omit status to get every account including archived ones.
+/// `row.ownerUserId == actor.userId` gates the row set server-side, so an operator can never see
+/// another operator's customers. Omit status to get every account including archived ones.
 @actor
 query account accounts {
   args {
@@ -40,9 +40,9 @@ query account accounts {
   shape    accountFull
 }
 
-/// Fetch a single account by id, gated to the caller. Owned: ownerUserId==actor.userId is the
-/// load-bearing guard, so an operator can never read another operator's customer even holding its
-/// id. Backs the account detail read and the pre-write existence check.
+/// Fetch a single account by id, gated to the caller. Owned: `row.ownerUserId == actor.userId` is
+/// the load-bearing guard, so an operator can never read another operator's customer even holding
+/// its id. Backs the account detail read and the pre-write existence check.
 @unbounded("account by id (guarded) gated to the owning operator -- bounded to a single row")
 @actor
 query account accountById {
@@ -62,11 +62,11 @@ query account accountById {
 // attribution and grouped revocation. Nothing authenticates AS an
 // account (docs/internal/design/account-isolation-model.md 3.3, 3.4).
 //
-// Both reads below are therefore gated on `userId==actor.userId`, the
+// Both reads below are therefore gated on `row.userId == actor.userId`, the
 // SUBJECT relation, and NOT on the account binding. That distinction is
 // the point: gating on accountId alone would be authorization by
 // honour system (5.2 -- the caller names the tenant whose rows they
-// would like), whereas userId==actor.userId is the same owned predicate
+// would like), whereas `row.userId == actor.userId` is the same owned predicate
 // every other credential listing in this file uses. The accountId
 // conjunct is a NARROWING of an already-authorized set, not the gate.
 //
@@ -78,10 +78,10 @@ query account accountById {
 // accident. The digest is a custody record, not an index.
 
 /// List the account tokens the CALLING user has issued for one account, newest first. Owned:
-/// userId==actor.userId is the gate (the credential's subject is the operator, never the account);
-/// the accountId conjunct narrows an already-authorized set rather than deciding access. Includes
-/// revoked rows so a revocation can be seen to have taken effect. Carries no keyHash -- the shape
-/// names the credential's non-secret leaves by path.
+/// `row.userId == actor.userId` is the gate (the credential's subject is the operator, never the
+/// account); the accountId conjunct narrows an already-authorized set rather than deciding access.
+/// Includes revoked rows so a revocation can be seen to have taken effect. Carries no keyHash --
+/// the shape names the credential's non-secret leaves by path.
 @actor
 query identity accountTokensForAccount {
   args {
@@ -95,9 +95,9 @@ query identity accountTokensForAccount {
   shape    accountTokenSummary
 }
 
-/// Fetch one account-token identity by id, gated to the calling user. Owned: userId==actor.userId,
-/// so an operator can never read (or, via the revoke handler that calls this, revoke) a credential
-/// another operator issued. Backs the pre-revoke ownership check.
+/// Fetch one account-token identity by id, gated to the calling user. Owned:
+/// `row.userId == actor.userId`, so an operator can never read (or, via the revoke handler that
+/// calls this, revoke) a credential another operator issued. Backs the pre-revoke ownership check.
 @unbounded("account token by id (guarded) gated to the issuing operator -- bounded to a single row")
 @actor
 query identity accountTokenById {
@@ -186,8 +186,8 @@ query accessRequest accessRequestById {
 // Returns:
 //   Array of delegation records in delegationFull shape
 //
-// Usage:
-//   activeDelegationsForAgent({agentId: "agent-sofia"})
+// Usage, as the string a client sends to Execute:
+//   activeDelegationsForAgent(agentId: "agent-sofia")
 //
 
 /// Get all active delegations for a given agent ID
@@ -311,7 +311,7 @@ query user usersForSeedSweep {
 // Pagination (epic #1964 / memql#1975): this query declares ONLY `sort`
 // (deterministic, keyset-eligible createdAt-desc order) and NO inner
 // `paginate`. The dynamic page window is applied by the searchUsers tool
-// handler's OUTER paginate($args.limit) wrapper (dsl/memql/tools.memql). The
+// handler's OUTER paginate(..., args.limit) wrapper (dsl/memql/tools.memql). The
 // inner query must NOT also declare `paginate` -- two nested paginate()
 // directives are rejected by the engine ("multiple paginate() directives are
 // not supported"), which broke the searchUsers tool for every call after the
@@ -323,11 +323,11 @@ query user usersForSeedSweep {
 /// users alike; pass true to return only active users or false for only deactivated ones.
 /// Developer-or-above only. Backs the searchUsers tool.
 ///
-/// memql#2883: `when(args.active)` is DROPPED when the arg is absent (authoring rules), so before
-/// this gate `searchUsers()` with no arguments applied no predicate at all and returned every user
-/// in the cluster in userFull -- every @pii field plus the cluster-wide auth role. It is also on the
-/// agent tool surface (dsl/memql/tools.memql), so a prompt-injected or over-eager agent could pull
-/// the whole user table.
+/// memql#2883: the `args.active == nil || ...` guard folds away when the arg is unset (authoring
+/// rules), so before this gate `searchUsers()` with no arguments applied no predicate at all and
+/// returned every user in the cluster in userFull -- every @pii field plus the cluster-wide auth
+/// role. It is also on the agent tool surface (dsl/memql/tools.memql), so a prompt-injected or
+/// over-eager agent could pull the whole user table.
 ///
 /// A ROLE GATE rather than @serverOnly, because unlike its three siblings this one has a genuine
 /// client caller: the MCP tool. Gating by origin would delete the tool; gating by role keeps it
@@ -346,8 +346,8 @@ query user usersForSeedSweep {
 /// because what excludes a developer from those is a GRANT it does not hold.
 ///
 /// It replaced the `requiresDeveloperOrAbove` spec, which could not see a custom role at all --
-/// `role == "developer" || role == "admin" || role == "owner"` is false for a rank-350 role a
-/// cluster authored for itself, whatever that role holds.
+/// `actor.role == "developer" || actor.role == "admin" || actor.role == "owner"` is false for a
+/// rank-350 role a cluster authored for itself, whatever that role holds.
 ///
 /// The MANAGEMENT verbs are untouched: a developer reading this list still cannot edit, re-role,
 /// suspend or delete anybody on it.
@@ -371,7 +371,7 @@ query user searchUsers {
 // Alice did").
 //
 // To answer the general "audit events for a user" question -- which
-// logically means actorUserId==X OR targetId==X -- callers run BOTH
+// logically means `row.actorUserId == X || row.targetId == X` -- callers run BOTH
 // this query and auditEventsByTarget and merge the results on the
 // client. The frontend dedupes on auditEvent.id when the same
 // row would be returned by both (e.g. self-action events).
@@ -589,7 +589,7 @@ query oauthClient oAuthClientByClientId {
 // 2-replica mesh. The middleware bounds the read rate with a short in-process
 // TTL window instead; correctness does not depend on it.
 //
-// `corsOriginsJSON != ""` is the canonical is-set idiom and EXCLUDES rows where
+// `row.corsOriginsJSON != ""` is the canonical is-set idiom and EXCLUDES rows where
 // the field is absent (authoring rule 27), which is every client registered
 // before this field existed and every client registered since -- /register
 // writes no allowance.
@@ -873,7 +873,7 @@ query authSession sessionsForSubjectAdmin {
 // the revoke fan-out. This one is a PERSON read, and it is shaped and
 // filtered differently for that reason.
 //
-// OWNED TIER. userId==actor.userId, so the query answers about the caller
+// OWNED TIER. `row.userId == actor.userId`, so the query answers about the caller
 // and nobody else -- there is no argument to point it at another person,
 // which is what makes it safe to reach from a browser at all.
 //
@@ -927,16 +927,16 @@ query authSession authSessionsForSelf {
 //   Empty when the first-run wizard hasn't completed yet -- callers
 //   fall back to env-derived defaults.
 //
-// Filter: pin to id=="cluster" (the canonical singleton key). Without
+// Filter: pin to `row.id == "cluster"` (the canonical singleton key). Without
 // the id filter the query scans ALL v1:identity:clusterSettings rows
 // and returns one per distinct id; if a stale or miskeyed row exists
 // alongside the canonical one, Nodes[0] can be either row depending
 // on scan order -- non-deterministic across replicas (#1807).
 //
-// id=="cluster" is a short-slug filter. The engine's resolveFullId
+// `row.id == "cluster"` is a short-slug filter. The engine's resolveFullId
 // expands it to the full storage id "v1:identity:clusterSettings:cluster"
 // before the SQL WHERE clause is built, so it correctly matches the
-// row the writer inserted via createClusterSettings({id:"cluster",...}).
+// row the writer inserted via createClusterSettings(id: "cluster", ...).
 // The comment that led to this filter being removed previously mentioned
 // `_system:v1:identity:clusterSettings:cluster` -- that prefix was
 // retired when partition-scoping was removed; the current canonical form
@@ -962,8 +962,8 @@ query clusterSettings clusterSettingsCurrent {
 // Returns:
 //   Array of delegation records in delegationFull shape
 //
-// Usage:
-//   delegationsByIdentity({identityId: "id-user-alice"})
+// Usage, as the string a client sends to Execute:
+//   delegationsByIdentity(identityId: "id-user-alice")
 //
 
 /// Get all delegations (active and revoked) for a given identity ID
@@ -985,19 +985,19 @@ query delegation delegationsByIdentity {
 // time. Used by the expireDelegations automation to find delegations
 // to deactivate.
 //
-// The cutoff is passed in as the `now` arg (rather than referencing the
-// clock inline) because the MemQL query planner rejects the timestamp
-// call-form AST node in filter comparisons ("unsupported literal type
-// *ast.TimestampExprFunc"). The automation supplies the arg from the bare
-// reserved `now` identifier at the call site so the resulting value is a
-// plain datetime. Matches the expireGuestInvitations /
-// expiredPendingGuestInvitations pattern.
+// The cutoff is the `asOf` argument rather than the clock read inline. It
+// began that way because the query planner of the time refused the
+// timestamp() call form in a filter comparison ("unsupported literal type
+// *ast.TimestampExprFunc"). Edition 2026 reads `now` directly in a filter,
+// but the argument stays: the identity logic that calls this passes
+// `asOf: args.asOf`. The expireGuestInvitations /
+// expiredPendingGuestInvitations pair used the same shape.
 //
 // Returns:
 //   Array of expired delegation records in delegationFull shape
 //
-// Usage:
-//   expiredActiveDelegations({ now: now })
+// Usage, from a logic body:
+//   query expiredActiveDelegations(asOf: args.asOf)
 //
 
 /// Active delegations whose expiresAt is before the supplied cutoff.
@@ -1024,8 +1024,9 @@ query delegation expiredActiveDelegations {
 // FALSE -- the filter restriction is on function calls, not arg-cutoff
 // comparisons, and addDuration takes negative ISO durations (the
 // cluster stale-node prune has shipped that shape since #1642). The
-// clean pattern is cutoff-in-logic + a when(args.cutoff) filter here,
-// as expiredPendingAccessRequests now does.
+// clean pattern is cutoff-in-logic + an optional cutoff guard in the
+// filter here, `(args.cutoff == nil || ...)`, as
+// expiredPendingAccessRequests now does.
 //
 // Note: as of writing, MemQL has no row-removal mutation -- the AST
 // defines only Insert and Update. The retention sweep can soft-mark
@@ -1063,7 +1064,7 @@ query auditEvent expiredAuditEvents {
 // supplied `now` cutoff. RFC 6749 mandates a ~60s TTL for auth codes,
 // so rows churn quickly; a sweep keeps the table compact.
 //
-// memql#1714: the filter gates on consumedAt!="" so behaviour matches
+// memql#1714: the filter gates on `row.consumedAt != ""` so behaviour matches
 // the name. An unspent-but-expired code is intentionally NOT returned
 // here -- the consume handler may still be racing to redeem it, and a
 // sweep keyed only on expiry could delete a row out from under an
@@ -1346,7 +1347,7 @@ query magicLinkRequest magicLinkRequestById {
 //
 //   - /me/tokens (component/identity/web/me_tokens.go) -- the owner, themselves.
 //   - `memql pat list --user-id X` (subcommand_pat.go) -- an OPERATOR listing
-//     somebody else's, which a bare `userId==actor.userId` would empty.
+//     somebody else's, which a bare `row.userId == actor.userId` would empty.
 //   - /admin/tokens (component/identity/adminops/adminops.go, via pat.Store.ListAll)
 //     -- the same, cluster-wide.
 //
@@ -1354,10 +1355,10 @@ query magicLinkRequest magicLinkRequestById {
 // caller-supplied userId for the two operator surfaces, and
 // patIdentitiesForSelf below serves /me/tokens with no userId at all. The
 // self-OR-admin single-query form (`... && (userId==actor.userId ||
-// requiresOwnerOrAdmin)`) is deliberately NOT used: it parses and loads, but
-// test/dslconformance/admin_gate_test.go's TestAdminGateIsATopLevelConjunct refuses a gate
-// inside a disjunction, correctly -- the other arm switches it off, so a false
-// gate would not zero the row set.
+// requiresOwnerOrAdmin)`) was deliberately NOT used: it parsed and loaded, but
+// test/dslconformance/admin_gate_test.go's TestAdminGateIsATopLevelConjunct refused a gate
+// inside a disjunction, correctly -- the other arm switched it off, so a false
+// gate would not have zeroed the row set.
 //
 // THE GATE IS AN ANNOTATION NOW (epic memql#5166), not a conjunct. It was
 // `requiresOwnerOrAdmin` as a top-level conjunct, which is what made a false
@@ -1525,7 +1526,8 @@ query accessRequest pendingAccessRequests {
 //
 // The concept declares @rowAuthz(owner="actorUserId", clusterOwner), so
 // the engine ANDs `(actorUserId==actor.userId)||(actor.isClusterOwner==true)`
-// into every read below whether the author wrote it or not.
+// (the injected predicate, in the internal query form's spelling) into every
+// read below whether the author wrote it or not.
 //
 // WHY THE ROLL-UP IS CLUSTER-OWNER-GATED AND NOT requiresOwnerOrAdmin.
 // The composite tier's escape is `isClusterOwner`, which is the `owner`
@@ -1649,22 +1651,23 @@ query auditEvent recentAuditEvents {
 /// decide whether an address already belongs to a user, and the /login
 /// email-first flow calls it to branch between magic-link and registration --
 /// the lookup is part of working out WHO the caller is, so
-/// `primaryEmail==actor.primaryEmail` is circular in exactly the way
-/// `id==actor.userId` was on userById (memql#2800).
+/// `row.primaryEmail == actor.primaryEmail` is circular in exactly the way
+/// `row.id == actor.userId` was on userById (memql#2800).
 ///
 /// Left open it projected userFull -- every @pii field, plus the cluster-wide
 /// auth role -- keyed on the one identifier an attacker is most likely to
 /// already have, so no id enumeration was needed. userByIdSystem returns the
 /// identical shape and was gated by #2860; this one was missed (memql#2881).
 ///
-/// It is NOT the worst reader of this shape, and saying so here because the
-/// next person to gate one should start from the right end: searchUsers,
+/// It was NOT the worst reader of this shape, and this note said so because
+/// the next person to gate one should start from the right end: searchUsers,
 /// activeUsers, usersScheduledForDeletion and usersInDeletionCooldown all
-/// return userFull and are all reachable from the wire today. searchUsers is
-/// the extreme -- its only predicate is `when(args.active) { ... }`, which is
-/// DROPPED when the arg is absent, so calling it with no arguments returns
+/// returned userFull and were all reachable from the wire. searchUsers was
+/// the extreme -- its only predicate was `when(args.active) { ... }`, which
+/// dropped when the arg was absent, so calling it with no arguments returned
 /// every user in the cluster, and it is exposed to agents as an MCP tool.
-/// Tracked in memql#2883.
+/// Tracked in memql#2883. All four are gated now: searchUsers by
+/// `@requiresRank("developer")`, the other three by @serverOnly.
 @serverOnly
 @unbounded("user by unique primaryEmail -- bounded to a single row")
 query user userByEmail {
@@ -2058,7 +2061,7 @@ query identity workerTokenByKeyHash {
 ///
 /// Why actor.userId scoping is not the fix: the one caller that matters is the
 /// revoke ownership check in component/grpc/worker_token_handlers.go, and it
-/// runs under contextWithSystemActor -- so `userId==actor.userId` would compare
+/// runs under contextWithSystemActor -- so `row.userId == actor.userId` would compare
 /// against the SYSTEM actor and return zero rows for every real request. It
 /// already passes the caller's own id as the argument; the problem was never
 /// that the Go path was unscoped, it was that the query was reachable from the
@@ -2257,7 +2260,7 @@ query identity oidcIdentityBySubject {
 //
 // There is no userId argument BY DESIGN, following patIdentitiesForSelf
 // and badgesForSelf (memql#3178): the row set comes from
-// userId==actor.userId, so it cannot be pointed at a stranger's
+// `row.userId == actor.userId`, so it cannot be pointed at a stranger's
 // authenticators.
 
 /// List the CALLING user's own enrolled passkeys, newest first. Projects passkeySummary -- the
@@ -2303,7 +2306,7 @@ query identity passkeysForSelf {
 //
 // SELF-SCOPED with no userId argument, following patIdentitiesForSelf /
 // badgesForSelf / passkeysForSelf (memql#3178): the row set comes from
-// userId==actor.userId, so a caller cannot ask how recoverable somebody
+// `row.userId == actor.userId`, so a caller cannot ask how recoverable somebody
 // else's account is.
 
 /// List the CALLING user's own ACTIVE sign-in routes -- magic-link and passkey credentials only.
@@ -2329,7 +2332,7 @@ query identity signInIdentitiesForSelf {
 // `Store.HasClaimedOwner`, which answers "has the cluster's owner ever
 // authenticated" during identity boot -- the same first-run window as
 // `activeUsers` and `CountActiveUsers`, where there is no actor at all.
-// `userId==actor.userId` would evaluate against an empty actor, return zero rows,
+// `row.userId == actor.userId` would evaluate against an empty actor, return zero rows,
 // and report every claimed cluster as unclaimed.
 //
 // WHY THE QUESTION EXISTS. The install writes the owner user row when it
@@ -2357,7 +2360,7 @@ query identity signInIdentitiesForSelf {
 ///
 /// Why actor.userId scoping is not the fix: the caller runs BEFORE any actor exists. This
 /// answers "has this cluster's owner ever signed in" during identity boot -- the same
-/// first-run window as activeUsers and CountActiveUsers -- so `userId==actor.userId` would
+/// first-run window as activeUsers and CountActiveUsers -- so `row.userId == actor.userId` would
 /// evaluate against an empty actor, match zero rows, and report every claimed cluster as
 /// unclaimed. That is the same circularity that kept activeUsers and userByEmail
 /// server-only (memql#2881), and the reason the self-scoped twin
@@ -2420,7 +2423,7 @@ query identity signInIdentitiesForUser {
 /// Why actor.userId scoping is not the fix: a node_token row belongs to a
 /// cluster NODE, not to a person. Its `userId` is the synthetic bootstrap user
 /// the mint ran as (component/identity/http/node_bootstrap.go), never the id of
-/// anyone who reads it -- so `userId==actor.userId` would match zero rows for
+/// anyone who reads it -- so `row.userId == actor.userId` would match zero rows for
 /// every real caller: the admin listing tokens is a human, and the bootstrap
 /// handler resolving a binding has no resolved actor at all, since this runs
 /// BEFORE the node has an identity. There is no caller to scope to, which is
@@ -2467,7 +2470,7 @@ query identity nodeTokenIdentityByBinding {
 ///
 /// Why actor.userId scoping is not the fix: same as nodeTokenIdentityByBinding
 /// above -- a node_token row's `userId` is the synthetic bootstrap user, not
-/// any reader, so `userId==actor.userId` returns nothing for the admin who
+/// any reader, so `row.userId == actor.userId` returns nothing for the admin who
 /// consumes this. It is also a deliberate cluster-wide SWEEP: the /admin/tokens
 /// section exists precisely to show every node's credential row, so a
 /// per-caller filter would empty the surface it backs.
@@ -2519,9 +2522,9 @@ query identity nodeTokenIdentities {
 /// the portal's Tokens surface until epic memql#4984).
 ///
 /// Why actor.userId scoping is not the alternative: a node_token row's `userId` is the synthetic
-/// bootstrap user rather than any reader, so `userId==actor.userId` returns nothing for the admin
-/// who consumes this. The gate that fits is the role, and it is stated here rather than left to a
-/// route.
+/// bootstrap user rather than any reader, so `row.userId == actor.userId` returns nothing for the
+/// admin who consumes this. The gate that fits is the role, and it is stated here rather than
+/// left to a route.
 @requiresCapability("update", "principal")
 query identity nodeTokenIdentitiesAdmin {
   filter   row => identityIsNodeToken(row)
@@ -2554,7 +2557,7 @@ query identity nodeTokenIdentitiesAdmin {
 ///
 /// Why actor.userId scoping is not the fix: same as its two siblings -- a
 /// node_token row's `userId` is the synthetic bootstrap user rather than any
-/// reader, so `userId==actor.userId` matches nothing for the admin driving the
+/// reader, so `row.userId == actor.userId` matches nothing for the admin driving the
 /// revoke flow. The authorization that does apply is the admin gate on the
 /// route (component/identity/admin/route_gate_test.go, memql#2934); origin
 /// gating puts the DSL-side boundary where that authorization already lives.
@@ -2677,7 +2680,7 @@ query identity activeRecoveryKeys {
 /// the outstanding ones cannot revoke a link sent to the wrong address, which
 /// is the one repair this list exists for.
 ///
-/// kind=="user" is load-bearing rather than decorative: guest invitations live
+/// `row.kind == "user"` is load-bearing rather than decorative: guest invitations live
 /// in the same concept, belong to a space rather than to the cluster, and have
 /// their own product-side surface.
 @requiresRank("developer")

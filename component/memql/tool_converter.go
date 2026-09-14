@@ -141,11 +141,10 @@ func toolDeclToTool(decl *ast.ToolDecl, origin string) ([]*Tool, error) {
 			handler.FunctionName = decl.HandlerName
 		case "query":
 			handler.Query = decl.HandlerName
-			// Parsed ONCE, here: a v1 handler that is not a handler is a
-			// load refusal (a baseloader Skip strict boot refuses), not a
-			// failure on the first call a model makes. A legacy `$args.`
-			// handler parses to nil and keeps the substitution path until
-			// the tree is migrated (tool_handler_v1.go).
+			// Parsed ONCE, here: a handler that is not a handler -- the
+			// retired `$args.` placeholder included -- is a load refusal (a
+			// baseloader Skip strict boot refuses), not a failure on the
+			// first call a model makes (tool_handler_v1.go).
 			plan, err := prepareToolQueryV1(handler.Query)
 			if err != nil {
 				return nil, fmt.Errorf("tool %q: @handler: %w", decl.Name, err)
@@ -153,6 +152,15 @@ func toolDeclToTool(decl *ast.ToolDecl, origin string) ([]*Tool, error) {
 			handler.queryV1 = plan
 		case "webhook":
 			handler.URL = decl.HandlerURL
+			// The url is an expression, parsed and checked here for the
+			// same reason the query is.
+			if strings.TrimSpace(handler.URL) != "" {
+				url, err := prepareWebhookURL(handler.URL)
+				if err != nil {
+					return nil, fmt.Errorf("tool %q: @handler: %w", decl.Name, err)
+				}
+				handler.urlV1 = url
+			}
 			if decl.HandlerMethod != "" {
 				handler.Method = decl.HandlerMethod
 			} else {

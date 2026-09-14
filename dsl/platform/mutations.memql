@@ -205,8 +205,8 @@ mutate missingCapability updateMissingCapabilityStatus {
 // product automation/logic body calls this to durably request that
 // something leave the cluster. The engine-owned outbound worker drains
 // the row and stamps status transitions back. Callers derive requestId
-// deterministically (hash(concat(...))) when they want staging-time
-// idempotency.
+// deterministically (a hash() over a `+`-joined key) when they want
+// staging-time idempotency.
 //
 // @createOnly("status", "attempts") makes that idempotency correct
 // (fylo#63): status + attempts are the delivery-lifecycle fields the
@@ -647,7 +647,7 @@ mutate customDomain createCustomDomain {
 /// script, and `markCustomDomainRemoved` closes the walk.
 ///
 /// THE HOSTNAME STOPS RESOLVING AT THIS WRITE, not at the Ingress deletion: `liveCustomDomainByHostname`
-/// filters `status=="live"`, so the edge stops answering the moment this lands. That ordering is the
+/// filters `row.status == "live"`, so the edge stops answering the moment this lands. That ordering is the
 /// point -- an operator removing a binding because it is being abused should not have to wait for
 /// kubectl.
 @requiresCapability("execute", "app:deployables/domains")

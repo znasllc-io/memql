@@ -3,7 +3,7 @@
 // Event-driven population of the Library index. Each backing-row creation
 // event folds into a v1:library:artifact index row. The createArtifact write
 // lives directly in the automation's mutation step, binding its args from the
-// trigger event payload (which IS the created row), with coalesce on the
+// trigger event payload (which IS the created row), with `??` on the
 // optional fields. #2235: this replaces the former promotion-logic indirection
 // (each index* logic did the write inline -- an ADR §2.1 logic-purity
 // violation). Mirrors the cluster registerNode/deregisterNode form: the logic
@@ -182,7 +182,7 @@ automation indexMemoryOnCreate {
 // owner had labelled the artifact: the memql#4288 hazard, reached from the
 // promotion path instead of the edit path.
 //
-// `status == "stored"` is the creation state and only the creation state --
+// `row.status == "stored"` is the creation state and only the creation state --
 // createLibraryFile STAMPS it (it is not a caller argument), and every later
 // write moves it on. Keeping the index in step with what analysis learns is
 // therefore the analysis pass's job, which is Go and can carry the labels

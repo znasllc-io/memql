@@ -45,10 +45,10 @@ query agent activeAgents {
 // would wire it back up.
 //
 // THE SPLIT #3178 USED FOR PATs IS NOT AVAILABLE HERE, and the reason is
-// worth stating so nobody re-proposes it: a second `userId==args.userId`
+// worth stating so nobody re-proposes it: a second `row.userId == args.userId`
 // arm -- admin-gated or `@serverOnly` -- still binds a concept that
 // declares a tier, so #3172's land gate measures it and refuses it too.
-// Under a declared tier, `userId==actor.userId` is the only readable
+// Under a declared tier, `row.userId == actor.userId` is the only readable
 // shape. The four server-side call sites that legitimately resolve
 // ANOTHER user's envelope ceiling (the agent's owner, not the caller)
 // therefore supply that user's actor envelope for the one Execute call
@@ -177,7 +177,7 @@ query agent agentsForRegistry {
 // `actor.userId`; splitting tracked as a follow-up under #54.
 /// Per Q10 layered dedupe Layer 1: list every active agent owned by a user (any roleSlug, any space
 /// scope). The Planner Agent's createSpecialist decision feeds this list into the similarity check
-/// before proposing a new agent. Platform-infrastructure agents (payload.kind=='system' -- MemQL
+/// before proposing a new agent. Platform-infrastructure agents (`row.kind == "system"` -- MemQL
 /// Planner, MemQL Trainer) are returned by this query and filtered out structurally by
 /// loadExistingAgents in integrations/agents/factory.go before they enter the dedupe candidate
 /// pool; the filter lives one layer up rather than in the query so the same query can serve other
@@ -348,7 +348,7 @@ query skillChangeEvent skillChangeEventsForAgent {
 // undeclared concepts in the per-row-authz long tail: it carries no
 // `@rowAuthz` tier, and every existing agent read here either declares
 // `@public` (activeAgentsForUser, assistantAgentForUser) or is unclassified.
-// An `ownerUserId==actor.userId` conjunct would LOOK like narrowing and
+// A `row.ownerUserId == actor.userId` conjunct would LOOK like narrowing and
 // would in fact be a silent emptiness: `createAgent` takes `ownerUserId`
 // as a caller ARGUMENT rather than stamping it from the actor, so a
 // planner-provisioned specialist can carry an empty one -- and the row the

@@ -25,25 +25,23 @@ import (
 // `actor` (the envelope, read one field at a time so that `actor.userId` can
 // refuse, memql#3620) and `config` (the allow-listed configuration), with
 // `now` the renderer's one clock. Nothing here reads expression TEXT. That is
-// the point of the file: the string half of mutation_templates.go decided
-// what a value meant by looking at its spelling, so a quoted "123" came back
-// an int64, a quoted "args.x" came back the caller's argument, and a
-// mistyped reference was stored as its own name; a parsed literal is a
-// literal and a parsed reference is a reference.
+// the point of the file: the string evaluator this replaced (deleted at the
+// flip) decided what a value meant by looking at its spelling, so a quoted
+// "123" came back an int64, a quoted "args.x" came back the caller's
+// argument, and a mistyped reference was stored as its own name; a parsed
+// literal is a literal and a parsed reference is a reference.
 //
-// What carries over unchanged, because the v1 table keeps it: a missing
+// What carried over unchanged, because the v1 table keeps it: a missing
 // argument omits its key or element and an explicit nil is kept (EvalExpr's
 // container rule, memql#3627); `??` is blank-coalescing through the one
 // selection rule, coalesceSelect; hash() of a missing value digests "" and so
 // stays 64 characters wide (memql#3009); shortId, canonicalId, var and the
-// secret readers reach the same engine resolvers the string half reached.
+// secret readers reach the same engine resolvers the string evaluator
+// reached.
 //
-// TRANSITION. Every template the tree loads today is still the legacy kind,
-// rendered by the string half. A template reaches this file only when
-// newMutationTemplateV1 built it, which marks it ValuesV1; the parser option
-// that makes the loader build one for every mutation lands separately, and
-// the flip then deletes the string half and the dispatch in
-// renderMutationTemplate.
+// Every mutation the loader reads builds its template here, from its v1
+// parse (mutationTemplateFromStmtV1); newMutationTemplateV1 is the one
+// builder and renderMutationTemplate the one renderer.
 
 // mutationValueCheck is the load-time check every mutation value passes
 // (expr_inprocess_check.go): the position's node kinds and functions, and the
@@ -101,7 +99,7 @@ type mutationSlotsV1 struct {
 // The annotation-driven fields (MergeFields, AppendFields, ...) are the
 // caller's to set on the result, exactly as the loader sets them.
 func newMutationTemplateV1(kind ast.MutationKind, concept string, block ast.ExpressionNode, slots mutationSlotsV1) (*FunctionMutationTemplate, error) {
-	tmpl := &FunctionMutationTemplate{Kind: kind, Concept: strings.TrimSpace(concept), ValuesV1: true}
+	tmpl := &FunctionMutationTemplate{Kind: kind, Concept: strings.TrimSpace(concept)}
 
 	for _, slot := range []struct {
 		name string
@@ -185,12 +183,16 @@ func newMutationTemplateV1(kind ast.MutationKind, concept string, block ast.Expr
 }
 
 // mutationTemplateFromStmtV1 builds the template of a mutation parsed with
-// the edition-2026 grammar (parser.Options.ExpressionsV1): the statement's
-// PayloadExpr is the block and its four slot templates are the call-level
-// values, all parsed nodes. The loader calls it for a FunctionDef marked
-// ExpressionsV1; a slot that is not a v1 node means the statement was not
-// parsed that way, and is refused rather than rendered by the wrong half.
+// the edition-2026 grammar: the statement's PayloadExpr is the block and its
+// four slot templates are the call-level values, all parsed nodes. The loader
+// builds every mutation's template here. A statement the grammar did not parse
+// -- its block left as text, a slot that is not a v1 node -- is refused: there
+// is no other evaluator to hand it to, and building from what is left would
+// write an empty payload.
 func mutationTemplateFromStmtV1(stmt *languageParser.MutationStmt, concept string) (*FunctionMutationTemplate, error) {
+	if stmt.PayloadExpr == nil && strings.TrimSpace(stmt.PayloadRaw) != "" {
+		return nil, fmt.Errorf("the insert/update block was not parsed with the edition-2026 grammar, so it has no value to render: `%s`", strings.TrimSpace(stmt.PayloadRaw))
+	}
 	var slots mutationSlotsV1
 	for _, s := range []struct {
 		name string
@@ -267,10 +269,48 @@ func mutationLayoutValueV1(n ast.ExpressionNode) any {
 	return n
 }
 
-// renderMutationTemplateV1 renders an edition-2026 template. The order of the
-// steps, and every error's wording, follow renderMutationTemplate's, so a
-// caller cannot tell which renderer refused a call except by what the
-// refusal is about.
+// mutationLayoutSource prints a laid-out template value as the source it was
+// parsed from -- a nested map as `{k: v, ...}` (keys sorted), a list as
+// `[a, b]`, a node through ast.FormatExpr -- for a reader that searches a
+// mutation's text. fmt's rendering of a node is its pointer, so a search over
+// it finds the block's keys and nothing its values reference.
+func mutationLayoutSource(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case map[string]any:
+		var b strings.Builder
+		b.WriteByte('{')
+		for i, k := range sortedAnyKeys(t) {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(k)
+			b.WriteString(": ")
+			b.WriteString(mutationLayoutSource(t[k]))
+		}
+		b.WriteByte('}')
+		return b.String()
+	case []any:
+		var b strings.Builder
+		b.WriteByte('[')
+		for i, el := range t {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(mutationLayoutSource(el))
+		}
+		b.WriteByte(']')
+		return b.String()
+	case ast.ExpressionNode:
+		return ast.FormatExpr(t)
+	}
+	return fmt.Sprint(v)
+}
+
+// renderMutationTemplateV1 renders a template: the id and createdAt slots,
+// the payload and its overlay, the relationship hints, in that order, each
+// refusal naming the value it is about.
 func (e *MemQLEngine) renderMutationTemplateV1(ctx context.Context, tmpl *FunctionMutationTemplate, concept string, args map[string]any) (MutationNode, error) {
 	r := e.newMutationRendererV1(ctx, args)
 
@@ -304,16 +344,26 @@ func (e *MemQLEngine) renderMutationTemplateV1(ctx context.Context, tmpl *Functi
 		if absent {
 			// The container rule, applied to the overlay as to every other
 			// container: a missing argument contributes nothing, so the
-			// splat's own value for the key stands. The string half wrote
-			// its missing sentinel here, which marshals as `{}` -- an object
-			// nobody sent.
+			// splat's own value for the key stands. The string evaluator
+			// wrote its missing sentinel here, which marshals as `{}` -- an
+			// object nobody sent.
 			continue
 		}
 		payloadMap[k] = v
 	}
 
-	// Insert-time canonicalisation of @relationship fields, exactly as the
-	// string half does (see renderMutationTemplate for why it is insert-time).
+	// Auto-canonicalize @relationship payload fields. Every concept's
+	// outgoing relationships (foreign-key fields like participant.userId ->
+	// v1:identity:user) are rewritten to canonical form before the payload
+	// hits the database.
+	//
+	// Why insert-time, not on read: `payload.userId == arg(...)` and
+	// `id == arg(...)` lookups operate on the stored bytes. Two callers
+	// inserting the same logical reference under different shapes ("user-abc"
+	// vs canonical) would otherwise produce two distinct stored values that do
+	// not match each other under `==`. Collapsing to canonical at insert
+	// eliminates the class entirely without touching every query site.
+	//
 	// It rewrites fields in place, a dotted relationship field inside a
 	// nested object included, and a value read from args is the caller's own
 	// map: canonicalise a deep copy, so a call never edits its arguments.
@@ -340,8 +390,7 @@ func (e *MemQLEngine) renderMutationTemplateV1(ctx context.Context, tmpl *Functi
 }
 
 // mutationRendererV1 renders one call's values: one scope and one clock for
-// every value of the call, so two fields reading `now` read one instant, as
-// the string half's single e.now did.
+// every value of the call, so two fields reading `now` read one instant.
 type mutationRendererV1 struct {
 	ctx   context.Context
 	scope *mutationScopeV1
@@ -365,8 +414,8 @@ func (e *MemQLEngine) newMutationRendererV1(ctx context.Context, args map[string
 	}
 }
 
-// resolveExprVariable backs var / systemVar / secret / systemSecret: the same
-// four engine resolvers the string half called, chosen by the function's name.
+// resolveExprVariable backs var / systemVar / secret / systemSecret: the four
+// engine resolvers, chosen by the function's name.
 func (e *MemQLEngine) resolveExprVariable(ctx context.Context, kind, name string) (string, error) {
 	switch kind {
 	case "var":
@@ -391,8 +440,8 @@ func (r *mutationRendererV1) eval(n ast.ExpressionNode) (any, error) {
 // slotText renders an id / createdAt / parent / aliasOf slot as text: nil
 // (the slot was not written), an absent value and nil are "", a string is
 // itself, and a number or bool is its canonical text. A list or a map is
-// refused -- a row id is text, and the string half's "%v" of one was Go's
-// own map syntax, which no reader of an id could have meant.
+// refused -- a row id is text, and the string evaluator's "%v" of one was
+// Go's own map syntax, which no reader of an id could have meant.
 func (r *mutationRendererV1) slotText(t any) (string, error) {
 	if t == nil {
 		return "", nil
@@ -499,7 +548,8 @@ func (r *mutationRendererV1) layoutValue(t any) (any, bool, error) {
 // mutationScopeV1 is the scope a mutation value reads. `now` is not bound
 // here -- EvalExpr reads it from EvalOptions.Now, the renderer's one clock --
 // and no other name is: an unknown name is unknown_name (and refused at load
-// by mutationValueCheck), where the string half wrote it out as a literal.
+// by mutationValueCheck), where the string evaluator wrote it out as a
+// literal.
 type mutationScopeV1 struct {
 	ctx    context.Context
 	engine *MemQLEngine
@@ -551,24 +601,23 @@ var errActorEnvelopeWhole = errors.New("the actor envelope has no whole value: r
 func (actorEnvelopeV1) MarshalJSON() ([]byte, error) { return nil, errActorEnvelopeWhole }
 
 // ---------------------------------------------------------------------------
-// the layout gates' reading of a v1 leaf
+// the layout gates' reading of a leaf
 // ---------------------------------------------------------------------------
 //
 // Three load-time gates read a template's LAYOUT rather than its source --
 // validateMutationCallerArgs (C5, memql#2035), destructiveNestedObjectFields
-// (memql#3617) and OwnerFieldProvenance (memql#2982). The layout is the same
-// for a v1 template (newMutationTemplateV1 builds the loader's), but its
-// leaves are parsed nodes where the string half's were text, and a gate that
-// tests a leaf for the prefix "args." would find no text in a v1 leaf: the
-// first two would pass every v1 mutation without looking, and the third would
-// fail every one closed. Each gate asks the functions below first; a leaf
-// they do not recognise as v1 (isV1 false) is read the way it always was.
+// (memql#3617) and OwnerFieldProvenance (memql#2982). Their leaves are parsed
+// nodes, and the functions below are how each gate reads one: a gate that
+// tested a leaf's TEXT for the prefix "args." (as all three did before the
+// flip) would find no text in a node, and the first two would pass every
+// mutation without looking while the third failed every one closed.
 
 // v1CallerArgPath reports whether n is exactly a read of a caller argument --
 // `args.<path>`, through `.` or `.?` -- and returns the path. A value that
 // merely CONTAINS one (`args.x ?? "d"`, `"p-" + args.x`) is not one: that is
 // the leaf test the gates applied to text ("starts with args."), kept as it
-// was rather than widened here.
+// was rather than widened here. C5 and memql#3617's guard ask it;
+// OwnerFieldProvenance asks classifyV1Expr, which reads the whole value.
 func v1CallerArgPath(n ast.ExpressionNode) ([]string, bool) {
 	var path []string
 	for {
@@ -589,43 +638,11 @@ func v1CallerArgPath(n ast.ExpressionNode) ([]string, bool) {
 	}
 }
 
-// v1LeafIsCallerArg is valueReferencesCallerArg's reading of a v1 leaf.
-func v1LeafIsCallerArg(v any) (isArg, isV1 bool) {
-	n, ok := v.(ast.ExpressionNode)
-	if !ok || ast.KindOf(n) == ast.KindUnknown {
-		return false, false
-	}
-	_, isArg = v1CallerArgPath(n)
-	return isArg, true
-}
-
-// v1LeafBareArg is bareArgReference's reading of a v1 leaf: exactly
-// `args.<name>`, one segment.
-func v1LeafBareArg(v any) (name string, ok, isV1 bool) {
-	n, isNode := v.(ast.ExpressionNode)
-	if !isNode || ast.KindOf(n) == ast.KindUnknown {
-		return "", false, false
-	}
-	path, isArg := v1CallerArgPath(n)
-	if !isArg || len(path) != 1 {
-		return "", false, true
-	}
-	return path[0], true, true
-}
-
-// classifyV1TemplateLeaf is OwnerFieldProvenance's reading of a v1 leaf,
-// with the classifier's rules: a read of a caller argument anywhere in the
-// value makes it caller-controllable (provAccept), `actor.userId` with no
-// argument beside it is the stamp (provStamp), and a name it cannot place is
-// provUnknown, which the gate treats as caller-controllable -- failing closed,
-// as for the string half's unrecognised nodes.
-func classifyV1TemplateLeaf(n ast.ExpressionNode) (valueProvenance, bool) {
-	if ast.KindOf(n) == ast.KindUnknown {
-		return provUnknown, false
-	}
-	return classifyV1Expr(n, nil), true
-}
-
+// classifyV1Expr is OwnerFieldProvenance's reading of a leaf, with the
+// classifier's rules: a read of a caller argument anywhere in the value makes
+// it caller-controllable (provAccept), `actor.userId` with no argument beside
+// it is the stamp (provStamp), and a name or a node it cannot place is
+// provUnknown, which the gate treats as caller-controllable -- failing closed.
 func classifyV1Expr(n ast.ExpressionNode, params []string) valueProvenance {
 	fold := func(parts ...ast.ExpressionNode) valueProvenance {
 		return foldProvenance(func(yield func(valueProvenance)) {

@@ -5,7 +5,7 @@
 
 /// Full projection of v1:identity:account -- an operator-managed customer record. Carries the two
 /// @pii contact fields, so every query binding this shape must constrain its caller; both account
-/// reads do, via the ownerUserId==actor.userId conjunct that the concept's owned tier also injects.
+/// reads do, via the `row.ownerUserId == actor.userId` conjunct that the concept's owned tier also injects.
 /// ownerUserId is projected deliberately: an operator surface renders "managed by" and the field is
 /// the row's authz key, so hiding it would make the tier invisible to the UI that depends on it.
 @row

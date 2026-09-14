@@ -47,7 +47,7 @@ query invocation expiredWorkerInvocations {
 
 /// List the CALLER'S worker invocations belonging to a Plan.
 ///
-/// The `ownerUserId==actor.userId` conjunct is the caller scope v1:worker:invocation's composite
+/// The `row.ownerUserId == actor.userId` conjunct is the caller scope v1:worker:invocation's composite
 /// tier now injects anyway (memql#4406); stating it is what makes the read's scope checkable
 /// (TestRowAuthzEnforcementLandGate) instead of implicit. There is deliberately no operator
 /// counterpart: the pair shape exists where an operator surface needs it
@@ -125,7 +125,7 @@ query invocation invocationsForUser {
 
 /// Look up the worker registration owned by an identity row.
 ///
-/// The `ownerUserId==actor.userId` conjunct is not redundant with the concept's tier -- it is
+/// The `row.ownerUserId == actor.userId` conjunct is not redundant with the concept's tier -- it is
 /// what makes this read's result set the SAME before and after enforcement, which
 /// TestRowAuthzEnforcementLandGate is the gate for. It is satisfied at runtime because the only
 /// caller, component/worker's register handshake, runs under auth.ContextWithUserActor for the
@@ -200,7 +200,7 @@ query appSession appSessionById {
   args {
     sessionId  string!
   }
-  // Caller-scoped. `ownerUserId==actor.userId` implies the composite tier's
+  // Caller-scoped. `row.ownerUserId == actor.userId` implies the composite tier's
   // floor (`owner || clusterOwner`) -- A implies A||B -- so this satisfies
   // the land gate as a plain top-level conjunct. Writing the disjunction
   // here instead would be UNDECIDABLE to the enforcement analyzer, which
@@ -252,11 +252,14 @@ query appSession appSessionsForUser {
   // (auth.ContextWithUserActor), the same borrowed-authority pattern the
   // campaign sender uses, so the engine never out-ranks the user whose
   // rows it is reading.
-  // No when() guard here on purpose: a ConditionalFilterExpression makes
-  // the whole filter undecidable to the row-authz analyzer, so it cannot
-  // prove the ownership floor holds. A decidable filter that always
-  // enforces the floor is worth more than an optional app narrowing the
-  // one consumer does not use.
+  // No optional app narrowing. It was a when(args.app) guard, dropped
+  // because the row-authz analyzer of the time read that guard as making
+  // the whole filter undecidable, so it could not prove the ownership floor
+  // held -- and a decidable filter that always enforces the floor was worth
+  // more than a narrowing the one consumer does not use. The edition-2026
+  // guard, `(args.app == nil || row.app == args.app)`, is one more conjunct
+  // beside the owner comparison, which the analyzer still reads, so the
+  // narrowing can come back when a consumer needs it.
   filter   row => row.ownerUserId == actor.userId
   sort     "row.createdAt", "desc"
   paginate 50
@@ -304,7 +307,7 @@ query delegationPolicy delegationPolicyForUser {
 // THREE READS OF ONE CONCEPT, and the split is the identity/authActivity
 // precedent (dsl/identity/queries.memql), not duplication. v1:worker:registration
 // declares the composite tier `@rowAuthz(owner="ownerUserId", clusterOwner)`, so
-// the ENGINE already ANDs `(ownerUserId==actor.userId)||(actor.isClusterOwner)`
+// the ENGINE already ANDs `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)`
 // onto every row. What differs between the three is WHO ASKS and with what:
 //
 //   workersForOwnerWithStatus  the ROUTER, server-side, for a user who is not

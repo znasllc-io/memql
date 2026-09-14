@@ -13,9 +13,9 @@ import (
 //
 // A mutation that REBUILDS a nested object from optional args destroys every
 // leaf it was not passed. An absent optional arg omits its key from the nested
-// object (evalValue's map branch drops missingValue{}); the object is a
-// TOP-LEVEL payload field, so the read-merge replaces it WHOLESALE unless the
-// mutation names it in @mergeFields. The un-passed leaves are then gone from
+// object (the renderer's container rule drops an absent argument); the object
+// is a TOP-LEVEL payload field, so the read-merge replaces it WHOLESALE unless
+// the mutation names it in @mergeFields. The un-passed leaves are then gone from
 // durable storage with no error at any layer.
 //
 // recordPasskeyAssertion is the live instance: five of its ten args are
@@ -80,7 +80,7 @@ func TestRecordPasskeyAssertion_MergesCredentials(t *testing.T) {
 	require.True(t, ok, "credentials must render as an object")
 	for _, leaf := range passkeyOptionalLeafArgs {
 		require.NotContains(t, deltaCreds, leaf,
-			"an absent optional arg omits its key from the nested object (evalValue map branch)")
+			"an absent optional arg omits its key from the nested object (the container rule)")
 	}
 
 	// Now the engine's own read-merge, with the mutation's declared merge set.
