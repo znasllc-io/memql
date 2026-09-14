@@ -205,6 +205,28 @@ export class ConnectionManager {
     return this.conn?.engineVersion;
   }
 
+  // The MemQL LANGUAGE the connected node speaks, as it stated on the
+  // handshake (ServerHello.edition / grammar_version / editor_release,
+  // memql#5362): the edition, the grammar version inside it, and the first
+  // release of this extension that carries that grammar. The connect-time
+  // comparison (src/version/editionSkew.ts) reads them from the "connected"
+  // listener, which runs after `conn` is stored.
+  //
+  // Getters over `conn` for the reason engineVersion is one, and with the same
+  // two empty answers: "" is a node that answered and predates the fields,
+  // undefined is no connection to ask.
+  get edition(): string | undefined {
+    return this.conn?.edition;
+  }
+
+  get grammarVersion(): string | undefined {
+    return this.conn?.grammarVersion;
+  }
+
+  get editorRelease(): string | undefined {
+    return this.conn?.editorRelease;
+  }
+
   // The raw dispatcher, for the surfaces the SDK exposes as free functions
   // over one rather than as methods on QueryClient -- currently callTool
   // (memql#3309's tool runs). Undefined whenever `query` is, and for the same

@@ -96,7 +96,7 @@ seed skill ` + slug + ` {
   predefined:    true
 }
 `
-	return fstest.MapFS{"skills.memql": &fstest.MapFile{Data: []byte(body)}}
+	return withLanguageLine(fstest.MapFS{"skills.memql": &fstest.MapFile{Data: []byte(body)}})
 }
 
 func TestSeedMaterializer_CarrierOverlaySkillRowsResolve(t *testing.T) {
@@ -224,7 +224,7 @@ seed skill ` + slug + ` {
   predefined:    true
 }
 `
-	return fstest.MapFS{"skills.memql": &fstest.MapFile{Data: []byte(body)}}
+	return withLanguageLine(fstest.MapFS{"skills.memql": &fstest.MapFile{Data: []byte(body)}})
 }
 
 // TestSeedMaterializer_StaleCarrierSkillRowHeals is the #1462 real-engine,

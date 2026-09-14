@@ -157,48 +157,41 @@ func rewriteNames(edition string) []string {
 // language line in every domain of a tree that has none (epic
 // dsl-v1-foundations, memql#5357).
 //
-// A domain is what the engine's mounts treat as one: a top-level directory of
-// the root that directly holds a .memql file, skipping `_` and `.` directories
-// as the mounts do. When the root itself directly holds .memql files it is one
-// domain (the caller passed dsl/<domain> rather than dsl/). A domain that
-// already has a memql.toml is left alone whatever it declares, because moving
-// a declared line is a decision about the tree, not a migration of it.
+// A domain is exactly what the loader asks a line of: the first path segment
+// of a .memql file some loader reads, however deep beneath it the file sits
+// (parser.LanguageLineDomainOf, the rule the resolver itself keys on), so a
+// domain holding only a sub-namespace (beta/sub/concepts.memql) is one, and
+// `_`/`.` segments are skipped as the walkers and mounts skip them. When the
+// root itself directly holds .memql files it is one domain (the caller passed
+// dsl/<domain> rather than dsl/). A domain that already has a memql.toml is
+// left alone whatever it declares, because moving a declared line is a
+// decision about the tree, not a migration of it.
 func rewriteLanguageLine(edition string) func(root string, files map[string][]byte) (map[string][]byte, error) {
 	return func(root string, files map[string][]byte) (map[string][]byte, error) {
-		domains := map[string]bool{}  // domain dir ("" = the root) -> holds a .memql file directly
-		declared := map[string]bool{} // domain dir -> has a manifest
+		domains := map[string]bool{} // domain dir ("" = the root) -> needs a line
+		rootIsDomain := false
 		for p := range files {
-			dir, base := "", p
-			if i := strings.LastIndexByte(p, '/'); i >= 0 {
-				dir, base = p[:i], p[i+1:]
+			if !strings.Contains(p, "/") && strings.HasSuffix(p, ".memql") && !strings.HasPrefix(p, "_") {
+				rootIsDomain = true
 			}
-			if strings.Contains(dir, "/") {
-				continue // deeper than a domain's own directory
-			}
-			if dir != "" && (strings.HasPrefix(dir, "_") || strings.HasPrefix(dir, ".")) {
-				continue
-			}
-			switch {
-			case strings.HasSuffix(base, ".memql"):
-				domains[dir] = true
-			case base == dslfs.ManifestFile:
-				declared[dir] = true
+			if d := langparser.LanguageLineDomainOf(p); d != "" {
+				domains[d] = true
 			}
 		}
-		// A root that is itself a domain makes its subdirectories part of it,
-		// not domains of their own.
-		if domains[""] {
+		// A root that is itself a domain makes everything beneath it part of
+		// that one domain, not domains of their own.
+		if rootIsDomain {
 			domains = map[string]bool{"": true}
 		}
 		line := dslfs.Manifest{Language: langparser.LanguageVersion, Edition: edition}
 		out := map[string][]byte{}
 		for dir := range domains {
-			if declared[dir] {
-				continue
-			}
 			target := dslfs.ManifestFile
 			if dir != "" {
 				target = dir + "/" + dslfs.ManifestFile
+			}
+			if _, declared := files[target]; declared {
+				continue
 			}
 			out[target] = []byte("# The language this directory's .memql files are written in.\n" +
 				"# See docs/public/language/memql.md, \"The language line\".\n" + line.Render())

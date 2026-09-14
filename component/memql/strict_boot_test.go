@@ -79,7 +79,8 @@ func TestStrictBoot_FixtureWithBadConstruct(t *testing.T) {
 	fixture := fstest.MapFS{
 		"specs.memql": {Data: []byte("@enabled\n@description(\"bad\")\nspec activeRowTrait fixtureBadSpec {\n  return status ==== \"x\" &&&& true\n}\n")},
 	}
-	memqldsl.RegisterTree(domain, fixture)
+	// The fixture declares its language line, so the bad spec is its ONE problem.
+	memqldsl.RegisterTree(domain, withLanguageLine(fixture))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	// engine.Init normalizes (mutates) the concept registry's relationships

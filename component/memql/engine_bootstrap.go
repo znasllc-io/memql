@@ -30,6 +30,14 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	report := newLoadReport()
 	e.loadReport = report
 
+	// THE LANGUAGE LINE FIRST (memql#5357). Every domain declares the language
+	// it is written in, and a domain the engine will not read -- no line, a
+	// newer one, an edition it has no front end for -- is recorded here,
+	// before any loader runs, so strict boot refuses the tree below and
+	// MEMQL_DSL_ALLOW_SKIPS is the break-glass. The domain still parses, with
+	// the engine's own edition, so one boot reports every problem it has.
+	e.resolveLanguageLines(report)
+
 	if concepts == nil {
 		return fmt.Errorf("concept registry is required")
 	}

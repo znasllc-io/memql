@@ -43,7 +43,15 @@ type FakeConn = Connection & {
   terminate(): void;
 };
 
-function fakeConn(nodeId: string, engineVersion = ""): FakeConn {
+// The language a ServerHello names (memql#5362). Each defaults to "", which is
+// what a cluster predating the fields states.
+interface HelloLanguage {
+  edition?: string;
+  grammarVersion?: string;
+  editorRelease?: string;
+}
+
+function fakeConn(nodeId: string, engineVersion = "", language: HelloLanguage = {}): FakeConn {
   let resolveDone!: () => void;
   const donePromise = new Promise<void>((resolve) => {
     resolveDone = resolve;
@@ -54,6 +62,9 @@ function fakeConn(nodeId: string, engineVersion = ""): FakeConn {
     // what an engine predating the field states, which is every cluster
     // installed before it.
     engineVersion,
+    edition: language.edition ?? "",
+    grammarVersion: language.grammarVersion ?? "",
+    editorRelease: language.editorRelease ?? "",
     wasClosed: false,
     // Identity markers so a test can assert WHICH connection the manager is
     // handing out (or that it is handing out none).
@@ -454,6 +465,61 @@ test("an engine predating the handshake field reports an empty string, not undef
   const manager = new ConnectionManager(() => Promise.resolve(fakeConn("x")));
   await manager.connect(cluster("a"));
   assert.equal(manager.engineVersion, "");
+});
+
+test("the language the handshake stated is readable off the manager", async () => {
+  // The connect-time language comparison (memql#5362, D25) reads these three.
+  // Getters over `conn` for the reason engineVersion is one: the manager drops
+  // the connection the instant the socket dies, and a cached grammar would go
+  // on describing a cluster this editor is no longer talking to.
+  const manager = new ConnectionManager(() =>
+    Promise.resolve(
+      fakeConn("x", "v0.20.0", {
+        edition: "2026",
+        grammarVersion: "2026.09-example-grammar-0123abcd",
+        editorRelease: "0.4.0",
+      }),
+    ),
+  );
+  assert.equal(manager.edition, undefined, "nothing is connected yet");
+  assert.equal(manager.grammarVersion, undefined);
+  assert.equal(manager.editorRelease, undefined);
+
+  await manager.connect(cluster("a"));
+  assert.equal(manager.edition, "2026");
+  assert.equal(manager.grammarVersion, "2026.09-example-grammar-0123abcd");
+  assert.equal(manager.editorRelease, "0.4.0");
+
+  await manager.disconnect();
+  assert.equal(manager.edition, undefined, "a torn-down connection states nothing");
+  assert.equal(manager.grammarVersion, undefined);
+  assert.equal(manager.editorRelease, undefined);
+});
+
+test("the language is readable by the time a listener hears connected", async () => {
+  // The notice is raised FROM the "connected" listener, so the values must
+  // already be there when it runs: the connection is stored before the state
+  // is published, and this pins that order for these three getters too.
+  const manager = new ConnectionManager(() =>
+    Promise.resolve(fakeConn("x", "", { edition: "2026", grammarVersion: "g", editorRelease: "0.4.0" })),
+  );
+  const seen: Array<string | undefined> = [];
+  manager.onDidChangeState((state) => {
+    if (state.status === "connected") seen.push(manager.edition, manager.grammarVersion, manager.editorRelease);
+  });
+  await manager.connect(cluster("a"));
+  assert.deepEqual(seen, ["2026", "g", "0.4.0"]);
+});
+
+test("an engine predating the language fields reports empty strings, not undefined", async () => {
+  // "" is a cluster that answered and is older than the contract -- which the
+  // comparison reads as "cannot compare" and stays silent about. undefined is
+  // no connection at all.
+  const manager = new ConnectionManager(() => Promise.resolve(fakeConn("x", "v0.19.0")));
+  await manager.connect(cluster("a"));
+  assert.equal(manager.edition, "");
+  assert.equal(manager.grammarVersion, "");
+  assert.equal(manager.editorRelease, "");
 });
 
 test("a done() from a superseded connection cannot clobber the newer connection", async () => {

@@ -43,6 +43,23 @@ const LanguageVersion = "1.0"
 // Edition is the edition this engine writes and the newest one it reads.
 const Edition = "2026"
 
+// EditorRelease is the first release of MemQL for VS Code that carries
+// GrammarVersion (memql#5362; D25 of the design record above).
+//
+// The extension ships its own language server, so an editor speaks the
+// grammar it was packaged with, whatever the cluster it connects to speaks.
+// A cluster states this value on the handshake (ServerHello.editor_release)
+// so an OLDER editor can name the release to install: the editor has never
+// heard of a grammar newer than itself, and only the cluster can say which
+// release carries it.
+//
+// It moves with the grammar. A GrammarVersion bump after this release has
+// shipped needs a new extension release, and this constant, the extension's
+// `version` and the `memql.grammarVersion` pin in editors/vscode/package.json
+// move in the same change -- cmd/memql-lsp/editorparity_test.go refuses the
+// change otherwise, and its failure names each edit.
+const EditorRelease = "0.4.0"
+
 // FrontEnd is how one edition's source reaches the core parser.
 type FrontEnd struct {
 	// Edition is the label a tree declares as `edition = "<Edition>"`.

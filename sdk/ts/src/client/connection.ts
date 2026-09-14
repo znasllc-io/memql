@@ -137,6 +137,13 @@ export class Connection {
   // establish it OR predates the field; both mean "render this as unknown",
   // which is why they are not told apart here (memql#4575).
   engineCommit = "";
+  // The MemQL language the node speaks (memql#5362): the edition, the grammar
+  // version inside it, and the first release of MemQL for VS Code that
+  // carries that grammar. Each stays "" against a node that predates the
+  // fields, the same "older than this contract" answer engineVersion gives.
+  edition = "";
+  grammarVersion = "";
+  editorRelease = "";
 
   private socket: WebSocket;
   private readonly logger: DispatcherOptions["logger"];
@@ -599,6 +606,9 @@ export class Connection {
         this.serverVersion = payload.value.version ?? "";
         this.engineVersion = payload.value.engineVersion ?? "";
         this.engineCommit = payload.value.engineCommit ?? "";
+        this.edition = payload.value.edition ?? "";
+        this.grammarVersion = payload.value.grammarVersion ?? "";
+        this.editorRelease = payload.value.editorRelease ?? "";
       }
     } finally {
       clearTimeout(timer);

@@ -40,7 +40,7 @@ func (Query) listParticipants(_ any) (any, error) {
 `)},
 	}
 
-	tree, err := Load(root)
+	tree, err := Load(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -96,7 +96,7 @@ func (Query) legacyQuery(_ any) (any, error) {
 }
 `)},
 	}
-	_, err := Load(root)
+	_, err := Load(withLanguageLines(root))
 	if err == nil {
 		t.Fatal("expected Form A rejection, got nil")
 	}
@@ -115,7 +115,7 @@ import (
 )
 `)},
 	}
-	_, err := Load(root)
+	_, err := Load(withLanguageLines(root))
 	if err == nil {
 		t.Fatal("expected missing-target error, got nil")
 	}
@@ -139,7 +139,7 @@ import (
 )
 `)},
 	}
-	_, err := Load(root)
+	_, err := Load(withLanguageLines(root))
 	if err == nil {
 		t.Fatal("expected cycle error, got nil")
 	}
@@ -160,7 +160,7 @@ import (
 )
 `)},
 	}
-	_, err := Load(root)
+	_, err := Load(withLanguageLines(root))
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -183,7 +183,7 @@ func (Query) noop(_ any) (any, error) { return nil, nil }
 		"_skip.memql":       {Data: body},
 		"_disabled/x.memql": {Data: body},
 	}
-	tree, err := Load(root)
+	tree, err := Load(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -221,7 +221,7 @@ logic logicValid {
 }
 `)},
 	}
-	_, err := Load(root)
+	_, err := Load(withLanguageLines(root))
 	if err == nil {
 		t.Fatal("Load should surface the orphan-logic parse error; got nil")
 	}
@@ -254,7 +254,7 @@ func TestLoad_NonProceduralFileParsesNatively(t *testing.T) {
 	for filename, body := range cases {
 		t.Run(filename, func(t *testing.T) {
 			root := fstest.MapFS{filename: {Data: []byte(body)}}
-			_, err := Load(root)
+			_, err := Load(withLanguageLines(root))
 			if err != nil {
 				t.Errorf("Load(%s) returned a diagnostic for a valid non-procedural file: %v", filename, err)
 			}
@@ -280,7 +280,7 @@ func TestLoad_MalformedNonProceduralBodySurfaces(t *testing.T) {
 	for filename, body := range cases {
 		t.Run(filename, func(t *testing.T) {
 			root := fstest.MapFS{filename: {Data: []byte(body)}}
-			_, err := Load(root)
+			_, err := Load(withLanguageLines(root))
 			if err == nil {
 				t.Fatalf("Load(%s) returned no diagnostic for a malformed non-procedural body; the strip regressed and the body is being swallowed again", filename)
 			}
@@ -293,7 +293,7 @@ func TestLoad_MalformedNonProceduralBodySurfaces(t *testing.T) {
 
 // TestLoad_EmptyTree locks the no-files case.
 func TestLoad_EmptyTree(t *testing.T) {
-	tree, err := Load(fstest.MapFS{})
+	tree, err := Load(withLanguageLines(fstest.MapFS{}))
 	if err != nil {
 		t.Fatalf("Load empty tree: %v", err)
 	}

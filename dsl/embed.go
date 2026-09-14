@@ -18,11 +18,14 @@ package dsl
 
 import (
 	"embed"
+	"fmt"
 	"io/fs"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // embedFS holds every .memql + .tmpl under the domain-first tree.
@@ -44,8 +47,73 @@ import (
 // is now the ordinary embedded `memory` domain in the list below.
 // examples/referencepack is the worked pack that carries the proof now.
 //
-//go:embed all:accounts all:actions all:agents all:authoring all:bench all:calendar all:campaigns all:capabilities all:cluster all:compose all:commerce all:common all:data all:deployment all:forge all:healing all:identity all:install all:integrations all:knowledge all:library all:memory all:memql all:models all:notes all:observability all:os all:planner all:platform all:policies all:providers all:rbac all:router all:rules all:safety all:shopify all:skills all:todos all:work all:workbench all:worker
+// memql.toml is the one root file: the language line every core domain speaks
+// (memql#5357, EmbeddedManifest below). It is not a domain, and every walker
+// reads only .memql files, so nothing loads it but EmbeddedManifest.
+//
+//go:embed memql.toml all:accounts all:actions all:agents all:authoring all:bench all:calendar all:campaigns all:capabilities all:cluster all:compose all:commerce all:common all:data all:deployment all:forge all:healing all:identity all:install all:integrations all:knowledge all:library all:memory all:memql all:models all:notes all:observability all:os all:planner all:platform all:policies all:providers all:rbac all:router all:rules all:safety all:shopify all:skills all:todos all:work all:workbench all:worker
 var embedFS embed.FS
+
+// EmbeddedManifestPath is where the embedded tree's language line lives in the
+// repository, and the name every message about it uses.
+const EmbeddedManifestPath = "dsl/" + dslfs.ManifestFile
+
+// embeddedManifest reads dsl/memql.toml once: it is compiled into the binary,
+// so it can only change with a rebuild.
+var embeddedManifest = sync.OnceValues(func() (dslfs.Manifest, error) {
+	data, err := fs.ReadFile(embedFS, dslfs.ManifestFile)
+	if err != nil {
+		return dslfs.Manifest{}, fmt.Errorf("%s: %w", EmbeddedManifestPath, err)
+	}
+	m, err := dslfs.ParseManifest(data)
+	if err != nil {
+		return dslfs.Manifest{}, fmt.Errorf("%s: %w", EmbeddedManifestPath, err)
+	}
+	return m, nil
+})
+
+// EmbeddedManifest returns the language line of the embedded tree
+// (dsl/memql.toml, memql#5357). The embedded tree is compiled in as one tree,
+// so it declares its line once and every core domain speaks it; a domain
+// mounted from anywhere else declares its own in <domain>/memql.toml, because
+// a domain directory is the only thing a bundle, a package or a mount delivers.
+// An error here is a build defect, and the loader refuses every core domain
+// with it rather than guessing a line.
+func EmbeddedManifest() (dslfs.Manifest, error) {
+	return embeddedManifest()
+}
+
+// cachedCoreDomains is coreDomains as a set, built once: the embedded FS
+// cannot change after the binary is built, and a resolver asks per domain.
+var cachedCoreDomains = sync.OnceValue(func() map[string]bool {
+	set := map[string]bool{}
+	for _, d := range coreDomains() {
+		set[d] = true
+	}
+	return set
+})
+
+// IsCoreDomain reports whether domain is one the embedded tree ships -- a
+// core domain, which speaks the embedded language line and which no pack or
+// mount can claim.
+func IsCoreDomain(domain string) bool {
+	return cachedCoreDomains()[domain]
+}
+
+// EmbeddedTree is the embedded tree as the language-line resolver sees it: it
+// satisfies component/language/parser.CoreTree, so a loader in any module
+// resolves a tree with parser.ResolveLanguageLines(tree, dsl.EmbeddedTree{})
+// without this package importing the parser.
+type EmbeddedTree struct{}
+
+// IsCoreDomain is the package function IsCoreDomain.
+func (EmbeddedTree) IsCoreDomain(domain string) bool { return IsCoreDomain(domain) }
+
+// EmbeddedManifest is the package function EmbeddedManifest.
+func (EmbeddedTree) EmbeddedManifest() (dslfs.Manifest, error) { return EmbeddedManifest() }
+
+// EmbeddedManifestPath is the constant EmbeddedManifestPath.
+func (EmbeddedTree) EmbeddedManifestPath() string { return EmbeddedManifestPath }
 
 // pluginTrees holds the additional DSL subtrees registered by external
 // Go modules via RegisterTree. Each entry maps a domain name (the

@@ -33,7 +33,7 @@ spec actorEnvelope liveProbeSpec {
 }
 `)}}
 	const domain = "lifecycledisabledspecs"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := newSpecRegistry()
@@ -70,7 +70,7 @@ spec actorEnvelope brokenRetiredSpec {
 }
 `)}}
 	const domain = "lifecycledisabledspecinvalid"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := newSpecRegistry()
@@ -95,7 +95,7 @@ trait liveProbeTrait {
 }
 `)}}
 	const domain = "lifecycledisabledtraits"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := newSpecRegistry()
