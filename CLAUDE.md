@@ -2024,7 +2024,7 @@ Go integration named by `@executor`.
 @enabled
 @description("Run one command on a per-run workbench workspace")
 @executor("integration.workbench.dispatchHost")
-@args(environment="object")
+@args(profile="object")
 builtin workbenchDispatchHost {
   runId    string  @required
   action   string  @required

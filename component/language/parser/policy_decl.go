@@ -1,9 +1,11 @@
 package parser
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/core/num"
 )
@@ -48,9 +50,8 @@ func (p *Parser) parsePolicyDecl(attrs []*ast.Attribute) (*ast.PolicyDecl, error
 	p.advance()
 
 	// Translate the leading attribute set into typed PolicyDecl
-	// fields. Unknown attributes are rejected against the canonical
-	// registry (validateDeclAnnotations below) -- matches the
-	// hand-rolled parser's drain-and-skip default branch.
+	// fields. Unknown attributes are refused by the annotation registry
+	// (checkAnnotations below, memql#5359).
 	for _, attr := range attrs {
 		if attr == nil {
 			continue
@@ -67,7 +68,7 @@ func (p *Parser) parsePolicyDecl(attrs []*ast.Attribute) (*ast.PolicyDecl, error
 		}
 	}
 
-	if err := p.validateDeclAnnotations("Policy", "policy", decl.Name, attrs); err != nil {
+	if err := p.checkAnnotations(annotations.Policy, fmt.Sprintf("policy %q", decl.Name), attrs); err != nil {
 		return nil, err
 	}
 

@@ -2,9 +2,9 @@ package memql
 
 import (
 	"log/slog"
+	"strings"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -42,32 +42,22 @@ spec actorEnvelope requiresOwnerOrAdminFixture {
 
 // TestSpecDeclToSpec_RejectsUnknownAnnotation confirms the surface still
 // rejects an annotation that is not in the Spec receiver set, so a typo'd
-// or misplaced annotation is a hard error rather than a silent drop. Since
-// memql#2395 the PARSER already rejects it (validateDeclAnnotations against
-// the same registry); the converter check remains as defense-in-depth for
-// programmatically-built decls that never pass through the parser.
+// or misplaced annotation is a hard error rather than a silent drop. The
+// PARSER is the one gate (memql#2395, and since memql#5359 the annotation
+// registry's check every construct runs); the converter's second copy of the
+// list is gone with the rest of the duplicate tables.
 func TestSpecDeclToSpec_RejectsUnknownAnnotation(t *testing.T) {
 	// @public is a valid annotation for Query/Mutation but not for Spec.
 	src := `@public
 spec actorEnvelope specWithMisplacedAnnotation {
   return role == "admin"
 }`
-	if _, err := languageParser.ParseSpecDecl(src); err == nil {
+	_, err := languageParser.ParseSpecDecl(src)
+	if err == nil {
 		t.Fatal("ParseSpecDecl accepted @public on a spec; want a parse-time rejection (memql#2395)")
 	}
-
-	// Converter layer: a decl built directly (bypassing the parser) still
-	// rejects the misplaced annotation.
-	decl := &ast.SpecDecl{
-		Name:      "specWithMisplacedAnnotation",
-		BoundName: "actorEnvelope",
-		Attributes: []*ast.Attribute{
-			{Name: "public"},
-		},
-		Body: &ast.ComparisonExpr{},
-	}
-	if _, err := specDeclToSpec(decl, "test:spec"); err == nil {
-		t.Fatal("specDeclToSpec accepted @public on a spec; want a rejection")
+	if !strings.Contains(err.Error(), "@public is not valid on a spec or trait") || !strings.HasSuffix(err.Error(), "[annotation_misplaced]") {
+		t.Fatalf("want the registry's misplaced refusal, got: %v", err)
 	}
 }
 

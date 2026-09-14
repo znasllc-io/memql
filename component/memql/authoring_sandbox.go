@@ -344,8 +344,10 @@ func buildCandidateConcept(c SandboxConstruct) (string, *memoryNodes.Concept, er
 	} else {
 		id, err = languageAst.AssembleConceptIdFromDecl(decl)
 	}
-	if err != nil {
-		return "", nil, fmt.Errorf("%s: %v", origin, err)
+	// The registry answers first about an annotation it refuses, as at boot
+	// (conceptIdRefusal).
+	if err = conceptIdRefusal(decl, err); err != nil {
+		return "", nil, fmt.Errorf("%s: %w", origin, err)
 	}
 	if id == "" {
 		return "", nil, fmt.Errorf("%s: concept %q is missing @namespace and the bundle carries no origin path to derive one from -- either annotate it or send the document's tree-relative path", origin, c.Name)

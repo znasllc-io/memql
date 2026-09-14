@@ -21,23 +21,23 @@
 // Source-of-truth boundaries (deliberate, see the A1 design note on #2122)
 //
 //   - Annotations + their per-receiver legality are DERIVED from
-//     component/language/annotations (the existing #991 registry that
-//     already backs both the load-time gate and the editor). dslspec does
-//     NOT re-list them; Annotations() inverts that registry so the spec
-//     cannot disagree with it.
-//   - Constructs, keywords, operators, field-types, and legal-next rules
-//     have no pre-existing Go registry -- the truth was split across the
-//     parser's top-level dispatch (component/language/parser/parser.go) and
-//     the struct-form rewriter (parser/rewriter.go). dslspec is the SoT for
-//     those; the drift test (#2124) introspects the parser/rewriter and
-//     asserts this spec stays in lockstep, because the parser's dispatch
-//     switch cannot be read from here. (The package does import the parser,
-//     for Edition and GrammarVersion only; see below.)
+//     component/language/annotations, the registry every parser checks
+//     annotations against (memql#5359). dslspec does NOT re-list them;
+//     Annotations() inverts that registry so the spec cannot disagree with
+//     it.
+//   - The construct set, each construct's body clauses and the clause
+//     keywords are DERIVED from the parser (parser.StructFormKeywords,
+//     parser.TopLevelDeclKeywords, parser.BodyClauses; memql#5359).
+//     Operators, field types, legal-next rules and each construct's doc
+//     have no Go registry and are authored here; the drift test (#2124)
+//     holds them against the parser.
+//   - The spec names the language it describes: Edition and GrammarVersion
+//     come from the parser (memql#5362), so a client reading the export
+//     knows which grammar it was built from.
 //
-// The package imports component/language/annotations and, since memql#5362,
-// component/language/parser for the two labels naming the language a spec
-// describes (Edition, GrammarVersion). The parser does not import dslspec, so
-// component/memql/sense and the gRPC/SDK export layer still consume it
+// The package imports component/language/annotations (a leaf) and
+// component/language/parser, which does not import dslspec, so
+// component/memql/sense and the gRPC/SDK export layer can both consume it
 // without an import cycle.
 package dslspec
 
@@ -86,9 +86,9 @@ type Construct struct {
 	// Doc is a one-line description for hover/completion.
 	Doc string `json:"doc"`
 	// AnnotationReceiver is the key into the annotations registry whose
-	// allow-list applies to this construct. Empty string is the concept
-	// (top-level) receiver. "" with Keyword=="concept" is intentional; a
-	// genuinely un-keyed lookup is impossible because Keyword is required.
+	// allow-list applies to this construct's leading annotations ("Concept"
+	// for the concept -- it was "" before memql#5359). Empty for `use`, which
+	// carries no annotations.
 	AnnotationReceiver string `json:"annotationReceiver"`
 	// RegistryBacked is true when AnnotationReceiver resolves in
 	// component/language/annotations.ByReceiver. #2151 closed the
@@ -104,11 +104,19 @@ type Construct struct {
 	// Completion uses this to suggest a concept (or an import) right after
 	// the keyword.
 	ConceptInSignature bool `json:"conceptInSignature"`
-	// BodyBlocks lists the named sub-blocks legal inside this construct's
-	// body (e.g. args / filter / shape for a query; insert / update for a
-	// mutation; params / auth for a provider). Empty for constructs whose
-	// body is a bare field/path/expression list.
+	// BodyBlocks lists the clauses legal inside this construct's body, in
+	// authoring order -- blocks (`args { }`, `insert { }`, `step x { }`) and
+	// line clauses (`filter <expr>`, `paginate 25`) alike, which
+	// parser.IsLineClause tells apart. Derived from parser.BodyClauses
+	// (memql#5359). Empty for constructs whose body is a bare
+	// field/path/expression list.
 	BodyBlocks []string `json:"bodyBlocks,omitempty"`
+	// FieldAnnotations lists the annotations legal on this construct's
+	// fields -- a concept's fields, the fields of an args block, or the field
+	// list that is a tool / prompt / builtin body -- projected from the
+	// registry's field receiver for the construct (memql#5359). Empty for a
+	// construct with no field list.
+	FieldAnnotations []string `json:"fieldAnnotations,omitempty"`
 }
 
 // Annotation is one `@name` directive and the set of construct keywords it
@@ -120,6 +128,10 @@ type Annotation struct {
 	// (e.g. "query", "mutation"), sorted. Derived from annotations.ByReceiver
 	// by mapping each receiver key back to its construct keyword(s).
 	Receivers []string `json:"receivers"`
+	// Fields are the construct keywords whose FIELDS accept this annotation
+	// (e.g. "concept" for @pii, "query" for an args field's @required),
+	// sorted. Derived from the registry's field receivers (memql#5359).
+	Fields []string `json:"fields,omitempty"`
 }
 
 // FieldType is a scalar/shape type name valid in a concept field, args
@@ -251,88 +263,84 @@ func (s *Spec) ConstructByKeyword(keyword string) *Construct {
 	return nil
 }
 
-// buildAnnotations inverts annotations.ByReceiver (receiver -> []name) into
-// a per-annotation view (name -> doc + []constructKeyword), so the spec
-// stays a strict projection of the #991 registry and cannot disagree with
-// it. Receiver keys are mapped to construct keywords via
-// receiverKeyToConstructKeywords (e.g. the "Spec" receiver backs both the
-// `spec` and `trait` keywords).
+// buildAnnotations inverts the registry (receiver -> []name) into a
+// per-annotation view (name -> doc + the constructs it is legal on + the
+// constructs whose fields accept it), so the spec stays a strict projection
+// of component/language/annotations and cannot disagree with it. The receiver
+// of each construct is the construct's own AnnotationReceiver and field
+// receiver (constructs.go), so the mapping has one source.
 func buildAnnotations() []Annotation {
-	// name -> set of construct keywords.
-	receiverFor := map[string]map[string]bool{}
-	for receiverKey, names := range annotations.ByReceiver {
-		keywords := receiverKeyToConstructKeywords(receiverKey)
-		for _, name := range names {
-			set := receiverFor[name]
-			if set == nil {
-				set = map[string]bool{}
-				receiverFor[name] = set
-			}
-			for _, kw := range keywords {
-				set[kw] = true
-			}
+	leading := map[string]map[string]bool{} // name -> construct keywords
+	fields := map[string]map[string]bool{}  // name -> constructs whose fields take it
+	add := func(into map[string]map[string]bool, name, keyword string) {
+		if into[name] == nil {
+			into[name] = map[string]bool{}
+		}
+		into[name][keyword] = true
+	}
+	for _, c := range constructs() {
+		for _, name := range annotations.ByReceiver[c.AnnotationReceiver] {
+			add(leading, name, c.Keyword)
+		}
+		for _, name := range c.FieldAnnotations {
+			add(fields, name, c.Keyword)
 		}
 	}
+	// @relationship is written inside the concept's body, not before it.
+	for _, name := range annotations.ByReceiver[string(annotations.ConceptBody)] {
+		add(leading, name, "concept")
+	}
 
-	out := make([]Annotation, 0, len(receiverFor))
-	for name, set := range receiverFor {
-		receivers := make([]string, 0, len(set))
-		for kw := range set {
-			receivers = append(receivers, kw)
-		}
-		sort.Strings(receivers)
+	names := map[string]bool{}
+	for n := range leading {
+		names[n] = true
+	}
+	for n := range fields {
+		names[n] = true
+	}
+	out := make([]Annotation, 0, len(names))
+	for name := range names {
 		out = append(out, Annotation{
 			Name:      name,
 			Doc:       annotations.Docs[name],
-			Receivers: receivers,
+			Receivers: sortedSet(leading[name]),
+			Fields:    sortedSet(fields[name]),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
-// receiverKeyToConstructKeywords maps an annotations-registry receiver key
-// to the author-facing construct keyword(s) it governs. Most are 1:1; the
-// empty key is the concept declaration, and the "Spec" receiver governs
-// both `spec` and `trait` (trait shares spec's runtime contract -- it is
-// parsed by parseSpecDecl with trait=true).
-func receiverKeyToConstructKeywords(receiverKey string) []string {
-	switch receiverKey {
-	case "":
-		return []string{"concept"}
-	case "Query":
-		return []string{"query"}
-	case "Mutation":
-		return []string{"mutate"}
-	case "Logic":
-		return []string{"logic"}
-	case "Automation":
-		return []string{"automation"}
-	case "Action":
-		return []string{"action"}
-	case "Capability":
-		return []string{"capability"}
-	case "Spec":
-		return []string{"spec", "trait"}
-	case "Tool":
-		return []string{"tool"}
-	case "Builtin":
-		return []string{"builtin"}
-	case "Prompt":
-		return []string{"prompt"}
-	case "Provider":
-		return []string{"provider"}
-	case "Shape":
-		return []string{"shape"}
-	case "Policy":
-		return []string{"policy"}
-	case "Rule":
-		return []string{"rule"}
-	case "Seed":
-		return []string{"seed"}
-	default:
-		// Unknown receiver key: surface it under its lowercased self so the
-		// drift test notices rather than silently dropping it.
-		return []string{receiverKey}
+// sortedSet returns the set's members sorted; an empty set is an empty (not
+// nil) slice, so a JSON consumer reads `"receivers": []`.
+func sortedSet(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
 	}
+	sort.Strings(out)
+	return out
+}
+
+// receiverKeyToConstructKeywords maps an annotations-registry receiver key to
+// the author-facing construct keyword(s) it governs, derived from
+// constructs(): a construct receiver governs the constructs naming it as
+// their AnnotationReceiver (the "Spec" receiver backs both `spec` and
+// `trait`); a field receiver governs the constructs whose field list it
+// checks; ConceptBody governs the concept. An unknown key maps to nothing,
+// which the drift test reports.
+func receiverKeyToConstructKeywords(receiverKey string) []string {
+	set := map[string]bool{}
+	if receiverKey == string(annotations.ConceptBody) {
+		set["concept"] = true
+	}
+	for _, c := range constructs() {
+		if c.AnnotationReceiver == receiverKey && receiverKey != "" {
+			set[c.Keyword] = true
+		}
+		if string(fieldReceiverFor(c)) == receiverKey && receiverKey != "" {
+			set[c.Keyword] = true
+		}
+	}
+	return sortedSet(set)
 }

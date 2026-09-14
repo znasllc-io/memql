@@ -321,3 +321,31 @@ func TestDiagnose_RetiredFormCarriesItsRule(t *testing.T) {
 		})
 	}
 }
+
+// TestRefusedAnnotationDiagnosticCoversTheAnnotation: a refused annotation's
+// diagnostic spans the annotation it refuses -- the `@` and its name, where
+// the parser put the error -- not a fixed ten columns from its start.
+func TestRefusedAnnotationDiagnosticCoversTheAnnotation(t *testing.T) {
+	s := New(&fakeRegistry{})
+	for _, tc := range []struct {
+		src        string
+		start, end Position
+	}{
+		{"@bogus\nquery thing probe {\n  filter row.id != \"\"\n}\n", Position{Line: 1, Column: 1}, Position{Line: 1, Column: 7}},
+		{"prompt probe {\n  x string @nope\n}\n", Position{Line: 2, Column: 12}, Position{Line: 2, Column: 17}},
+	} {
+		var found bool
+		for _, d := range s.Diagnose(tc.src, "probe.memql") {
+			if d.Code != "invalid-annotation" {
+				continue
+			}
+			found = true
+			if d.Range.Start != tc.start || d.Range.End != tc.end {
+				t.Errorf("%q: range %+v, want %+v..%+v", tc.src, d.Range, tc.start, tc.end)
+			}
+		}
+		if !found {
+			t.Errorf("%q: no invalid-annotation diagnostic", tc.src)
+		}
+	}
+}

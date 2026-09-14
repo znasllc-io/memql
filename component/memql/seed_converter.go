@@ -3,9 +3,8 @@ package memql
 // seed_converter.go bridges the langparser's *ast.SeedDecl AST node
 // (introduced by memql#335 / sub-epic #329 / Stage 1C of #310) to
 // the in-package *seedDecl that LoadUnifiedSeeds + compileSeedDecl
-// already consume. The hand-rolled parseSeedMemQL (seed_parser.go)
-// is unreferenced from production after this child lands but kept
-// for its tests until #329's cleanup PR.
+// already consume. The hand-rolled seed parser this replaced was deleted
+// with memql#5359; seed_parser.go keeps only the in-package types.
 //
 // Strategy: translate to the existing internal *seedDecl rather than
 // produce *SeedDefinition directly. That lets the compileSeedDecl
@@ -23,7 +22,7 @@ import (
 )
 
 // seedDeclASTToInternal converts a langparser SeedDecl AST node into
-// the in-package *seedDecl shape parseSeedMemQL produced. The
+// the in-package *seedDecl shape the retired hand-rolled parser produced. The
 // downstream compileSeedDecl call still owns loader-level
 // validation; this converter just translates.
 //
@@ -65,8 +64,8 @@ func seedDeclASTToInternal(decl *languageParser.SeedDecl) (*seedDecl, error) {
 }
 
 // seedBlockASTToInternal lowers an AST block into the in-package
-// shape, preserving insertion order via the keys slice. Mirrors
-// parseSeedMemQL::parseBlockBody's output 1:1.
+// shape, preserving insertion order via the keys slice. Mirrors the
+// retired hand-rolled parser's block output 1:1.
 func seedBlockASTToInternal(b *languageParser.SeedBlock) (seedBlock, error) {
 	out := newSeedBlock()
 	if b == nil {

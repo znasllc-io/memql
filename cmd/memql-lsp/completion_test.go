@@ -33,7 +33,7 @@ func TestToLSPCompletionItem(t *testing.T) {
 	ci := toLSPCompletionItem(sense.CompletionItem{
 		Label: "query", Kind: "keyword", Detail: "construct",
 		Documentation: "a query", InsertText: "query", SortPriority: 3,
-	})
+	}, "")
 	if ci.Label != "query" {
 		t.Errorf("label = %q", ci.Label)
 	}

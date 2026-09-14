@@ -7,7 +7,7 @@ someone deciding whether to install rather than for someone reading the repo.
 
 **The MemQL it speaks, and the cluster's**
 - This release speaks MemQL edition 2026, grammar
-  `2026.09-dsl-v1-expressions-b80c0409`: its
+  `2026.09-dsl-v1-expressions-4485b389`: its
   highlighting, completion and diagnostics are that grammar's.
 - When you connect to a cluster, the extension compares the cluster's MemQL
   with its own. A cluster on a newer grammar raises a notice naming the release
