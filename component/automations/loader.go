@@ -353,7 +353,7 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 	// static cost limit refuses the automation at load rather than at its
 	// first run. Before the args-resolution gate, which reads the parsed
 	// nodes of a v1 automation.
-	if err := PrepareExpressions(&automation); err != nil {
+	if err := prepareExpressions(&automation, l.registry); err != nil {
 		return nil, err
 	}
 
@@ -867,7 +867,7 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 
 	// The same one-time parse compileMemQL runs, for a body compiled from
 	// the v1 grammar (memql#5367).
-	if err := PrepareExpressions(&automation); err != nil {
+	if err := prepareExpressions(&automation, l.registry); err != nil {
 		return nil, err
 	}
 

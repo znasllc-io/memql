@@ -39,11 +39,13 @@ package automations
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 
+	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
@@ -111,8 +113,21 @@ func (l *ExprLeaf) MarshalJSON() ([]byte, error) {
 //
 // An error names the step and the position: a parse error, or an expression
 // whose static cost estimate exceeds tiers.MaxStaticCost.
+//
+// PrepareExpressions has no concept registry, so it cannot check a trigger
+// filter against its concept's declared field types; the loader, which has
+// one, calls prepareExpressions with it.
 func PrepareExpressions(a *Automation) error {
-	p := &exprPreparer{automation: a.Name}
+	return prepareExpressions(a, nil)
+}
+
+// prepareExpressions is PrepareExpressions against the concept registry the
+// automation compiles with -- the engine's at boot, the authoring sandbox's
+// clone (bundle concepts overlaid) for an authored one. A trigger filter is
+// checked against its concept's declared field types there (see
+// checkTriggerFilterFields); a nil registry skips that check and nothing else.
+func prepareExpressions(a *Automation, concepts memoryNodes.Registry) error {
+	p := &exprPreparer{automation: a.Name, concepts: concepts}
 	if !a.IsV1() {
 		if err := refuseLegacyLeaves(a); err != nil {
 			return err
@@ -176,7 +191,52 @@ func (p *exprPreparer) triggerFilter(t *TriggerConfig) error {
 	if err := p.checkCost("trigger filter", lam.Body); err != nil {
 		return err
 	}
+	if err := p.checkTriggerFilterFields(t, lam); err != nil {
+		return err
+	}
 	t.FilterLambda = lam
+	return nil
+}
+
+// checkTriggerFilterFields refuses a trigger filter that uses a bare field of
+// a declared non-boolean type as its condition -- `row => row.title` over a
+// string field -- as Lower refuses one in a query filter (memql#5366). The
+// filter is decided in process over the triggering row, and there a stored
+// non-boolean in condition position is "not true", so the automation would
+// load and silently never fire; the author meant a comparison, and the
+// refusal names the one it probably was.
+//
+// The declared types are the trigger concept's, read from the registry the
+// automation compiles against. By the time the preparer runs, the compiler
+// has resolved the trigger's concept to its canonical id in the topic
+// (graph.node.<action>.<concept id>). A trigger that names no concept (a
+// schedule, a non-graph event, a wildcard), a concept the registry does not
+// hold, or no registry at all leaves nothing to check against, and the
+// runtime rule decides.
+func (p *exprPreparer) checkTriggerFilterFields(t *TriggerConfig, lam *ast.LambdaExpr) error {
+	if p.concepts == nil {
+		return nil
+	}
+	conceptID := conceptIdFromTriggerTopic(t.Event)
+	if conceptID == "" {
+		return nil
+	}
+	concept, err := p.concepts.Get(conceptID)
+	if err != nil || concept == nil {
+		return nil
+	}
+	if err := memql.CheckConditionFields(lam, concept, tiers.PositionTriggerFilter); err != nil {
+		// The lambda was parsed from the compiled JSON's filter text, so the
+		// refused node's span is a column of THAT text, not of the author's
+		// file. An authoring diagnostic positions a LowerError by its span,
+		// and a position that cannot be established is omitted rather than
+		// guessed -- the diagnostic then anchors at the construct.
+		var le *memql.LowerError
+		if errors.As(err, &le) {
+			le.Span = ast.Span{}
+		}
+		return fmt.Errorf("automation %q: trigger filter: %w", p.automation, err)
+	}
 	return nil
 }
 
@@ -238,6 +298,9 @@ func bindV1OnErrorRun(evaluator *Evaluator, a *Automation, exec *AutomationExecu
 // exprPreparer carries the automation's name into every refusal.
 type exprPreparer struct {
 	automation string
+	// concepts is the registry the automation compiles against, for the
+	// trigger filter's declared-type check; nil skips that check.
+	concepts memoryNodes.Registry
 }
 
 // parse parses one always-expression position and checks its static cost.

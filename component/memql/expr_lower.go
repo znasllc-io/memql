@@ -146,6 +146,8 @@ func positionPhrase(p tiers.Position) string {
 		return "a spec or trait body"
 	case tiers.PositionQueryRefine:
 		return "a refine clause"
+	case tiers.PositionTriggerFilter:
+		return "a trigger filter"
 	case "":
 		return "a pushdown position"
 	}
@@ -516,20 +518,26 @@ func (l *lowerer) barePred(n ast.ExpressionNode) (ExpressionNode, error) {
 // not boolean, naming the type and the comparison that was probably meant.
 func (l *lowerer) notBooleanRefusal(n ast.ExpressionNode, typ string) error {
 	text := ast.FormatExpr(n)
-	fix := "Compare it with a value, as in `" + text + " == true`"
+	return l.refuse(n, fmt.Sprintf("`%s` is a %s, and a condition must be boolean", text, typ), notBooleanFix(text, typ))
+}
+
+// notBooleanFix is the comparison a non-boolean used as a condition probably
+// meant, by its type -- shared by Lower and the in-process positions' load
+// check (CheckConditionFields), so both suggest the same spelling.
+func notBooleanFix(text, typ string) string {
 	switch typ {
 	case "string", "datetime":
-		fix = "Test whether it is set, `" + text + " != nil`, or compare it: `" + text + " == \"...\"`"
+		return "Test whether it is set, `" + text + " != nil`, or compare it: `" + text + " == \"...\"`"
 	case "number":
-		fix = "Compare it with a number, as in `" + text + " > 0`"
+		return "Compare it with a number, as in `" + text + " > 0`"
 	case "list":
-		fix = "Test its elements, as in `" + text + ".any(x => x == \"...\")`, or its size: `" + text + ".count() > 0`"
+		return "Test its elements, as in `" + text + ".any(x => x == \"...\")`, or its size: `" + text + ".count() > 0`"
 	case "map":
-		fix = "Compare one of its fields, as in `" + text + ".status == \"...\"`"
+		return "Compare one of its fields, as in `" + text + ".status == \"...\"`"
 	case "nil":
-		fix = "A condition is `true` or `false`; `nil` is neither"
+		return "A condition is `true` or `false`; `nil` is neither"
 	}
-	return l.refuse(n, fmt.Sprintf("`%s` is a %s, and a condition must be boolean", text, typ), fix)
+	return "Compare it with a value, as in `" + text + " == true`"
 }
 
 // ternaryPred lowers a BOOLEAN ternary, `c ? p : q`, to `(c && p) || (!c &&

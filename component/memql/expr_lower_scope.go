@@ -196,13 +196,13 @@ func checkQueryConstruct(fn *Function, scope pushdownScope) (string, error) {
 	if fn == nil {
 		return "", nil
 	}
-	if fn.V1Filter != nil {
-		var concept *memoryNodes.Concept
-		if scope.concepts != nil && fn.BoundConcept != "" {
-			if c, err := scope.concepts.Get(fn.BoundConcept); err == nil {
-				concept = c
-			}
+	var concept *memoryNodes.Concept
+	if scope.concepts != nil && fn.BoundConcept != "" {
+		if c, err := scope.concepts.Get(fn.BoundConcept); err == nil {
+			concept = c
 		}
+	}
+	if fn.V1Filter != nil {
 		args := argTypesFromSchema(fn.ArgsSchema)
 		if _, err := lowerQueryFilter(fn.V1Filter, concept, args, scope.predicate); err != nil {
 			return "lower", err
@@ -212,7 +212,7 @@ func checkQueryConstruct(fn *Function, scope pushdownScope) (string, error) {
 		}
 	}
 	if refine := refineIn(fn.Expr); refine != nil {
-		if err := validateRefineIn(fn, refine, scope.predicate); err != nil {
+		if err := validateRefineIn(fn, refine, scope.predicate, concept); err != nil {
 			return "lower:refine", err
 		}
 	}

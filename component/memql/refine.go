@@ -166,16 +166,28 @@ func (e *MemQLEngine) refinePredicates() func(string) (string, ast.ExpressionNod
 //   - every call is a catalog function or method, or a predicate applied to
 //     the row whose v1 body EvalExpr can evaluate;
 //   - every name is the parameter, a lambda parameter, args (a declared
-//     argument), actor, now or config.
+//     argument), actor, now or config;
+//   - no condition position holds a bare field of the bound concept whose
+//     declared type is not boolean (CheckConditionFields, D8): at run time
+//     such a field is "not true" on every row, so the refine would load and
+//     silently empty every page.
 func (e *MemQLEngine) validateRefine(fn *Function, refine *RefineExpression) error {
-	return validateRefineIn(fn, refine, e.predicateLookup())
+	var concept *memorynodes.Concept
+	if e != nil && e.concepts != nil && fn != nil && fn.BoundConcept != "" {
+		concept, _ = e.concepts.Get(fn.BoundConcept)
+	}
+	return validateRefineIn(fn, refine, e.predicateLookup(), concept)
 }
 
 // validateRefineIn is validateRefine over an explicit spec lookup -- the
 // engine's registry at Init, the scope an authored construct is lowered in at
 // define time. A nil lookup (an engine-free validation, which sees no spec
 // registry) defers the predicate checks to the lowering that has one.
-func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string) (*Spec, bool)) error {
+// concept is the query's bound concept: a bare field of a declared non-boolean
+// type used as the refine's condition is refused against it
+// (CheckConditionFields), as Lower refuses one in a filter. Nil checks no
+// field types.
+func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string) (*Spec, bool), concept *memorynodes.Concept) error {
 	lam := refine.Lambda
 	if lam == nil || len(lam.Params) != 1 {
 		return fmt.Errorf("refine takes a lambda of one parameter, the row")
@@ -274,7 +286,10 @@ func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string
 		}
 	}
 	walk(lam.Body, map[string]bool{})
-	return walkErr
+	if walkErr != nil {
+		return walkErr
+	}
+	return CheckConditionFields(lam, concept, tiers.PositionQueryRefine)
 }
 
 // checkRefinePredicate checks a predicate application inside a refine: it is
