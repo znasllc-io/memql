@@ -1921,7 +1921,7 @@ type RelationshipDecl struct {
 //	                                  canonical semantics; @disabled on a
 //	                                  @base propagates to its @extends children
 //	@base                             vendor-level metadata (no @model)
-//	@type("OpenAI") / @model("...")   provider type + concrete model
+//	@vendor("OpenAI") / @model("...")   provider type + concrete model
 //	@modality("text"|"tts"|"stt")     defaults to text
 //	@default                          first @default wins the runtime default
 //	@extends("parent") @description   inheritance + docs
@@ -1929,7 +1929,7 @@ type RelationshipDecl struct {
 // Authoring shape:
 //
 //	@description("OpenAI GPT-5 Mini")
-//	@type("OpenAI")
+//	@vendor("OpenAI")
 //	@model("gpt-5-mini")
 //	@modality("text")
 //	provider chat5Mini {
@@ -1945,7 +1945,7 @@ type RelationshipDecl struct {
 // Base providers (vendor-level metadata, no @model) carry @base:
 //
 //	@base
-//	@type("OpenAI")
+//	@vendor("OpenAI")
 //	provider openai {
 //	  auth { apiKey env("MEMQL_AI_OPENAI_PROJECT_ID") }
 //	}

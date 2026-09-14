@@ -223,7 +223,7 @@ func (p *Parser) parseProviderParamsBlock(decl *ast.ProviderDecl) error {
 
 // attrStringValue pulls a single string value off an annotation.
 // Returns "" for flag attributes or attributes whose value isn't a
-// string. Used for `@type("OpenAI")` / `@model("gpt-5-mini")` /
+// string. Used for `@vendor("OpenAI")` / `@model("gpt-5-mini")` /
 // `@extends("openai")` / etc.
 func attrStringValue(attr *ast.Attribute) string {
 	if attr == nil || attr.Value == nil {

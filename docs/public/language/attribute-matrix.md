@@ -30,36 +30,110 @@ pins this table to the allow-lists so the two cannot drift.
 | Attribute | Query | Mutation | Automation | Description |
 |-----------|:-----:|:--------:|:----------:|-------------|
 | **Lifecycle** |
-| `@enabled` | Yes | Yes | Yes | Accepted no-op; definitions are enabled by default (#2609) |
 | `@disabled` | Yes | Yes | Yes | Explicitly disables the definition |
-| `@deprecated` | No | No | No | Not accepted on any function-style construct -- removed from the allow-lists (#989); the parser still folds it but the load gate rejects it. Use `@disabled` to deactivate |
-| `@version("v1")` | No | No | No | Version metadata -- valid on **seeds and concept definitions only**, rejected at load on query/mutation/automation |
 | **Documentation** |
 | `@description("...")` | Yes | Yes | Yes | Human-readable description (fallback; prefer `///` doc comments, #2601) |
 | **Access Control** |
 | `@public` | Yes | Yes | No | Authz-classification opt-out: declares that no caller-scope check applies (see below) |
 | `@actor` | Yes | Yes | Yes | Declares the body reads the auth envelope (`actor.*`); used-but-undeclared fails load (#2621) |
-| `@permission("...")` | -- | -- | -- | BURIED (#2713); never enforced. See below |
 | **Performance** |
-| `@timeout("30s")` | No | No | No | Not accepted -- removed from the allow-lists (#989); rejected at load |
-| `@cache(300)` | Yes | No | No | Result-cache TTL in whole seconds; positional preferred (#2618), `ttl="300"` keeps parsing |
+| `@cache(300)` | Yes | No | No | Result-cache TTL in whole seconds. `@cache(0)` is the explicit never-cache. One spelling: `ttl="300"` and `@nocache` are retired (memql#5375) |
 | **Reliability** |
-| `@retry(count=3)` | No | No | No | Not accepted -- removed from the allow-lists (#989); rejected at load |
-| `@idempotent` | No | No | No | Not accepted -- removed from the mutation allow-list (#989); rejected at load |
 | `@mergeFields("a", "b")` | No | Yes | No | Deep-merge the named object payload fields on update instead of replacing them |
 | `@appendFields("a", "b")` | No | Yes | No | Append the named array payload fields' elements to the stored array on update instead of replacing them |
 | `@addToSet("a", "b")` | No | Yes | No | Treat the named array payload fields as sets and union the written elements into the stored array, deduped |
 | `@removeFromSet("a", "b")` | No | Yes | No | Treat the named array payload fields as sets and remove the written elements from the stored array |
 | `@createOnly("a", "b")` | No | Yes | No | Write the named payload fields only on create; preserve the stored value on an insert (upsert) onto an existing id |
 | `@noUnset("a", "b")` | No | Yes | No | Declare the named payload fields one-way: a write may set them, never blank them. An empty incoming value is dropped when the stored value is non-empty |
-| **Auditing** |
-| `@audit` | No | No | No | Not accepted -- removed from the allow-lists (#989); rejected at load |
 | **Triggers (Automation Only)** |
 | `@trigger(event="...")` | No | No | Yes | Event-based trigger |
 | `@trigger(schedule="...")` | No | No | Yes | Cron-based schedule (6-field, with seconds) |
 | `@filter(...)` | No | No | Yes | Predicate over the triggering event's payload |
-| `@schedule(cron="...")` | No | No | Yes | Accepted synonym for `@trigger(schedule="...")` |
-| `@async` | No | No | No | Not accepted -- dead vocabulary; rejected at load. Automations run async by their event/schedule trigger |
+
+---
+
+## Retired attributes
+
+Every name here REFUSES at parse or load. The refusal names what replaced it
+and, where a codemod applies, the command: `memqlmigrate --rewrite=attributes`.
+
+This section is pinned in BOTH directions by
+[`attribute_matrix_parity_test.go`](../../../attribute_matrix_parity_test.go):
+the applicability table above may not carry a row for a retired name, and every
+retired name must appear somewhere in this file. The second half matters more
+than it looks -- an author who meets a refusal and cannot find the annotation
+documented anywhere reads it as a typo in their own file.
+
+The ledger the refusals come from is `retiredConstructAnnotations` and
+`retiredFieldAnnotations` in [`core/baseparser/iface.go`](../../../core/baseparser/iface.go).
+
+### Retired because nothing read them (memql#5375)
+
+Each of these parsed, was stored, and changed no behaviour. Several were
+rendered by `help()` or by editor hover, which is worse than being ignored: the
+render showed a field whose only reachable value was the zero value.
+
+| Attribute | Receiver | What to do instead |
+|-----------|----------|--------------------|
+| `@deprecated` | function | Delete it, or say so in the construct's `@description` |
+| `@timeout("30s")` | function | Delete it; a real deadline belongs on the caller's context |
+| `@retry(count=N)` | function | Delete it; nothing ever retried |
+| `@idempotent` | mutation | Delete it; there was no check behind it |
+| `@audit` | function | Delete it; auditing is `v1:identity:auditEvent`, written from Go |
+| `@version("v1")` | function | Delete it. **Still live on a concept and a seed**, where it is the `v1` of every canonical id |
+| `@rateLimit(...)` | tool | Delete it. The ceiling did not exist: `Tool.RateLimit` was cloned and advertised and enforced nowhere. The live ceilings are the provider chokepoint in `ai_guard.go` and the run budget in `component/work` |
+| `@scopes(...)` | tool | Delete it. It was advertised on the gRPC tool descriptor and checked nowhere, so it read as an authorization gate while gating nothing. Use `@requiresCapability` for a real one |
+| `@unique` | concept field | Delete it. There was no uniqueness check behind it (memql#2960) |
+| `@immutable` | concept field | Delete it. A field that must not change is enforced by the mutation that writes it |
+| `@default("x")` | concept field | Delete it. It was never applied on insert, so the field did not default. Fill the value with `??` in the mutation that writes it. **Still live on a tool, prompt or builtin field**, where the body IS the schema the model reads |
+
+### Retired because they restated something the engine derives (memql#5375)
+
+A restatement is worse than an absence, because it can disagree with the thing
+it restates -- and when it does, the stale copy usually wins.
+
+| Attribute | Receiver | What to do instead |
+|-----------|----------|--------------------|
+| `@enabled` | every construct | Delete it. Constructs are enabled by default, so it was an explicit no-op that read like a switch. `@disabled` is unchanged |
+| `@latestMode` | query | Delete it. Time-dependence is derived from `asOf latest` in the body; the annotation was OR-ed in, so a stale one could force `true` on a query that no longer reads the tip |
+| `@namespace("x")` | concept | Delete it. The namespace is the domain directory, or that directory's one-line `namespace.pin`. Pin a deliberate divergence with a `namespace.pin` file (#2614) |
+
+### Retired as the losing spelling of a pair (memql#5375)
+
+One value, one spelling. Two names for one thing means a reader has to know
+both to grep for either.
+
+| Retired | Write instead |
+|---------|---------------|
+| `@nocache` | `@cache(0)` |
+| `@cache(ttl="300")` | `@cache(300)` |
+| `@schedule(cron="...")` | `@trigger(schedule="...")` |
+| `mutate <Concept> <name> {` | `mutation <Concept> <name> {` |
+| `@type("OpenAI")` on a provider | `@vendor("OpenAI")`. A concept's `@type` is its row kind and is unchanged |
+
+### Kept, and why -- the three D17 candidates that have a live reader
+
+memql#5375 proposed retiring these and re-verified each first, as the design
+record's own section 10 requires. Each turned out to be read, so each stays
+with its reader named in
+[`component/language/annotations/registry.go`](../../../component/language/annotations/registry.go).
+
+| Attribute | Reader |
+|-----------|--------|
+| `@displayCard` | `clients/os/src/apps/concepts/displayCard.ts` resolves the slots; `RowsPanel.tsx` renders them. A concept with no card shows its id and nothing else |
+| `@composable` | Served through `integration.compose.composableConcepts`; read by `clients/os/src/apps/materializer/useCompose.ts`. Retiring it would empty the composer's list |
+| `@allowedRoles` | `Tool.AllowedRoles` in `component/memql/tool_types.go`, applied by `component/grpc/server.go` before dispatch and by `tool_execution.go` on the in-engine path. It gates which AGENT role may call a tool -- a different axis from `@requiresRank` (the human caller's rank) and `@requiresCapability` (a grant over a resource), and neither can say "a specialist may not call this" |
+
+### Retired earlier
+
+| Attribute | Retired in | What to do instead |
+|-----------|-----------|--------------------|
+| `@internal` | 2026.08 (#2620 / #2708) | Delete it. It hid the construct from discovery surfaces while leaving it callable. `@serverOnly` bars client-originated calls |
+| `@role` | #2631 / #2709 | Delete it. Never enforced; access control is the actor layer (RBAC + `@public`) |
+| `@permission("...")` | #2631 / #2713 | Delete it. The `@role` twin, equally unenforced |
+| `@async` | dead vocabulary | Delete it. Automations run async by their event or schedule trigger |
+| `@clientExecution` | epic memql#4988 | Delete it. It dispatched the tool to the connected browser over the client-tool relay, removed with the cognition node. Every tool needs a server-side `@handler` |
+| The `@use*` family | import-model pivot | Declare the dependency with a file-top `use <module>.{ ... }` import, and put the bound concept in the signature |
 
 ---
 

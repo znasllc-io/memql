@@ -57,7 +57,7 @@ tool dangerTool {
 
 // TestParseProviderDecl_RejectsUnknownAnnotation locks in #990 for providers.
 func TestParseProviderDecl_RejectsUnknownAnnotation(t *testing.T) {
-	source := `@type("OpenAI")
+	source := `@vendor("OpenAI")
 @model("gpt-5.4-mini")
 @bogusProviderAnno
 @description("provider with a bogus annotation")

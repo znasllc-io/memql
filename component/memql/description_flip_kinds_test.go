@@ -114,7 +114,7 @@ func TestDescriptionFlip_PromptProviderPolicy(t *testing.T) {
 		}
 	})
 	t.Run("provider", func(t *testing.T) {
-		decl, err := languageParser.ParseProviderDecl("/// Provider doc.\n@base\n@type(\"Anthropic\")\n@description(\"Provider annot.\")\nprovider flipProvider {\n  auth {\n    apiKey env(\"X\")\n  }\n}")
+		decl, err := languageParser.ParseProviderDecl("/// Provider doc.\n@base\n@vendor(\"Anthropic\")\n@description(\"Provider annot.\")\nprovider flipProvider {\n  auth {\n    apiKey env(\"X\")\n  }\n}")
 		if err != nil {
 			t.Fatal(err)
 		}

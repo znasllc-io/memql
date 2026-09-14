@@ -112,7 +112,7 @@ func (c ProviderConfig) ContextWindow() int {
 //
 // IT IS A CAPABILITY, NOT A TYPE, and that is the whole point of the field.
 // Every vendor model used to carry TWO records -- `chat54Mini` and
-// `stream54Mini`, one @type("OpenAI") and one @type("OpenAIStream") -- for one
+// `stream54Mini`, one @vendor("OpenAI") and one @vendor("OpenAIStream") -- for one
 // model with one price. The two drifted, exactly as a duplicated fact does:
 // they disagreed about gpt-5.4-mini's maxCompletionTokens, and the streaming
 // copy was the one the agent reply path actually used, so it was the copy that
