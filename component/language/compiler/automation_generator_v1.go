@@ -1,18 +1,13 @@
 package compiler
 
 // automation_generator_v1.go -- compiling an automation (or logic) body
-// parsed in the edition-2026 expression grammar (AutomationDef.ExpressionsV1,
-// epic memql#5363, memql#5367).
+// (epic memql#5363, memql#5367).
 //
-// A v1 body's expressions are already canonical v1 source or parsed v1 nodes,
-// so this half does NOT run any of the legacy half's text rewrites
-// (translateCondition, convertEventReferences, convertArgReferences, the `$`
-// lifting in compileStepHelperValue): those exist to turn authored text into
-// the string evaluator's dialect, and a v1 expression is read by EvalExpr as
-// written. What it emits (the runtime reads it in
-// component/automations/expressions_v1.go):
+// Every expression of a body is canonical edition-2026 source or a parsed v1
+// node, and it is carried as written: the runtime evaluates it with EvalExpr
+// (component/automations/expressions_v1.go), so nothing here rewrites
+// authored text into another dialect. What it emits:
 //
-//   - `"expressions": "v1"` at the top level;
 //   - every EXPRESSION FIELD -- a position that is always an expression: a
 //     step `condition`, `forEach.source`, `forEach.filter`,
 //     `switch.expression`, `shape.source`, `trigger.filter`, a `query.query`
@@ -29,10 +24,10 @@ package compiler
 //     step whose query is that call; every other function step is a construct
 //     call for the engine.
 //
-// The step order is the legacy topological sort, fed by a v1 reference walk:
-// the free names of every expression in a step (lambda parameters bound, a
-// forEach's loop variable bound inside its body) that are step ids, plus
-// `steps.<id>` reads.
+// The step order is a topological sort fed by a reference walk: the free
+// names of every expression in a step (lambda parameters bound, a forEach's
+// loop variable bound inside its body) that are step ids, plus `steps.<id>`
+// reads.
 
 import (
 	"fmt"
@@ -44,22 +39,19 @@ import (
 	"github.com/znasllc-io/memql/component/language/parser"
 )
 
-// expressionsV1Key / expressionsV1Value mark a compiled v1 automation.
+// expressionsV1Key / expressionsV1Value are the retired `"expressions": "v1"`
+// marker. Every automation is edition 2026 and compileAutomation writes the
+// marker unconditionally, for a runtime that still keys on it; it goes once
+// the runtime reads every automation as v1 without it (memql#5367).
 const (
 	expressionsV1Key   = "expressions"
 	expressionsV1Value = "v1"
-	exprLeafKey        = "$expr"
 )
 
-// compileStepFor compiles a step in the grammar its body was parsed in.
-func (c *Compiler) compileStepFor(step *parser.StepDef, v1 bool) (map[string]any, error) {
-	if v1 {
-		return c.compileStepV1(step)
-	}
-	return c.compileStep(step)
-}
+// exprLeafKey is the one key of a compiled value leaf that is an expression.
+const exprLeafKey = "$expr"
 
-// compileStepV1 is compileStep for a v1 body.
+// compileStepV1 compiles one step.
 func (c *Compiler) compileStepV1(step *parser.StepDef) (map[string]any, error) {
 	output := map[string]any{
 		"id":   step.ID,
@@ -226,9 +218,9 @@ func (c *Compiler) compileStepListV1(sc *parser.SwitchCase) ([]map[string]any, e
 	return out, nil
 }
 
-// compileFunctionStepV1 compiles a call step: the helper calls the legacy
-// half recognises (event, webhook, shape, mutation), a sub-automation, a
-// catalog function evaluated in process, or a construct call.
+// compileFunctionStepV1 compiles a call step: a helper call (event, webhook,
+// shape, mutation), a sub-automation, a catalog function evaluated in
+// process, or a construct call.
 func (c *Compiler) compileFunctionStepV1(step *parser.StepDef, cfg *parser.FunctionStepConfig, output map[string]any) error {
 	at := func(pos string) string { return fmt.Sprintf("step %q %s", step.ID, pos) }
 	helperArgs := cfg.Args
@@ -411,12 +403,11 @@ func (c *Compiler) compileFunctionStepV1(step *parser.StepDef, cfg *parser.Funct
 	return nil
 }
 
-// compileMutationConfigV1 is compileMutationConfig for a v1 body, whose
-// templates hold v1 nodes and whose payload is MutationStmt.PayloadExpr, a
-// map literal. The id / parent / aliasOf templates are string-typed
-// expression positions; the payload's values are value leaves. As in the
-// legacy half, a payload of the form `{id: ..., payload: {...}}` names the id
-// inside it.
+// compileMutationConfigV1 compiles a mutation step's config, whose templates
+// hold v1 nodes and whose payload is MutationStmt.PayloadExpr, a map literal.
+// The id / parent / aliasOf templates are string-typed expression positions;
+// the payload's values are value leaves. A payload of the form
+// `{id: ..., payload: {...}}` names the id inside it.
 func compileMutationConfigV1(where string, m *parser.MutationStmt) (map[string]any, error) {
 	if m == nil {
 		return nil, fmt.Errorf("%s: missing mutation", where)
