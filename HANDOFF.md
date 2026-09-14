@@ -4,6 +4,33 @@ Written at the end of a long session. The next session has no memory of it.
 
 ---
 
+## 0. OWNER DECISIONS — ratified, do not re-ask
+
+The owner was asked these directly and answered. Treat them as settled.
+
+1. **Ship #5377 with the `@allowedRoles` clause deliberately unexecuted — AND
+   file a follow-up issue for it.** Open the follow-up BEFORE closing #5377.
+   It needs a real design (an agent-role capability axis, which does not exist
+   today); a deviation recorded only in a merged PR body is a deviation that
+   gets forgotten.
+2. **STOP AT "PR OPEN + CI GREEN". Do NOT merge, do NOT close the issues.**
+   This overrides steps 8 and 9 as originally written below. Push, open the
+   single PR, wait for CI, hand back the link. The owner takes it from there.
+   Do not run `scripts/dev/merge-as-owner.sh`.
+3. **Delete `archive/dsl-deploy-authoring` AFTER the merge**, not now. Since you
+   are not merging, leave the tag alone entirely.
+
+### TWO scope deviations, not one
+
+The PR body must name both. A reader who knows D17 will look for each.
+
+| Deviation | Against | Why |
+|---|---|---|
+| `@allowedRoles` not replaced by `@requiresRank` / `@requiresCapability` | #5377 (named in its title) | Agent-role axis (`assistant` / `specialist`), absent from the role catalog. Neither replacement can express it. Executing as written would let every specialist call the assistant-only tools (`ensureAgent`, `produceArtifact`). |
+| `,`-as-OR deferred to epic #5363 | #5376 (D17 lists `;` and `,` together) | Live grammar: `parentOf(concept==X, concept==Y)` folds two filters into one argument. Its codemod is `--rewrite=expressions`, owned by #5363. `;`-as-AND **was** retired — the two were not alike. |
+
+---
+
 ## 1. GIT STATE
 
 | | |
@@ -274,7 +301,8 @@ reviewer should read closely:
   as parse-time *names* so the decl parsers can refuse them by name with a hint.
   They are not dead code.
 - **The three `scripts/*` test failures** — pre-existing and environmental.
-- **`archive/dsl-deploy-authoring`** — a safety tag, the user's call to delete.
+- **`archive/dsl-deploy-authoring`** — a safety tag. The owner's call, and the
+  answer is "after the merge" (§0.3). You are not merging, so leave it.
 - **`docs/superpowers/plans/2026-09-14-dsl-v1-attributes.md`** — the epic says
   the plan is deleted *in the merge*. It is still present; delete it as the last
   commit before the PR, not before.
@@ -304,14 +332,21 @@ reviewer should read closely:
    criterion is literally "the epic issue carries the reader list or the word
    none, with file references". Post the `@displayCard` / `@composable` readers
    on #5378, and the `@allowedRoles` finding on #5377.
-7. **Push and open ONE PR** for #5375 #5376 #5377 #5378 #5379 (the user was
-   explicit: one PR, not one per issue). The body must call out:
-   the wire-contract change (§6.1), the four kept annotations (§3), and the
-   `,`-as-OR deferral to #5363.
-8. **Merge via the queue**: `gh pr merge <n> --repo znasllc-io/memql` — bare, no
-   flags. `--delete-branch` is refused and `--merge` is ignored. It **enqueues**;
-   a 5-minute batch window means it sits at OPEN with `mergedAt: null` for
-   minutes with nothing wrong. If it goes `DIRTY`, rebase on `origin/main` and
-   force-push. To merge as the owner:
-   `scripts/dev/merge-as-owner.sh --pr=<n> --check` first, then without `--check`.
-9. **Close #5375–#5379** once merged.
+6a. **File the `@allowedRoles` follow-up issue** (owner decision §0.1), before
+   the PR. Title it for the design, not the deletion — the replacement needs an
+   agent-role capability axis that does not exist today. Reference #5377 and
+   `dsl/skills/seeds/foundational.memql:39`.
+7. **Push and open ONE PR** for #5375 #5376 #5377 #5378 #5379 (the owner was
+   explicit: one PR, not one per issue). The body MUST call out:
+   - the **wire-contract change** (§6.1) — `;` as AND in raw client query
+     strings now refuses; needs a frontend ping, per CLAUDE.md
+   - the **four kept annotations** and why (§3)
+   - **both scope deviations** (§0), each against the issue it deviates from
+8. **Wait for CI, then STOP.** Report the PR link and the CI result. Do NOT
+   merge and do NOT close the issues — the owner is doing that (§0.2).
+   `mcp__ccd_pr__get_status` reads CI without polling `gh` in a loop.
+
+   For reference only, in case the owner asks you to continue later: the merge
+   is `gh pr merge <n> --repo znasllc-io/memql`, bare — `--delete-branch` is
+   refused and `--merge` is ignored, and it ENQUEUES (a 5-minute batch window
+   means it sits at OPEN with `mergedAt: null` for minutes with nothing wrong).
