@@ -285,11 +285,10 @@ func (e *MemQLEngine) lowerAllPushdownPositions(report *LoadReport, specs *SpecR
 // lowerDisabledSpecBodies validates the @disabled edition-2026 specs and
 // traits the loader skipped: each is lowered exactly as an enabled one --
 // binding, body, dry-compile -- and never written back, so it stays
-// unregistered and uncallable. A legacy body is validated before the
-// @disabled gate (specDeclToSpec); an edition-2026 body is validated by Lower,
-// which runs here, so without this pass a disabled spec whose body does not
-// lower loads green and re-enabling it refuses boot. A disabled spec applying
-// another disabled one is refused too: re-enabling it alone would be.
+// unregistered and uncallable. A body is validated by Lower, which runs here,
+// so without this pass a disabled spec whose body does not lower loads green
+// and re-enabling it refuses boot. A disabled spec applying another disabled
+// one is refused too: re-enabling it alone would be.
 func (e *MemQLEngine) lowerDisabledSpecBodies(report *LoadReport, specs *SpecRegistry, shapes *ShapeRegistry) []error {
 	if specs == nil {
 		return nil

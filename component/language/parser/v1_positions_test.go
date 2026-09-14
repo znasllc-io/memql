@@ -314,9 +314,6 @@ func TestSpecAndTraitLambdaForm(t *testing.T) {
 			if decl.Lambda == nil || len(decl.Lambda.Params) != 1 {
 				t.Fatalf("Lambda = %+v, want a one-parameter lambda", decl.Lambda)
 			}
-			if decl.Body != nil {
-				t.Errorf("Body = %T, want nil for the lambda form", decl.Body)
-			}
 			// The per-slice entry the spec loader uses agrees.
 			decl, err := ParseSpecDecl(src)
 			if err != nil {

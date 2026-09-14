@@ -1834,25 +1834,21 @@ type PromptField struct {
 }
 
 // SpecDecl is the shared-frontend AST node for a struct-form spec
-// or trait declaration (`spec NAME { <bool-expr> }` /
-// `trait NAME { <bool-expr> }`). Introduced by memql#334
+// or trait declaration (`spec <bound> <name> = row => <bool-expr>` /
+// `trait <name> = row => <bool-expr>`). Introduced by memql#334
 // (sub-epic #329 / #310 Stage 1C) so the unified spec loader can
 // parse specs + traits through the langparser instead of the
 // hand-rolled spec_parser.go mini-parser.
 //
-// Body grammar: a single boolean expression. The langparser parses
-// the body via the shared expression-parsing path and stores the
-// resulting typed ExpressionNode here; the memql-side converter
-// (specDeclToSpec) runs NewASTConverter().ConvertExpression on it
-// + the existing classifier + boolean-shape validator.
+// The body is the edition-2026 lambda (memql#5364), held in Lambda; the
+// engine lowers it against the resolved binding at Init.
 //
 // Annotation surface (validated by the converter, not the parser):
 //
 //	@description("text")              documentation (both specs + traits)
 //	@enabled / @disabled              lifecycle (traits only; no-op flags)
 //
-// IsTrait discriminates the two header keywords (`spec NAME { ... }`
-// vs `trait NAME { ... }`). Specs and traits share the SpecRegistry
+// IsTrait discriminates the two header keywords (`spec` vs `trait`). Specs and traits share the SpecRegistry
 // runtime contract; the trait flag drives the converter's
 // classification of whether the entry binds a concept (specs do via
 // file-top use + signature; traits are concept-agnostic).
@@ -1861,17 +1857,15 @@ type SpecDecl struct {
 	// immediately above this declaration (memql#2633, capture-only;
 	// description sourcing flips in #2634).
 	DocComment string
-	Name       string         // spec / trait name
-	BoundName  string         // signature binding: `spec <BoundName> <Name>` resolves to an imported shape XOR concept (specs only; empty for traits)
-	IsTrait    bool           // true for `trait NAME { ... }`, false for `spec NAME { ... }`
-	Attributes []*Attribute   // declaration-level annotations
-	Body       ExpressionNode // parsed boolean expression body (the `return <bool>` body's expression)
-	Path       string         // source path, for errors/diagnostics
+	Name       string       // spec / trait name
+	BoundName  string       // signature binding: `spec <BoundName> <Name>` resolves to an imported shape XOR concept (specs only; empty for traits)
+	IsTrait    bool         // true for a trait, false for a spec
+	Attributes []*Attribute // declaration-level annotations
+	Path       string       // source path, for errors/diagnostics
 
-	// Lambda is the edition-2026 body, `spec <bound> <name> = row => ...` /
+	// Lambda is the body, `spec <bound> <name> = row => ...` /
 	// `trait <name> = row => ...` (memql#5364): exactly one parameter, the
-	// bound row -- or, over an @actor shape, `actor`. Body is nil when it is
-	// set; the two forms are one declaration's alternatives, never both.
+	// bound row -- or, over an @actor shape, `actor`.
 	Lambda *LambdaExpr
 }
 

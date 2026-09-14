@@ -13,36 +13,29 @@ import (
 // and is passed in as attrs. The keyword arm (`spec` vs `trait`) is
 // encoded in the isTrait parameter.
 //
-// Grammar (spec/shape binding redesign, epic #2281):
+// Grammar (spec/shape binding redesign, epic #2281; the lambda body is
+// edition 2026, memql#5364):
 //
-//	spec <BoundName> <Name> { return <bool-expr> }   -- signature-bound
-//	trait <Name> { return <bool-expr> }              -- deliberately unbound
-//	spec <BoundName> <Name> = row => <bool-expr>     -- edition 2026 (memql#5364)
-//	trait <Name> = row => <bool-expr>                -- edition 2026
+//	spec <BoundName> <Name> = row => <bool-expr>     -- signature-bound
+//	trait <Name> = row => <bool-expr>                -- deliberately unbound
 //
-// The `=` form's body is a lambda of one parameter, parsed by the v1
-// expression grammar into SpecDecl.Lambda (Body stays nil): the parameter IS
-// the bound row -- or, over an @actor shape, the actor envelope, spelled
-// `actor`. With Options.ExpressionsV1 on, the `{ return ... }` form is refused
-// naming memqlmigrate --rewrite=expressions; with it off both load.
+// The body is a lambda of one parameter, parsed by the v1 expression grammar
+// into SpecDecl.Lambda: the parameter IS the bound row -- or, over an @actor
+// shape, the actor envelope, spelled `actor`. The retired `{ return ... }`
+// body is refused naming memqlmigrate --rewrite=expressions.
 //
 // A spec binds exactly one shape XOR concept in its signature; the
 // bound name resolves through the file-top `use` import (shapes vs
 // concepts disambiguated by the import path). A trait carries no
-// binding -- it is the one deliberately-unbound row predicate (bare
-// payload fields, validated against the concrete concept at the call
-// site). The body is a single `return <boolean expression>`; bare field
-// names read the bound surface (no payload./shapeName./conceptName.
-// prefix). The old bare-expression body (no `return`) is rejected with
-// a migration-pointing error.
+// binding -- it is the one deliberately-unbound row predicate, its
+// fields validated against the concrete concept at the call site.
 //
-// The body expression is parsed in one shot via p.parseExpression() and
-// the resulting typed ExpressionNode stored on the AST node. The
-// memql-side converter (specDeclToSpec) runs the engine's ASTConverter
-// on it directly -- no string-roundtrip re-parse.
+// The memql-side converter (specDeclToSpec) keeps the lambda whole; what
+// its parameter reads depends on the binding, so the engine lowers it at
+// Init, once shapes and concepts have loaded.
 //
-// memql#334 (sub-epic #329 / #310 Stage 1C); signature binding + return
-// added by epic #2281 (Story 2 / #2282).
+// memql#334 (sub-epic #329 / #310 Stage 1C); signature binding added by
+// epic #2281 (Story 2 / #2282); the lambda body by memql#5364.
 func (p *Parser) parseSpecDecl(attrs []*ast.Attribute, isTrait bool) (*ast.SpecDecl, error) {
 	keyword := "spec"
 	if isTrait {
@@ -64,8 +57,8 @@ func (p *Parser) parseSpecDecl(attrs []*ast.Attribute, isTrait bool) (*ast.SpecD
 		Attributes: attrs,
 	}
 
-	// Two-identifier signature `spec <BoundName> <Name> { ... }`. If the
-	// next token is another identifier (not `{`), the first identifier is
+	// Two-identifier signature `spec <BoundName> <Name> = ...`. If the
+	// next token is another identifier (not `=`), the first identifier is
 	// the binding (shape XOR concept) and the second is the spec name.
 	// Traits are deliberately unbound: a second identifier on a trait is
 	// rejected.

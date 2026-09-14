@@ -47,12 +47,11 @@ type SpecRegistry struct {
 
 	disabledMu sync.RWMutex
 	disabled   map[string]bool
-	// disabledBodies are the @disabled edition-2026 specs and traits the
-	// unified loader skipped, kept ONLY so the Init pass can lower them:
-	// a legacy body is validated before the @disabled gate (specDeclToSpec),
-	// and an edition-2026 body is validated by Lower, which runs at Init.
-	// Without this a disabled spec whose body does not lower loads green,
-	// and re-enabling it bricks boot. Never registered, never callable.
+	// disabledBodies are the @disabled specs and traits the unified loader
+	// skipped, kept ONLY so the Init pass can lower them: a body is
+	// validated by Lower, which runs at Init. Without this a disabled spec
+	// whose body does not lower loads green, and re-enabling it bricks boot.
+	// Never registered, never callable.
 	disabledBodies []*Spec
 }
 

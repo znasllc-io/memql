@@ -208,7 +208,8 @@ type Spec struct {
 	// Expr against the resolved binding (lowerAllPushdownPositions), and
 	// EvalExpr evaluates it when the predicate is applied in process -- a
 	// refine clause, an automation condition -- where there is no SQL. Nil
-	// for a pre-2026 `{ return ... }` body, whose Expr is converted at load.
+	// for an inline spec of the internal query form, whose Expr is converted
+	// where it is defined (buildInlineSpec).
 	Lambda *ast.LambdaExpr
 
 	// Uses are the file-top `use` imports in force where the spec was
