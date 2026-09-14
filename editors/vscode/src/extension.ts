@@ -597,9 +597,16 @@ function startLanguageClient(context: ExtensionContext): void {
     // on cluster documents, which is the defect this fixed.
     documentSelector: [{ language: 'memql', scheme: 'file' }],
     synchronize: {
-      // The server rebuilds its registry on watched .memql changes so a concept
-      // added in one file becomes visible to completion/hover in the others.
-      fileEvents: workspace.createFileSystemWatcher('**/*.memql'),
+      // The server rebuilds its registry on every watched change: a .memql
+      // file, so a concept added in one file becomes visible to
+      // completion/hover in the others, and a memql.toml, so a domain's
+      // language line -- written by the quick fix or by hand -- clears the
+      // domain's refusal and brings completion back without a reload
+      // (memql#5362).
+      fileEvents: [
+        workspace.createFileSystemWatcher('**/*.memql'),
+        workspace.createFileSystemWatcher('**/memql.toml'),
+      ],
     },
   };
 
