@@ -6,6 +6,10 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/dslclause"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Per-row authorization over the fleet domain (epic memql#3852, task memql#3855).
@@ -48,7 +52,6 @@ var (
 	conceptDecl   = regexp.MustCompile(`(?m)^concept\s+(\w+)\s*\{`)
 	queryDecl     = regexp.MustCompile(`(?m)^query\s+(\w+)\s+(\w+)\s*\{`)
 	publicAttr    = regexp.MustCompile(`(?m)^@public\s*$`)
-	filterClause  = regexp.MustCompile(`(?m)^\s+filter\s+(.+)$`)
 	ownerConjunct = "ownerUserId==actor.userId"
 )
 
@@ -59,6 +62,96 @@ func fleetFile(t *testing.T, name string) string {
 		t.Fatalf("read %s: %v", name, err)
 	}
 	return string(b)
+}
+
+// migratedFleetFile is fleetFile as the edition-2026 expressions codemod
+// (memqlmigrate --rewrite=expressions, epic memql#5363) would leave it,
+// computed in memory with the codemod's own engine over the whole bundle --
+// the bundle declares the specs its filters name, so it migrates alone.
+// Nothing on disk changes.
+func migratedFleetFile(t *testing.T, name string) string {
+	t.Helper()
+	dir := filepath.Join(bundleRoot(t), "fleet")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	files := map[string][]byte{}
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".memql") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		files[e.Name()] = b
+	}
+	preds, err := langparser.CollectPredicates(files)
+	if err != nil {
+		t.Fatalf("collect predicates: %v", err)
+	}
+	out, err := langparser.RewriteExpressions(files[name], preds)
+	if err != nil {
+		t.Fatalf("migrate %s: %v", name, err)
+	}
+	return string(out)
+}
+
+// filterClauseOf returns a query block's filter clause: the text after the
+// keyword plus every continuation line the struct-query normaliser folds into
+// it (dslclause.ClauseExtent). It used to read the opening line only, so a
+// wrapped clause -- legal since memql#4123, and how the edition-2026 codemod
+// writes every long filter -- was judged by its first conjunct.
+func filterClauseOf(body string) (string, bool) {
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		trim := strings.TrimSpace(line)
+		if !dslclause.StartsWith(trim, "filter") {
+			continue
+		}
+		parts := []string{strings.TrimSpace(strings.TrimPrefix(trim, "filter"))}
+		for j, last := i+1, dslclause.ClauseExtent(lines, i); j <= last; j++ {
+			if t := strings.TrimSpace(lines[j]); t != "" {
+				parts = append(parts, t)
+			}
+		}
+		return strings.Join(parts, " "), true
+	}
+	return "", false
+}
+
+// scopedByOwner reports whether a filter names `ownerUserId == actor.userId` as
+// a TOP-LEVEL conjunct. An edition-2026 filter is read as a tree: a top-level
+// `&&` operand comparing the lambda parameter's `ownerUserId` with
+// `actor.userId`, in either operand order -- the parameter's field, never a
+// nested path, and never an arm of a guard `(args.x == nil || ...)`, which is
+// the edition-2026 spelling of the when() guard this gate exists to see
+// through.
+func scopedByOwner(filter string) bool {
+	if !dslclause.OpensLambda(filter) {
+		return hasTopLevelConjunct(filter, ownerConjunct)
+	}
+	lam, err := langparser.ParseV1Lambda(filter)
+	if err != nil || len(lam.Params) != 1 {
+		return false
+	}
+	is := func(n ast.ExpressionNode, root, field string) bool {
+		r, fields, ok := ast.MemberPath(ast.Unparen(n))
+		return ok && r == root && len(fields) == 1 && fields[0] == field
+	}
+	param := lam.Params[0]
+	for _, c := range ast.Conjuncts(lam.Body) {
+		b, ok := c.(*ast.BinaryExpr)
+		if !ok || b.Op != "==" {
+			continue
+		}
+		if (is(b.Left, param, "ownerUserId") && is(b.Right, "actor", "userId")) ||
+			(is(b.Left, "actor", "userId") && is(b.Right, param, "ownerUserId")) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestEveryCustomerConceptDeclaresAnOwner.
@@ -123,7 +216,15 @@ func TestEveryCustomerConceptDeclaresAnOwner(t *testing.T) {
 // drops its conjunct when the argument is absent, so a scoped-looking query
 // returns everything (memql#2883).
 func TestEveryFleetQueryIsCallerScoped(t *testing.T) {
-	src := fleetFile(t, "queries.memql")
+	// Both editions: the bundle as authored, and as the expressions codemod
+	// leaves it -- where every filter opens `row =>` and the owner term reads
+	// `row.ownerUserId == actor.userId`, which the text match below never
+	// equals.
+	t.Run("authored", func(t *testing.T) { checkEveryFleetQueryIsCallerScoped(t, fleetFile(t, "queries.memql")) })
+	t.Run("migrated", func(t *testing.T) { checkEveryFleetQueryIsCallerScoped(t, migratedFleetFile(t, "queries.memql")) })
+}
+
+func checkEveryFleetQueryIsCallerScoped(t *testing.T, src string) {
 
 	// THREE CATEGORIES, and the third is the one worth explaining.
 	//
@@ -224,22 +325,53 @@ func TestEveryFleetQueryIsCallerScoped(t *testing.T) {
 			continue
 		}
 
-		m := filterClause.FindStringSubmatch(body)
-		if m == nil {
+		filter, ok := filterClauseOf(body)
+		if !ok {
 			t.Errorf("query %s declares no filter, so it reads every row in its concept for every caller", name)
 			continue
 		}
 		checked++
 
-		if !hasTopLevelConjunct(m[1], ownerConjunct) {
+		if !scopedByOwner(filter) {
 			t.Errorf("query %s does not name %s as a TOP-LEVEL conjunct of its filter:\n    filter %s\n"+
 				"A conjunct inside a when() guard vanishes when its argument is absent, so this query returns the whole table for a caller who omits an optional argument (memql#2883).",
-				name, ownerConjunct, strings.TrimSpace(m[1]))
+				name, ownerConjunct, filter)
 		}
 	}
 
-	if checked == 0 {
-		t.Fatal("every query was public, so this gate checked no scoping at all")
+	// The reachable positive: caller-scoped queries this read. Measured when
+	// the floor was set: 7, in both editions.
+	if checked < 5 {
+		t.Fatalf("checked the scoping of %d queries -- the query split or the filter read has stopped reaching them", checked)
+	}
+	t.Logf("checked the scoping of %d queries", checked)
+}
+
+// TestFleetOwnerScopeReadsBothEditions: the scoping rule's CATCH and PASS
+// cases in both spellings. The bundle is clean, so without these a rule that
+// went blind to the v1 spelling -- or that took a guard's arm for a top-level
+// conjunct -- would read as a clean bundle.
+func TestFleetOwnerScopeReadsBothEditions(t *testing.T) {
+	for _, tc := range []struct {
+		filter string
+		want   bool
+	}{
+		{`ownerUserId==actor.userId && when(args.status) { status==args.status }`, true},
+		{`row => row.ownerUserId == actor.userId && (args.status == nil || row.status == args.status)`, true},
+		{`row => actor.userId == row.ownerUserId`, true},
+		// CATCH: inside a guard, under a disjunction, or on a nested path.
+		{`when(args.mine) { ownerUserId==actor.userId }`, false},
+		{`row => (args.mine == nil || row.ownerUserId == actor.userId)`, false},
+		{`row => row.ownerUserId == actor.userId || row.public == true`, false},
+		{`row => row.credentials.ownerUserId == actor.userId`, false},
+	} {
+		if got := scopedByOwner(tc.filter); got != tc.want {
+			t.Errorf("scopedByOwner(%q) = %v, want %v", tc.filter, got, tc.want)
+		}
+	}
+	body := "query subscription mine {\n  filter    row => row.status == \"active\"\n            && row.ownerUserId == actor.userId\n  shape     subscriptionFull\n}"
+	if f, ok := filterClauseOf(body); !ok || !scopedByOwner(f) {
+		t.Errorf("an owner term on a wrapped line was not read (clause %q)", f)
 	}
 }
 

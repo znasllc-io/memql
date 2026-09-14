@@ -13,6 +13,7 @@ package memql
 
 import (
 	"regexp"
+	"sort"
 	"sync"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
@@ -63,9 +64,10 @@ type KeywordSlice struct {
 //
 // Slice extent: preamble of @-attribute and comment lines walking
 // up from the header, through the matching close-brace below it.
-// String + line-comment aware brace balancing.
+// String + line-comment aware brace balancing. An edition-2026
+// brace-less spec or trait ends with its expression instead (see
+// constructDeclarationSlices).
 func ExtractKeywordSlices(source, keyword string) []KeywordSlice {
-	headerRe := keywordHeaderRegexp(keyword)
 	// Detect headers and balance braces on a comment-BLANKED view, so a
 	// declaration existing only inside a `/* ... */` block is never extracted as
 	// a live construct (memql#2868). Offsets are preserved, so the emitted slice
@@ -80,7 +82,7 @@ func ExtractKeywordSlices(source, keyword string) []KeywordSlice {
 	// `// concept x {` line never matched.
 	// One shared implementation across every offset-based slicer (memql#2896);
 	// the blanked-scan / original-cut split described above lives there now.
-	slices := languageParser.ExtractDeclarationSlices(source, headerRe)
+	slices := constructDeclarationSlices(source, keyword)
 	if len(slices) == 0 {
 		return nil
 	}
@@ -90,4 +92,29 @@ func ExtractKeywordSlices(source, keyword string) []KeywordSlice {
 		out = append(out, KeywordSlice{Source: s.Source, Name: s.Name})
 	}
 	return out
+}
+
+// constructDeclarationSlices returns every top-level declaration of one
+// keyword in source, in source order: the braced `<keyword> [CONCEPT] NAME {
+// ... }` form, and -- for `spec` and `trait` -- edition 2026's brace-less
+// `spec <Bound> <Name> = row => ...` / `trait <Name> = row => ...` (epic
+// memql#5363), whose extent is its expression rather than a brace pair.
+//
+// Every slicing site asks this rather than the brace slicer alone. A braced
+// header regexp sees no brace-less declaration at all, so each site that used
+// one -- the spec loader, the duplicate detector, the construct catalog, the
+// authoring bundle splitter -- lost every spec and trait of a migrated tree in
+// silence: a construct that is not sliced is not a skip anything reports.
+func constructDeclarationSlices(source, keyword string) []languageParser.DeclarationSlice {
+	slices := languageParser.ExtractDeclarationSlices(source, keywordHeaderRegexp(keyword))
+	if keyword != "spec" && keyword != "trait" {
+		return slices
+	}
+	braceLess := languageParser.ExtractPredicateDeclarationSlices(source, keyword)
+	if len(braceLess) == 0 {
+		return slices
+	}
+	slices = append(slices, braceLess...)
+	sort.SliceStable(slices, func(i, j int) bool { return slices[i].Start < slices[j].Start })
+	return slices
 }

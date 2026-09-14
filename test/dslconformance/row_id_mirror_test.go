@@ -64,13 +64,10 @@ package dslconformance
 
 import (
 	"fmt"
-	"github.com/znasllc-io/memql/dsl"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
-
-	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 var (
@@ -161,14 +158,37 @@ func selfMirrorFields(t *testing.T, sources map[string]string) map[string]map[st
 // intrinsic is authoritative, the copy is only as good as every writer that
 // maintains it, and a drift between them returns zero rows silently.
 func TestByIdQueriesFilterTheRowIdNotASelfMirror(t *testing.T) {
-	paths, err := dslfs.WalkMemqlFiles(dsl.Tree())
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
-	sources := make(map[string]string, len(paths))
-	for _, p := range paths {
-		sources[p] = readTreeFile(t, p)
-	}
+	// Both editions (epic memql#5363): a v1 filter reads the mirror as
+	// `row.deploymentId`, which the bare-name read below cannot see.
+	bothCorpora(t, func(t *testing.T, c corpus) {
+		flagged, seen, examined := rowIdMirrorFindings(t, c)
+		// The reachable positive: queries bound to a self-mirroring concept
+		// whose filter this read. Measured when the floor was set: 13.
+		if examined < 8 {
+			t.Fatalf("examined %d filters of queries bound to a self-mirroring concept -- the query walk has stopped reaching them", examined)
+		}
+		t.Logf("examined %d filters of queries bound to a self-mirroring concept", examined)
+		for _, f := range flagged {
+			t.Errorf("%s\n\tThe payload field is a COPY of the row id (memql#2784). The two agree only "+
+				"while every writer keeps them in step, and when they drift the query returns zero rows "+
+				"rather than erroring -- silently, on the unauthenticated /oauth/token path and on the "+
+				"deploy controller's read of its own state. The engine composes the concept prefix on "+
+				"both sides (resolveFullId vs id.BuildNodeId), so `row.id == args.X` with the same bare "+
+				"argument is a drop-in replacement.", f)
+		}
+		for key := range rowIdMirrorExemptions {
+			if !seen[key] {
+				t.Errorf("rowIdMirrorExemptions has a stale entry %q -- the construct no longer matches. Remove the entry.", key)
+			}
+		}
+	})
+}
+
+// rowIdMirrorFindings runs the gate over one corpus and returns what it
+// flagged, every exemption key it reached, and how many filters it examined.
+func rowIdMirrorFindings(t *testing.T, c corpus) (flagged []string, seen map[string]bool, examined int) {
+	t.Helper()
+	paths, sources := c.paths, c.files
 
 	mirrors := selfMirrorFields(t, sources)
 	if len(mirrors) == 0 {
@@ -178,8 +198,7 @@ func TestByIdQueriesFilterTheRowIdNotASelfMirror(t *testing.T) {
 			"mirrorStampRe / mirrorAcceptRe stopped matching the authored form, not that the tree is clean")
 	}
 
-	var flagged []string
-	seen := map[string]bool{}
+	seen = map[string]bool{}
 
 	for _, p := range paths {
 		blanked := blankComments(sources[p])
@@ -198,13 +217,16 @@ func TestByIdQueriesFilterTheRowIdNotASelfMirror(t *testing.T) {
 			if strings.TrimSpace(clause) == "" {
 				continue
 			}
+			examined++
 
 			for field, mutation := range fields {
-				// The mirror read BARE (`deploymentId == args.x`). `row.id` is
-				// the fix, and a payload field is never written `row.<field>`,
-				// so requiring the bare spelling cannot match the fixed form.
-				bare := regexp.MustCompile(`(?:^|[^.\w])` + regexp.QuoteMeta(field) + `[ \t]*==[ \t]*args\.`)
-				if !bare.MatchString(clause) {
+				// The mirror read BARE (`deploymentId == args.x`) in a legacy
+				// clause, where `row.id` is the fix and a payload field is
+				// never written `row.<field>` -- so requiring the bare
+				// spelling cannot match the fixed form. In an edition-2026
+				// clause every field is `row.<field>`, and the mirror is told
+				// from the fix by its NAME on the tree (rowFieldComparedToArg).
+				if !rowFieldComparedToArg(clause, field, false) {
 					continue
 				}
 				key := p + " " + name
@@ -220,18 +242,5 @@ func TestByIdQueriesFilterTheRowIdNotASelfMirror(t *testing.T) {
 	}
 
 	sort.Strings(flagged)
-	for _, f := range flagged {
-		t.Errorf("%s\n\tThe payload field is a COPY of the row id (memql#2784). The two agree only "+
-			"while every writer keeps them in step, and when they drift the query returns zero rows "+
-			"rather than erroring -- silently, on the unauthenticated /oauth/token path and on the "+
-			"deploy controller's read of its own state. The engine composes the concept prefix on "+
-			"both sides (resolveFullId vs id.BuildNodeId), so `row.id == args.X` with the same bare "+
-			"argument is a drop-in replacement.", f)
-	}
-
-	for key := range rowIdMirrorExemptions {
-		if !seen[key] {
-			t.Errorf("rowIdMirrorExemptions has a stale entry %q -- the construct no longer matches. Remove the entry.", key)
-		}
-	}
+	return flagged, seen, examined
 }

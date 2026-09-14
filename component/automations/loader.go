@@ -11,6 +11,7 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/compiler"
+	"github.com/znasllc-io/memql/component/language/dslclause"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -1067,24 +1068,54 @@ func extractConceptFromTopic(topic string) string {
 
 // extractConceptFromFilter extracts the concept from a filter like "concept==v1:cognition:participant;...".
 // Returns empty string if no concept filter is found.
+//
+// An edition-2026 trigger filter (`@filter(row => ...)`, epic memql#5363)
+// reaches here as its canonical source, and is read as a tree: a top-level
+// conjunct `<param>.concept == "<id>"`. The text scan below looks for a part
+// that STARTS with `concept==`, which the v1 spelling never does, so this
+// warning went silent for every migrated automation.
 func extractConceptFromFilter(filter string) string {
 	if filter == "" {
 		return ""
 	}
+	if dslclause.OpensLambda(filter) {
+		lam, err := languageParser.ParseV1Lambda(filter)
+		if err != nil || len(lam.Params) != 1 {
+			return ""
+		}
+		for _, c := range ast.Conjuncts(lam.Body) {
+			b, ok := c.(*ast.BinaryExpr)
+			if !ok || b.Op != "==" {
+				continue
+			}
+			root, fields, isPath := ast.MemberPath(ast.Unparen(b.Left))
+			lit, isLit := ast.Unparen(b.Right).(*ast.LiteralExpr)
+			if isPath && isLit && root == lam.Params[0] && len(fields) == 1 && fields[0] == "concept" {
+				if s, ok := lit.Value.(string); ok {
+					return s
+				}
+			}
+		}
+		return ""
+	}
 
-	// Split by semicolons (AND) and commas (OR)
+	// Split by semicolons (AND) and commas (OR), and by `&&`: the unified
+	// grammar's AND (memql#977). Without the last, `concept==X && y` read its
+	// value as "X && y" and warned of a contradiction that was not there.
 	// Look for concept== patterns
 	for _, part := range strings.FieldsFunc(filter, func(r rune) bool {
 		return r == ';' || r == ','
 	}) {
-		part = strings.TrimSpace(part)
+		for _, conjunct := range strings.Split(part, "&&") {
+			conjunct = strings.TrimSpace(conjunct)
 
-		// Check for concept== pattern
-		if strings.HasPrefix(part, "concept==") {
-			value := strings.TrimPrefix(part, "concept==")
-			// Remove quotes if present
-			value = strings.Trim(value, `"'`)
-			return value
+			// Check for concept== pattern
+			if strings.HasPrefix(conjunct, "concept==") {
+				value := strings.TrimSpace(strings.TrimPrefix(conjunct, "concept=="))
+				// Remove quotes if present
+				value = strings.Trim(value, `"'`)
+				return value
+			}
 		}
 	}
 

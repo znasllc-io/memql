@@ -40,11 +40,20 @@ func TestBareRowIntrinsicRuleFlagsFilters(t *testing.T) {
 		{"in operator", "query widget q {\n  filter id in args.ids\n}\n", "id"},
 		{"lowercase intrinsic", "query widget q {\n  filter createdat < args.x\n}\n", "createdAt"},
 		{"provenance leaf", "query widget q {\n  filter provenance.kind==\"automation\"\n}\n", "provenance.kind"},
-		// A filter clause CANNOT span lines -- parseStructQueryBody hard-errors
-		// on a continuation line -- so there is nothing here for the scanner to
-		// find, and pretending otherwise let block comments escape the
-		// single-line bound.
-		{"continuation line is not reachable grammar", "query widget q {\n  filter ownerUserId==actor.userId &&\n    id==args.x\n}\n", ""},
+		// A filter clause SPANS LINES. This case once asserted the opposite, on
+		// the ground that parseStructQueryBody hard-errored on a continuation
+		// line; memql#4123 made the normaliser fold them, so `id==args.x` below
+		// reaches the engine as a payload read and must be flagged. The
+		// edition-2026 codemod wraps every long filter this way.
+		{"continuation line is part of the clause", "query widget q {\n  filter ownerUserId==actor.userId &&\n    id==args.x\n}\n", "id"},
+		{"leading-operator continuation", "query widget q {\n  filter ownerUserId==actor.userId\n    && id==args.x\n}\n", "id"},
+		// ...but the clause ends where the normaliser ends it.
+		{"clause ends at the next keyword", "query widget q {\n  filter ownerUserId==actor.userId\n  shape x\n}\n", ""},
+		// Edition 2026: a row intrinsic is a member of the parameter, and a
+		// name a lambda binds is not the row's.
+		{"v1 row member", "query widget q {\n  filter  row => row.id == args.x\n          && row.createdAt > args.since\n}\n", ""},
+		{"v1 lambda-bound name", "query widget q {\n  filter  row => row.items.any(id => id == args.x)\n}\n", ""},
+		{"v1 bare intrinsic on a wrapped line", "query widget q {\n  filter  row => row.a == 1\n          && id == args.x\n}\n", "id"},
 		// Leafless `provenance` has no push-down and `row.provenance` is
 		// rejected outright, so flagging it would name a spelling nothing
 		// accepts.

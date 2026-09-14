@@ -10,8 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/dslclause"
 	"github.com/znasllc-io/memql/component/language/pagination"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/dslgate"
 	"github.com/znasllc-io/memql/core/baseparser"
 	"github.com/znasllc-io/memql/core/dslfs"
@@ -117,21 +119,26 @@ func TestFilterSyntaxCanonical(t *testing.T) {
 		line int
 		text string
 	}
-	var violations []violation
+	bothCorpora(t, func(t *testing.T, c corpus) {
+		var violations []violation
+		n := visitFilterPredicatesIn(c, func(file string, lineno int, pred string) {
+			head, _ := splitFilterRef(pred)
+			if head == "payload" {
+				violations = append(violations, violation{file, lineno, pred})
+			}
+		})
+		if n < filterPredicateFloor {
+			t.Errorf("walked %d filter predicates -- the walk has stopped reading filters and this gate would pass on anything", n)
+		}
+		t.Logf("walked %d filter predicates", n)
 
-	visitFilterPredicates(t, func(file string, lineno int, pred string) {
-		head, _ := splitFilterRef(pred)
-		if head == "payload" {
-			violations = append(violations, violation{file, lineno, pred})
+		if len(violations) > 0 {
+			t.Errorf("found %d filter predicates using the removed `payload.` prefix (write the payload property by bare name):", len(violations))
+			for _, v := range violations {
+				t.Errorf("  %s:%d  %s", v.file, v.line, v.text)
+			}
 		}
 	})
-
-	if len(violations) > 0 {
-		t.Errorf("found %d filter predicates using the removed `payload.` prefix (write the payload property by bare name):", len(violations))
-		for _, v := range violations {
-			t.Errorf("  %s:%d  %s", v.file, v.line, v.text)
-		}
-	}
 }
 
 // TestNoInlineTraitablePredicates asserts that no filter clause
@@ -185,22 +192,26 @@ func TestNoInlineTraitablePredicates(t *testing.T) {
 		text string
 		hint string
 	}
-	var violations []violation
+	bothCorpora(t, func(t *testing.T, c corpus) {
+		var violations []violation
+		n := visitFilterPredicatesIn(c, func(file string, lineno int, pred string) {
+			for _, r := range rules {
+				if r.re.MatchString(pred) {
+					violations = append(violations, violation{file, lineno, pred, r.hint})
+				}
+			}
+		})
+		if n < filterPredicateFloor {
+			t.Errorf("walked %d filter predicates -- the walk has stopped reading filters and this gate would pass on anything", n)
+		}
 
-	visitFilterPredicates(t, func(file string, lineno int, pred string) {
-		for _, r := range rules {
-			if r.re.MatchString(pred) {
-				violations = append(violations, violation{file, lineno, pred, r.hint})
+		if len(violations) > 0 {
+			t.Errorf("found %d filter predicates that should use a trait spec:", len(violations))
+			for _, v := range violations {
+				t.Errorf("  %s:%d  %s   → use %s", v.file, v.line, v.text, v.hint)
 			}
 		}
 	})
-
-	if len(violations) > 0 {
-		t.Errorf("found %d filter predicates that should use a trait spec:", len(violations))
-		for _, v := range violations {
-			t.Errorf("  %s:%d  %s   → use %s", v.file, v.line, v.text, v.hint)
-		}
-	}
 }
 
 // TestNoShortIdConceptPrefix asserts that no .memql file constructs
@@ -239,12 +250,6 @@ func TestNoShortIdConceptPrefix(t *testing.T) {
 		text   string
 		prefix string
 	}
-	var violations []violation
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
 	// Known exemptions tied to follow-up issues. Lines listed here use
 	// the prefix legitimately for partition-naming (the partition row
 	// stores per-user partition state); these go away wholesale with
@@ -254,46 +259,53 @@ func TestNoShortIdConceptPrefix(t *testing.T) {
 		"identity/logic.memql:412": true, // partition name (issue #56 will remove the partition concept entirely)
 		"identity/logic.memql:426": true, // partition lookup-by-name (same; issue #56)
 	}
-	for _, p := range paths {
-		file, openErr := tree.Open(p)
-		if openErr != nil {
-			t.Fatalf("open %s: %v", p, openErr)
-		}
-		raw, readErr := io.ReadAll(file)
-		file.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", p, readErr)
-		}
-		for lineno, line := range strings.Split(string(raw), "\n") {
-			// Skip line comments + block-comment spans (line-level only).
-			trimmed := strings.TrimLeft(line, " \t")
-			if strings.HasPrefix(trimmed, "//") {
-				continue
-			}
-			for _, prefix := range bannedPrefixes {
-				needle := `concat("` + prefix
-				if strings.Contains(line, needle) {
-					locKey := p + ":" + itoa(lineno+1)
-					if exemptions[locKey] {
-						continue
+	// Both editions: edition 2026 spells `concat("ga-", x)` as `"ga-" + x`
+	// (epic memql#5363), and a needle for the call alone matches nothing once
+	// the codemod has run. concatLiteralPrefixes reads both.
+	bothCorpora(t, func(t *testing.T, c corpus) {
+		var violations []violation
+		examined := 0
+		for _, p := range c.paths {
+			for lineno, line := range strings.Split(c.files[p], "\n") {
+				// Skip line comments + block-comment spans (line-level only).
+				trimmed := strings.TrimLeft(line, " \t")
+				if strings.HasPrefix(trimmed, "//") {
+					continue
+				}
+				for _, lit := range concatLiteralPrefixes(line) {
+					examined++
+					for _, prefix := range bannedPrefixes {
+						if !strings.HasPrefix(lit, prefix) {
+							continue
+						}
+						if exemptions[p+":"+itoa(lineno+1)] {
+							continue
+						}
+						violations = append(violations, violation{
+							file:   p,
+							line:   lineno + 1,
+							text:   strings.TrimSpace(line),
+							prefix: prefix,
+						})
 					}
-					violations = append(violations, violation{
-						file:   p,
-						line:   lineno + 1,
-						text:   strings.TrimSpace(line),
-						prefix: prefix,
-					})
 				}
 			}
 		}
-	}
-	if len(violations) > 0 {
-		t.Errorf("found %d shortId-prefix anti-patterns (issue #53):", len(violations))
-		for _, v := range violations {
-			t.Errorf("  %s:%d  %q in: %s", v.file, v.line, v.prefix, v.text)
+		// The reachable positive: the concatenations this read. Measured when
+		// the floor was set: 11 in the embedded tree, 17 migrated (a `+` chain
+		// has a left operand at every link, so one call can read as several).
+		if examined < 8 {
+			t.Errorf("examined %d literal-prefixed concatenations -- the reader has stopped finding them and this gate would pass on anything", examined)
 		}
-		t.Logf("\nThe canonical id format is `{partition}:{concept}:{shortId}`; the\nshortId should be the bare unique part (uuid/hash/slug), never\nprefixed with the concept name or a sub-type discriminator. If the\nprefix is a real discriminator (e.g. 'ga-' vs specialists), move it\ninto a payload field (e.g. agent.role='assistant').")
-	}
+		t.Logf("examined %d literal-prefixed concatenations", examined)
+		if len(violations) > 0 {
+			t.Errorf("found %d shortId-prefix anti-patterns (issue #53):", len(violations))
+			for _, v := range violations {
+				t.Errorf("  %s:%d  %q in: %s", v.file, v.line, v.prefix, v.text)
+			}
+			t.Logf("\nThe canonical id format is `{partition}:{concept}:{shortId}`; the\nshortId should be the bare unique part (uuid/hash/slug), never\nprefixed with the concept name or a sub-type discriminator. If the\nprefix is a real discriminator (e.g. 'ga-' vs specialists), move it\ninto a payload field (e.g. agent.role='assistant').")
+		}
+	})
 }
 
 // TestNoCanonicalPatternOnArgs asserts that no args-block field in the
@@ -892,35 +904,49 @@ func TestPerRowAuthzClassification(t *testing.T) {
 // see TestWalkedTreeHasNoUnderscorePaths.)
 func visitFilterPredicates(t *testing.T, f func(file string, lineno int, pred string)) {
 	t.Helper()
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
-	for _, p := range paths {
-		file, openErr := tree.Open(p)
-		if openErr != nil {
-			t.Fatalf("open %s: %v", p, openErr)
-		}
-		raw, readErr := io.ReadAll(file)
-		file.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", p, readErr)
-		}
-		walkFilterPredicates(p, string(raw), f)
-	}
+	visitFilterPredicatesIn(embeddedCorpus(t), f)
 }
+
+// visitFilterPredicatesIn is visitFilterPredicates over any corpus. It returns
+// how many predicates it emitted, the reachable positive its gates assert.
+func visitFilterPredicatesIn(c corpus, f func(file string, lineno int, pred string)) int {
+	n := 0
+	for _, p := range c.paths {
+		walkFilterPredicates(p, c.files[p], func(file string, lineno int, pred string) {
+			n++
+			f(file, lineno, pred)
+		})
+	}
+	return n
+}
+
+// filterPredicateFloor is the least number of filter predicates a corpus walk
+// may emit before its gates are reading nothing. Measured when it was set:
+// 1357 embedded, 1498 migrated -- the editions differ by the guard conditions
+// the codemod made explicit (`args.x == nil` is a leaf of its own, where a
+// legacy `when(args.x) { ... }` contributed only its body).
+const filterPredicateFloor = 1000
 
 // walkFilterPredicates scans src line-by-line.
 //
 // Two contexts emit predicates:
 //
-//  1. Struct-form: a line beginning with `filter ` opens a clause
-//     whose body runs across `&&`-joined predicates (the canonical
-//     AND operator, #977; the `;` AND separator is retired and
-//     rejected tree-wide by TestNoRetiredOperatorForms) on the same
-//     line and indented continuation lines, terminating on a known
-//     end keyword / annotation / blank line.
+//  1. Struct-form: a line beginning with `filter ` opens a clause whose
+//     extent is dslclause.ClauseExtent's -- the fold the struct-query
+//     normaliser applies -- so a wrapped clause is read to its last line.
+//     The `;` AND separator is retired and rejected tree-wide by
+//     TestNoRetiredOperatorForms.
+//
+//     An edition-2026 clause (`filter row => ...`, epic memql#5363) is
+//     PARSED, and each leaf of its boolean structure (ast.PredicateLeaves) is
+//     emitted with the lambda parameter's root removed: `row.status ==
+//     "active"` is emitted as `status == "active"`. Both gates that read
+//     these predicates are about how a PAYLOAD field is named, and
+//     `row.<field>` is edition 2026's spelling of what a legacy filter wrote
+//     bare -- so this is the reading under which a v1 `row.payload.x` still
+//     reports the `payload` head and `row.active == true` still reads as the
+//     traitable `active == true`. A v1 clause that does not parse is emitted
+//     as text, line by line, as a legacy one is.
 //
 //  2. Procedural-form: a legacy `shape(concept;` call inside a `func`
 //     body (the author-side procedural form is retired -- this branch
@@ -933,13 +959,10 @@ func visitFilterPredicates(t *testing.T, f func(file string, lineno int, pred st
 // evaluator that doesn't recognize trait spec calls, so the same
 // rules don't apply.
 func walkFilterPredicates(path, src string, emit func(file string, lineno int, pred string)) {
-	inFilter := false
 	inShapeCall := false
-	for lineno, raw := range strings.Split(src, "\n") {
-		line := raw
-		if idx := strings.Index(line, "//"); idx >= 0 {
-			line = line[:idx]
-		}
+	lines := strings.Split(blankComments(src), "\n")
+	for lineno := 0; lineno < len(lines); lineno++ {
+		line := lines[lineno]
 		trim := strings.TrimSpace(line)
 
 		// Procedural-form `shape(` body — emit each ;-piece until
@@ -966,41 +989,102 @@ func walkFilterPredicates(path, src string, emit func(file string, lineno int, p
 			continue
 		}
 
-		if trim == "" {
-			inFilter = false
+		if !dslclause.StartsWith(trim, "filter") {
 			continue
 		}
-		if dslclause.StartsWith(trim, "filter") {
-			inFilter = true
-			rest := strings.TrimSpace(strings.TrimPrefix(trim, "filter"))
-			for _, p := range splitPredicates(rest) {
+		last := dslclause.ClauseExtent(lines, lineno)
+		clauseLines := []string{strings.TrimSpace(strings.TrimPrefix(trim, "filter"))}
+		for j := lineno + 1; j <= last; j++ {
+			clauseLines = append(clauseLines, strings.TrimSpace(lines[j]))
+		}
+		if emitV1FilterLeaves(path, lineno+1, clauseLines, emit) {
+			lineno = last
+			continue
+		}
+		for k, text := range clauseLines {
+			for _, p := range splitPredicates(text) {
 				if p != "" {
-					emit(path, lineno+1, p)
+					emit(path, lineno+1+k, p)
 				}
 			}
-			continue
 		}
-		if !inFilter {
-			continue
-		}
-		// The keyword set is shared with the pagination checker and pinned
-		// against parseStructQueryBody's own switch (memql#2815). This list
-		// used to be local, and it had drifted: it omitted sort / paginate /
-		// asOf / count, so 22 directive lines in the shipped corpus were
-		// emitted to the gates below as pseudo-predicates. Over-inclusive
-		// rather than a miss, so nothing false-fired -- but the safe
-		// direction was luck, and a gate that REJECTED rather than
-		// classified would have started firing on `sort "createdAt", "desc"`.
-		if dslclause.TerminatesFilterClause(trim) {
-			inFilter = false
-			continue
-		}
-		for _, p := range splitPredicates(trim) {
-			if p != "" {
-				emit(path, lineno+1, p)
-			}
-		}
+		lineno = last
 	}
+}
+
+// emitV1FilterLeaves emits the leaves of an edition-2026 filter clause, each
+// on the source line it sits on, and reports whether the clause was one. See
+// walkFilterPredicates for the reading.
+func emitV1FilterLeaves(path string, firstLine int, clauseLines []string, emit func(file string, lineno int, pred string)) bool {
+	clause := strings.Join(clauseLines, "\n")
+	if !dslclause.OpensLambda(clause) {
+		return false
+	}
+	lam, err := langparser.ParseV1Lambda(clause)
+	if err != nil || len(lam.Params) != 1 {
+		return false
+	}
+	param := lam.Params[0]
+	ast.PredicateLeaves(lam.Body, func(leaf ast.ExpressionNode) {
+		line := firstLine
+		if sp := v1SpanOf(leaf); sp.Line > 0 {
+			line = firstLine + sp.Line - 1
+		}
+		emit(path, line, stripV1Root(ast.FormatExpr(leaf), param))
+	})
+	return true
+}
+
+// v1SpanOf returns a v1 node's source span, or the zero span.
+func v1SpanOf(n ast.ExpressionNode) ast.Span {
+	switch e := n.(type) {
+	case *ast.IdentExpr:
+		return e.Span
+	case *ast.MemberExpr:
+		return e.Span
+	case *ast.CallExpr:
+		return e.Span
+	case *ast.UnaryExpr:
+		return e.Span
+	case *ast.BinaryExpr:
+		return e.Span
+	case *ast.ListExpr:
+		return e.Span
+	case *ast.MapExpr:
+		return e.Span
+	case *ast.ParenExpr:
+		return e.Span
+	}
+	return ast.Span{}
+}
+
+// stripV1Root removes the `<param>.` root from every member path in a
+// formatted v1 expression, outside string literals.
+func stripV1Root(text, param string) string {
+	var b strings.Builder
+	inStr := false
+	for i := 0; i < len(text); i++ {
+		c := text[i]
+		switch {
+		case inStr && c == '\\' && i+1 < len(text):
+			b.WriteByte(c)
+			b.WriteByte(text[i+1])
+			i++
+			continue
+		case c == '"':
+			inStr = !inStr
+		case !inStr && strings.HasPrefix(text[i:], param+".") &&
+			(i == 0 || !isFilterIdentByte(text[i-1]) && text[i-1] != '.'):
+			i += len(param) // skip `<param>.`
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+func isFilterIdentByte(c byte) bool {
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }
 
 // procShapeCallStart returns true if the line opens a procedural-
@@ -1368,29 +1452,56 @@ func TestQueryConceptMatchesShapeConcept(t *testing.T) {
 // The audit report (scripts/audit-pagination) reads the SAME classifier,
 // so its UNMARKED list and this gate can never drift.
 func TestPaginationAuthoringRule(t *testing.T) {
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
+	// Both editions (epic memql#5363): the single-row exemption reads the
+	// filter, and a v1 filter spells the optional-argument guard as an
+	// explicit `(args.x == nil || row.id == args.x)`.
+	bothCorpora(t, checkPaginationAuthoringRule)
+}
 
+// paginationFindings classifies every query in a corpus.
+func paginationFindings(c corpus) []pagination.QueryFinding {
 	var findings []pagination.QueryFinding
-	for _, p := range paths {
+	for _, p := range c.paths {
 		if !strings.HasSuffix(p, "queries.memql") {
 			continue
 		}
-		f, openErr := tree.Open(p)
-		if openErr != nil {
-			t.Fatalf("open %s: %v", p, openErr)
-		}
-		raw, readErr := io.ReadAll(f)
-		f.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", p, readErr)
-		}
-		findings = append(findings, pagination.ScanSource(p, string(raw))...)
+		findings = append(findings, pagination.ScanSource(p, c.files[p])...)
 	}
 	pagination.SortFindings(findings)
+	return findings
+}
+
+// TestPaginationClassificationIsEditionIndependent: every query classifies
+// the same way in the embedded tree and in its migrated form.
+func TestPaginationClassificationIsEditionIndependent(t *testing.T) {
+	class := func(c corpus) map[string]pagination.Classification {
+		out := map[string]pagination.Classification{}
+		for _, f := range paginationFindings(c) {
+			out[f.File+" "+f.Name] = f.Class
+		}
+		return out
+	}
+	legacy, v1 := class(embeddedCorpus(t)), class(migratedCorpus(t))
+	for key, want := range legacy {
+		if got, ok := v1[key]; !ok || got != want {
+			t.Errorf("%s: classifies %s in the embedded tree and %s once migrated", key, want, got)
+		}
+	}
+	// Measured when the floor was set: 399 queries, 43 single-row.
+	single := 0
+	for _, c := range legacy {
+		if c == pagination.SingleRow {
+			single++
+		}
+	}
+	if len(legacy) < 300 || single < 30 {
+		t.Errorf("classified %d queries, %d single-row -- the scan has stopped reaching them", len(legacy), single)
+	}
+	t.Logf("%d queries classified identically, %d single-row", len(legacy), single)
+}
+
+func checkPaginationAuthoringRule(t *testing.T, c corpus) {
+	findings := paginationFindings(c)
 
 	byClass := map[pagination.Classification]int{}
 	var unmarked []pagination.QueryFinding

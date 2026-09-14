@@ -1,14 +1,11 @@
 package dslconformance
 
 import (
-	"github.com/znasllc-io/memql/dsl"
-	"io"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/memql/dslgate"
-	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // TestAdminGateIsATopLevelConjunct hard-fails when an admin-gated filter
@@ -47,42 +44,33 @@ func TestAdminGateIsATopLevelConjunct(t *testing.T) {
 
 	// A corpus that stopped producing admin-gated filters, or an extractor
 	// that stopped finding them, would leave the check above green while
-	// protecting nothing. This counts what it had to reason about.
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
-	checked := 0
-	for _, p := range paths {
-		f, openErr := tree.Open(p)
-		if openErr != nil {
-			t.Fatalf("open %s: %v", p, openErr)
-		}
-		raw, readErr := io.ReadAll(f)
-		f.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", p, readErr)
-		}
-		src := string(raw)
-		for _, m := range constructHeaderRe.FindAllStringSubmatchIndex(src, -1) {
-			closeIdx := matchingClose(src, m[1]-1)
-			if closeIdx < 0 {
-				continue
-			}
-			// filterClauseOf strips comments, so the prose in
-			// dsl/authoring/queries.memql and dsl/identity/queries.memql that
-			// merely NAMES the gate is excluded, as is every `actor.` read in
-			// a logic body -- neither is a filter.
-			if clause := filterClauseOf(src[m[1]:closeIdx]); clause != "" && mentionsAdminGate(clause) {
-				checked++
+	// protecting nothing. This counts what it had to reason about -- in both
+	// editions, since the migrated corpus is the one the codemod leaves behind
+	// (TestContractGatesPassTheMigratedCorpus runs the gate itself over it).
+	bothCorpora(t, func(t *testing.T, c corpus) {
+		checked := 0
+		for _, p := range c.paths {
+			src := c.files[p]
+			for _, m := range constructHeaderRe.FindAllStringSubmatchIndex(src, -1) {
+				closeIdx := matchingClose(src, m[1]-1)
+				if closeIdx < 0 {
+					continue
+				}
+				// filterClauseOf strips comments, so the prose in
+				// dsl/authoring/queries.memql and dsl/identity/queries.memql that
+				// merely NAMES the gate is excluded, as is every `actor.` read in
+				// a logic body -- neither is a filter.
+				if clause := filterClauseOf(src[m[1]:closeIdx]); clause != "" && mentionsAdminGate(clause) {
+					checked++
+				}
 			}
 		}
-	}
-	if checked == 0 {
-		t.Fatal("no admin-gated filter clauses found; the corpus shape or filterClauseOf changed and this gate has silently stopped protecting anything")
-	}
-	t.Logf("checked %d admin-gated filter clause(s)", checked)
+		// Measured when the floor was set: 264 in each edition.
+		if checked < 200 {
+			t.Fatalf("%d admin-gated filter clauses found; the corpus shape or filterClauseOf changed and this gate has silently stopped protecting anything", checked)
+		}
+		t.Logf("checked %d admin-gated filter clause(s)", checked)
+	})
 }
 
 // TestAdminGateCompositionRules pins the rule itself, independently of the
@@ -206,22 +194,19 @@ func adminGateSpecNames(t *testing.T) []string {
 // a test edit -- the failure this guards against is a name nothing declares,
 // not a name nothing uses yet.
 func TestAdminGateNamesAreDeclaredOrRecorded(t *testing.T) {
-	declared := map[string]bool{}
-	specDecl := regexp.MustCompile(`(?m)^spec\s+\S+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{`)
+	bothCorpora(t, checkAdminGateNamesAreDeclaredOrRecorded)
+}
 
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
+func checkAdminGateNamesAreDeclaredOrRecorded(t *testing.T, c corpus) {
+	declared := map[string]bool{}
 	var specFiles int
-	for _, path := range paths {
+	for _, path := range c.paths {
 		if !strings.HasSuffix(path, "specs.memql") {
 			continue
 		}
 		specFiles++
-		for _, m := range specDecl.FindAllStringSubmatch(readTreeFile(t, path), -1) {
-			declared[m[1]] = true
+		for _, m := range specDeclRe.FindAllStringSubmatch(c.files[path], -1) {
+			declared[m[2]] = true
 		}
 	}
 	if specFiles == 0 {
@@ -290,27 +275,17 @@ func TestNamedQueriesKeepTheirAdminGate(t *testing.T) {
 		},
 	}
 
+	bothCorpora(t, func(t *testing.T, c corpus) { checkNamedQueriesKeepTheirAdminGate(t, c, want) })
+}
+
+func checkNamedQueriesKeepTheirAdminGate(t *testing.T, c corpus, want map[string]map[string]bool) {
 	found := map[string]map[string]bool{}
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
-	for _, p := range paths {
+	for _, p := range c.paths {
 		names, ok := want[p]
 		if !ok {
 			continue
 		}
-		f, openErr := tree.Open(p)
-		if openErr != nil {
-			t.Fatalf("open %s: %v", p, openErr)
-		}
-		raw, readErr := io.ReadAll(f)
-		f.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", p, readErr)
-		}
-		src := string(raw)
+		src := c.files[p]
 
 		for _, m := range constructHeaderRe.FindAllStringSubmatchIndex(src, -1) {
 			name := src[m[4]:m[5]]
@@ -382,31 +357,30 @@ func TestNamedQueriesKeepTheirAdminGate(t *testing.T) {
 // only ones that can serve as an admin gate. A row-spec is a SQL predicate over
 // payload fields and belongs in no gate vocabulary.
 func TestEveryDeclaredActorGateIsRecognised(t *testing.T) {
+	bothCorpora(t, checkEveryDeclaredActorGateIsRecognised)
+}
+
+func checkEveryDeclaredActorGateIsRecognised(t *testing.T, c corpus) {
 	// Names that are @actor-bound but deliberately NOT gate vocabulary. Empty
 	// today, and an entry here is a claim that a caller-scope spec is not a
 	// caller-scope GATE -- which wants a reason beside it.
 	notGateVocabulary := map[string]string{}
 
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
-
-	// `spec actorEnvelope <name> {` -- the @actor binding is the signature's
-	// first identifier, so the declaration alone says whether it is a
-	// context-spec. No AST needed and none available here.
-	actorSpec := regexp.MustCompile(`(?m)^spec[ \t]+actorEnvelope[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
-
+	// `spec actorEnvelope <name> {` (or `= actor => ...`, edition 2026) -- the
+	// @actor binding is the signature's first identifier, so the declaration
+	// alone says whether it is a context-spec. No AST needed and none
+	// available here.
 	declared := map[string]string{}
 	var specFiles int
-	for _, p := range paths {
+	for _, p := range c.paths {
 		if !strings.HasSuffix(p, "specs.memql") {
 			continue
 		}
 		specFiles++
-		for _, m := range actorSpec.FindAllStringSubmatch(readTreeFile(t, p), -1) {
-			declared[m[1]] = p
+		for _, m := range specDeclRe.FindAllStringSubmatch(c.files[p], -1) {
+			if m[1] == "actorEnvelope" {
+				declared[m[2]] = p
+			}
 		}
 	}
 
