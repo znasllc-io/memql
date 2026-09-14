@@ -81,7 +81,7 @@ func TestCompletion_RegistryRefreshCrossFile(t *testing.T) {
 	}
 	commonlog.Configure(-4, nil)
 	s := newServer(dir, commonlog.GetLogger(lsName))
-	s.buildSense() // workspace has no product concept yet
+	s.buildSense(nil) // workspace has no product concept yet
 
 	const uriB = "file:///b.memql"
 	s.docs.open(uriB, "query ") // ContextConstructConcept after "query "
@@ -116,7 +116,7 @@ concept gadget {
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s.buildSense() // the rebuild scheduleRebuild would trigger on didSave
+	s.buildSense(nil) // the rebuild scheduleRebuild would trigger on didSave
 
 	if !hasGadget() {
 		t.Error("concept defined in file A should complete in file B after the registry rebuild")
