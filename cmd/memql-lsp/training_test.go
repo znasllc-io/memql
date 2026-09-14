@@ -202,7 +202,7 @@ func TestTrainingState_HandleProducesContractJSON(t *testing.T) {
 		`"signatureRange":{"start":{"line":15,"character":0},"end":{"line":15,"character":32}},` +
 		`"state":"untrained"},` +
 		`{"kind":"mutation","name":"seededMutation","concept":"participant",` +
-		`"signatureRange":{"start":{"line":21,"character":0},"end":{"line":21,"character":33}},` +
+		`"signatureRange":{"start":{"line":21,"character":0},"end":{"line":21,"character":35}},` +
 		`"state":"seeded","origin":"core"},` +
 		`{"kind":"action","name":"deployCluster",` +
 		`"signatureRange":{"start":{"line":28,"character":0},"end":{"line":28,"character":20}},` +

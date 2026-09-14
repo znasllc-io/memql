@@ -32,7 +32,7 @@ import (
 // hash(canonicalId(recipientId, recipient)))) in that ORDER, per-part hashed.
 func TestDeliveryIdDerivationMatchesTheMutation(t *testing.T) {
 	src := campaignsDSL(t, "mutations.memql")
-	block := mutationBlock(t, src, "mutate delivery recordCampaignDelivery")
+	block := mutationBlock(t, src, "mutation delivery recordCampaignDelivery")
 
 	idExpr := collapsedExprAt(t, block, "id:")
 	const want = "id: hash(concat( hash(canonicalId(args.campaignId, campaign)), " +
@@ -90,7 +90,7 @@ func mutationBlock(t *testing.T, src, header string) string {
 			"that re-implements its derived id is now pointing at nothing", header)
 	}
 	rest := src[i+len(header):]
-	if end := strings.Index(rest, "\nmutate "); end > 0 {
+	if end := strings.Index(rest, "\nmutation "); end > 0 {
 		rest = rest[:end]
 	}
 	return rest

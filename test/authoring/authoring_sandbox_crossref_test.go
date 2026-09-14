@@ -55,7 +55,7 @@ func crossRefTestEngine(t *testing.T) *memql.MemQLEngine {
 func TestCrossRef_SelfConsistentBundlePasses(t *testing.T) {
 	eng := crossRefTestEngine(t)
 
-	rep := memql.SandboxCompileBundleWithEngine([]memql.SandboxConstruct{
+	rep := memql.SandboxCompileBundleWithEngine(memql.WithOrigin([]memql.SandboxConstruct{
 		{
 			Kind: "concept",
 			Name: "crossWidget",
@@ -78,7 +78,7 @@ shape crossWidget crossWidgetCard {
   count
 }`,
 		},
-	}, eng)
+	}, "crossns/concepts.memql"), eng)
 
 	if !rep.OK {
 		t.Fatalf("expected a self-consistent bundle to pass, got: %+v", rep.Diagnostics)
@@ -90,7 +90,7 @@ shape crossWidget crossWidgetCard {
 func TestCrossRef_DanglingShapeImportFails(t *testing.T) {
 	eng := crossRefTestEngine(t)
 
-	rep := memql.SandboxCompileBundleWithEngine([]memql.SandboxConstruct{
+	rep := memql.SandboxCompileBundleWithEngine(memql.WithOrigin([]memql.SandboxConstruct{
 		{
 			Kind: "spec",
 			Name: "crossDanglingSpec",
@@ -101,7 +101,7 @@ spec ghostShapeThatDoesNotExist crossDanglingSpec {
   return role == "admin"
 }`,
 		},
-	}, eng)
+	}, "crossns/concepts.memql"), eng)
 
 	if rep.OK {
 		t.Fatalf("expected bundle FAIL on dangling shape import, got OK: %+v", rep.Diagnostics)
@@ -117,7 +117,7 @@ spec ghostShapeThatDoesNotExist crossDanglingSpec {
 func TestCrossRef_BundleSiblingImportResolves(t *testing.T) {
 	eng := crossRefTestEngine(t)
 
-	rep := memql.SandboxCompileBundleWithEngine([]memql.SandboxConstruct{
+	rep := memql.SandboxCompileBundleWithEngine(memql.WithOrigin([]memql.SandboxConstruct{
 		{
 			Kind: "concept",
 			Name: "crossThing",
@@ -150,7 +150,7 @@ query crossThing queryCrossThing {
   shape   crossThingCard
 }`,
 		},
-	}, eng)
+	}, "crossns/concepts.memql"), eng)
 
 	if !rep.OK {
 		t.Fatalf("expected sibling import to resolve, got: %+v", rep.Diagnostics)
@@ -162,7 +162,7 @@ query crossThing queryCrossThing {
 func TestCrossRef_FieldExistenceFails(t *testing.T) {
 	eng := crossRefTestEngine(t)
 
-	rep := memql.SandboxCompileBundleWithEngine([]memql.SandboxConstruct{
+	rep := memql.SandboxCompileBundleWithEngine(memql.WithOrigin([]memql.SandboxConstruct{
 		{
 			Kind: "concept",
 			Name: "crossFieldThing",
@@ -182,7 +182,7 @@ shape crossFieldThing crossFieldCard {
   doesNotExist
 }`,
 		},
-	}, eng)
+	}, "crossns/concepts.memql"), eng)
 
 	if rep.OK {
 		t.Fatalf("expected bundle FAIL on non-existent field, got OK: %+v", rep.Diagnostics)
@@ -204,7 +204,7 @@ shape crossFieldThing crossFieldCard {
 func TestCrossRef_FieldExistenceAgainstCoreConceptPasses(t *testing.T) {
 	eng := crossRefTestEngine(t)
 
-	good := memql.SandboxCompileBundleWithEngine([]memql.SandboxConstruct{
+	good := memql.SandboxCompileBundleWithEngine(memql.WithOrigin([]memql.SandboxConstruct{
 		{
 			Kind: "shape",
 			Name: "crossUserCard",
@@ -216,12 +216,12 @@ shape user crossUserCard {
   row.createdAt
 }`,
 		},
-	}, eng)
+	}, "crossns/concepts.memql"), eng)
 	if !good.OK {
 		t.Fatalf("expected a row-intrinsic-only shape over a core concept to pass, got: %+v", good.Diagnostics)
 	}
 
-	bad := memql.SandboxCompileBundleWithEngine([]memql.SandboxConstruct{
+	bad := memql.SandboxCompileBundleWithEngine(memql.WithOrigin([]memql.SandboxConstruct{
 		{
 			Kind: "shape",
 			Name: "crossUserBogus",
@@ -232,7 +232,7 @@ shape user crossUserBogus {
   thisFieldIsNotOnUser
 }`,
 		},
-	}, eng)
+	}, "crossns/concepts.memql"), eng)
 	if bad.OK {
 		t.Fatalf("expected FAIL projecting a bogus field on a core concept, got OK: %+v", bad.Diagnostics)
 	}
@@ -243,7 +243,7 @@ shape user crossUserBogus {
 func TestCrossRef_AutomationTriggerConceptExists(t *testing.T) {
 	eng := crossRefTestEngine(t)
 
-	good := memql.SandboxCompileBundleWithEngine([]memql.SandboxConstruct{
+	good := memql.SandboxCompileBundleWithEngine(memql.WithOrigin([]memql.SandboxConstruct{
 		{
 			Kind: "automation",
 			Name: "crossOnUser",
@@ -254,12 +254,12 @@ automation crossOnUser {
   }
 }`,
 		},
-	}, eng)
+	}, "crossns/concepts.memql"), eng)
 	if !good.OK {
 		t.Fatalf("expected automation on a real concept to pass, got: %+v", good.Diagnostics)
 	}
 
-	bad := memql.SandboxCompileBundleWithEngine([]memql.SandboxConstruct{
+	bad := memql.SandboxCompileBundleWithEngine(memql.WithOrigin([]memql.SandboxConstruct{
 		{
 			Kind: "automation",
 			Name: "crossOnGhost",
@@ -270,7 +270,7 @@ automation crossOnGhost {
   }
 }`,
 		},
-	}, eng)
+	}, "crossns/concepts.memql"), eng)
 	if bad.OK {
 		t.Fatalf("expected FAIL on automation triggering on a non-existent concept, got OK: %+v", bad.Diagnostics)
 	}
@@ -285,7 +285,7 @@ automation crossOnGhost {
 func TestCrossRef_AutomationTriggerOnBundleConcept(t *testing.T) {
 	eng := crossRefTestEngine(t)
 
-	rep := memql.SandboxCompileBundleWithEngine([]memql.SandboxConstruct{
+	rep := memql.SandboxCompileBundleWithEngine(memql.WithOrigin([]memql.SandboxConstruct{
 		{
 			Kind: "concept",
 			Name: "crossEvented",
@@ -304,7 +304,7 @@ automation crossOnEvented {
   }
 }`,
 		},
-	}, eng)
+	}, "crossns/concepts.memql"), eng)
 	if !rep.OK {
 		t.Fatalf("expected automation triggering on a bundle-defined concept to pass, got: %+v", rep.Diagnostics)
 	}
@@ -316,7 +316,7 @@ func TestCrossRef_NoMutationOfConceptRegistry(t *testing.T) {
 	eng := crossRefTestEngine(t)
 
 	before := len(memoryNodes.List())
-	_ = memql.SandboxCompileBundleWithEngine([]memql.SandboxConstruct{
+	_ = memql.SandboxCompileBundleWithEngine(memql.WithOrigin([]memql.SandboxConstruct{
 		{
 			Kind: "concept",
 			Name: "crossEphemeral",
@@ -335,7 +335,7 @@ automation crossOnEphemeral {
   }
 }`,
 		},
-	}, eng)
+	}, "crossns/concepts.memql"), eng)
 	if after := len(memoryNodes.List()); after != before {
 		t.Fatalf("cross-ref pass mutated the live concept registry: before=%d after=%d", before, after)
 	}
