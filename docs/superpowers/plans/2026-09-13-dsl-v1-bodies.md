@@ -1,6 +1,8 @@
 # DSL v1 body language Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. This plan is deleted in the epic's merge.
+>
+> **Resuming?** Read `2026-09-13-dsl-v1-bodies-checkpoint.md` beside this file first: where the branch stands, what the peers owe, and what comes next.
 
 **Goal:** One body language for `logic` and `automation`: statements that execute in source order, with forward references refused; the terse header, `step` blocks, the `steps.<id>` spellings and the pinned loop variable retired; one execution model for both keywords, with journal parity; the whole tree migrated by `memqlmigrate --rewrite=bodies` in the same PR (epic memql#5370, tasks #5371-#5374).
 
@@ -828,6 +830,6 @@ Rule, as in epic 2: a gate that matched text now walks the parsed `ast.Body`, an
 
 - [ ] **Step 1:** Rebase on the latest `origin/epic/dsl-v1-expressions` (and on `main` once epics 1 and 2 merge); rerun the rewrite over `dsl/**` rather than resolving migrated files by hand; `make arch-model`.
 - [ ] **Step 2: Verification matrix**, every output read: `make test`; `MEMQL_REQUIRE_DB=1` over `scripts/ci/db-gated-packages.sh --trees` plus `./test/conformance/...`; the seven node-tag builds (`go build .`, `-tags identity|agent|planner|workbench|mcp|edge`); `scripts/ci/module-boundaries.sh`; `go run ./cmd/memqllint dsl`; `make vscode-test`; `make sdk-ts-typecheck`; `make frontdoor-paths-check`; `go test -count=1 . ./scripts/...`; `gitleaks dir .` over the diff.
-- [ ] **Step 3:** Delete this plan file.
+- [ ] **Step 3:** Delete this plan file and its checkpoint (`2026-09-13-dsl-v1-bodies-checkpoint.md`).
 - [ ] **Step 4:** Push; open the PR (one `Closes #n` line per issue; the behaviour changes listed above; the census of reordered bodies; the frontend note: none, the wire is unchanged); watch CI; enqueue with `gh pr merge <n> --repo znasllc-io/memql` only after epics 1 and 2 have merged.
 - [ ] **Step 5:** After merge: close any issue the merge did not, delete the local branch and the worktree, prune refs.
