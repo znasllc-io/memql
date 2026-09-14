@@ -9,7 +9,8 @@ package conformance
 // and this lane is where they are compared on the rows the language finds
 // awkward: an absent key, JSON null, "", " ", 0, 1, 1.5, false, true, "e",
 // "E", "é", a stored "1", a nested object with an absent intermediate, the
-// arrays [], ["a"] and [1, 2, 3], and a scalar where an array is expected.
+// arrays [], ["a"] and [1, 2, 3], a scalar and an object where an array is
+// expected, and a string where a boolean is.
 //
 // For every expression -- each `lower` and pushdown `evaluate` case of the
 // corpus, and a generated matrix over the absence table and the typed
@@ -17,8 +18,16 @@ package conformance
 // engine over a real database, writes the rows through the engine's own insert
 // form, and reads them back two ways: through the executor's real read path
 // (the query, called with its arguments), and through EvalExpr over each stored
-// row. A row one side selects and the other does not is a disagreement, named
-// with the case file (or the generated expression), the row and both answers.
+// row. A row one side selects and the other does not is a disagreement, and so
+// is a row EvalExpr refuses while the SQL answers -- a filter would skip it and
+// a refine clause over the same rows would fail the read. Each is named with
+// the case file (or the generated expression), the row and both answers.
+//
+// Two disagreements are known and recorded as open questions of the language
+// (component/memql/expr_lower_agreement_db_test.go, irEvalDivergentRows): a
+// bare condition over a stored non-boolean, which D8 refuses in process and
+// the SQL reads as "not true", and count() of a stored string, the string's
+// characters in process and 0 in the pushdown. The lane logs both.
 //
 // ADVISORY until the freeze epic (dsl-v1-freeze): a disagreement is logged on
 // a line starting `DIFFERENTIAL:` and the test passes, unless
@@ -40,6 +49,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"regexp"
 	"sort"
@@ -122,6 +132,7 @@ var laneValues = []laneRow{
 	{"tags-numbers", map[string]any{"tags": []any{1, 2, 3}}},
 	{"tags-scalar", map[string]any{"tags": "a"}},
 	{"tags-null", map[string]any{"tags": nil}},
+	{"tags-object", map[string]any{"tags": map[string]any{"k": "a"}}},
 	{"obj-empty", map[string]any{"obj": map[string]any{}}},
 	{"obj-a", map[string]any{"obj": map[string]any{"a": "x"}}},
 	{"obj-a-null", map[string]any{"obj": map[string]any{"a": nil}}},
@@ -130,6 +141,8 @@ var laneValues = []laneRow{
 	{"flag-true", map[string]any{"flag": true}},
 	{"flag-false", map[string]any{"flag": false}},
 	{"flag-null", map[string]any{"flag": nil}},
+	{"flag-string-true", map[string]any{"flag": "true"}},
+	{"flag-malformed", map[string]any{"flag": "maybe"}},
 }
 
 // laneMatrix is the generated half: the absence table and the typed
@@ -148,7 +161,8 @@ func laneMatrix() []string {
 		`row => row.value in ["", "a"]`,
 		`row => row.value in ["a"]`,
 		`row => row.value in [nil]`,
-		`row => row.value in [1, "1"]`,
+		`row => row.value in [1, 2]`,
+		`row => row.value in ["1", "a"]`,
 		`row => row.value startsWith "a"`,
 		`row => row.value startsWith ""`,
 		`row => row.value startsWith ["x", "a"]`,
@@ -168,6 +182,8 @@ func laneMatrix() []string {
 		`row => row.flag == true`,
 		`row => !(row.flag == true)`,
 		`row => row.flag != false`,
+		`row => row.flag`,
+		`row => !row.flag`,
 	)
 	return out
 }
@@ -242,9 +258,12 @@ func TestDifferentialLane(t *testing.T) {
 			_, inSQL := selected[laneBareID(node.ID)]
 			compared++
 			switch {
-			case evalErr != nil && inSQL:
-				report(fmt.Sprintf("%s: `%s` over row %s %s: SQL selects it, EvalExpr refuses: %v", x.source, x.lambda, laneLabel(node), node.Payload, evalErr))
-			case evalErr == nil && inProcess != inSQL:
+			case evalErr != nil:
+				// A refusal against an answer is a disagreement whichever way
+				// the SQL answered: a query filter would skip the row, a
+				// refine clause over the same rows would fail the read.
+				report(fmt.Sprintf("%s: `%s` over row %s %s: SQL says %v, EvalExpr refuses: %v", x.source, x.lambda, laneLabel(node), node.Payload, inSQL, evalErr))
+			case inProcess != inSQL:
 				report(fmt.Sprintf("%s: `%s` over row %s %s: SQL says %v, EvalExpr says %v", x.source, x.lambda, laneLabel(node), node.Payload, inSQL, inProcess))
 			}
 		}
@@ -323,7 +342,12 @@ func laneTree(t *testing.T, exprs []*laneExpr, fixtures map[string]string) fstes
 		param := lam.Params[0]
 		x.query = fmt.Sprintf("laneQuery%d", i+1)
 		b := file(x.domain)
-		fmt.Fprintf(b, "\n/// The differential lane's read of %s.\nquery %s %s {\n  args {\n    lane  string  @required\n", laneComment(x.source), x.concept, x.query)
+		// A query that reads the caller declares it (#2621).
+		actorLine := ""
+		if laneReadsRoot(lam.Body, "actor") {
+			actorLine = "@actor\n"
+		}
+		fmt.Fprintf(b, "\n/// The differential lane's read of %s.\n%squery %s %s {\n  args {\n    lane  string  @required\n", laneComment(x.source), actorLine, x.concept, x.query)
 		for _, name := range laneArgNames(lam.Body) {
 			fmt.Fprintf(b, "    %s  %s\n", name, laneArgType(x.args[name]))
 		}
@@ -543,6 +567,18 @@ func laneFieldValues(p *ast.PropertyDecl) []any {
 	return []any{nil, "", 0, false, "x"}
 }
 
+// laneReadsRoot reports whether an expression reads the reserved root name.
+func laneReadsRoot(body ast.ExpressionNode, root string) bool {
+	found := false
+	ast.WalkV1(body, func(n ast.ExpressionNode) bool {
+		if id, ok := n.(*ast.IdentExpr); ok && id != nil && id.Name == root {
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
 // laneArgNames lists the args an expression reads, sorted.
 func laneArgNames(body ast.ExpressionNode) []string {
 	seen := map[string]bool{}
@@ -568,7 +604,7 @@ func laneArgType(v any) string {
 	case bool:
 		return "bool"
 	case float64:
-		if x == float64(int64(x)) {
+		if !math.IsInf(x, 0) && math.Trunc(x) == x {
 			return "int"
 		}
 		return "float"
