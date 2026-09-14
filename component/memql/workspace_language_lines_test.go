@@ -135,3 +135,102 @@ func TestOfflineSense_WorkspaceLanguageLinesOfNoWorkspace(t *testing.T) {
 		t.Errorf("got %+v; want an empty answer", got)
 	}
 }
+
+// TestOfflineSense_TheBuildAnswersTheLinesItsInitResolved: the lines the build
+// hands back are its Init's -- read from the engine and its load report -- and
+// they equal the resolver's, refusal for refusal, for every refusal code. The
+// load report keeps a refusal's message but not its code, so this is also the
+// pin on reading the code back from the message.
+func TestOfflineSense_TheBuildAnswersTheLinesItsInitResolved(t *testing.T) {
+	declares := func(language, edition string) *fstest.MapFile {
+		return &fstest.MapFile{Data: []byte(dslfs.Manifest{Language: language, Edition: edition}.Render())}
+	}
+	root := fstest.MapFS{
+		"missing/traits.memql":                languageLineDomainFile(),
+		"malformed/traits.memql":              languageLineDomainFile(),
+		"malformed/" + dslfs.ManifestFile:     {Data: []byte("edition = \"" + langparser.Edition + "\"\n")},
+		"newer/traits.memql":                  languageLineDomainFile(),
+		"newer/" + dslfs.ManifestFile:         declares("99.0", langparser.Edition),
+		"older/traits.memql":                  languageLineDomainFile(),
+		"older/" + dslfs.ManifestFile:         declares("0.9", langparser.Edition),
+		"unreadedition/traits.memql":          languageLineDomainFile(),
+		"unreadedition/" + dslfs.ManifestFile: declares(langparser.LanguageVersion, "1999"),
+		"widgets/traits.memql":                languageLineDomainFile(),
+		"widgets/" + dslfs.ManifestFile:       languageLineFile(),
+	}
+
+	_, got, err := BuildOfflineSenseWithLanguageLines(root)
+	if err == nil {
+		t.Fatal("the build succeeded; five refused lines must refuse the tree")
+	}
+	want := ResolveWorkspaceLanguageLines(root)
+
+	codes := map[string]bool{}
+	for _, p := range want.Problems {
+		codes[p.Code] = true
+	}
+	for _, code := range []string{
+		langparser.CodeLanguageLineMissing, langparser.CodeLanguageLineMalformed, langparser.CodeLanguageVersionNewer,
+		langparser.CodeLanguageVersionUnsupported, langparser.CodeEditionUnknown,
+	} {
+		if !codes[code] {
+			t.Fatalf("the fixture refuses no line with %s; it must cover every code: %+v", code, want.Problems)
+		}
+	}
+
+	if got.Root != want.Root || len(got.Problems) != len(want.Problems) {
+		t.Fatalf("build lines = {Root: %q, %d problems}; want the resolver's {Root: %q, %d problems}\n got: %+v\nwant: %+v",
+			got.Root, len(got.Problems), want.Root, len(want.Problems), got.Problems, want.Problems)
+	}
+	for i := range want.Problems {
+		if got.Problems[i] != want.Problems[i] {
+			t.Errorf("problem %d\n got: %+v\nwant: %+v", i, got.Problems[i], want.Problems[i])
+		}
+	}
+	for d, line := range want.Lines {
+		if g, ok := got.Lines[d]; !ok || g.Refused != line.Refused {
+			t.Errorf("line of %s = %+v (present %v); want Refused=%v", d, g, ok, line.Refused)
+		}
+	}
+	if len(got.Lines) != len(want.Lines) {
+		t.Errorf("build lines carry %d domains; want %d", len(got.Lines), len(want.Lines))
+	}
+}
+
+// TestOfflineSense_AProductRepositoryMountsItsOneDomain: a product repository
+// keeps exactly one domain, under dsl/ (memql#5362). The build mounts it --
+// refused while it declares no line, loaded once it does -- where it used to
+// mount nothing at all, because dsl/ was held to the root's two-domain bar.
+func TestOfflineSense_AProductRepositoryMountsItsOneDomain(t *testing.T) {
+	const probeID = "v1:znas:znasLineProbe"
+	root := fstest.MapFS{
+		"dsl/znas/concepts.memql": {Data: []byte(`@version("1.0.0")
+@namespace("znas")
+@description("A probe of the product domain.")
+concept znasLineProbe {
+  label  string  @required  @description("Probe label.")
+}
+`)},
+		"cmd/product/main.go": {Data: []byte("package main\n")},
+		"README.md":           {Data: []byte("# a product\n")},
+	}
+
+	_, lines, err := BuildOfflineSenseWithLanguageLines(root)
+	if err == nil {
+		t.Fatal("the build succeeded; a domain with no language line must refuse the tree")
+	}
+	if lines.Root != "dsl" || len(lines.Problems) != 1 ||
+		lines.Problems[0].Domain != "znas" || lines.Problems[0].Code != langparser.CodeLanguageLineMissing {
+		t.Fatalf("lines = {Root: %q, Problems: %+v}; want znas refused under dsl/ for %s",
+			lines.Root, lines.Problems, langparser.CodeLanguageLineMissing)
+	}
+
+	root["dsl/znas/"+dslfs.ManifestFile] = languageLineFile()
+	adapter, err := buildOfflineSenseAdapter(nil, root)
+	if err != nil {
+		t.Fatalf("build with the line declared: %v", err)
+	}
+	if _, ok := adapter.ConceptGet(probeID); !ok {
+		t.Errorf("%s is not in the built registry; the one domain under dsl/ was not mounted", probeID)
+	}
+}
