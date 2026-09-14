@@ -152,10 +152,10 @@ func TestBodyBlocksCarryTheFactsTheHandListGotWrong(t *testing.T) {
 		}
 		return false
 	}
-	if has("automation", "body") {
-		t.Error("an automation has no body block -- its body is step blocks (emitAutomation refuses `body { }`)")
+	if has("automation", "body") || has("automation", "step") {
+		t.Error("an automation's statements follow its args block: it has no body or step block (both retired: body_block_retired, body_step_retired)")
 	}
-	for _, clause := range []string{"args", "step", "precondition"} {
+	for _, clause := range []string{"args", "precondition"} {
 		if !has("automation", clause) {
 			t.Errorf("automation BodyBlocks lack %q", clause)
 		}

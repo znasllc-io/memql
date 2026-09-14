@@ -174,7 +174,7 @@ func (p *Parser) parseV1Definition(attrs []*Attribute, attrToks []Token) (*Funct
 	}
 
 	body := &ast.Body{Statements: stmts, Span: joinV1Span(v1TokenSpan(kindTok), v1TokenSpan(closeTok))}
-	auto := &AutomationDef{Name: name, Steps: []StepDef{}, Enabled: true, Body: body}
+	auto := &AutomationDef{Name: name, Enabled: true, Body: body}
 	def := &FunctionDef{
 		Name:       name,
 		Args:       []FunctionArg{{Name: "_", Type: "any"}},
@@ -327,6 +327,14 @@ func (p *Parser) refuseV1CallWord(word string) error {
 		word, p.peekAhead(1).Literal)
 }
 
+// inlineConstructBlock refuses an inline `query { ... }` or `mutation { ... }`
+// block: a statement calls a construct declared elsewhere, by name. prefix is
+// the `x := ` the author wrote, or empty.
+func inlineConstructBlock(tok Token, kind, prefix string) error {
+	return bodyRefuse(tok, codeBodyCallKindMissing,
+		"`%s { ... }` is not a statement: a statement calls a %s declared elsewhere, by name -- `%s%s <name>(<named args>)`", kind, kind, prefix, kind)
+}
+
 // parseV1WordStatement parses a statement that opens with an identifier.
 func (p *Parser) parseV1WordStatement(kind, construct string) (ast.BodyStatement, error) {
 	tok := p.current
@@ -378,9 +386,16 @@ func (p *Parser) parseV1WordStatement(kind, construct string) (ast.BodyStatement
 	}
 	switch {
 	case next.Type == TokenParenOpen && sameLine:
+		if bodyCallKinds[word] {
+			return nil, bodyRefuse(tok, codeBodyCallKindMissing,
+				"`%s(...)` is not a call: a %s is declared elsewhere and called by name -- `%s <name>(<named args>)`", word, word, word)
+		}
 		return nil, bodyRefuse(tok, codeBodyCallKindMissing,
 			"`%s(...)` names no construct kind: write `query`, `mutation`, `logic`, `builtin`, `automation` or `action` before it (%s adds it)", word, bodyMigrator)
 	case next.Type == TokenBraceOpen && sameLine:
+		if bodyCallKinds[word] {
+			return nil, inlineConstructBlock(tok, word, "")
+		}
 		return nil, bodyRefuse(tok, codeBodyCallKindMissing,
 			"`%s { ... }` names no construct kind: write `<kind> %s(<named args>)` (%s rewrites it)", word, word, bodyMigrator)
 	}
@@ -431,6 +446,9 @@ func (p *Parser) parseV1Assign() (ast.BodyStatement, error) {
 	}
 	if p.check(TokenBraceOpen) && p.current.Line == endLine(p.lastTok()) {
 		if id, ok := value.(*ast.IdentExpr); ok {
+			if bodyCallKinds[id.Name] {
+				return nil, inlineConstructBlock(rhs, id.Name, nameTok.Literal+" := ")
+			}
 			return nil, bodyRefuse(rhs, codeBodyCallKindMissing,
 				"`%s { ... }` names no construct kind: write `%s := <kind> %s(<named args>)` (%s rewrites it)", id.Name, nameTok.Literal, id.Name, bodyMigrator)
 		}

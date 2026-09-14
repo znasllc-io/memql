@@ -623,6 +623,12 @@ func (p *Parser) parseV1FunctionCall() (v1Expr, error) {
 	if rule, retired := v1RetiredCalls[lower]; retired {
 		return v1Expr{}, v1Retired(nameTok, rule)
 	}
+	// `mutation(...)`, `query(...)`: a construct kind is not a function. A
+	// construct is called by name, as a statement of its own.
+	if bodyCallKinds[name] {
+		return v1Expr{}, bodyRefuse(nameTok, codeBodyCallKindMissing,
+			"`%s(...)` is not a call: a %s is declared elsewhere and called by name, as a statement of its own -- `x := %s <name>(<named args>)`", name, name, name)
+	}
 	if hint, retired := retiredExprBuiltins[lower]; retired {
 		return v1Expr{}, v1Errorf(nameTok, "%s", retiredExprBuiltinMessage(name, hint))
 	}

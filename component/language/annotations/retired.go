@@ -44,7 +44,7 @@ var retiredOn = map[retiredKey]string{
 	{Action, "sideEffect"}:     "the authoritative side-effect class lives on the capability declaration the action calls, where an action cannot overstate or understate it; remove it from the action",
 	{Action, "reliability"}:    "reliability is runtime state the engine keeps, not something the source declares; remove it",
 	{Tool, "clientExecution"}:  "it dispatched the tool to the connected browser over the client-tool relay, which was removed with the cognition node (epic memql#4988). Every tool now needs a server-side @handler",
-	{Spec, "shape"}:            "a spec binds its shape or concept in the signature (epic #2281): `spec <boundName> <name> { return <bool> }`, with boundName resolved through the file-top `use` import",
+	{Spec, "shape"}:            "a spec binds its shape or concept in the signature (epic #2281): `spec <boundName> <name> = row => <predicate>`, with boundName resolved through the file-top `use` import",
 	{Spec, "row"}:              "it is a shape-only marker since epic #2281 -- to predicate on row metadata, bind a @row shape in the signature (`spec <shape> <name>`) and read its projected key by bare name",
 	{Spec, "actor"}:            "it is a shape-only marker since epic #2281 -- to predicate on the caller, bind an @actor shape in the signature (`spec <shape> <name>`) and read its projected key by bare name",
 	{Shape, "concepts"}:        "bind the concept in the signature instead: `shape <Concept> <name> { ... }`, with the concept imported by a file-top `use` line",

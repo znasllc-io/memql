@@ -4,25 +4,26 @@ package automations
 // (Epic 4 / memql#2139): the deterministic check whose miss is the clean
 // self-healing repair trigger AND the cross-machine portability signal.
 //
-// A `precondition` block lives inside the `automation NAME { ... }` body
-// alongside `step` blocks:
+// A `precondition` block sits inside the `automation NAME { ... }` body,
+// after its args block and before its statements:
 //
 //	automation deployStaging {
-//	  precondition envIsStaging {
-//	    check: $config.MEMQL_ENV == "staging"
-//	    literal: MEMQL_ENV
+//	  args {
+//	    target any
+//	  }
+//	  precondition targetIsStaging {
+//	    check: args.target == "staging"
+//	    literal: target
 //	    description: "Only drive the staging deploy spine in staging."
 //	  }
-//	  step run { logic driveDeployment { event: event } }
+//	  run := logic driveDeployment(target: args.target)
 //	}
 //
-// The struct-form automation rewriter (component/language/parser) only
-// understands `step` blocks, so we extract + strip the precondition
-// blocks here BEFORE the source reaches the rewriter, parse them into the
-// Precondition struct, and re-attach them to the compiled Automation.
-// This keeps the precondition a first-class construct without widening
-// the core grammar. The check expression is evaluated at run time by the
-// same deterministic boolean evaluator that powers Step.Condition.
+// The statement parser steps over the blocks; they are extracted here,
+// parsed into the Precondition struct, and re-attached to the compiled
+// Automation. The check is an expression over the run's roots (args, actor,
+// event, config, partition, now), evaluated before the first statement by
+// the evaluator that decides a statement's condition.
 
 import (
 	"context"

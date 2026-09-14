@@ -299,8 +299,7 @@ func TestCompileBodyRefusesABodyWithProblems(t *testing.T) {
 
 // TestCompileSourceTakesAStatementBody runs the whole pipeline a loader runs --
 // the rewriter, the parser, the compiler -- over an automation in statement
-// form: its steps come from CompileBody, in source order, and it is marked as
-// edition-2026 expressions.
+// form: its steps come from CompileBody, in source order.
 func TestCompileSourceTakesAStatementBody(t *testing.T) {
 	res, err := CompileSource(`@trigger(event="node.created")
 automation routeRequest {
@@ -319,9 +318,6 @@ automation routeRequest {
 		t.Fatalf("automations = %d", len(res.Automations))
 	}
 	out := res.Automations[0].JSON
-	if out["body"] != "statements" {
-		t.Errorf("body = %v, want statements", out["body"])
-	}
 	if _, ok := out["_return"]; ok {
 		t.Errorf("a statement body writes no _return: its return is a step")
 	}

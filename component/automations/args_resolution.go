@@ -1,111 +1,112 @@
 package automations
 
-// args_resolution.go -- the args contract of an automation's expressions
-// (G2 of the event-payload-binding epic, memql#2352, story #2364; ADR
-// docs/internal/design/event-payload-binding-adr.md Decision 3), and the G5
-// source scan (memql#2367).
+// args_resolution.go -- what an automation's expressions may read beyond its
+// statements (epic memql#5370), and the G5 source scan (memql#2367).
 //
-// At run time a bare name in an args-block automation resolves in RunScope's
-// order -- loop variable, step, args field, a declared-but-absent optional
-// field as nil (run_scope.go). At load, validateArgsResolution checks the
-// parsed expressions against the same order (args_resolution_v1.go):
-//   - an args field may not shadow a reserved engine name;
-//   - a step id or forEach loop variable may not shadow an args field;
-//   - a free name must be a reserved root, a loop variable in scope, a step
-//     or an args field -- a typo'd field is a load error, not a run-time nil.
-// Explicit `args.X` remains valid everywhere as the disambiguator.
+// A statement body's names are compiler.CheckBody's: it compiled at load, and
+// an argument is read args.x. The two expressions an automation carries
+// outside its body -- the trigger filter and each precondition -- are checked
+// here: a free name in either is a root the run binds before its first
+// statement (compiler.IsBodyRoot: args, actor, event, config, partition, now)
+// or the filter's own parameter, so a misspelled root is a load error rather
+// than a filter that decides false, or a precondition that misses, on every
+// fire.
 
 import (
+	"fmt"
 	"regexp"
+	"sort"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/compiler"
 )
 
-// reservedAutomationRoots are the engine-provided bare roots an automation
-// expression may reference. An args field may not shadow any of these
-// (mirrors the reserved-name rule for function args). The set is the ADR
-// Decision 3 reserved list plus the roots a run seeds (RunScope) and the
-// `payload` envelope shorthand.
-var reservedAutomationRoots = map[string]bool{
-	// ADR Decision 3 reserved names.
-	"now": true, "actor": true, "partition": true, "config": true,
-	"trace": true, "event": true, "args": true, "steps": true,
-	// Evaluator ambient roots + shorthands (conditionRootSegment,
-	// EvaluateFilterValue).
-	"timestamp": true, "ctx": true, "input": true, "item": true,
-	"var": true, "systemVar": true, "secret": true, "systemSecret": true,
-	"automation": true, "payload": true, "error": true,
-}
-
-// declaredArgsSet projects an automation's args-field names for the
-// evaluator seed (SetCustom("argsDeclared", ...)) so optional declared
-// fields resolve to nil instead of the literal fallback.
-func declaredArgsSet(a *Automation) map[string]bool {
-	if a == nil || a.Args == nil || len(a.Args.Fields) == 0 {
-		return nil
-	}
-	set := make(map[string]bool, len(a.Args.Fields))
-	for _, f := range a.Args.Fields {
-		set[f.Name] = true
-	}
-	return set
-}
-
-// ---------------------------------------------------------------------------
-// Load-time validation
-// ---------------------------------------------------------------------------
-
-// validateArgsResolution enforces the ADR Decision 3 load-time rules on an
-// automation's parsed expressions (args_resolution_v1.go).
-func validateArgsResolution(a *Automation) error {
-	// A statement body's names were checked when it compiled, by
-	// compiler.CheckBody (epic memql#5370): the scope rules are the gate
-	// there, and the G2 bare-args tier this function polices does not exist
-	// in it -- an argument is read args.x.
-	if a.IsStatementBody() {
-		return nil
-	}
-	return validateArgsResolutionV1(a)
-}
-
-func collectStepIDs(steps []*Step, into map[string]bool) {
-	for _, s := range steps {
-		if s == nil {
-			continue
+// validateOuterExpressionNames checks the trigger filter's and the
+// preconditions' free names (see the file comment).
+func validateOuterExpressionNames(a *Automation) error {
+	check := func(where string, n ast.ExpressionNode) error {
+		if n == nil {
+			return nil
 		}
-		if s.ID != "" {
-			into[s.ID] = true
-		}
-		if s.ForEach != nil {
-			collectStepIDs(s.ForEach.Do, into)
-		}
-		if s.Parallel != nil {
-			collectStepIDs(s.Parallel.Branches, into)
-		}
-		if s.Switch != nil {
-			for _, c := range s.Switch.Cases {
-				collectStepIDs(caseSteps(c), into)
+		var unknown []string
+		v1FreeNames(n, nil, func(id *ast.IdentExpr) {
+			if !compiler.IsBodyRoot("automation", id.Name) {
+				unknown = append(unknown, id.Name)
 			}
-			collectStepIDs(caseSteps(s.Switch.Default), into)
+		})
+		if len(unknown) == 0 {
+			return nil
+		}
+		sort.Strings(unknown)
+		return fmt.Errorf("automation %q: unknown name %q in %s (`%s`) -- it reads args.<field>, actor, event, config, partition or now, and a filter its own parameter",
+			a.Name, unknown[0], where, ast.FormatExpr(n))
+	}
+	if a.Trigger != nil && a.Trigger.FilterLambda != nil {
+		if err := check("the trigger filter", a.Trigger.FilterLambda); err != nil {
+			return err
 		}
 	}
+	for _, pc := range a.Preconditions {
+		if pc != nil {
+			if err := check("precondition "+pc.ID, pc.checkExpr); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
-func caseSteps(c *SwitchCase) []*Step {
-	if c == nil {
-		return nil
+// v1FreeNames calls visit for every IdentExpr in n that no enclosing lambda
+// binds: the names n reads from its scope. A callee name is not an IdentExpr
+// (CallExpr.Name), and neither is a member or a map key, so none of those is
+// visited.
+func v1FreeNames(n ast.ExpressionNode, bound map[string]bool, visit func(*ast.IdentExpr)) {
+	switch e := n.(type) {
+	case nil:
+	case *ast.IdentExpr:
+		if !bound[e.Name] {
+			visit(e)
+		}
+	case *ast.LambdaExpr:
+		inner := make(map[string]bool, len(bound)+len(e.Params))
+		for k := range bound {
+			inner[k] = true
+		}
+		for _, p := range e.Params {
+			inner[p] = true
+		}
+		v1FreeNames(e.Body, inner, visit)
+	case *ast.MemberExpr:
+		v1FreeNames(e.Object, bound, visit)
+	case *ast.CallExpr:
+		v1FreeNames(e.Receiver, bound, visit)
+		for _, a := range e.Args {
+			v1FreeNames(a, bound, visit)
+		}
+		for _, na := range e.Named {
+			v1FreeNames(na.Value, bound, visit)
+		}
+	case *ast.UnaryExpr:
+		v1FreeNames(e.Operand, bound, visit)
+	case *ast.BinaryExpr:
+		v1FreeNames(e.Left, bound, visit)
+		v1FreeNames(e.Right, bound, visit)
+	case *ast.ListExpr:
+		for _, el := range e.Elems {
+			v1FreeNames(el, bound, visit)
+		}
+	case *ast.MapExpr:
+		for _, en := range e.Entries {
+			v1FreeNames(en.Value, bound, visit)
+		}
+	case *ast.ParenExpr:
+		v1FreeNames(e.Inner, bound, visit)
+	case *ast.TernaryExpr:
+		v1FreeNames(e.Condition, bound, visit)
+		v1FreeNames(e.Then, bound, visit)
+		v1FreeNames(e.Else, bound, visit)
 	}
-	if c.Step != nil {
-		return append(append([]*Step(nil), c.Steps...), c.Step)
-	}
-	return c.Steps
-}
-
-func cloneSet(in map[string]bool) map[string]bool {
-	out := make(map[string]bool, len(in)+1)
-	for k := range in {
-		out[k] = true
-	}
-	return out
 }
 
 // ---------------------------------------------------------------------------
@@ -125,10 +126,10 @@ func cloneSet(in map[string]bool) map[string]bool {
 //
 // The narrow pattern could not have caught it: the broken spelling was not the
 // retired one. Any dotted read off `event` is now refused, because in an
-// automation body the payload binds to the args { } contract and is read bare.
-// A bare `event` passed along as a step argument (`logic f ( event: event )`)
-// carries no dot and is unaffected, as are logic bodies, which read
-// `args.event.payload.X` on a different surface.
+// automation body the payload binds to the args { } contract and is read
+// args.<field>. A bare `event` passed along as a call argument
+// (`logic f(event: event)`) carries no dot and is unaffected, as are logic
+// bodies, which read `args.event.payload.X` on a different surface.
 var eventPayloadReadPattern = regexp.MustCompile(`[$]?\bevent\.[A-Za-z_]`)
 
 // scrubSourceForPayloadScan blanks string literals AND both comment forms so

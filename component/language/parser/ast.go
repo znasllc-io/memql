@@ -87,15 +87,6 @@ type (
 	MutationKind          = ast.MutationKind
 	QueryStmt             = ast.QueryStmt
 	Attribute             = ast.Attribute
-	AssignStmt            = ast.AssignStmt
-	ForRangeStmt          = ast.ForRangeStmt
-	SwitchStmt            = ast.SwitchStmt
-	CaseClause            = ast.CaseClause
-	IfStmt                = ast.IfStmt
-	ContinueStmt          = ast.ContinueStmt
-	BreakStmt             = ast.BreakStmt
-	ReturnStmt            = ast.ReturnStmt
-	RetryExpr             = ast.RetryExpr
 	DotAccessExpr         = ast.DotAccessExpr
 	NilExpr               = ast.NilExpr
 	ReceiverType          = ast.ReceiverType
@@ -108,16 +99,6 @@ type (
 	TriggerDef            = ast.TriggerDef
 	ArgsSchema            = ast.ArgsSchema
 	ArgsField             = ast.ArgsField
-	StepDef               = ast.StepDef
-	StepType              = ast.StepType
-	QueryStepConfig       = ast.QueryStepConfig
-	MutationStepConfig    = ast.MutationStepConfig
-	FunctionStepConfig    = ast.FunctionStepConfig
-	ActionStepConfig      = ast.ActionStepConfig
-	ForEachStepConfig     = ast.ForEachStepConfig
-	ParallelStepConfig    = ast.ParallelStepConfig
-	SwitchStepConfig      = ast.SwitchStepConfig
-	SwitchCase            = ast.SwitchCase
 	UseDeclaration        = ast.UseDeclaration
 	ImportDecl            = ast.ImportDecl
 	File                  = ast.File
@@ -237,14 +218,6 @@ var (
 	RelParentOf              = ast.RelParentOf
 	SortAsc                  = ast.SortAsc
 	SortDesc                 = ast.SortDesc
-	StepTypeAction           = ast.StepTypeAction
-	StepTypeAutomation       = ast.StepTypeAutomation
-	StepTypeForEach          = ast.StepTypeForEach
-	StepTypeFunction         = ast.StepTypeFunction
-	StepTypeMutation         = ast.StepTypeMutation
-	StepTypeParallel         = ast.StepTypeParallel
-	StepTypeQuery            = ast.StepTypeQuery
-	StepTypeSwitch           = ast.StepTypeSwitch
 
 	MutationKindInsert = ast.MutationKindInsert
 	MutationKindUpdate = ast.MutationKindUpdate

@@ -4,7 +4,6 @@
 package automations
 
 import (
-	"encoding/json"
 	"log/slog"
 	"os"
 	"strings"
@@ -86,17 +85,13 @@ type Automation struct {
 	// When an event matching the pattern is published, this automation runs.
 	Trigger *TriggerConfig `json:"trigger,omitempty"`
 
-	// Input defines the initial data query for the automation.
-	// The result is available as `input` in step expressions.
-	Input *AutomationInput `json:"input,omitempty"`
-
 	// Preconditions are first-class deterministic checks (Epic 4 /
-	// memql#2139) evaluated -- in order -- at the START of the run, after
-	// the trigger fires and the input query (if any) loads, but BEFORE any
-	// step executes. Each precondition is a boolean expression over the
-	// same deterministic evaluator that powers Step.Condition + trigger
-	// filters (no LLM). A precondition that evaluates false is a MISS: it
-	// aborts the run cleanly (no steps fire) and emits the structured
+	// memql#2139) evaluated -- in order -- at the START of the run, after the
+	// trigger fires but BEFORE any statement runs. Each precondition is a
+	// boolean expression over the same deterministic evaluator that decides a
+	// statement's condition and a trigger filter (no LLM). A precondition
+	// that evaluates false is a MISS: it aborts the run cleanly (no
+	// statement runs) and emits the structured
 	// healing.precondition.missed signal the self-healing repair loop
 	// (E4.4) subscribes to. A miss is BOTH the clean repair trigger and
 	// the cross-machine portability mechanism -- a literal asserted by a
@@ -106,12 +101,6 @@ type Automation struct {
 
 	// Steps are the ordered list of operations to execute.
 	Steps []*Step `json:"steps"`
-
-	// OnComplete is an optional step to run after successful completion.
-	OnComplete *Step `json:"onComplete,omitempty"`
-
-	// OnError is an optional step to run if the automation fails.
-	OnError *Step `json:"onError,omitempty"`
 
 	// Args is the automation's declared input contract -- the `args { }`
 	// block (event-payload-binding ADR Decision 1, memql#2363). When
@@ -145,11 +134,6 @@ type Automation struct {
 
 	// Origin tracks where this automation was loaded from (file path).
 	Origin string `json:"-"`
-
-	// Body is "statements" (BodyStatements) when the steps were compiled from
-	// an edition-2026 statement body (epic memql#5370). Empty for every other
-	// automation.
-	Body string `json:"body,omitempty"`
 
 	// exprsPrepared records that PrepareExpressions parsed this automation's
 	// expressions. The executor prepares one that was built in Go before its
@@ -301,11 +285,12 @@ func (a *Automation) DefinitionFingerprint(engine *id.Engine) string {
 // the automation's steps run, and a miss is the clean repair trigger.
 //
 // A precondition is intentionally minimal and DETERMINISTIC -- it never
-// calls an LLM. The harness evaluates Check the way it evaluates
-// Step.Condition and trigger filters (EvalCondition over the run), so the
-// full expression grammar (event.*, input.*, config.*, var.*, comparisons,
-// &&/||/!) is available. The deploy spine stays authored/deterministic:
-// preconditions guard it but are never themselves LLM-healed.
+// calls an LLM. The harness evaluates Check the way it evaluates a
+// statement's condition and a trigger filter (EvalCondition over the run),
+// over the roots the run binds before its first statement: args, actor,
+// event, config, partition and now. The deploy spine stays
+// authored/deterministic: preconditions guard it but are never themselves
+// LLM-healed.
 type Precondition struct {
 	// ID is a stable identifier for this precondition within its
 	// automation (e.g. "engineImageDigestPinned"). It keys the miss
@@ -315,8 +300,7 @@ type Precondition struct {
 
 	// Check is the deterministic boolean expression that must hold for
 	// the automation to proceed. Evaluated false => the precondition
-	// MISSES. Required. Example: `config.MEMQL_ENV == "staging"` or
-	// `event.payload.imageDigest != ""`.
+	// MISSES. Required. Example: `args.imageDigest != ""`.
 	Check string `json:"check"`
 
 	// Literal optionally names the machine-specific literal this
@@ -338,76 +322,42 @@ type Precondition struct {
 	checkExpr ast.ExpressionNode
 }
 
-// AutomationInput defines the initial data source for an automation.
-type AutomationInput struct {
-	// Query is a MemQL expression to fetch initial data.
-	Query string `json:"query"`
-
-	// Limit optionally caps the number of results.
-	Limit int `json:"limit,omitempty"`
-}
-
 // StepType defines the kind of step operation.
 type StepType string
 
+// The step kinds are the ones a statement compiles to (epic memql#5370,
+// component/language/compiler/body_compile.go).
 const (
-	// StepTypeQuery executes a MemQL query.
-	StepTypeQuery StepType = "query"
-
-	// StepTypeMutation executes a MemQL mutation (insert).
-	StepTypeMutation StepType = "mutation"
-
-	// StepTypeShape transforms data using a shape template.
-	StepTypeShape StepType = "shape"
-
-	// StepTypeWebhook makes an HTTP request.
-	StepTypeWebhook StepType = "webhook"
-
-	// StepTypeEvent publishes an event to the event bus.
+	// StepTypeEvent publishes an event to the event bus: `publish`.
 	StepTypeEvent StepType = "event"
 
-	// StepTypeFunction invokes a registered MemQL function.
+	// StepTypeFunction calls a query, a mutation, a logic or a builtin.
 	StepTypeFunction StepType = "function"
 
 	// StepTypeAction replays an action-library action by reference (#1758).
 	StepTypeAction StepType = "action"
 
-	// StepTypeForEach iterates over a collection.
+	// StepTypeForEach runs its list once per item: `for`.
 	StepTypeForEach StepType = "forEach"
 
-	// StepTypeParallel executes multiple branches concurrently.
+	// StepTypeParallel runs its branches at once: `parallel`.
 	StepTypeParallel StepType = "parallel"
-
-	// StepTypeSwitch provides conditional branching.
-	StepTypeSwitch StepType = "switch"
 
 	// StepTypeAutomation invokes another automation.
 	StepTypeAutomation StepType = "automation"
 
-	// StepTypeDetectLeadSignal performs deterministic regex-based lead signal detection.
-	StepTypeDetectLeadSignal StepType = "detectLeadSignal"
-
-	// StepTypeEmitConceptCard emits a concept card utterance to a conversation.
-	StepTypeEmitConceptCard StepType = "emitConceptCard"
-
-	// StepTypeExpression evaluates one expression in process; a statement
-	// body's `x := <expression>` (epic memql#5370). Statement bodies only.
+	// StepTypeExpression evaluates one expression in process: `x :=
+	// <expression>`.
 	StepTypeExpression StepType = "expression"
 
-	// StepTypeReturn ends the sequence it is in with a value; a statement
-	// body's `return <expression>`. Statement bodies only.
+	// StepTypeReturn ends the sequence it is in with a value: `return
+	// <expression>`.
 	StepTypeReturn StepType = "return"
 
-	// StepTypeBlock runs a list of steps in order in a scope of its own; a
-	// parallel statement's branch. Statement bodies only.
+	// StepTypeBlock runs a list of steps in order in a scope of its own: a
+	// parallel statement's branch.
 	StepTypeBlock StepType = "block"
 )
-
-// BodyStatements is the value of an automation's `"body"` key that marks
-// its steps as compiled from an edition-2026 statement body (epic memql#5370):
-// they run in order through runSequence, each named statement binds its value
-// under its `binds` name, and names resolve as statements do (sequence.go).
-const BodyStatements = "statements"
 
 // ErrorStrategy defines how to handle step failures.
 type ErrorStrategy string
@@ -425,8 +375,9 @@ const (
 
 // Step represents a single operation in an automation.
 type Step struct {
-	// ID is a unique identifier for this step within the automation.
-	// Used to reference results: `steps.<id>.result`, or the bare `<id>`.
+	// ID identifies this step within its list: the key its result and its
+	// journal record carry. A statement's value is read by the name it binds
+	// (Binds), never by its id.
 	ID string `json:"id"`
 
 	// Name is a human-readable description of the step.
@@ -447,18 +398,6 @@ type Step struct {
 
 	// Configuration for specific step types (only one should be set):
 
-	// Query configuration (type: "query")
-	Query *QueryStepConfig `json:"query,omitempty"`
-
-	// Mutation configuration (type: "mutation")
-	Mutation *MutationStepConfig `json:"mutation,omitempty"`
-
-	// Shape configuration (type: "shape")
-	Shape *ShapeStepConfig `json:"shape,omitempty"`
-
-	// Webhook configuration (type: "webhook")
-	Webhook *WebhookStepConfig `json:"webhook,omitempty"`
-
 	// Event configuration (type: "event")
 	Event *EventStepConfig `json:"event,omitempty"`
 
@@ -477,23 +416,14 @@ type Step struct {
 	// Parallel configuration (type: "parallel")
 	Parallel *ParallelStepConfig `json:"parallel,omitempty"`
 
-	// Switch configuration (type: "switch")
-	Switch *SwitchStepConfig `json:"switch,omitempty"`
-
-	// DetectLeadSignal configuration (type: "detectLeadSignal")
-	DetectLeadSignal *DetectLeadSignalStepConfig `json:"detectLeadSignal,omitempty"`
-
-	// EmitConceptCard configuration (type: "emitConceptCard")
-	EmitConceptCard *EmitConceptCardStepConfig `json:"emitConceptCard,omitempty"`
-
-	// Binds is the name a statement-body step binds its value under, when
-	// the statement has one (`x := ...`). It is separate from ID: the id
-	// names the step in the run record and is unique within its list, and
-	// two sibling branches may bind the same name. Statement bodies only.
+	// Binds is the name a step binds its value under, when its statement
+	// has one (`x := ...`). It is separate from ID: the id names the step in
+	// the run record and is unique within its list, and two sibling branches
+	// may bind the same name.
 	Binds string `json:"binds,omitempty"`
 
-	// Returns marks a statement-body call step written `return <call>`: the
-	// sequence ends after it, with the call's value as the returned value.
+	// Returns marks a call step written `return <call>`: the sequence ends
+	// after it, with the call's value as the returned value.
 	Returns bool `json:"returns,omitempty"`
 
 	// Expression is an expression step's canonical v1 source (type
@@ -511,85 +441,6 @@ type Step struct {
 	// and read every string leaf of its value maps as a literal. Nil for a
 	// step that was never prepared, which the executors refuse.
 	Exprs *StepExprs `json:"-"`
-}
-
-// QueryStepConfig configures a query step.
-type QueryStepConfig struct {
-	// Query is the step's expression: a construct call the engine runs, or
-	// any other expression, evaluated in process.
-	Query string `json:"query"`
-}
-
-// MutationStepConfig configures a mutation (insert) step. Its payload is
-// structured data whose leaves are evaluated at run time, before the insert
-// for the MemQL engine is built.
-type MutationStepConfig struct {
-	// Concept is the target concept name (e.g., "v1:identity:user").
-	Concept string `json:"concept"`
-
-	// ID is an optional explicit ID for the record: a string literal, or an
-	// expression leaf such as `{"$expr": "event.payload.subject"}`
-	// (value_leaves.go).
-	ID string `json:"id,omitempty"`
-
-	// Payload is the mutation payload as a structured map. Each leaf is a
-	// literal or an expression leaf, resolved at run time.
-	Payload map[string]any `json:"payload"`
-
-	// Parent is an optional parent reference for relationship hints.
-	Parent string `json:"parent,omitempty"`
-
-	// AliasOf is an optional alias reference for relationship hints.
-	AliasOf string `json:"aliasOf,omitempty"`
-
-	// leaves are the value leaves carried in id / parent / aliasOf when they
-	// are not strings (value_leaves.go).
-	leaves leafFields
-}
-
-// ShapeStepConfig configures a shape transformation step.
-type ShapeStepConfig struct {
-	// Source is an expression naming the input data.
-	// Example: `input`, `fetch`
-	Source string `json:"source"`
-
-	// Template is the shape template as a JSON object.
-	// Values can use shape helpers: node(), ai(), children(), etc.
-	Template json.RawMessage `json:"template"`
-
-	// RequireNotEmpty fails the step if source resolves to an empty array.
-	// Useful for asserting that prerequisite data exists before proceeding.
-	RequireNotEmpty bool `json:"requireNotEmpty,omitempty"`
-}
-
-// WebhookStepConfig configures an HTTP request step.
-type WebhookStepConfig struct {
-	// URL is the endpoint to call: a string literal or an expression leaf.
-	URL string `json:"url"`
-
-	// Method is the HTTP method. Defaults to POST.
-	Method string `json:"method,omitempty"`
-
-	// Headers to include in the request: string literals here, and an
-	// expression-valued header lifted into leaves.
-	Headers map[string]string `json:"headers,omitempty"`
-
-	// Body is the JSON body: each leaf a literal or an expression leaf.
-	Body map[string]any `json:"body,omitempty"`
-
-	// IncludeResult sends the previous step's result as the body.
-	IncludeResult bool `json:"includeResult,omitempty"`
-
-	// ResultFrom specifies which step's result to include.
-	// Defaults to the immediately preceding step.
-	ResultFrom string `json:"resultFrom,omitempty"`
-
-	// Timeout for the request. Defaults to 30s.
-	Timeout string `json:"timeout,omitempty"`
-
-	// leaves are the value leaves carried in url and the header values when
-	// they are not strings (value_leaves.go).
-	leaves leafFields
 }
 
 // EventStepConfig configures an event publication step.
@@ -621,10 +472,10 @@ type FunctionStepConfig struct {
 	Name string `json:"name"`
 	// Args are optional function arguments passed at invocation time.
 	Args map[string]any `json:"args,omitempty"`
-	// Kind is the construct kind a statement body wrote before the call --
+	// Kind is the construct kind the statement wrote before the call --
 	// query, mutation, logic or builtin (epic memql#5370). It decides the
-	// shape of the value the call binds (statementValue). Empty for a
-	// legacy step.
+	// shape of the value the call binds (statementValue). Empty for a step
+	// built in Go without one.
 	Kind string `json:"kind,omitempty"`
 }
 
@@ -706,63 +557,6 @@ type ParallelStepConfig struct {
 
 	// FailFast stops all branches when one fails.
 	FailFast bool `json:"failFast,omitempty"`
-}
-
-// SwitchStepConfig configures conditional branching.
-type SwitchStepConfig struct {
-	// Expression is evaluated to determine which case to execute.
-	// Example: `item.classification`
-	Expression string `json:"expression"`
-
-	// Cases maps expression values to steps.
-	Cases map[string]*SwitchCase `json:"cases"`
-
-	// Default is executed if no case matches.
-	Default *SwitchCase `json:"default,omitempty"`
-}
-
-// SwitchCase defines what to execute for a switch case.
-type SwitchCase struct {
-	// Steps to execute when this case matches.
-	Steps []*Step `json:"steps,omitempty"`
-
-	// Step is a shorthand for a single step.
-	Step *Step `json:"step,omitempty"`
-}
-
-// DetectLeadSignalStepConfig configures a detect lead signal step.
-type DetectLeadSignalStepConfig struct {
-	// Source is an expression naming the text to analyze.
-	Source string `json:"source"`
-
-	// CustomIntentKeywords allows adding deployment-specific intent signals.
-	CustomIntentKeywords []string `json:"customIntentKeywords,omitempty"`
-
-	// CustomProductKeywords allows adding deployment-specific product mentions.
-	CustomProductKeywords []string `json:"customProductKeywords,omitempty"`
-}
-
-// EmitConceptCardStepConfig configures a concept card emission step.
-// Concept cards are system-generated utterances that surface automation output in conversation.
-type EmitConceptCardStepConfig struct {
-	// CardType identifies the kind of card (e.g., "lead_captured", "lead_updated").
-	CardType string `json:"cardType"`
-
-	// PartitionId is the space to emit the card to.
-	// A string literal or an expression leaf (value_leaves.go).
-	PartitionId string `json:"partitionId"`
-
-	// ConceptRef is a reference to the created concept (e.g., the lead ID).
-	// A string literal or an expression leaf (value_leaves.go).
-	ConceptRef string `json:"conceptRef"`
-
-	// Data contains fields to display on the card.
-	// Each value is a literal or an expression leaf.
-	Data map[string]any `json:"data,omitempty"`
-
-	// leaves are the value leaves carried in cardType / partitionId /
-	// conceptRef when they are not strings (value_leaves.go).
-	leaves leafFields
 }
 
 // StepResult contains the outcome of executing a step.

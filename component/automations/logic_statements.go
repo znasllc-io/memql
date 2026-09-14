@@ -71,7 +71,6 @@ func (r *LogicRunner) statementLogic(fnName string, body []map[string]any) (*Aut
 
 	data, err := json.Marshal(map[string]any{
 		"name":  "logic:" + fnName,
-		"body":  BodyStatements,
 		"steps": body,
 	})
 	if err != nil {
@@ -87,7 +86,7 @@ func (r *LogicRunner) statementLogic(fnName string, body []map[string]any) (*Aut
 	return a, nil
 }
 
-// RunLogicBody implements memql.StatementLogicRunner (see the file comment).
+// RunLogicBody implements memql.LogicRunner (see the file comment).
 func (r *LogicRunner) RunLogicBody(ctx context.Context, fnName string, body []map[string]any, args map[string]any) (any, error) {
 	if r.stepRegistry == nil {
 		return nil, fmt.Errorf("logic runner has no step registry wired")
@@ -200,6 +199,3 @@ func keyedUnder(steps []*Step, key string) []*Step {
 	}
 	return out
 }
-
-// Compile-time check that LogicRunner runs statement bodies too.
-var _ memql.StatementLogicRunner = (*LogicRunner)(nil)

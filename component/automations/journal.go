@@ -187,18 +187,12 @@ func stepKindFor(step *Step) string {
 func stepCallSummary(step *Step) map[string]any {
 	call := map[string]any{"construct": string(step.Type)}
 	switch {
-	case step.Query != nil:
-		call["name"] = step.Query.Query
-	case step.Mutation != nil:
-		call["name"] = step.Mutation.Concept
 	case step.Function != nil:
 		call["name"] = step.Function.Name
 	case step.Automation != nil:
 		call["name"] = step.Automation.Name
 	case step.Action != nil:
 		call["name"] = step.Action.Ref
-	case step.Webhook != nil:
-		call["name"] = step.Webhook.URL
 	case step.Event != nil:
 		call["name"] = step.Event.Topic
 	}

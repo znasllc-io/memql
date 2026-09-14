@@ -97,12 +97,6 @@ func (f *nameFrame) lookup(name string) (any, bool) {
 	return nil, false
 }
 
-// IsStatementBody reports whether the automation's steps were compiled from a
-// statement body.
-func (a *Automation) IsStatementBody() bool {
-	return a != nil && a.Body == BodyStatements
-}
-
 // statementMode reports whether this Evaluator resolves names as a statement
 // body does.
 func (e *Evaluator) statementMode() bool { return e != nil && e.names != nil }
@@ -119,25 +113,6 @@ func (e *Evaluator) childFrame() *Evaluator {
 	c := e.Clone()
 	c.names = newNameFrame(e.names)
 	return c
-}
-
-// statementLookup resolves a bare name in a statement body: the frames, then
-// the reserved roots the load gate admits (compiler.IsBodyRoot). `now` is left
-// to EvalExpr, which answers it from the run clock (ExprOptions). An unseeded
-// root is absent, as it is in RunScope.
-func (s *RunScope) statementLookup(name string) (any, bool) {
-	e := s.e
-	if v, ok := e.names.lookup(name); ok {
-		return v, true
-	}
-	switch name {
-	case "args", "actor", "event", "config", "partition":
-		if v, ok := e.custom[name]; ok {
-			return v, true
-		}
-		return memql.Absent, true
-	}
-	return nil, false
 }
 
 // rowIntrinsics are the names a row answers from its columns rather than its

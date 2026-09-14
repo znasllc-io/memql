@@ -614,61 +614,6 @@ func (r *ConceptResolver) resolveNode(node languageParser.Node, symbols map[stri
 		return r.resolveNode(n.Target, symbols)
 	case *languageParser.ConditionalFilterExpr:
 		return r.resolveNode(n.Filter, symbols)
-	case *languageParser.ReturnStmt:
-		for _, result := range n.Results {
-			if err := r.resolveNode(result, symbols); err != nil {
-				return err
-			}
-		}
-	case *languageParser.AssignStmt:
-		if n.Value != nil {
-			return r.resolveNode(n.Value, symbols)
-		}
-	case *languageParser.IfStmt:
-		if n.Condition != nil {
-			if err := r.resolveNode(n.Condition, symbols); err != nil {
-				return err
-			}
-		}
-		for _, stmt := range n.Then {
-			if err := r.resolveNode(stmt, symbols); err != nil {
-				return err
-			}
-		}
-		for _, stmt := range n.Else {
-			if err := r.resolveNode(stmt, symbols); err != nil {
-				return err
-			}
-		}
-	case *languageParser.ForRangeStmt:
-		if n.Collection != nil {
-			if err := r.resolveNode(n.Collection, symbols); err != nil {
-				return err
-			}
-		}
-		for _, stmt := range n.Body {
-			if err := r.resolveNode(stmt, symbols); err != nil {
-				return err
-			}
-		}
-	case *languageParser.SwitchStmt:
-		if n.Expr != nil {
-			if err := r.resolveNode(n.Expr, symbols); err != nil {
-				return err
-			}
-		}
-		for _, c := range n.Cases {
-			for _, stmt := range c.Body {
-				if err := r.resolveNode(stmt, symbols); err != nil {
-					return err
-				}
-			}
-		}
-		for _, stmt := range n.Default {
-			if err := r.resolveNode(stmt, symbols); err != nil {
-				return err
-			}
-		}
 	}
 	// Unrecognized node types are left as-is (no concept references to resolve)
 	return nil

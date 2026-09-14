@@ -18,11 +18,7 @@ func TestCompiledDescriptions_DocCommentPrecedence(t *testing.T) {
 		"    node any",
 		"  }",
 		"",
-		"  step persist {",
-		"    mutation createSpawnEvent (",
-		"      nodeId: node.id ?? \"\"",
-		"    )",
-		"  }",
+		"  persist := mutation createSpawnEvent(nodeId: args.node.id ?? \"\")",
 		"}",
 	}, "\n")
 	res, err := CompileSource(src)

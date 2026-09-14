@@ -287,9 +287,6 @@ func TestV1BodyDefinition(t *testing.T) {
 	if fn.ArgsSchema == nil || len(fn.ArgsSchema.Fields) != 2 {
 		t.Fatalf("args = %+v, want the two declared fields", fn.ArgsSchema)
 	}
-	if len(auto.Steps) != 0 {
-		t.Fatalf("a statement body has no legacy steps, got %d", len(auto.Steps))
-	}
 
 	logic := parseV1BodyFile(t, v1BodyCases[12].src)
 	if logic.Type != FunctionTypeLogic || !strings.Contains(logic.DocComment, "Measure the thing") {

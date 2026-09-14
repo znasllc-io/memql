@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -15,9 +14,6 @@ import (
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
-
-var inlineStepBlockPattern = regexp.MustCompile(`:=\s*(query|mutation|shape|webhook|event|publishEvent)\s*(if\s+[^{]+)?\{`)
-var inlineOperationCallPattern = regexp.MustCompile(`:=\s*(?:if\s+[^{]+\{\s*)?(query|mutation)\s*\(`)
 
 // Loader loads automation definitions from the unified DSL tree.
 type Loader struct {
@@ -107,13 +103,10 @@ func (l *Loader) CompileSource(source, origin string) (*Automation, error) {
 //  1. Exact automation name (e.g. registerNode / deregisterNode /
 //     bootstrapCluster / pruneStaleClusterNodes / expireDelegations). This is
 //     the canonical, documented name and the only previously-supported form.
-//  2. A wrapped LOGIC construct's name, in either spelling -- the full
-//     `logicXxx` construct name OR its bare invocation form `xxx` (strip the
-//     `logic` prefix, lowercase the first letter) -- resolving to the unique
-//     automation whose step invokes that logic. This makes a logic construct
-//     reachable by the name an author naturally reaches for (the QA pain in
-//     #1663: `revokeExpiredDelegations` / `revokeExpiredDelegations` both
-//     now resolve to the `expireDelegations` automation that wraps them).
+//  2. A logic's name, resolving to the automation whose statement calls it.
+//     This makes a logic reachable by the name an author naturally reaches
+//     for (the QA pain in #1663: `revokeExpiredDelegations` resolves to the
+//     `expireDelegations` automation that calls it).
 //
 // If no automation matches but the name corresponds to a logic construct that
 // no automation wraps, a clear "not a runnable entry point" error is returned
@@ -139,10 +132,8 @@ func (l *Loader) LoadByName(name string) (*Automation, error) {
 		}
 	}
 
-	// 2. Logic-alias resolution. A wrapped logic construct resolves to the
-	//    automation whose step invokes it. Post-C6 (memql#2036) both the
-	//    construct declaration and its invocation are bare, so the match is
-	//    a direct name comparison.
+	// 2. Logic-alias resolution: a logic resolves to the automation whose
+	//    statement calls it.
 	for _, a := range automations {
 		for _, invoked := range invokedLogicNames(a) {
 			if invoked == name {
@@ -161,47 +152,32 @@ func (l *Loader) LoadByName(name string) (*Automation, error) {
 	return nil, fmt.Errorf("automation %q not found", name)
 }
 
-// invokedLogicNames returns the bare construct names invoked by an
-// automation's function-call steps (walking nested parallel / forEach / switch
-// containers). Post-C6 (memql#2036) a `logic <name> { ... }` step is rewritten
-// by the parser into a function-call step whose Function.Name is the bare logic
-// name, so these are the StepTypeFunction steps. (Sub-automation dispatch is
-// StepTypeAutomation and is therefore excluded.)
+// invokedLogicNames returns the names of the logic an automation's
+// statements call, walking the lists a `for` and a parallel's branches hold.
+// A sub-automation is a StepTypeAutomation step, and is not one.
 func invokedLogicNames(a *Automation) []string {
 	if a == nil {
 		return nil
 	}
 	var out []string
 	var walk func(steps []*Step)
-	visit := func(s *Step) {
-		if s == nil {
-			return
-		}
-		if s.Type == StepTypeFunction && s.Function != nil {
-			out = append(out, s.Function.Name)
-		}
-		if s.Parallel != nil {
-			walk(s.Parallel.Branches)
-		}
-		if s.ForEach != nil {
-			walk(s.ForEach.Do)
-		}
-		if s.Switch != nil {
-			for _, c := range s.Switch.Cases {
-				if c != nil {
-					walk(c.Steps)
-					walk([]*Step{c.Step})
-				}
-			}
-			if s.Switch.Default != nil {
-				walk(s.Switch.Default.Steps)
-				walk([]*Step{s.Switch.Default.Step})
-			}
-		}
-	}
 	walk = func(steps []*Step) {
 		for _, s := range steps {
-			visit(s)
+			if s == nil {
+				continue
+			}
+			if s.Type == StepTypeFunction && s.Function != nil && s.Function.Kind == "logic" {
+				out = append(out, s.Function.Name)
+			}
+			if s.ForEach != nil {
+				walk(s.ForEach.Do)
+			}
+			if s.Parallel != nil {
+				walk(s.Parallel.Branches)
+			}
+			if s.Block != nil {
+				walk(s.Block.Steps)
+			}
 		}
 	}
 	walk(a.Steps)
@@ -223,63 +199,17 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 }
 
 // compileMemQLFrom is compileMemQL for a source derived from authored -- a
-// slice of a file placed on its line there, or a terse automation's lowered
-// longhand compiled against the one-line header the author wrote: a parse
-// error or a rewriter refusal is reported where authored has it (memql#5364).
+// slice of a file placed on its line there: a parse error or a refusal is
+// reported where authored has it (memql#5364).
 func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, error) {
 	// An unknown / dead / retired annotation on an automation (#2712) is
 	// refused by the parser below, against the annotation registry, when
-	// parseResolveCompile parses the lowered source (memql#5359) -- the same
-	// gate every construct runs, so there is no second text scan here.
+	// parseResolveCompile parses the source (memql#5359) -- the same gate
+	// every construct runs, so there is no second text scan here.
 
-	// The three raw-text gates below scan a COMMENT-BLANKED view, not the raw
-	// slice (memql#2872).
-	//
-	// They are substring/regex scans, so a comment merely MENTIONING the thing
-	// they forbid tripped them and refused the whole boot: a note reading
-	// `/* the old form used $steps.foo */` or a commented-out
-	// `mutation(concept: ...)` example is valid, memqllint-clean input that an
-	// author writes constantly. That is why the two earlier attempts at
-	// #2872's preamble fix had to be reverted -- pulling a comment into the
-	// slice made these fire. Blanking is what makes the preamble fix possible.
-	//
-	// The gates keep firing on REAL code: BlankComments only blanks comment
-	// spans, and it is byte-length- and newline-preserving, so a live
-	// `$steps.` is untouched.
-	//
-	// Note the ORIGINAL source is what gets parsed below -- `///` doc comments
-	// are semantic (they become @description), so the blanked copy is used for
-	// GATING only, never for compilation.
-	gateScan := languageParser.BlankComments(source)
-
-	// Enforce .memql automation syntax: do not allow JSON-style $steps references.
-	// In .memql, step references should be bare (e.g., "getAgent.result.Bundle.nodes")
-	// and are resolved by the evaluator at runtime.
-	if strings.Contains(gateScan, "$steps.") {
-		return nil, fmt.Errorf("invalid .memql syntax: '$steps.' is not allowed (use bare step references like 'stepId.result.X')")
-	}
-	if inlineStepBlockPattern.MatchString(gateScan) {
-		return nil, fmt.Errorf("inline step blocks are no longer supported in .memql automations; use kind-prefixed named-args call syntax such as query name(k: v), mutation name(k: v), builtin publishEvent(k: v), or webhook name(k: v)")
-	}
-
-	// Enforce architectural layering: reject direct query() and mutation() calls
-	if inlineOperationCallPattern.MatchString(gateScan) {
-		return nil, fmt.Errorf("direct query() and mutation() calls are not allowed in automations\n\n" +
-			"Use named query/mutation functions instead:\n" +
-			"  - For queries: see queries/v1/ directory\n" +
-			"  - For mutations: see mutations/v1/ directory\n\n" +
-			"Examples:\n" +
-			"  Instead of: query({ query: \"concept==v1:agents:agent; ...\" })\n" +
-			"  Use: query activeAgents(tier: \"pro\")\n\n" +
-			"  Instead of: mutation({ concept: \"v1:cognition:space\", ... })\n" +
-			"  Use: mutation mutationCreateSpace(name: \"My Space\")")
-	}
-
-	// Extract + strip first-class precondition blocks (Epic 4 / memql#2139)
-	// BEFORE the struct-form rewriter runs -- the rewriter only understands
-	// `step` blocks, so a `precondition NAME { ... }` left in the body would
-	// fail to parse. We re-attach the parsed preconditions to the compiled
-	// Automation below.
+	// Extract first-class precondition blocks (Epic 4 / memql#2139) from the
+	// source: the statement parser steps over them, and the parsed
+	// preconditions are re-attached to the compiled Automation below.
 	preconditions, source, err := extractPreconditions(source)
 	if err != nil {
 		return nil, fmt.Errorf("parsing automation preconditions: %w", err)
@@ -287,7 +217,7 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 
 	// Parse, resolve concept references, then compile. The text compileMemQL
 	// was handed is what the author wrote (or its slice): parse positions are
-	// reported against it, not against the precondition-stripped lowering.
+	// reported against it, not against the precondition-stripped source.
 	result, err := l.parseResolveCompile(authored, source, path)
 	if err != nil {
 		return nil, fmt.Errorf("compiling .memql: %w", err)
@@ -343,26 +273,25 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 		return nil, fmt.Errorf("invalid steps: %w", err)
 	}
 
-	// A v1 automation's expressions are parsed ONCE, here, and cached on the
+	// An automation's expressions are parsed ONCE, here, and cached on the
 	// steps (memql#5367): a parse error or an expression over the M tier's
 	// static cost limit refuses the automation at load rather than at its
-	// first run. Before the args-resolution gate, which reads the parsed
-	// nodes of a v1 automation.
+	// first run. Before the name check, which reads the parsed nodes.
 	if err := prepareExpressions(&automation, l.registry); err != nil {
 		return nil, err
 	}
 
-	// G2 (memql#2364, ADR Decision 3): for args-block automations, reject
-	// shadowing and unresolvable bare identifiers at compile time -- both the
-	// tree loader and the authoring-sandbox hook flow through here, so
-	// authored bundles get the same gate. Args-less automations are exempt.
-	if err := validateArgsResolution(&automation); err != nil {
+	// The trigger filter's and the preconditions' names: the body's were
+	// compiler.CheckBody's (args_resolution.go). Both the tree loader and the
+	// authoring-sandbox hook flow through here, so authored bundles get the
+	// same gate.
+	if err := validateOuterExpressionNames(&automation); err != nil {
 		return nil, err
 	}
 
 	// G5 (memql#2367, ADR Decision 6): `event.payload.X` reads are RETIRED
 	// in automation bodies -- the payload binds to the args { } contract and
-	// is read bare (or as args.X). Rejected at the SOURCE level (comments and
+	// is read args.<field>. Rejected at the SOURCE level (comments and
 	// string literals scrubbed) so authored DSL cannot regress; programmatic
 	// Step construction and logic bodies (args.event.payload.X, a logic-arg
 	// read) are different surfaces and unaffected.
@@ -395,34 +324,31 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 
 // parseAutomationFile parses an automation slice, with the author's positions
 // (authored) carried in the tokens. It is the parse half of
-// parseResolveCompile. An automation is read as written -- the parser reads
-// its statement body natively and refuses a retired form by name (epic
-// memql#5370) -- so lowered is source itself. file is nil when the source
-// parses to something other than a file.
-func parseAutomationFile(authored, source string) (file *languageParser.File, lowered string, err error) {
+// parseResolveCompile. An automation is read as written: the parser reads its
+// statements and refuses a retired form by name (epic memql#5370). file is
+// nil when the source parses to something other than a file.
+func parseAutomationFile(authored, source string) (file *languageParser.File, err error) {
 	if err := languageParser.RejectLegacyProceduralAuthorForm(source); err != nil {
-		return nil, "", languageParser.PositionRewriteError(authored, err)
+		return nil, languageParser.PositionRewriteError(authored, err)
 	}
 
-	// Tokenize the lowering with the author's positions carried in it, so a
-	// refusal names the author's line and column; source itself stays
-	// unmarked for the fallback compile below.
+	// Tokenize with the author's positions carried in the tokens, so a
+	// refusal names the author's line and column.
 	lexer := languageParser.NewLexer(languageParser.PositionLowering(authored, source))
 	tokens, err := lexer.Tokenize()
 	if err != nil {
-		return nil, "", fmt.Errorf("lexer error: %w", err)
+		return nil, fmt.Errorf("lexer error: %w", err)
 	}
 
-	// Parse
 	p := languageParser.NewParser(tokens)
 	p.SetDocComments(lexer.DocComments())
 	ast, err := p.Parse()
 	if err != nil {
-		return nil, "", fmt.Errorf("parser error: %w", err)
+		return nil, fmt.Errorf("parser error: %w", err)
 	}
 
 	f, _ := ast.(*languageParser.File)
-	return f, source, nil
+	return f, nil
 }
 
 // parseResolveCompile parses source, runs concept resolution on the AST, then compiles.
@@ -431,13 +357,13 @@ func parseAutomationFile(authored, source string) (file *languageParser.File, lo
 // authored is the text source was derived from; parse positions are reported
 // against it (languageParser.PositionLowering, memql#5364).
 func (l *Loader) parseResolveCompile(authored, source, path string) (*compiler.CompileResult, error) {
-	file, lowered, err := parseAutomationFile(authored, source)
+	file, err := parseAutomationFile(authored, source)
 	if err != nil {
 		return nil, err
 	}
 	if file == nil {
 		// Fall back to CompileSource for non-file AST (shouldn't happen for automations)
-		return compiler.CompileSource(lowered)
+		return compiler.CompileSource(source)
 	}
 
 	// Resolve use declarations if present
@@ -660,13 +586,13 @@ func resolveConceptByTrailingSegment(registry memoryNodes.Registry, name, nsHint
 // @trigger per automation, is the annotation registry's repeat rule at parse
 // time (memql#5359):
 //
-//   - An unrecognised `event=` may not carry concept= / partition=. Those
-//     kwargs are meaningful ONLY to the structured node.* form: for any other
-//     event kind the old code hit `continue`, dropped them on the floor, and
-//     subscribed to the bare `event=` string. `dsl/deployment/automations.memql`
-//     shipped `@trigger(event="deploy.requested", concept="v1:cluster:deployment",
-//     partition="*")` and got plain `deploy.requested` -- the concept scoping
-//     the author wrote was not in effect and nothing said so. The fix REFUSES
+//   - An unrecognised `event=` may not carry concept=. That kwarg is
+//     meaningful ONLY to the structured node.* form: for any other event kind
+//     the old code hit `continue`, dropped it on the floor, and subscribed to
+//     the bare `event=` string. `dsl/deployment/automations.memql` shipped
+//     `@trigger(event="deploy.requested", concept="v1:cluster:deployment")`
+//     and got plain `deploy.requested` -- the concept scoping the author wrote
+//     was not in effect and nothing said so. The fix REFUSES
 //     rather than inventing a `deploy.requested.<concept>` topic shape: the
 //     concept segment exists because the graph CDC publisher composes it into
 //     `graph.node.<action>.<concept>`, and an arbitrary application topic has
@@ -750,7 +676,6 @@ func normalizeStructuredTriggers(file *languageParser.File, registry memoryNodes
 				return fmt.Errorf("automation %q: @trigger: %w", fd.Name, err)
 			}
 			delete(attr.Args, "concept")
-			delete(attr.Args, "partition")
 			attr.Args["event"] = topic
 			// The parser already copied the unresolved event= into the
 			// AutomationDef body. Patch it here so the compiler sees the
@@ -766,28 +691,22 @@ func normalizeStructuredTriggers(file *languageParser.File, registry memoryNodes
 	return nil
 }
 
-// rejectStrayStructuredKwargs refuses concept= / partition= on a @trigger
-// whose event= is not one of the structured node.* kinds (or is absent
-// entirely). Those two kwargs are consumed ONLY by the structured rewrite
-// above; anywhere else they were read, discarded, and never mentioned again.
+// rejectStrayStructuredKwargs refuses concept= on a @trigger whose event= is
+// not one of the structured node.* kinds (or is absent entirely). The kwarg
+// is consumed ONLY by the structured rewrite above; anywhere else it was read,
+// discarded, and never mentioned again.
 func rejectStrayStructuredKwargs(automationName string, args map[string]any, eventStr string) error {
-	var stray []string
-	for _, k := range []string{"concept", "partition"} {
-		if _, ok := args[k]; ok {
-			stray = append(stray, k+"=")
-		}
-	}
-	if len(stray) == 0 {
+	if _, ok := args["concept"]; !ok {
 		return nil
 	}
 	where := "a @trigger with no event="
 	if eventStr != "" {
 		where = fmt.Sprintf("@trigger event=%q", eventStr)
 	}
-	return fmt.Errorf("automation %q: %s carries %s, which only the structured graph-CDC form consumes -- "+
-		"they were being dropped, so the scoping you wrote was not in effect. "+
-		"Either use a structured event kind (%s) to get concept scoping, or drop the stray kwarg(s) and subscribe to the raw topic as written",
-		automationName, where, strings.Join(stray, " + "), strings.Join(ast.AllowedEventKinds(), " / "))
+	return fmt.Errorf("automation %q: %s carries concept=, which only the structured graph-CDC form consumes -- "+
+		"it was being dropped, so the scoping you wrote was not in effect. "+
+		"Either use a structured event kind (%s) to get concept scoping, or drop concept= and subscribe to the raw topic as written",
+		automationName, where, strings.Join(ast.AllowedEventKinds(), " / "))
 }
 
 // versionFromFilePath extracts the version directory from a file path.
@@ -820,17 +739,17 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 	// Validate required fields.
 	//
 	// The `.json` suffix trim is vestigial: since memql#2858 removed the
-	// on-disk .json loader, the sole caller is the LogicRunner
-	// (logic_runner.go compileBodyToAutomation) passing a synthetic
-	// "logic:<name>" path, which never carries the suffix. Harmless, and
-	// left rather than changed because `path` is caller-supplied and a
-	// future caller may again pass a filename.
+	// on-disk .json loader, the callers pass the compiled JSON of a loaded
+	// automation or the LogicRunner's synthetic "logic:<name>" path, neither
+	// of which carries the suffix. Harmless, and left rather than changed
+	// because `path` is caller-supplied and a future caller may again pass a
+	// filename.
 	if automation.Name == "" {
 		base := filepath.Base(path)
 		automation.Name = strings.TrimSuffix(base, ".json")
 	}
 
-	if len(automation.Steps) == 0 && automation.OnComplete == nil {
+	if len(automation.Steps) == 0 {
 		return nil, fmt.Errorf("automation must have at least one step")
 	}
 
@@ -839,8 +758,7 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 		return nil, fmt.Errorf("invalid steps: %w", err)
 	}
 
-	// The same one-time parse compileMemQL runs, for a body compiled from
-	// the v1 grammar (memql#5367).
+	// The same one-time parse compileMemQL runs (memql#5367).
 	if err := prepareExpressions(&automation, l.registry); err != nil {
 		return nil, err
 	}
@@ -855,9 +773,6 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 	markSecretArgsFields(&automation, l.registry)
 
 	if l.logger != nil {
-		// Not ".json" any more: memql#2858 removed the on-disk .json
-		// loader, so every call now comes from the LogicRunner compiling a
-		// logic body in memory.
 		l.logger.Debug("automation parsed from compiler JSON",
 			"name", automation.Name,
 			"path", path,
@@ -897,18 +812,6 @@ func (l *Loader) validateSteps(steps []*Step) error {
 
 		// Validate type-specific configuration
 		switch step.Type {
-		case StepTypeQuery:
-			if step.Query == nil {
-				return fmt.Errorf("step %q: query configuration required for type 'query'", step.ID)
-			}
-		case StepTypeMutation:
-			if step.Mutation == nil {
-				return fmt.Errorf("step %q: mutation configuration required for type 'mutation'", step.ID)
-			}
-		case StepTypeWebhook:
-			if step.Webhook == nil {
-				return fmt.Errorf("step %q: webhook configuration required for type 'webhook'", step.ID)
-			}
 		case StepTypeEvent:
 			if step.Event == nil {
 				return fmt.Errorf("step %q: event configuration required for type 'event'", step.ID)
@@ -942,27 +845,10 @@ func (l *Loader) validateSteps(steps []*Step) error {
 			if err := l.validateSteps(step.Parallel.Branches); err != nil {
 				return fmt.Errorf("step %q parallel: %w", step.ID, err)
 			}
-		case StepTypeSwitch:
-			if step.Switch == nil {
-				return fmt.Errorf("step %q: switch configuration required for type 'switch'", step.ID)
-			}
-		case StepTypeShape:
-			if step.Shape == nil {
-				return fmt.Errorf("step %q: shape configuration required for type 'shape'", step.ID)
-			}
-		case StepTypeDetectLeadSignal:
-			if step.DetectLeadSignal == nil {
-				return fmt.Errorf("step %q: detectLeadSignal configuration required for type 'detectLeadSignal'", step.ID)
-			}
-		case StepTypeEmitConceptCard:
-			if step.EmitConceptCard == nil {
-				return fmt.Errorf("step %q: emitConceptCard configuration required for type 'emitConceptCard'", step.ID)
-			}
 		case StepTypeAutomation:
 			if step.Automation == nil {
 				return fmt.Errorf("step %q: automation configuration required for type 'automation'", step.ID)
 			}
-		// A statement body's own step types (epic memql#5370).
 		case StepTypeExpression:
 			if strings.TrimSpace(step.Expression) == "" {
 				return fmt.Errorf("step %q: an expression step requires its expression", step.ID)

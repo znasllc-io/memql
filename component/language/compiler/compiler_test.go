@@ -218,10 +218,9 @@ func TestValidateMemQL(t *testing.T) {
 		},
 		{
 			name: "valid automation",
-			source: `func (Automation) test(_ any) {
-				step1 := query { concept==v1:test }
-				return step1
-			}`,
+			source: `automation test {
+  step1 := query readTest()
+}`,
 			wantErr: false,
 		},
 		{
@@ -668,21 +667,20 @@ func TestCompiler_ExpressionToString_StringFunctions(t *testing.T) {
 // resolved to empty -- the dailyspace builtin then errored "userId is
 // required" on every login.
 //
-// The fix evaluates the fallback inside an intermediate function STEP whose
-// args the runtime resolves against the logic's own arguments before it
-// calls the builtin. In edition 2026 that argument is an {"$expr"} leaf the
-// runtime evaluates with EvalExpr, args in scope, and the `_return` is a
-// bare step reference -- never a re-parsed builtin call string.
+// The fallback is a statement's argument: an {"$expr"} leaf the runtime
+// evaluates with EvalExpr, args in scope, before the builtin is called, and
+// the return reads the statement's name -- never a re-parsed builtin call
+// string.
 func TestCompiler_LogicCoalesceInFunctionStepResolvesArgRefs(t *testing.T) {
 	source := `
 use common.builtins.{ ensureDailySpaceForUser }
 @enabled
 logic logicEnsureDailySpaceOnAuthSession {
-  args { event object @required }
-  body {
-    ensured := ensureDailySpaceForUser(userId: args.event.payload.userId ?? args.event.payload.subject)
-    return ensured
+  args {
+    event object!
   }
+  ensured := builtin ensureDailySpaceForUser(userId: args.event.payload.userId ?? args.event.payload.subject)
+  return ensured
 }`
 	normalised, err := parser.NormaliseAll(source)
 	if err != nil {
@@ -715,15 +713,13 @@ logic logicEnsureDailySpaceOnAuthSession {
 	}
 	compiled := result.Automations[0].JSON
 
-	// _return must be the BARE step reference, not a re-parsed builtin call.
-	ret, _ := compiled["_return"].(string)
-	if strings.TrimSpace(ret) != "ensured" {
-		t.Fatalf("_return = %q, want bare step ref %q (a builtin-call _return string can't resolve arg() refs)", ret, "ensured")
-	}
-
+	// The return reads the statement's name, not a re-parsed builtin call.
 	steps, _ := compiled["steps"].([]map[string]any)
-	if len(steps) != 1 {
-		t.Fatalf("expected 1 function step, got %d", len(steps))
+	if len(steps) != 2 {
+		t.Fatalf("expected the call and the return, got %d steps", len(steps))
+	}
+	if ret, _ := steps[1]["return"].(map[string]any); ret == nil || ret["value"] != "ensured" {
+		t.Fatalf("step 1 = %#v, want the return of the statement's name", steps[1])
 	}
 	fn, _ := steps[0]["function"].(map[string]any)
 	if fn == nil || fn["name"] != "ensureDailySpaceForUser" {

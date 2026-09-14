@@ -47,9 +47,8 @@ func TestValidateFileComposition_AutomationWithQueries(t *testing.T) {
 	source := `
 @enabled
 @trigger(event="session.opened")
-func (Automation) bootstrapUser(_ any) {
-  check := query { concept==v1:user }
-  return check
+automation bootstrapUser {
+  check := query readUser()
 }
 
 func (Query) helperQuery() {
@@ -116,15 +115,13 @@ func TestValidateFileComposition_MultipleAutomations(t *testing.T) {
 	// Invalid: 2 automations
 	source := `
 @enabled
-func (Automation) first(_ any) {
-  step1 := query { concept==v1:a }
-  return step1
+automation first {
+  step1 := query readA()
 }
 
 @enabled
-func (Automation) second(_ any) {
-  step1 := query { concept==v1:b }
-  return step1
+automation second {
+  step1 := query readB()
 }
 `
 	ast := mustParse(t, source)
@@ -174,9 +171,8 @@ func TestValidateFileComposition_MixedAutomationMutation(t *testing.T) {
 	// Invalid: automation + mutation in same file
 	source := `
 @enabled
-func (Automation) workflow(_ any) {
-  step1 := query { concept==v1:a }
-  return step1
+automation workflow {
+  step1 := query readA()
 }
 
 @enabled
@@ -209,9 +205,8 @@ func TestGetPrimaryType(t *testing.T) {
 			name: "automation primary",
 			source: `
 @enabled
-func (Automation) test(_ any) {
-	step1 := query { concept==v1:a }
-	return step1
+automation test {
+	step1 := query readA()
 }
 func (Query) helper() { concept==v1:b }
 `,
@@ -265,9 +260,8 @@ func TestCompositionSummary(t *testing.T) {
 		},
 		{
 			name: "automation with query",
-			source: `func (Automation) a(_ any) {
-				s := query { concept==v1:a }
-				return s
+			source: `automation a {
+				s := query readA()
 			}
 			func (Query) b() { concept==v1:b }`,
 			contains: "1 automation",

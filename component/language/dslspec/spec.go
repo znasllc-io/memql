@@ -105,7 +105,7 @@ type Construct struct {
 	// the keyword.
 	ConceptInSignature bool `json:"conceptInSignature"`
 	// BodyBlocks lists the clauses legal inside this construct's body, in
-	// authoring order -- blocks (`args { }`, `insert { }`, `step x { }`) and
+	// authoring order -- blocks (`args { }`, `insert { }`, `precondition x { }`) and
 	// line clauses (`filter <expr>`, `paginate 25`) alike, which
 	// parser.IsLineClause tells apart. Derived from parser.BodyClauses
 	// (memql#5359). Empty for constructs whose body is a bare

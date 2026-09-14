@@ -26,20 +26,11 @@ func StepDeterministicFingerprint(step *Step, result *StepResult) string {
 
 	// Include deterministic result shape based on step type
 	switch step.Type {
-	case StepTypeQuery, StepTypeFunction:
+	case StepTypeFunction:
 		fp["resultShape"] = fingerprintQueryResult(result.Result)
-
-	case StepTypeMutation:
-		fp["resultShape"] = fingerprintMutationResult(result.Result)
-
-	case StepTypeWebhook:
-		fp["resultShape"] = fingerprintWebhookResult(result.Result)
 
 	case StepTypeEvent:
 		fp["resultShape"] = fingerprintEventResult(result.Result)
-
-	case StepTypeShape:
-		fp["resultShape"] = fingerprintShapeResult(step, result.Result)
 
 	case StepTypeForEach:
 		fp["resultShape"] = fingerprintForEachResult(result)
@@ -92,35 +83,6 @@ func fingerprintQueryResult(result any) map[string]any {
 	return fp
 }
 
-// fingerprintMutationResult extracts deterministic shape from mutation results.
-func fingerprintMutationResult(result any) map[string]any {
-	fp := map[string]any{"type": "mutation"}
-
-	if m, ok := result.(map[string]any); ok {
-		if id, ok := m["id"].(string); ok {
-			fp["targetId"] = id
-		}
-		if concept, ok := m["concept"].(string); ok {
-			fp["concept"] = concept
-		}
-	}
-
-	return fp
-}
-
-// fingerprintWebhookResult - hash status code only.
-func fingerprintWebhookResult(result any) map[string]any {
-	fp := map[string]any{"type": "webhook"}
-
-	if m, ok := result.(map[string]any); ok {
-		if status, ok := m["statusCode"].(int); ok {
-			fp["statusCode"] = status
-		}
-	}
-
-	return fp
-}
-
 // fingerprintEventResult - hash topic only.
 func fingerprintEventResult(result any) map[string]any {
 	fp := map[string]any{"type": "event"}
@@ -129,21 +91,6 @@ func fingerprintEventResult(result any) map[string]any {
 		if topic, ok := m["topic"].(string); ok {
 			fp["topic"] = topic
 		}
-	}
-
-	return fp
-}
-
-// fingerprintShapeResult - hash template structure and count.
-func fingerprintShapeResult(step *Step, result any) map[string]any {
-	fp := map[string]any{"type": "shape"}
-
-	if step.Shape != nil {
-		fp["template"] = string(step.Shape.Template)
-	}
-
-	if arr, ok := result.([]any); ok {
-		fp["count"] = len(arr)
 	}
 
 	return fp

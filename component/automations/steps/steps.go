@@ -173,23 +173,15 @@ func NewRegistry() *Registry {
 		executors: make(map[automations.StepType]Executor),
 	}
 
-	// Register built-in executors
-	r.Register(automations.StepTypeQuery, &QueryExecutor{})
-	r.Register(automations.StepTypeMutation, &MutationExecutor{})
-	r.Register(automations.StepTypeWebhook, &WebhookExecutor{})
+	// One executor per step kind a statement compiles to (epic memql#5370).
+	// A statement body's expression and return steps never reach the
+	// registry: runSequence evaluates them itself.
 	r.Register(automations.StepTypeEvent, &EventExecutor{})
 	r.Register(automations.StepTypeFunction, &FunctionExecutor{})
 	r.Register(automations.StepTypeAction, &ActionExecutor{})
 	r.Register(automations.StepTypeAutomation, &AutomationExecutor{})
-	r.Register(automations.StepTypeForEach, &ForEachExecutor{Registry: r})
+	r.Register(automations.StepTypeForEach, &ForEachExecutor{})
 	r.Register(automations.StepTypeParallel, &ParallelExecutor{Registry: r})
-	r.Register(automations.StepTypeSwitch, &SwitchExecutor{Registry: r})
-	r.Register(automations.StepTypeShape, &ShapeExecutor{})
-	r.Register(automations.StepTypeDetectLeadSignal, &DetectLeadSignalExecutor{})
-	r.Register(automations.StepTypeEmitConceptCard, &EmitConceptCardExecutor{})
-	// A parallel statement's branch (statements.go, epic memql#5370). The
-	// statement body's expression and return steps never reach the registry:
-	// runSequence evaluates them itself.
 	r.Register(automations.StepTypeBlock, &BlockExecutor{})
 
 	return r

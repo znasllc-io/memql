@@ -501,22 +501,6 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 		return nil, err
 	}
 
-	// Arithmetic-operand parity (#2542): reject the unparenthesized-comparison
-	// trap (`a - b > 0` -> `a - (b > 0)`) across the WHOLE logic body, including
-	// intermediate `:=` steps the loader otherwise stashes un-converted. The
-	// terminal-return position is already covered by convertArithmeticExpr; this
-	// extends the same clear rejection to every step so it fires through the
-	// lint/boot-parity pass, not just at RunLogic.
-	if err := validateLogicArithmeticOperands(funcDef); err != nil {
-		return nil, err
-	}
-	if err := validateLogicCondBareIdentifierPredicate(funcDef); err != nil {
-		return nil, err
-	}
-	if err := validateLogicCondBranchValues(funcDef); err != nil {
-		return nil, err
-	}
-
 	// Validate the function name matches the file-derived function name.
 	if funcDef.Name != "" && funcDef.Name != expectedName {
 		return nil, fmt.Errorf("function name %q does not match expected name %q", funcDef.Name, expectedName)
@@ -671,68 +655,27 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 			fn.ExprSource = extractExpressionFromContent(content)
 
 		case languageParser.FunctionTypeLogic:
-			// An edition-2026 statement body (epic memql#5370) compiles HERE,
-			// at load, never at call: CompileBody refuses a read of a later
-			// name, the scope rules and D14's construct rules (a logic may not
+			// A logic's statement body (epic memql#5370) compiles HERE, at
+			// load, never at call: CompileBody refuses a read of a later name,
+			// the scope rules and D14's construct rules (a logic may not
 			// publish, nor call an automation or an action, and ends with a
 			// return), all of them at once.
-			if auto, ok := funcDef.Body.(*languageParser.AutomationDef); ok && auto.Body != nil {
-				var argNames []string
-				if funcDef.ArgsSchema != nil {
-					for _, f := range funcDef.ArgsSchema.Fields {
-						argNames = append(argNames, f.Name)
-					}
-				}
-				steps, problems := compiler.CompileBody("logic", expectedName, argNames, auto.Body)
-				if len(problems) > 0 {
-					return nil, fmt.Errorf("function %q: %w", expectedName, compiler.BodyProblems(problems))
-				}
-				fn.LogicBody = steps
-				fn.ExprSource = extractExpressionFromContent(content)
-				break
+			auto, ok := funcDef.Body.(*languageParser.AutomationDef)
+			if !ok || auto.Body == nil {
+				return nil, fmt.Errorf("function %q: a logic's body is its statements, got %T", expectedName, funcDef.Body)
 			}
-			// Logic functions: the parser produces an *AutomationDef body
-			// (a sequence of `name := <call>` steps plus a synthetic
-			// `_return` step). For single-statement bodies (`body { return
-			// <expr> }`) the AutomationDef has exactly one `_return` step
-			// whose Query is the expression — we extract it as fn.Expr so
-			// the standard expression evaluator runs the call directly.
-			//
-			// Multi-statement Logic bodies (with intermediate `:=` steps)
-			// are not yet executed end-to-end through this path: the
-			// intermediate steps' side effects (mutations, publishEvent)
-			// would be lost. Those logics need a step-runner-backed
-			// invocation flow on the engine side; tracked as a follow-up.
-			if auto, ok := funcDef.Body.(*languageParser.AutomationDef); ok {
-				// Always extract the `_return` expression as fn.Expr.
-				// Single-statement bodies (no intermediate `name := <call>`
-				// steps) run through the standard expression evaluator
-				// via this path. Multi-step bodies ALSO keep fn.Expr set
-				// so callers that aren't routing through the LogicRunner
-				// (e.g. validation paths) still see something callable;
-				// the engine's dispatch path checks LogicSteps first.
-				retExpr, err := extractLogicReturnExpression(auto)
-				if err != nil {
-					return nil, fmt.Errorf("function %q: %w", expectedName, err)
+			var argNames []string
+			if funcDef.ArgsSchema != nil {
+				for _, f := range funcDef.ArgsSchema.Fields {
+					argNames = append(argNames, f.Name)
 				}
-				// The body is bridged onto the two runners logic has by
-				// logic_body_v1.go (memql#5367): a pure body is fn.Expr, and
-				// one with intermediate steps also runs on the LogicRunner,
-				// which walks the steps in order, binds each result for later
-				// step references, and evaluates the `_return` expression as
-				// the function's return.
-				engineExpr, onRunner, err := loadLogicBodyV1(auto, retExpr)
-				if err != nil {
-					return nil, fmt.Errorf("function %q body: %w", expectedName, err)
-				}
-				fn.Expr = engineExpr
-				fn.ExprSource = extractExpressionFromContent(content)
-				if onRunner {
-					fn.LogicSteps = auto
-				}
-			} else {
-				return nil, fmt.Errorf("function %q logic body must be a procedural block, got %T", expectedName, funcDef.Body)
 			}
+			steps, problems := compiler.CompileBody("logic", expectedName, argNames, auto.Body)
+			if len(problems) > 0 {
+				return nil, fmt.Errorf("function %q: %w", expectedName, compiler.BodyProblems(problems))
+			}
+			fn.LogicBody = steps
+			fn.ExprSource = extractExpressionFromContent(content)
 
 		default:
 			// Query functions: convert the expression AST to executable engine AST.
@@ -1271,37 +1214,6 @@ func collectFunctionDefsFromFile(file *languageParser.File) []*languageParser.Fu
 		}
 	}
 	return out
-}
-
-// nonReturnStepCount returns the number of steps in the slice whose ID is
-// not "_return". Used by the logic-body validator to flag multi-step
-// bodies that the function executor doesn't yet run end-to-end.
-func nonReturnStepCount(steps []languageParser.StepDef) int {
-	n := 0
-	for _, s := range steps {
-		if s.ID != "_return" {
-			n++
-		}
-	}
-	return n
-}
-
-// extractLogicReturnExpression returns the expression the logic body
-// produces. We look for the synthetic `_return` step that
-// parseGoStyleAutomationBody appends for the trailing `return <expr>`
-// terminator, and pull the wrapped QueryStepConfig.Query out of it.
-func extractLogicReturnExpression(auto *languageParser.AutomationDef) (languageParser.ExpressionNode, error) {
-	for _, s := range auto.Steps {
-		if s.ID != "_return" {
-			continue
-		}
-		cfg, ok := s.Config.(*languageParser.QueryStepConfig)
-		if !ok || cfg == nil || cfg.Query == nil {
-			return nil, fmt.Errorf("logic `_return` step is missing its expression")
-		}
-		return cfg.Query, nil
-	}
-	return nil, fmt.Errorf("logic body has no trailing `return <expr>` terminator")
 }
 
 // validateFunctions (cycle + unknown-reference validation) was dead code with

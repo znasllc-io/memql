@@ -7,22 +7,20 @@ package steps
 // automations.StepExecutorRegistry, so the automation Executor drives it exactly
 // like the production registry. For each step it decides, by TIER:
 //
-//   - WRITE-BEARING (a direct mutation step, or a function step whose function
-//     is a mutation): the would-be write is evaluated + recorded into the
-//     manifest under the run's ephemeral sandbox partition and a synthetic
-//     success result is returned. The write NEVER reaches engine.Execute, so no
-//     row lands in the live graph. Later steps that reference the step still see
-//     a success result.
-//   - WEBHOOK / external POST: the request is evaluated + recorded as a blocked
-//     webhook and a synthetic success result is returned. Nothing is dispatched
-//     under the isolated tier.
-//   - READ / pure compute (queries, ai(), similarTo, webSearch, fetchUrl, logic,
-//     shape, switch, ...): the read is METERED into the manifest (an ai() call
-//     -> aiCalls + a cost estimate; a similarTo / webSearch / fetchUrl call ->
+//   - WRITE-BEARING (a `mutation` call): the would-be write is evaluated +
+//     recorded into the manifest under the run's ephemeral sandbox partition
+//     and a synthetic success result is returned. The write NEVER reaches
+//     engine.Execute, so no row lands in the live graph. Later statements that
+//     read its name still see a success result.
+//   - SIDE EFFECTS (a publish, an action, a sub-automation): recorded, and a
+//     synthetic success returned.
+//   - A LOGIC call runs its statements through this same registry, so every
+//     write in it is intercepted too.
+//   - READ / pure compute (a query, a builtin, ai(), similarTo, webSearch,
+//     fetchUrl): the read is METERED into the manifest (an ai() call ->
+//     aiCalls + a cost estimate; a similarTo / webSearch / fetchUrl call ->
 //     webCalls) and then DELEGATED to the real executor -> real engine.Execute
 //     -> real read.
-//
-// Full-sandbox-live webhook routing (increment 3) layers onto this structure.
 
 import (
 	"context"
@@ -33,7 +31,6 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
-	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -73,19 +70,15 @@ func newSandboxStepRegistry(real *Registry, engine *memql.MemQLEngine, partition
 // automations.StepExecutorRegistry.
 func (s *sandboxStepRegistry) Execute(ctx context.Context, step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
 	switch step.Type {
-	case automations.StepTypeMutation:
-		return s.interceptDirectMutation(step, stepCtx)
-	case automations.StepTypeWebhook:
-		return s.interceptWebhook(step, stepCtx)
 	case automations.StepTypeFunction:
 		switch s.functionKind(step) {
 		case "mutation":
 			return s.interceptMutationFunction(step, stepCtx)
 		case "logic":
-			// A logic function is the real authored write path: its body runs
-			// mutation / webhook steps. Recurse through the SAME sandbox
-			// registry (via a sandbox LogicRunner) so those nested side effects
-			// are intercepted too, instead of escaping to engine.Execute.
+			// A logic's statements may write. Run them through the SAME
+			// sandbox registry (via a sandbox LogicRunner) so those nested side
+			// effects are intercepted too, instead of escaping to
+			// engine.Execute.
 			return s.interceptLogicFunction(ctx, step, stepCtx)
 		default:
 			// A read (ai() / similarTo / webSearch / fetchUrl) or a plain
@@ -96,56 +89,38 @@ func (s *sandboxStepRegistry) Execute(ctx context.Context, step *automations.Ste
 		}
 	// Write-bearing step types that used to fall through to the production
 	// executors (memql#2943). Each reaches a real side effect:
-	//   emitConceptCard -> stepCtx.Engine.Execute(insert ...)
-	//   event           -> stepCtx.EventBus.Publish, on the LIVE bus
-	//   action          -> engine.ExecuteToolByName, a real capability call
-	//   automation      -> triggers another automation, unbounded
-	case automations.StepTypeEmitConceptCard,
-		automations.StepTypeEvent,
+	//   event      -> stepCtx.EventBus.Publish, on the LIVE bus
+	//   action     -> engine.ExecuteToolByName, a real capability call
+	//   automation -> triggers another automation, unbounded
+	case automations.StepTypeEvent,
 		automations.StepTypeAction,
 		automations.StepTypeAutomation:
 		return s.interceptSideEffect(step, stepCtx)
 
 	// Containers. Delegating these to the real registry is what let a nested
-	// write escape: the production container executors resolve children
-	// through the concrete *Registry, not through this sandbox. Build the
-	// container here with Dispatch pointed back at Execute so every nested
-	// step -- to any depth -- re-enters this switch. See child_dispatch.go.
+	// write escape (memql#2943): a nested step must re-enter this switch. A
+	// parallel resolves its branches with Dispatch pointed back at Execute
+	// (child_dispatch.go); a `for` and a branch run their lists through the
+	// sequence runner, whose registry is this one.
 	case automations.StepTypeForEach:
-		return (&ForEachExecutor{Registry: s.real, Dispatch: s.Execute}).Execute(ctx, step, stepCtx)
+		// A `for` runs its list through the executor's sequence runner, whose
+		// registry is this one, so every statement in it -- to any depth --
+		// re-enters this switch.
+		return (&ForEachExecutor{}).Execute(ctx, step, stepCtx)
 	case automations.StepTypeParallel:
 		return (&ParallelExecutor{Registry: s.real, Dispatch: s.Execute}).Execute(ctx, step, stepCtx)
-	case automations.StepTypeSwitch:
-		return (&SwitchExecutor{Registry: s.real, Dispatch: s.Execute}).Execute(ctx, step, stepCtx)
 	case automations.StepTypeBlock:
-		// A statement body's parallel branch. Its list runs through the
-		// executor's sequence runner, whose registry is this one, so every
-		// statement in it -- to any depth -- re-enters this switch. (A statement
-		// `for` does the same through the ForEachExecutor above.)
+		// A parallel's branch. Its list runs through the executor's sequence
+		// runner, whose registry is this one, so every statement in it -- to
+		// any depth -- re-enters this switch. (A `for` does the same through
+		// the ForEachExecutor above.)
 		return (&BlockExecutor{}).Execute(ctx, step, stepCtx)
-
-	// Genuinely read-only / pure compute. Named EXPLICITLY rather than left to
-	// a default arm -- which is the point of this change: a step type reaches
-	// production because someone decided it reads, not because nobody
-	// classified it.
-	//
-	// query carries a caveat that is checked rather than assumed: the engine's
-	// Execute runs mutations too (query.go's own doc says so), so a `query:`
-	// step carrying a write is a real escape. isWriteBearingQuery inspects the
-	// evaluated text and routes it to interception instead.
-	case automations.StepTypeQuery:
-		if s.isWriteBearingQuery(step, stepCtx) {
-			return s.interceptSideEffect(step, stepCtx)
-		}
-		return s.real.Execute(ctx, step, stepCtx)
-	case automations.StepTypeShape, automations.StepTypeDetectLeadSignal:
-		return s.real.Execute(ctx, step, stepCtx)
 
 	default:
 		// FAIL CLOSED. This arm used to forward every unclassified step to the
-		// production executors, which is how emitConceptCard / event / action
-		// reached the live graph while dryrun.go promised "zero rows land in
-		// the live graph".
+		// production executors, which is how event and action steps reached
+		// the live graph while dryrun.go promised "zero rows land in the live
+		// graph".
 		//
 		// Refusing is the conservative answer for a preview whose OUTPUT is an
 		// approval artifact: an operator reading the manifest has to be able to
@@ -186,42 +161,8 @@ func (s *sandboxStepRegistry) refuseUnclassified(step *automations.Step) (*autom
 		step.ID, step.Type)
 }
 
-// isWriteBearingQuery reports whether a `query:` step performs a write.
-//
-// query.go runs a construct call through engine.Execute, which runs mutations
-// as well as reads. So the step TYPE does not settle whether it writes; the
-// expression does. Deliberately conservative: anything that may write, or
-// that cannot be examined, counts as write-bearing. Being wrong in that
-// direction costs a metered read; being wrong the other way puts a row in the
-// live graph and leaves it out of the manifest.
-func (s *sandboxStepRegistry) isWriteBearingQuery(step *automations.Step, stepCtx *automations.StepContext) bool {
-	if step.Query == nil || strings.TrimSpace(step.Query.Query) == "" {
-		return false
-	}
-	// The query is an expression parsed at load (memql#5367), so the answer
-	// is read off the node rather than sniffed from text. An in-process
-	// expression cannot write: EvalExpr refuses a construct call nested in
-	// it. A construct call writes unless it is a `query` -- a mutation does,
-	// and a logic or builtin may, so both count as write-bearing.
-	//
-	// A step that was never prepared has no node to read, so it cannot be
-	// shown to be a read: the dangerous case is assumed.
-	x := step.Exprs
-	if x == nil || x.Query == nil {
-		return true
-	}
-	call, isCall := ast.Unparen(x.Query).(*ast.CallExpr)
-	if !isCall || call.Kind == "" {
-		return false
-	}
-	return call.Kind != "query"
-}
-
 // sandboxConceptForStep is a best-effort label for the manifest entry.
 func sandboxConceptForStep(step *automations.Step) string {
-	if step.Mutation != nil && step.Mutation.Concept != "" {
-		return step.Mutation.Concept
-	}
 	return string(step.Type)
 }
 
@@ -258,21 +199,15 @@ func (s *sandboxStepRegistry) functionKind(step *automations.Step) string {
 	return said
 }
 
-// interceptLogicFunction runs a logic body through a sandbox LogicRunner that
-// shares THIS registry, so the body's mutation / webhook steps are intercepted
-// recursively: a statement body (fn.LogicBody) on the sequence runner, a legacy
-// multi-step body on RunLogic. The sandbox's runner journals nothing -- a
-// preview leaves no run, whatever the logic does. A legacy single-statement
-// logic (no multi-step body) evaluates through engine.Execute and is delegated
-// to the real executor; its own mutation/webhook would route back through the
-// engine's wired runner -- out of scope for increment 1 (multi-step logic is
-// the authored write path).
+// interceptLogicFunction runs a logic's statements through a sandbox
+// LogicRunner that shares THIS registry, so every write in them is intercepted
+// recursively. The sandbox's runner journals nothing -- a preview leaves no
+// run, whatever the logic does.
 func (s *sandboxStepRegistry) interceptLogicFunction(ctx context.Context, step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
 	name := strings.TrimSpace(step.Function.Name)
 	fn, ok := s.engine.Functions().Lookup(name)
-	if !ok || fn == nil || (fn.LogicSteps == nil && fn.LogicBody == nil) {
-		// Single-statement logic (or unknown): no multi-step body to recurse
-		// into. Delegate to the real executor.
+	if !ok || fn == nil || fn.LogicBody == nil {
+		// An unknown name: the real executor surfaces the error.
 		return s.real.Execute(ctx, step, stepCtx)
 	}
 
@@ -280,15 +215,7 @@ func (s *sandboxStepRegistry) interceptLogicFunction(ctx context.Context, step *
 	s.note(step.ID, "logic "+name+" run in sandbox (nested side effects intercepted)")
 	args := s.stepCallArgs(step, stepCtx)
 	runner := automations.NewLogicRunner(s.engine, s, nil).WithoutJournal()
-	var (
-		out any
-		err error
-	)
-	if fn.LogicBody != nil {
-		out, err = runner.RunLogicBody(ctx, name, fn.LogicBody, args)
-	} else {
-		out, err = runner.RunLogic(ctx, name, fn.LogicSteps, args)
-	}
+	out, err := runner.RunLogicBody(ctx, name, fn.LogicBody, args)
 	now := time.Now()
 	if err != nil {
 		return &automations.StepResult{
@@ -308,30 +235,6 @@ func (s *sandboxStepRegistry) interceptLogicFunction(ctx context.Context, step *
 		CompletedAt: now,
 		Duration:    now.Sub(started),
 	}, nil
-}
-
-// interceptDirectMutation records a direct mutation step's would-be write and
-// returns a synthetic success without touching the engine.
-func (s *sandboxStepRegistry) interceptDirectMutation(step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
-	started := time.Now()
-	rec := memql.RecordedMutation{StepId: step.ID, Partition: s.partition}
-	if step.Mutation != nil {
-		// The same evaluation the real executor runs (MutationExecutor.execute),
-		// so the recorded write is faithful.
-		rec.Concept = step.Mutation.Concept
-		rec.Payload = step.Mutation.Payload
-		if x := step.Exprs; x != nil {
-			if id, err := v1Text(context.Background(), stepCtx.Evaluator, x.ID); err == nil {
-				rec.Id = id
-			}
-		}
-		if payload, err := stepCtx.Evaluator.ResolveV1Map(context.Background(), step.Mutation.Payload); err == nil {
-			rec.Payload = payload
-		}
-	}
-	s.recordMutation(rec)
-	s.note(step.ID, "mutation isolated to sandbox partition "+s.partition)
-	return s.syntheticSuccess(step.ID, started, rec.Payload), nil
 }
 
 // interceptMutationFunction records a mutation-function call's would-be write
@@ -380,55 +283,6 @@ func (s *sandboxStepRegistry) stepCallArgs(step *automations.Step, stepCtx *auto
 	return resolved
 }
 
-// interceptWebhook captures a webhook step's request and returns a synthetic
-// success. Under the isolated tier it is recorded-and-blocked (nothing
-// dispatched). Under the full-sandbox-live tier it is re-routed to the capture
-// sink (Sink recorded) -- the automation's REAL webhook target is never POSTed
-// to under either tier.
-func (s *sandboxStepRegistry) interceptWebhook(step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
-	started := time.Now()
-	captured := memql.BlockedWebhook{StepId: step.ID, Method: "POST"}
-	if step.Webhook != nil {
-		// URL and body evaluate as the real executor evaluates them, so the
-		// captured request is the one it would send.
-		captured.Url = step.Webhook.URL
-		if x := step.Exprs; x != nil {
-			if url, err := v1Text(context.Background(), stepCtx.Evaluator, x.URL); err == nil {
-				captured.Url = url
-			}
-		}
-		if m := strings.ToUpper(strings.TrimSpace(step.Webhook.Method)); m != "" {
-			captured.Method = m
-		}
-		if step.Webhook.Body != nil {
-			captured.Body = step.Webhook.Body
-			if body, err := stepCtx.Evaluator.ResolveV1Map(context.Background(), step.Webhook.Body); err == nil {
-				captured.Body = body
-			}
-		}
-	}
-
-	live := s.mode == memql.DryRunModeFullSandboxLive
-	noteMsg := "webhook recorded and blocked"
-	if live {
-		captured.Sink = s.captureSink
-		if captured.Sink == "" {
-			captured.Sink = "default-capture-sink"
-		}
-		noteMsg = "webhook re-routed to capture sink " + captured.Sink + " (real target not called)"
-	}
-
-	s.recordBlockedWebhook(captured)
-	s.note(step.ID, noteMsg)
-	return s.syntheticSuccess(step.ID, started, map[string]any{
-		"dryRun":  true,
-		"blocked": !live,
-		"sink":    captured.Sink,
-		"url":     captured.Url,
-		"method":  captured.Method,
-	}), nil
-}
-
 // syntheticSuccess builds a success StepResult for an intercepted step so
 // downstream steps that reference it (and the executor's chain) proceed.
 func (s *sandboxStepRegistry) syntheticSuccess(stepId string, started time.Time, result any) *automations.StepResult {
@@ -448,12 +302,6 @@ func (s *sandboxStepRegistry) recordMutation(rec memql.RecordedMutation) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.mutations = append(s.mutations, rec)
-}
-
-func (s *sandboxStepRegistry) recordBlockedWebhook(rec memql.BlockedWebhook) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.blockedWebhooks = append(s.blockedWebhooks, rec)
 }
 
 // webReadFunctions is the set of read-builtin names that touch external surfaces

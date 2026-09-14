@@ -25,9 +25,7 @@ package sense
 // Everywhere else -- after `:=`, in a call's arguments, in a condition, on a
 // line that continues an expression -- an expression is being written: the
 // expression completer answers (complete_expr.go), and a statement logic body
-// is its PositionLogicBody (exprpos.go). A body still written in the retired
-// forms (a `step` block, a logic's `body { }`, the terse header) keeps the
-// completion it had until the flip.
+// is its PositionLogicBody (exprpos.go).
 
 import (
 	"regexp"

@@ -74,12 +74,12 @@ func resumedStatements(j *RunJournal, automation *Automation, at int) *resumedLi
 }
 
 // stepRetryable reports whether the resume point may run again without
-// AllowSideEffects: IsStepRetryable's rule, and a statement body's mutation
-// call, which is a function step but a write as surely as a mutation step is.
-func stepRetryable(automation *Automation, step *Step) bool {
+// AllowSideEffects: IsStepRetryable's rule, and a mutation call, which is a
+// function step but a write.
+func stepRetryable(step *Step) bool {
 	if !IsStepRetryable(step.Type) {
 		return false
 	}
-	return !(automation.IsStatementBody() && step.Type == StepTypeFunction && step.Function != nil &&
+	return !(step.Type == StepTypeFunction && step.Function != nil &&
 		strings.EqualFold(step.Function.Kind, "mutation"))
 }

@@ -4,19 +4,12 @@ package ast
 // docs/superpowers/specs/2026-09-13-dsl-v1-language-freeze-program-design.md).
 //
 // A `logic` and an `automation` share ONE body: statements, in source order.
-// Steps become statements, a name is its value (`rows := query x(...)` then
-// `rows.count()`), and nothing reorders them -- the topological sort the
-// compiler used to run over step references is not consulted for a body of
-// this shape.
+// A name is its value (`rows := query x(...)` then `rows.count()`), and
+// nothing reorders them.
 //
 // The statement set is closed and small on purpose. What each form means at
 // run time is the body compiler's business (component/language/compiler); what
 // names are in scope where is the scope checker's. This file is only the shape.
-//
-// The legacy procedural nodes further down ast.go -- AssignStmt, IfStmt,
-// ForRangeStmt, SwitchStmt, ReturnStmt and the flat StepDef list they flatten
-// into -- serve the retired body grammar until the tree is migrated, and are
-// deleted with it.
 
 // Body is the statements of a logic or an automation, in source order.
 type Body struct {

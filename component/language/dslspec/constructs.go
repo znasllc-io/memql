@@ -143,14 +143,14 @@ func constructCatalog() []Construct {
 		{
 			Keyword:            "logic",
 			Category:           CategoryFunction,
-			Doc:                "Imperative procedure called from an automation step. `args { }` declares inputs; `body { }` is named statements ending in `return <expr>`.",
+			Doc:                "A procedure that decides. `args { }` declares its inputs; its statements follow in the order they run (`x := <kind> name(...)`, if, for, switch, parallel) and end with `return <expr>`. It calls queries, mutations, logic and builtins; publishing, calling an automation and dispatching an action are an automation's (D14).",
 			AnnotationReceiver: "Logic",
 			ConceptInSignature: false,
 		},
 		{
 			Keyword:            "automation",
 			Category:           CategoryFunction,
-			Doc:                "Event- or schedule-triggered side-effect (via @trigger). Consumes the layers above it; the triggering event is bound as `args`.",
+			Doc:                "Event- or schedule-triggered side-effect (via @trigger). Its statements run in the order written and call every construct kind; the triggering event's payload is bound into its `args { }` block.",
 			AnnotationReceiver: "Automation",
 			ConceptInSignature: false,
 		},

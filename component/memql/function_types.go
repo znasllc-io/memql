@@ -103,18 +103,10 @@ type Function struct {
 	// a legacy filter.
 	V1Filter *languageParser.LambdaExpr
 
-	// LogicSteps carries the parsed multi-step body for Logic functions
-	// whose body has intermediate `name := <call>` steps before the
-	// `_return` terminator. When set, the engine dispatches the call
-	// through the wired LogicRunner instead of evaluating Expr directly.
-	// Single-statement Logic bodies leave this nil and run through Expr.
-	LogicSteps *languageParser.AutomationDef
-
-	// LogicBody is an edition-2026 statement body (epic memql#5370) compiled
-	// at LOAD by compiler.CompileBody: the executor's step list, in source
-	// order, in the shape an automation's `steps` compile to. A logic in
-	// this form has no LogicSteps and no Expr; the sequence runner executes
-	// it. Nil for every other function.
+	// LogicBody is a logic's statement body (epic memql#5370), compiled at
+	// LOAD by compiler.CompileBody: the executor's step list, in source
+	// order, in the shape an automation's `steps` compile to. The sequence
+	// runner executes it (LogicRunner). Nil for every other function.
 	LogicBody []map[string]any
 
 	// MutationTemplate is the parsed mutation template (for mutation functions).
@@ -259,8 +251,7 @@ func (f *Function) clone() *Function {
 		// so shared. It MUST be listed -- the registry hands out clones, and
 		// a clone without it is a query the Init pass cannot re-check.
 		V1Filter:         f.V1Filter,
-		LogicSteps:       f.LogicSteps, // shared parsed AST -- read-only at runtime
-		LogicBody:        f.LogicBody,  // compiled at load -- read-only at runtime
+		LogicBody:        f.LogicBody, // compiled at load -- read-only at runtime
 		MutationTemplate: mutationCopy,
 		Origin:           f.Origin,
 		Type:             f.Type,

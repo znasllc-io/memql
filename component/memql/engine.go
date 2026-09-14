@@ -16,7 +16,6 @@ import (
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/component/provenance"
 	"github.com/znasllc-io/memql/core/common"
@@ -240,28 +239,12 @@ type MemQLEngine struct {
 // pre-#250 API was a soak-period rollback handle that the legacy
 // parser deletion makes meaningless.
 
-// LogicRunner is the cross-package bridge that lets the memql engine
-// dispatch a multi-step Logic call into the automation step runner.
-// Implemented in component/automations/ (logic_runner.go); wired at
-// app bootstrap. The runner takes the parsed *AutomationDef body
-// (the parser's representation of `body { ... ; return <expr> }`),
-// walks the intermediate `name := <call>` steps in order, binds each
-// result for later steps to reference, and returns the `_return`
-// step's evaluated value.
-//
-// caller args are passed under both `args` (the canonical author-
-// facing form) and `ctx` (the legacy runtime form still produced
-// by the rewriter) so step bodies referencing either resolve.
+// LogicRunner is the cross-package bridge that lets the memql engine run a
+// logic call: its statement body, compiled at load into Function.LogicBody
+// (epic memql#5370), on the sequence runner an automation's statements run
+// on. Implemented in component/automations (logic_runner.go); wired at app
+// bootstrap.
 type LogicRunner interface {
-	RunLogic(ctx context.Context, fnName string, body *languageParser.AutomationDef, args map[string]any) (any, error)
-}
-
-// StatementLogicRunner runs a logic whose body is an edition-2026 statement
-// body (epic memql#5370), compiled at load into Function.LogicBody: the same
-// sequence runner an automation's statements run on. The automations
-// package's LogicRunner implements it beside RunLogic until the tree is
-// migrated and RunLogic goes.
-type StatementLogicRunner interface {
 	RunLogicBody(ctx context.Context, fnName string, body []map[string]any, args map[string]any) (any, error)
 }
 
@@ -767,15 +750,13 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// These two gates used to sit on the query path further down, below
 	// seven branches that return without reaching it: a top-level builtin, a
 	// literal, a collection method, a dot access, an arithmetic or comparison
-	// fold, a date builtin. A SINGLE-STATEMENT logic -- `return cond(...)`,
-	// `return someBuiltin({...})` -- expands to exactly one of those at
-	// plan.Root and never hoists to plan.LogicCall (that needs LogicSteps),
-	// so a `@requiresRank` or `@requiresCapability` on it was recorded on the
-	// plan and read by nothing. The grant enforcement probe found it: the
-	// plan-expansion path refused and the "direct" single-statement path
-	// admitted everybody. The multi-step logic and mutation dispatches below
-	// carry their own direct-call gates, and record nothing here, so this is
-	// a no-op for them rather than a second check.
+	// fold, a date builtin -- so a `@requiresRank` or `@requiresCapability`
+	// on a construct that expanded to one of those was recorded on the plan
+	// and read by nothing. The grant enforcement probe found it: the
+	// plan-expansion path refused and the direct path admitted everybody.
+	// The logic and mutation dispatches below carry their own direct-call
+	// gates, and record nothing here, so this is a no-op for them rather
+	// than a second check.
 	//
 	// It refuses the call outright rather than narrowing it. A floor is a
 	// statement about who may call, not about which rows come back -- and
@@ -1444,11 +1425,11 @@ func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *Functi
 	if err := e.refuseBelowRequiredCapability(ctx, fn, call.Name); err != nil {
 		return nil, err
 	}
-	if fn.LogicSteps == nil && fn.LogicBody == nil {
-		return nil, fmt.Errorf("function %q has no multi-step body (LogicSteps unset)", call.Name)
+	if fn.LogicBody == nil {
+		return nil, fmt.Errorf("function %q has no statement body", call.Name)
 	}
 	if e.logicRunner == nil {
-		return nil, fmt.Errorf("function %q has a multi-step logic body but no LogicRunner is wired -- call engine.SetLogicRunner from app bootstrap (the automations package registers one against the live step registry)", call.Name)
+		return nil, fmt.Errorf("function %q is a logic, and no LogicRunner is wired -- call engine.SetLogicRunner from app bootstrap (the automations package registers one against the live step registry)", call.Name)
 	}
 
 	args := call.Args
@@ -1462,18 +1443,7 @@ func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *Functi
 		return nil, err
 	}
 
-	var out any
-	if fn.LogicBody != nil {
-		// A statement body (epic memql#5370) -- one statement or many -- runs
-		// on the sequence runner an automation's statements run on.
-		runner, ok := e.logicRunner.(StatementLogicRunner)
-		if !ok {
-			return nil, fmt.Errorf("logic %q has a statement body, and the wired LogicRunner cannot run one", fn.Name)
-		}
-		out, err = runner.RunLogicBody(ctx, fn.Name, fn.LogicBody, args)
-	} else {
-		out, err = e.logicRunner.RunLogic(ctx, fn.Name, fn.LogicSteps, args)
-	}
+	out, err := e.logicRunner.RunLogicBody(ctx, fn.Name, fn.LogicBody, args)
 	if err != nil {
 		return nil, fmt.Errorf("logic %q: %w", fn.Name, err)
 	}
