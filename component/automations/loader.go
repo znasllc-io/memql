@@ -367,7 +367,7 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 	// Step construction and logic bodies (args.event.payload.X, a logic-arg
 	// read) are different surfaces and unaffected.
 	if eventPayloadReadPattern.MatchString(scrubSourceForPayloadScan(source)) {
-		return nil, fmt.Errorf("automation %q: dotted `event.<field>` reads are retired (G5, epic #2352; widened in memql#3610) -- declare the field in the args { } block and read it bare. Note that `event.node.<field>` never resolved to anything at all: the CDC envelope has no `node` key, so it silently decided false rather than erroring. Migrate with: go run ./scripts/migrations/event_payload_args -write <dsl-root>", automation.Name)
+		return nil, fmt.Errorf("automation %q: dotted `event.<field>` reads are retired (G5, epic #2352; widened in memql#3610) -- declare the field in the args { } block and read it as args.<field>. Note that `event.node.<field>` never resolved to anything at all: the CDC envelope has no `node` key, so it silently decided false rather than erroring. Migrate with: memqlmigrate --rewrite=bodies <dsl-root>", automation.Name)
 	}
 
 	// Validate trigger for potential misconfigurations
