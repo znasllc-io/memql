@@ -154,7 +154,10 @@ func buildCallableParsers() map[string]callableEntry {
 		"asof":      {CallableDirective, (*Parser).parseAsOfFunction},
 		"withdepth": {CallableDirective, (*Parser).parseWithDepthFunction},
 		"count":     {CallableDirective, (*Parser).parseCountFunction},
-		"shape":     {CallableDirective, (*Parser).parseShapeFunction},
+		// refine (memql#5364) is the internal form of a struct-form query's
+		// `refine <lambda>` clause: refine(paginate(<query>, n), row => ...).
+		"refine": {CallableDirective, (*Parser).parseRefineFunction},
+		"shape":  {CallableDirective, (*Parser).parseShapeFunction},
 	}
 }
 

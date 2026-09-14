@@ -238,8 +238,17 @@ func TestV1ParseShapes(t *testing.T) {
 		{`f(x).?a.b`, `(. (.? (call f x) a) b)`},
 		{`row.?tags.any(t => t)`, `(method any (.? row tags) (=> [t] t))`},
 		{`query activeUsers(status: "a").count()`, `(method count (query activeUsers status: lit:string:"a"))`},
-		{`logic runIsTerminal(status)`, `(logic runIsTerminal status)`},
+		// A construct call's bare name is a named argument that puns, and is
+		// recorded as one, in source order, mixed with named ones or not.
+		{`logic runIsTerminal(status)`, `(logic runIsTerminal status: status)`},
+		{`logic f(event, mode: "x")`, `(logic f event: event mode: lit:string:"x")`},
+		{`action cloneRepoAtVersion(workdir, ref: ref, dryRun)`, `(action cloneRepoAtVersion workdir: workdir ref: ref dryRun: dryRun)`},
 		{`capability script(dry-run: args.dryRun)`, `(capability script dry-run: (. args dryRun))`},
+		// Only a bare or construct call is held to the retired object-literal
+		// wrapper; a method's map argument is data, as is a map beside others.
+		{`xs.merge({k: 1})`, `(method merge xs {map k: lit:int64:1})`},
+		{`f({k: 1}, 2)`, `(call f {map k: lit:int64:1} lit:int64:2)`},
+		{`f(({k: 1}))`, `(call f (paren {map k: lit:int64:1}))`},
 		{`{Content-Type: "x"}`, `{map Content-Type: lit:string:"x"}`},
 		{`{in: 1, default: 2}`, `{map in: lit:int64:1 default: lit:int64:2}`},
 		{`true && false`, `(&& lit:bool:true lit:bool:false)`},
@@ -401,7 +410,7 @@ var v1CanonicalCorpus = []string{
 	`childOf(p => p.concept == "v1:crm:lead")`,
 	`references("assignedTo", r => r.active)`,
 	`rows.first().email`,
-	`logic runIsTerminal(status)`,
+	`logic runIsTerminal(status: status)`,
 	`capability script(dry-run: args.dryRun)`,
 	`{Content-Type: "application/json"}`,
 	`"say \"hi\"" + "tab\t"`,
@@ -465,6 +474,8 @@ func TestV1RoundTripNonCanonical(t *testing.T) {
 		`x in[1,2]`,
 		`a<b`,
 		`- 5.x`,
+		`logic runIsTerminal(status)`,
+		`action cloneRepoAtVersion(workdir, ref: ref, dryRun)`,
 		`(x)=>x`,
 		"f(\n  a: 1,\n  b: 2,\n)",
 	}

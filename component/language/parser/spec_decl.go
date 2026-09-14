@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"strconv"
+
 	"github.com/znasllc-io/memql/component/language/ast"
 )
 
@@ -13,6 +15,14 @@ import (
 //
 //	spec <BoundName> <Name> { return <bool-expr> }   -- signature-bound
 //	trait <Name> { return <bool-expr> }              -- deliberately unbound
+//	spec <BoundName> <Name> = row => <bool-expr>     -- edition 2026 (memql#5364)
+//	trait <Name> = row => <bool-expr>                -- edition 2026
+//
+// The `=` form's body is a lambda of one parameter, parsed by the v1
+// expression grammar into SpecDecl.Lambda (Body stays nil): the parameter IS
+// the bound row -- or, over an @actor shape, the actor envelope, spelled
+// `actor`. With Options.ExpressionsV1 on, the `{ return ... }` form is refused
+// naming memqlmigrate --rewrite=expressions; with it off both load.
 //
 // A spec binds exactly one shape XOR concept in its signature; the
 // bound name resolves through the file-top `use` import (shapes vs
@@ -75,6 +85,25 @@ func (p *Parser) parseSpecDecl(attrs []*ast.Attribute, isTrait bool) (*ast.SpecD
 	// this parser and accept the same lifecycle/description annotations.
 	if err := p.validateDeclAnnotations("Spec", keyword, decl.Name, attrs); err != nil {
 		return nil, err
+	}
+
+	// Edition 2026: `= <lambda>`.
+	if p.check(TokenOperator) && p.current.Literal == "=" {
+		p.advance()
+		lam, err := p.parseOneParamLambda(keyword + " " + strconv.Quote(decl.Name))
+		if err != nil {
+			return nil, err
+		}
+		decl.Lambda = lam
+		return decl, nil
+	}
+
+	if p.opts.ExpressionsV1 && p.check(TokenBraceOpen) {
+		rule := ruleSpecReturnBody
+		if isTrait {
+			rule = ruleTraitReturnBody
+		}
+		return nil, v1Retired(p.current, rule)
 	}
 
 	if err := p.expect(TokenBraceOpen); err != nil {

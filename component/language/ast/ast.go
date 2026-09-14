@@ -274,6 +274,20 @@ type CountExpr struct {
 func (*CountExpr) node()           {}
 func (*CountExpr) expressionNode() {}
 
+// RefineExpr is the `refine <lambda>` query clause (memql#5364): a predicate
+// evaluated in process over the page its paginated Target reads, after SQL.
+// It is the one named in-process construct in a query, it requires paginate
+// -- so what it scans is bounded by construction -- and it may return fewer
+// rows than the page size. The struct-form rewriter places it inside shape
+// and outside paginate: shape(refine(paginate(...), row => ...), "s").
+type RefineExpr struct {
+	Target ExpressionNode
+	Lambda *LambdaExpr
+}
+
+func (*RefineExpr) node()           {}
+func (*RefineExpr) expressionNode() {}
+
 // ShapeExpr applies a result-shaping template to the target expression.
 type ShapeExpr struct {
 	Target        ExpressionNode
@@ -745,12 +759,19 @@ type MutationStmt struct {
 	Kind    MutationKind
 	Concept string
 	// IDTemplate preserves the id=... expression (string literal, args.X, concat(...), etc.)
-	// for later runtime evaluation by mutation/function execution.
+	// for later runtime evaluation by mutation/function execution. Parsed with
+	// the edition-2026 grammar (parser.Options.ExpressionsV1) it -- and the
+	// three templates below -- hold the v1 ExpressionNode itself.
 	IDTemplate any
 	// CreatedAtTemplate preserves createdAt=... expression for optional CreatedAt overrides.
 	// It should evaluate to an RFC3339/RFC3339Nano timestamp string at runtime.
 	CreatedAtTemplate any
 	PayloadRaw        string
+	// PayloadExpr is the payload parsed as an edition-2026 map literal
+	// (parser.Options.ExpressionsV1); PayloadRaw then holds its canonical
+	// source (ast.FormatExpr). Nil when the payload was parsed as today's
+	// raw text.
+	PayloadExpr ExpressionNode
 	// ParentTemplate and AliasOfTemplate preserve relationship hints for later evaluation.
 	ParentTemplate  any
 	AliasOfTemplate any
@@ -1171,6 +1192,13 @@ type FunctionDef struct {
 	// ArgsSchema is the function's input schema, populated from the
 	// file-top `args { ... }` block.
 	ArgsSchema *ArgsSchema
+
+	// ExpressionsV1 records that the definition was parsed with the
+	// edition-2026 expression grammar in its in-process positions
+	// (parser.Options.ExpressionsV1, memql#5364), so its expression strings
+	// hold canonical v1 source and its expression fields hold v1 nodes.
+	// Consumers key their v1 path on it until the tree flips as one unit.
+	ExpressionsV1 bool
 }
 
 // RateLimitConfig holds rate limiting configuration.
@@ -1231,6 +1259,14 @@ type AutomationDef struct {
 	// automation runtime (audited in #2712) and are load-rejected on
 	// automations by the #2712 gate; the dead fields were removed in #2724.
 	Enabled bool // from @enabled
+
+	// ExpressionsV1 records that the automation (or logic) body was parsed
+	// with the edition-2026 expression grammar (parser.Options.ExpressionsV1,
+	// memql#5364): step conditions, forEach sources and filters, switch
+	// subjects, step arguments and the trigger filter hold canonical v1
+	// source, and their *Expr fields hold the parsed nodes. The compiler and
+	// the automation runtime key their v1 path on it.
+	ExpressionsV1 bool
 }
 
 func (*AutomationDef) node() {}
@@ -1239,6 +1275,10 @@ func (*AutomationDef) node() {}
 type TriggerDef struct {
 	Event  string
 	Filter string
+	// FilterLambda is the edition-2026 trigger filter, `@filter(row => ...)`
+	// (memql#5364): `row` is the triggering row. Filter then holds its
+	// canonical source (ast.FormatExpr). Nil for today's raw-text filter.
+	FilterLambda *LambdaExpr
 }
 
 // ArgsSchema defines an args-block schema -- the input schema for a
@@ -1302,6 +1342,11 @@ type StepDef struct {
 	RetryCount int    // from retry(n) wrapper
 	OnError    string // error handling strategy (e.g., "continue", "fail")
 	Config     any    // Step-type-specific configuration
+
+	// ConditionExpr is Condition parsed with the edition-2026 grammar
+	// (parser.Options.ExpressionsV1); Condition then holds its canonical
+	// source. Nil when the condition is today's canonicalised string.
+	ConditionExpr ExpressionNode
 }
 
 // StepType identifies the kind of step.
@@ -1352,6 +1397,12 @@ type ForEachStepConfig struct {
 	Index       string // Index variable (optional, e.g., "i" in "for i, item := range")
 	Concurrency int
 	Do          []StepDef
+
+	// SourceExpr and FilterExpr are Source and Filter parsed with the
+	// edition-2026 grammar (parser.Options.ExpressionsV1); the string fields
+	// then hold their canonical source. Nil otherwise.
+	SourceExpr ExpressionNode
+	FilterExpr ExpressionNode
 }
 
 // ParallelStepConfig configures concurrent step execution.
@@ -1366,6 +1417,11 @@ type SwitchStepConfig struct {
 	Expression string
 	Cases      map[string]*SwitchCase
 	Default    *SwitchCase
+
+	// ExpressionExpr is Expression parsed with the edition-2026 grammar
+	// (parser.Options.ExpressionsV1); Expression then holds its canonical
+	// source. Nil otherwise.
+	ExpressionExpr ExpressionNode
 }
 
 // SwitchCase defines what to execute for a switch case.
@@ -1801,6 +1857,12 @@ type SpecDecl struct {
 	Attributes []*Attribute   // declaration-level annotations
 	Body       ExpressionNode // parsed boolean expression body (the `return <bool>` body's expression)
 	Path       string         // source path, for errors/diagnostics
+
+	// Lambda is the edition-2026 body, `spec <bound> <name> = row => ...` /
+	// `trait <name> = row => ...` (memql#5364): exactly one parameter, the
+	// bound row -- or, over an @actor shape, `actor`. Body is nil when it is
+	// set; the two forms are one declaration's alternatives, never both.
+	Lambda *LambdaExpr
 }
 
 func (*SpecDecl) node() {}

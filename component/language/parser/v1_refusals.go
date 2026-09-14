@@ -71,6 +71,14 @@ const (
 	ruleSpecReference       = "retired_spec_reference"
 	ruleTraitReference      = "retired_trait_reference"
 	ruleContainsMethod      = "retired_contains_method"
+
+	// The predicate positions' legacy forms. Refused only with
+	// Options.ExpressionsV1 on: until the tree flips, both spellings of a
+	// predicate position load side by side.
+	ruleFilterWithoutLambda = "retired_filter_without_lambda"
+	ruleSpecReturnBody      = "retired_spec_return_body"
+	ruleTraitReturnBody     = "retired_trait_return_body"
+	ruleFilterAnnotation    = "retired_filter_annotation"
 )
 
 // v1RetiredFormTable is the one list. Order is the order the docs print.
@@ -116,6 +124,13 @@ var v1RetiredFormTable = []RetiredForm{
 	// The parser cannot know the receiver's type, so the method's refusal
 	// names both of the forms it used to stand for.
 	{Spelling: ".contains(...)", Replacement: "v in <list> for membership or s.includes(sub) for a substring", Rule: ruleContainsMethod},
+
+	// The predicate positions (D1): every predicate is a lambda naming the
+	// row it reads. Refused only with Options.ExpressionsV1 on.
+	{Spelling: "filter <predicate>", Replacement: "filter row => <predicate>", Rule: ruleFilterWithoutLambda},
+	{Spelling: "spec <bound> <name> { return <predicate> }", Replacement: "spec <bound> <name> = row => <predicate>", Rule: ruleSpecReturnBody},
+	{Spelling: "trait <name> { return <predicate> }", Replacement: "trait <name> = row => <predicate>", Rule: ruleTraitReturnBody},
+	{Spelling: "@filter(<predicate>)", Replacement: "@filter(row => <predicate>)", Rule: ruleFilterAnnotation},
 }
 
 // V1RetiredForms returns every spelling the edition-2026 expression parser

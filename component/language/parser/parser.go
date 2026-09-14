@@ -81,13 +81,22 @@ type Parser struct {
 	// thousand `(` -- is a parse error, not a goroutine stack overflow, which
 	// Go cannot recover and which would take the whole engine down.
 	v1Depth int
+
+	// opts selects the grammar of the in-process expression positions
+	// (options.go). The zero value is today's grammar.
+	opts Options
 }
 
-// NewParser creates a new parser for the given tokens.
+// NewParser creates a new parser for the given tokens, under DefaultOptions.
+// The engine's loaders build their parsers here rather than through ParseFile,
+// which is why the default lives on the parser: flipping DefaultOptions flips
+// every path that parses a definition, and an expression-only parse (the
+// internal query form) reads no option at all.
 func NewParser(tokens []Token) *Parser {
 	p := &Parser{
 		tokens: tokens,
 		pos:    0,
+		opts:   DefaultOptions,
 	}
 	if len(tokens) > 0 {
 		p.current = tokens[0]
@@ -200,15 +209,7 @@ func (p *Parser) Parse() (Node, error) {
 // returns an ExpressionNode when the input lacks a top-level
 // definition.
 func ParseFile(source string) (*File, error) {
-	lexer := NewLexer(source)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		return nil, err
-	}
-	parser := NewParser(tokens)
-	parser.SetSource(source)
-	parser.SetDocComments(lexer.DocComments())
-	return parser.parseFile()
+	return ParseFileWithOptions(source, DefaultOptions)
 }
 
 // ParseShapeDecl tokenises the given source and parses it as a
@@ -395,6 +396,9 @@ func (p *Parser) parseFile() (*File, error) {
 		}
 		if def != nil {
 			attachDocComment(def, p.takeDocFor(defFirstLine))
+			if p.opts.ExpressionsV1 {
+				markExpressionsV1(def)
+			}
 			file.Definitions = append(file.Definitions, def)
 		}
 	}
@@ -725,6 +729,7 @@ func (p *Parser) parseDefinition() (Node, error) {
 //   - @trigger(event="session.opened")   (named arguments)
 //   - @args({ "userId": {...} })         (object value)
 func (p *Parser) parseAttribute() (*Attribute, error) {
+	atTok := p.current
 	if err := p.expect(TokenAt); err != nil {
 		return nil, err
 	}
@@ -753,6 +758,26 @@ func (p *Parser) parseAttribute() (*Attribute, error) {
 		if p.check(TokenParenClose) {
 			p.advance()
 			return attr, nil
+		}
+
+		// @filter(row => ...): the edition-2026 trigger filter (memql#5364),
+		// a lambda over the triggering row, stored as the node itself.
+		// processAutomationAttributes carries it onto TriggerDef.
+		if name == "filter" {
+			if p.v1FilterLambdaAhead() {
+				lam, err := p.parseOneParamLambda("@filter")
+				if err != nil {
+					return nil, err
+				}
+				attr.Value = lam
+				if err := p.expect(TokenParenClose); err != nil {
+					return nil, err
+				}
+				return attr, nil
+			}
+			if p.opts.ExpressionsV1 {
+				return nil, v1Retired(atTok, ruleFilterAnnotation)
+			}
 		}
 
 		// @filter(...) captures raw expression as a string
@@ -931,7 +956,7 @@ func (p *Parser) parseAttribute() (*Attribute, error) {
 				attr.Args[argName] = true
 			} else {
 				p.advance() // consume = or :
-				val, err := p.parseValue()
+				val, err := p.parseAttributeArgValue(name, argName, argTok)
 				if err != nil {
 					return nil, err
 				}
@@ -1049,7 +1074,13 @@ func (p *Parser) parseGoStyleFunction() (*FunctionDef, error) {
 	case FunctionTypeMutation:
 		body, err = p.parseGoStyleMutationBodyOrLegacy()
 	case FunctionTypeQuery:
+		bodyStart := p.current
 		body, err = p.parseGoStyleQueryBodyOrLegacy()
+		if err == nil {
+			if expr, ok := body.(ExpressionNode); ok {
+				err = p.checkV1QueryFilter(expr, bodyStart)
+			}
+		}
 	case FunctionTypeSpec:
 		// Specs require an explicit return statement with a boolean expression.
 		body, err = p.parseGoStyleSpecBody()
@@ -1474,7 +1505,13 @@ func (p *Parser) parseGoStyleAutomationBody(name string) (*AutomationDef, error)
 		// Check for return statement
 		if p.check(TokenKeywordReturn) {
 			p.advance()
-			expr, err := p.parseExpression()
+			var expr ExpressionNode
+			var err error
+			if p.opts.ExpressionsV1 {
+				expr, err = p.parseV1Expression()
+			} else {
+				expr, err = p.parseExpression()
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -1607,7 +1644,7 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 	// inner steps keep their own IDs).
 	if p.check(TokenKeywordIf) {
 		p.advance()
-		cond, err := p.parseConditionExpression()
+		cond, condExpr, err := p.parseStepCondition()
 		if err != nil {
 			return nil, err
 		}
@@ -1633,11 +1670,32 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 				return nil, err
 			}
 			return &StepDef{
-				ID:         names[0],
-				Type:       StepTypeParallel,
-				Condition:  cond,
-				RetryCount: retryCount,
-				Config:     cfg,
+				ID:            names[0],
+				Type:          StepTypeParallel,
+				Condition:     cond,
+				ConditionExpr: condExpr,
+				RetryCount:    retryCount,
+				Config:        cfg,
+			}, nil
+		}
+		if p.opts.ExpressionsV1 {
+			call, err := p.parseV1StepCall("a conditional step's body")
+			if err != nil {
+				return nil, err
+			}
+			if !p.check(TokenBraceClose) {
+				return nil, newParseErrorf(&p.current,
+					"multi-statement bodies are not supported in the `%s := if cond { ... }` assignment form (the LHS only binds a single result). Drop the `%s := ` prefix and write the if statement at the top level of the body -- the inner statements keep their own names and the if's condition is stamped on each.",
+					names[0], names[0])
+			}
+			p.advance() // }
+			return &StepDef{
+				ID:            names[0],
+				Type:          StepTypeFunction,
+				Condition:     cond,
+				ConditionExpr: condExpr,
+				RetryCount:    retryCount,
+				Config:        &FunctionStepConfig{Name: call.Name, Args: v1CallArgs(call)},
 			}, nil
 		}
 		// Lookahead: is this body a single bare function-call
@@ -1682,6 +1740,17 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 				Args: call.Args,
 			},
 		}, nil
+	}
+
+	// Edition 2026 (Options.ExpressionsV1): the right-hand side is any v1
+	// expression -- a call is a function step, anything else a query step
+	// the runtime evaluates in process -- unless it is a step-type block.
+	if p.opts.ExpressionsV1 && !p.stepBlockAhead() {
+		n, err := p.parseV1Expression()
+		if err != nil {
+			return nil, err
+		}
+		return v1Step(names[0], retryCount, n), nil
 	}
 
 	// Function-call step OR expression-builtin step:
@@ -1841,13 +1910,14 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 
 	// Check for "if condition" after type
 	var condition string
+	var conditionExpr ExpressionNode
 	if p.check(TokenKeywordIf) {
 		p.advance()
-		cond, err := p.parseConditionExpression()
+		cond, condExpr, err := p.parseStepCondition()
 		if err != nil {
 			return nil, err
 		}
-		condition = cond
+		condition, conditionExpr = cond, condExpr
 	}
 
 	// Parse step body
@@ -1867,11 +1937,12 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 	p.advance()
 
 	return &StepDef{
-		ID:         names[0],
-		Type:       stepType,
-		Condition:  condition,
-		RetryCount: retryCount,
-		Config:     config,
+		ID:            names[0],
+		Type:          stepType,
+		Condition:     condition,
+		ConditionExpr: conditionExpr,
+		RetryCount:    retryCount,
+		Config:        config,
 	}, nil
 }
 
@@ -3224,32 +3295,51 @@ func (p *Parser) parseForRangeStep() (*StepDef, error) {
 	}
 	p.advance()
 
-	// Parse collection expression (until 'if' or '{')
-	collectionParts := []string{}
-	for !p.check(TokenEOF) && !p.check(TokenKeywordIf) && !p.check(TokenBraceOpen) {
-		collectionParts = append(collectionParts, p.current.Literal)
-		p.advance()
-	}
-	source := strings.Join(collectionParts, "")
-
-	// Optional filter: if condition
-	var filter string
-	if p.check(TokenKeywordIf) {
-		p.advance()
-		filterParts := []string{}
-		for !p.check(TokenEOF) && !p.check(TokenBraceOpen) {
-			lit := p.current.Literal
-			// Token literals are UNQUOTED content; re-quote strings so the
-			// reconstructed filter keeps `x == "development"` intact --
-			// otherwise the literal leaks as a bare identifier (flagged by
-			// the G2 checker and ambiguous for the evaluator). #2367.
-			if p.check(TokenString) {
-				lit = strconv.Quote(lit)
+	var source, filter string
+	var sourceExpr, filterExpr ExpressionNode
+	if p.opts.ExpressionsV1 {
+		// Edition 2026: the collection and the optional `if` filter are v1
+		// expressions; each stops at the token that follows it.
+		n, err := p.parseV1Expression()
+		if err != nil {
+			return nil, err
+		}
+		source, sourceExpr = formatV1(n), n
+		if p.check(TokenKeywordIf) {
+			p.advance()
+			f, err := p.parseV1Expression()
+			if err != nil {
+				return nil, err
 			}
-			filterParts = append(filterParts, lit)
+			filter, filterExpr = formatV1(f), f
+		}
+	} else {
+		// Parse collection expression (until 'if' or '{')
+		collectionParts := []string{}
+		for !p.check(TokenEOF) && !p.check(TokenKeywordIf) && !p.check(TokenBraceOpen) {
+			collectionParts = append(collectionParts, p.current.Literal)
 			p.advance()
 		}
-		filter = strings.Join(filterParts, " ")
+		source = strings.Join(collectionParts, "")
+
+		// Optional filter: if condition
+		if p.check(TokenKeywordIf) {
+			p.advance()
+			filterParts := []string{}
+			for !p.check(TokenEOF) && !p.check(TokenBraceOpen) {
+				lit := p.current.Literal
+				// Token literals are UNQUOTED content; re-quote strings so the
+				// reconstructed filter keeps `x == "development"` intact --
+				// otherwise the literal leaks as a bare identifier (flagged by
+				// the G2 checker and ambiguous for the evaluator). #2367.
+				if p.check(TokenString) {
+					lit = strconv.Quote(lit)
+				}
+				filterParts = append(filterParts, lit)
+				p.advance()
+			}
+			filter = strings.Join(filterParts, " ")
+		}
 	}
 
 	// Parse body
@@ -3313,11 +3403,13 @@ func (p *Parser) parseForRangeStep() (*StepDef, error) {
 		ID:   stepId,
 		Type: StepTypeForEach,
 		Config: &ForEachStepConfig{
-			Source: source,
-			Filter: filter,
-			As:     valueVar,
-			Index:  indexVar,
-			Do:     doSteps,
+			Source:     source,
+			Filter:     filter,
+			As:         valueVar,
+			Index:      indexVar,
+			Do:         doSteps,
+			SourceExpr: sourceExpr,
+			FilterExpr: filterExpr,
 		},
 	}, nil
 }
@@ -3349,12 +3441,17 @@ func (p *Parser) parseIfStatement() (*IfStmt, error) {
 
 	// Parse condition (until '{') -- canonicalised by parseConditionExpression
 	// so the runtime evaluator sees the same shape that step.Condition
-	// strings carry elsewhere.
-	condStr, err := p.parseConditionExpression()
+	// strings carry elsewhere. With ExpressionsV1 on the condition is the v1
+	// node itself, which ifStatementToSteps stamps as a node.
+	condStr, condExpr, err := p.parseStepCondition()
 	if err != nil {
 		return nil, err
 	}
-	stmt.Condition = &LiteralExpr{Value: condStr}
+	if condExpr != nil {
+		stmt.Condition = condExpr
+	} else {
+		stmt.Condition = &LiteralExpr{Value: condStr}
+	}
 
 	// Parse then block
 	if err := p.expect(TokenBraceOpen); err != nil {
@@ -3453,6 +3550,18 @@ func (p *Parser) parseIfBodyStatements() ([]StepDef, error) {
 				// the same callee name.
 				pos := p.current.Pos
 				line := p.current.Line
+				if p.opts.ExpressionsV1 {
+					call, err := p.parseV1StepCall("an if-body statement")
+					if err != nil {
+						return nil, err
+					}
+					steps = append(steps, StepDef{
+						ID:     fmt.Sprintf("anon_%d_L%d", pos, line),
+						Type:   StepTypeFunction,
+						Config: &FunctionStepConfig{Name: call.Name, Args: v1CallArgs(call)},
+					})
+					continue
+				}
 				expr, err := p.parseExpression()
 				if err != nil {
 					return nil, err
@@ -3505,12 +3614,22 @@ func (p *Parser) parseSwitchStep() (*StepDef, error) {
 	}
 
 	// Parse expression (until '{')
-	exprParts := []string{}
-	for !p.check(TokenEOF) && !p.check(TokenBraceOpen) {
-		exprParts = append(exprParts, p.current.Literal)
-		p.advance()
+	var expression string
+	var expressionExpr ExpressionNode
+	if p.opts.ExpressionsV1 {
+		n, err := p.parseV1Expression()
+		if err != nil {
+			return nil, err
+		}
+		expression, expressionExpr = formatV1(n), n
+	} else {
+		exprParts := []string{}
+		for !p.check(TokenEOF) && !p.check(TokenBraceOpen) {
+			exprParts = append(exprParts, p.current.Literal)
+			p.advance()
+		}
+		expression = strings.Join(exprParts, "")
 	}
-	expression := strings.Join(exprParts, "")
 
 	if err := p.expect(TokenBraceOpen); err != nil {
 		return nil, err
@@ -3584,9 +3703,10 @@ func (p *Parser) parseSwitchStep() (*StepDef, error) {
 		ID:   "switch_" + expression,
 		Type: StepTypeSwitch,
 		Config: &SwitchStepConfig{
-			Expression: expression,
-			Cases:      cases,
-			Default:    defaultCase,
+			Expression:     expression,
+			Cases:          cases,
+			Default:        defaultCase,
+			ExpressionExpr: expressionExpr,
 		},
 	}, nil
 }
@@ -3604,6 +3724,9 @@ func (p *Parser) parseSwitchStep() (*StepDef, error) {
 func (p *Parser) ifStatementToSteps(stmt *IfStmt) []StepDef {
 	if stmt == nil {
 		return nil
+	}
+	if p.opts.ExpressionsV1 {
+		return ifStatementToStepsV1(stmt)
 	}
 	cond := conditionString(stmt.Condition)
 	var out []StepDef
@@ -3901,6 +4024,10 @@ func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Att
 			if v := getAttrArgString(attr, "filter"); v != "" {
 				d.Trigger.Filter = v
 			}
+			if lam, ok := attr.Args["filter"].(*LambdaExpr); ok {
+				d.Trigger.Filter = formatV1(lam)
+				d.Trigger.FilterLambda = lam
+			}
 			// @trigger(schedule="0 0 0 * * *") -- accepted as a synonym for
 			// @schedule(cron="..."). Historically the scheduler silently
 			// dropped this form; any automation using it never ran. Kept
@@ -3913,6 +4040,13 @@ func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Att
 			// @filter(...) as standalone annotation — sets trigger filter
 			if d.Trigger == nil {
 				d.Trigger = &TriggerDef{}
+			}
+			// @filter(row => ...) (memql#5364): the canonical source in
+			// Filter, the lambda beside it.
+			if lam, ok := attr.Value.(*LambdaExpr); ok {
+				d.Trigger.Filter = formatV1(lam)
+				d.Trigger.FilterLambda = lam
+				continue
 			}
 			// Accept @filter("expression") or @filter(expression)
 			if v := getAttrString(attr); v != "" {
@@ -4188,13 +4322,14 @@ func (p *Parser) parseStep() (*StepDef, error) {
 
 	// Optional "when" condition
 	var condition string
+	var conditionExpr ExpressionNode
 	if p.check(TokenKeywordWhen) {
 		p.advance()
-		cond, err := p.parseConditionExpression()
+		cond, condExpr, err := p.parseStepCondition()
 		if err != nil {
 			return nil, err
 		}
-		condition = cond
+		condition, conditionExpr = cond, condExpr
 	}
 
 	// Step body in braces
@@ -4215,10 +4350,11 @@ func (p *Parser) parseStep() (*StepDef, error) {
 	p.advance()
 
 	return &StepDef{
-		ID:        stepId,
-		Type:      stepType,
-		Condition: condition,
-		Config:    config,
+		ID:            stepId,
+		Type:          stepType,
+		Condition:     condition,
+		ConditionExpr: conditionExpr,
+		Config:        config,
 	}, nil
 }
 
@@ -4287,6 +4423,20 @@ func (p *Parser) parseActionStepConfig() (any, error) {
 			continue
 		}
 
+		// Edition 2026: the args map's values are v1 expressions, and a bare
+		// name in it puns -- it is a construct call's argument list.
+		if key == "args" && p.opts.ExpressionsV1 {
+			args, err := p.parseV1ArgsMap(true)
+			if err != nil {
+				return nil, err
+			}
+			cfg.Args = args
+			if p.check(TokenComma) {
+				p.advance()
+			}
+			continue
+		}
+
 		val, err := p.parseValue()
 		if err != nil {
 			return nil, err
@@ -4336,6 +4486,18 @@ func (p *Parser) parseFunctionStepConfig() (any, error) {
 		if p.check(TokenColon) || (p.check(TokenOperator) && p.current.Literal == "=") {
 			p.advance()
 		} else {
+			continue
+		}
+
+		if key == "args" && p.opts.ExpressionsV1 {
+			args, err := p.parseV1ArgsMap(false)
+			if err != nil {
+				return nil, err
+			}
+			cfg.Args = args
+			if p.check(TokenComma) {
+				p.advance()
+			}
 			continue
 		}
 
@@ -4443,7 +4605,13 @@ func (p *Parser) parseMutationBody() (*MutationStmt, error) {
 	// (either '{' or an identifier like 'id'). Jump straight to argument parsing.
 	if implicit {
 		// Check if first argument is an object literal { ... }
-		if p.check(TokenBraceOpen) {
+		if p.check(TokenBraceOpen) && p.opts.ExpressionsV1 {
+			payload, raw, err := p.parseV1Payload()
+			if err != nil {
+				return nil, err
+			}
+			mutation.PayloadExpr, mutation.PayloadRaw = payload, raw
+		} else if p.check(TokenBraceOpen) {
 			start := p.pos
 			depth := 0
 			for !p.check(TokenEOF) {
@@ -4473,18 +4641,26 @@ func (p *Parser) parseMutationBody() (*MutationStmt, error) {
 
 					switch argName {
 					case "id":
-						idTmpl, err := p.parseValueMaybeCoalesce()
+						idTmpl, err := p.parseMutationValue()
 						if err != nil {
 							return nil, err
 						}
 						mutation.IDTemplate = idTmpl
 					case "createdAt":
-						createdAtTmpl, err := p.parseValueMaybeCoalesce()
+						createdAtTmpl, err := p.parseMutationValue()
 						if err != nil {
 							return nil, err
 						}
 						mutation.CreatedAtTemplate = createdAtTmpl
 					case "payload":
+						if p.opts.ExpressionsV1 {
+							payload, raw, err := p.parseV1Payload()
+							if err != nil {
+								return nil, err
+							}
+							mutation.PayloadExpr, mutation.PayloadRaw = payload, raw
+							break
+						}
 						start := p.pos
 						depth := 0
 						for !p.check(TokenEOF) {
@@ -4504,13 +4680,13 @@ func (p *Parser) parseMutationBody() (*MutationStmt, error) {
 						}
 						mutation.PayloadRaw = p.reconstructTokens(start, p.pos)
 					case "parent":
-						valTmpl, err := p.parseValueMaybeCoalesce()
+						valTmpl, err := p.parseMutationValue()
 						if err != nil {
 							return nil, err
 						}
 						mutation.ParentTemplate = valTmpl
 					case "aliasOf":
-						valTmpl, err := p.parseValueMaybeCoalesce()
+						valTmpl, err := p.parseMutationValue()
 						if err != nil {
 							return nil, err
 						}
@@ -4530,7 +4706,13 @@ func (p *Parser) parseMutationBody() (*MutationStmt, error) {
 		p.advance()
 
 		// Check if second argument is an object literal { ... }
-		if p.check(TokenBraceOpen) {
+		if p.check(TokenBraceOpen) && p.opts.ExpressionsV1 {
+			payload, raw, err := p.parseV1Payload()
+			if err != nil {
+				return nil, err
+			}
+			mutation.PayloadExpr, mutation.PayloadRaw = payload, raw
+		} else if p.check(TokenBraceOpen) {
 			// Object literal syntax: insert("concept", { id: ..., payload: {...} })
 			start := p.pos
 			depth := 0
@@ -4563,18 +4745,26 @@ func (p *Parser) parseMutationBody() (*MutationStmt, error) {
 
 					switch argName {
 					case "id":
-						idTmpl, err := p.parseValueMaybeCoalesce()
+						idTmpl, err := p.parseMutationValue()
 						if err != nil {
 							return nil, err
 						}
 						mutation.IDTemplate = idTmpl
 					case "createdAt":
-						createdAtTmpl, err := p.parseValueMaybeCoalesce()
+						createdAtTmpl, err := p.parseMutationValue()
 						if err != nil {
 							return nil, err
 						}
 						mutation.CreatedAtTemplate = createdAtTmpl
 					case "payload":
+						if p.opts.ExpressionsV1 {
+							payload, raw, err := p.parseV1Payload()
+							if err != nil {
+								return nil, err
+							}
+							mutation.PayloadExpr, mutation.PayloadRaw = payload, raw
+							break
+						}
 						// Collect payload as raw string
 						start := p.pos
 						depth := 0
@@ -4595,13 +4785,13 @@ func (p *Parser) parseMutationBody() (*MutationStmt, error) {
 						}
 						mutation.PayloadRaw = p.reconstructTokens(start, p.pos)
 					case "parent":
-						valTmpl, err := p.parseValueMaybeCoalesce()
+						valTmpl, err := p.parseMutationValue()
 						if err != nil {
 							return nil, err
 						}
 						mutation.ParentTemplate = valTmpl
 					case "aliasOf":
-						valTmpl, err := p.parseValueMaybeCoalesce()
+						valTmpl, err := p.parseMutationValue()
 						if err != nil {
 							return nil, err
 						}
@@ -4656,6 +4846,14 @@ func (p *Parser) parseForEachStepConfig() (*ForEachStepConfig, error) {
 
 			switch key {
 			case "source":
+				if p.opts.ExpressionsV1 {
+					n, err := p.parseV1Expression()
+					if err != nil {
+						return nil, err
+					}
+					config.Source, config.SourceExpr = formatV1(n), n
+					break
+				}
 				val, err := p.parseValue()
 				if err != nil {
 					return nil, err
@@ -4664,6 +4862,14 @@ func (p *Parser) parseForEachStepConfig() (*ForEachStepConfig, error) {
 					config.Source = s
 				}
 			case "filter", "where":
+				if p.opts.ExpressionsV1 {
+					n, err := p.parseV1Expression()
+					if err != nil {
+						return nil, err
+					}
+					config.Filter, config.FilterExpr = formatV1(n), n
+					break
+				}
 				val, err := p.parseValue()
 				if err != nil {
 					return nil, err
@@ -4708,6 +4914,29 @@ func (p *Parser) parseForEachStepConfig() (*ForEachStepConfig, error) {
 			}
 
 			if p.check(TokenComma) {
+				p.advance()
+			}
+		}
+	} else if p.opts.ExpressionsV1 {
+		// Edition 2026: `forEach <source> [where <filter>] [as item]`, each
+		// a v1 expression that stops at the keyword that follows it.
+		n, err := p.parseV1Expression()
+		if err != nil {
+			return nil, err
+		}
+		config.Source, config.SourceExpr = formatV1(n), n
+		if p.check(TokenKeywordWhere) {
+			p.advance()
+			f, err := p.parseV1Expression()
+			if err != nil {
+				return nil, err
+			}
+			config.Filter, config.FilterExpr = formatV1(f), f
+		}
+		if p.check(TokenKeywordAs) {
+			p.advance()
+			if p.check(TokenIdentifier) {
+				config.As = p.current.Literal
 				p.advance()
 			}
 		}
@@ -4881,6 +5110,14 @@ func (p *Parser) parseSwitchStepConfig() (*SwitchStepConfig, error) {
 
 		switch key {
 		case "expression", "expr":
+			if p.opts.ExpressionsV1 {
+				n, err := p.parseV1Expression()
+				if err != nil {
+					return nil, err
+				}
+				config.Expression, config.ExpressionExpr = formatV1(n), n
+				break
+			}
 			val, err := p.parseValue()
 			if err != nil {
 				return nil, err
@@ -5343,6 +5580,9 @@ func (p *Parser) parseUnary() (ExpressionNode, error) {
 
 // parsePrimary parses primary expressions.
 func (p *Parser) parsePrimary() (ExpressionNode, error) {
+	if lam, ok, err := p.tryParseV1LambdaOperand(); ok || err != nil {
+		return lam, err
+	}
 	switch {
 	case p.check(TokenParenOpen):
 		return p.parseGrouped()
@@ -8205,5 +8445,11 @@ func (p *Parser) declShapeAhead() bool {
 	if idents == 0 || i >= len(p.tokens) {
 		return false
 	}
-	return p.tokens[i].Type == TokenBraceOpen
+	if p.tokens[i].Type == TokenBraceOpen {
+		return true
+	}
+	// The edition-2026 predicate declaration opens with `=` where the older
+	// form opens with `{`: `spec <bound> <name> = row => ...` (memql#5364).
+	kw := p.current.Literal
+	return (kw == "spec" || kw == "trait") && p.tokens[i].Type == TokenOperator && p.tokens[i].Literal == "="
 }

@@ -130,7 +130,7 @@ func ExtractDeclarationSlices(source string, headerRe *regexp.Regexp) []Declarat
 // comments survive into the slice, and walk the preamble on the original.
 func ExtractTerseAutomationSlices(source string) []DeclarationSlice {
 	scan := BlankComments(source)
-	matches := terseAutomationHeader.FindAllStringSubmatchIndex(scan, -1)
+	matches := terseAutomationMatches(scan)
 	if len(matches) == 0 {
 		return nil
 	}

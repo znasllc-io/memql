@@ -49,6 +49,8 @@ var StructQueryDirectives = []string{
 	"sort",
 	"paginate",
 	"asOf",
+	// refine (memql#5364) runs a lambda over the page paginate reads.
+	"refine",
 }
 
 // BodyKeywords additionally covers the construct kinds a struct-query body

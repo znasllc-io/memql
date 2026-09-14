@@ -63,6 +63,27 @@ package parser
 //   - 93b365ed (2026-07-21, memql#2707) -- eight zero-use expression builtins
 //     hard-retired (year, quarter, month, dayOfMonth, isAnniversary,
 //     isFirstDayOfQuarter, memqlVersion, subtractTimestamps).
+//
+// # 2026.09-dsl-v1-expressions (memql#5364)
+//
+// The edition-2026 predicate positions, accepted BESIDE the legacy spellings
+// until parser.Options.ExpressionsV1 flips with the tree's migration: a struct
+// query's `filter row => ...`, `spec <bound> <name> = row => ...`,
+// `trait <name> = row => ...`, `@filter(row => ...)` (also inline on a terse
+// automation header, and as @trigger's filter=), and the new `refine <lambda>`
+// clause, legal only with `paginate`. Every one is a WIDENING, so no rewrite
+// mode is owed for this bump; memqlmigrate --rewrite=expressions is what the
+// later flip ships.
+//
+// One narrowing: a call named `refine(...)` in the internal query form is now
+// the refine directive, which takes refine(paginate(...), row => ...). No
+// construct in the tree calls a function by that name.
+//
+// Not a surface change, recorded because it changes an internal string: a
+// struct query's filter joins its concept as `concept==<id> && (<filter>)`,
+// not `concept==<id>;<filter>`. The `;` bound at `&&` level, so a filter whose
+// top level was an `||` split around it; every such filter in the tree was
+// already parenthesised, so no shipped query changes meaning.
 
 import (
 	"crypto/sha256"
@@ -77,7 +98,7 @@ import (
 // The digest suffix is not decoration: TestGrammarVersionCarriesTheSurfaceDigest
 // recomputes it and requires this string to end with it, which is what makes a
 // grammar move impossible to land without editing this line (memql#3089).
-const GrammarVersion = "2026.08-asof-fallback-and-annotation-arg-narrowings-c0eedce6"
+const GrammarVersion = "2026.09-dsl-v1-expressions-b80c0409"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test

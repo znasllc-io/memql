@@ -693,6 +693,9 @@ type structQueryBody struct {
 	sort     string
 	paginate string
 	asOf     string
+	// refine is the lambda of a `refine <lambda>` clause (memql#5364): a
+	// predicate evaluated in process over the page paginate reads.
+	refine string
 }
 
 // UnboundedPaginateWindow is the explicit paginate window the rewriter
@@ -724,6 +727,9 @@ func emitQuery(name, conceptId, body, preamble string) (string, error) {
 	if parsed.count && (parsed.sort != "" || parsed.paginate != "") {
 		return "", fmt.Errorf("`count` cannot be combined with `sort` or `paginate`")
 	}
+	if err := checkRefineClause(parsed); err != nil {
+		return "", err
+	}
 
 	// `@unbounded("reason")` opt-out (memql#1965). The author has
 	// deliberately marked this query as a legitimate full-set read.
@@ -753,7 +759,7 @@ func emitQuery(name, conceptId, body, preamble string) (string, error) {
 	var sb strings.Builder
 	emitFuncHeader(&sb, "Query", name, parsed.argsText, "(any, error)")
 	sb.WriteString("  return ")
-	sb.WriteString(buildStructQueryExpr(conceptId, parsed.filter, parsed.shape, parsed.sort, parsed.paginate, parsed.asOf, parsed.count))
+	sb.WriteString(buildStructQueryExpr(conceptId, parsed.filter, parsed.shape, parsed.sort, parsed.paginate, parsed.asOf, parsed.refine, parsed.count))
 	sb.WriteString(", nil\n}")
 	return sb.String(), nil
 }
@@ -780,6 +786,37 @@ func unboundedReason(preamble string) (string, bool, error) {
 		return "", true, fmt.Errorf("`@unbounded` requires a reason string: @unbounded(\"why this query reads the full set\")")
 	}
 	return "", false, nil
+}
+
+// checkRefineClause validates a `refine <lambda>` clause (memql#5364), before
+// @unbounded can inject a window of its own. refine evaluates in process over
+// the page paginate reads, so it needs an AUTHORED paginate: without one the
+// "page" is the whole matching set, which is the silent client-side scan the
+// pushdown tier exists to refuse. It never combines with count, which reads no
+// page at all.
+func checkRefineClause(q *structQueryBody) error {
+	if q.refine == "" {
+		return nil
+	}
+	if q.count {
+		return fmt.Errorf("`refine` cannot be combined with `count` -- count aggregates in SQL and reads no page for refine to run over")
+	}
+	if q.paginate == "" {
+		return fmt.Errorf("`refine` requires `paginate`: it runs in process over the page paginate reads, and without one that page is the whole matching set -- add `paginate <n>` (refine may then return fewer than n rows)")
+	}
+	if !opensWithLambdaHeader(q.refine) {
+		return fmt.Errorf("`refine` takes a lambda: refine row => <predicate>, got %q", q.refine)
+	}
+	return nil
+}
+
+// lambdaHeader matches the start of an edition-2026 lambda: `x =>`, `() =>`,
+// `(x) =>`, `(x, y) =>`.
+var lambdaHeader = regexp.MustCompile(`^(?:[A-Za-z_][A-Za-z0-9_]*|\(\s*(?:[A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*\s*,?)?\s*\))\s*=>`)
+
+// opensWithLambdaHeader reports whether a clause value is a lambda.
+func opensWithLambdaHeader(s string) bool {
+	return lambdaHeader.MatchString(strings.TrimSpace(s))
 }
 
 // joinStructQueryContinuations folds a struct-query body's physical lines
@@ -840,13 +877,18 @@ func joinStructQueryContinuations(raw []string) []string {
 // expression, longest first so `<=` is tested before `<`.
 var structQueryTrailingOperators = []string{
 	"??", "&&", "||", "==", "!=", "<=", ">=",
-	"+", "-", "*", "/", "%", ",", "(", "{", "<", ">", "=", ".", ":",
+	"+", "-", "*", "/", "%", ",", "(", "{", "<", ">", "=", ".", ":", "?",
 }
 
 // structQueryLeadingOperators are the tokens a continuation line may OPEN
 // with. `-` is excluded deliberately: it is a legal identifier character in
 // this language, so a line starting `-foo` is not reliably an operator.
-var structQueryLeadingOperators = []string{"??", "&&", "||", "==", "!=", "<=", ">=", ")", "}", ",", ".", "+", "*", "/"}
+//
+// `?`, `:` and `=>` (memql#5364) are the edition-2026 continuations: a
+// conditional broken before its branches, and a lambda whose arrow starts the
+// next line (`filter row` / `=> row.a == 1`). No clause keyword starts with
+// any of them, so none can swallow the next clause.
+var structQueryLeadingOperators = []string{"??", "&&", "||", "==", "!=", "<=", ">=", ")", "}", ",", ".", "+", "*", "/", "?", ":", "=>"}
 
 func endsOnDanglingOperator(s string) bool {
 	s = strings.TrimSpace(s)
@@ -954,6 +996,8 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 			out.paginate = strings.TrimSpace(strings.TrimPrefix(line, "paginate"))
 		case strings.HasPrefix(line, "asOf"):
 			out.asOf = strings.TrimSpace(strings.TrimPrefix(line, "asOf"))
+		case strings.HasPrefix(line, "refine"):
+			out.refine = strings.TrimSpace(strings.TrimPrefix(line, "refine"))
 		default:
 			return nil, fmt.Errorf("unknown struct-query field on line %q", line)
 		}
@@ -966,7 +1010,7 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 // engine already knows how to compile.
 //
 // Directive wrapping order (innermost to outermost): asOf -> sort ->
-// paginate -> shape. Matches the order the runtime memql parser
+// paginate -> refine -> shape. Matches the order the runtime memql parser
 // applies them when these are written as nested function calls in
 // a handwritten query string. Each directive's argument is passed
 // through VERBATIM -- the author writes the same arg list they
@@ -980,10 +1024,18 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 // handwritten `shape(paginate(sort(...)))` runtime form, which
 // blocked memql#286's migration of cognition's space-context
 // callsites away from runtime shape() (memql#288, memql#290).
-func buildStructQueryExpr(conceptId, filter, shape, sort, paginate, asOf string, count bool) string {
+func buildStructQueryExpr(conceptId, filter, shape, sort, paginate, asOf, refine string, count bool) string {
 	base := "concept==" + conceptId
 	if filter != "" {
-		base += ";" + filter
+		// Joined with `&&` and parenthesised (memql#5364). The join used to be
+		// `;`, which binds at `&&` level, so a filter whose own top level was
+		// an `||` split around it -- `concept==X; a || b` is
+		// `(concept==X && a) || b`, and every row matching b escaped the
+		// concept. The corpus parenthesises its one such filter; the
+		// parentheses here make that unnecessary. A v1 filter is a lambda
+		// (`row => ...`), and the parentheses are what keep its body, which
+		// extends as far as it can, inside the join.
+		base += " && (" + filter + ")"
 	}
 	if asOf != "" {
 		base = fmt.Sprintf("asOf(%s, %s)", base, asOf)
@@ -993,6 +1045,11 @@ func buildStructQueryExpr(conceptId, filter, shape, sort, paginate, asOf string,
 	}
 	if paginate != "" {
 		base = fmt.Sprintf("paginate(%s, %s)", base, paginate)
+	}
+	// refine runs in process over the page paginate read, so it wraps the
+	// page and sits inside shape (memql#5364).
+	if refine != "" {
+		base = fmt.Sprintf("refine(%s, %s)", base, refine)
 	}
 	// count is the outermost wrapper and mutually exclusive with shape
 	// (enforced in emitQuery). It aggregates the matching set to a
@@ -1461,25 +1518,118 @@ func NormaliseAutomationSource(source string) (string, error) {
 	return rewriteEachBlock(source, automationStructHeader, "struct-form automation", false, emitAutomation)
 }
 
-// terseAutomationHeader matches the terse single-step automation form
-// (ADR §2.4 / §7, memql#2215):
+// terseAutomationHeader finds the CANDIDATE lines of the terse single-step
+// automation form (ADR §2.4 / §7, memql#2215):
 //
-//	automation NAME @trigger(event="...")    => logic logicName
-//	automation NAME @trigger(schedule="...")  => logic logicName
+//	automation NAME @trigger(event="...")                        => logic logicName
+//	automation NAME @trigger(schedule="...")                     => logic logicName
+//	automation NAME @trigger(event="...") @filter(row => row.a)  => logic logicName
 //
 // It kills the pass-through ceremony (an automation whose entire body
 // was `step run { logic X { event: event } }`) without hiding the
 // reactive surface: the `@trigger` stays greppable on the declaration
 // line. Group 1 is leading indentation, group 2 the automation name,
-// group 3 the whole `@trigger(...)` annotation, group 4 the target
-// logic name. The `@trigger` arg list carries no nested parens, so a
-// `[^)]*` capture is exact.
-var terseAutomationHeader = regexp.MustCompile(`(?m)^([ \t]*)automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+(@trigger\([^)]*\))[ \t]*=>[ \t]*logic[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*$`)
+// group 3 the run of annotations, group 4 the target logic name.
+//
+// The terse arrow is the LAST top-level `=>` on the line (memql#5364): an
+// annotation may carry a lambda, `@filter(row => row.a != nil)`, whose own
+// `=>` sits inside its parentheses. The greedy `.*` of group 3 stops at the
+// last `=> logic NAME` before the end of the line, which is only ever the
+// terse arrow, and terseAnnotations then proves group 3 is annotations and
+// nothing else -- so a candidate this regexp finds is a header only when
+// terseAutomationMatches keeps it. Use that, never this regexp alone.
+var terseAutomationHeader = regexp.MustCompile(`(?m)^([ \t]*)automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+(@.*)=>[ \t]*logic[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*$`)
+
+// terseAutomationMatches returns the submatch indices of every terse header in
+// src, in the layout FindAllStringSubmatchIndex gives terseAutomationHeader,
+// with the candidates whose group 3 is not a run of annotations dropped.
+func terseAutomationMatches(src string) [][]int {
+	var out [][]int
+	for _, m := range terseAutomationHeader.FindAllStringSubmatchIndex(src, -1) {
+		if _, ok := terseAnnotations(src[m[6]:m[7]]); ok {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+// terseAnnotations splits a terse header's annotation run -- `@name` or
+// `@name(...)`, whitespace between -- into the annotations, reporting false
+// when anything else is there or no @trigger is. The parentheses are matched
+// string-aware, so a `)` or a `=>` inside a string or a lambda is part of its
+// annotation.
+func terseAnnotations(run string) ([]string, bool) {
+	var out []string
+	hasTrigger := false
+	i := 0
+	for {
+		for i < len(run) && (run[i] == ' ' || run[i] == '\t') {
+			i++
+		}
+		if i >= len(run) {
+			break
+		}
+		if run[i] != '@' {
+			return nil, false
+		}
+		start := i
+		i++
+		name, _ := splitLeadingIdent(run[i:])
+		if name == "" {
+			return nil, false
+		}
+		i += len(name)
+		if i < len(run) && run[i] == '(' {
+			end := matchParenStrAware(run, i)
+			if end < 0 {
+				return nil, false
+			}
+			i = end + 1
+		}
+		out = append(out, run[start:i])
+		if name == "trigger" {
+			hasTrigger = true
+		}
+	}
+	return out, hasTrigger
+}
+
+// matchParenStrAware returns the index of the `)` matching the `(` at open,
+// skipping string literals (escape state tracked, never inferred from the byte
+// before a quote -- memql#3046), or -1.
+func matchParenStrAware(s string, open int) int {
+	depth := 0
+	inStr, escaped := false, false
+	for i := open; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case inStr:
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inStr = false
+			}
+		case c == '"':
+			inStr = true
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
 
 // LooksLikeTerseAutomation reports whether the source declares a terse
 // single-step automation (the `=> logic X` arrow form).
 func LooksLikeTerseAutomation(source string) bool {
-	return terseAutomationHeader.MatchString(source)
+	return len(terseAutomationMatches(source)) > 0
 }
 
 // NormaliseTerseAutomationSource lowers every terse single-step
@@ -1513,10 +1663,31 @@ func NormaliseTerseAutomationSource(source string) (string, error) {
 	if err := rejectTerseAutomationArgsBlock(source); err != nil {
 		return "", err
 	}
-	return terseAutomationHeader.ReplaceAllString(
-		source,
-		"${1}${3}\n${1}automation ${2} {\n${1}  step run {\n${1}    logic ${4} { event: event }\n${1}  }\n${1}}",
-	), nil
+	matches := terseAutomationMatches(source)
+	if len(matches) == 0 {
+		return source, nil
+	}
+	// Each annotation is hoisted to its own line above the longhand
+	// declaration, in the order written. With the one @trigger the form has
+	// always carried, the output is byte-for-byte what it was.
+	var sb strings.Builder
+	last := 0
+	for _, m := range matches {
+		indent := source[m[2]:m[3]]
+		annotations, _ := terseAnnotations(source[m[6]:m[7]])
+		sb.WriteString(source[last:m[0]])
+		for _, a := range annotations {
+			sb.WriteString(indent + a + "\n")
+		}
+		sb.WriteString(indent + "automation " + source[m[4]:m[5]] + " {\n")
+		sb.WriteString(indent + "  step run {\n")
+		sb.WriteString(indent + "    logic " + source[m[8]:m[9]] + " { event: event }\n")
+		sb.WriteString(indent + "  }\n")
+		sb.WriteString(indent + "}")
+		last = m[1]
+	}
+	sb.WriteString(source[last:])
+	return sb.String(), nil
 }
 
 // rejectTerseAutomationArgsBlock reports an error when a file-top
@@ -1577,7 +1748,7 @@ func terseAutomationFollows(rest string) bool {
 		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
 			firstLine = rest[:nl]
 		}
-		return terseAutomationHeader.MatchString(firstLine)
+		return len(terseAutomationMatches(firstLine)) > 0
 	}
 }
 
