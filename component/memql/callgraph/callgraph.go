@@ -54,8 +54,8 @@ type SideEffectClassifier func(builtinName string) bool
 var (
 	// A call site: an identifier immediately followed by `(`. Intersected
 	// with the file's use-map so only cross-file construct calls count --
-	// pure helpers (coalesce/concat/if) and method calls (.first()) are
-	// never imported, so they fall out.
+	// ambient functions (canonicalId, addDuration) and method calls
+	// (.first()) are never imported, so they fall out.
 	callRE = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
 	// A graph write: an `insert {` or `update {` block opener at statement
 	// position.
@@ -220,8 +220,8 @@ func isCallgraphIdentByte(b byte) bool {
 // requires -- keyed to their kind. A call written `<kind> name(` is correctly
 // prefixed and never reported; a dotted/method call `x.name(` is not a construct
 // invocation and is skipped. Only names whose useKinds kind is in
-// kindPrefixedInvocationKinds are checked, so ambient language builtins
-// (coalesce / concat / where / ...), bare predicate refs in a filter, and
+// kindPrefixedInvocationKinds are checked, so ambient language functions
+// (canonicalId / addDuration / ...), predicate applications in a filter, and
 // capability calls never produce a finding.
 // stripLiteralsAndComments blanks the CONTENTS of double-quoted string literals
 // and `//` line comments (replacing each interior byte with a space, preserving
@@ -427,11 +427,11 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 		// Conditions (if gates, forEach where clauses, @filter) may gate on
 		// step results, presence, and single-value fan-out equality -- but
 		// POLICY in a condition is a finding: a same-field string-literal
-		// ||-vocabulary (role/status sets), date-math or default-injecting
-		// builtins (addDuration / coalesce / concat), each of which belongs
-		// in a pure decide logic (or a query pushdown / @filter relevance
-		// check). This is the rule whose ABSENCE let 13 policy sites
-		// accumulate invisibly after the #2235 burn-down.
+		// ||-vocabulary (role/status sets), date math (addDuration), or a
+		// default injected into the compared value (`??` coalesce, `+`
+		// concat), each of which belongs in a pure decide logic (or a query
+		// pushdown / @filter relevance check). This is the rule whose ABSENCE
+		// let 13 policy sites accumulate invisibly after the #2235 burn-down.
 		for _, cond := range automationConditions(text) {
 			if what, ok := conditionPolicyOp(cond); ok {
 				add("automation-condition-builtin", fmt.Sprintf("condition %q %s -- date math / defaults are POLICY; compute the decision in a pure logic (or push a cutoff into the query) and gate on steps.<decide>.result (P4, #2371)", snippet(cond), what))
@@ -457,16 +457,11 @@ var (
 	// trigger relevance filters: `@filter(<cond>)`. Only the OPENING is
 	// matched; the argument runs to its balanced `)` (annotationArgs). A
 	// `[^)]*` capture stopped at the first `)` inside the condition, so
-	// everything after a call -- `@filter(exists(x) && concat(a, b) == "y")`
-	// read as `exists(x` -- was never examined, and an edition-2026 filter
-	// (`@filter(row => (row.kind ?? "x") == "y")`) opens a group at once.
+	// everything after a group or a call was never examined -- and a
+	// trigger filter (`@filter(row => (row.kind ?? "x") == "y")`) can open a
+	// group at once.
 	automationFilterRE = regexp.MustCompile(`@filter\s*\(`)
 
-	// Policy smells inside a condition. exists() is the sanctioned presence
-	// guard and is deliberately NOT in this list. Edition 2026 spells two of
-	// the three as operators -- `a ?? b` for coalesce, `a + b` for concat --
-	// which conditionPolicyOp reads off the parsed condition.
-	conditionBuiltinRE = regexp.MustCompile(`\b(addDuration|coalesce|concat)\s*\(`)
 	// Every `<ident> == "<literal>"` atom in a condition; two on the SAME
 	// identifier joined by || form a vocabulary (checked in Go -- RE2 has no
 	// backreferences).
@@ -541,12 +536,12 @@ func annotationArgs(text string, re *regexp.Regexp) []string {
 // words the finding uses: date math, or a default injected into the value
 // being compared.
 //
-// An edition-2026 condition is PARSED (a trigger filter as a lambda, `row =>
-// ...`; a step gate as an expression) and the operation is found on the tree:
-// a call to addDuration, a `??` (coalesce), or a `+` (concat). A condition the
-// v1 grammar refuses is a legacy one -- `coalesce(...)` and `concat(...)` are
-// retired spellings the v1 parser refuses by name -- and is read with the
-// legacy call pattern.
+// The condition is PARSED (a trigger filter as a lambda, `row => ...`; a step
+// gate as an expression) and the operation is found on the tree: a call to
+// addDuration, a `??` (coalesce), or a `+` (concat). A presence check --
+// `x != nil`, the sanctioned guard -- is not policy and is not in this list.
+// A condition that does not parse is not judged: the loader refuses it with
+// the parser's own message.
 func conditionPolicyOp(cond string) (string, bool) {
 	src := strings.TrimSpace(cond)
 	var body ast.ExpressionNode
@@ -558,9 +553,6 @@ func conditionPolicyOp(cond string) (string, bool) {
 		body = n
 	}
 	if body == nil {
-		if m := conditionBuiltinRE.FindStringSubmatch(cond); m != nil {
-			return "calls " + m[1] + "()", true
-		}
 		return "", false
 	}
 	what := ""
@@ -572,9 +564,9 @@ func conditionPolicyOp(cond string) (string, bool) {
 		case *ast.BinaryExpr:
 			switch e.Op {
 			case "??":
-				what = "coalesces with `??` (edition 2026's coalesce)"
+				what = "coalesces with `??`"
 			case "+":
-				what = "concatenates with `+` (edition 2026's concat)"
+				what = "concatenates with `+`"
 			}
 		case *ast.CallExpr:
 			if e.Receiver == nil && e.Kind == "" && e.Name == "addDuration" {

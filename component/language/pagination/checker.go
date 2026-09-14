@@ -12,17 +12,17 @@
 //   - an `@unbounded("reason")` annotation (the author has deliberately
 //     marked it a legitimate full-set read).
 //
-// A query that filters by a unique-key equality (`id == <expr>`, an
-// equality on the row's primary intrinsic) reads at most one row and is
-// EXEMPT -- it is a single-row read, not a list.
+// A query whose filter guarantees a unique-key equality (`row.id ==
+// <expr>`, an equality on the row's primary intrinsic) reads at most one
+// row and is EXEMPT -- it is a single-row read, not a list.
 //
-// This package contains the pure, deterministic classifier. It operates
-// on raw `.memql` source text using line structure only (no full
-// parser), the same lightweight approach the test/dslconformance/conformance_test.go
-// gates use, so it can run identically over the embedded tree (the
-// conformance test) and the on-disk tree (the audit report) without an
-// engine. Both consumers derive from this one definition so the rule can
-// never drift between the checker and the audit.
+// This package contains the pure, deterministic classifier. It finds each
+// query and its clauses in raw `.memql` source text by line structure, and
+// reads the filter with the edition-2026 expression parser -- no engine --
+// so it can run identically over the embedded tree (the conformance test)
+// and the on-disk tree (the audit report). Both consumers derive from this
+// one definition so the rule can never drift between the checker and the
+// audit.
 //
 // NOTE on sequencing (memql#1965 owner decision): this package SHIPS the
 // classifier + the runtime backstop. The repo-wide hard-fail assertion
@@ -48,8 +48,9 @@ import (
 type Classification int
 
 const (
-	// SingleRow: the query filters by a unique-key equality (`id ==`)
-	// and reads at most one row. Exempt from the pagination rule.
+	// SingleRow: the query's filter guarantees a unique-key equality
+	// (`row.id ==`) and reads at most one row. Exempt from the pagination
+	// rule.
 	SingleRow Classification = iota
 	// Aggregate: the query carries a `count` clause and returns a
 	// numeric aggregate, not a row set. Exempt.
@@ -102,26 +103,6 @@ var (
 	// `query <Concept> <name> {`. Group 1 = concept, group 2 = name.
 	queryHeaderRe = regexp.MustCompile(`(?m)^[ \t]*query[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 
-	// uniqueKeyFilterRe matches a unique-key equality on the row's
-	// primary intrinsic: `row.id == <expr>` (single-row read). A
-	// guarded `when(args.x) { row.id == ... }` is intentionally NOT
-	// matched here -- the id filter is conditional on the arg being
-	// present, so the query can still return the full set when the arg
-	// is omitted.
-	//
-	// The `row.` namespace makes this unambiguous (memql#2779). Before it,
-	// the pattern had to match a BARE `id ==` while excluding payload
-	// sub-fields that merely end in "id" (`payload.threadId`) -- that is
-	// what the leading negative class did, and it is kept so a property
-	// named `myrow` cannot masquerade as the namespace.
-	//
-	// BOTH spellings match. The engine still resolves a bare `id` correctly
-	// -- only the authoring gates retired it -- so a product bundle mounted
-	// via MEMQL_DSL_PATH and authored before #2779 is still a single-row
-	// read, and misclassifying it as an unmarked list would report a
-	// pagination violation that has nothing to do with pagination.
-	uniqueKeyFilterRe = regexp.MustCompile(`(^|[^A-Za-z0-9_.])(row\.)?id[ \t]*==`)
-
 	// unboundedRe matches `@unbounded("reason")` and captures the
 	// reason.
 	unboundedRe = regexp.MustCompile(`@unbounded\s*\(\s*"((?:[^"\\]|\\.)*)"\s*\)`)
@@ -164,25 +145,12 @@ func classifyQuery(file string, line int, name, concept, preamble, body string) 
 		return f
 	}
 
-	filter := filterClause(body)
-
-	// Single-row read: a bare `id ==` equality on the primary intrinsic.
-	// Strip `when(args.x) { ... }` guard blocks first -- a guarded id
-	// equality is conditional on the arg being present, so it does NOT
-	// guarantee a single-row read (the query returns the full set when
-	// the arg is omitted) and must stay classified as a list.
-	//
-	// An edition-2026 filter carries no `when` block to strip: the codemod
-	// writes the guard as `(args.x == nil || row.id == args.x)`, where a
-	// text match for `row.id ==` would read the conditional equality as
-	// unconditional and exempt a full-set read. It is read as a tree
-	// instead (v1SingleRow).
-	if single, isV1 := v1SingleRow(filter); isV1 {
-		if single {
-			f.Class = SingleRow
-			return f
-		}
-	} else if uniqueKeyFilterRe.MatchString(stripWhenGuards(filter)) {
+	// Single-row read: the filter guarantees an equality on the primary
+	// intrinsic. A guarded equality -- `(args.x == nil || row.id ==
+	// args.x)` -- is conditional on the arg being present, so it does NOT
+	// guarantee a single-row read (the query returns the full set when the
+	// arg is omitted) and stays classified as a list; see singleRow.
+	if singleRow(filterClause(body)) {
 		f.Class = SingleRow
 		return f
 	}
@@ -239,23 +207,24 @@ func filterClause(body string) string {
 	return ""
 }
 
-// v1SingleRow reports whether an edition-2026 filter guarantees a unique-key
-// equality -- every row it admits satisfies `<param>.id == <expr>` -- and
-// whether the filter was an edition-2026 one at all.
+// singleRow reports whether a filter guarantees a unique-key equality: every
+// row it admits satisfies `<param>.id == <expr>`, in either operand order.
 //
 // ast.Guarantees carries the rule: a conjunct narrows, so `row.id == args.x
 // && ...` is single-row; the optional-argument guard `(args.x == nil ||
 // row.id == args.x)` is a disjunction one arm of which is no id equality, so
-// the query stays a list exactly as a guarded legacy equality does. A v1
-// filter that does not parse is not single-row: that direction demands a
-// bound, which is the conservative answer for this rule.
-func v1SingleRow(filter string) (single, isV1 bool) {
+// the query stays a list. The `row.` namespace makes the intrinsic
+// unambiguous (memql#2779): a payload field that merely ends in "id"
+// (`row.threadId`) is a different member. A filter that is not an
+// edition-2026 lambda, or does not parse, is not single-row -- the loader
+// refuses it, and this rule's conservative direction demands a bound.
+func singleRow(filter string) bool {
 	if !dslclause.OpensLambda(filter) {
-		return false, false
+		return false
 	}
 	lam, err := parser.ParseV1Lambda(filter)
 	if err != nil || len(lam.Params) != 1 {
-		return false, true
+		return false
 	}
 	param := lam.Params[0]
 	isRowID := func(n ast.ExpressionNode) bool {
@@ -265,31 +234,7 @@ func v1SingleRow(filter string) (single, isV1 bool) {
 	return ast.Guarantees(lam.Body, func(n ast.ExpressionNode) bool {
 		b, ok := n.(*ast.BinaryExpr)
 		return ok && b.Op == "==" && (isRowID(b.Left) || isRowID(b.Right))
-	}), true
-}
-
-// whenGuardRe matches a `when(...) { ... }` guard block so it can be
-// removed before the unaffected (always-applied) predicates are tested
-// for a unique-key equality.
-var whenGuardRe = regexp.MustCompile(`when\s*\([^)]*\)\s*\{[^}]*\}`)
-
-// stripWhenGuards removes every `when(...) { ... }` guard block from a
-// filter clause, leaving only the predicates that always apply.
-func stripWhenGuards(filter string) string {
-	return whenGuardRe.ReplaceAllString(filter, " ")
-}
-
-// startsWithDirective reports whether a trimmed line opens the next clause,
-// terminating a multi-line filter continuation.
-//
-// The keyword set lives in component/language/dslclause, shared with the
-// conformance gates and pinned against parseStructQueryBody's own switch
-// (memql#2815). It used to be a local list here and a DIFFERENT local list in
-// the gates, and the two had already drifted: the gates' copy omitted
-// sort / paginate / asOf / count, so 22 directive lines in the shipped corpus
-// reached them as pseudo-predicates.
-func startsWithDirective(trim string) bool {
-	return dslclause.StartsAnyOf(trim, dslclause.BodyKeywords)
+	})
 }
 
 // hasDirective reports whether the query body has a directive line
