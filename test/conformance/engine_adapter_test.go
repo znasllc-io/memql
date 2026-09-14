@@ -16,12 +16,10 @@ package conformance
 //     ParseV1Expression elsewhere -- and run through memql.EvalExpr (a
 //     condition through memql.EvalCondition, which refuses a non-boolean).
 //   - A P position (a query filter, a spec body) PUSHES DOWN. Its answer is
-//     memql.Lower plus the executor: `lower` is the SQL the pushdown compiler
-//     emits, and `evaluate` is the executor's own in-process post-filter over
-//     the case row, with the SQL required to lower as well. That half goes
-//     through pushdown, below, which is nil until Lower (memql#5366) lands on
-//     this branch: every pushdown case until then fails naming it, rather than
-//     being answered by a stand-in.
+//     memql.Lower plus the executor, through MemQLEngine.ProbeLower: `lower` is
+//     the SQL the pushdown compiler emits once a call has bound the case's
+//     args and caller, and `evaluate` is the executor's own in-process
+//     post-filter over the case row, with the SQL required to lower as well.
 //   - The three literal positions (a sort key, an @rowAuthz argument, a tool
 //     @default) are not expressions at all: their syntax is a literal and the
 //     v1 grammar does not change it. An `evaluate` case there holds the literal
@@ -40,6 +38,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/ast"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -73,25 +72,6 @@ type ExprEnv struct {
 // corpusNow is the instant `now` reads in every case, so a case that reads
 // the clock has one answer on every run. The corpus README names it.
 var corpusNow = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-
-// pushdownResult is what the one lowering answers for a pushdown-position
-// expression: the SQL the query pushes down, and the executor's in-process
-// post-filter, which decides one row the way a read re-checks every scanned
-// candidate.
-type pushdownResult struct {
-	SQL     string
-	Matches func(row map[string]any) (bool, error)
-}
-
-// pushdown lowers a pushdown-position lambda through memql.Lower and the
-// executor's pushdown compiler, binding the case's args and actor as a call
-// would. It is nil until Lower (memql#5366) is merged into this branch;
-// engine_adapter_pushdown_test.go sets it then.
-var pushdown func(ctx context.Context, position tiers.Position, lam *ast.LambdaExpr, env ExprEnv) (pushdownResult, error)
-
-// errPushdownPending is every pushdown case's answer while pushdown is nil.
-var errPushdownPending = errors.New("a pushdown position answers through memql.Lower (memql#5366), which is not on this branch yet: " +
-	"the case is written and waits for it (set pushdown in engine_adapter_pushdown_test.go when Lower lands)")
 
 // lower returns the SQL an expression at a pushdown position lowers to.
 func lower(position tiers.Position, src string, env ExprEnv) (string, error) {
@@ -175,16 +155,27 @@ func evaluate(position tiers.Position, src string, env ExprEnv) (any, error) {
 	return v, nil
 }
 
-// adapterPushdown parses a pushdown-position lambda and hands it to pushdown.
-func adapterPushdown(position tiers.Position, src string, env ExprEnv) (pushdownResult, error) {
+// adapterPushdown lowers a pushdown-position lambda through the engine's
+// probe: Lower at the position, the case's args and caller bound as a call
+// binds them, the pushdown compiled.
+func adapterPushdown(position tiers.Position, src string, env ExprEnv) (*memql.ProbeLowered, error) {
 	lam, err := langparser.ParseV1Lambda(src)
 	if err != nil {
-		return pushdownResult{}, err
+		return nil, err
 	}
-	if pushdown == nil {
-		return pushdownResult{}, errPushdownPending
+	return env.Engine.ProbeLower(adapterCaller(env.Actor), position, env.Concept, lam, env.Args, corpusNow)
+}
+
+// adapterCaller is the call a pushdown case is made in: as the case's actor
+// when it names one, else as a caller with no role.
+func adapterCaller(actor map[string]any) context.Context {
+	user, _ := actor["userId"].(string)
+	role, _ := actor["role"].(string)
+	if user == "" {
+		return context.Background()
 	}
-	return pushdown(context.Background(), position, lam, env)
+	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: user, Role: auth.Role(role)})
+	return auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: user})
 }
 
 // evaluateLiteral answers a literal position: the one node must be a literal,
