@@ -41,8 +41,17 @@ func (e *ForEachExecutor) Execute(ctx context.Context, step *automations.Step, s
 
 	// Resolve the source collection
 	// Use EvaluateStepReference to auto-resolve bare step names like "stepName.result"
-	// to "$steps.stepName.result" for cleaner .memql syntax
-	sourceValue, err := stepCtx.Evaluator.EvaluateStepReference(forEachCfg.Source)
+	// to "$steps.stepName.result" for cleaner .memql syntax. A v1 step's
+	// source is an expression parsed at load (memql#5367): a step name
+	// stands for its rows, so `rows` and `rows.where(r => r.active)` both
+	// iterate node maps.
+	var sourceValue any
+	var err error
+	if x := step.Exprs; x != nil {
+		sourceValue, err = v1Value(ctx, stepCtx.Evaluator, x.Source)
+	} else {
+		sourceValue, err = stepCtx.Evaluator.EvaluateStepReference(forEachCfg.Source)
+	}
 	if err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("failed to evaluate source: %v", err)
@@ -108,8 +117,17 @@ func (e *ForEachExecutor) Execute(ctx context.Context, step *automations.Step, s
 			// EvaluateForEachFilter (#2318) routes a genuine collection /
 			// lambda chain filter (`item.tags.any(t => t == "vip")`) through
 			// the in-memory collection surface and keeps the legacy
-			// string-condition path for everything else.
-			matches, err := filterEval.EvaluateForEachFilter(forEachCfg.Filter)
+			// string-condition path for everything else. A v1 step's filter
+			// is a condition parsed at load, evaluated over the same scoped
+			// evaluator (memql#5367); an erroring filter is handled exactly
+			// as the legacy one is.
+			var matches bool
+			var err error
+			if x := step.Exprs; x != nil && x.Filter != nil {
+				matches, err = filterEval.EvalV1Condition(ctx, x.Filter)
+			} else {
+				matches, err = filterEval.EvaluateForEachFilter(forEachCfg.Filter)
+			}
 			if err != nil {
 				// Log warning but continue
 				if stepCtx.Logger != nil {
@@ -353,7 +371,10 @@ func (e *ForEachExecutor) executeForItem(
 					"condition", iteratedStep.Condition,
 				)
 			}
-			shouldRun, err := itemEval.EvaluateCondition(iteratedStep.Condition)
+			// StepCondition: EvalCondition for a v1 step (iteratedStep
+			// is a copy, so it carries the parsed Exprs), the string
+			// evaluator for a legacy one.
+			shouldRun, err := itemEval.StepCondition(ctx, &iteratedStep)
 			if err != nil {
 				if stepCtx.Logger != nil {
 					stepCtx.Logger.Warn("step condition evaluation failed",

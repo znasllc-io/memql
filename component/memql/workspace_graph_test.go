@@ -15,6 +15,7 @@ import (
 
 func fyloWorkspace() fstest.MapFS {
 	return fstest.MapFS{
+		"fylo/memql.toml": languageLineFile(),
 		"fylo/concepts.memql": &fstest.MapFile{Data: []byte(`@version("1.0.0")
 @namespace("fylo")
 concept order {
@@ -120,7 +121,7 @@ mutate ghostConcept touchGhost {
 }`)},
 	}
 
-	svc, err := BuildOfflineSense(root)
+	svc, err := BuildOfflineSense(withLanguageLines(root))
 	if err == nil {
 		t.Fatal("expected a strict-boot error for a mutation bound to a nonexistent concept")
 	}
@@ -143,7 +144,7 @@ concept item {
   id  string  @required
 }`)},
 	}
-	svc, err := BuildOfflineSense(root)
+	svc, err := BuildOfflineSense(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("BuildOfflineSense over a clean workspace: %v", err)
 	}
@@ -189,7 +190,7 @@ concept item {
   id  string  @required
 }`)},
 	}
-	svc, err := BuildOfflineSense(root)
+	svc, err := BuildOfflineSense(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("BuildOfflineSense: %v", err)
 	}
@@ -231,7 +232,7 @@ concept item {
   id  string  @required
 }`)},
 	}
-	svc, err := BuildOfflineSense(root)
+	svc, err := BuildOfflineSense(withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("BuildOfflineSense: %v", err)
 	}

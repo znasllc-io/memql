@@ -139,7 +139,7 @@ tool zzNoHandler {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			domain := "toolvalidation3625" + strings.ToLower(tc.tool)
-			memqldsl.RegisterTree(domain, fstest.MapFS{"tools.memql": {Data: []byte(tc.src)}})
+			memqldsl.RegisterTree(domain, withLanguageLine(fstest.MapFS{"tools.memql": {Data: []byte(tc.src)}}))
 			t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 			registry := newToolRegistry()

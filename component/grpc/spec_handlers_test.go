@@ -18,6 +18,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/language/dslspec"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // newSpecSession builds a minimal streamSession; handleDslSpec needs no access
@@ -72,6 +73,19 @@ func TestDslSpec_RoundTrip(t *testing.T) {
 
 	// The embedded spec.version matches the envelope version too.
 	assert.Equal(t, res.GetVersion(), got.Version, "embedded version must equal the envelope version")
+}
+
+// The export names the language it describes (memql#5362, D25), so a client
+// that is not the VS Code extension can compare its own grammar with the
+// cluster's over the stream.
+func TestDslSpec_NamesTheLanguage(t *testing.T) {
+	s, cs := newSpecSession(t)
+	require.NoError(t, dispatchSpec(s))
+
+	var got dslspec.Spec
+	require.NoError(t, json.Unmarshal([]byte(cs.lastSent().GetDslSpecResult().GetSpecJson()), &got))
+	assert.Equal(t, langparser.Edition, got.Edition, "the exported spec must carry the edition")
+	assert.Equal(t, langparser.GrammarVersion, got.GrammarVersion, "the exported spec must carry the grammar version")
 }
 
 // A nil body is rejected with an InvalidArgument query error rather than a

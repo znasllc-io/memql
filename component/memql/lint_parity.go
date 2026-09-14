@@ -25,8 +25,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/znasllc-io/memql/core/component"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql/baseloader"
+	"github.com/znasllc-io/memql/core/component"
+	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
@@ -86,7 +88,7 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 		for _, cs := range conceptSkips {
 			diags = append(diags, LintDiagnostic{File: cs.File, Message: cs.String()})
 		}
-		return diags, skippedCore, fmt.Errorf("loading concepts from merged tree: %w", err)
+		return withUnreadRootManifest(diags, root), skippedCore, fmt.Errorf("loading concepts from merged tree: %w", err)
 	}
 	registry := concept.DefaultRegistry()
 
@@ -120,10 +122,7 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 	// parse-phase skip).
 	if eng.loadReport != nil {
 		for _, s := range eng.loadReport.Skipped {
-			diags = append(diags, LintDiagnostic{
-				File:    s.File,
-				Message: fmt.Sprintf("%s %q (%s): %s", s.Keyword, s.Name, s.Phase, s.Err),
-			})
+			diags = append(diags, LintDiagnostic{File: s.File, Message: skipDiagnostic(s)})
 		}
 		for _, d := range eng.loadReport.Duplicates {
 			diags = append(diags, LintDiagnostic{Message: "duplicate construct: " + d.String()})
@@ -139,6 +138,7 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 	if initErr != nil && !strings.Contains(initErr.Error(), "strict DSL boot refused") {
 		diags = append(diags, LintDiagnostic{Message: initErr.Error()})
 	}
+	diags = withUnreadRootManifest(diags, root)
 
 	sort.SliceStable(diags, func(i, j int) bool {
 		if diags[i].File != diags[j].File {
@@ -146,5 +146,40 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 		}
 		return diags[i].Message < diags[j].Message
 	})
-	return diags, skippedCore, nil
+	return dedupeDiagnostics(diags), skippedCore, nil
+}
+
+// withUnreadRootManifest adds the diagnostic for a memql.toml at the root of
+// the mounted tree, which no mount reads (dsl.UnreadRootManifest, memql#5357).
+// Boot never sees that file, so it is the offline passes that must say so --
+// in their diagnostics, where an author reads, not in a log they discard.
+func withUnreadRootManifest(diags []LintDiagnostic, root fs.FS) []LintDiagnostic {
+	if msg, unread := memqldsl.UnreadRootManifest(root); unread {
+		diags = append(diags, LintDiagnostic{File: dslfs.ManifestFile, Message: msg})
+	}
+	return diags
+}
+
+// skipDiagnostic is how the offline passes print one load-report skip. A
+// ConceptSkip that stands for a tree-level refusal (a refused language line,
+// memql#5357) prints through here too, which is what makes the concept-phase
+// copy of a refusal and Init's copy one diagnostic rather than two.
+func skipDiagnostic(s baseloader.Skip) string {
+	return fmt.Sprintf("%s %q (%s): %s", s.Keyword, s.Name, s.Phase, s.Err)
+}
+
+// dedupeDiagnostics drops a diagnostic identical to the one before it, in a
+// list already sorted by file then message. The concept build and Init both
+// refuse a domain whose language line the engine will not read (memql#5357),
+// so a pass that collects both holds that refusal twice; an author must read
+// it once.
+func dedupeDiagnostics(diags []LintDiagnostic) []LintDiagnostic {
+	out := make([]LintDiagnostic, 0, len(diags))
+	for i, d := range diags {
+		if i > 0 && d == diags[i-1] {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
 }

@@ -100,6 +100,17 @@ type FunctionMutationTemplate struct {
 	// hand-maintained field list. Only valid on update-kind mutations
 	// (enforced at load time in function_loader.go). See memql#1711.
 	ScrubPii bool
+
+	// ValuesV1 marks a template whose slots hold edition-2026 expression
+	// nodes (epic memql#5363): IDTemplate, CreatedAtTemplate, ParentTemplate
+	// and AliasOfTemplate each an ast.ExpressionNode or nil; PayloadTemplate
+	// the block's fields in the layout the loader has always produced -- a
+	// map[string]any of field -> node, a nested object literal as a nested
+	// map and a list literal as a []any -- or one node for a `payload:`
+	// splat; PayloadOverlayTemplate the same layout. renderMutationTemplate
+	// hands such a template to EvalExpr (mutation_values_v1.go) and never to
+	// the string evaluator below. newMutationTemplateV1 is the one builder.
+	ValuesV1 bool
 }
 
 // renderMutationTemplate evaluates a mutation template into a concrete MutationNode.
@@ -113,6 +124,11 @@ func (e *MemQLEngine) renderMutationTemplate(ctx context.Context, tmpl *Function
 	concept := strings.TrimSpace(tmpl.Concept)
 	if concept == "" {
 		return MutationNode{}, fmt.Errorf("mutation template concept is required")
+	}
+	if tmpl.ValuesV1 {
+		// Edition 2026: the values are parsed nodes and EvalExpr renders
+		// them. Nothing below this line reads a v1 template.
+		return e.renderMutationTemplateV1(ctx, tmpl, concept, args)
 	}
 
 	eval := &mutationTemplateEvaluator{
@@ -211,6 +227,15 @@ func (e *MemQLEngine) renderMutationTemplate(ctx context.Context, tmpl *Function
 		return MutationNode{}, fmt.Errorf("evaluate aliasOf: %w", err)
 	}
 
+	return templateMutationNode(tmpl, concept, id, payloadJSON, createdAtRef, parent, aliasOf), nil
+}
+
+// templateMutationNode assembles the MutationNode a rendered template
+// produces. Both renderers -- the string half above and the edition-2026 one
+// (mutation_values_v1.go) -- end here, so a template field added to one is
+// carried by the other: a copy of this list per renderer is how a field would
+// go missing from one of them without a signal.
+func templateMutationNode(tmpl *FunctionMutationTemplate, concept, id string, payloadJSON []byte, createdAtRef *time.Time, parent, aliasOf string) MutationNode {
 	var parentRef *string
 	if strings.TrimSpace(parent) != "" {
 		copy := parent
@@ -250,7 +275,7 @@ func (e *MemQLEngine) renderMutationTemplate(ctx context.Context, tmpl *Function
 		CreateOnlyFields: tmpl.CreateOnlyFields,
 		NoUnsetFields:    tmpl.NoUnsetFields,
 		ScrubPii:         tmpl.ScrubPii,
-	}, nil
+	}
 }
 
 func parseRFC3339Timestamp(raw string) (time.Time, error) {

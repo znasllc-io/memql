@@ -13,6 +13,10 @@
 //
 //	memql-lsp gen-grammar editors/vscode/syntaxes/memql.tmLanguage.json
 //
+// The package also generates the extension's language configuration from
+// dslspec's punctuation table (languageconfig.go, memql#5362), gated the same
+// way. `make vscode-grammar` writes both.
+//
 // # Rule order is precedence
 //
 // TextMate tries every pattern at the current position and takes the match that

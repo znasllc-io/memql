@@ -156,3 +156,43 @@ func TestGuardedIdFilterStaysList(t *testing.T) {
 		t.Fatalf("guarded id filter classified as single-row; a conditional id filter is not guaranteed single-row")
 	}
 }
+
+// TestV1Filters: an edition-2026 filter (epic memql#5363) is read as a tree.
+// The codemod writes the optional-argument guard as `(args.x == nil ||
+// row.id == args.x)`, which a text match for `row.id ==` reads as an
+// unconditional equality -- exempting a query that returns the full set when
+// the argument is omitted.
+func TestV1Filters(t *testing.T) {
+	for _, tc := range []struct {
+		name, filter string
+		want         Classification
+	}{
+		// CATCH: conditional on the argument, so a list that must declare a bound.
+		{"guarded id", "row => args.x == nil || row.id == args.x", UnmarkedList},
+		{"guarded id beside a conjunct", "row => row.status == \"open\"\n          && (args.x == nil || row.id == args.x)", UnmarkedList},
+		{"id in one arm of a disjunction", "row => row.id == args.x || row.status == \"open\"", UnmarkedList},
+		// PASS: an unconditional equality, in either operand order, on any line.
+		{"id equality", "row => row.id == args.x", SingleRow},
+		{"reversed operands", "row => args.x == row.id", SingleRow},
+		{"id equality on a wrapped line", "row => row.status == \"open\"\n\n          && row.id == args.x", SingleRow},
+		{"id equality beside a guard", "row => row.id == args.x && (args.y == nil || row.status == args.y)", SingleRow},
+		// A payload field ending in `id` is not the intrinsic.
+		{"payload threadId", "row => row.threadId == args.x", UnmarkedList},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "query thing q {\n  args { x string }\n  filter  " + tc.filter + "\n  shape   thingFull\n}\n"
+			if f := findingFor(t, ScanSource("f.memql", src), "q"); f.Class != tc.want {
+				t.Errorf("classified %s, want %s", f.Class, tc.want)
+			}
+		})
+	}
+}
+
+// TestFilterClauseSpansABlankLine: the clause is the normaliser's fold, which
+// skips a blank line inside a wrapped clause rather than ending it there.
+func TestFilterClauseSpansABlankLine(t *testing.T) {
+	src := "query thing q {\n  filter  status == \"open\" &&\n\n    id == args.x\n  shape   thingFull\n}\n"
+	if f := findingFor(t, ScanSource("f.memql", src), "q"); f.Class != SingleRow {
+		t.Errorf("classified %s, want single-row: the id equality after the blank line is part of the clause", f.Class)
+	}
+}

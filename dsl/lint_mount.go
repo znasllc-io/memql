@@ -11,6 +11,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"strings"
+
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // MountOverlayDomains registers every product-domain directory found at the
@@ -37,6 +39,9 @@ import (
 // place. The other skips are self-evident from the root's own shape -- a file,
 // a "_"-prefixed soft-disable, a sidecar with no .memql in it -- and reporting
 // them would bury the collision signal in noise.
+//
+// A memql.toml at the root beside a product domain is not a mount's to report:
+// the passes that mount a root and print diagnostics ask UnreadRootManifest.
 func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore []string, unmount func()) {
 	noop := func() {}
 	if root == nil {
@@ -137,4 +142,40 @@ func directoryHasMemqlFile(root fs.FS, dir string) bool {
 		}
 	}
 	return false
+}
+
+// UnreadRootManifestCode ends the diagnostic UnreadRootManifest answers.
+const UnreadRootManifestCode = "language_line_unread"
+
+// UnreadRootManifest reports a memql.toml at the root of a tree mounted the
+// way MountOverlayDomains mounts one, beside at least one product domain
+// (memql#5357), and the diagnostic an offline pass prints for it. No mount
+// reads a root file -- a domain directory is the only thing that reaches a
+// node -- so each domain declares its line in <domain>/memql.toml, and one at
+// the root is a declaration its author believes governs the tree while
+// nothing does. A root of core domains alone is the engine's own dsl/, whose
+// root memql.toml IS read -- it is the embedded line -- so it is not reported.
+func UnreadRootManifest(root fs.FS) (string, bool) {
+	if root == nil {
+		return "", false
+	}
+	if info, err := fs.Stat(root, dslfs.ManifestFile); err != nil || info.IsDir() {
+		return "", false
+	}
+	entries, err := fs.ReadDir(root, ".")
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+			continue
+		}
+		if directoryHasMemqlFile(root, name) && !IsCoreDomain(name) {
+			return dslfs.ManifestFile + " at the root of this tree is never read: a mount reads domain directories only, " +
+				"so declare the language line in each domain directory as <domain>/" + dslfs.ManifestFile +
+				" and remove this one [" + UnreadRootManifestCode + "]", true
+		}
+	}
+	return "", false
 }

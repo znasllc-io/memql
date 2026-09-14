@@ -949,33 +949,33 @@ mutate clusterSettings createClusterSettings {
     authoredAutomationsEnabled bool
   }
   insert {
-    args.id
-    clusterDomain: args.clusterDomain ?? ""
-    brandName: args.brandName ?? ""
-    brandPrimaryColor: args.brandPrimaryColor ?? ""
-    brandLogoDataURI: args.brandLogoDataURI ?? ""
-    brandIconDataURI: args.brandIconDataURI ?? ""
-    args.registrationMode
-    registrationDomains: args.registrationDomains ?? ""
-    internalDomains: args.internalDomains ?? ""
-    args.internalDefaultRole
-    registeredClientsJSON: args.registeredClientsJSON ?? ""
-    accessRequestNotifyEmails: args.accessRequestNotifyEmails ?? ""
-    accessRequestNotifyThrottleMins: 5
-    bootstrapEmail: args.bootstrapEmail ?? ""
-    bootstrapFirstName: args.bootstrapFirstName ?? ""
-    bootstrapLastName: args.bootstrapLastName ?? ""
-    bootstrapPhone: args.bootstrapPhone ?? ""
-    bootstrapPrimaryRole: args.bootstrapPrimaryRole ?? ""
-    bootstrapGender: args.bootstrapGender ?? ""
-    bootstrapBirthdate: args.bootstrapBirthdate ?? ""
-    bootstrappedAt: args.bootstrappedAt ?? ""
-    accessTokenTTLSeconds: args.accessTokenTTLSeconds ?? 0
-    refreshTokenTTLSeconds: args.refreshTokenTTLSeconds ?? 0
-    magicLinkTTLSeconds: args.magicLinkTTLSeconds ?? 0
-    invitationTTLDays: args.invitationTTLDays ?? 0
-    refreshCookieSameSite: args.refreshCookieSameSite ?? ""
-    authoredAutomationsEnabled: args.authoredAutomationsEnabled ?? true
+    accept { id, registrationMode, internalDefaultRole }
+    stamp {
+      clusterDomain: args.clusterDomain ?? ""
+      brandName: args.brandName ?? ""
+      brandPrimaryColor: args.brandPrimaryColor ?? ""
+      brandLogoDataURI: args.brandLogoDataURI ?? ""
+      brandIconDataURI: args.brandIconDataURI ?? ""
+      registrationDomains: args.registrationDomains ?? ""
+      internalDomains: args.internalDomains ?? ""
+      registeredClientsJSON: args.registeredClientsJSON ?? ""
+      accessRequestNotifyEmails: args.accessRequestNotifyEmails ?? ""
+      accessRequestNotifyThrottleMins: 5
+      bootstrapEmail: args.bootstrapEmail ?? ""
+      bootstrapFirstName: args.bootstrapFirstName ?? ""
+      bootstrapLastName: args.bootstrapLastName ?? ""
+      bootstrapPhone: args.bootstrapPhone ?? ""
+      bootstrapPrimaryRole: args.bootstrapPrimaryRole ?? ""
+      bootstrapGender: args.bootstrapGender ?? ""
+      bootstrapBirthdate: args.bootstrapBirthdate ?? ""
+      bootstrappedAt: args.bootstrappedAt ?? ""
+      accessTokenTTLSeconds: args.accessTokenTTLSeconds ?? 0
+      refreshTokenTTLSeconds: args.refreshTokenTTLSeconds ?? 0
+      magicLinkTTLSeconds: args.magicLinkTTLSeconds ?? 0
+      invitationTTLDays: args.invitationTTLDays ?? 0
+      refreshCookieSameSite: args.refreshCookieSameSite ?? ""
+      authoredAutomationsEnabled: args.authoredAutomationsEnabled ?? true
+    }
   }
 }
 

@@ -80,13 +80,16 @@
 package dslgate
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"sort"
 	"strings"
 
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/dslfs"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // Gate names the rule a violation broke. Stable strings: they appear in boot
@@ -301,6 +304,12 @@ func ScanTree(tree fs.FS, opts Options) ([]Violation, error) {
 	if err != nil {
 		return nil, fmt.Errorf("walking DSL tree: %w", err)
 	}
+	// The gates read the core grammar, so each file is read through the
+	// front end of the edition its domain declares (memql#5358), exactly as
+	// boot's pass over baseloader.ReadAll does: a domain whose language line
+	// is refused is not scanned (boot reads none of it), and a file its front
+	// end refuses is an error naming it.
+	lines, _ := languageParser.ResolveLanguageLines(tree, memqldsl.EmbeddedTree{})
 	files := make([]SourceFile, 0, len(paths))
 	for _, p := range paths {
 		f, openErr := tree.Open(p)
@@ -312,7 +321,14 @@ func ScanTree(tree fs.FS, opts Options) ([]Violation, error) {
 		if readErr != nil {
 			return nil, fmt.Errorf("read %s: %w", p, readErr)
 		}
-		files = append(files, SourceFile{Path: p, Content: string(raw)})
+		prepared, prepErr := lines.Prepare(p, raw)
+		if errors.Is(prepErr, languageParser.ErrLanguageLineRefused) {
+			continue
+		}
+		if prepErr != nil {
+			return nil, fmt.Errorf("%s: %w", p, prepErr)
+		}
+		files = append(files, SourceFile{Path: p, Content: string(prepared)})
 	}
 	return ScanFiles(files, opts), nil
 }
@@ -328,5 +344,8 @@ func ScanSource(path, src string, opts Options) []Violation {
 	// ScanSource rather than ScanFiles so a single-file caller (memqllint on one
 	// path, Sense) gets the same verdict boot does (memql#5196).
 	out = append(out, scanDuplicateImportNames(path, src)...)
+	// Per-file for the same reason: whether a statement opens with a
+	// construct keyword is a fact about this file's text (memql#5358).
+	out = append(out, scanUnknownConstructKeywords(path, src)...)
 	return out
 }

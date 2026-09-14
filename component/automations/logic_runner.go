@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/compiler"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
@@ -121,6 +122,20 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 			returnStep = step
 			continue
 		}
+		// A v1 step (memql#5367) carries its expressions parsed at load, and
+		// every step kind evaluates them through EvalExpr on the run's scope:
+		// the query executor evaluates an in-process expression (`total :=
+		// a + b`, `active := rows.where(r => r.active)`) itself, and a
+		// construct call goes to the engine with its arguments evaluated. So
+		// none of the string short-circuits below -- each re-parses legacy
+		// step text -- applies; they stay exactly as they are for a legacy
+		// body.
+		if step.Exprs != nil {
+			if err := r.runOneStep(ctx, step, stepCtx, evaluator); err != nil {
+				return nil, fmt.Errorf("logic %q step %q: %w", fnName, step.ID, err)
+			}
+			continue
+		}
 		// Builtin RHS short-circuit: a step assignment whose body is a
 		// positional helper (`coalesce(args.X, "default")`,
 		// `concat(...)`, ...) gets evaluated against the local
@@ -226,6 +241,27 @@ func (r *LogicRunner) RunLogic(ctx context.Context, fnName string, body *languag
 		// no `_return` step the body is malformed. Surface as an error
 		// instead of returning nil silently.
 		return nil, fmt.Errorf("logic %q has no `_return` step (body must end with `return <expr>`)", fnName)
+	}
+	// A v1 return (memql#5367). `return <stepName>` hands back the step's
+	// RECORDED result, as the legacy bare-step return did (tryEvaluateReturnLocally)
+	// -- a query step's execute result, not the node list an expression reads
+	// it as -- so a logic's output keeps its shape across the two grammars.
+	// Every other return runs as the `_return` step: an expression evaluates in
+	// process, a construct call runs on the engine.
+	if x := returnStep.Exprs; x != nil {
+		if id, isIdent := ast.Unparen(x.Query).(*ast.IdentExpr); isIdent && evaluator.HasStep(id.Name) {
+			if recorded := evaluator.steps[id.Name]; recorded != nil {
+				return recorded.Result, nil
+			}
+			return nil, nil
+		}
+		if err := r.runOneStep(ctx, returnStep, stepCtx, evaluator); err != nil {
+			return nil, fmt.Errorf("logic %q return: %w", fnName, err)
+		}
+		if returnResult, ok := evaluator.steps["_return"]; ok && returnResult != nil {
+			return returnResult.Result, nil
+		}
+		return nil, nil
 	}
 	// Short-circuit pure step-method-call returns like
 	// `expiredDelegations.count()` / `existing.first()` / `rows.empty()`.
@@ -1199,7 +1235,9 @@ func isBareIdentifier(expr string) bool {
 // event publishing / step record persistence.
 func (r *LogicRunner) runOneStep(ctx context.Context, step *Step, stepCtx *StepContext, evaluator *Evaluator) error {
 	if step.Condition != "" {
-		shouldRun, err := evaluator.EvaluateCondition(step.Condition)
+		// StepCondition: EvalCondition for a v1 step, the string evaluator
+		// for a legacy one (memql#5367).
+		shouldRun, err := evaluator.StepCondition(ctx, step)
 		if err != nil {
 			// Match executor behaviour: condition errors skip the step
 			// rather than failing the whole Logic. The evaluator logs
@@ -1274,13 +1312,22 @@ func (r *LogicRunner) compileBodyToAutomation(fnName string, body *languageParse
 	}
 
 	if returnExpr, ok := compiled["_return"].(string); ok && strings.TrimSpace(returnExpr) != "" {
-		automation.Steps = append(automation.Steps, &Step{
+		ret := &Step{
 			ID:   "_return",
 			Type: StepTypeQuery,
 			Query: &QueryStepConfig{
 				Query: returnExpr,
 			},
-		})
+		}
+		// A v1 body's return is v1 source like every other expression in
+		// it; parse it once now, as parseJSON parsed the rest, so the
+		// stitched step is a v1 step and never reaches the string evaluator.
+		if automation.IsV1() {
+			if err := (&exprPreparer{automation: automation.Name}).step(ret); err != nil {
+				return nil, fmt.Errorf("parse compiled logic %q: %w", fnName, err)
+			}
+		}
+		automation.Steps = append(automation.Steps, ret)
 	}
 
 	return automation, nil

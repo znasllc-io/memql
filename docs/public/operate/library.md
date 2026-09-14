@@ -352,14 +352,14 @@ file-backed, the backing `v1:library:file` is archived with it.
 
 `libraryArtifacts()` excludes archived rows; the Bin app is where they live.
 
-> **INFO: the list filter is spelled `archived != true`, not
-> `archived == false`, and the difference is load-bearing.** Measured against
+> **INFO: the list filter is spelled `row.archived != true`, not
+> `row.archived == false`, and the difference is load-bearing.** Measured against
 > Postgres, `!= true` keeps rows whose payload has no `archived` key at all --
 > every artifact promoted before the field existed. The equality spelling would
 > drop them, emptying every existing Library on deploy.
 >
 > The Bin's own read spells it the other way -- `libraryArchivedArtifacts`
-> filters `archived == true` -- and that asymmetry is correct rather than an
+> filters `row.archived == true` -- and that asymmetry is correct rather than an
 > oversight. "Not archived" has to be null-safe because a row with no key is
 > not archived; "IS archived" is a positive test, and the same row genuinely
 > fails it. The two are inverses in meaning and not in spelling.
@@ -374,7 +374,7 @@ folder, its provenance and every earlier version exactly where they were.
 **The pair is CLIENT-DRIVEN, and that is not a shortcut.** Archiving an
 artifact archives its backing file through `archiveFileOnArtifactArchive`; the
 mirror of that automation cannot exist, because it would ride `node.updated`
-filtered on `archived == false` -- essentially every artifact update -- and
+filtered on `row.archived == false` -- essentially every artifact update -- and
 together with the archive automation the two close a cycle where each write
 publishes an event the other subscribes to. So the Bin calls both mutations,
 index first, exactly as the recursive archive walk calls its own writes.
@@ -503,7 +503,7 @@ it.
 ## Promotion, and one thing to know before changing it
 
 A file becomes an index row through the `indexFileOnCreate` automation, which
-carries `@filter(payload.status == "stored")`.
+carries `@filter(row => row.status == "stored")`.
 
 **That filter is load-bearing.** `graph.node.created` fires on every write, not
 only the first, so without it every `setLibraryFileStatus` would re-promote the

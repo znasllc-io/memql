@@ -240,3 +240,56 @@ func singularForTest(base string) string {
 	}
 	return strings.TrimSuffix(base, "s")
 }
+
+// writeCorpus writes a corpus to a fresh directory, for a gate that takes a
+// ROOT rather than sources.
+func writeCorpus(t *testing.T, c corpus) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, p := range c.paths {
+		dst := filepath.Join(root, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dst, err)
+		}
+		if err := os.WriteFile(dst, []byte(c.files[p]), 0o644); err != nil {
+			t.Fatalf("write %s: %v", dst, err)
+		}
+	}
+	return root
+}
+
+// TestCallGraphContractOnTheMigratedCorpus runs the whole-tree gate over the
+// tree as the edition-2026 codemod leaves it (epic memql#5363): the same
+// findings (none), and the same construct counts per restricted kind -- the
+// reachable positive that tells a clean result from a splitter that stopped
+// seeing the migrated spelling.
+func TestCallGraphContractOnTheMigratedCorpus(t *testing.T) {
+	sideEffecting, err := capability.ClassifierFromDir(dslPath(t, "."))
+	if err != nil {
+		t.Fatalf("build builtin side-effect classifier: %v", err)
+	}
+	for _, c := range []corpus{embeddedCorpus(t), migratedCorpus(t)} {
+		root := writeCorpus(t, c)
+		findings, err := callgraph.CheckTree(root, callgraph.SideEffectClassifier(sideEffecting))
+		if err != nil {
+			t.Fatalf("%s: walk: %v", c.name, err)
+		}
+		for _, f := range findings {
+			t.Errorf("%s corpus: %s|%s|%s: %s", c.name, f.Rule, f.Kind, f.Construct, f.Message)
+		}
+	}
+	legacy, err := callgraph.Coverage(writeCorpus(t, embeddedCorpus(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1, err := callgraph.Coverage(writeCorpus(t, migratedCorpus(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for kind, n := range legacy {
+		if v1[kind] != n || n == 0 {
+			t.Errorf("call-graph coverage for %q: %d constructs in the embedded tree, %d once migrated", kind, n, v1[kind])
+		}
+	}
+	t.Logf("call-graph coverage, both editions: %v", legacy)
+}

@@ -9,10 +9,12 @@ import (
 )
 
 // keyword_slices_lambda_test.go -- the edition-2026 spec and trait (memql#5366)
-// has no braces, so the brace slicer cannot find it. Without the lambda slicer
-// every `=` declaration in a tree is ABSENT from the registry -- not refused,
-// not skipped -- and every query applying one fails as if it had never been
-// declared. These cases pin the extent rule.
+// has no braces, so the brace slicer cannot find it. Without the brace-less
+// slicer (languageParser.ExtractPredicateDeclarationSlices, behind
+// constructDeclarationSlices) every `=` declaration in a tree is ABSENT from
+// the registry -- not refused, not skipped -- and every query applying one
+// fails as if it had never been declared. These cases pin, at the loader's
+// entry point, that each slice parses on its own as the spec it names.
 
 const lambdaSlicesSource = `use crm.concepts.{ lead }
 
@@ -67,9 +69,7 @@ func TestExtractKeywordSlices_FindsEditionTwentySixSpecsAndTraits(t *testing.T) 
 	require.NotNil(t, decl.Lambda)
 }
 
-func TestExtractKeywordSlices_ComparisonsAndArrowsAreNotHeaders(t *testing.T) {
-	// `==` and `=>` after a name are not the declaration's `=`.
-	require.Empty(t, extractLambdaDeclarationSlices("spec lead x == y\n", "spec"))
-	require.Empty(t, extractLambdaDeclarationSlices("spec lead x => y\n", "spec"))
-	require.Len(t, extractLambdaDeclarationSlices("spec lead x =\n  row => row.a == 1\n", "spec"), 1, "the `=` may end its line")
+func TestExtractKeywordSlices_AComparisonIsNotAHeader(t *testing.T) {
+	// `==` after a name is not the declaration's `=`.
+	require.Empty(t, ExtractKeywordSlices("spec lead x == y\n", "spec"))
 }

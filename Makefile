@@ -86,9 +86,10 @@ edge:
 memql-lsp:
 	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/memql-lsp ./cmd/memql-lsp
 
-## Regenerate the VS Code TextMate grammar from dslspec (run on GrammarVersion bump)
+## Regenerate the VS Code TextMate grammar and language configuration from dslspec (run on GrammarVersion bump)
 vscode-grammar: memql-lsp
 	$(BIN_DIR)/memql-lsp gen-grammar editors/vscode/syntaxes/memql.tmLanguage.json
+	$(BIN_DIR)/memql-lsp gen-language-config editors/vscode/language-configuration.json
 
 ## Package the VS Code extension into a .vsix (bundles the host-platform binary by default)
 vscode-package:

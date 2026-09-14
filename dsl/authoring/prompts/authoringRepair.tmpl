@@ -32,18 +32,29 @@ Gate-1 diagnostics (the exact error per construct):
 
 # Grammar reminders
 
-- `&&` / `||` / `!` / parens; `payload.X` for fields, bare intrinsics.
+- A filter is a lambda over the row: `filter row => row.X == args.X`.
+  Every field goes through the parameter (`row.X`, `row.id`,
+  `row.createdAt`); `&&` / `||` / `!` / parens; a condition must be a
+  boolean.
+- A retired spelling is refused with its replacement in the diagnostic:
+  write what it names -- `p ? a : b`, `a + b`, `a ?? b`, `x != nil`,
+  `x.count()`, `s.includes(sub)`, `v in list`, `nil`, and
+  `(args.x == nil || <predicate>)` in place of `when(args.x) { ... }`.
 - Caller args in `args { ... }`, read as `args.X`; engine values bare
   (`now`, `actor.userId`). No `@default` on an args field.
+- A construct call names its kind and its arguments: `query name(k: v)`,
+  never `query name({ ... })` or a bare argument `query name(k)`.
 - Mutations: exactly one `insert` OR `update` block. Owner-stamped
   writes + owner-filtered reads for per-row authz.
 
 # Specs
 
-A spec carries `@description` and MAY carry an optional `@shape("name")`
-pin; the engine derives the eval strategy from the body. Fix a spec
-diagnostic by grounding the body in real concept fields + correct
-grammar, not by stripping a valid annotation.
+A spec carries `@description`, and its body is one lambda over the
+concept or shape its signature binds: `= row => <predicate>`, or
+`= actor => <predicate>` over an `@actor` shape. A `{ return ... }` body
+is refused. Fix a spec diagnostic by grounding the body in real fields
+of that binding and correct grammar, not by stripping a valid
+annotation.
 
 # Output contract
 

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // writeDSLTree materialises a throwaway dsl/ tree from a map of
@@ -666,4 +667,127 @@ func TestRewriteAppliesTheInferredTier(t *testing.T) {
 	if string(qOut) != string(qSrc) {
 		t.Fatalf("queries.memql was rewritten:\n%s", qOut)
 	}
+}
+
+// TestClassifyConstructReadsTheWholeClauseInBothEditions: the edition-2026
+// forms the expressions codemod writes (epic memql#5363), and a wrapped clause
+// in either edition -- which a first-line read saw as one conjunct of several.
+func TestClassifyConstructReadsTheWholeClauseInBothEditions(t *testing.T) {
+	cases := []struct {
+		name  string
+		body  string
+		want  verdictKind
+		tier  langparser.RowAuthzTier
+		owner string
+	}{
+		{"v1 caller-scoped", "{\n  filter  row => row.ownerUserId == actor.userId\n}", verdictVote, langparser.RowAuthzOwned, "ownerUserId"},
+		{"v1 reversed operands", "{\n  filter  row => actor.userId == row.userId && row.active == true\n}", verdictVote, langparser.RowAuthzOwned, "userId"},
+		{"v1 owner on a wrapped line", "{\n  filter  row => row.status == \"open\"\n          && row.ownerUserId == actor.userId\n  shape   noteFull\n}", verdictVote, langparser.RowAuthzOwned, "ownerUserId"},
+		{"legacy owner on a wrapped line", "{\n  filter  status==\"open\" &&\n    ownerUserId==actor.userId\n  shape   noteFull\n}", verdictVote, langparser.RowAuthzOwned, "ownerUserId"},
+		{"v1 admin gate", "{\n  filter  row => row.targetId == args.targetId && actor.isClusterOwner == true\n}", verdictVote, langparser.RowAuthzClusterOwner, ""},
+		// Blocks: nothing guarantees the caller.
+		{"v1 unscoped", "{\n  filter  row => row.spaceId == args.spaceId\n}", verdictBlocks, "", ""},
+		{"v1 owner widened by a disjunct", "{\n  filter  row => row.ownerUserId == actor.userId || row.visibility == \"public\"\n}", verdictBlocks, "", ""},
+		{"v1 owner behind a guard", "{\n  filter  row => (args.mine == nil || row.ownerUserId == actor.userId)\n}", verdictBlocks, "", ""},
+		{"v1 nested payload path is not an owner field", "{\n  filter  row => row.credentials.userId == actor.userId\n}", verdictBlocks, "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := classifyConstruct("query", "", tc.body, tc.body)
+			if got.Kind != tc.want {
+				t.Fatalf("Kind = %v, want %v (reason %q, decl %+v)", got.Kind, tc.want, got.Reason, got.Decl)
+			}
+			if tc.want == verdictVote && (got.Decl.Tier != tc.tier || got.Decl.Owner != tc.owner) {
+				t.Errorf("decl = %+v, want tier %v owner %q", got.Decl, tc.tier, tc.owner)
+			}
+			if got.Kind == verdictBlocks && got.Reason == "" {
+				t.Fatal("a blocking verdict must carry a reason")
+			}
+		})
+	}
+}
+
+// TestRowAuthzInferenceIsEditionIndependent runs the inference over the real
+// dsl/ tree and over that tree as the expressions codemod leaves it (epic
+// memql#5363), and requires the same verdict for every concept: the same tier
+// where one is inferred, an abstention where one is not. The migrated tree is
+// written to a scratch directory; nothing under dsl/ changes.
+func TestRowAuthzInferenceIsEditionIndependent(t *testing.T) {
+	realRoot := filepath.Join("..", "..", "dsl")
+	files := map[string][]byte{}
+	walkErr := filepath.WalkDir(realRoot, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if repowalk.SkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		rel, _ := filepath.Rel(realRoot, p)
+		b, readErr := os.ReadFile(p)
+		files[filepath.ToSlash(rel)] = b
+		return readErr
+	})
+	if walkErr != nil {
+		t.Fatalf("read %s: %v", realRoot, walkErr)
+	}
+	changed, err := rewriteExpressions("", files)
+	if err != nil {
+		t.Fatalf("expressions rewrite: %v", err)
+	}
+	if len(changed) < 100 {
+		t.Fatalf("the codemod changed %d files; the comparison below would be the legacy tree against itself", len(changed))
+	}
+	scratch := t.TempDir()
+	for p, b := range files {
+		if next, ok := changed[p]; ok {
+			b = next
+		}
+		dst := filepath.Join(scratch, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dst, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	legacy, err := inferRowAuthz(realRoot)
+	if err != nil {
+		t.Fatalf("infer over dsl/: %v", err)
+	}
+	v1, err := inferRowAuthz(scratch)
+	if err != nil {
+		t.Fatalf("infer over the migrated tree: %v", err)
+	}
+	inferred := 0
+	for domain, tiers := range legacy.Tiers {
+		for name, want := range tiers {
+			inferred++
+			got, ok := v1.Tiers[domain][name]
+			if !ok || got != want {
+				t.Errorf("%s.%s: infers %+v from dsl/ and %+v (found %v) once migrated", domain, name, want, got, ok)
+			}
+		}
+	}
+	for domain, tiers := range v1.Tiers {
+		for name, got := range tiers {
+			if _, ok := legacy.Tiers[domain][name]; !ok {
+				t.Errorf("%s.%s: infers %+v only once migrated", domain, name, got)
+			}
+		}
+	}
+	for key := range legacy.Abstained {
+		if _, ok := v1.Abstained[key]; !ok {
+			t.Errorf("%v: abstains over dsl/ and not once migrated", key)
+		}
+	}
+	// The reachable positive: concepts the inference had evidence for.
+	// Measured when the floor was set: 57 inferred tiers, 104 abstentions.
+	if inferred < 40 {
+		t.Errorf("inferred %d tiers over dsl/ -- the inference has stopped reading evidence", inferred)
+	}
+	t.Logf("%d tiers and %d abstentions, identical in both editions", inferred, len(legacy.Abstained))
 }

@@ -42,6 +42,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/znasllc-io/memql/component/language/dslclause"
 )
 
 // =============================================================================
@@ -810,13 +812,11 @@ func checkRefineClause(q *structQueryBody) error {
 	return nil
 }
 
-// lambdaHeader matches the start of an edition-2026 lambda: `x =>`, `() =>`,
-// `(x) =>`, `(x, y) =>`.
-var lambdaHeader = regexp.MustCompile(`^(?:[A-Za-z_][A-Za-z0-9_]*|\(\s*(?:[A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*\s*,?)?\s*\))\s*=>`)
-
-// opensWithLambdaHeader reports whether a clause value is a lambda.
+// opensWithLambdaHeader reports whether a clause value is a lambda: `x =>`,
+// `() =>`, `(x) =>`, `(x, y) =>`. The rule is dslclause.OpensLambda, the one
+// every gate asks before choosing which grammar to read a clause with.
 func opensWithLambdaHeader(s string) bool {
-	return lambdaHeader.MatchString(strings.TrimSpace(s))
+	return dslclause.OpensLambda(s)
 }
 
 // joinStructQueryContinuations folds a struct-query body's physical lines
@@ -846,6 +846,11 @@ func opensWithLambdaHeader(s string) bool {
 // Anything else starts a new field. A field keyword can therefore never be
 // swallowed: `shape spaceFull` neither leaves a delimiter open nor ends on
 // an operator, so the `sort` line after it starts fresh.
+//
+// The rule itself is dslclause.ContinuesClause, and it lives there rather than
+// here so every gate that reads a clause as text folds lines exactly as this
+// does (epic memql#5363): a gate reading only a filter's first line is blind to
+// every conjunct the codemod wrapped onto the lines below it.
 func joinStructQueryContinuations(raw []string) []string {
 	var out []string
 	var acc string
@@ -862,7 +867,7 @@ func joinStructQueryContinuations(raw []string) []string {
 		if line == "" {
 			continue
 		}
-		if acc != "" && (unclosedDelimiters(acc) || endsOnDanglingOperator(acc) || opensWithBinaryOperator(line)) {
+		if acc != "" && dslclause.ContinuesClause(acc, line) {
 			acc += " " + line
 			continue
 		}
@@ -871,73 +876,6 @@ func joinStructQueryContinuations(raw []string) []string {
 	}
 	flush()
 	return out
-}
-
-// structQueryTrailingOperators are the tokens that cannot END a complete
-// expression, longest first so `<=` is tested before `<`.
-var structQueryTrailingOperators = []string{
-	"??", "&&", "||", "==", "!=", "<=", ">=",
-	"+", "-", "*", "/", "%", ",", "(", "{", "<", ">", "=", ".", ":", "?",
-}
-
-// structQueryLeadingOperators are the tokens a continuation line may OPEN
-// with. `-` is excluded deliberately: it is a legal identifier character in
-// this language, so a line starting `-foo` is not reliably an operator.
-//
-// `?`, `:` and `=>` (memql#5364) are the edition-2026 continuations: a
-// conditional broken before its branches, and a lambda whose arrow starts the
-// next line (`filter row` / `=> row.a == 1`). No clause keyword starts with
-// any of them, so none can swallow the next clause.
-var structQueryLeadingOperators = []string{"??", "&&", "||", "==", "!=", "<=", ">=", ")", "}", ",", ".", "+", "*", "/", "?", ":", "=>"}
-
-func endsOnDanglingOperator(s string) bool {
-	s = strings.TrimSpace(s)
-	for _, op := range structQueryTrailingOperators {
-		if strings.HasSuffix(s, op) {
-			return true
-		}
-	}
-	return false
-}
-
-func opensWithBinaryOperator(s string) bool {
-	s = strings.TrimSpace(s)
-	for _, op := range structQueryLeadingOperators {
-		if strings.HasPrefix(s, op) {
-			return true
-		}
-	}
-	return false
-}
-
-// unclosedDelimiters reports whether s leaves a `(` or `{` open, ignoring
-// anything inside a string literal so a `{` in `@pattern("^a{2}$")` does not
-// read as an opener.
-func unclosedDelimiters(s string) bool {
-	depth := 0
-	var quote byte
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if quote != 0 {
-			if c == '\\' {
-				i++
-				continue
-			}
-			if c == quote {
-				quote = 0
-			}
-			continue
-		}
-		switch c {
-		case '"', '\'', '`':
-			quote = c
-		case '(', '{':
-			depth++
-		case ')', '}':
-			depth--
-		}
-	}
-	return depth > 0
 }
 
 func parseStructQueryBody(body string) (*structQueryBody, error) {
@@ -1327,6 +1265,10 @@ var idFieldMatcher = regexp.MustCompile(`^id\s*:\s*([\s\S]+)$`)
 // object-literal form the engine's `insert()` / `update()` accept.
 // The `id:` line is hoisted to a positional `id=<expr>` argument and
 // dropped from the payload.
+//
+// Every field it emits is an explicit `key: value` entry: the bare-mirror
+// shorthand is expanded here (expandBareMirror), so the payload is a map
+// literal in both grammars -- the edition-2026 map refuses a key-less entry.
 func translateInsertBody(raw string) (idExpr string, payload string, err error) {
 	fields, err := splitInsertFields(raw)
 	if err != nil {
@@ -1334,6 +1276,9 @@ func translateInsertBody(raw string) (idExpr string, payload string, err error) 
 	}
 	var keep []string
 	for _, f := range fields {
+		if f, err = expandBareMirror(f); err != nil {
+			return "", "", err
+		}
 		if m := idFieldMatcher.FindStringSubmatch(f); m != nil {
 			if idExpr != "" {
 				return "", "", fmt.Errorf("duplicate `id:` line in insert body")
@@ -1347,6 +1292,36 @@ func translateInsertBody(raw string) (idExpr string, payload string, err error) 
 		return idExpr, "{}", nil
 	}
 	return idExpr, "{ " + strings.Join(keep, ", ") + " }", nil
+}
+
+// bareArgsPathRe matches a key-less write-block field that is a dotted
+// `args.` path of any depth; bareMirrorRe (acceptstamp_migrate.go) is its
+// one-segment case, the only one authoring rule 15 admits.
+var bareArgsPathRe = regexp.MustCompile(`^args(?:\.[A-Za-z_][A-Za-z0-9_]*)+$`)
+
+// expandBareMirror expands authoring rule 15's bare-mirror shorthand: a
+// write-block line that is only `args.name` means `name: args.name`.
+//
+// The shorthand is write-block SYNTAX, not an expression, so it is resolved
+// here, where the block is still a list of lines, and never reaches an
+// expression parser. The string half used to resolve it inside its object
+// literal parser (mutation_templates.go's tryParseShorthandCtx); the
+// edition-2026 map literal has no key-less entry, and a key cannot be
+// dotted, so under Options.ExpressionsV1 the line would be refused. Expanding
+// it here gives both grammars the same explicit entry -- the one the string
+// half's shorthand produced -- and gives rule 15's constraint a message
+// instead of a vague object-literal failure: a multi-segment path has no
+// single key to infer, so `args.user.id` is refused, naming the explicit
+// spelling. Any other field passes through untouched.
+func expandBareMirror(field string) (string, error) {
+	if m := bareMirrorRe.FindStringSubmatch(field); m != nil {
+		return m[1] + ": " + field, nil
+	}
+	if bareArgsPathRe.MatchString(field) {
+		key := field[strings.LastIndex(field, ".")+1:]
+		return "", fmt.Errorf("`%s` has no key, and the bare-mirror shorthand takes a single-segment arg (authoring rule 15): write `%s: %s`", field, key, field)
+	}
+	return field, nil
 }
 
 // splitInsertFields walks the raw body and returns each

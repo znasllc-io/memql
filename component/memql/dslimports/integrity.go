@@ -1597,9 +1597,103 @@ func filterEnumViolations(n languageAst.Node, enums map[string][]string) []enumV
 			walk(v.Target)
 		case *languageAst.CountExpr:
 			walk(v.Target)
+		case *languageAst.RefineExpr:
+			// `refine row => ...` (memql#5364) is a predicate over the rows
+			// the paginated target reads -- the same row, the same enums.
+			walk(v.Target)
+			if v.Lambda != nil {
+				walk(v.Lambda)
+			}
+		case *languageAst.LambdaExpr:
+			out = append(out, v1EnumViolations(v, enums)...)
 		}
 	}
 	walk(n)
+	return out
+}
+
+// v1EnumViolations is filterEnumViolations for an edition-2026 predicate
+// (epic memql#5363): `filter row => ...` or a brace-less spec's `row => ...`.
+//
+// The same comparisons are inspected, spelled as v1 nodes: `==` / `!=`
+// between the parameter's field and a string literal (either operand order),
+// and `in` between the parameter's field and a list of them, a `!` directly
+// over the `in` taking the `not in` consequence. Only a single-field member of
+// the PARAMETER is the enum -- `args.status` and a nested lambda's own
+// parameter are not the row's field.
+func v1EnumViolations(lam *languageAst.LambdaExpr, enums map[string][]string) []enumViolation {
+	if lam == nil || len(lam.Params) != 1 || len(enums) == 0 {
+		return nil
+	}
+	param := lam.Params[0]
+	rowField := func(n languageAst.ExpressionNode) (string, bool) {
+		root, fields, ok := languageAst.MemberPath(languageAst.Unparen(n))
+		if !ok || root != param || len(fields) != 1 {
+			return "", false
+		}
+		_, isEnum := enums[fields[0]]
+		return fields[0], isEnum
+	}
+	literal := func(n languageAst.ExpressionNode) (string, bool) {
+		l, ok := languageAst.Unparen(n).(*languageAst.LiteralExpr)
+		if !ok {
+			return "", false
+		}
+		s, ok := l.Value.(string)
+		return s, ok
+	}
+	var out []enumViolation
+	check := func(field, value string, op languageAst.ComparisonOperator) {
+		allowed := enums[field]
+		for _, a := range allowed {
+			if a == value {
+				return
+			}
+		}
+		out = append(out, enumViolation{field: field, value: value, allowed: allowed, consequence: enumConsequence(op)})
+	}
+	negated := map[languageAst.ExpressionNode]bool{}
+	languageAst.WalkV1(lam.Body, func(n languageAst.ExpressionNode) bool {
+		switch e := n.(type) {
+		case *languageAst.UnaryExpr:
+			if e.Op == "!" {
+				negated[languageAst.Unparen(e.Operand)] = true
+			}
+		case *languageAst.BinaryExpr:
+			switch e.Op {
+			case "==", "!=":
+				op := languageAst.OpEq
+				if e.Op == "!=" {
+					op = languageAst.OpNe
+				}
+				if field, ok := rowField(e.Left); ok {
+					if lit, ok := literal(e.Right); ok {
+						check(field, lit, op)
+					}
+				} else if field, ok := rowField(e.Right); ok {
+					if lit, ok := literal(e.Left); ok {
+						check(field, lit, op)
+					}
+				}
+			case "in":
+				field, ok := rowField(e.Left)
+				list, isList := languageAst.Unparen(e.Right).(*languageAst.ListExpr)
+				if !ok || !isList {
+					break
+				}
+				op := languageAst.OpIn
+				if negated[n] {
+					op = languageAst.OpOut
+				}
+				for _, el := range list.Elems {
+					if lit, ok := literal(el); ok {
+						check(field, lit, op)
+					}
+				}
+			}
+		}
+		return true
+	})
 	return out
 }
 
@@ -1723,6 +1817,29 @@ func filterFieldHeads(n languageAst.Node) []string {
 			walk(v.Target)
 		case *languageAst.CountExpr:
 			walk(v.Target)
+		case *languageAst.RefineExpr:
+			// `refine row => ...` (memql#5364) reads the same row's fields,
+			// in process, over the page the paginated target returns.
+			walk(v.Target)
+			if v.Lambda != nil {
+				walk(v.Lambda)
+			}
+		case *languageAst.LambdaExpr:
+			// An edition-2026 predicate (epic memql#5363): every field is a
+			// member of the lambda's parameter, `row.status`, so the head is
+			// the FIRST FIELD of each chain rooted at it -- not the root,
+			// which would report `row` for every reference. A chain rooted
+			// anywhere else (`args.x`, `actor.userId`, a nested lambda's own
+			// parameter) is not the row's field and contributes nothing, as
+			// a reserved head contributes nothing above.
+			if len(v.Params) != 1 {
+				return
+			}
+			languageAst.MemberPaths(v.Body, func(root string, fields []string) {
+				if root == v.Params[0] && len(fields) > 0 {
+					add(languageAst.FieldReference{Parts: fields})
+				}
+			})
 		}
 	}
 	walk(n)
@@ -2342,14 +2459,28 @@ func (t *Tree) verifySpecBodyFields(path string, f *languageAst.File, idx *declI
 	var errs []error
 	for _, def := range f.Definitions {
 		spec, ok := def.(*languageAst.SpecDecl)
-		if !ok || spec.IsTrait || spec.BoundName == "" || spec.Body == nil {
+		if !ok || spec.IsTrait || spec.BoundName == "" {
+			continue
+		}
+		// An edition-2026 spec (`spec <bound> <name> = row => ...`, epic
+		// memql#5363) carries its body as Lambda with Body nil -- the two are
+		// one declaration's alternatives. Keying on Body alone skipped every
+		// migrated spec, and SpecBodyCoverage counts a skipped spec as
+		// checked, so the lane would have gone blind tree-wide in silence.
+		var body languageAst.Node
+		switch {
+		case spec.Lambda != nil:
+			body = spec.Lambda
+		case spec.Body != nil:
+			body = spec.Body
+		default:
 			continue
 		}
 		allowed, kind := t.resolveSpecBindingFields(path, f, idx, spec.BoundName)
 		if allowed == nil {
 			continue // unresolved -- lane 2 reports it
 		}
-		for _, head := range filterFieldHeads(spec.Body) {
+		for _, head := range filterFieldHeads(body) {
 			if allowed[head] {
 				continue
 			}

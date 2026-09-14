@@ -29,6 +29,10 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/dslclause"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Finding is one violation of the §2 call-graph contract.
@@ -429,8 +433,8 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 		// check). This is the rule whose ABSENCE let 13 policy sites
 		// accumulate invisibly after the #2235 burn-down.
 		for _, cond := range automationConditions(text) {
-			if m := conditionBuiltinRE.FindStringSubmatch(cond); m != nil {
-				add("automation-condition-builtin", fmt.Sprintf("condition %q calls %s() -- date math / defaults are POLICY; compute the decision in a pure logic (or push a cutoff into the query) and gate on steps.<decide>.result (P4, #2371)", snippet(cond), m[1]))
+			if what, ok := conditionPolicyOp(cond); ok {
+				add("automation-condition-builtin", fmt.Sprintf("condition %q %s -- date math / defaults are POLICY; compute the decision in a pure logic (or push a cutoff into the query) and gate on steps.<decide>.result (P4, #2371)", snippet(cond), what))
 			}
 			if field, ok := literalVocabularyField(cond); ok {
 				add("automation-condition-vocabulary", fmt.Sprintf("condition %q compares %q against multiple string literals -- a value VOCABULARY is policy; own it in one pure decide logic and switch on its result (P4, #2371)", snippet(cond), field))
@@ -450,11 +454,18 @@ var (
 	automationIfRE = regexp.MustCompile(`(?m)^\s*if\s+(.+?)\s*\{\s*$`)
 	// forEach where clauses: `forEach x in <src> where <cond> {`.
 	automationWhereRE = regexp.MustCompile(`(?m)forEach\s+\w+\s+in\s+.+?\s+where\s+(.+?)\s*\{\s*$`)
-	// trigger relevance filters: `@filter(<cond>)`.
-	automationFilterRE = regexp.MustCompile(`@filter\(([^)]*)\)`)
+	// trigger relevance filters: `@filter(<cond>)`. Only the OPENING is
+	// matched; the argument runs to its balanced `)` (annotationArgs). A
+	// `[^)]*` capture stopped at the first `)` inside the condition, so
+	// everything after a call -- `@filter(exists(x) && concat(a, b) == "y")`
+	// read as `exists(x` -- was never examined, and an edition-2026 filter
+	// (`@filter(row => (row.kind ?? "x") == "y")`) opens a group at once.
+	automationFilterRE = regexp.MustCompile(`@filter\s*\(`)
 
 	// Policy smells inside a condition. exists() is the sanctioned presence
-	// guard and is deliberately NOT in this list.
+	// guard and is deliberately NOT in this list. Edition 2026 spells two of
+	// the three as operators -- `a ?? b` for coalesce, `a + b` for concat --
+	// which conditionPolicyOp reads off the parsed condition.
 	conditionBuiltinRE = regexp.MustCompile(`\b(addDuration|coalesce|concat)\s*\(`)
 	// Every `<ident> == "<literal>"` atom in a condition; two on the SAME
 	// identifier joined by || form a vocabulary (checked in Go -- RE2 has no
@@ -492,10 +503,87 @@ func automationConditions(text string) []string {
 	for _, m := range automationWhereRE.FindAllStringSubmatch(text, -1) {
 		out = append(out, m[1])
 	}
-	for _, m := range automationFilterRE.FindAllStringSubmatch(text, -1) {
-		out = append(out, m[1])
+	out = append(out, annotationArgs(text, automationFilterRE)...)
+	return out
+}
+
+// annotationArgs returns the argument text of every annotation whose opening
+// (`@name(`) re matches, up to its BALANCED closing paren; parentheses inside
+// string literals do not count. An annotation left unclosed is skipped: it
+// does not load, so there is no condition to judge.
+func annotationArgs(text string, re *regexp.Regexp) []string {
+	var out []string
+	for _, loc := range re.FindAllStringIndex(text, -1) {
+		depth, inStr := 1, false
+	scan:
+		for i := loc[1]; i < len(text); i++ {
+			switch c := text[i]; {
+			case inStr && c == '\\':
+				i++
+			case c == '"':
+				inStr = !inStr
+			case inStr:
+			case c == '(':
+				depth++
+			case c == ')':
+				depth--
+				if depth == 0 {
+					out = append(out, text[loc[1]:i])
+					break scan
+				}
+			}
+		}
 	}
 	return out
+}
+
+// conditionPolicyOp reports the policy operation a condition performs, as the
+// words the finding uses: date math, or a default injected into the value
+// being compared.
+//
+// An edition-2026 condition is PARSED (a trigger filter as a lambda, `row =>
+// ...`; a step gate as an expression) and the operation is found on the tree:
+// a call to addDuration, a `??` (coalesce), or a `+` (concat). A condition the
+// v1 grammar refuses is a legacy one -- `coalesce(...)` and `concat(...)` are
+// retired spellings the v1 parser refuses by name -- and is read with the
+// legacy call pattern.
+func conditionPolicyOp(cond string) (string, bool) {
+	src := strings.TrimSpace(cond)
+	var body ast.ExpressionNode
+	if dslclause.OpensLambda(src) {
+		if lam, err := parser.ParseV1Lambda(src); err == nil {
+			body = lam.Body
+		}
+	} else if n, err := parser.ParseV1Expression(src); err == nil {
+		body = n
+	}
+	if body == nil {
+		if m := conditionBuiltinRE.FindStringSubmatch(cond); m != nil {
+			return "calls " + m[1] + "()", true
+		}
+		return "", false
+	}
+	what := ""
+	ast.WalkV1(body, func(n ast.ExpressionNode) bool {
+		if what != "" {
+			return false
+		}
+		switch e := n.(type) {
+		case *ast.BinaryExpr:
+			switch e.Op {
+			case "??":
+				what = "coalesces with `??` (edition 2026's coalesce)"
+			case "+":
+				what = "concatenates with `+` (edition 2026's concat)"
+			}
+		case *ast.CallExpr:
+			if e.Receiver == nil && e.Kind == "" && e.Name == "addDuration" {
+				what = "calls addDuration()"
+			}
+		}
+		return what == ""
+	})
+	return what, what != ""
 }
 
 // snippet truncates a condition for the finding message.
@@ -506,4 +594,3 @@ func snippet(s string) string {
 	}
 	return s
 }
-

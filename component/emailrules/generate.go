@@ -50,7 +50,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/functions"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/tiers"
 )
 
 // Rule is the form half of v1:campaigns:emailRule -- everything the generator
@@ -101,8 +104,6 @@ var (
 	conceptIdRe = regexp.MustCompile(`^v[0-9]+:[a-zA-Z][a-zA-Z0-9]*:[a-zA-Z][a-zA-Z0-9]*$`)
 	// What a generated construct name may contain, after sanitising.
 	nameSafeRe = regexp.MustCompile(`[^A-Za-z0-9]`)
-	// A conservative grammar for the optional condition. See validateCondition.
-	conditionSafeRe = regexp.MustCompile(`^[A-Za-z0-9_. "'\-=!<>&|()\[\],]+$`)
 )
 
 // ConstructNameFor derives the generated automation's name from the rule id.
@@ -184,7 +185,8 @@ func (r Rule) Validate() error {
 		return fmt.Errorf("emailrules: %q is not a recipient mode (expected %s, %s or %s)",
 			r.RecipientMode, ModeClusterRoles, ModeAudience, ModeRowAddress)
 	}
-	return validateCondition(r.Condition)
+	_, err := canonicalCondition(r.Condition)
+	return err
 }
 
 // triggerEventFor maps the form's event kind onto the automation trigger's.
@@ -204,39 +206,232 @@ func triggerEventFor(eventKind string) (string, error) {
 	}
 }
 
-// validateCondition pre-checks the optional filter expression.
+// ConditionError is a refused condition, worded for the person who typed it:
+// the condition is the one place an end user writes an expression in the
+// product (the OS Campaigns app's "Only when" field), and this message is what
+// that field shows. Plain words, and the fix in one sentence.
+type ConditionError struct{ Message string }
+
+func (e *ConditionError) Error() string { return e.Message }
+
+func conditionErr(format string, args ...any) error {
+	return &ConditionError{Message: fmt.Sprintf(format, args...)}
+}
+
+// conditionExample is the example every refusal points at.
+const conditionExample = `row.role == "admin"`
+
+// canonicalCondition checks a rule's optional condition and returns it in its
+// canonical form: an edition-2026 predicate over `row`, the triggering record,
+// printed by the one canonical printer. It is the body of the generated
+// trigger filter's lambda -- `@filter(row => <condition>)` -- so an empty
+// condition is no filter at all.
 //
-// THIS IS NOT THE REAL CHECK, and saying so matters. The condition is emitted
-// UNQUOTED inside `@filter(...)`, and the authoritative verdict on it is Gate 1
-// of the authoring pipeline, which compiles the generated construct with the
-// real parser -- so a condition this function lets through and the parser
-// refuses fails the rule with the parser's own sentence, which is the better
-// message anyway.
+// TWO SPELLINGS ARE ACCEPTED, and they generate the same automation. The v1
+// one reads the record through `row` (`row.role == "admin"`). The legacy one,
+// the only form the field accepted until the grammar changed, reads it through
+// `payload` (`payload.role == "admin"`); stored rules keep that text -- it is
+// the operator's data, and nothing migrates rows -- and it is converted here
+// by the conversion `memqlmigrate --rewrite=expressions` applies to a trigger
+// filter (payload.<f> becomes row.<f>, null becomes nil).
 //
-// What this function is for is the class the parser cannot help with: a
-// condition carrying a `)` or a newline does not produce a bad filter, it
-// produces a DIFFERENT CONSTRUCT -- the annotation closes early and whatever
-// follows is read as source. That is the injection shape, and it has to be
-// refused before the text is assembled rather than after.
-func validateCondition(condition string) error {
+// The order of the checks is the point:
+//
+//  1. The INJECTION guards run on the raw text, before anything reads it. A
+//     newline, a brace, an `@` or a `;` does not make a bad filter; in the
+//     legacy text it closed the annotation and turned the rest of the condition
+//     into source. The generated construct no longer carries the raw text --
+//     it carries the parsed condition, re-printed -- but the guards stay, so a
+//     condition that could only ever have been an attack is refused as one.
+//  2. The condition is PARSED with the edition-2026 grammar, and a parse error
+//     is refused with the parser's own words.
+//  3. What it may READ is exactly what the generated filter's scope binds:
+//     `row` (which it must read at least one field of), `now`, the event
+//     envelope `event`, and the one argument the generated automation declares
+//     (`id`, also `args.id`). `actor` is refused although the scope binds it:
+//     a rule fires from the event bus with nobody signed in, so the actor is
+//     always nobody and a condition over it would silently never match.
+//  4. A construct call -- a query or mutation run from a condition -- is
+//     refused, as the tier manifest refuses it in every trigger filter; so is
+//     a call to a function the catalog does not hold, which the rule has no
+//     spec or trait registry to resolve.
+func canonicalCondition(condition string) (string, error) {
 	c := strings.TrimSpace(condition)
 	if c == "" {
-		return nil
+		return "", nil
 	}
 	if strings.ContainsAny(c, "\r\n\x00{}@;") {
-		return fmt.Errorf("emailrules: the condition may not contain a newline, a brace, an @ or a semicolon -- it is emitted inside the generated automation's @filter, where any of those would close the annotation and turn the rest of the condition into source")
+		return "", conditionErr("The condition has to fit on one line and can't contain braces, @ or semicolons. Write it like %s.", conditionExample)
 	}
-	if !conditionSafeRe.MatchString(c) {
-		return fmt.Errorf("emailrules: the condition contains a character the filter grammar does not use; write it as a comparison over payload fields, e.g. payload.role == \"admin\"")
+	src := c
+	if legacyPayloadRoot.MatchString(maskConditionStrings(c)) {
+		converted, err := convertLegacyCondition(c)
+		if err != nil {
+			return "", err
+		}
+		src = converted
 	}
-	if strings.Count(c, "(") != strings.Count(c, ")") {
-		return fmt.Errorf("emailrules: the condition's parentheses are unbalanced")
+	node, err := langparser.ParseV1Expression(src)
+	if err != nil {
+		return "", conditionErr("The condition isn't valid: %v. Write it like %s.", err, conditionExample)
 	}
-	if strings.Count(c, `"`)%2 != 0 {
-		return fmt.Errorf("emailrules: the condition has an unterminated string")
+	if err := checkConditionReads(node); err != nil {
+		return "", err
 	}
-	if !strings.Contains(c, "payload.") {
-		return fmt.Errorf("emailrules: the condition must test a field of the triggering row, which is spelled payload.<field> -- e.g. payload.role == \"admin\"")
+	return ast.FormatExpr(node), nil
+}
+
+// legacyPayloadRoot finds `payload.` used as a ROOT -- not `row.payload.x`,
+// a v1 read of a payload field named payload -- on a view of the condition
+// whose string literals are blanked.
+var legacyPayloadRoot = regexp.MustCompile(`(^|[^A-Za-z0-9_.])payload\.`)
+
+// maskConditionStrings blanks the contents of the condition's string
+// literals, so text inside quotes is never read as structure.
+func maskConditionStrings(s string) string {
+	out := []byte(s)
+	var quote byte
+	for i := 0; i < len(out); i++ {
+		switch {
+		case quote != 0 && out[i] == '\\':
+			out[i] = ' '
+			if i+1 < len(out) {
+				i++
+				out[i] = ' '
+			}
+		case quote != 0 && out[i] == quote:
+			quote = 0
+		case quote != 0:
+			out[i] = ' '
+		case out[i] == '"' || out[i] == '\'':
+			quote = out[i]
+		}
+	}
+	return string(out)
+}
+
+// convertLegacyCondition carries a stored `payload.<field>` condition onto
+// the edition-2026 form with the expressions rewrite itself, run over the
+// trigger filter it used to be emitted as, and returns the lambda's body. One
+// conversion, the codemod's, so a stored rule and a migrated hand-written
+// automation cannot come out different.
+func convertLegacyCondition(c string) (string, error) {
+	const head = "@filter(row => "
+	out, err := langparser.RewriteExpressions([]byte("@filter("+c+")\n"), nil)
+	if err != nil {
+		if m := bareWordErr.FindStringSubmatch(err.Error()); m != nil {
+			return "", conditionErr("Put the text %s in quotes, like %q -- without quotes it reads as a name.", m[1], m[1])
+		}
+		return "", conditionErr("This condition uses the older payload. form and can't be converted automatically. Rewrite it with row., like %s.", conditionExample)
+	}
+	text := strings.TrimSuffix(string(out), "\n")
+	if !strings.HasPrefix(text, head) || !strings.HasSuffix(text, ")") {
+		return "", conditionErr("This condition uses the older payload. form and can't be converted automatically. Rewrite it with row., like %s.", conditionExample)
+	}
+	return strings.TrimSuffix(strings.TrimPrefix(text, head), ")"), nil
+}
+
+// bareWordErr recognises the rewrite's refusal of an unquoted word, the one
+// legacy mistake worth a sentence of its own.
+var bareWordErr = regexp.MustCompile(`the bare word ([^ ]+) is a path or a literal`)
+
+// conditionRoots is what a condition may read by name: the scope the
+// generated trigger filter evaluates in (see canonicalCondition). `row` is the
+// lambda's parameter; `id` is the args field the generated automation
+// declares, which the run's scope also answers bare.
+var conditionRoots = map[string]bool{"row": true, "now": true, "event": true, "args": true, "id": true}
+
+// checkConditionReads walks the parsed condition for what it reads and calls.
+func checkConditionReads(node ast.ExpressionNode) error {
+	readsRow := false
+	var err error
+	var walk func(n ast.ExpressionNode, bound map[string]bool)
+	walk = func(n ast.ExpressionNode, bound map[string]bool) {
+		if err != nil || n == nil {
+			return
+		}
+		if tiers.KindAdmission(tiers.PositionTriggerFilter, ast.KindOf(n)) == tiers.Refused {
+			if ast.KindOf(n) == ast.KindConstructCall {
+				err = conditionErr("The condition can't run a query, mutation or other construct; it can only compare the record's fields, like %s.", conditionExample)
+			} else {
+				err = conditionErr("The condition can't use %s here. Compare the record's fields instead, like %s.", ast.FormatExpr(n), conditionExample)
+			}
+			return
+		}
+		switch e := n.(type) {
+		case *ast.IdentExpr:
+			if bound[e.Name] {
+				return
+			}
+			switch {
+			case e.Name == "actor":
+				err = conditionErr("The condition can't use actor: nobody is signed in when a rule fires. To test who made the change, use row.createdBy.")
+			case !conditionRoots[e.Name]:
+				err = conditionErr("The condition can't use %s. To test a field of the record, write row.%s; if %s is a value, put it in quotes: %q.", e.Name, e.Name, e.Name, e.Name)
+			}
+		case *ast.MemberExpr:
+			if root, ok := ast.Unparen(e.Object).(*ast.IdentExpr); ok && !bound[root.Name] {
+				switch root.Name {
+				case "row":
+					readsRow = true
+				case "args":
+					if e.Field != "id" {
+						err = conditionErr("The condition can read the record's fields (row.<field>) and its id, but not args.%s. Write row.%s instead.", e.Field, e.Field)
+						return
+					}
+				}
+			}
+			walk(e.Object, bound)
+		case *ast.CallExpr:
+			if e.Receiver == nil && e.Kind == "" {
+				if _, ok := functions.Lookup(e.Name); !ok {
+					err = conditionErr("The condition uses %s(...), which isn't a function a condition can call. Use a built-in function instead, like lower(row.name) == \"ada\".", e.Name)
+					return
+				}
+			}
+			walk(e.Receiver, bound)
+			for _, a := range e.Args {
+				walk(a, bound)
+			}
+			for _, a := range e.Named {
+				walk(a.Value, bound)
+			}
+		case *ast.LambdaExpr:
+			inner := make(map[string]bool, len(bound)+len(e.Params))
+			for k := range bound {
+				inner[k] = true
+			}
+			for _, p := range e.Params {
+				inner[p] = true
+			}
+			walk(e.Body, inner)
+		case *ast.UnaryExpr:
+			walk(e.Operand, bound)
+		case *ast.BinaryExpr:
+			walk(e.Left, bound)
+			walk(e.Right, bound)
+		case *ast.ListExpr:
+			for _, el := range e.Elems {
+				walk(el, bound)
+			}
+		case *ast.MapExpr:
+			for _, en := range e.Entries {
+				walk(en.Value, bound)
+			}
+		case *ast.ParenExpr:
+			walk(e.Inner, bound)
+		case *ast.TernaryExpr:
+			walk(e.Condition, bound)
+			walk(e.Then, bound)
+			walk(e.Else, bound)
+		}
+	}
+	walk(node, map[string]bool{})
+	if err != nil {
+		return err
+	}
+	if !readsRow {
+		return conditionErr("The condition has to test a field of the record that changed, like %s.", conditionExample)
 	}
 	return nil
 }
@@ -271,23 +466,37 @@ func GenerateAutomation(r Rule) (string, error) {
 
 	fmt.Fprintf(&b, "@trigger(event=%s, concept=%s, partition=\"*\")\n",
 		langparser.QuoteString(event), langparser.QuoteString(strings.TrimSpace(r.TriggerConcept)))
-	if c := strings.TrimSpace(r.Condition); c != "" {
-		fmt.Fprintf(&b, "@filter(%s)\n", c)
+	// The filter is the rule's condition in its canonical v1 form -- the
+	// PARSED condition, re-printed, never the text the operator typed -- as
+	// the body of a lambda over the triggering row.
+	cond, err := canonicalCondition(r.Condition)
+	if err != nil {
+		return "", err
+	}
+	if cond != "" {
+		fmt.Fprintf(&b, "@filter(row => %s)\n", cond)
 	}
 	fmt.Fprintf(&b, "automation %s {\n", name)
 	b.WriteString("  args {\n    id any\n  }\n")
 	b.WriteString("  step send {\n")
+	// The arguments are COMMA-separated. A construct call's arguments are a
+	// list, and the parser refuses a second one that is not preceded by a
+	// comma ("expected ')'"). The generator wrote them newline-separated, which
+	// no binary linking the automation compiler accepted: this package's own
+	// Gate-1 test passed only because its test binary did not link that
+	// compiler, so the sandbox skipped the automation kind instead of
+	// compiling it. generate_v1_test.go links it, which is what exposed it.
 	b.WriteString("    builtin emailRuleFire (\n")
-	fmt.Fprintf(&b, "      emailRuleId: %s\n", langparser.QuoteString(r.ID))
-	b.WriteString("      nodeId: id\n")
-	// `event: event` is a RUNTIME REFERENCE, not the literal string "event".
-	// The step evaluator's isRuntimeReference (component/automations/steps/
-	// function.go) names `event` explicitly alongside `$`-prefixed values and
-	// `steps.`/`item.` roots, so the whole envelope is bound at fire time.
-	// Worth stating: a value that is NOT on that list lands in the call as
-	// literal text, and a rule that passed the parser would then hand the
-	// builtin the four characters "event" and mail nobody, per firing,
-	// forever.
+	fmt.Fprintf(&b, "      emailRuleId: %s,\n", langparser.QuoteString(r.ID))
+	b.WriteString("      nodeId: id,\n")
+	// `event: event` passes the triggering event's WHOLE ENVELOPE, and `id`
+	// is the args field the trigger payload binds. In the edition-2026
+	// grammar both are names: the run's scope (component/automations
+	// RunScope) resolves `event` to the envelope and `id` to the bound
+	// field, and a name it cannot resolve is refused -- at load by the
+	// args-resolution gate, at fire time as an unknown name -- never passed
+	// along as its own text. (Until the grammar flips, the legacy step
+	// evaluator reads the same two words as runtime references.)
 	b.WriteString("      event: event\n")
 	b.WriteString("    )\n")
 	b.WriteString("  }\n")

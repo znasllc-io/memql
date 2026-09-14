@@ -46,7 +46,7 @@ concept probeLiveConcept {
 }
 `)}}
 	const domain = "probecommentedkinds"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	if _, err := LoadUnifiedConcepts(e2eDiscardLogger()); err != nil {

@@ -38,13 +38,14 @@ gates both:
    engine injects the ownership predicate into every read and refuses a write
    whose target belongs to somebody else. The owned tier has **no cluster-owner
    bypass**.
-2. Every caller-scoped query additionally names `ownerUserId==actor.userId` as a
-   **top-level** conjunct.
+2. Every caller-scoped query additionally names `row.ownerUserId == actor.userId`
+   as a **top-level** conjunct.
 
-The second exists because of *where* the conjunct sits. Inside a `when()` guard
-it vanishes when its argument is absent — that is what the guard is for — so a
-query that reads as scoped returns the whole table the moment a caller omits an
-optional argument. That is memql#2883, it has happened before, and it looks
+The second exists because of *where* the conjunct sits. Inside an
+optional-argument guard -- `(args.x == nil || row.ownerUserId == actor.userId)`
+-- it stops applying when the argument is absent, which is what the guard is for,
+so a query that reads as scoped returns the whole table the moment a caller omits
+an optional argument. That is memql#2883, it has happened before, and it looks
 entirely correct in review. The gate splits the filter on `&&` at depth zero and
 requires the conjunct to be one of the terms.
 

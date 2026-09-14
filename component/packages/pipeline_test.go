@@ -256,6 +256,7 @@ func plainUser() Actor    { return Actor{UserId: "v1:identity:user:someone"} }
 func spaOnlyPackage() fstest.MapFS {
 	p := validPackage()
 	delete(p, "dsl/acme/concepts.memql")
+	delete(p, "dsl/acme/memql.toml")
 	return p
 }
 

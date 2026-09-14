@@ -39,14 +39,10 @@ mutate globalSecret setGlobalSecret {
     active          bool
   }
   insert {
-    args.id
-    args.name
-    args.encryptedValue
-    args.fingerprint
-    args.kind
-    args.description
-    args.addedBy
-    active: args.active ?? true
+    accept { id, name, encryptedValue, fingerprint, kind, description, addedBy }
+    stamp {
+      active: args.active ?? true
+    }
   }
 }
 
@@ -69,11 +65,10 @@ mutate globalVariable setGlobalVariable {
     active       bool
   }
   insert {
-    args.id
-    args.name
-    args.value
-    args.description
-    active: args.active ?? true
+    accept { id, name, value, description }
+    stamp {
+      active: args.active ?? true
+    }
   }
 }
 
@@ -104,14 +99,10 @@ mutate partitionSecret setPartitionSecret {
     active          bool
   }
   insert {
-    args.id
-    args.name
-    args.encryptedValue
-    args.fingerprint
-    args.kind
-    args.description
-    args.addedBy
-    active: args.active ?? true
+    accept { id, name, encryptedValue, fingerprint, kind, description, addedBy }
+    stamp {
+      active: args.active ?? true
+    }
   }
 }
 
@@ -135,11 +126,10 @@ mutate partitionVariable setPartitionVariable {
     active       bool
   }
   insert {
-    args.id
-    args.name
-    args.value
-    args.description
-    active: args.active ?? true
+    accept { id, name, value, description }
+    stamp {
+      active: args.active ?? true
+    }
   }
 }
 
@@ -578,10 +568,7 @@ mutate packState setPackEnabled {
     reason      string
   }
   insert {
-    args.id
-    args.packDomain
-    args.enabled
-    args.reason
+    accept { id, packDomain, enabled, reason }
   }
 }
 

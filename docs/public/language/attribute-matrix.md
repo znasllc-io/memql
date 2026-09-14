@@ -57,7 +57,7 @@ pins this table to the allow-lists so the two cannot drift.
 | **Triggers (Automation Only)** |
 | `@trigger(event="...")` | No | No | Yes | Event-based trigger |
 | `@trigger(schedule="...")` | No | No | Yes | Cron-based schedule (6-field, with seconds) |
-| `@filter(...)` | No | No | Yes | Predicate over the triggering event's payload |
+| `@filter(row => ...)` | No | No | Yes | Predicate over the triggering row, written as a lambda |
 | `@schedule(cron="...")` | No | No | Yes | Accepted synonym for `@trigger(schedule="...")` |
 | `@async` | No | No | No | Not accepted -- dead vocabulary; rejected at load. Automations run async by their event/schedule trigger |
 
@@ -610,14 +610,21 @@ automation pruneStaleClusterNodes { ... }
 ```
 
 #### `@filter(...)`
-Predicate over the triggering event's payload. The automation only
-fires when the predicate holds.
+A lambda over the triggering row: `row` is the row whose event fired the
+trigger, and its fields are read through it as in a query filter. The
+automation fires only when the predicate holds. The filter runs in
+process, so it can call any catalog function; `args` holds the
+automation's declared args, bound from the event payload before the
+filter runs.
 
 ```memql fragment
 @trigger(event="node.created", concept="v1:library:folder", partition="*")
-@filter(active==true)
+@filter(row => row.active == true)
 automation indexFolder { ... }
 ```
+
+`@filter(active == true)`, with no lambda header, is the pre-v1 spelling;
+the parser refuses it and names `memqlmigrate --rewrite=expressions`.
 
 #### `@async` (removed)
 Not accepted -- dead vocabulary, rejected at load (#2712), and its
@@ -639,7 +646,7 @@ query artifact activeDocumentArtifacts {
   args {
     folderId  string  @required
   }
-  filter  folderId==args.folderId && kind=="document" && isActiveRecord
+  filter  row => row.folderId == args.folderId && row.kind == "document" && isActiveRecord(row)
   shape   artifactFull
 }
 ```
@@ -674,7 +681,7 @@ use library.logic.{ indexArtifact }
 @description("Indexes a file into the Library the moment its row lands")
 automation indexArtifact {
   step run {
-    logic indexArtifact { event: event }
+    logic indexArtifact(event: event)
   }
 }
 ```

@@ -36,23 +36,42 @@ Dependencies to REUSE (reference by name, do NOT author):
 - Cross-file dependencies go through file-top `use <ns>.<kind>.{ name }`
   imports. Bind concepts via the construct signature
   (`query <Concept> <name>`, `shape <Concept> <name>`, ...).
-- Filter / predicate grammar: `&&` / `||` / `!` / parens; `payload.X`
-  for fields, bare names for intrinsics (id, createdAt, createdBy).
+- A query filter is a lambda over the row:
+  `filter row => row.status == args.status && isActiveRecord(row)`.
+  Every field goes through the parameter -- `row.X` for a payload field,
+  `row.id` / `row.createdAt` / `row.createdBy` for an intrinsic; a bare
+  name is never a field. A trigger filter is the same over the triggering
+  row: `@filter(row => row.status == "archived")`.
+- `&&` / `||` / `!` / parens, and a condition must be a boolean. Guard an
+  optional arg with a predicate: `(args.x == nil || row.f == args.x)`.
+- One spelling each: `p ? a : b`, `a + b`, `a ?? b`, `x != nil`,
+  `x.count()`, `s.includes(sub)`, `v in list`, `nil`, `now`. The old
+  `cond(`, `concat(`, `coalesce(`, `exists(`, `len(`, `contains(s, sub)`,
+  `has`, `when(...)`, `null` and `now()` are refused.
 - Caller args in an `args { ... }` block, read as `args.X`. Engine
   values are bare: `now`, `actor.userId`, `partition`. No `@default`
-  on an args field -- use `coalesce(args.X, <default>)`.
+  on an args field -- write `args.X ?? <default>`.
+- A construct call names its kind and its arguments:
+  `rows := query activeUsers(status: "active")`,
+  `logic record(event: event)` -- never `logic record({ ... })` and never
+  a bare argument `logic record(event)`. Only a spec or trait takes a
+  bare argument, its receiver: `isActiveRecord(row)`.
 - Mutations: exactly one `insert { ... }` OR `update { ... }` block.
   Owner-stamped writes (`createdBy: actor.userId`,
   `ownerUserId: actor.userId`) and owner-filtered reads
-  (`payload.ownerUserId == actor.userId`) for per-row authz.
+  (`filter row => row.ownerUserId == actor.userId`) for per-row authz.
 
 # Specs
 
-A spec body is a single boolean expression; the engine derives the eval
-strategy (SQL row-spec vs in-process context-spec) from the body's field
-references. A spec carries `@description` and MAY carry an optional
-`@shape("name")` pin documenting the shape it reads -- the pin is not
-required. Keep authored specs minimal: prefer body + `@description`.
+A spec binds one concept or shape in its signature, and its body is one
+lambda over it: `spec registration isRevoked = row => row.revokedAt != nil`.
+Over an `@actor` shape the parameter is `actor`:
+`spec actorEnvelope requiresOwner = actor => actor.role == "owner"`. A
+trait binds nothing: `trait isOpen = row => row.status == "open"`. The
+binding decides the eval strategy -- a concept or `@row` shape pushes down
+to SQL, an `@actor` shape runs in process. Apply a spec or trait to its
+receiver where you use it: `isOpen(row)`, `requiresOwner(actor)`. A spec
+carries `@description`; keep authored specs minimal.
 
 # Output contract
 

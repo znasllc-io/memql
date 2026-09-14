@@ -691,6 +691,12 @@ func evaluateTriggerFilter(a *Automation, event *events.Event, bound map[string]
 		"error":  "",
 	})
 
+	// A v1 automation's filter is a lambda over the triggering ROW
+	// (`@filter(row => row.status == "archived")`), parsed at load; the
+	// rest of the scope is the state seeded above.
+	if lam := a.Trigger.FilterLambda; lam != nil {
+		return evaluateTriggerFilterV1(lam, event, evaluator)
+	}
 	return evaluator.EvaluateCondition(a.Trigger.Filter)
 }
 
