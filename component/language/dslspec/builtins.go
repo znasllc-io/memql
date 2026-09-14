@@ -1,48 +1,47 @@
 package dslspec
 
-import "sort"
+import (
+	"sort"
 
-// builtins.go is the single source of truth for the MemQL expression-level
-// builtins -- the bare functions an author calls inside a filter / shape /
-// mutation / logic body (concat / coalesce / hash / lower / year / ...), the
-// context accessors (item / event / step / now / actor / ...), and the
+	"github.com/znasllc-io/memql/component/language/functions"
+)
+
+// builtins.go is the single source of truth for the builtins Sense and the JSON
+// export describe: the expression functions an author calls (lower / hash /
+// childOf / ...), the context accessors (item / event / step / ...), and the
 // runtime-registered builtins resolved from the integration/builtin registry
 // (ai / node / similar / embed / ...).
 //
 // Before #2155 this metadata lived only in a hand-maintained map in
 // component/memql/sense/builtins.go (BuiltinFunctions), the one Sense surface
-// with no drift guard -- and it had already gone stale against the grammar
-// (it omitted year / quarter / month / dayOfMonth / subtractTimestamps /
-// isAnniversary / isFirstDayOfQuarter / memqlVersion / contains, all of which
-// the parser recognised at the time; all but contains were later
-// hard-retired under 2026.08, #2620 ruling / #2707). This table is the
-// durable fix: Sense is now DRIVEN
-// from dslspec.Builtins (sense/builtins.go projects it), and the drift test
-// (drift_test.go) pins the grammar-recognised subset to parser.CallableBuiltins
-// so the editor can never fall behind the grammar again.
+// with no drift guard -- and it had already gone stale against the grammar.
+// This table is the durable fix: Sense is DRIVEN from dslspec.Builtins
+// (sense/builtins.go projects it), and the drift test (drift_test.go) pins it.
+//
+// Since memql#5365 the expression functions are not written here at all: they
+// are PROJECTED from the v1 function catalog (component/language/functions),
+// the one list of functions a v1 expression calls, with the catalog's
+// signature, doc, tier and parameters. A spelling the catalog retires (concat /
+// coalesce / cond / first / last) is therefore no longer an editor builtin; the
+// catalog's RetiredFunctions names what to write instead, and the drift test
+// holds every name the parser still accepts to "catalog function or retired".
 //
 // Categorisation (BuiltinCategory) is load-bearing -- the drift test treats the
 // three categories differently:
 //
-//   - CategoryBuiltinExpr: a true editor-callable expression builtin the parser
-//     special-cases in parseFunctionCall (parser.CallableBuiltins). The drift
-//     test asserts THIS subset's name-set EXACTLY equals parser.CallableBuiltins
-//     (both directions).
+//   - CategoryBuiltinExpr: a catalog function (component/language/functions),
+//     projected verbatim. The drift test pins the projection to the catalog, and
+//     the catalog to the parser's callable tables.
 //   - CategoryBuiltinAccessor: a context accessor the parser recognises
-//     (parser.CallableAccessors) -- item / event / step / input / field / var /
-//     now / timestamp / actor / error, plus index (special-cased). The reserved
-//     ones (now / actor / partition / config / trace) are ALSO modelled by
-//     keywords(); they are kept here too because they are callable like
-//     functions and Sense offers them in call completion. The drift test asserts
-//     this subset is a subset of parser.CallableAccessors (+ the documented
-//     index exception).
+//     (parser.CallableAccessors) that is not a catalog function -- item / event /
+//     step / input / field / actor, plus index (special-cased). var and error
+//     are accessors to the parser as well, but a v1 expression calls them as
+//     the catalog functions they are, so the catalog's entry is their only one.
 //   - CategoryBuiltinRegistry: a builtin resolved at runtime from the
 //     integration / builtin registry, NOT special-cased by the parser (it falls
 //     through parseFunctionCall to a generic FunctionCallExpr): ai / node /
-//     children / parent / payload / similar / embed / systemVar / secret /
-//     systemSecret. The parser has no grammar rule for these names, so the drift
-//     test does NOT pin them to the parser; they are spec-authored metadata
-//     Sense needs for completion / hover / signature.
+//     children / parent / payload / similar / embed. The drift test asserts the
+//     parser has no rule for them.
 
 // BuiltinCategory buckets a builtin by how the grammar treats its name, so the
 // drift test can pin the parser-recognised expression builtins exactly while
@@ -50,11 +49,11 @@ import "sort"
 type BuiltinCategory string
 
 const (
-	// CategoryBuiltinExpr is a parser-special-cased expression builtin
-	// (parser.CallableBuiltins). Pinned exactly by the drift test.
+	// CategoryBuiltinExpr is a function of the v1 function catalog
+	// (component/language/functions), projected from it.
 	CategoryBuiltinExpr BuiltinCategory = "expr"
 	// CategoryBuiltinAccessor is a parser-recognised context accessor
-	// (parser.CallableAccessors, + index).
+	// (parser.CallableAccessors, + index) that is not a catalog function.
 	CategoryBuiltinAccessor BuiltinCategory = "accessor"
 	// CategoryBuiltinRegistry is a runtime-registry builtin not special-cased
 	// by the parser grammar.
@@ -103,6 +102,12 @@ type BuiltinParam struct {
 	Name string `json:"name"`
 	// Doc explains the parameter.
 	Doc string `json:"doc"`
+	// Type is the catalog type word of a catalog function's parameter
+	// ("string", "lambda", ...); empty for the hand-authored entries.
+	Type string `json:"type,omitempty"`
+	// Optional marks a parameter a call may leave out (a traversal's leading
+	// `as` label).
+	Optional bool `json:"optional,omitempty"`
 }
 
 // Builtin is one expression-level builtin / accessor / registry function in the
@@ -114,7 +119,7 @@ type Builtin struct {
 	// Category buckets the builtin (see BuiltinCategory).
 	Category BuiltinCategory `json:"category"`
 	// Signature is the one-line call signature for hover/completion detail,
-	// e.g. `concat(values ...string)`.
+	// e.g. `lower(value string) string`.
 	Signature string `json:"signature"`
 	// Doc is the prose documentation for hover.
 	Doc string `json:"doc"`
@@ -125,6 +130,9 @@ type Builtin struct {
 	// BuiltinDependency). Zero value (DependencyAmbient) means ambient -- the
 	// common case; only the nondeterministic core primitives set it.
 	Dependency BuiltinDependency `json:"dependency,omitempty"`
+	// Tier is a catalog function's tier: "P" when it pushes down to SQL, "M"
+	// when it runs in process. Empty for the accessors and registry builtins.
+	Tier string `json:"tier,omitempty"`
 }
 
 // CoreBuiltinNames is the sorted set of builtin names classified
@@ -145,158 +153,43 @@ func CoreBuiltinNames() []string {
 	return out
 }
 
-// builtins returns the full editor-callable builtin table. The grammar-
-// recognised expression-builtin subset (CategoryBuiltinExpr) is pinned to
-// parser.CallableBuiltins by the drift test; the accessor + registry entries
-// are the additional editor surface Sense needs.
+// builtins returns the full editor-callable builtin table: the catalog's
+// functions, projected (CategoryBuiltinExpr), then the hand-authored accessors
+// and registry builtins the catalog does not describe.
 func builtins() []Builtin {
-	return []Builtin{
-		// ============================================================
-		// Expression builtins (parser.CallableBuiltins) -- pinned exactly.
-		// ============================================================
-		{
-			Name:      "concat",
-			Category:  CategoryBuiltinExpr,
-			Signature: `concat(values ...string)`,
-			Doc:       "Concatenate multiple string values.",
-			Params: []BuiltinParam{
-				{Name: "values", Doc: "Strings to concatenate."},
-			},
-		},
-		{
-			Name:      "coalesce",
-			Category:  CategoryBuiltinExpr,
-			Signature: `coalesce(values ...any)`,
-			Doc:       "Return the first non-nil value. The final argument is the ultimate fallback and is returned even if empty. Shorthand: the `??` operator (a ?? b ?? c), #2611.",
-			Params: []BuiltinParam{
-				{Name: "values", Doc: "Values to check, in order."},
-			},
-		},
-		{
-			Name:      "cond",
-			Category:  CategoryBuiltinExpr,
-			Signature: `cond(predicate, thenValue, elseValue)`,
-			Doc:       "Return thenValue when predicate is truthy, else elseValue. The canonical conditional-value expression; use the `if` statement for control flow.",
-			Params: []BuiltinParam{
-				{Name: "predicate", Doc: "Boolean-valued expression."},
-				{Name: "thenValue", Doc: "Value returned when predicate is truthy."},
-				{Name: "elseValue", Doc: "Value returned when predicate is falsy."},
-			},
-		},
-		{
-			Name:      "first",
-			Category:  CategoryBuiltinExpr,
-			Signature: `first(collection)`,
-			Doc:       "Return the first item from a collection.",
-			Params:    []BuiltinParam{{Name: "collection", Doc: "Collection to get first item from."}},
-		},
-		{
-			Name:      "last",
-			Category:  CategoryBuiltinExpr,
-			Signature: `last(collection)`,
-			Doc:       "Return the last item from a collection.",
-			Params:    []BuiltinParam{{Name: "collection", Doc: "Collection to get last item from."}},
-		},
-		{
-			Name:      "lower",
-			Category:  CategoryBuiltinExpr,
-			Signature: `lower(value string)`,
-			Doc:       "Convert string to lowercase.",
-			Params:    []BuiltinParam{{Name: "value", Doc: "String to convert."}},
-		},
-		{
-			Name:      "upper",
-			Category:  CategoryBuiltinExpr,
-			Signature: `upper(value string)`,
-			Doc:       "Convert string to uppercase.",
-			Params:    []BuiltinParam{{Name: "value", Doc: "String to convert."}},
-		},
-		{
-			Name:      "trim",
-			Category:  CategoryBuiltinExpr,
-			Signature: `trim(value string)`,
-			Doc:       "Remove leading and trailing whitespace.",
-			Params:    []BuiltinParam{{Name: "value", Doc: "String to trim."}},
-		},
-		{
-			Name:      "hash",
-			Category:  CategoryBuiltinExpr,
-			Signature: `hash(value string)`,
-			Doc:       "Compute SHA-256 hash of a string value.",
-			Params:    []BuiltinParam{{Name: "value", Doc: "String to hash."}},
-		},
-		{
-			Name:      "shortId",
-			Category:  CategoryBuiltinExpr,
-			Signature: `shortId(value string)`,
-			Doc: "Extract the bare short id from an id-shaped value -- the inverse of canonicalId.\n\n" +
-				"Strips the `<partition>:<concept>:` prefix from a canonical node id (e.g. " +
-				"`v1:forge:request:r-001` -> `r-001`) and returns the trailing bare slug. " +
-				"A value that is already bare (no version-tagged concept prefix) is " +
-				"returned unchanged, so calling it on an already-short id is a no-op. It is NOT " +
-				"idempotent in general (memql#2981): it strips ONE prefix, so a value whose own " +
-				"result is not already a fixed point strips again -- " +
-				"`v1:a:b:v2:c:d:e` -> `v2:c:d:e` -> `e`.\n\n" +
-				"Use it to normalize a foreign-key / audit field to one consistent (short) id form " +
-				"regardless of whether the caller passes a canonical node id or a bare slug -- e.g. " +
-				"`requestId: shortId(args.requestId)` so the audit trail keys consistently across the " +
-				"automation (canonical) and tool (short) write paths (#1859).",
-			Params: []BuiltinParam{
-				{Name: "value", Doc: "Id-shaped value (canonical or bare). Empty input returns empty."},
-			},
-		},
-		{
-			Name:      "canonicalId",
-			Category:  CategoryBuiltinExpr,
-			Signature: `canonicalId(value, concept)`,
-			Doc: "Normalize an id-shaped value to canonical form (`<partition>:<concept>:<bareSlug>`).\n\n" +
-				"Use in mutation id derivations that hash foreign-key args, so the derived id stays stable whether the caller passes a bare slug or an already-canonical id.\n\n" +
-				"Example: `id = concat(\"participant-\", hash(concat(hash(canonicalId(args.partitionId, space)), hash(canonicalId(args.userId, user)))))`\n\n" +
-				"Hash each part, then concatenate the digests -- do NOT join the parts with a separator first. `hash(concat(a, \":\", b))` ALIASES: a colon inside a part makes two different tuples derive one id (`(\"chat\", \"k:1\")` and `(\"chat:k\", \"1\")`). Fixed-width digests have exactly one decomposition, so this is injective by construction rather than by a constraint on what a caller may send (memql#3009).\n\n" +
-				"The second argument is a concept short-name -- resolved against the file-top `use ...concepts.{ ... }` imports, or ambient when the concept lives in the file's own domain (#2617: same-domain constructs need no import); the stringly-typed `\"v1:ns:name\"` literal is retired. The engine reads the named concept's @scope to pick the right partition prefix (`_system` for global, otherwise the request envelope's partition). Errors when the concept name isn't imported / registered or when the value is already canonical for a different concept (catches type-tag typos).",
-			Params: []BuiltinParam{
-				{Name: "value", Doc: "Id-shaped value (bare slug or canonical). Empty input returns empty."},
-				{Name: "concept", Doc: "Concept short-name: imported (`use identity.concepts.{ user }`) or ambient same-domain (#2617)."},
-			},
-		},
-		{
-			Name:      "toString",
-			Category:  CategoryBuiltinExpr,
-			Signature: `toString(value any)`,
-			Doc:       "Convert a value to its string representation.",
-			Params:    []BuiltinParam{{Name: "value", Doc: "Value to convert."}},
-		},
-		{
-			Name:      "addDuration",
-			Category:  CategoryBuiltinExpr,
-			Signature: `addDuration(timestamp, duration string)`,
-			Doc:       "Add a duration to a timestamp (e.g., \"24h\", \"30m\").",
-			Params: []BuiltinParam{
-				{Name: "timestamp", Doc: "Base timestamp."},
-				{Name: "duration", Doc: "Duration string (e.g., \"24h\", \"7d\")."},
-			},
-		},
-		{
-			Name:      "daysBetween",
-			Category:  CategoryBuiltinExpr,
-			Signature: `daysBetween(start, end)`,
-			Doc:       "Calculate the number of days between two timestamps.",
-			Params: []BuiltinParam{
-				{Name: "start", Doc: "Start timestamp."},
-				{Name: "end", Doc: "End timestamp."},
-			},
-		},
-		{
-			Name:      "contains",
-			Category:  CategoryBuiltinExpr,
-			Signature: `contains(haystack string, needle string)`,
-			Doc:       "Check if a string contains a substring. (The single-paren `contains(filter)` relationship form is discriminated by arg count.)",
-			Params: []BuiltinParam{
-				{Name: "haystack", Doc: "String to search in."},
-				{Name: "needle", Doc: "Substring to find."},
-			},
-		},
+	return append(catalogBuiltins(), handAuthoredBuiltins()...)
+}
 
+// catalogBuiltins projects every catalog FUNCTION (not method -- a method is
+// called on a value, and the builtin table is keyed by bare name) into a
+// CategoryBuiltinExpr entry. Nothing is restated: the name, signature, doc,
+// tier and parameters are the catalog's.
+func catalogBuiltins() []Builtin {
+	var out []Builtin
+	for _, f := range functions.Catalog() {
+		if f.Receiver != "" {
+			continue
+		}
+		params := make([]BuiltinParam, 0, len(f.Params))
+		for _, p := range f.Params {
+			params = append(params, BuiltinParam{Name: p.Name, Type: p.Type, Optional: p.Optional})
+		}
+		out = append(out, Builtin{
+			Name:      f.Name,
+			Category:  CategoryBuiltinExpr,
+			Signature: f.Signature(),
+			Doc:       f.Doc,
+			Params:    params,
+			Tier:      string(f.Tier),
+		})
+	}
+	return out
+}
+
+// handAuthoredBuiltins are the builtins the catalog does not describe: the
+// parser's context accessors and the runtime-registry builtins.
+func handAuthoredBuiltins() []Builtin {
+	return []Builtin{
 		// ============================================================
 		// Context accessors (parser.CallableAccessors, + index).
 		// actor / partition / config / trace are ALSO reserved keywords
@@ -307,20 +200,6 @@ func builtins() []Builtin {
 		// (a keyword, see keywords()), and the now() / timestamp() call-forms
 		// are retired (epic #2298 / #2301 -- CallableRetired in the parser).
 		// ============================================================
-		{
-			Name:      "error",
-			Category:  CategoryBuiltinAccessor,
-			Signature: `error(message string)`,
-			Doc:       "Return an error, terminating the current execution.",
-			Params:    []BuiltinParam{{Name: "message", Doc: "Error message."}},
-		},
-		{
-			Name:      "var",
-			Category:  CategoryBuiltinAccessor,
-			Signature: `var(name string)`,
-			Doc:       "Resolve a partition-scoped plaintext configuration variable from v1:platform:partitionVariable. Falls back to v1:platform:globalVariable (global) if the partition lookup misses.",
-			Params:    []BuiltinParam{{Name: "name", Doc: "Variable name (e.g., \"MEMQL_COGNITION_SI_ENABLED\")."}},
-		},
 		{
 			Name:      "step",
 			Category:  CategoryBuiltinAccessor,
@@ -432,27 +311,6 @@ func builtins() []Builtin {
 				{Name: "text", Doc: "Text to embed."},
 				{Name: "model", Doc: "Optional model override (default: text-embedding-3-small)."},
 			},
-		},
-		{
-			Name:      "systemVar",
-			Category:  CategoryBuiltinRegistry,
-			Signature: `systemVar(name string)`,
-			Doc:       "Resolve an instance-wide (global) plaintext configuration variable from v1:platform:globalVariable. No fallback.",
-			Params:    []BuiltinParam{{Name: "name", Doc: "System variable name (e.g., \"MEMQL_DEFAULT_CHAT_PROVIDER\")."}},
-		},
-		{
-			Name:      "secret",
-			Category:  CategoryBuiltinRegistry,
-			Signature: `secret(name string)`,
-			Doc:       "Resolve a partition-scoped encrypted secret from v1:platform:partitionSecret. Falls back to v1:platform:globalSecret (global) if the partition lookup misses. Returns the decrypted plaintext; requires MEMQL_MASTER_KEY. Callers must never log the result.",
-			Params:    []BuiltinParam{{Name: "name", Doc: "Secret name (e.g., \"MEMQL_OPENAI_PROJECT_ID\")."}},
-		},
-		{
-			Name:      "systemSecret",
-			Category:  CategoryBuiltinRegistry,
-			Signature: `systemSecret(name string)`,
-			Doc:       "Resolve an instance-wide (global) encrypted secret from v1:platform:globalSecret. No fallback. Returns the decrypted plaintext; requires MEMQL_MASTER_KEY.",
-			Params:    []BuiltinParam{{Name: "name", Doc: "System secret name (e.g., \"MEMQL_IDENTITY_KEY_ENCRYPTION_KEY\")."}},
 		},
 	}
 }

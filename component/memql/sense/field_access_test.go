@@ -33,7 +33,7 @@ func TestFieldAccess_ActorMembers(t *testing.T) {
 			t.Errorf("actor. must offer %q, got %v", want, got)
 		}
 	}
-	for _, never := range []string{"query", "coalesce", "cond", "concept", "filter"} {
+	for _, never := range []string{"query", "lower", "hash", "concept", "filter"} {
 		if got[never] {
 			t.Errorf("dot context must not offer %q", never)
 		}

@@ -21,13 +21,16 @@ func TestTokenize_StartsWithIsKeyword(t *testing.T) {
 	}
 }
 
+// startsWith hovers as the operator it is (memql#5365): the operator table's
+// card, whose form and prose explain the prefix semantics this test has always
+// asked for. It used to hover as a bare keyword doc.
 func TestHover_StartsWithKeyword(t *testing.T) {
 	s := New(&stubRegistry{})
 	// "  filter codeReference startsWith \"integration.\"" -- hover inside the keyword.
 	src := "query codeMetric q {\n  filter codeReference startsWith \"integration.\"\n}"
 	res := hoverAt(t, s, src, 2, 28)
-	if res == nil || !strings.Contains(res.Contents, "(keyword)") {
-		t.Fatalf("expected a keyword hover for `startsWith`, got %+v", res)
+	if res == nil || !strings.HasPrefix(res.Contents, "```memql\ns startsWith p\n```") {
+		t.Fatalf("expected the startsWith operator card, got %+v", res)
 	}
 	if !strings.Contains(res.Contents, "prefix") {
 		t.Errorf("hover should explain the prefix semantics: %q", res.Contents)

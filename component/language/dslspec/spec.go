@@ -155,11 +155,26 @@ type KeywordProperty struct {
 	AliasOf string `json:"aliasOf,omitempty"`
 }
 
-// Operator is a boolean/comparison/membership operator in the one-Go-grammar
-// filter surface (#971).
+// Operator is one operator of the v1 expression grammar, projected row for
+// row from the operator table (component/language/functions, Operators) so
+// the spec, Sense and the generated grammar read the same prose. The fields
+// past Doc were added with that projection (memql#5365); they are additive in
+// the JSON envelope, so no SpecVersion bump.
 type Operator struct {
 	Symbol string `json:"symbol"`
 	Doc    string `json:"doc"`
+	// Name is the operator's stable identifier ("coalesce", "notEqual"); the
+	// symbol alone is ambiguous for "-", which is both negate and subtract.
+	Name string `json:"name"`
+	// Kind is the expression node kind the operator builds, in the tier
+	// manifest's vocabulary ("comparison", "arithmetic", "ternary").
+	Kind string `json:"kind"`
+	// Form shows the operator in use ("a ?? b").
+	Form string `json:"form"`
+	// Absence is the absence rule for the operator, where the record has one.
+	Absence string `json:"absence,omitempty"`
+	// Level is the precedence level, 1 binding tightest.
+	Level int `json:"level"`
 }
 
 // NextRule encodes a single "what is legal to type next" hint for

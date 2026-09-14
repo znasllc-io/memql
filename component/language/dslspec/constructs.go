@@ -86,7 +86,7 @@ func constructs() []Construct {
 		{
 			Keyword:            "spec",
 			Category:           CategoryPredicate,
-			Doc:                "Atomic boolean predicate. Row-specs (payload.X / intrinsics) compile to SQL; context-specs (actor.X) evaluate in-process. Mixing both is rejected.",
+			Doc:                "Atomic boolean predicate over one bound concept or shape: `spec <bound> <name> = row => <predicate>`, applied as `name(row)`. Over an @actor shape the parameter is `actor` and the predicate evaluates in process; over a row it pushes down to SQL.",
 			AnnotationReceiver: "Spec",
 			RegistryBacked:     true,
 			ConceptInSignature: false,
@@ -94,7 +94,7 @@ func constructs() []Construct {
 		{
 			Keyword:            "trait",
 			Category:           CategoryPredicate,
-			Doc:                "Concept-agnostic boolean predicate scaffold (same runtime contract as spec). Used as a cross-concept reusable predicate.",
+			Doc:                "Concept-agnostic boolean predicate (same runtime contract as spec): `trait <name> = row => <predicate>`, applied as `name(row)` to a row of any concept.",
 			AnnotationReceiver: "Spec",
 			RegistryBacked:     true,
 			ConceptInSignature: false,
