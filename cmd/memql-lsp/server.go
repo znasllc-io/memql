@@ -87,13 +87,6 @@ func (s *server) getSense() *sense.Service {
 	return s.sense
 }
 
-// setSense atomically swaps the Sense service.
-func (s *server) setSense(svc *sense.Service) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.sense = svc
-}
-
 // getBuild returns the current Sense service and the language lines resolved
 // with it, from one build.
 func (s *server) getBuild() (*sense.Service, memql.WorkspaceLanguageLines) {
