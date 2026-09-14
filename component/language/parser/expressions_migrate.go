@@ -1413,6 +1413,10 @@ var xmInProcessCalls = []string{"cond", "concat", "coalesce", "exists"}
 // original line -- which is what a refusal reports.
 func xmRewriteInProcess(s string) (string, error) {
 	s = xmQuoteCanonicalIdConcepts(s)
+	s, err := xmExpandKeylessMapEntries(s)
+	if err != nil {
+		return "", err
+	}
 	for guard := 0; ; guard++ {
 		if guard > 4096 {
 			return "", xmRefuse(0, "internal: the in-process rewrite did not converge")
@@ -1986,6 +1990,227 @@ func xmTopLevelIndex(mask string, c byte) int {
 		}
 	}
 	return -1
+}
+
+// xmPathEntry is a bare dotted path, the legacy key-less map entry
+// (parseObject's "Shorthand A"): its key is the terminal segment.
+var xmPathEntry = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$`)
+
+// xmAccessorEntry is the legacy key-less accessor entry (parseObject's
+// "Shorthand B"): `node("a.b")` / `var("a.b")`, keyed by the terminal segment
+// of its quoted argument.
+var xmAccessorEntry = regexp.MustCompile(`^(?:node|var)\s*\(`)
+
+// xmNoMapBlocks are the blocks whose braces hold no in-process map literal
+// this rewrite may touch: an args block declares fields, and a mutation's
+// write blocks are expanded by the struct-form rewriter, which owns their
+// shorthands.
+var xmNoMapBlocks = map[string]bool{"args": true, "insert": true, "update": true, "accept": true, "stamp": true}
+
+// xmExpandKeylessMapEntries writes out the key of every key-less map-literal
+// entry in one construct body (epic memql#5363).
+//
+// The legacy object literal accepted two entries with no `key:`, and the
+// edition-2026 map literal refuses both ("a map key is one name" /
+// "a map entry is written key: value"):
+//
+//	{ args.event.payload.identityId }  ->  { identityId: args.event.payload.identityId }
+//	{ allAgents }                      ->  { allAgents: allAgents }
+//
+// -- the first keyed by the path's terminal segment (Shorthand A), the second
+// a pun (G3, #2365). Each is expanded to the entry the legacy parse built, so
+// the map means what it meant.
+//
+// A brace is a map literal where an expression is expected: after `:`, `=`,
+// `(`, `,`, `[` or `return`. Any other brace opens a block, and a block's
+// keyword decides whether maps inside it are this rewrite's (xmNoMapBlocks).
+// Refused by name, rather than guessed at: the accessor shorthand
+// `{ node("a.b") }`, which keys by its ARGUMENT's last segment -- no tree
+// carries one -- and two entries that would land on one key, which the legacy
+// map resolved last-wins in silence and a v1 map refuses.
+func xmExpandKeylessMapEntries(s string) (string, error) {
+	mask := blankCommentsAndStrings(s)
+	type frame struct {
+		open  byte
+		isMap bool
+		skip  bool // inside a block whose maps are not this rewrite's
+	}
+	type edit struct {
+		start, end int
+		text       string
+	}
+	var (
+		stack []frame
+		edits []edit
+	)
+	skipping := func() bool {
+		for _, f := range stack {
+			if f.skip {
+				return true
+			}
+		}
+		return false
+	}
+	for i := 0; i < len(mask); i++ {
+		switch c := mask[i]; c {
+		case '(', '[':
+			stack = append(stack, frame{open: c})
+		case ')', ']':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		case '{':
+			prevCh, prevWord := xmPrevSignificant(mask, i)
+			isMap := strings.ContainsRune(":=(,[?", rune(prevCh)) || prevWord == "return" || xmAfterArrow(mask, i)
+			fr := frame{open: '{', isMap: isMap, skip: !isMap && xmNoMapBlocks[prevWord]}
+			if isMap && !skipping() {
+				close := MatchingCloseBrace(mask, i)
+				if close < 0 {
+					return "", xmRefuse(i, "a map literal here does not close")
+				}
+				es, err := xmMapEntryEdits(s, mask, i, close)
+				if err != nil {
+					return "", err
+				}
+				for _, e := range es {
+					edits = append(edits, edit{e.start, e.end, e.text})
+				}
+			}
+			stack = append(stack, fr)
+		case '}':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	if len(edits) == 0 {
+		return s, nil
+	}
+	sort.Slice(edits, func(a, b int) bool { return edits[a].start < edits[b].start })
+	var b strings.Builder
+	prev := 0
+	for _, e := range edits {
+		b.WriteString(s[prev:e.start])
+		b.WriteString(e.text)
+		prev = e.end
+	}
+	b.WriteString(s[prev:])
+	return b.String(), nil
+}
+
+// xmAfterArrow reports whether the brace at pos follows a lambda arrow, `g =>
+// { ... }` -- a collection method's projection, whose body is a map.
+func xmAfterArrow(mask string, pos int) bool {
+	i := pos - 1
+	for i >= 0 && (mask[i] == ' ' || mask[i] == '\t' || mask[i] == '\n' || mask[i] == '\r') {
+		i--
+	}
+	return i >= 1 && mask[i] == '>' && mask[i-1] == '='
+}
+
+// xmPrevSignificant returns the last non-blank character before pos on the
+// masked view, and the identifier it ends, if it ends one.
+func xmPrevSignificant(mask string, pos int) (byte, string) {
+	i := pos - 1
+	for i >= 0 && (mask[i] == ' ' || mask[i] == '\t' || mask[i] == '\n' || mask[i] == '\r') {
+		i--
+	}
+	if i < 0 {
+		return 0, ""
+	}
+	end := i + 1
+	for i >= 0 && isIdentByte(mask[i]) {
+		i--
+	}
+	return mask[end-1], mask[i+1 : end]
+}
+
+// xmMapEntryEdits returns the edits that key the key-less entries of the map
+// literal whose braces sit at open and close.
+func xmMapEntryEdits(s, mask string, open, close int) ([]struct {
+	start, end int
+	text       string
+}, error) {
+	type ed = struct {
+		start, end int
+		text       string
+	}
+	var out []ed
+	keys := map[string]int{}
+	depth := 0
+	entryStart := open + 1
+	visit := func(lo, hi int) error {
+		// [lo, hi) is one entry, surrounding blanks included.
+		t := strings.TrimSpace(mask[lo:hi])
+		if t == "" {
+			return nil
+		}
+		at := lo + strings.Index(mask[lo:hi], t)
+		raw := s[at : at+len(t)]
+		key, expanded := "", ""
+		switch {
+		case xmEntryKeyed(t):
+			sep := strings.IndexAny(t, ":=")
+			key = strings.TrimSpace(t[:sep])
+			if t[sep] == '=' {
+				// The legacy `key = value` separator: the same entry, which a
+				// v1 map spells `key: value`.
+				value := strings.TrimLeft(raw[sep+1:], " \t")
+				expanded = key + ": " + value
+			}
+		case xmPathEntry.MatchString(t):
+			key = t[strings.LastIndexByte(t, '.')+1:]
+			expanded = key + ": " + raw
+		case xmIdent.MatchString(t):
+			key = t
+			expanded = key + ": " + raw
+		case xmAccessorEntry.MatchString(t):
+			return xmRefuse(at, "the map entry %s has no key: the legacy grammar keyed it by the last segment of its quoted argument, which edition 2026 does not; write the key yourself (key: %s)", raw, raw)
+		default:
+			return nil // not a shorthand: the v1 parser names what it is
+		}
+		if prevAt, dup := keys[key]; dup {
+			return xmRefuse(at, "two entries of one map literal land on the key %q (the entry at byte %d and %s): the legacy map kept only the last one in silence, and an edition-2026 map refuses a duplicate key; write distinct keys", key, prevAt, raw)
+		}
+		keys[key] = at
+		if expanded != "" {
+			out = append(out, ed{start: at, end: at + len(t), text: expanded})
+		}
+		return nil
+	}
+	for i := open + 1; i < close; i++ {
+		switch mask[i] {
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			depth--
+		case ',':
+			if depth == 0 {
+				if err := visit(entryStart, i); err != nil {
+					return nil, err
+				}
+				entryStart = i + 1
+			}
+		}
+	}
+	if err := visit(entryStart, close); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// xmEntryKeyed reports whether a map entry (masked, trimmed) already names
+// its key: `key: value`, or the legacy `key = value`.
+func xmEntryKeyed(t string) bool {
+	i := 0
+	for i < len(t) && (isIdentByte(t[i]) || t[i] == '-') {
+		i++
+	}
+	if i == 0 {
+		return false
+	}
+	rest := strings.TrimLeft(t[i:], " \t\n\r")
+	return strings.HasPrefix(rest, ":") || (strings.HasPrefix(rest, "=") && !strings.HasPrefix(rest, "=="))
 }
 
 // xmNullToNil replaces the bare word `null` with `nil` outside strings and

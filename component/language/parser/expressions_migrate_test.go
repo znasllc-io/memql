@@ -942,3 +942,112 @@ func xmtEvalV1(t *testing.T, n ast.ExpressionNode, env map[string]bool) bool {
 	}
 	return env[xmtLeafKey(legacy)]
 }
+
+// Key-less map-literal entries (epic memql#5363). The legacy object literal
+// keyed a bare dotted path by its terminal segment and a bare name by itself
+// (a pun); the edition-2026 map literal refuses both, so the rewrite writes the
+// key the legacy parse built.
+func TestRewriteExpressions_KeylessMapEntries(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"dsl/identity/logic.memql onDelegationCreated, exactly",
+			"  emitEvent := publishEvent(\n" +
+				"    topic: \"delegation.created\",\n" +
+				"    payload: {\n" +
+				"      delegationId: args.event.payload.id,\n" +
+				"      args.event.payload.identityId,\n" +
+				"      args.event.payload.identitySubject,\n" +
+				"      args.event.payload.identityType,\n" +
+				"      args.event.payload.agentId,\n" +
+				"      args.event.payload.roleCeiling,\n" +
+				"      args.event.payload.scopes,\n" +
+				"      args.event.payload.createdBySubject,\n" +
+				"      timestamp: now\n" +
+				"    }\n" +
+				"  )\n" +
+				"  return emitEvent",
+			"  emitEvent := publishEvent(\n" +
+				"    topic: \"delegation.created\",\n" +
+				"    payload: {\n" +
+				"      delegationId: args.event.payload.id,\n" +
+				"      identityId: args.event.payload.identityId,\n" +
+				"      identitySubject: args.event.payload.identitySubject,\n" +
+				"      identityType: args.event.payload.identityType,\n" +
+				"      agentId: args.event.payload.agentId,\n" +
+				"      roleCeiling: args.event.payload.roleCeiling,\n" +
+				"      scopes: args.event.payload.scopes,\n" +
+				"      createdBySubject: args.event.payload.createdBySubject,\n" +
+				"      timestamp: now\n" +
+				"    }\n" +
+				"  )\n" +
+				"  return emitEvent"},
+		{"a pun",
+			`    r := publishEvent(topic: "x", payload: { allAgents, n: 1 })`,
+			`    r := publishEvent(topic: "x", payload: { allAgents: allAgents, n: 1 })`},
+		{"an assigned map, a returned map, a map in a list, a nested map",
+			"    a := { steps.decide.result.id }\n    b := [{ args.x.y }]\n    return { outer: { args.p.q } }",
+			"    a := { id: steps.decide.result.id }\n    b := [{ y: args.x.y }]\n    return { outer: { q: args.p.q } }"},
+		{"keyed entries and a block are left alone; the legacy `key = value` separator becomes `:`",
+			"    if steps.ok.result == true {\n      r := f(m: { a: args.a.b, c = 1 })\n    }",
+			"    if steps.ok.result == true {\n      r := f(m: { a: args.a.b, c: 1 })\n    }"},
+		{"a collection method's projection body is a map",
+			`    groups := args.rows.groupBy(r => r.kind).select(g => { g.key, n: g.items.count() })`,
+			`    groups := args.rows.groupBy(r => r.kind).select(g => { key: g.key, n: g.items.count() })`},
+		{"a dotted name inside a string or a comment is not an entry",
+			"    r := f(m: { s: \"x.y\" }) // { a.b }",
+			"    r := f(m: { s: \"x.y\" }) // { a.b }"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "logic l {\n  body {\n" + tc.in + "\n  }\n}\n"
+			want := "logic l {\n  body {\n" + tc.want + "\n  }\n}\n"
+			got := xmtRewrite(t, src, nil)
+			if got != want {
+				t.Fatalf("\n got:\n%s\nwant:\n%s", got, want)
+			}
+			// Idempotent: a second run changes nothing.
+			if again := xmtRewrite(t, got, nil); again != got {
+				t.Errorf("a second run changed the output:\n%s", again)
+			}
+		})
+	}
+
+	// An automation step's call arguments hold maps too.
+	auto := "automation a {\n  step s {\n    builtin b ( m: { event.payload.id } )\n  }\n}\n"
+	if got, want := xmtRewrite(t, auto, nil), strings.Replace(auto, "{ event.payload.id }", "{ id: event.payload.id }", 1); got != want {
+		t.Errorf("automation step:\n got:\n%s\nwant:\n%s", got, want)
+	}
+
+	// A mutation's write block is the struct-form rewriter's: left alone, a
+	// nested map inside it included.
+	mut := "mutate thing m {\n  insert {\n    id: args.id\n    meta: { args.a.b }\n  }\n}\n"
+	if got := xmtRewrite(t, mut, nil); got != mut {
+		t.Errorf("a write block was touched:\n%s", got)
+	}
+
+	// The migrated body parses under the edition-2026 grammar.
+	src := "logic l {\n  args {\n    event object!\n  }\n  body {\n" + cases[0].in + "\n  }\n}\n"
+	got := xmtRewrite(t, src, nil)
+	if _, err := ParseV1Expression(strings.TrimSpace(got[strings.Index(got, "publishEvent("):strings.LastIndex(got, "  return")])); err != nil {
+		t.Errorf("the rewritten map does not parse as v1: %v", err)
+	}
+}
+
+// Refused by name: the accessor shorthand, keyed by its ARGUMENT, and two
+// entries that would land on one key -- the legacy map kept the last one in
+// silence, a v1 map refuses the duplicate.
+func TestRewriteExpressions_KeylessMapEntriesRefusals(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{`    r := f(m: { node("a.b") })`, "last segment of its quoted argument"},
+		{`    r := f(m: { args.a.id, args.b.id })`, `land on the key "id"`},
+		{`    r := f(m: { id: 1, args.a.id })`, `land on the key "id"`},
+	} {
+		src := "logic l {\n  body {\n" + tc.in + "\n  }\n}\n"
+		out, err := RewriteExpressions([]byte(src), nil)
+		if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "line 3:") {
+			t.Errorf("%s: err = %v, want a line-3 refusal naming %q", tc.in, err, tc.want)
+		}
+		if string(out) != src {
+			t.Errorf("%s: a refused file must come back unchanged", tc.in)
+		}
+	}
+}
