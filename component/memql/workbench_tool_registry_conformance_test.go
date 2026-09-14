@@ -46,7 +46,7 @@ func TestWorkbenchHostRegistersFromCarrierTree(t *testing.T) {
 	// A builtin IS reached through the function handler: builtins are Functions
 	// internally and share the FunctionRegistry, which is what makes
 	// `workbenchDispatchHost` (dsl/workbench/builtins.memql) resolvable here.
-	const workbenchHostTool = `@enabled
+	const workbenchHostTool = `
 @handler(type="function", name="workbenchDispatchHost")
 @description("Run headless work in the per-Plan workbench sandbox: exec, fs_read, fs_write, fs_list, fs_stat, http_fetch.")
 tool workbenchHost {

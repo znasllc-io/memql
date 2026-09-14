@@ -52,7 +52,7 @@ func newDryRunEngine(t *testing.T) *memql.MemQLEngine {
 // dryRunMutationAutomation is a candidate automation that calls a REAL mutation
 // function (createAuthoringConstruct) -- exactly the authored-automation
 // write shape Gate 2 must isolate. Driven by a synthetic trigger event.
-const dryRunMutationAutomation = `@enabled
+const dryRunMutationAutomation = `
 @trigger(event="node.created", concept="v1:authoring:bundle")
 @description("Sandbox: record a construct when a bundle is created")
 automation sandboxRecordConstruct {
@@ -128,7 +128,7 @@ func TestDryRun_MutationIsolatedToSandboxPartition(t *testing.T) {
 
 // dryRunWebhookAutomation calls a webhook step -- an external POST the sandbox
 // must record-and-block.
-const dryRunWebhookAutomation = `@enabled
+const dryRunWebhookAutomation = `
 @trigger(event="node.created", concept="v1:authoring:bundle")
 @description("Sandbox: POST to an external sink")
 automation sandboxWebhook {

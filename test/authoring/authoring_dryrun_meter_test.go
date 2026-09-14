@@ -22,7 +22,7 @@ import (
 // real reads, so without a DB/provider the underlying delegate may fail;
 // metering records the calls UP FRONT so the manifest reflects the read intent
 // regardless of the delegate outcome.
-const dryRunMeteredAutomation = `@enabled
+const dryRunMeteredAutomation = `
 @trigger(event="node.created", concept="v1:authoring:bundle")
 @description("Sandbox: read-heavy automation")
 automation sandboxReadHeavy {

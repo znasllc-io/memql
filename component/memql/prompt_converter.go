@@ -37,6 +37,7 @@ import (
 	"strings"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/baseparser"
 	"github.com/znasllc-io/memql/core/num"
 )
 
@@ -64,8 +65,10 @@ func promptDeclToPromptDecl(decl *languageParser.PromptDecl, origin string) (*pr
 
 	for _, attr := range decl.Attributes {
 		switch attr.Name {
-		case "enabled":
-			// Accepted no-op: enabled is the default (lifecycle ruling, #2606).
+		// @enabled was an accepted no-op here (lifecycle ruling) until
+		// memql#5375 retired it. It falls through to the unknown-annotation
+		// arm, which consults the retirement ledger first and names
+		// @disabled as what an author actually wants.
 		case "disabled":
 			out.disabled = true
 		case "description":
@@ -97,7 +100,10 @@ func promptDeclToPromptDecl(decl *languageParser.PromptDecl, origin string) (*pr
 			// Unknown annotation -- hard-rejected (#990). Closes the
 			// silent-tolerance gap so typos and stale annotations on
 			// prompts fail at load instead of being dropped.
-			return nil, fmt.Errorf("%s: prompt %q: unknown annotation @%s -- supported: @defaultProvider, @description, @disabled, @enabled, @level, @templateFile", origin, decl.Name, attr.Name)
+			if hint, retired := baseparser.RetiredConstructAnnotation(attr.Name); retired {
+				return nil, fmt.Errorf("%s: prompt %q: @%s is retired -- %s", origin, decl.Name, attr.Name, hint)
+			}
+			return nil, fmt.Errorf("%s: prompt %q: unknown annotation @%s -- supported: @defaultProvider, @description, @disabled, @level, @templateFile", origin, decl.Name, attr.Name)
 		}
 	}
 

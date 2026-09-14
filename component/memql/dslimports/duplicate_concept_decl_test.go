@@ -118,7 +118,7 @@ concept widget {
 concept widget {
   b  string  @required @description("B.")
 }`),
-		"consumer/queries.memql": file(`@enabled
+		"consumer/queries.memql": file(`
 @description("Binds widget with NO import, from a third domain.")
 query widget consumerWidgets {
   args {

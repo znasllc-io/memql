@@ -56,7 +56,7 @@ spec requiresAdmin {
 // controls spec lifecycle. @enabled / @disabled on a spec is an
 // error; the same annotations are no-op on traits.
 func TestParseSpecMemQL_RejectsLifecycleOnSpec(t *testing.T) {
-	src := []byte(`@enabled
+	src := []byte(`
 spec specBoom {
   payload.active == true
 }`)
@@ -107,7 +107,7 @@ spec specFoo {
 
 // TestParseSpecMemQL_TraitGoldenPath locks the trait surface.
 func TestParseSpecMemQL_TraitGoldenPath(t *testing.T) {
-	src := []byte(`@enabled
+	src := []byte(`
 @description("Records with active==true.")
 trait isActiveRecord {
   payload.active == true

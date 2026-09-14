@@ -49,7 +49,7 @@ func TestValidNamespace(t *testing.T) {
 }
 
 func TestBuiltinExecutorsScan(t *testing.T) {
-	src := `@enabled
+	src := `
 @executor("integration.workbench.teardownDirectory")
 @args(profile="object")
 builtin workbenchTeardownDirectory {

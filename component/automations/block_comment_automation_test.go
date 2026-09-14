@@ -43,7 +43,7 @@ import (
 
 // liveAutomation is a well-formed automation used as the control in every
 // fixture below: it must survive whatever the block comment around it does.
-const liveAutomation = `@enabled
+const liveAutomation = `
 @description("control")
 @trigger(event="node.created", concept="v1:cluster:node")
 automation blockCommentControl {
@@ -179,7 +179,7 @@ automation commentedNextLineBrace
 // aware, so it counted the `}` in `/* } */`, closed the slice early, and
 // handed the compiler a truncated automation -- a refused boot since #2830.
 func TestBraceInsideBlockCommentDoesNotTruncateSlice(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("brace inside a block comment in the body")
 @trigger(event="node.created", concept="v1:cluster:node")
 automation braceInBlockComment {
@@ -204,7 +204,7 @@ automation braceInBlockComment {
 // step argument would blank the rest of the automation -- trading the reported
 // bug for a worse one.
 func TestBlockCommentMarkerInsideStringIsNotAComment(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("a string carrying comment markers")
 @trigger(event="node.created", concept="v1:cluster:node")
 automation commentMarkerInString {

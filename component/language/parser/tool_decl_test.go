@@ -11,7 +11,7 @@ import (
 // query="...") + @executionTime + a small typed-field body.
 // Mirrors dsl/memql/tools.memql::searchUsers.
 func TestParseToolDecl_GoldenPath_QueryHandler(t *testing.T) {
-	source := `@enabled
+	source := `
 @handler(type="query", query="concept==v1:memql:backend:user")
 @executionTime("fast")
 @description("Search for users")

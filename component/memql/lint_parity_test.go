@@ -154,7 +154,7 @@ concept marker {
   label  string  @required  @description("Marker label.")
 }
 `)},
-		"lintlogic/logic.memql": {Data: []byte(`@enabled
+		"lintlogic/logic.memql": {Data: []byte(`
 @description("Reads the triggering event without declaring an event input.")
 logic decideThing {
   body {
@@ -185,7 +185,7 @@ concept marker {
   label  string  @required  @description("Marker label.")
 }
 `)},
-		"lintarith/logic.memql": {Data: []byte(`@enabled
+		"lintarith/logic.memql": {Data: []byte(`
 @description("Returns an unparenthesized arithmetic-then-comparison (#2542 trap).")
 logic ratioGate {
   args {
@@ -215,7 +215,7 @@ concept marker {
   label  string  @required  @description("Marker label.")
 }
 `)},
-		"lintarithok/logic.memql": {Data: []byte(`@enabled
+		"lintarithok/logic.memql": {Data: []byte(`
 @description("Returns the parenthesized working idiom.")
 logic ratioGateOK {
   args {

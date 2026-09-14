@@ -118,7 +118,7 @@ func TestPreambleSurvivesALineComment(t *testing.T) {
 	}
 	got := slices[0].Source
 
-	for _, want := range []string{"@enabled", `@description("live")`, "// why this exists"} {
+	for _, want := range []string{`@description("live")`, "// why this exists"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("emitted slice lost %q -- the preamble walk must run on the ORIGINAL source, "+
 				"not the comment-blanked view, or annotations above a `//` line are dropped "+

@@ -40,7 +40,7 @@ func TestSandboxAutomation_ValidScheduledCompiles(t *testing.T) {
 		{
 			Kind: "automation",
 			Name: "sandboxScheduledSweep",
-			Source: `@enabled
+			Source: `
 @trigger(schedule="0 0 4 * * *")
 @description("Daily sandbox sweep")
 automation sandboxScheduledSweep {
@@ -69,7 +69,7 @@ func TestSandboxAutomation_StructuredTriggerCompiles(t *testing.T) {
 		{
 			Kind: "automation",
 			Name: "sandboxOnUserCreate",
-			Source: `@enabled
+			Source: `
 @trigger(event="node.created", concept="v1:identity:user")
 @description("Sandbox: react to user creation")
 automation sandboxOnUserCreate {

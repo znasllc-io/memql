@@ -167,7 +167,7 @@ func TestStartsWith_StructQueryFilter(t *testing.T) {
 // A spec body reads its bound fields bare; the predicate is a boolean over a
 // string field, so it belongs there too.
 func TestStartsWith_SpecBody(t *testing.T) {
-	decl, err := ParseSpecDecl(`@enabled
+	decl, err := ParseSpecDecl(`
 @description("Matches integration-owned code references.")
 spec codeMetric isIntegrationMetric {
   return codeReference startsWith "integration."

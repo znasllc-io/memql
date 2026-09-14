@@ -288,7 +288,7 @@ func TestVerify_ZeroImportFileNeverProvablyMissing(t *testing.T) {
 	// outside the linted root. A file with zero Form B imports therefore
 	// offers no evidence the author works in-root -- stay silent.
 	tree := loadTree(t, fstest.MapFS{
-		"myapp/mutations.memql": file(`@enabled
+		"myapp/mutations.memql": file(`
 @description("Binds an engine concept without any import; boots green when the bundle mounts alongside the engine tree.")
 mutation space productCreateSpace {
   args {
@@ -353,7 +353,7 @@ query item queryItems {
   }
   filter  name == args.name
 }`),
-		"other/queries.memql": file(`@enabled
+		"other/queries.memql": file(`
 @description("Signature concept resolved through the global fallback.")
 query item queryOtherItems {
   args {
@@ -386,7 +386,7 @@ query space querySpaces {
 func TestVerify_SignatureConceptResolvesToNonConcept(t *testing.T) {
 	tree := loadTree(t, fstest.MapFS{
 		"demo/concepts.memql": file(demoConcepts),
-		"demo/logic.memql": file(`@enabled
+		"demo/logic.memql": file(`
 @description("A logic construct sharing a name the query below binds.")
 logic widget {
   args {
@@ -420,7 +420,7 @@ func TestVerify_NonConceptImportDoesNotShadowConcept(t *testing.T) {
 concept widget {
   label string @required @description("Label.")
 }`),
-		"demo/logic.memql": file(`@enabled
+		"demo/logic.memql": file(`
 @description("Same-named logic.")
 logic widget {
   args {
@@ -635,7 +635,7 @@ func TestVerify_StrandedImportAfterCallRename(t *testing.T) {
 	// are legitimately absent), but the rename strands the original import.
 	tree := loadTree(t, fstest.MapFS{
 		"demo/concepts.memql": file(demoConcepts),
-		"demo/logic.memql": file(`@enabled
+		"demo/logic.memql": file(`
 @description("Decides something about an item event.")
 logic decideThing {
   args {

@@ -48,7 +48,7 @@ import (
 
 // condProbeSource builds a single-statement logic whose body is `expr`.
 func condProbeSource(expr string) string {
-	return fmt.Sprintf(`@enabled
+	return fmt.Sprintf(`
 @description("memql#2962 predicate-shape probe")
 logic condProbe {
   args {
@@ -168,7 +168,7 @@ func TestCond_UnsupportedPredicateShapesAreLoadErrors(t *testing.T) {
 func TestExecute_CondComparisonPredicate_RunsAndDiscriminates(t *testing.T) {
 	eng, _, ctx := sharedReadMergeEngine(t)
 
-	const src = `@enabled
+	const src = `
 @description("memql#2962 end-to-end role gate")
 logic roleGate {
   args {

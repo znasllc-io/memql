@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // builtinDeclToFunction converts a langparser BuiltinDecl into the
@@ -56,8 +57,10 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 
 	for _, attr := range decl.Attributes {
 		switch attr.Name {
-		case "enabled":
-			// Accepted no-op: enabled is the default (lifecycle ruling, #2608).
+		// @enabled was an accepted no-op here (lifecycle ruling) until
+		// memql#5375 retired it. It falls through to the unknown-annotation
+		// arm, which consults the retirement ledger first and names
+		// @disabled as what an author actually wants.
 		case "disabled":
 			enabled = false
 		case "sdk":
@@ -104,7 +107,10 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 			// Unknown annotation -- hard-rejected (#990). Closes the
 			// silent-tolerance gap so typos and stale annotations on
 			// builtins fail at load instead of being dropped.
-			return nil, fmt.Errorf("%s: builtin %q: unknown annotation @%s -- supported: @alias, @args, @description, @disabled, @enabled, @executor, @requiresCapability, @sdk", origin, decl.Name, attr.Name)
+			if hint, retired := baseparser.RetiredConstructAnnotation(attr.Name); retired {
+				return nil, fmt.Errorf("%s: builtin %q: @%s is retired -- %s", origin, decl.Name, attr.Name, hint)
+			}
+			return nil, fmt.Errorf("%s: builtin %q: unknown annotation @%s -- supported: @alias, @args, @description, @disabled, @executor, @requiresCapability, @sdk", origin, decl.Name, attr.Name)
 		}
 	}
 

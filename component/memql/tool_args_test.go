@@ -212,7 +212,7 @@ func TestToolParser_AutoInjectedAnnotation(t *testing.T) {
 	// Parser-level smoke: a tool field with @autoInjected lands as
 	// a Tool.AutoInjectedFields entry. The integration with
 	// si_tool_loop is tested above; this just pins the parser path.
-	src := `@enabled
+	src := `
 @handler(type="function", name="myTool")
 @description("test tool")
 tool myTool {

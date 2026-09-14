@@ -56,7 +56,7 @@ const (
 	grantProbeOrigin = "memql#5296-test"
 )
 
-const grantProbeLogicSource = `@enabled
+const grantProbeLogicSource = `
 @description("memql#5296 grant gate probe -- the direct-call path")
 @requiresCapability("execute", "app:grant-test")
 logic grantGateProbeLogic {
@@ -71,7 +71,7 @@ logic grantGateProbeLogic {
 
 // rankProbeLogicSource is the RANK twin of the logic probe, for the hole the
 // capability probe exposed (see TestSingleStatementLogicClearsItsFloors).
-const rankProbeLogicSource = `@enabled
+const rankProbeLogicSource = `
 @description("memql#5296 rank gate probe -- a single-statement logic")
 @requiresRank("admin")
 logic rankGateProbeLogic {

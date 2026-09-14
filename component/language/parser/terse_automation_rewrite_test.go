@@ -15,11 +15,11 @@ import (
 // is what guarantees there is no separate terse execution path and so
 // no dry-run/live divergence.
 func TestTerseAutomation_LowersIdenticalToLonghand(t *testing.T) {
-	terse := `@enabled
+	terse := `
 @description("Register this node on startup.")
 automation registerNode @trigger(event="system.startup") => logic registerNode`
 
-	longhand := `@enabled
+	longhand := `
 @description("Register this node on startup.")
 @trigger(event="system.startup")
 automation registerNode {

@@ -38,7 +38,7 @@ concept widget {
 concept widget {
   label  string  @required @description("Label.")
 }`),
-		"alpha/queries.memql": file(`@enabled
+		"alpha/queries.memql": file(`
 @description("Binds alpha's own widget with no import -- ambient under #2617.")
 query widget alphaWidgets {
   args {
@@ -66,7 +66,7 @@ func TestLane2_SameDomainBindingNeedsNoImport(t *testing.T) {
 func TestLane2_ForeignAmbiguityStillReported(t *testing.T) {
 	root := sameDomainAmbiguousTree()
 	// A third domain binds `widget` without declaring one of its own.
-	root["gamma/queries.memql"] = file(`@enabled
+	root["gamma/queries.memql"] = file(`
 @description("Binds an ambiguous foreign name with no import -- genuinely unresolvable.")
 query widget gammaWidgets {
   args {

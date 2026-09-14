@@ -248,7 +248,7 @@ func TestLexer_TypeReceivers(t *testing.T) {
 }
 
 func TestLexer_Attributes(t *testing.T) {
-	input := `@enabled
+	input := `
 @description("Test function")
 @trigger(event="test.event")`
 

@@ -157,7 +157,7 @@ func TestMutationTemplate_MergeFieldsAnnotationPlumbing(t *testing.T) {
 		"v1:identity:user": {Name: "v1:identity:user"},
 	})
 
-	src := `@enabled
+	src := `
 @mergeFields("preferences")
 @description("Set User.preferences.computerUseEnabled.")
 mutation user toggleComputerUseEnabled {
@@ -202,7 +202,7 @@ func TestMutationTemplate_MergeFieldsRejectedOnInsert(t *testing.T) {
 		"v1:identity:user": {Name: "v1:identity:user"},
 	})
 
-	src := `@enabled
+	src := `
 @mergeFields("preferences")
 mutation user mutationCreateUserBad {
   args {

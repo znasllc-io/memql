@@ -37,6 +37,7 @@ import (
 	"github.com/znasllc-io/memql/component/language/annotations"
 	"github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // specDeclToSpec converts a langparser SpecDecl into the engine's
@@ -77,6 +78,9 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 			return nil, fmt.Errorf("%s: @%s is a shape-only marker (epic #2281) -- a %s may not carry it. To predicate on %s data, bind a @%s shape in the signature and read its projected key by bare name", origin, attr.Name, kindLabel, ambientWord(attr.Name), attr.Name)
 		}
 		if !allowed[attr.Name] {
+			if hint, retired := baseparser.RetiredConstructAnnotation(attr.Name); retired {
+				return nil, fmt.Errorf("%s: @%s on a %s is retired -- %s", origin, attr.Name, kindLabel, hint)
+			}
 			return nil, fmt.Errorf("%s: unknown %s annotation @%s (supported: %s)", origin, kindLabel, attr.Name, strings.Join(annotations.ByReceiver["Spec"], " / "))
 		}
 		switch attr.Name {
@@ -86,8 +90,10 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 				return nil, fmt.Errorf("%s: @description expects a string value", origin)
 			}
 			description = val
-		case ast.AttrEnabled:
-			// Accepted no-op: enabled is the default (lifecycle ruling, #2607).
+		// @enabled was an accepted no-op here (lifecycle ruling) until
+		// memql#5375 retired it. It falls through to the unknown-annotation
+		// arm, which consults the retirement ledger first and names
+		// @disabled as what an author actually wants.
 		case ast.AttrDisabled:
 			disabled = true
 		}

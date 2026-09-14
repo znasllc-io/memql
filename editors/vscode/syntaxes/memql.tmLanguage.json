@@ -62,7 +62,7 @@
     },
     "construct-keywords": {
       "name": "storage.type.memql",
-      "match": "\\b(?:action|automation|builtin|capability|concept|logic|mutate|policy|prompt|provider|query|rule|seed|shape|spec|tool|trait|use)\\b"
+      "match": "\\b(?:action|automation|builtin|capability|concept|logic|mutation|policy|prompt|provider|query|rule|seed|shape|spec|tool|trait|use)\\b"
     },
     "control-keywords": {
       "name": "keyword.control.memql",

@@ -21,7 +21,7 @@ import (
 // later return reads it, with no engine step dispatched (arithmetic resolves
 // locally).
 func TestLogicRunner_RunLogic_IntermediateArithmeticStepRHS(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("intermediate arithmetic step RHS (#2542 GAP 2)")
 logic doubler {
   args {
@@ -56,7 +56,7 @@ logic doubler {
 // applied to query steps is what makes the `$args.X` operands re-parse and
 // resolve, exactly as a terminal-return arithmetic already does.
 func TestLogicRunner_RunLogic_ArithmeticStepRHS_ArgsOperands(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("args operands in an arithmetic step RHS (#2542 GAP 2)")
 logic netAmount {
   args {
@@ -87,7 +87,7 @@ logic netAmount {
 // operand walker. This RHS leads with a call, so it is rescued inside the
 // bareCall branch rather than the leading-operand speculative branch.
 func TestLogicRunner_RunLogic_ArithmeticStepRHS_DateBuiltinOperand(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("date builtin inside an arithmetic step RHS (#2542 GAP 2)")
 logic weeksBetween {
   args {
@@ -119,7 +119,7 @@ logic weeksBetween {
 // division-by-zero in a step RHS surfaces the same clean error a terminal
 // return does, never a panic or a silent nil bind.
 func TestLogicRunner_RunLogic_ArithmeticStepRHS_DivisionByZero(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("division by zero in an arithmetic step RHS (#2542 GAP 2)")
 logic ratioStep {
   args {
@@ -164,7 +164,7 @@ func TestLogicRunner_CompileRoundTrip_ArithmeticStepRHS(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			src := `@enabled
+			src := `
 @description("step-RHS round-trip probe")
 logic probe {
   args {

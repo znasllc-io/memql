@@ -169,7 +169,7 @@ provider acme {
 // TestParseProviderDecl_Enabled locks @enabled as an explicit-on
 // no-op: it parses cleanly and leaves Disabled == false.
 func TestParseProviderDecl_Enabled(t *testing.T) {
-	source := `@enabled
+	source := `
 @vendor("OpenAI")
 @model("gpt-5-mini")
 provider chat5Mini {

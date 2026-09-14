@@ -32,7 +32,7 @@ func runProjectionLogic(t *testing.T, src, fn string, args map[string]any) (any,
 // --- Item 2: cond over a collection chain (terminal return) ---
 
 func TestRunLogic_CondOverChain_TerminalReturn(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("cond over a collection-chain aggregate (#2542 item 2)")
 logic condReturn {
   args {
@@ -62,7 +62,7 @@ logic condReturn {
 // The else branch is selected (and is itself a chain) when the predicate is
 // false.
 func TestRunLogic_CondOverChain_ElseBranch(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("cond else-branch chain")
 logic condElse {
   args {
@@ -87,7 +87,7 @@ logic condElse {
 // --- Item 2: cond as a STEP value ---
 
 func TestRunLogic_CondOverChain_StepValue(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("cond as a step value over a chain (#2542 item 2)")
 logic condStep {
   args {
@@ -116,7 +116,7 @@ logic condStep {
 // A cond predicate that is a comparison over a step scalar (parseable today)
 // evaluates through the condition machinery.
 func TestRunLogic_CondScalarComparisonPredicate(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("cond with a scalar-comparison predicate")
 logic condScalar {
   args {
@@ -145,7 +145,7 @@ logic condScalar {
 // serialized comparison string through the condition evaluator. Resolves
 // locally -- no step dispatch.
 func TestRunLogic_CondComparisonOverChain_TerminalReturn(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("cond over a comparison of a collection-chain aggregate (#2542 item 2)")
 logic condChainCmp {
   args {
@@ -184,7 +184,7 @@ logic condChainCmp {
 // an intermediate `:=` step, then returned) -- reached through
 // reconstructPositionalBuiltinCall rather than the terminal-return path.
 func TestRunLogic_CondComparisonOverChain_StepValue(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("cond comparison-over-chain as a step value (#2542 item 2)")
 logic condChainCmpStep {
   args {
@@ -258,7 +258,7 @@ func TestEvaluateLocalExpr_CondComparisonOverChainString(t *testing.T) {
 // --- Lambda-carrying chain in TERMINAL RETURN (serializer gap) ---
 
 func TestRunLogic_LambdaChainTerminalReturn(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("lambda-carrying chain in terminal return (serializer gap)")
 logic lambdaReturn {
   args {
@@ -288,7 +288,7 @@ logic lambdaReturn {
 // --- Item 3: arithmetic in a groupBy-projection object-literal value ---
 
 func TestRunLogic_GroupByProjection_MethodCallValue(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("groupBy projection with a method-call value (#2542 item 3)")
 logic projCount {
   args {
@@ -327,7 +327,7 @@ logic projCount {
 // operand is pinned END-TO-END through the same boundary by
 // TestRunLogic_GroupByProjection_FloatRatio below.
 func TestRunLogic_GroupByProjection_ArithmeticRatioPercent(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("per-group accuracy percent in a projection (#2542 item 3)")
 logic accuracy {
   args {
@@ -366,7 +366,7 @@ logic accuracy {
 // yielding 0 instead of ~0.6667 -- the memqllint-green/runtime-wrong class #2542
 // eliminates. Regression guard for the float-literal serialization fix.
 func TestRunLogic_GroupByProjection_FloatRatio(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("per-group fractional accuracy ratio via a float operand (#2542 item 3)")
 logic accuracyRatio {
   args {
@@ -404,7 +404,7 @@ logic accuracyRatio {
 // Division by a zero group aggregate surfaces cleanly through the full logic
 // path (never a panic).
 func TestRunLogic_GroupByProjection_DivisionByZero(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("projection division by a zero group aggregate")
 logic ratioZero {
   args {

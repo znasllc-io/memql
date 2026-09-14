@@ -37,7 +37,7 @@ import (
 // bootstrapClusterAutomation mirrors dsl/cluster/automations.memql. The full
 // tree (with this exact text) is validated to load by memqllint; here we
 // compile it standalone to inspect the step IR.
-const bootstrapClusterAutomation = `@enabled
+const bootstrapClusterAutomation = `
 @trigger(event="system.startup")
 @description("Bootstrap cluster, database, and identity provider records on first startup")
 automation bootstrapCluster {
@@ -84,7 +84,7 @@ automation bootstrapCluster {
   }
 }`
 
-const pruneStaleClusterNodesAutomation = `@enabled
+const pruneStaleClusterNodesAutomation = `
 @trigger(schedule="0 */10 * * * *")
 @description("Every 10 min: mark departed cluster nodes as health='stopped'.")
 automation pruneStaleClusterNodes {

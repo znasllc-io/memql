@@ -8,7 +8,7 @@ import (
 // TestParseToolDecl_RejectsUnknownAnnotation locks in #990: the tool
 // parser no longer silently swallows unknown annotations.
 func TestParseToolDecl_RejectsUnknownAnnotation(t *testing.T) {
-	source := `@enabled
+	source := `
 @handler(type="function", name="recentChat")
 @requires("recent-chat")
 @description("a tool with a stale annotation")
@@ -30,7 +30,7 @@ tool recentChat {
 // feature (the tool loop gates destructive/confirmation tools) and must
 // still parse.
 func TestParseToolDecl_KeepsLiveAnnotations(t *testing.T) {
-	source := `@enabled
+	source := `
 @handler(type="function", name="dangerTool")
 @destructive
 @requiresConfirmation

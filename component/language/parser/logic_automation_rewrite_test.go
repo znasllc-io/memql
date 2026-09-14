@@ -54,7 +54,7 @@ logic doFoo {
 // memql-cockpit#49.) Per issue #93 the parameter is `_` and there
 // is no `return ctx, nil` trailing line.
 func TestNormaliseAutomationSource_StepRewrite(t *testing.T) {
-	src := `@enabled
+	src := `
 @trigger(event="graph.node.created.v1:cognition:space")
 @useLogic(joinAgents)
 @description("Demo automation.")
@@ -96,7 +96,7 @@ func TestLooksLikeLegacyAutomation(t *testing.T) {
 	}{
 		{
 			name: "legacy func form",
-			source: `@enabled
+			source: `
 func (Automation) foo(_ any) {
   return ctx, nil
 }`,
@@ -104,7 +104,7 @@ func (Automation) foo(_ any) {
 		},
 		{
 			name: "struct form",
-			source: `@enabled
+			source: `
 automation foo {
   step run { logic doThing { event: event } }
 }`,
@@ -129,7 +129,7 @@ automation foo {
 // and let later steps reference prior step outputs via bare
 // `<priorStep>.<field>` -- the dotted suffix rides through verbatim.
 func TestNormaliseAutomationSource_MultipleStepsAndOutputRefs(t *testing.T) {
-	src := `@enabled
+	src := `
 @trigger(event="graph.node.created.v1:cognition:privateUtterance")
 @useLogic(classifyLeadIntent, recordLeadIfNeeded)
 automation leadClassification {
@@ -186,7 +186,7 @@ automation leadClassification {
 // Both failure modes surfaced as the "daily space never shows up"
 // symptom in memql-cockpit#49.
 func TestNormaliseAutomationSource_EventRefsPassThroughVerbatim(t *testing.T) {
-	src := `@enabled
+	src := `
 @trigger(event="graph.node.created.v1:identity:authSession")
 @useLogic(logicEnsureDailySpaceOnAuthSession)
 automation ensureDailySpaceOnAuthSession {

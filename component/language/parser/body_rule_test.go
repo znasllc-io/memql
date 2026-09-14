@@ -171,7 +171,7 @@ action tagRelease {
 // An automation carrying a `body { }` block is rejected: an automation is
 // `step ...` blocks, never a procedural body.
 func TestBodyRule_AutomationWithBody_Rejected(t *testing.T) {
-	src := `@enabled
+	src := `
 @trigger(event="system.startup")
 automation onStartup {
   body {

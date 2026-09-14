@@ -43,7 +43,7 @@ concept widget {
 concept widget {
   name  string  @required @description("Name.")
 }`),
-		"beta/queries.memql": file(`@enabled
+		"beta/queries.memql": file(`
 @description("Binds beta's own widget with no import -- ambient under #2617.")
 query widget betaWidgets {
   args {
@@ -103,7 +103,7 @@ concept widget {
 concept widget {
   name  string  @required @description("Name.")
 }`),
-		"alpha/sub/queries.memql": file(`@enabled
+		"alpha/sub/queries.memql": file(`
 @description("Binds an ambiguous FOREIGN name with no import -- unresolvable.")
 query widget alphaWidgets {
   args {
@@ -189,7 +189,7 @@ concept widget {
 concept widget {
   name  string  @required @description("Name.")
 }`),
-		"deployment/queries.memql": file(`@enabled
+		"deployment/queries.memql": file(`
 @description("Binds ` + "`widget`" + ` with no import from deployment/.")
 query widget deploymentWidgets {
   args {

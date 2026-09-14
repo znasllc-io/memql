@@ -183,7 +183,7 @@ query widget deployWidgets {
 func TestPinnedDomainRemedyIsValidUseSyntax(t *testing.T) {
 	root := pinnedNamespaceWithRealDirTree()
 	// Drop the import so the unimported-signature-concept diagnostic fires.
-	root["deploy/queries.memql"] = file(`@enabled
+	root["deploy/queries.memql"] = file(`
 @description("No import, so the ambiguity diagnostic fires with its remedy.")
 query widget deployWidgets {
   args {

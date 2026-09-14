@@ -16,7 +16,7 @@ import (
 // @shape pin to the signature. Classification (row vs context) is deferred
 // to the engine-bootstrap binding resolver, so Kind is empty at conversion.
 func TestSpecDeclToSpec_AcceptsBindingAndEnabled(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("Caller must hold owner or admin role.")
 spec actorEnvelope requiresOwnerOrAdminFixture {
   return role == "admin" || role == "owner"

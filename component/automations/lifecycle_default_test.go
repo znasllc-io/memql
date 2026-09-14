@@ -32,7 +32,7 @@ func TestCompileMemQL_LifecycleDefaults(t *testing.T) {
 		wantEnabled bool
 	}{
 		{"absent", "", true}, // the ruling; compiled to disabled pre-#2604
-		{"explicit-enabled", "@enabled", true},
+		{"explicit-enabled", true},
 		{"explicit-disabled", "@disabled", false},
 	}
 	for _, tc := range cases {

@@ -165,7 +165,7 @@ func TestEvaluateExpressionSet_LiteralIsDescriptiveError(t *testing.T) {
 func TestExecute_LogicConsolidateMemoryShape_RunsToCompletion(t *testing.T) {
 	eng, _, ctx := sharedReadMergeEngine(t)
 
-	const src = `@enabled
+	const src = `
 @description("repro of the memql#1705 consolidateMemory return shape")
 logic consolidateMemory {
   args {

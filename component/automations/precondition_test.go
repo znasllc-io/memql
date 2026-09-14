@@ -119,7 +119,7 @@ func TestValidatePreconditions_DuplicateID(t *testing.T) {
 // after) and surface the precondition on the compiled Automation.
 func TestCompileMemQL_AttachesPreconditions(t *testing.T) {
 	loader := NewLoader(LoaderOptions{})
-	src := `@enabled
+	src := `
 @trigger(event="node.created", concept="v1:cognition:space", partition="*")
 @description("guarded greet")
 automation guardedGreet {

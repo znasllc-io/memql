@@ -134,7 +134,7 @@ mutation item createItem {
 			name: "stranded import after call rename",
 			files: map[string]string{
 				"demo/concepts.memql": testConcepts,
-				"demo/logic.memql": `@enabled
+				"demo/logic.memql": `
 @description("Decides something.")
 logic decideThing {
   args {

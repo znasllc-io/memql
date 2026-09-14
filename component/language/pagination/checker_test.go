@@ -125,7 +125,7 @@ func TestCountIsAggregate(t *testing.T) {
 // TestUnboundedMarkedListCapturesReason: an @unbounded("reason") query
 // is compliant and its reason is captured for the audit report.
 func TestUnboundedMarkedListCapturesReason(t *testing.T) {
-	src := `@enabled
+	src := `
 @unbounded("small bounded catalog -- providers never exceed a handful of rows")
 @description("All providers.")
 query provider queryAllProviders {
