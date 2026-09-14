@@ -3,7 +3,7 @@ import { newShortId, type Connection, type Row } from "@znasllc-io/memql-sdk-cor
 
 import { useOsConnection } from "../../live/connection";
 import { flatten } from "../../kit/rows";
-import type { RecipientMode } from "./rows";
+import { engineSentence, type RecipientMode } from "./rows";
 
 // Every write the Campaigns app makes, and the busy/error pair each one owns.
 //
@@ -764,7 +764,8 @@ export function useCreateRule(): CreateRuleState {
     // writing this row can never by itself mail anybody.
     return emailRuleId;
   }, "");
-  return { busy, error, reset, create: call };
+  // The rules surface shows a refusal's sentence, never its transport frames.
+  return { busy, error: engineSentence(error), reset, create: call };
 }
 
 export interface UpdateRuleState extends WriteState {
@@ -791,7 +792,7 @@ export function useUpdateRule(): UpdateRuleState {
     },
     false,
   );
-  return { busy, error, reset, update: call };
+  return { busy, error: engineSentence(error), reset, update: call };
 }
 
 export interface RuleArmingState extends WriteState {
@@ -816,6 +817,9 @@ export interface RuleArmingState extends WriteState {
  *
  * One error slot, for the reason `useSendControls` has one: these three are a
  * single cluster of controls on one row, and only one can be pressed at once.
+ * The slot holds the ENGINE'S SENTENCE (engineSentence), not the call's error
+ * text: that is what lets the rule page see that the refusal it is about to
+ * show is the one `lastError` already shows, and say it once.
  */
 export function useRuleArming(): RuleArmingState {
   const activate = useWrite(async (query, emailRuleId: string) => {
@@ -834,7 +838,7 @@ export function useRuleArming(): RuleArmingState {
   const parts = [activate, retire, status];
   return {
     busy: parts.some((p) => p.busy),
-    error: parts.map((p) => p.error).find((e) => e !== "") ?? "",
+    error: engineSentence(parts.map((p) => p.error).find((e) => e !== "") ?? ""),
     reset: () => parts.forEach((p) => p.reset()),
     activate: activate.call,
     retire: retire.call,
