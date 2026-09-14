@@ -23,9 +23,10 @@ import (
 // which broke the cockpit editor's diagnostics for the four most common
 // construct kinds (memql#2359).
 //
-// Positions the lexer/parser report are in LOWERED coordinates; a lineMap
-// (built from the authored + rewritten pair) maps them back to the authored
-// lines the user is editing.
+// The lowering is lexed with the author's positions carried in it
+// (parser.PositionLowering), so the lexer and parser report positions in the
+// source the user is editing; a lineMap (built from the authored + rewritten
+// pair) maps positions back only for a lowering left unmarked.
 func (s *Service) Diagnose(source string, filePath string) []Diagnostic {
 	if strings.TrimSpace(source) == "" {
 		return nil
@@ -43,17 +44,32 @@ func (s *Service) Diagnose(source string, filePath string) []Diagnostic {
 
 	lm := newLineMap(source, rewritten)
 
+	// Lex the lowering with the author's positions carried in it
+	// (parser.PositionLowering, memql#5364). Every position the lexer and
+	// parser report is then the author's own -- down to the column of a token
+	// inside a filter the lowering moved into its synthesized return, which no
+	// line map can recover -- and the line map is only the fallback for a
+	// lowering PositionLowering left unmarked.
+	marked := parser.PositionLowering(source, rewritten)
+	positioned := marked != rewritten
+
 	var diagnostics []Diagnostic
 
-	// Phase 1: Lexer errors (lowered coords -> authored).
-	lexer := parser.NewLexer(rewritten)
+	// Phase 1: Lexer errors. A marked text's lexer reports the author's
+	// position already; an unmarked one's is mapped back.
+	lexer := parser.NewLexer(marked)
 	tokens, lexErr := lexer.Tokenize()
 	if lexErr != nil {
-		diagnostics = append(diagnostics, lm.remap(lexerDiagnostic(lexErr)))
+		d := lexerDiagnostic(lexErr)
+		if !positioned {
+			d = lm.remap(d)
+		}
+		diagnostics = append(diagnostics, d)
 		return diagnostics // Can't continue without valid tokens.
 	}
 
-	// Phase 2: Parser errors (lowered coords -> authored).
+	// Phase 2: Parser errors, positioned as the lexer's are. A ParseError
+	// names its failing token's extent, which becomes the range.
 	//
 	// A file whose only constructs are non-procedural (shape / builtin /
 	// prompt / seed / spec / trait) is stripped to bare comments by
@@ -66,7 +82,12 @@ func (s *Service) Diagnose(source string, filePath string) []Diagnostic {
 	ast, parseErr := p.Parse()
 	if parseErr != nil && !errors.Is(parseErr, parser.ErrEmptyInput) {
 		for _, d := range parserDiagnostics(parseErr) {
-			diagnostics = append(diagnostics, lm.remap(d))
+			if r, ok := failingTokenRange(parseErr, rewritten == source); ok {
+				d.Range = r
+			} else if !positioned {
+				d = lm.remap(d)
+			}
+			diagnostics = append(diagnostics, d)
 		}
 		// Continue with semantic analysis on a partial AST if one survives.
 	}
@@ -215,6 +236,24 @@ func lexerDiagnostic(err error) Diagnostic {
 		Message:  msg,
 		Code:     "lex-error",
 	}
+}
+
+// failingTokenRange is the range of the token a parse error is about, in the
+// author's coordinates, so the squiggle covers that token: the authored extent
+// a marked lowering gives it, or -- lexedIsAuthored, nothing was lowered --
+// the lexed one. ok is false when the error carries no token extent.
+func failingTokenRange(err error, lexedIsAuthored bool) (Range, bool) {
+	var pe *parser.ParseError
+	if !errors.As(err, &pe) || (pe.AuthoredLine == 0 && !(lexedIsAuthored && pe.Line > 0)) {
+		return Range{}, false
+	}
+	line, col := pe.Position()
+	endLine, endCol := pe.EndPosition()
+	r := Range{Start: Position{Line: line, Column: col}, End: Position{Line: endLine, Column: endCol}}
+	if r.End.Line < r.Start.Line || (r.End.Line == r.Start.Line && r.End.Column <= r.Start.Column) {
+		r.End = Position{Line: line, Column: col + 1}
+	}
+	return r, true
 }
 
 // parserDiagnostics converts parser errors to diagnostics.

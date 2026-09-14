@@ -58,7 +58,7 @@ func (p *Parser) tryParseV1LambdaOperand() (ExpressionNode, bool, error) {
 			return nil, true, err
 		}
 		if !p.check(TokenParenClose) {
-			return nil, true, p.v1Expected("`)` to close the lambda opened at line " + strconv.Itoa(open.Line) + ", column " + strconv.Itoa(open.Column))
+			return nil, true, p.v1Expected("`)` to close the lambda opened at " + v1Where(open))
 		}
 		p.advance()
 		return e.n, true, nil
@@ -161,8 +161,9 @@ func formatV1(n ExpressionNode) string { return ast.FormatExpr(n) }
 // checkV1QueryFilter refuses, with ExpressionsV1 on, a query whose filter is
 // not a lambda. A struct-form query reaches the parser as
 // `[directives](concept==<id> [&& (<filter>)])`, so the filter is the right
-// operand of the join under the directive wrappers.
-func (p *Parser) checkV1QueryFilter(body ExpressionNode, at Token) error {
+// operand of the join under the directive wrappers. from is the index of the
+// body's first token.
+func (p *Parser) checkV1QueryFilter(body ExpressionNode, from int) error {
 	if !p.opts.ExpressionsV1 {
 		return nil
 	}
@@ -177,7 +178,28 @@ func (p *Parser) checkV1QueryFilter(body ExpressionNode, at Token) error {
 	if _, isLambda := and.Right.(*ast.LambdaExpr); isLambda {
 		return nil
 	}
-	return v1Retired(at, ruleFilterWithoutLambda)
+	return v1Retired(p.v1FilterStart(from), ruleFilterWithoutLambda)
+}
+
+// v1FilterStart is the first token of the filter a struct-form query joins as
+// `concept==<id> && (<filter>)`, searched from the body's first token: the
+// refusal of a filter belongs on the author's text, and every token before
+// the filter is the rewriter's. The body's first token is the fallback.
+func (p *Parser) v1FilterStart(from int) Token {
+	for i := from; i+5 < len(p.tokens); i++ {
+		t := p.tokens[i]
+		if t.Type == TokenBraceClose {
+			break
+		}
+		if t.Type == TokenIdentifier && t.Literal == "concept" && p.tokens[i+1].Literal == "==" &&
+			p.tokens[i+3].Type == TokenAmpAmp && p.tokens[i+4].Type == TokenParenOpen {
+			return p.tokens[i+5]
+		}
+	}
+	if from < len(p.tokens) {
+		return p.tokens[from]
+	}
+	return p.current
 }
 
 // unwrapQueryDirectives strips the directive wrappers a struct-form query's

@@ -125,7 +125,9 @@ func (p *Parser) sliceSource(start int) string {
 	if start < 0 || end > len(p.src) || end <= start {
 		return ""
 	}
-	return strings.TrimSpace(string(p.src[start:end]))
+	// The span leaves the parser as TEXT (a step's verbatim source), so the
+	// position markers of a marked lowering come out of it.
+	return strings.TrimSpace(StripPositionMarkers(string(p.src[start:end])))
 }
 
 // Parse parses the token stream and returns the root AST node.
@@ -1074,7 +1076,7 @@ func (p *Parser) parseGoStyleFunction() (*FunctionDef, error) {
 	case FunctionTypeMutation:
 		body, err = p.parseGoStyleMutationBodyOrLegacy()
 	case FunctionTypeQuery:
-		bodyStart := p.current
+		bodyStart := p.pos
 		body, err = p.parseGoStyleQueryBodyOrLegacy()
 		if err == nil {
 			if expr, ok := body.(ExpressionNode); ok {

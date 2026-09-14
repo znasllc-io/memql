@@ -26,6 +26,15 @@ type FunctionSlice struct {
 	Source string                      // slice text (preamble + declaration body)
 	Kind   languageParser.FunctionType // Query / Mutation / Logic / Automation / Spec / Shape / Tool / etc.
 	Name   string                      // function name from the header
+
+	// Line is the line of the source file the declaration's own text starts
+	// on -- its preamble, or its header when it has none -- and BodyOffset
+	// where that text starts in Source, after the file-top `use` block every
+	// slice inherits. The loader anchors the slice there, so a parse error
+	// names the file's line rather than the slice's (memql#5364). Zero Line
+	// is unknown.
+	Line       int
+	BodyOffset int
 }
 
 // functionDeclHeader matches every top-level function-style header
@@ -210,9 +219,11 @@ func ExtractFunctionSlices(source string) []FunctionSlice {
 			body = usePreamble + body
 		}
 		slices = append(slices, FunctionSlice{
-			Source: body,
-			Kind:   kind,
-			Name:   name,
+			Source:     body,
+			Kind:       kind,
+			Name:       name,
+			Line:       1 + strings.Count(source[:preambleStart], "\n"),
+			BodyOffset: len(usePreamble),
 		})
 	}
 

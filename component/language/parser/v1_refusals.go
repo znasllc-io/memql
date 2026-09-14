@@ -214,12 +214,22 @@ func v1FormByRule(rule string) (RetiredForm, bool) {
 // ParseError.Error appends a `(got "...")` suffix when it is set, and every v1
 // message already says what it found, so the suffix would only repeat it.
 func v1ParseErrorAt(tok Token, msg string) *ParseError {
-	return &ParseError{Message: msg, Pos: tok.Pos, Line: tok.Line, Column: tok.Column}
+	e := &ParseError{Message: msg}
+	e.setToken(tok)
+	return e
 }
 
 // v1Errorf is v1ParseErrorAt with a format.
 func v1Errorf(tok Token, format string, args ...any) error {
 	return v1ParseErrorAt(tok, fmt.Sprintf(format, args...))
+}
+
+// v1Where names where tok is, for a message that points back at an opener
+// ("the `(` at line 3, column 9"): in the author's coordinates, as the
+// refusal's own position is.
+func v1Where(tok Token) string {
+	line, col := tok.At()
+	return fmt.Sprintf("line %d, column %d", line, col)
 }
 
 // v1Describe names a token the way a message quotes it.
