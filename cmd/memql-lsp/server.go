@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/tliron/commonlog"
 	"github.com/tliron/glsp"
@@ -25,8 +26,23 @@ type server struct {
 	diag    *diagnosticsDebouncer
 	rebuild *rebuildDebouncer
 
+	// mu guards sense and lines, which one build produces together and
+	// setBuild swaps together: lines is the workspace's language lines as that
+	// build resolved them (languageline.go).
 	mu    sync.RWMutex
 	sense *sense.Service
+	lines memql.WorkspaceLanguageLines
+
+	// createsFiles records whether the client can apply a workspace edit that
+	// creates a file, which the language-line quick fix is (languageline.go).
+	// Set once, at initialize.
+	createsFiles atomic.Bool
+
+	// announceMu guards announced: the causes the last notification about a
+	// failed build named, so the same failure is not announced twice
+	// (announceBuild, languageline.go). Empty after a build that succeeded.
+	announceMu sync.Mutex
+	announced  map[string]bool
 
 	// catalogMu guards catalog, the connected cluster's construct catalog as
 	// last pushed by the client over `memql/clusterCatalog`. Its ZERO VALUE IS
@@ -57,7 +73,7 @@ func newServer(root string, log commonlog.Logger) *server {
 // every open document against the new registry.
 func (s *server) scheduleRebuild(notify glsp.NotifyFunc) {
 	s.rebuild.schedule(func() {
-		s.buildSense()
+		s.buildSense(notify)
 		for _, uri := range s.docs.uris() {
 			s.publishDiagnostics(notify, uri)
 		}
@@ -78,14 +94,44 @@ func (s *server) setSense(svc *sense.Service) {
 	s.sense = svc
 }
 
-// buildSense builds the offline Sense service over the workspace root. On engine
-// failure (a workspace construct trips the strict-boot gate) BuildOfflineSense
-// still returns a service carrying the workspace symbol graph, so import and
+// getBuild returns the current Sense service and the language lines resolved
+// with it, from one build.
+func (s *server) getBuild() (*sense.Service, memql.WorkspaceLanguageLines) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sense, s.lines
+}
+
+// setBuild swaps in one build's Sense service and language lines together, so
+// no reader pairs one build's service with another's lines.
+func (s *server) setBuild(svc *sense.Service, lines memql.WorkspaceLanguageLines) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sense = svc
+	s.lines = lines
+}
+
+// buildSense builds the offline Sense service over the workspace root, and
+// resolves the workspace's language lines beside it. On engine failure (a
+// workspace construct trips the strict-boot gate) BuildOfflineSense still
+// returns a service carrying the workspace symbol graph, so import and
 // reference diagnostics keep working on exactly the broken workspace an author
 // is iterating on -- only the registry-backed vocabulary (completion, hover) is
 // absent until boot is clean.
-func (s *server) buildSense() {
-	svc, err := memql.BuildOfflineSense(os.DirFS(s.root))
+//
+// That absence is said, not just logged (languageline.go): a refused language
+// line is published on its domain's files, and the failure is announced once
+// through notify. A nil notify announces nothing.
+func (s *server) buildSense(notify glsp.NotifyFunc) {
+	root := os.DirFS(s.root)
+	// Resolved BEFORE the build, for the one race that is common: a memql.toml
+	// written while the build runs (by the quick fix). Resolved first, the
+	// lines at worst still name a refusal the build no longer has, which the
+	// rebuild that same write triggers clears. Resolved after, they could miss
+	// the refusal the build failed on, and the notification would blame the
+	// wrong thing.
+	lines := memql.ResolveWorkspaceLanguageLines(root)
+	svc, err := memql.BuildOfflineSense(root)
 	if err != nil {
 		s.log.Warningf("offline Sense engine build failed for %s (%s); serving workspace-graph reference analysis + syntax diagnostics without the full registry", s.root, err)
 	}
@@ -93,7 +139,8 @@ func (s *server) buildSense() {
 		// Defensive: BuildOfflineSense returns a non-nil service even on error.
 		svc = sense.New(nil)
 	}
-	s.setSense(svc)
+	s.setBuild(svc, lines)
+	s.announceBuild(notify, err, lines)
 }
 
 // handler wires the LSP methods: lifecycle, incremental text sync, push
@@ -113,13 +160,23 @@ func (s *server) handler() *protocol.Handler {
 		TextDocumentHover:              s.hover,
 		TextDocumentDefinition:         s.definition,
 		TextDocumentSignatureHelp:      s.signatureHelp,
+		TextDocumentCodeAction:         s.codeAction,
 		WorkspaceDidChangeWatchedFiles: s.didChangeWatchedFiles,
 	}
 }
 
-func (s *server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any, error) {
-	// Build offline Sense from the workspace before serving any request.
-	s.buildSense()
+func (s *server) initialize(ctx *glsp.Context, params *protocol.InitializeParams) (any, error) {
+	if params != nil {
+		s.createsFiles.Store(clientCreatesFiles(params.Capabilities))
+	}
+	// Build offline Sense from the workspace before serving any request. A
+	// failed build is announced from here: window/showMessage is one of the
+	// notifications LSP lets a server send while initialize is in flight.
+	var notify glsp.NotifyFunc
+	if ctx != nil {
+		notify = ctx.Notify
+	}
+	s.buildSense(notify)
 
 	syncKind := protocol.TextDocumentSyncKindIncremental
 	openClose := true
@@ -149,6 +206,12 @@ func (s *server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 		DefinitionProvider: true,
 		SignatureHelpProvider: &protocol.SignatureHelpOptions{
 			TriggerCharacters: signatureHelpTriggerChars,
+		},
+		// The quick fix that writes a domain's missing memql.toml
+		// (languageline.go). Advertised to every client; offered only to one
+		// that can create a file through a workspace edit.
+		CodeActionProvider: protocol.CodeActionOptions{
+			CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix},
 		},
 		// Custom (non-LSP) requests this server answers, advertised so a client
 		// can feature-detect rather than call blind and handle MethodNotFound.
@@ -213,8 +276,10 @@ func (s *server) didChangeWatchedFiles(ctx *glsp.Context, _ *protocol.DidChangeW
 	return nil
 }
 
-func (s *server) didClose(_ *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
+func (s *server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
 	s.diag.cancel(params.TextDocument.URI)
+	// Before the buffer goes: its own diagnostics are republished from it.
+	s.withdrawRefusal(ctx.Notify, params.TextDocument.URI)
 	s.docs.closeDoc(params.TextDocument.URI)
 	return nil
 }
