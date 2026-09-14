@@ -233,6 +233,7 @@ var manifest = map[Position]positionRule{
 	PositionStepArgument:        {tier: TierM, kinds: bodyKinds, functions: allFunctions, predicates: Admitted},
 	PositionToolDefault:         {tier: TierM, kinds: literalKinds, functions: noFunctions, predicates: Refused},
 	PositionPromptInput:         {tier: TierM, kinds: inProcessKinds, functions: allFunctions, predicates: Refused},
+	PositionQueryRefine:         {tier: TierM, kinds: inProcessKinds, functions: allFunctions, predicates: Admitted},
 }
 
 // catalogByKey indexes the function catalog by Function.Key, the key

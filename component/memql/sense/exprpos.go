@@ -653,6 +653,7 @@ var positionPhrases = map[tiers.Position]string{
 	tiers.PositionStepArgument:        "a step argument",
 	tiers.PositionToolDefault:         "a tool default",
 	tiers.PositionPromptInput:         "a prompt input",
+	tiers.PositionQueryRefine:         "a refine clause",
 }
 
 // isTraversal reports whether a catalog function is a relationship traversal,

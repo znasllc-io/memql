@@ -46,6 +46,14 @@ const (
 	PositionToolDefault Position = "toolDefault"
 	// PositionPromptInput is a value bound into a prompt's input.
 	PositionPromptInput Position = "promptInput"
+	// PositionQueryRefine is a query's `refine` clause: the one named construct
+	// that evaluates an expression IN PROCESS over a row set, and only over the
+	// bounded page `paginate` already read (D11: evaluating in process over a
+	// bounded page is a named construct, never an automatic escape). It is the
+	// twelfth position, added by the expression-language epic, because a
+	// predicate over rows that runs in process belongs to neither the pushdown
+	// filter nor any body position.
+	PositionQueryRefine Position = "queryRefine"
 )
 
 // Positions lists every position, in the order the record names them.
@@ -62,5 +70,6 @@ func Positions() []Position {
 		PositionStepArgument,
 		PositionToolDefault,
 		PositionPromptInput,
+		PositionQueryRefine,
 	}
 }

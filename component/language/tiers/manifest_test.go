@@ -94,6 +94,7 @@ func TestTierOfEveryPosition(t *testing.T) {
 		PositionStepArgument:        TierM,
 		PositionToolDefault:         TierM,
 		PositionPromptInput:         TierM,
+		PositionQueryRefine:         TierM,
 	}
 	for _, p := range Positions() {
 		if got := TierOf(p); got != want[p] {
@@ -329,6 +330,7 @@ func TestPredicateAdmission(t *testing.T) {
 		PositionStepArgument:        Admitted,
 		PositionToolDefault:         Refused,
 		PositionPromptInput:         Refused,
+		PositionQueryRefine:         Admitted,
 	}
 	for _, p := range Positions() {
 		if got := PredicateAdmission(p); got != want[p] {
