@@ -40,7 +40,7 @@ logic condReturn {
   }
   body {
     active := args.members.where(m => m.active)
-    return cond(active.any(), active.count(), 0)
+    return active.any() ? active.count() : 0
   }
 }
 `
@@ -70,7 +70,7 @@ logic condElse {
   }
   body {
     active := args.members.where(m => m.active)
-    return cond(active.any(), "some-active", "none-active")
+    return active.any() ? "some-active" : "none-active"
   }
 }
 `
@@ -95,7 +95,7 @@ logic condStep {
   }
   body {
     active := args.members.where(m => m.active)
-    label := cond(active.any(), "has-active", "no-active")
+    label := active.any() ? "has-active" : "no-active"
     return label
   }
 }
@@ -123,8 +123,8 @@ logic condScalar {
     revenue int @required
   }
   body {
-    r := coalesce(args.revenue, 0)
-    return cond(r > 50, "high", "low")
+    r := args.revenue ?? 0
+    return r > 50 ? "high" : "low"
   }
 }
 `
@@ -153,7 +153,7 @@ logic condChainCmp {
   }
   body {
     active := args.members.where(m => m.active)
-    return cond(active.count() > 1, "many", "few")
+    return active.count() > 1 ? "many" : "few"
   }
 }
 `
@@ -192,7 +192,7 @@ logic condChainCmpStep {
   }
   body {
     active := args.members.where(m => m.active)
-    label := cond(active.count() >= 2, "quorum", "short")
+    label := active.count() >= 2 ? "quorum" : "short"
     return label
   }
 }

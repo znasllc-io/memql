@@ -29,7 +29,7 @@ query widget queryAllWidgetsUnmarked {
   args {
     ownerUserId  string  @required
   }
-  filter  payload.ownerUserId==args.ownerUserId
+  filter  row => row.ownerUserId == args.ownerUserId
   shape   widgetFull
 }`
 	findings := ScanSource("cognition/queries.memql", src)
@@ -47,7 +47,7 @@ query widget queryAllWidgetsUnmarked {
 func TestSingleRowReadIsExempt(t *testing.T) {
 	src := `query space querySpaceMeta {
   args { partitionId string @required }
-  filter  row.id==args.partitionId
+  filter  row => row.id == args.partitionId
   shape   spaceFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "querySpaceMeta")
@@ -60,7 +60,7 @@ func TestSingleRowReadIsExempt(t *testing.T) {
 // whitespace also reads as single-row.
 func TestSingleRowReadWithSpacedEquality(t *testing.T) {
 	src := `query space querySpaceMetaSpaced {
-  filter  row.id == args.partitionId && isActiveRecord
+  filter  row => row.id == args.partitionId && isActiveRecord(row)
   shape   spaceFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "querySpaceMetaSpaced")
@@ -75,7 +75,7 @@ func TestSingleRowReadWithSpacedEquality(t *testing.T) {
 func TestPayloadIdSubfieldIsNotSingleRow(t *testing.T) {
 	src := `query message queryThreadMessages {
   args { threadId string @required }
-  filter  payload.threadId==args.threadId
+  filter  row => row.threadId == args.threadId
   shape   messageFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "queryThreadMessages")
@@ -88,7 +88,7 @@ func TestPayloadIdSubfieldIsNotSingleRow(t *testing.T) {
 // bounded / compliant.
 func TestPaginatedListIsBounded(t *testing.T) {
 	src := `query space queryFirstTenSpaces {
-  filter  payload.active==true
+  filter  row => row.active == true
   paginate 10
   shape   spaceFull
 }`
@@ -101,7 +101,7 @@ func TestPaginatedListIsBounded(t *testing.T) {
 // TestSortedListIsBounded: a sort directive marks the list as bounded.
 func TestSortedListIsBounded(t *testing.T) {
 	src := `query space queryLatestSpaces {
-  filter  payload.active==true
+  filter  row => row.active == true
   sort    "createdAt", "desc"
   shape   spaceFull
 }`
@@ -114,7 +114,7 @@ func TestSortedListIsBounded(t *testing.T) {
 // TestCountIsAggregate: a count clause returns an aggregate, exempt.
 func TestCountIsAggregate(t *testing.T) {
 	src := `query user userCount {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   count
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "userCount")
@@ -130,7 +130,7 @@ func TestUnboundedMarkedListCapturesReason(t *testing.T) {
 @unbounded("small bounded catalog -- providers never exceed a handful of rows")
 @description("All providers.")
 query provider queryAllProviders {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   providerFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "queryAllProviders")
@@ -148,7 +148,7 @@ query provider queryAllProviders {
 func TestGuardedIdFilterStaysList(t *testing.T) {
 	src := `query space queryMaybeOneSpace {
   args { partitionId string }
-  filter  when(args.partitionId) { row.id==args.partitionId } && payload.ownerUserId==actor.userId
+  filter  row => (args.partitionId == nil || row.id == args.partitionId) && row.ownerUserId == actor.userId
   shape   spaceFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "queryMaybeOneSpace")
@@ -191,7 +191,7 @@ func TestV1Filters(t *testing.T) {
 // TestFilterClauseSpansABlankLine: the clause is the normaliser's fold, which
 // skips a blank line inside a wrapped clause rather than ending it there.
 func TestFilterClauseSpansABlankLine(t *testing.T) {
-	src := "query thing q {\n  filter  status == \"open\" &&\n\n    id == args.x\n  shape   thingFull\n}\n"
+	src := "query thing q {\n  filter  row => row.status == \"open\"\n              && row.id == args.x\n  shape   thingFull\n}\n"
 	if f := findingFor(t, ScanSource("f.memql", src), "q"); f.Class != SingleRow {
 		t.Errorf("classified %s, want single-row: the id equality after the blank line is part of the clause", f.Class)
 	}

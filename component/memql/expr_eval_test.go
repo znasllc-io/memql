@@ -954,7 +954,7 @@ func TestEvalExprPredicateApplication(t *testing.T) {
 	opts := EvalOptions{Predicates: predicates}
 	active := ExprRow{ID: "a", Payload: map[string]any{"active": true, "name": "A"}}
 	inactive := ExprRow{ID: "b", Payload: map[string]any{"active": false}}
-	scope := MapScope{"row": active, "other": inactive, "args": map[string]any{"rows": []any{active, inactive, active}}}
+	scope := MapScope{"row": active, "other": inactive, "args": map[string]any{"rows": []any{active, inactive, active}, "record": map[string]any{"name": "A"}}}
 	runExprCases(t, []exprCase{
 		{"a trait over a row", xcall("isActiveRecord", xid("row")), scope, opts, true},
 		{"a trait over another row", xcall("isActiveRecord", xid("other")), scope, opts, false},
@@ -962,7 +962,11 @@ func TestEvalExprPredicateApplication(t *testing.T) {
 		{"a trait inside a lambda", xmeth(xmeth(xpath("args", "rows"), "where", xlam("r", xcall("isActiveRecord", xid("r")))), "count"), scope, opts, int64(2)},
 		{"a predicate cannot see the caller's lambda parameter", xmeth(xpath("args", "rows"), "any", xlam("x", xcall("readsCallerLambda", xid("x")))), scope, opts, errCode("unknown_name")},
 		{"a predicate takes exactly one argument", xcall("isActiveRecord", xid("row"), xid("other")), scope, opts, errCode("argument_count")},
-		{"a predicate's body must be boolean", xcall("notBoolean", xid("row")), scope, opts, errCode("condition_not_boolean")},
+		// A body reading a stored value that is not a bool is not true, as
+		// the pushdown reads it (expr_stored.go); over a value the caller
+		// computed, the same body is refused.
+		{"a predicate's body over a stored non-boolean is not true", xcall("notBoolean", xid("row")), scope, opts, false},
+		{"a predicate's body over a computed non-boolean is refused", xcall("notBoolean", xpath("args", "record")), scope, opts, errCode("condition_not_boolean")},
 		{"a recursive predicate stops", xcall("selfRecursive", xid("row")), scope, opts, errCode("predicate_depth_exceeded")},
 		{"an unknown function", xcall("isUnknown", xid("row")), scope, opts, errCode("unknown_function")},
 		{"no predicate registry", xcall("isActiveRecord", xid("row")), scope, EvalOptions{}, errCode("unknown_function")},

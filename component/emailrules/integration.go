@@ -25,7 +25,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/uptrace/bun"
+
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/automations"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -58,8 +61,42 @@ func bound() (ActivationEngine, func() memql.AuthoredRuntimeDeps, bool) {
 
 func init() {
 	memql.RegisterPlugin(IntegrationName, func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
-		return &Integration{engine: pluginEngine{pctx.Engine}, logger: pctx.Logger}, nil
+		return &Integration{
+			engine: pluginEngine{pctx.Engine},
+			logger: pctx.Logger,
+			claim:  newFirstFireClaim(pctx.BunDB, pctx.Logger),
+		}, nil
 	})
+}
+
+// firstFireClaimName namespaces a created rule's claims in the execution-claim
+// table; the row's id is the dedup key.
+const firstFireClaimName = "emailrules.firstFire:"
+
+// newFirstFireClaim is a created rule's once-per-row claim: a row in
+// automation_execution_claims, the table the automation cluster guard makes
+// event-triggered automations exactly-once with. Its primary key is the
+// serialisation point -- one insert wins, on any replica, with no local state
+// -- and the STRICT claimer refuses rather than fails open when the database
+// cannot record it: a created rule that cannot prove it is first does not
+// send.
+//
+// The guard prunes claims after its retention window, and that is enough:
+// once the row exists, no later write is its first version, so the trigger
+// never fires for it again. The claim only has to outlive the race between two
+// writes creating the same row.
+func newFirstFireClaim(db func() *bun.DB, logger *slog.Logger) FirstFireClaim {
+	if db == nil {
+		return nil
+	}
+	var guardLogger automations.Logger
+	if logger != nil {
+		guardLogger = logger
+	}
+	claimer := automations.NewClusterExecutionGuard(db, guardLogger).StrictClaimer()
+	return func(ctx context.Context, ruleID, rowID string) bool {
+		return claimer.ClaimWithTTL(ctx, firstFireClaimName+ruleID, rowID, 0)
+	}
 }
 
 // pluginEngine adapts the plug-in surface to the Execute shape this package
@@ -77,6 +114,7 @@ func (p pluginEngine) Execute(ctx context.Context, query string) (any, error) {
 type Integration struct {
 	engine Engine
 	logger *slog.Logger
+	claim  FirstFireClaim
 }
 
 func (i *Integration) IntegrationName() string { return IntegrationName }
@@ -163,7 +201,7 @@ func (i *Integration) handleFire(ctx context.Context, args map[string]any, _ int
 		return nil, fmt.Errorf("emailrules.fire: emailRuleId is required")
 	}
 	event, _ := args["event"].(map[string]any)
-	out, err := NewFirer(i.engine).Fire(ctx, ruleID, strings.TrimSpace(argString(args, "nodeId")), event)
+	out, err := NewFirer(i.engine).WithFirstFireClaim(i.claim).Fire(ctx, ruleID, strings.TrimSpace(argString(args, "nodeId")), event)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +216,7 @@ func (i *Integration) handleFire(ctx context.Context, args map[string]any, _ int
 		"sent":        out.Sent,
 		"skipped":     out.Skipped,
 		"refusals":    out.Refusals,
+		"duplicate":   out.Duplicate,
 	})
 }
 

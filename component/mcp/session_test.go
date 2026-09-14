@@ -17,9 +17,7 @@ import (
 // validSpecBundle is a context-spec: it compiles + binds with no concept
 // dependency, so it validates cleanly through the Gate-1 sandbox.
 const validSpecBundle = `@description("MCP session test spec")
-spec actorEnvelope mcpSessionSpec {
-  return role == "admin"
-}`
+spec actorEnvelope mcpSessionSpec = actor => actor.role == "admin"`
 
 func newAuthoredRegistry() *memql.AuthoredRuntimeRegistry {
 	return memql.NewAuthoredRuntimeRegistry()

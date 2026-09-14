@@ -40,7 +40,6 @@ func (r *bundleStepRegistry) Execute(_ context.Context, step *Step, _ *StepConte
 func dotAccessLogicBody(t *testing.T, returnExpr string) *languageParser.AutomationDef {
 	t.Helper()
 	src := `@enabled
-@useQuery(queryThing)
 @description("pluck a scalar field off a step result (#2542 item 4)")
 logic logicPluckStepField {
   args {
@@ -135,7 +134,6 @@ func TestLogicRunner_RunLogic_DotAccessAfterChain(t *testing.T) {
 // query. Only the query step may reach the registry.
 func TestLogicRunner_RunLogic_ArgsRootedDotAccess(t *testing.T) {
 	src := `@enabled
-@useQuery(queryThing)
 @description("pluck a scalar field off a caller-arg collection (#2542 item 4)")
 logic logicPluckArgField {
   args {

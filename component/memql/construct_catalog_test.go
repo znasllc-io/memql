@@ -62,7 +62,9 @@ query widget catalogFixtureWidgets {
     /// Which lifecycle state to read.
     state     string  @enum("live", "retired")
   }
-  filter  ownerUserId==actor.userId && when(args.widgetId) { row.id==args.widgetId } && when(args.state) { status==args.state }
+  filter  row => row.ownerUserId == actor.userId
+              && (args.widgetId == nil || row.id == args.widgetId)
+              && (args.state == nil || row.status == args.state)
   sort    "row.createdAt", "desc"
   shape   widgetFull
 }
@@ -377,7 +379,7 @@ func catalogViewOnlyKindsCarryNoArgs(t *testing.T) {
 // TestConstructCatalogPromotedAppearsAndDisappears is the case a file walk
 // cannot do: a construct that lives in the database and in no file.
 func TestConstructCatalogPromotedAppearsAndDisappears(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	reg := NewAuthoredRuntimeRegistry()
 	c := authorOneSpec(t, reg, "owner-1")
 

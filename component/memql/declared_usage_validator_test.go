@@ -27,7 +27,7 @@ func TestDeclaredUsage_AcceptsFullyUsedDecls(t *testing.T) {
   insert {
     id: "x"
     name: args.name
-    description: coalesce(args.description, "")
+    description: args.description ?? ""
     status: "active"
   }
 }`
@@ -57,21 +57,24 @@ func TestDeclaredUsage_RejectsStaleArgsField(t *testing.T) {
 	require.Contains(t, err.Error(), "args.other")
 }
 
+// TestDeclaredUsage_RejectsStaleUseSpec: a stale @useSpec never reaches the
+// declared-usage validator any more -- the whole @use* family is refused at
+// parse time by the annotation registry as retired (memql#5359), which says
+// what replaced it. A declaration that cannot be written cannot go stale.
 func TestDeclaredUsage_RejectsStaleUseSpec(t *testing.T) {
 	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
 		"v1:cognition:space": {Name: "v1:cognition:space"},
 	})
 
-	// Query declares @useSpec(specGhost) but never references it.
 	src := `@useSpec(specGhost)
 query space queryStaleSpec {
   args {
     userId string
   }
-  filter ?.createdBy==args.userId
+  filter row => args.userId == nil || row.createdBy == args.userId
 }`
 	_, err := tryParseNewFunctionSyntax("queryStaleSpec", "query", src, "test.memql", registry)
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "specGhost")
-	require.Contains(t, err.Error(), "never referenced")
+	require.Contains(t, err.Error(), "@useSpec on a query is retired")
+	require.Contains(t, err.Error(), "[annotation_retired]")
 }

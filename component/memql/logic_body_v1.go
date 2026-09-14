@@ -184,7 +184,10 @@ func literalValueV1(n ast.ExpressionNode) (any, bool) {
 // present is false when the argument evaluated to absent: it is not passed,
 // as an absent argument of a statement's call is not (v1ConstructCallText).
 func evaluateLogicArgumentV1(pc *PlanConstExpression, args, ambient map[string]any) (any, bool, error) {
-	bindings := planConstantBindings(args, ambient)
+	// The ambient roots are always bound (withAmbientDefaults): a logic
+	// argument expanded without an envelope reads the denying actor, not an
+	// unknown name.
+	bindings := withAmbientDefaults(planConstantBindings(args, ambient))
 	if bindings["args"] == nil {
 		bindings["args"] = map[string]any{}
 	}

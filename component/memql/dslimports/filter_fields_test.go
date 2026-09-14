@@ -17,7 +17,7 @@ func filterFieldTree(queries string) fstest.MapFS {
 				"  settings     object  @description(\"Nested settings.\")\n" +
 				"}\n")},
 		"lab/specs.memql": &fstest.MapFile{Data: []byte(
-			"/// Matches active rows.\ntrait labIsActive {\n  return active == true\n}\n")},
+			"/// Matches active rows.\ntrait labIsActive = row => row.active == true\n")},
 		"lab/queries.memql": &fstest.MapFile{Data: []byte(queries)},
 	}
 }
@@ -46,7 +46,7 @@ func TestFilterFieldsRejectsUndeclaredProperty(t *testing.T) {
 
 /// Widgets owned by the caller -- with a typo'd property.
 query widget widgetsOwned {
-  filter  ownerUserid == actor.userId
+  filter  row => row.ownerUserid == actor.userId
 }
 `)
 	if len(errs) != 1 {
@@ -80,7 +80,11 @@ query widget widgetsLegit {
   args {
     region  string
   }
-  filter  ownerUserId == actor.userId && settings.theme == "dark" && row.id != "" && labIsActive && when(args.region) { region == args.region }
+  filter  row => row.ownerUserId == actor.userId
+              && row.settings.theme == "dark"
+              && row.id != ""
+              && labIsActive(row)
+              && (args.region == nil || row.region == args.region)
 }
 `)
 	if len(errs) != 0 {
@@ -99,12 +103,12 @@ query widget widgetsGuarded {
   args {
     region  string
   }
-  filter  when(args.region) { regionn == args.region }
+  filter  row => args.region == nil || row.regionn == args.region
 }
 
 /// Typo buried inside a disjunct.
 query widget widgetsDisjunct {
-  filter  (ownerUserId == actor.userId || regoin == "emea") && region != ""
+  filter  row => (row.ownerUserId == actor.userId || row.regoin == "emea") && row.region != ""
 }
 `)
 	if len(errs) != 2 {
@@ -123,7 +127,7 @@ use lab.specs.{ labIsActive }
 
 /// Compares an imported construct rather than calling it bare.
 query widget widgetsCompared {
-  filter  ownerUserId == actor.userId && labIsActive == true
+  filter  row => row.ownerUserId == actor.userId && row.labIsActive == true
 }
 `)
 	if len(errs) != 0 {
@@ -142,7 +146,7 @@ func TestFilterFieldsSkipsSameDomainSpecWithoutImport(t *testing.T) {
 
 /// Compares a same-domain trait that is deliberately NOT imported.
 query widget widgetsLocalSpec {
-  filter  ownerUserId == actor.userId && labIsActive == true
+  filter  row => row.ownerUserId == actor.userId && row.labIsActive == true
 }
 `)
 	if len(errs) != 0 {
@@ -176,7 +180,7 @@ func TestFilterFieldsRejectsWriteOnlyIntrinsics(t *testing.T) {
 
 /// Filters on a write-side template the concept does not declare.
 query widget widgetsParent {
-  filter  parent == "x"
+  filter  row => row.parent == "x"
 }
 `)
 	if len(errs) != 1 {
@@ -192,7 +196,7 @@ func TestFilterFieldsAcceptsMixedCaseHeads(t *testing.T) {
 
 /// Intrinsics and namespaces spelled with non-canonical case.
 query widget widgetsMixedCase {
-  filter  createdat != "" && Row.id != "" && region != ""
+  filter  row => row.createdAt != "" && row.Row.id != "" && row.region != ""
 }
 `)
 	if len(errs) != 0 {
@@ -211,12 +215,12 @@ func TestFilterFieldsSkipsDuplicateQueryNames(t *testing.T) {
 
 /// First.
 query widget dup {
-  filter  region == "x"
+  filter  row => row.region == "x"
 }
 
 /// Second, same name.
 query gadget dup {
-  filter  size == "y"
+  filter  row => row.size == "y"
 }
 `)},
 	}))
@@ -240,7 +244,7 @@ func TestFilterFieldsSkipsUnresolvableConcept(t *testing.T) {
 
 /// Bound to a concept this tree does not carry.
 query space spacesExternal {
-  filter  whateverField == "x"
+  filter  row => row.whateverField == "x"
 }
 `)},
 	}))
@@ -286,7 +290,7 @@ func TestFilterFieldsExplicitImportWinsOverAmbientDomain(t *testing.T) {
 
 /// Bound to the IMPORTED request, whose namespace this root does not carry.
 query request findRequest {
-  filter  channel == args.channel
+  filter  row => row.channel == args.channel
 }
 `)},
 	}))
@@ -311,12 +315,12 @@ func TestFilterFieldsReportsDuplicateQueryNames(t *testing.T) {
 
 /// First.
 query widget dup {
-  filter  region == "x"
+  filter  row => row.region == "x"
 }
 
 /// Second, same name.
 query gadget dup {
-  filter  size == "y"
+  filter  row => row.size == "y"
 }
 `)},
 	}))

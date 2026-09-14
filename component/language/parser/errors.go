@@ -36,6 +36,11 @@ type ParseError struct {
 	EndColumn int
 	Token     *Token
 
+	// Cause is the typed error behind the message, when there is one -- an
+	// annotation registry refusal (memql#5359) -- so a caller can recover its
+	// stable code with errors.As rather than by matching text.
+	Cause error
+
 	AuthoredLine      int
 	AuthoredColumn    int
 	AuthoredEndLine   int
@@ -72,8 +77,12 @@ func (e *ParseError) Error() string {
 	return fmt.Sprintf("parse error at position %d: %s", e.Pos, e.Message)
 }
 
-func (e *ParseError) Unwrap() error {
-	return ErrInvalidSyntax
+// Unwrap reports ErrInvalidSyntax, and the typed Cause when there is one.
+func (e *ParseError) Unwrap() []error {
+	if e.Cause != nil {
+		return []error{ErrInvalidSyntax, e.Cause}
+	}
+	return []error{ErrInvalidSyntax}
 }
 
 // setToken positions e at tok, in both coordinate systems.

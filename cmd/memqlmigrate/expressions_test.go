@@ -133,3 +133,74 @@ func TestExpressionsRewriteTheRealTree(t *testing.T) {
 	}
 	t.Logf("%d of %d files would change", len(out), len(files))
 }
+
+// writeTree writes files under a fresh directory and returns it.
+func writeTree(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for rel, content := range files {
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+// A bundle's spec over the core @actor shape actorEnvelope is an actor
+// predicate, though the bundle declares no such shape: the tree is read over
+// the core tree it loads over. Before, the spec came out `= row => row.role`,
+// which a real engine refuses at define -- and a second run would keep it.
+func TestExpressionsBundleBindsACoreActorShape(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"fylo/concepts.memql": "@namespace(\"fylo\")\nconcept order {\n  status  string\n}\n",
+		"fylo/specs.memql":    "use common.shapes.{ actorEnvelope }\n\nspec actorEnvelope isAdmin {\n  return role == \"admin\"\n}\n",
+		"fylo/queries.memql": "use fylo.concepts.{ order }\nuse fylo.specs.{ isAdmin }\nuse common.traits.{ isActiveRecord }\n\n" +
+			"query order orders {\n  filter  status == \"open\" && isActiveRecord || isAdmin\n}\n",
+	})
+	if _, stderr, err := runMigrate(t, "--rewrite=expressions", "-w", root); err != nil {
+		t.Fatalf("-w: %v\n%s", err, stderr)
+	}
+	for rel, want := range map[string]string{
+		"fylo/specs.memql":   "spec actorEnvelope isAdmin = actor => actor.role == \"admin\"\n",
+		"fylo/queries.memql": "  filter  row => row.status == \"open\" && isActiveRecord(row) || isAdmin(actor)\n",
+	} {
+		got, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil || !strings.Contains(string(got), want) {
+			t.Errorf("%s = %q, %v; want it to contain %q", rel, got, err, want)
+		}
+	}
+}
+
+// A spec whose binding nothing declares -- not the tree, not the core tree, not
+// any signature -- is refused by name rather than guessed a row.
+func TestExpressionsRefusesABindingNothingDeclares(t *testing.T) {
+	files := xmTree()
+	files["deploy/specs.memql"] = []byte("spec gadget isShiny {\n  return shiny == true\n}\n")
+	out, err := rewriteExpressions("root", files)
+	if err == nil {
+		t.Fatalf("want a refusal, got %v", out)
+	}
+	if want := "deploy/specs.memql: line 1: spec isShiny binds gadget, which no shape and no concept declares"; !strings.Contains(err.Error(), want) {
+		t.Errorf("the refusal does not name the binding:\n%v", err)
+	}
+}
+
+// The legacy `<boundConcept>.<field>` spelling is that row's field:
+// `todo.ownerUserId` in a query bound to todo is `row.ownerUserId`, not
+// `row.todo.ownerUserId`.
+func TestExpressionsBoundConceptPrefixThroughTheCLI(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"todos/queries.memql": "@actor\nquery todo sandboxOwned {\n  filter todo.ownerUserId == actor.userId\n}\n",
+	})
+	if _, stderr, err := runMigrate(t, "--rewrite=expressions", "-w", root); err != nil {
+		t.Fatalf("-w: %v\n%s", err, stderr)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "todos", "queries.memql"))
+	if want := "@actor\nquery todo sandboxOwned {\n  filter row => row.ownerUserId == actor.userId\n}\n"; err != nil || string(got) != want {
+		t.Errorf("queries.memql = %q, %v; want %q", got, err, want)
+	}
+}

@@ -124,7 +124,7 @@ func TestCompileMemQL_AttachesPreconditions(t *testing.T) {
 @description("guarded greet")
 automation guardedGreet {
   precondition ownerPresent {
-    check: exists(event.payload.ownerUserId)
+    check: event.payload.ownerUserId != nil
     literal: ownerUserId
     description: "owner id must be present"
   }

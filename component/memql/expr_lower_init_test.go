@@ -53,13 +53,23 @@ spec actorEnvelope callerIsOwner = actor => actor.role == "owner"
 // and runs Init. Cleanup restores the embedded-only tree and registry.
 func bootLowerTree(t *testing.T, files map[string]string) (*MemQLEngine, error) {
 	t.Helper()
+	return bootLowerDomains(t, map[string]map[string]string{"lowerinit": files})
+}
+
+// bootLowerDomains is bootLowerTree over several mounted domains, each named
+// by its directory.
+func bootLowerDomains(t *testing.T, domains map[string]map[string]string) (*MemQLEngine, error) {
+	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	// The domain declares its language line, as every mounted domain must
+	// Each domain declares its language line, as every mounted domain must
 	// (memql#5357): without one its concepts are never built and Init
 	// refuses the tree before any construct reaches Lower.
-	root := fstest.MapFS{"lowerinit/memql.toml": languageLineFile()}
-	for name, body := range files {
-		root["lowerinit/"+name] = &fstest.MapFile{Data: []byte(body)}
+	root := fstest.MapFS{}
+	for domain, files := range domains {
+		root[domain+"/memql.toml"] = languageLineFile()
+		for name, body := range files {
+			root[domain+"/"+name] = &fstest.MapFile{Data: []byte(body)}
+		}
 	}
 	_, _, unmount := memqldsl.MountOverlayDomains(logger, root)
 	t.Cleanup(func() {
@@ -183,9 +193,7 @@ func TestInit_RefusesWhatOnlyTheRegistryCanRefuse(t *testing.T) {
 		"legacy.memql": `use lowerinit.concepts.{ ticket }
 
 /// A pre-2026 body: EvalExpr has no v1 body to apply in a refine.
-spec ticket isLegacyOpen {
-  return status == "open"
-}
+spec ticket isLegacyOpen = row => row.status == "open"
 `,
 		"queries.memql": `use lowerinit.concepts.{ ticket }
 use lowerinit.specs.{ callerIsOwner, isOpenTicket }

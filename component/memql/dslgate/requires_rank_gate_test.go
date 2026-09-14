@@ -17,7 +17,7 @@ query groupMembership groupsForUser {
   args {
     userId  string!
   }
-  filter  userId==args.userId
+  filter  row => row.userId == args.userId
   shape   groupMembershipFull
 }
 `
@@ -67,7 +67,7 @@ query groupMembership groupsForUser {
   args {
     userId  string!
   }
-  filter  userId==args.userId
+  filter  row => row.userId == args.userId
   shape   groupMembershipFull
 }
 `

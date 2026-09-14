@@ -10,8 +10,10 @@ package memql
 //
 // Semantics mirror parseShapeMemQL one-for-one:
 //
-//   * Annotation surface: @description, @row, @actor, @useConcept(...).
-//     Unknown / retired (@concepts, @caller) annotations hard-reject.
+//   * Annotation surface: @description, @row, @actor. Which annotations a
+//     shape takes is decided at parse time by the annotation registry
+//     (memql#5359), which also refuses the retired @concepts, @caller and
+//     @use* forms with their hints; this reads what the legal ones mean.
 //   * Body path translation: row.X -> X, row.payload.X -> payload.X,
 //     <conceptBareName>.X -> payload.X, actor.X stays.
 //   * Template key: path's terminal identifier segment.
@@ -64,27 +66,6 @@ func shapeDeclToShapeDefinition(decl *languageParser.ShapeDecl, origin string) (
 
 		case "actor":
 			kindActor = true
-
-		case "useConcept":
-			// `@useConcept(name1, name2, ...)` -- the langparser stores
-			// each bare identifier as a key in Args with value `true`.
-			// UseTargets() returns the keys alphabetically sorted; we
-			// preserve that ordering on the ShapeDefinition (the
-			// downstream registry doesn't depend on declaration order
-			// and a stable sort makes diagnostic output deterministic).
-			useConcepts = append(useConcepts, attr.UseTargets()...)
-
-		case "concepts":
-			// Retired in Phase G.3.g; mirror the migration hint
-			// parseShapeMemQL emits.
-			return nil, fmt.Errorf("%s: `@concepts(\"v1:...\")` is retired -- bind the shape via `@useConcept(<bareName>)` (e.g. `@useConcept(space)`); the loader resolves bare names against the registry", origin)
-
-		case "caller":
-			// Retired in #221; mirror the same migration hint.
-			return nil, fmt.Errorf("%s: @caller is retired (#221) -- use @actor; the field accessor renamed at the same time (caller.X -> actor.X)", origin)
-
-		default:
-			return nil, fmt.Errorf("%s: unknown shape annotation @%s -- the supported surface is @description, @row, @actor, @useConcept", origin, attr.Name)
 		}
 	}
 

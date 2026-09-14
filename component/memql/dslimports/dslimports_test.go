@@ -246,10 +246,10 @@ func TestLoad_NonProceduralFileParsesNatively(t *testing.T) {
 	cases := map[string]string{
 		// annotation-led (the dominant authoring shape)
 		"shapes.memql": "@row\n@description(\"ok\")\nshape spaceCard {\n  row.id\n}\n",
-		"specs.memql":  "@enabled\n@description(\"ok\")\nspec activeRowTrait specIsActive {\n  return active==true\n}\n",
-		"traits.memql": "@enabled\n@description(\"ok\")\ntrait isActiveRecord {\n  return active==true\n}\n",
+		"specs.memql":  "@enabled\n@description(\"ok\")\nspec activeRowTrait specIsActive = row => row.active == true\n",
+		"traits.memql": "@enabled\n@description(\"ok\")\ntrait isActiveRecord = row => row.active == true\n",
 		// import-led, annotation-free construct
-		"traitsCB.memql": "use common.traits.{ activeRowTrait }\n\ntrait isActiveRecord {\n  return active==true\n}\n",
+		"traitsCB.memql": "use common.traits.{ activeRowTrait }\n\ntrait isActiveRecord = row => row.active == true\n",
 	}
 	for filename, body := range cases {
 		t.Run(filename, func(t *testing.T) {

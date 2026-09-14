@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -110,9 +111,17 @@ func extractLeadingCommentBlock(content string) string {
 // rewrite error names the exact construct and the migration, so callers
 // (and the unifiedFunctionLoader's skip-slice warning) see why the slice
 // failed rather than a misleading token complaint.
+//
+// A refusal the rewrite placed at the author's clause (memql#5364) is the
+// failure itself: the parse error only says the parser met the construct
+// unlowered, and would lead the report with the construct's header.
 func withRewriteCause(parseErr, rewriteErr error) error {
 	if rewriteErr == nil {
 		return parseErr
+	}
+	var placed *languageParser.PositionedRewriteError
+	if errors.As(rewriteErr, &placed) {
+		return rewriteErr
 	}
 	return fmt.Errorf("%w (struct-form rewrite failed: %v)", parseErr, rewriteErr)
 }
@@ -150,7 +159,7 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 	// author may write that shape directly. The compiler test fixtures
 	// that consume procedural source bypass this loader entirely.
 	if err := languageParser.RejectLegacyProceduralAuthorForm(content); err != nil {
-		return nil, fmt.Errorf("%s: %w", origin, err)
+		return nil, fmt.Errorf("%s: %w", origin, languageParser.PositionRewriteError(authored, err))
 	}
 
 	// Snapshot the signature-bound concepts BEFORE NormaliseAll
@@ -172,7 +181,9 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 	if rewritten, rerr := languageParser.NormaliseAll(content); rerr == nil {
 		content = rewritten
 	} else {
-		rewriteErr = rerr
+		// Placed at the author's clause, in the file when the slice was
+		// anchored to it.
+		rewriteErr = languageParser.PositionRewriteError(authored, rerr)
 	}
 
 	// Keep the pre-translation source for the declared-usage validator

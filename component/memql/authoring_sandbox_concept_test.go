@@ -54,7 +54,7 @@ mutate sandboxWidget mutationCreateSandboxWidget {
     widgetId  string  @required
   }
   insert {
-    id:    canonicalId(args.widgetId, sandboxWidget)
+    id:    canonicalId(args.widgetId, "sandboxWidget")
     label: "x"
   }
 }`

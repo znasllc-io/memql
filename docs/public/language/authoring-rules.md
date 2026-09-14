@@ -715,8 +715,10 @@ What the ternary does, from `component/memql/expr_eval.go`:
 
 - **The condition is a boolean.** There is no truthiness, so a string
   or a number there is refused with `condition_not_boolean`; an absent
-  condition reads as false. Compare a flag that may arrive as a string
-  explicitly: `args.flag == true ? "on" : "off"`.
+  condition reads as false, and so does a row field holding a value of
+  another type ([27](#27-unset-is-one-value-in--and--1685--2783)).
+  Compare a flag that may arrive as a string explicitly:
+  `args.flag == true ? "on" : "off"`.
 - **Only the chosen branch runs.** The other may hold an `error(...)`
   or a read that is only meaningful on its own side.
 - **It binds loosest of the value operators** (level 9 of the
@@ -775,7 +777,9 @@ Notes that hold in every in-process position:
 
 - **Conditions are booleans.** `if`, `&&`, `||`, `!`, `? :` and the
   lambdas of `where`, `any` and `all` take a boolean; an absent value
-  reads as false; anything else is refused with `condition_not_boolean`.
+  reads as false, and so does a row field holding a value of another
+  type ([27](#27-unset-is-one-value-in--and--1685--2783)); anything else
+  is refused with `condition_not_boolean`.
   There is no truthiness: `"false"`, `0` and `""` are not conditions.
 - **Integer arithmetic stays integer.** Two integers divide as integers
   (`7 / 2` is `3`), and `.count()` returns an integer, so
@@ -2515,7 +2519,7 @@ The whole table, as `EvalExpr` implements it
 | `x.count()` | `0` | `0` |
 | `x.?f` | absent | absent |
 
-Four more facts the table relies on:
+Five more facts the table relies on:
 
 - **Whitespace is a value.** `" "` is not unset: `" " == ""` is false.
   Only `??` reads a whitespace-only string as blank
@@ -2529,6 +2533,15 @@ Four more facts the table relies on:
   directions, so `!(row.n < 5)` is true for a row with no `n` while
   `row.n >= 5` is false: negating an ordered comparison is not the
   reversed comparison.
+- **A stored value of the wrong type answers.** Read from the row, a
+  value whose type does not fit the operation is not equal, not
+  ordered, not a member and not true: over a stored `"true"`,
+  `row.flag` is false and `!row.flag` true, and `"a" in row.tags` over
+  a stored string is false. `x.count()` counts what is stored -- an
+  array's elements, a string's characters, zero for anything else. SQL
+  cannot refuse one row mid-scan, and one corrupt row must not fail a
+  whole read, so the table's refusals are for a computed value only
+  (an argument, a call's result).
 - **Each rule has one SQL twin**, named beside it in `expr_eval.go`:
   `IS DISTINCT FROM` for `!=` against a set value,
   `COALESCE(x, '') = ''` (or `<> ''`) for a comparison against unset,

@@ -57,10 +57,10 @@ func TestPlanVersionSupersession_Rejects(t *testing.T) {
 // --- impact analysis ---
 
 // A shared spec the dependents bind against.
-const sharedSpecGood = `trait isRefund { return kind == "refund" }`
+const sharedSpecGood = `trait isRefund = row => row.kind == "refund"`
 
 // An edit that still compiles -- dependents must re-validate clean.
-const sharedSpecEditGood = `trait isRefund { return kind == "refundEscalation" }`
+const sharedSpecEditGood = `trait isRefund = row => row.kind == "refundEscalation"`
 
 // An edit that does NOT parse -- dependents must FAIL re-validation.
 const sharedSpecEditBroken = `trait isRefund { return kind == }`
@@ -71,7 +71,7 @@ func dependentConstructs() []memql.SandboxConstruct {
 		{Kind: "query", Name: "queryRefundsForOwner", Source: `use authoring.concepts.{ bundle }
 @actor
 query bundle queryRefundsForOwner {
-  filter  payload.ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   bundleFull
 }`},
 	}

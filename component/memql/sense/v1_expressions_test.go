@@ -771,15 +771,15 @@ func TestRetiredHoverIsTheParsersTable(t *testing.T) {
 			example: "filter row => row.status == args.owner && isActiveRecord(row)",
 		},
 		"retired_spec_return_body": {
-			src: "use todos.concepts.{ todo }\n\nspec todo isOverdue {\n  return done == false\n}", needle: "return",
+			src: "use todos.concepts.{ todo }\n\nspec todo isOverdue = row => row.done == false", needle: "return",
 			example: "spec todo isOverdue = row => row.done == false",
 		},
 		"retired_trait_return_body": {
-			src: "trait isOpen {\n  return status == \"open\"\n}", needle: "return",
+			src: "trait isOpen = row => row.status == \"open\"", needle: "return",
 			example: "trait isOpen = row => row.status == \"open\"",
 		},
 		"retired_filter_annotation": {
-			src:    "@trigger(event=\"graph.node.updated.v1:todos:todo\")\n@filter(payload.status == \"archived\")\nautomation onTodo {\n}",
+			src:    "@trigger(event=\"graph.node.updated.v1:todos:todo\")\n@filter(row => row.status == \"archived\")\nautomation onTodo {\n}",
 			needle: "@filter", example: "@filter(row => row.status == \"archived\")",
 		},
 	}
@@ -901,19 +901,19 @@ func TestHoverOnAPredicate(t *testing.T) {
 // rewrite writes it -- or the table's form, when the rewrite refuses it.
 func TestRetiredPredicateHover(t *testing.T) {
 	s := New(v1Registry())
-	spec := "use todos.concepts.{ todo }\n\nspec todo isOverdue {\n  return done == false\n}"
+	spec := "use todos.concepts.{ todo }\n\nspec todo isOverdue = row => row.done == false"
 	for _, c := range []struct {
 		name, src, needle, code string
 	}{
 		{"the header of a brace-bodied spec", spec, "spec", "spec todo isOverdue = row => row.done == false"},
-		{"the header of a brace-bodied trait", "trait isOpen { return status == \"open\" }", "trait", "trait isOpen = row => row.status == \"open\""},
+		{"the header of a brace-bodied trait", "trait isOpen = row => row.status == \"open\"", "trait", "trait isOpen = row => row.status == \"open\""},
 		// requiresOwner is a loaded context spec: its parameter is the actor.
-		{"a spec the registry knows reads the actor", "use common.shapes.{ actorEnvelope }\n\nspec actorEnvelope requiresOwner {\n  return role == \"owner\"\n}",
+		{"a spec the registry knows reads the actor", "use common.shapes.{ actorEnvelope }\n\nspec actorEnvelope requiresOwner = actor => actor.role == \"owner\"",
 			"return", "spec actorEnvelope requiresOwner = actor => actor.role == \"owner\""},
 		// isAdmin is not loaded, but a loaded context spec binds actorEnvelope.
-		{"a new spec over an @actor shape reads the actor", "spec actorEnvelope isAdmin {\n  return role == \"admin\"\n}",
+		{"a new spec over an @actor shape reads the actor", "spec actorEnvelope isAdmin = actor => actor.role == \"admin\"",
 			"return", "spec actorEnvelope isAdmin = actor => actor.role == \"admin\""},
-		{"the @ of a lambda-less @filter", "@filter(payload.done == true)\nautomation onTodo {\n}", "@", "@filter(row => row.done == true)"},
+		{"the @ of a lambda-less @filter", "@filter(row => row.done == true)\nautomation onTodo {\n}", "@", "@filter(row => row.done == true)"},
 		// The rewrite keeps the author's line breaks; the card keeps its lines.
 		{"a filter continued over several lines", v1Query + "  filter status == args.owner\n    && isActiveRecord\n}", "filter",
 			"filter row => row.status == args.owner\n           && isActiveRecord(row)"},

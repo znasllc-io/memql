@@ -28,7 +28,7 @@ logic doubler {
     n int @required
   }
   body {
-    base := coalesce(args.n, 0)
+    base := args.n ?? 0
     doubled := base * 2
     return doubled
   }
@@ -127,8 +127,8 @@ logic ratioStep {
     b int @required
   }
   body {
-    x := coalesce(args.a, 0)
-    y := coalesce(args.b, 0)
+    x := args.a ?? 0
+    y := args.b ?? 0
     q := x / y
     return q
   }

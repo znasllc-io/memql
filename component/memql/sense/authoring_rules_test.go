@@ -259,7 +259,7 @@ query participant spaceParticipants {
   args {
     spaceId string @required @description("dead")
   }
-  filter spaceId==args.spaceId
+  filter row => row.spaceId == args.spaceId
   shape  participantFull
 }
 `
@@ -295,7 +295,7 @@ query participant spaceParticipants {
 // TestActorUndeclaredRule (#2622): the edit-time mirror of the engine's
 // actor-binding load rule, positions computed from authored source.
 func TestActorUndeclaredRule(t *testing.T) {
-	src := "@description(\"owned\")\nquery todo todos {\n  filter todo.ownerUserId == actor.userId\n}\n"
+	src := "@description(\"owned\")\nquery todo todos {\n  filter row => row.ownerUserId == actor.userId\n}\n"
 	got := actorUndeclaredRule(src)
 	if len(got) != 1 || got[0].Code != "actor-undeclared" || got[0].Severity != SeverityError {
 		t.Fatalf("want one actor-undeclared Error, got %+v", got)
@@ -306,7 +306,7 @@ func TestActorUndeclaredRule(t *testing.T) {
 
 	// The SAME actor.userId text repeats: the second occurrence must
 	// anchor on ITS line, not the first (the findInSource trap).
-	repeated := "@actor\nquery todo mine {\n  filter todo.ownerUserId == actor.userId\n}\n\nquery todo theirs {\n  filter todo.ownerUserId == actor.userId\n}\n"
+	repeated := "@actor\nquery todo mine {\n  filter row => row.ownerUserId == actor.userId\n}\n\nquery todo theirs {\n  filter row => row.ownerUserId == actor.userId\n}\n"
 	got = actorUndeclaredRule(repeated)
 	if len(got) != 1 {
 		t.Fatalf("only the undeclared construct flags, got %+v", got)
@@ -316,12 +316,12 @@ func TestActorUndeclaredRule(t *testing.T) {
 	}
 
 	for name, clean := range map[string]string{
-		"declared":          "@actor\nquery todo todos {\n  filter todo.ownerUserId == actor.userId\n}\n",
-		"declared-unused":   "@actor\nquery todo all {\n  filter todo.done == false\n}\n",
-		"no-read":           "query todo all {\n  filter todo.done == false\n}\n",
+		"declared":          "@actor\nquery todo todos {\n  filter row => row.ownerUserId == actor.userId\n}\n",
+		"declared-unused":   "@actor\nquery todo all {\n  filter row => row.done == false\n}\n",
+		"no-read":           "query todo all {\n  filter row => row.done == false\n}\n",
 		"spec-body":         "spec isOwned {\n  when { ownerUserId == actor.userId }\n}\n",
 		"shape-kind-marker": "@actor\nshape actorEnvelope {\n  actor.userId\n  actor.role\n}\n",
-		"prose-only":        "// gated by actor.rank\nquery todo all {\n  filter todo.done == false\n}\n",
+		"prose-only":        "// gated by actor.rank\nquery todo all {\n  filter row => row.done == false\n}\n",
 		"event-envelope":    "@trigger(event=\"x.y\")\nautomation onThing {\n  step run {\n    logic handle ( event: event )\n  }\n}\n",
 	} {
 		if got := actorUndeclaredRule(clean); len(got) != 0 {
@@ -335,7 +335,7 @@ func TestActorUndeclaredRule(t *testing.T) {
 // the registry-gated semantic rules (this one included) emit nothing.
 func TestActorUndeclaredRule_NilRegistry(t *testing.T) {
 	s := New(nil)
-	got := s.Diagnose("query todo todos {\n  filter todo.ownerUserId == actor.userId\n}\n", "probe.memql")
+	got := s.Diagnose("query todo todos {\n  filter row => row.ownerUserId == actor.userId\n}\n", "probe.memql")
 	for _, d := range got {
 		if d.Code == "actor-undeclared" {
 			t.Errorf("nil-registry path must not emit the semantic rule, got %+v", d)

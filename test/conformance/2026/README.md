@@ -126,7 +126,8 @@ Two gates read the corpus rather than a list kept beside it:
 - `TestCorpusRefusesEveryRetiredForm` fails naming each spelling edition 2026
   retires (`parser.V1RetiredForms()`, and the names the function catalog
   retires) that no refused case pins by its rule id with a message naming the
-  replacement.
+  replacement -- or, where the refusal writes the rewrite out for the author's
+  own text (a keyless map entry), that rewrite.
 
 ## Running it
 

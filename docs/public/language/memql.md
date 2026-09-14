@@ -534,7 +534,8 @@ filter  row => row.folderId == args.folderId
 
 `!` works in every position: every predicate answers true or false, so `!e` is
 its exact negation. There is no truthiness. `&&`, `||`, `!` and a condition take
-a boolean, an absent value counts as false, and anything else is refused with
+a boolean, an absent value counts as false, a row field holding a value of
+another type is not true, and anything else is refused with
 `condition_not_boolean`: write `args.name != nil`, not `args.name`.
 
 Equality is typed. `1 == "1"` is false, numbers compare numerically across

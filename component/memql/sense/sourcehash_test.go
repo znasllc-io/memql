@@ -18,23 +18,23 @@ func TestConstructSourceHashIgnoresInsignificantEdits(t *testing.T) {
 	}{
 		{
 			name: "re-indentation",
-			a:    "query widget w {\n  filter  a==1\n}",
-			b:    "query widget w {\n\t\tfilter a==1\n}",
+			a:    "query widget w {\n  filter  row => row.a == 1\n}",
+			b:    "query widget w {\n\t\tfilter row => row.a == 1\n}",
 		},
 		{
 			name: "line comments",
-			a:    "// what this is for\nquery widget w {\n  filter a==1 // and why\n}",
-			b:    "query widget w {\n  filter a==1\n}",
+			a:    "// what this is for\nquery widget w {\n  filter row => row.a == 1 // and why\n}",
+			b:    "query widget w {\n  filter row => row.a == 1\n}",
 		},
 		{
 			name: "block comments",
-			a:    "/* a note\n   over two lines */\nquery widget w { filter a==1 }",
-			b:    "query widget w { filter a==1 }",
+			a:    "/* a note\n   over two lines */\nquery widget w { filter row => row.a == 1 }",
+			b:    "query widget w { filter row => row.a == 1 }",
 		},
 		{
 			name: "trailing whitespace and newlines",
-			a:    "query widget w { filter a==1 }   \n\n",
-			b:    "query widget w { filter a==1 }",
+			a:    "query widget w { filter row => row.a == 1 }   \n\n",
+			b:    "query widget w { filter row => row.a == 1 }",
 		},
 	}
 	for _, tc := range cases {
@@ -55,27 +55,27 @@ func TestConstructSourceHashKeepsSignificantEdits(t *testing.T) {
 	}{
 		{
 			name: "a doc comment is part of the declaration",
-			a:    "/// Restrict to one widget.\nquery widget w { filter a==1 }",
-			b:    "query widget w { filter a==1 }",
+			a:    "/// Restrict to one widget.\nquery widget w { filter row => row.a == 1 }",
+			b:    "query widget w { filter row => row.a == 1 }",
 		},
 		{
 			name: "editing a doc comment",
-			a:    "/// Restrict to one widget.\nquery widget w { filter a==1 }",
-			b:    "/// Restrict to two widgets.\nquery widget w { filter a==1 }",
+			a:    "/// Restrict to one widget.\nquery widget w { filter row => row.a == 1 }",
+			b:    "/// Restrict to two widgets.\nquery widget w { filter row => row.a == 1 }",
 		},
 		{
 			name: "whitespace inside a string literal",
-			a:    `@description("a  b")` + "\nquery widget w { filter a==1 }",
-			b:    `@description("a b")` + "\nquery widget w { filter a==1 }",
+			a:    `@description("a  b")` + "\nquery widget w { filter row => row.a == 1 }",
+			b:    `@description("a b")` + "\nquery widget w { filter row => row.a == 1 }",
 		},
 		{
 			name: "an annotation",
-			a:    "@actor\nquery widget w { filter a==1 }",
-			b:    "query widget w { filter a==1 }",
+			a:    "@actor\nquery widget w { filter row => row.a == 1 }",
+			b:    "query widget w { filter row => row.a == 1 }",
 		},
 		{
 			name: "a doc comment must not collide with a bare identifier",
-			a:    "/// active\nquery widget w { filter a==1 }",
+			a:    "/// active\nquery widget w { filter row => row.a == 1 }",
 			b:    "active query widget w { filter a==1 }",
 		},
 	}
@@ -94,12 +94,12 @@ func TestConstructSourceHashKeepsSignificantEdits(t *testing.T) {
 // of the declaration out of the hash, so two genuinely different constructs
 // would hash the same.
 func TestConstructSourceHashDoesNotReadCommentsInsideStrings(t *testing.T) {
-	a := `query widget w { filter url=="http://a" && x==1 }`
-	b := `query widget w { filter url=="http://a" && x==2 }`
+	a := `query widget w { filter row => row.url == "http://a" && row.x == 1 }`
+	b := `query widget w { filter row => row.url == "http://a" && row.x == 2 }`
 	if ConstructSourceHash(a) == ConstructSourceHash(b) {
 		t.Fatalf("the body after a `//` inside a string literal was dropped: %q", NormalizeConstructSource(a))
 	}
-	if got := NormalizeConstructSource(a); got != `query widget w { filter url=="http://a" && x==1 }` {
+	if got := NormalizeConstructSource(a); got != `query widget w { filter row => row.url == "http://a" && row.x == 1 }` {
 		t.Errorf("string literal not preserved verbatim: %q", got)
 	}
 }
@@ -118,7 +118,7 @@ func TestConstructSourceHashEmptyIsNotAHash(t *testing.T) {
 // TestConstructSourceHashIsStable: the same input hashes the same twice, and
 // the value is the lowercase hex the contract states.
 func TestConstructSourceHashIsStable(t *testing.T) {
-	const src = "query widget w { filter a==1 }"
+	const src = "query widget w { filter row => row.a == 1 }"
 	first := ConstructSourceHash(src)
 	if first != ConstructSourceHash(src) {
 		t.Fatal("the hash is not stable across calls")

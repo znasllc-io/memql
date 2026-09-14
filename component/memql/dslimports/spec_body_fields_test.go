@@ -81,9 +81,7 @@ func TestSpecBodyRejectsUndeclaredConceptProperty(t *testing.T) {
 	errs := specBodyErrs(t, `use lab.concepts.{ widget }
 
 /// Rows in a region -- with a typo'd property.
-spec widget inRegion {
-  return regoin == "eu"
-}
+spec widget inRegion = row => row.regoin == "eu"
 `)
 	if len(errs) != 1 {
 		t.Fatalf("expected exactly 1 spec-body error, got %d: %v", len(errs), errs)
@@ -125,9 +123,7 @@ spec widget inRegion {
 func TestSpecBodySkipsTraits(t *testing.T) {
 	errs := specBodyErrs(t, `
 /// Matches active rows. Unbound by design.
-trait labIsActive {
-  return active == true
-}
+trait labIsActive = row => row.active == true
 `)
 	if len(errs) != 0 {
 		t.Fatalf("traits are unbound by design and must be skipped, got: %v", errs)
@@ -221,9 +217,7 @@ func TestSpecBodyAcceptsIntrinsicOnConceptBoundSpec(t *testing.T) {
 	errs := specBodyErrs(t, `use lab.concepts.{ widget }
 
 /// Rows created after a cutoff.
-spec widget recentWidget {
-  return createdAt != ""
-}
+spec widget recentWidget = row => row.createdAt != ""
 `)
 	if len(errs) != 0 {
 		t.Fatalf("a concept-bound row spec may name intrinsics, got: %v", errs)
@@ -267,7 +261,7 @@ func TestSpecBodyTypoNotMaskedByUnrelatedConstruct(t *testing.T) {
 			"/// Actor envelope.\n@actor\nshape labActor {\n  actor.role\n}\n")},
 		// An unrelated trait in another namespace sharing the typo's spelling.
 		"other/traits.memql": &fstest.MapFile{Data: []byte(
-			"/// Unrelated.\ntrait roles {\n  return active == true\n}\n")},
+			"/// Unrelated.\ntrait roles = row => row.active == true\n")},
 		"lab/specs.memql": &fstest.MapFile{Data: []byte(
 			"/// Typo'd envelope key that collides with a trait name.\n" +
 				"spec labActor requiresAdmin {\n  return roles == \"admin\"\n}\n")},

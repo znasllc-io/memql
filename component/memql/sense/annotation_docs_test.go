@@ -8,9 +8,6 @@ import "testing"
 func TestEveryAnnotationHasDoc(t *testing.T) {
 	for receiver, anns := range AnnotationsByReceiver {
 		label := receiver
-		if label == "" {
-			label = "Concept"
-		}
 		for _, a := range anns {
 			if _, ok := AnnotationDocs[a]; !ok {
 				t.Errorf("%s: annotation @%s is offered but has no AnnotationDocs entry", label, a)

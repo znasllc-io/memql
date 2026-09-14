@@ -103,19 +103,19 @@ func TestClauseDoesNotShareTheOpeningBraceLine(t *testing.T) {
 func TestClauseAfterBraceDetector(t *testing.T) {
 	shouldMatch := []string{
 		`query widget q { sort "createdAt", "desc" }`,
-		`query widget q { filter id == args.x }`,
+		`query widget q { filter row => row.id == args.x }`,
 		`query widget q { sort "createdAt"`,
 		`query widget q {  filter  id==args.x`,
 		`query widget q {	sort	"createdAt"`,
 		// Review round 1: a nested body on the same line hid the clause from
 		// a negated-brace class. The most plausible authoring shape of the set.
-		`query widget q { args { x string } filter id == args.x }`,
+		`query widget q { args { x string } filter row => row.id == args.x }`,
 		`query widget q { args { x string } sort "createdAt","desc" }`,
 		// Review round 1: an NBSP between the keyword and its argument slipped
 		// an ASCII-only separator class -- the same assumption the sibling
 		// scanner explicitly rejects one file over.
 		"query widget q { sort \"createdAt\",\"desc\" }",
-		"query widget q { filter id == args.x }",
+		"query widget q { filter row => row.id == args.x }",
 	}
 	for _, s := range shouldMatch {
 		if !clauseAfterBraceRe.MatchString(blankQuotedAndComments(s)) {

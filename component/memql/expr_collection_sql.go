@@ -4,13 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // expr_collection_sql.go -- ArrayPredicateExpression: `.any(x => p)`,
-// `.all(x => p)` and `.count() <op> n` over a ROW ARRAY FIELD, lowered to SQL
-// (epic memql#5363, task memql#5366, design record D11).
+// `.all(x => p)` and `.count() <op> n` over a ROW FIELD, lowered to SQL (epic
+// memql#5363, task memql#5366, design record D11).
 //
 // # Why this is its own node and not a CollectionMethodExpression
 //
@@ -43,14 +44,17 @@ import (
 // "Absent" is the absence table's: the key is missing OR its value is JSON
 // null.
 //
-//	            absent   present non-array   array
-//	any(p)      false    false               some element satisfies p
-//	all(p)      true     false               every element satisfies p ([] -> true)
-//	count()     0        0                   its length
+//	            absent   present non-array                   array
+//	any(p)      false    false                               some element satisfies p
+//	all(p)      true     false                               every element satisfies p ([] -> true)
+//	count()     0        a string: its characters; else 0    its length
 //
 // all() over an absent field is vacuously true -- there are no elements to
 // fail -- while a present value that is not an array is a type mismatch, and a
-// mismatch satisfies nothing. An element predicate that is unknown for an
+// mismatch satisfies nothing. count() counts what is stored, whatever the
+// field declares, so a declared list holding a corrupt string counts its
+// characters: EvalExpr dispatches `.count()` on the value it holds (a string's
+// is string.count), and the two must agree on every row. An element predicate that is unknown for an
 // element (an absent element field) counts as false, in both directions: the
 // element does not satisfy any(), and it DOES fail all(). SQL spells that with
 // COALESCE, exactly as NotExpression does.
@@ -249,11 +253,15 @@ func (e *MemQLEngine) compileArrayPredicate(ctx context.Context, n *ArrayPredica
 			return compiledExpression{}, fmt.Errorf("%s.count(): %w", planConstantFieldLabel(n.Field), err)
 		}
 		// jsonb_array_length raises on a non-array exactly as
-		// jsonb_array_elements does, so the CASE hands it NULL instead, and
-		// COALESCE turns that NULL into the 0 the rules table promises.
+		// jsonb_array_elements does, so it only runs in the CASE's array
+		// branch. A string counts its characters: char_length of the text
+		// extraction counts code points in the database's encoding, UTF8, as
+		// string.count does in process. Everything else -- absent (the
+		// jsonb_typeof of a missing key is NULL), JSON null, an object, a
+		// number, a boolean -- falls to the ELSE and counts 0.
 		return compiledExpression{
-			sql: fmt.Sprintf("(COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(%[1]s) = 'array' THEN %[1]s END), 0) %[2]s ?)",
-				jsonbExpr, sqlOp),
+			sql: fmt.Sprintf("((CASE jsonb_typeof(%[1]s) WHEN 'array' THEN jsonb_array_length(%[1]s) WHEN 'string' THEN char_length(%[2]s) ELSE 0 END) %[3]s ?)",
+				jsonbExpr, textExpr, sqlOp),
 			args: []any{count},
 		}, nil
 	default:
@@ -395,6 +403,8 @@ func evalArrayPredicate(n *ArrayPredicateExpression, value any, present bool, el
 		count := 0
 		if isArray {
 			count = len(items)
+		} else if str, isString := value.(string); present && isString {
+			count = utf8.RuneCountInString(str)
 		}
 		return compareArrayCount(count, n.CountOp, n.CountValue)
 	default:

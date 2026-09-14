@@ -1,8 +1,10 @@
 package parser
 
 import (
+	"fmt"
 	"strconv"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	"github.com/znasllc-io/memql/component/language/ast"
 )
 
@@ -83,7 +85,7 @@ func (p *Parser) parseSpecDecl(attrs []*ast.Attribute, isTrait bool) (*ast.SpecD
 
 	// Traits validate against the "Spec" receiver set -- both kinds share
 	// this parser and accept the same lifecycle/description annotations.
-	if err := p.validateDeclAnnotations("Spec", keyword, decl.Name, attrs); err != nil {
+	if err := p.checkAnnotations(annotations.Spec, fmt.Sprintf("%s %q", keyword, decl.Name), attrs); err != nil {
 		return nil, err
 	}
 

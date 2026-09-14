@@ -141,10 +141,10 @@ func TestRewriteAcceptStamp(t *testing.T) {
     agentId string @required
   }
   insert {
-    id: concat("si-", hash(concat(
-      canonicalId(args.agentId, agent), ":",
-      canonicalId(args.spaceId, space)
-    )))
+    id: ("si-" + hash(
+      canonicalId(args.agentId, "agent") + ":" +
+      canonicalId(args.spaceId, "space")
+    ))
     args.spaceId
     args.agentId
   }
@@ -163,11 +163,8 @@ func TestRewriteAcceptStamp(t *testing.T) {
   insert {
     args.a
     args.b
-    q: concat("say \")(", args.a)
-    c: coalesce(
-      args.a,
-      args.b
-    )
+    q: "say \")(" + args.a
+    c: args.a ?? args.b
   }
 }`,
 		},

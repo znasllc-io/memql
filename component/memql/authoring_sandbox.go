@@ -28,6 +28,7 @@ package memql
 // reported as `skipped` rather than silently passing.
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -174,8 +175,12 @@ var sandboxSupportedKinds = map[string]bool{
 // mutated. Nothing is registered into any live registry, so it is safe to
 // call against a running engine. Returns a per-construct diagnostic report;
 // the bundle is OK only if every non-skipped construct compiled.
+//
+// It takes no engine: an edition-2026 query, spec or trait is lowered against
+// the bundle alone (authoring_lower.go), and what only an engine's registries
+// can decide is left to SandboxCompileBundleWithEngine and to registration.
 func SandboxCompileBundle(constructs []SandboxConstruct) SandboxReport {
-	rep, _ := compileBundle(constructs)
+	rep, _, _ := compileBundleWith(constructs, engineFreeLowering)
 	return rep
 }
 
@@ -339,8 +344,10 @@ func buildCandidateConcept(c SandboxConstruct) (string, *memoryNodes.Concept, er
 	} else {
 		id, err = languageAst.AssembleConceptIdFromDecl(decl)
 	}
-	if err != nil {
-		return "", nil, fmt.Errorf("%s: %v", origin, err)
+	// The registry answers first about an annotation it refuses, as at boot
+	// (conceptIdRefusal).
+	if err = conceptIdRefusal(decl, err); err != nil {
+		return "", nil, fmt.Errorf("%s: %w", origin, err)
 	}
 	if id == "" {
 		return "", nil, fmt.Errorf("%s: concept %q is missing @namespace and the bundle carries no origin path to derive one from -- either annotate it or send the document's tree-relative path", origin, c.Name)
@@ -392,7 +399,15 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		}
 		actualName = slice.Name
 		if _, err := dispatchPerConstructParser(slice, origin, concepts); err != nil {
-			return attachPos(fail(d, err.Error()), c, err)
+			msg := err.Error()
+			var lerr *LowerError
+			if errors.As(err, &lerr) {
+				// A filter that does not lower is refused while the query
+				// compiles (memql#5366); print the refusal itself rather
+				// than the converter's walk down to it.
+				msg = lowerDiagnosticMessage(c, err)
+			}
+			return attachPos(fail(d, msg), c, err)
 		}
 
 	case "spec", "trait":

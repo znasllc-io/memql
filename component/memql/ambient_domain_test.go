@@ -50,7 +50,7 @@ func TestResolveCanonicalIdConceptRefs_AmbientDomain(t *testing.T) {
 
 	src := `mutate invocation probe {
   insert {
-    id: canonicalId(args.invocationId, invocation)
+    id: canonicalId(args.invocationId, "invocation")
   }
 }`
 	// Ambient: the file's own domain resolves the bare name with no import.
@@ -79,7 +79,7 @@ func TestResolveCanonicalIdConceptRefs_AmbientDomain(t *testing.T) {
 	// same-domain ONLY, so the import discipline stays lint-enforceable.
 	cross := `mutate widget probe {
   insert {
-    id: canonicalId(args.spaceId, space)
+    id: canonicalId(args.spaceId, "space")
   }
 }`
 	if _, err := resolver.ResolveCanonicalIdConceptRefsInDomain(cross, "worker"); err == nil {

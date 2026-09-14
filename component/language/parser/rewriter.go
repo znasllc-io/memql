@@ -37,6 +37,7 @@
 package parser
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -174,6 +175,8 @@ type mutBodyBlock struct {
 	keyword string // the identifier before `{` (args/insert/update/accept/stamp/...)
 	named   string // a second header identifier if present (the retired `insert Concept {` form)
 	inner   string
+	at      int // offset of keyword in the scanned text, for a refusal to name
+	innerAt int // offset of inner in the scanned text
 }
 
 // scanMutationBlocks is the SINGLE source of block framing for a mutation body
@@ -194,11 +197,19 @@ type mutBodyBlock struct {
 // block's `}`, or contains a brace inside a string literal). A `{` in value
 // position (after a `:` or inside `(...)`) is an object literal, matched and
 // skipped, never mistaken for a block.
-func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fieldSample string, err error) {
+//
+// It also returns strayLine: the first depth-0 line that carries words but is
+// neither a `key: value` field nor a block header -- a line no reader above
+// consumes (`filter x == 1` at the mutation top level). The top-level caller
+// refuses it; inside a write block a field's value may continue onto the next
+// line, so the write block's caller does not.
+func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fieldSample string, strayLine string, err error) {
 	blanked := BlankComments(body)
 	n := len(blanked)
 	var idents []string
+	var identAt []int
 	identStart := -1
+	lineFirst := -1 // where the current line's first word starts
 	inValue := false
 	parenDepth := 0
 	isIdent := func(c byte) bool {
@@ -207,7 +218,15 @@ func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fie
 	endIdent := func(at int) {
 		if identStart >= 0 {
 			idents = append(idents, blanked[identStart:at])
+			identAt = append(identAt, identStart)
 			identStart = -1
+		}
+	}
+	// noteStray records the current line as stray when it carried words that
+	// were neither a field key nor a block header.
+	noteStray := func() {
+		if strayLine == "" && !inValue && parenDepth == 0 && len(idents) > 0 && lineFirst >= 0 {
+			strayLine = lineOfIndex(body, blanked, lineFirst)
 		}
 	}
 	lineOf := func(at int) string {
@@ -233,8 +252,10 @@ func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fie
 		case c == '\n' || c == '\r':
 			endIdent(i)
 			if parenDepth == 0 {
+				noteStray()
 				inValue = false
-				idents = nil
+				idents, identAt = nil, nil
+				lineFirst = -1
 			}
 			i++
 		case c == '(':
@@ -251,7 +272,7 @@ func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fie
 			endIdent(i)
 			if parenDepth == 0 {
 				inValue = false
-				idents = nil
+				idents, identAt = nil, nil
 			}
 			i++
 		case c == ':':
@@ -268,7 +289,7 @@ func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fie
 			endIdent(i)
 			closeIdx := matchBraceStrAware(blanked, i)
 			if closeIdx < 0 {
-				return nil, false, "", fmt.Errorf("mutation body: `{` has no matching `}`")
+				return nil, false, "", "", refuseAtBody(i, 1, fmt.Errorf("mutation body: `{` has no matching `}`"))
 			}
 			if inValue || parenDepth > 0 {
 				// Object-literal value (`field: { ... }`), not a block.
@@ -276,21 +297,25 @@ func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fie
 			} else {
 				switch len(idents) {
 				case 1:
-					blocks = append(blocks, mutBodyBlock{keyword: idents[0], inner: body[i+1 : closeIdx]})
+					blocks = append(blocks, mutBodyBlock{keyword: idents[0], inner: body[i+1 : closeIdx], at: identAt[0], innerAt: i + 1})
 				case 2:
-					blocks = append(blocks, mutBodyBlock{keyword: idents[0], named: idents[1], inner: body[i+1 : closeIdx]})
+					blocks = append(blocks, mutBodyBlock{keyword: idents[0], named: idents[1], inner: body[i+1 : closeIdx], at: identAt[0], innerAt: i + 1})
 				case 0:
-					return nil, false, "", fmt.Errorf("mutation body: `{ ... }` block with no keyword")
+					return nil, false, "", "", refuseAtBody(i, 1, fmt.Errorf("mutation body: `{ ... }` block with no keyword"))
 				default:
-					return nil, false, "", fmt.Errorf("mutation body: block header `%s ...` has too many words", idents[0])
+					return nil, false, "", "", refuseAtBody(identAt[0], len(idents[0]), fmt.Errorf("mutation body: block header `%s ...` has too many words", idents[0]))
 				}
 				i = closeIdx + 1
 			}
-			idents = nil
+			idents, identAt = nil, nil
 			inValue = false
+			lineFirst = -1
 		case isIdent(c):
 			if identStart < 0 {
 				identStart = i
+				if lineFirst < 0 {
+					lineFirst = i
+				}
 			}
 			i++
 		default:
@@ -299,7 +324,24 @@ func scanMutationBlocks(body string) (blocks []mutBodyBlock, hasFields bool, fie
 			i++
 		}
 	}
-	return blocks, hasFields, fieldSample, nil
+	endIdent(n)
+	noteStray()
+	return blocks, hasFields, fieldSample, strayLine, nil
+}
+
+// lineOfIndex returns the trimmed line of body containing offset at, located
+// on the blanked view (comments are blank there, so a comment is never taken
+// for a line's content) and sliced from the original.
+func lineOfIndex(body, blanked string, at int) string {
+	start := at
+	for start > 0 && blanked[start-1] != '\n' {
+		start--
+	}
+	end := at
+	for end < len(blanked) && blanked[end] != '\n' {
+		end++
+	}
+	return strings.TrimSpace(body[start:end])
 }
 
 // rewriteEachBlock walks every struct-form construct in `source`
@@ -335,6 +377,20 @@ func rewriteEachBlock(
 	for i := len(matches) - 1; i >= 0; i-- {
 		h := matches[i]
 
+		// A refusal names the author's text it refuses (rewrite_errors.go):
+		// the construct's name unless the emitter says which text. The
+		// offsets index source, which `out` still equals up to this
+		// construct's closing brace.
+		refuse := func(err error, start, end int) error {
+			return &RewriteError{err: err, input: source, start: start, end: end}
+		}
+		nameExtent := func() (int, int) {
+			if sub := header.FindStringSubmatchIndex(scan[h[0]:h[1]]); len(sub) >= 4 && sub[len(sub)-2] >= 0 {
+				return h[0] + sub[len(sub)-2], h[0] + sub[len(sub)-1]
+			}
+			return h[0], h[1]
+		}
+
 		openIdx := h[1] - 1
 		// Match the construct's closing brace on the comment-blanked, string-
 		// aware view (offsets map 1:1 to `out` for this not-yet-spliced region,
@@ -343,7 +399,7 @@ func rewriteEachBlock(
 		// findMatchingCloseBrace was brace-only and truncated such bodies.
 		closeIdx := matchBraceStrAware(scan, openIdx)
 		if closeIdx < 0 {
-			return "", fmt.Errorf("%s: missing closing brace", kindLabel)
+			return "", refuse(fmt.Errorf("%s: missing closing brace", kindLabel), openIdx, openIdx+1)
 		}
 
 		// From `scan`, not `out`: the header was LOCATED on the blanked view and
@@ -354,7 +410,7 @@ func rewriteEachBlock(
 		headerLine := scan[h[0]:h[1]]
 		nameMatch := header.FindStringSubmatch(headerLine)
 		if len(nameMatch) < 2 {
-			return "", fmt.Errorf("%s: could not extract name", kindLabel)
+			return "", refuse(fmt.Errorf("%s: could not extract name", kindLabel), h[0], h[1])
 		}
 		// Headers that carry a signature-bound concept expose it as
 		// the second-to-last submatch (capture group 1); the name is
@@ -372,7 +428,8 @@ func rewriteEachBlock(
 		var conceptId string
 		if needsConcept {
 			if signatureConcept == "" {
-				return "", fmt.Errorf("%s %q: missing concept binding -- declare via the signature form `<kind> <Concept> <name> { ... }`", kindLabel, name)
+				start, end := nameExtent()
+				return "", refuse(fmt.Errorf("%s %q: missing concept binding -- declare via the signature form `<kind> <Concept> <name> { ... }`", kindLabel, name), start, end)
 			}
 			conceptId = signatureConcept
 		}
@@ -381,7 +438,15 @@ func rewriteEachBlock(
 		preamble := precedingAnnotationBlock(out, h[0])
 		rewritten, err := emit(name, conceptId, body, preamble)
 		if err != nil {
-			return "", fmt.Errorf("%s %q: %w", kindLabel, name, err)
+			start, end := nameExtent()
+			var r *refusal
+			if errors.As(err, &r) {
+				pre := h[0] - len(preamble)
+				if s, e, ok := r.locate(scan[pre:closeIdx+1], openIdx+1-pre); ok {
+					start, end = pre+s, pre+e
+				}
+			}
+			return "", refuse(fmt.Errorf("%s %q: %w", kindLabel, name, err), start, end)
 		}
 		out = out[:h[0]] + rewritten + out[closeIdx+1:]
 	}
@@ -452,7 +517,8 @@ func extractArgsBlock(body string) (string, error) {
 	open := loc[0] + openOffset
 	close := matchBraceInBody(body, open)
 	if close < 0 {
-		return "", fmt.Errorf("`args { ... }` block missing closing brace")
+		kw, width := firstWordAt(body, loc[0])
+		return "", refuseAtBody(kw, width, fmt.Errorf("`args { ... }` block missing closing brace"))
 	}
 	return body[open+1 : close], nil
 }
@@ -472,29 +538,38 @@ var acceptFieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // comments and blank entries are ignored. Every entry must be a bare
 // identifier -- an `accept` list carries field NAMES, never `key:
 // value` pairs (those belong in `stamp`).
+//
+// A refusal of an entry names it at its offset in raw (rewrite_errors.go);
+// the caller shifts that to the mutation body.
 func parseAcceptNames(raw string) ([]string, error) {
 	var names []string
+	lineStart := 0
 	for _, line := range strings.Split(raw, "\n") {
+		here := lineStart
+		lineStart += len(line) + 1
 		// Strip line comments.
 		if idx := strings.Index(line, "//"); idx >= 0 {
 			line = line[:idx]
 		}
-		for _, tok := range strings.Split(line, ",") {
-			tok = strings.TrimSpace(tok)
+		entryStart := here
+		for _, entry := range strings.Split(line, ",") {
+			at := entryStart + len(entry) - len(strings.TrimLeftFunc(entry, unicode.IsSpace))
+			entryStart += len(entry) + 1
+			tok := strings.TrimSpace(entry)
 			if tok == "" {
 				continue
 			}
 			if strings.Contains(tok, ":") {
-				return nil, fmt.Errorf("accept block entry %q looks like a `key: value` pair -- the `accept { ... }` list carries public field NAMES only (auto-bound from same-named args); put server-set `key: value` fields in `stamp { ... }`", tok)
+				return nil, refuseAtBody(at, len(tok), fmt.Errorf("accept block entry %q looks like a `key: value` pair -- the `accept { ... }` list carries public field NAMES only (auto-bound from same-named args); put server-set `key: value` fields in `stamp { ... }`", tok))
 			}
 			if !acceptFieldName.MatchString(tok) {
-				return nil, fmt.Errorf("accept block entry %q is not a valid field name", tok)
+				return nil, refuseAtBody(at, len(tok), fmt.Errorf("accept block entry %q is not a valid field name", tok))
 			}
 			names = append(names, tok)
 		}
 	}
 	if len(names) == 0 {
-		return nil, fmt.Errorf("`accept { ... }` block is empty -- list at least one public field name, or drop the block")
+		return nil, refuseClause("accept", fmt.Errorf("`accept { ... }` block is empty -- list at least one public field name, or drop the block"))
 	}
 	return names, nil
 }
@@ -575,11 +650,17 @@ func RejectLegacyProceduralAuthorForm(source string) error {
 	// Scan a comment-blanked view so a `func (Receiver) ...` token that
 	// only appears inside a `//` or `/* */` comment never trips the
 	// rejection gate (memql#1074).
-	m := legacyProceduralAuthorForm.FindStringSubmatch(BlankComments(source))
+	m := legacyProceduralAuthorForm.FindStringSubmatchIndex(BlankComments(source))
 	if m == nil {
 		return nil
 	}
-	return fmt.Errorf("legacy procedural form `func (%s) ...` is retired (memql#303) -- author every construct in struct form: `<kind> <Concept> <name> { args { ... } ... }`", m[1])
+	// A *RewriteError over source, naming the `func` that opens the form
+	// (rewrite_errors.go); PositionRewriteError places it.
+	kw, width := firstWordAt(source, m[0])
+	return &RewriteError{
+		err:   fmt.Errorf("legacy procedural form `func (%s) ...` is retired (memql#303) -- author every construct in struct form: `<kind> <Concept> <name> { args { ... } ... }`", source[m[2]:m[3]]),
+		input: source, start: kw, end: kw + width,
+	}
 }
 
 // structFormStep is one stage of the struct-form rewriter chain: a
@@ -698,6 +779,18 @@ type structQueryBody struct {
 	// refine is the lambda of a `refine <lambda>` clause (memql#5364): a
 	// predicate evaluated in process over the page paginate reads.
 	refine string
+	// at is where each clause starts in the body, keyed by its keyword: the
+	// author's text a refusal of the clause names (rewrite_errors.go).
+	at map[string]int
+}
+
+// refuseClauseAt marks err as a refusal of the query's clause kw.
+func (q *structQueryBody) refuseClauseAt(kw string, err error) error {
+	at, ok := q.at[kw]
+	if !ok {
+		return refuseClause(kw, err)
+	}
+	return refuseAtBody(at, len(kw), err)
 }
 
 // UnboundedPaginateWindow is the explicit paginate window the rewriter
@@ -724,10 +817,10 @@ func emitQuery(name, conceptId, body, preamble string) (string, error) {
 		return "", err
 	}
 	if parsed.count && parsed.shape != "" {
-		return "", fmt.Errorf("`count` and `shape` are mutually exclusive on a query")
+		return "", parsed.refuseClauseAt("count", fmt.Errorf("`count` and `shape` are mutually exclusive on a query"))
 	}
 	if parsed.count && (parsed.sort != "" || parsed.paginate != "") {
-		return "", fmt.Errorf("`count` cannot be combined with `sort` or `paginate`")
+		return "", parsed.refuseClauseAt("count", fmt.Errorf("`count` cannot be combined with `sort` or `paginate`"))
 	}
 	if err := checkRefineClause(parsed); err != nil {
 		return "", err
@@ -743,17 +836,17 @@ func emitQuery(name, conceptId, body, preamble string) (string, error) {
 	// it to the implicit 50-row default.
 	reason, hasUnbounded, err := unboundedReason(preamble)
 	if err != nil {
-		return "", err
+		return "", refuseText("@unbounded", err)
 	}
 	if hasUnbounded {
 		if reason == "" {
-			return "", fmt.Errorf("`@unbounded` requires a non-empty reason string: @unbounded(\"why this query reads the full set\")")
+			return "", refuseText("@unbounded", fmt.Errorf("`@unbounded` requires a non-empty reason string: @unbounded(\"why this query reads the full set\")"))
 		}
 		if parsed.paginate != "" || parsed.sort != "" {
-			return "", fmt.Errorf("`@unbounded` cannot be combined with `paginate` or `sort` -- a paginated/sorted query is already bounded; drop @unbounded or drop the directive")
+			return "", refuseText("@unbounded", fmt.Errorf("`@unbounded` cannot be combined with `paginate` or `sort` -- a paginated/sorted query is already bounded; drop @unbounded or drop the directive"))
 		}
 		if parsed.count {
-			return "", fmt.Errorf("`@unbounded` cannot be combined with `count` -- count returns an aggregate, not a row set")
+			return "", refuseText("@unbounded", fmt.Errorf("`@unbounded` cannot be combined with `count` -- count returns an aggregate, not a row set"))
 		}
 		parsed.paginate = strconv.Itoa(UnboundedPaginateWindow)
 	}
@@ -772,20 +865,19 @@ func emitQuery(name, conceptId, body, preamble string) (string, error) {
 // enumerate why each bypass is legitimate.
 var unboundedReasonRe = regexp.MustCompile(`@unbounded\s*\(\s*"((?:[^"\\]|\\.)*)"\s*\)`)
 
-// unboundedBareRe matches a bare `@unbounded` (no argument list), which
-// is rejected -- the reason is required.
-var unboundedBareRe = regexp.MustCompile(`@unbounded\b`)
-
 // unboundedReason inspects a construct's preamble for the
-// `@unbounded("reason")` annotation. Returns the captured reason, a
-// presence flag, and an error if the annotation is present but
-// malformed (bare, or empty/whitespace reason).
+// `@unbounded("reason")` annotation. Returns the captured reason and a
+// presence flag.
+//
+// An @unbounded written in any other form -- bare, a number, a list -- is
+// reported ABSENT here, not refused: the annotation line stays in the source,
+// and the parser's annotation check refuses its form against the registry
+// (memql#5359), which says what @unbounded takes and shows the example. A
+// second, text-scanning form check here answered first with an uncoded
+// message, so the registry was not the one gate for this annotation.
 func unboundedReason(preamble string) (string, bool, error) {
 	if m := unboundedReasonRe.FindStringSubmatch(preamble); m != nil {
 		return strings.TrimSpace(m[1]), true, nil
-	}
-	if unboundedBareRe.MatchString(preamble) {
-		return "", true, fmt.Errorf("`@unbounded` requires a reason string: @unbounded(\"why this query reads the full set\")")
 	}
 	return "", false, nil
 }
@@ -805,10 +897,10 @@ func checkRefineClause(q *structQueryBody) error {
 		return nil
 	}
 	if q.count {
-		return fmt.Errorf("`refine` cannot be combined with `count` -- count aggregates in SQL and reads no page for refine to run over")
+		return q.refuseClauseAt("refine", fmt.Errorf("`refine` cannot be combined with `count` -- count aggregates in SQL and reads no page for refine to run over"))
 	}
 	if q.paginate == "" {
-		return fmt.Errorf("`refine` requires `paginate`: it runs in process over the page paginate reads, and without one that page is the whole matching set -- add `paginate <n>` (refine may then return fewer than n rows)")
+		return q.refuseClauseAt("refine", fmt.Errorf("`refine` requires `paginate`: it runs in process over the page paginate reads, and without one that page is the whole matching set -- add `paginate <n>` (refine may then return fewer than n rows)"))
 	}
 	return nil
 }
@@ -845,35 +937,54 @@ func checkRefineClause(q *structQueryBody) error {
 // here so every gate that reads a clause as text folds lines exactly as this
 // does (epic memql#5363): a gate reading only a filter's first line is blind to
 // every conjunct the codemod wrapped onto the lines below it.
-func joinStructQueryContinuations(raw []string) []string {
-	var out []string
-	var acc string
-
-	flush := func() {
-		if acc != "" {
-			out = append(out, acc)
-			acc = ""
+//
+// Each clause keeps where its first line starts in text, so a refusal of the
+// clause can name the author's line and column (rewrite_errors.go).
+func joinStructQueryContinuations(text string) []structQueryClause {
+	var out []structQueryClause
+	for start := 0; start <= len(text); {
+		end := len(text)
+		if nl := strings.IndexByte(text[start:], '\n'); nl >= 0 {
+			end = start + nl
 		}
+		raw := text[start:end]
+		if line := strings.TrimSpace(raw); line != "" {
+			if n := len(out); n > 0 && dslclause.ContinuesClause(out[n-1].text, line) {
+				out[n-1].text += " " + line
+			} else {
+				lead := len(raw) - len(strings.TrimLeftFunc(raw, unicode.IsSpace))
+				out = append(out, structQueryClause{text: line, at: start + lead})
+			}
+		}
+		if end == len(text) {
+			break
+		}
+		start = end + 1
 	}
-
-	for _, r := range raw {
-		line := strings.TrimSpace(r)
-		if line == "" {
-			continue
-		}
-		if acc != "" && dslclause.ContinuesClause(acc, line) {
-			acc += " " + line
-			continue
-		}
-		flush()
-		acc = line
-	}
-	flush()
 	return out
 }
 
+// structQueryClause is one clause of a struct-query body: its lines joined,
+// and the byte offset of its first character in the body.
+type structQueryClause struct {
+	text string
+	at   int
+}
+
+// blankKeepingLines is s with every byte but a line break turned to a space:
+// text cut out of a body without moving what follows it.
+func blankKeepingLines(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if c != '\n' && c != '\r' {
+			b[i] = ' '
+		}
+	}
+	return string(b)
+}
+
 func parseStructQueryBody(body string) (*structQueryBody, error) {
-	out := &structQueryBody{}
+	out := &structQueryBody{at: map[string]int{}}
 
 	// Pull the args block out of the body if present, then iterate
 	// the rest line-by-line. Stripping rather than line-skipping
@@ -894,10 +1005,12 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 		open := loc[0] + openOffset
 		close := matchBraceInBody(body, open)
 		if close < 0 {
-			return nil, fmt.Errorf("`args { ... }` block missing closing brace")
+			kw, width := firstWordAt(scan, loc[0])
+			return nil, refuseAtBody(kw, width, fmt.Errorf("`args { ... }` block missing closing brace"))
 		}
 		out.argsText = body[open+1 : close]
-		restScan = scan[:loc[0]] + scan[close+1:]
+		// Blanked, not cut: every clause after the block keeps its offset.
+		restScan = scan[:loc[0]] + blankKeepingLines(scan[loc[0]:close+1]) + scan[close+1:]
 	}
 
 	// Iterate the BLANKED view. The default arm below rejects any line it does
@@ -912,27 +1025,38 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 	// `//` inside a string literal survives untouched, while a trailing comment
 	// on a real field (`filter id==args.id // note`) becomes trailing
 	// whitespace that TrimSpace removes -- which is what the author meant.
-	for _, line := range joinStructQueryContinuations(strings.Split(restScan, "\n")) {
+	for _, clause := range joinStructQueryContinuations(restScan) {
+		line := clause.text
+		kw := ""
 		switch {
 		case strings.HasPrefix(line, "concept"):
-			return nil, fmt.Errorf("inline `concept` line is no longer supported; declare the concept via a file-top `use <ns>.<concept>` directive instead")
+			return nil, refuseAtBody(clause.at, len("concept"), fmt.Errorf("inline `concept` line is no longer supported; declare the concept via a file-top `use <ns>.<concept>` directive instead"))
 		case strings.HasPrefix(line, "filter"):
+			kw = "filter"
 			out.filter = strings.TrimSpace(strings.TrimPrefix(line, "filter"))
 		case line == "count":
+			kw = "count"
 			out.count = true
 		case strings.HasPrefix(line, "shape"):
+			kw = "shape"
 			out.shape = strings.TrimSpace(strings.TrimPrefix(line, "shape"))
 		case strings.HasPrefix(line, "sort"):
+			kw = "sort"
 			out.sort = strings.TrimSpace(strings.TrimPrefix(line, "sort"))
 		case strings.HasPrefix(line, "paginate"):
+			kw = "paginate"
 			out.paginate = strings.TrimSpace(strings.TrimPrefix(line, "paginate"))
 		case strings.HasPrefix(line, "asOf"):
+			kw = "asOf"
 			out.asOf = strings.TrimSpace(strings.TrimPrefix(line, "asOf"))
 		case strings.HasPrefix(line, "refine"):
+			kw = "refine"
 			out.refine = strings.TrimSpace(strings.TrimPrefix(line, "refine"))
 		default:
-			return nil, fmt.Errorf("unknown struct-query field on line %q", line)
+			at, width := firstWordAt(restScan, clause.at)
+			return nil, refuseAtBody(at, width, fmt.Errorf("unknown struct-query field on line %q", line))
 		}
+		out.at[kw] = clause.at
 	}
 	return out, nil
 }
@@ -1051,13 +1175,18 @@ func emitMutation(name, conceptId, body, _preamble string) (string, error) {
 			expected = conceptId[idx+1:]
 		}
 		if parsed.writeTarget != expected {
-			return "", fmt.Errorf("%s target %q does not match the concept binding %q -- drop the restated concept and write the bare `%s { ... }` (the target comes from the `mutate %s <name>` signature)", parsed.writeKind, parsed.writeTarget, expected, parsed.writeKind, expected)
+			return "", refuseClause(parsed.writeKind, fmt.Errorf("%s target %q does not match the concept binding %q -- drop the restated concept and write the bare `%s { ... }` (the target comes from the `mutate %s <name>` signature)", parsed.writeKind, parsed.writeTarget, expected, parsed.writeKind, expected))
 		}
 	}
 
 	idExpr, payload, err := translateInsertBody(parsed.writeBody)
 	if err != nil {
-		return "", fmt.Errorf("%s block: %w", parsed.writeKind, err)
+		err = fmt.Errorf("%s block: %w", parsed.writeKind, err)
+		var r *refusal
+		if !errors.As(err, &r) {
+			err = refuseClause(parsed.writeKind, err)
+		}
+		return "", err
 	}
 
 	var sb strings.Builder
@@ -1071,7 +1200,7 @@ func emitMutation(name, conceptId, body, _preamble string) (string, error) {
 		}
 	case "update":
 		if idExpr == "" {
-			return "", fmt.Errorf("update block requires an `id: <expr>` line identifying the target row")
+			return "", refuseClause("update", fmt.Errorf("update block requires an `id: <expr>` line identifying the target row"))
 		}
 		// Emit the bare concept name as the first positional arg
 		// (mirroring insert). The runtime doesn't strictly need it --
@@ -1099,7 +1228,7 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 	// disagree about which blocks exist -- the property that retires the
 	// same-line / boundary-anchoring class of bugs the regex approach kept
 	// reintroducing.
-	blocks, topFields, topFieldSample, err := scanMutationBlocks(body)
+	blocks, topFields, topFieldSample, topStray, err := scanMutationBlocks(body)
 	if err != nil {
 		return nil, err
 	}
@@ -1120,12 +1249,13 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 	var writeKind, writeInner string
 	writeCount := 0
 	var topAccept, topStamp *mutBodyBlock
+	var writeBlk *mutBodyBlock
 	for i := range blocks {
 		b := &blocks[i]
 		if b.named != "" {
 			// The named form `<kind> <Concept> { ... }` is retired (#988): the
 			// write target comes from the `mutate <Concept> <name>` signature.
-			return nil, fmt.Errorf("`%s %s { ... }` is retired -- drop the restated concept and write the bare `%s { ... }` (the target comes from the `mutate <Concept> <name>` signature)", b.keyword, b.named, b.keyword)
+			return nil, refuseAtBody(b.at, len(b.keyword), fmt.Errorf("`%s %s { ... }` is retired -- drop the restated concept and write the bare `%s { ... }` (the target comes from the `mutate <Concept> <name>` signature)", b.keyword, b.named, b.keyword))
 		}
 		switch b.keyword {
 		case "args":
@@ -1133,21 +1263,21 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 		case "insert", "update":
 			writeCount++
 			if writeCount > 1 {
-				return nil, fmt.Errorf("mutation body must contain exactly one write block -- one write per mutation (authoring-rules rule 1)")
+				return nil, refuseAtBody(b.at, len(b.keyword), fmt.Errorf("mutation body must contain exactly one write block -- one write per mutation (authoring-rules rule 1)"))
 			}
-			writeKind, writeInner = b.keyword, b.inner
+			writeKind, writeInner, writeBlk = b.keyword, b.inner, b
 		case "accept":
 			if topAccept != nil {
-				return nil, fmt.Errorf("mutation body has more than one top-level `accept { ... }` block")
+				return nil, refuseAtBody(b.at, len(b.keyword), fmt.Errorf("mutation body has more than one top-level `accept { ... }` block"))
 			}
 			topAccept = b
 		case "stamp":
 			if topStamp != nil {
-				return nil, fmt.Errorf("mutation body has more than one top-level `stamp { ... }` block")
+				return nil, refuseAtBody(b.at, len(b.keyword), fmt.Errorf("mutation body has more than one top-level `stamp { ... }` block"))
 			}
 			topStamp = b
 		default:
-			return nil, fmt.Errorf("mutation body: unexpected `%s { ... }` block", b.keyword)
+			return nil, refuseAtBody(b.at, len(b.keyword), fmt.Errorf("mutation body: unexpected `%s { ... }` block", b.keyword))
 		}
 	}
 	haveWrite := writeCount == 1
@@ -1156,56 +1286,68 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 	// silently dropped by any desugar (and the legacy write form keeps its
 	// fields INSIDE the insert/update block), so it is always an error.
 	if topFields {
-		return nil, fmt.Errorf("mutation body: unexpected field %q at the top level -- put write fields inside the `insert`/`update` block (or a `stamp { ... }` block)", topFieldSample)
+		return nil, refuseText(topFieldSample, fmt.Errorf("mutation body: unexpected field %q at the top level -- put write fields inside the `insert`/`update` block (or a `stamp { ... }` block)", topFieldSample))
+	}
+	// ...and neither is a line of words: until memql#5359 a top-level
+	// `filter x == 1` (or any clause a mutation does not take) was dropped
+	// without a word.
+	if topStray != "" {
+		return nil, fmt.Errorf("mutation body: unexpected %q at the top level -- a mutation body takes %s", topStray, clauseSpellings("mutate"))
 	}
 
 	// Nested accept/stamp live inside the write block; scan its inner with the
 	// same single source.
 	var nestAccept, nestStamp *mutBodyBlock
 	if haveWrite {
-		wblocks, wFields, wFieldSample, werr := scanMutationBlocks(writeInner)
+		wblocks, wFields, wFieldSample, _, werr := scanMutationBlocks(writeInner)
 		if werr != nil {
-			return nil, werr
+			return nil, shiftRefusal(werr, writeBlk.innerAt)
 		}
 		for i := range wblocks {
 			b := &wblocks[i]
+			b.at += writeBlk.innerAt // offsets index the mutation body from here on
+			b.innerAt += writeBlk.innerAt
 			if b.named != "" {
-				return nil, fmt.Errorf("`%s { ... }` has a `%s %s { ... }` block -- accept/stamp take no name", writeKind, b.keyword, b.named)
+				return nil, refuseAtBody(b.at, len(b.keyword), fmt.Errorf("`%s { ... }` has a `%s %s { ... }` block -- accept/stamp take no name", writeKind, b.keyword, b.named))
 			}
 			switch b.keyword {
 			case "accept":
 				if nestAccept != nil {
-					return nil, fmt.Errorf("`%s { ... }` has more than one nested `accept { ... }` block", writeKind)
+					return nil, refuseAtBody(b.at, len(b.keyword), fmt.Errorf("`%s { ... }` has more than one nested `accept { ... }` block", writeKind))
 				}
 				nestAccept = b
 			case "stamp":
 				if nestStamp != nil {
-					return nil, fmt.Errorf("`%s { ... }` has more than one nested `stamp { ... }` block", writeKind)
+					return nil, refuseAtBody(b.at, len(b.keyword), fmt.Errorf("`%s { ... }` has more than one nested `stamp { ... }` block", writeKind))
 				}
 				nestStamp = b
 			default:
-				return nil, fmt.Errorf("`%s { ... }` may not contain a nested `%s { ... }` block", writeKind, b.keyword)
+				return nil, refuseAtBody(b.at, len(b.keyword), fmt.Errorf("`%s { ... }` may not contain a nested `%s { ... }` block", writeKind, b.keyword))
 			}
 		}
 		// A write block mixing accept/stamp with loose fields would drop those
 		// fields on desugar (the body is rebuilt from the blocks alone).
 		if (nestAccept != nil || nestStamp != nil) && wFields {
-			return nil, fmt.Errorf("`%s { ... }` carries the field %q beside a nested `accept`/`stamp` block -- move server-set fields into `stamp { ... }` (a field left here would be dropped)", writeKind, wFieldSample)
+			return nil, refuseText(wFieldSample, fmt.Errorf("`%s { ... }` carries the field %q beside a nested `accept`/`stamp` block -- move server-set fields into `stamp { ... }` (a field left here would be dropped)", writeKind, wFieldSample))
 		}
 	}
 
 	hasNested := nestAccept != nil || nestStamp != nil
 	hasTop := topAccept != nil || topStamp != nil
 
+	top := topAccept
+	if top == nil {
+		top = topStamp
+	}
 	switch {
 	case hasTop && hasNested:
 		// accept/stamp split across the write-block boundary -- one inside, one
 		// outside. The desugar reads only the nested pair, so the outer block
 		// would be silently dropped (worst case: an empty payload).
-		return nil, fmt.Errorf("mutation body cannot mix a top-level `accept`/`stamp` with a nested one -- put both inside the `%s { ... }` block", writeKind)
+		return nil, refuseAtBody(top.at, len(top.keyword), fmt.Errorf("mutation body cannot mix a top-level `accept`/`stamp` with a nested one -- put both inside the `%s { ... }` block", writeKind))
 	case hasTop && haveWrite && !hasNested:
 		// bare accept/stamp sitting BESIDE an explicit write block.
-		return nil, fmt.Errorf("mutation body cannot mix the accept/stamp form with an explicit `%s { ... }` block -- nest `accept`/`stamp` inside the write block, or drop the block", writeKind)
+		return nil, refuseAtBody(top.at, len(top.keyword), fmt.Errorf("mutation body cannot mix the accept/stamp form with an explicit `%s { ... }` block -- nest `accept`/`stamp` inside the write block, or drop the block", writeKind))
 	}
 
 	// Resolve the accept/stamp blocks in play and the write kind they emit.
@@ -1222,11 +1364,11 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 		if acceptBlk != nil {
 			names, perr := parseAcceptNames(acceptBlk.inner)
 			if perr != nil {
-				return nil, perr
+				return nil, shiftRefusal(perr, acceptBlk.innerAt)
 			}
 			for _, nm := range names {
 				if !argNames[nm] {
-					return nil, fmt.Errorf("accept field %q has no matching arg -- declare `%s <type>` in the `args { ... }` block so it can auto-bind to `args.%s`", nm, nm, nm)
+					return nil, refuseTextAfter("accept", nm, fmt.Errorf("accept field %q has no matching arg -- declare `%s <type>` in the `args { ... }` block so it can auto-bind to `args.%s`", nm, nm, nm))
 				}
 				lines = append(lines, nm+": args."+nm)
 			}
@@ -1254,6 +1396,10 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 // idFieldMatcher matches `id: <expr>` lines inside insert/update bodies.
 var idFieldMatcher = regexp.MustCompile(`^id\s*:\s*([\s\S]+)$`)
 
+// idFieldLine finds an `id:` field line in a construct, for a refusal of a
+// second one to name it.
+var idFieldLine = regexp.MustCompile(`(?m)^[ \t]*(id)[ \t]*:`)
+
 // translateInsertBody converts the struct-form insert/update payload
 // from newline-separated `key: value` lines into the legacy
 // object-literal form the engine's `insert()` / `update()` accept.
@@ -1275,7 +1421,7 @@ func translateInsertBody(raw string) (idExpr string, payload string, err error) 
 		}
 		if m := idFieldMatcher.FindStringSubmatch(f); m != nil {
 			if idExpr != "" {
-				return "", "", fmt.Errorf("duplicate `id:` line in insert body")
+				return "", "", &refusal{err: fmt.Errorf("duplicate `id:` line in insert body"), at: -1, pattern: idFieldLine, nth: 1}
 			}
 			idExpr = strings.TrimSpace(m[1])
 			continue
@@ -1313,7 +1459,7 @@ func expandBareMirror(field string) (string, error) {
 	}
 	if bareArgsPathRe.MatchString(field) {
 		key := field[strings.LastIndex(field, ".")+1:]
-		return "", fmt.Errorf("`%s` has no key, and the bare-mirror shorthand takes a single-segment arg (authoring rule 15): write `%s: %s`", field, key, field)
+		return "", refuseText(field, fmt.Errorf("`%s` has no key, and the bare-mirror shorthand takes a single-segment arg (authoring rule 15): write `%s: %s`", field, key, field))
 	}
 	return field, nil
 }
@@ -1430,7 +1576,8 @@ func emitLogic(name, _conceptId, body, _preamble string) (string, error) {
 	open := loc[0] + openOffset
 	close := matchBraceInBody(body, open)
 	if close < 0 {
-		return "", fmt.Errorf("`body { ... }` block missing closing brace")
+		kw, width := firstWordAt(scan, loc[0])
+		return "", refuseAtBody(kw, width, fmt.Errorf("`body { ... }` block missing closing brace"))
 	}
 	bodyText := body[open+1 : close]
 
@@ -1438,10 +1585,165 @@ func emitLogic(name, _conceptId, body, _preamble string) (string, error) {
 	emitFuncHeader(&sb, "Logic", name, argsText, "(any, error)")
 	sb.WriteString(bodyText)
 	if !containsTrailingReturn(bodyText) {
-		return "", fmt.Errorf("logic %q body must end with a `return <expr>` terminator", name)
+		// Named at the statement that ends the body instead, or at `body`
+		// when it holds none.
+		at, width := firstWordAt(scan, loc[0])
+		if last := lastStatementAt(scan[open+1 : close]); last >= 0 {
+			at, width = firstWordAt(scan, open+1+last)
+		}
+		return "", refuseAtBody(at, width, fmt.Errorf("logic %q body must end with a `return <expr>` terminator", name))
+	}
+	// Everything but the args and body blocks is refused, not dropped
+	// (memql#5359). Run last, so the pointed messages above keep answering
+	// the mistakes they were written for.
+	if err := refuseUnknownBodyClauses("a logic", "logic", name, body, logicBodyClause); err != nil {
+		return "", err
 	}
 	sb.WriteString("}")
 	return sb.String(), nil
+}
+
+// lastStatementAt is the offset in body -- comments blanked -- of the last
+// line holding anything but a closing brace, or -1.
+func lastStatementAt(body string) int {
+	end := len(body)
+	for end > 0 {
+		start := strings.LastIndexByte(body[:end], '\n') + 1
+		if line := strings.TrimSpace(body[start:end]); line != "" && line != "}" {
+			return start
+		}
+		if start == 0 {
+			break
+		}
+		end = start - 1
+	}
+	return -1
+}
+
+// logicBodyClause reports whether word opens a clause of a logic body: its
+// `args { }` block and its `body { }` block. bodyClauseTable
+// (body_clauses.go) lists the same set for the editor and is pinned to this
+// switch.
+func logicBodyClause(word string) bool {
+	switch word {
+	case "args", "body":
+		return true
+	}
+	return false
+}
+
+// automationBodyClause reports whether word opens a clause of an automation
+// body: its `args { }` block, its `step <name> { }` blocks and its
+// `precondition <name> { }` blocks. component/automations extracts the
+// preconditions before the rewriter runs; one that reaches the rewriter (an
+// editor lowering the file) is a known clause the emitter skips.
+// bodyClauseTable lists the same set and is pinned to this switch.
+func automationBodyClause(word string) bool {
+	switch word {
+	case "args", "step", "precondition":
+		return true
+	}
+	return false
+}
+
+// refuseUnknownBodyClauses walks a block-only construct body -- a logic's or
+// an automation's -- at its top level and refuses anything that is not one of
+// the construct's clauses: each is a `<clause> { ... }` block, or for a named
+// block `<clause> <name> { ... }`, and an unnamed block is written at most
+// once. The emitters extract the clauses they know; until memql#5359 they
+// dropped everything else in silence, so a `filter` line in an automation or
+// a `step` block in a logic loaded and did nothing.
+//
+// article is the construct with its article ("a logic"), keyword the
+// construct keyword whose clause table the message lists.
+func refuseUnknownBodyClauses(article, keyword, name, text string, isClause func(string) bool) error {
+	scan := BlankComments(text)
+	seen := map[string]bool{}
+	takes := article + " body takes " + clauseSpellings(keyword)
+	for i := 0; ; {
+		i = skipBodyBlank(scan, i)
+		if i >= len(scan) {
+			return nil
+		}
+		word := bodyIdentAt(scan, i)
+		if word == "" {
+			return fmt.Errorf("%s %q: unexpected %q in the body -- %s", keyword, name, bodyLineAt(text, i), takes)
+		}
+		if !isClause(word) {
+			return fmt.Errorf("%s %q: unknown clause %q in the body -- %s", keyword, name, word, takes)
+		}
+		j := i + len(word)
+		if IsNamedBlock(word) {
+			j = skipBodyBlank(scan, j)
+			blockName := bodyIdentAt(scan, j)
+			if blockName == "" {
+				return fmt.Errorf("%s %q: a `%s` block needs a name -- write `%s <name> { ... }`", keyword, name, word, word)
+			}
+			j += len(blockName)
+		} else if seen[word] {
+			return fmt.Errorf("%s %q: more than one `%s { ... }` block -- write it once", keyword, name, word)
+		}
+		seen[word] = true
+		j = skipBodyBlank(scan, j)
+		if j >= len(scan) || scan[j] != '{' {
+			return fmt.Errorf("%s %q: `%s` opens a block -- %s", keyword, name, word, takes)
+		}
+		closeIdx := matchBraceInBody(text, j)
+		if closeIdx < 0 {
+			return fmt.Errorf("%s %q: `%s { ... }` block missing closing brace", keyword, name, word)
+		}
+		i = closeIdx + 1
+	}
+}
+
+// clauseSpellings lists a construct's clauses the way they are written:
+// "args { }, step <name> { } and precondition <name> { }".
+func clauseSpellings(keyword string) string {
+	clauses := BodyClauses(keyword)
+	out := make([]string, 0, len(clauses))
+	for _, c := range clauses {
+		if IsNamedBlock(c) {
+			out = append(out, "`"+c+" <name> { }`")
+		} else {
+			out = append(out, "`"+c+" { }`")
+		}
+	}
+	if len(out) <= 1 {
+		return strings.Join(out, "")
+	}
+	return strings.Join(out[:len(out)-1], ", ") + " and " + out[len(out)-1]
+}
+
+// skipBodyBlank returns the index of the first non-blank byte at or after i.
+func skipBodyBlank(s string, i int) int {
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r') {
+		i++
+	}
+	return i
+}
+
+// bodyIdentAt returns the identifier that starts at i, or "".
+func bodyIdentAt(s string, i int) string {
+	j := i
+	for j < len(s) {
+		c := s[j]
+		if c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (j > i && c >= '0' && c <= '9') {
+			j++
+			continue
+		}
+		break
+	}
+	return s[i:j]
+}
+
+// bodyLineAt returns the trimmed source line containing offset i.
+func bodyLineAt(s string, i int) string {
+	start := strings.LastIndexByte(s[:i], '\n') + 1
+	end := strings.IndexByte(s[i:], '\n')
+	if end < 0 {
+		return strings.TrimSpace(s[start:])
+	}
+	return strings.TrimSpace(s[start : i+end])
 }
 
 // containsTrailingReturn reports whether the last non-blank,
@@ -1520,6 +1822,23 @@ func terseAutomationMatches(src string) [][]int {
 		}
 	}
 	return out
+}
+
+// TerseAutomationSource is the terse automation named name as the author
+// wrote it in source -- its preamble and its one-line header -- and the byte
+// offset that text starts at; ok is false when source declares no terse
+// automation by that name. A loader that compiles the LOWERED longhand places
+// the refusals it reports against this text (PositionLowering aligns the two),
+// since the longhand is found nowhere in the file.
+func TerseAutomationSource(source, name string) (text string, start int, ok bool) {
+	for _, m := range terseAutomationMatches(BlankComments(source)) {
+		if source[m[4]:m[5]] != name {
+			continue
+		}
+		start = m[0] - len(precedingAnnotationBlock(source, m[0]))
+		return source[start:m[1]], start, true
+	}
+	return "", 0, false
 }
 
 // terseAnnotations splits a terse header's annotation run -- `@name` or
@@ -1630,7 +1949,7 @@ func NormaliseTerseAutomationSource(source string) (string, error) {
 	// automation would otherwise silently attach to the lowered longhand form
 	// -- reject it with a graduate-to-full-form hint instead.
 	if err := rejectTerseAutomationArgsBlock(source); err != nil {
-		return "", err
+		return "", err // a *RewriteError over source, naming the args block
 	}
 	matches := terseAutomationMatches(source)
 	if len(matches) == 0 {
@@ -1677,6 +1996,7 @@ func rejectTerseAutomationArgsBlock(source string) error {
 	//
 	// BlankComments preserves offsets and this function returns only an error,
 	// so scanning the blanked copy throughout is safe.
+	input := source
 	source = BlankComments(source)
 	for _, loc := range fileTopArgsHeader.FindAllStringIndex(source, -1) {
 		openIdx := strings.IndexByte(source[loc[0]:], '{')
@@ -1690,7 +2010,12 @@ func rejectTerseAutomationArgsBlock(source string) error {
 			continue
 		}
 		if terseAutomationFollows(source[closeIdx+1:]) {
-			return fmt.Errorf("a terse automation (`=> logic ...`) must not be preceded by an `args { ... }` block -- the terse form forwards the event payload to the target logic and declares no args of its own; graduate to the full form `automation NAME { args { ... } step <name> { ... } }` to declare typed inputs (event-payload-binding ADR Decision 6)")
+			// Named at the args block's keyword (rewrite_errors.go).
+			kw, width := firstWordAt(source, loc[0])
+			return &RewriteError{
+				err:   fmt.Errorf("a terse automation (`=> logic ...`) must not be preceded by an `args { ... }` block -- the terse form forwards the event payload to the target logic and declares no args of its own; graduate to the full form `automation NAME { args { ... } step <name> { ... } }` to declare typed inputs (event-payload-binding ADR Decision 6)"),
+				input: input, start: kw, end: kw + width,
+			}
 		}
 	}
 	return nil
@@ -1761,6 +2086,12 @@ func emitAutomation(name, _conceptId, body, _preamble string) (string, error) {
 	if len(steps) == 0 {
 		return "", fmt.Errorf("at least one `step` is required")
 	}
+	// Everything but the args, step and precondition blocks is refused, not
+	// dropped (memql#5359). Run last, so the pointed messages above keep
+	// answering the mistakes they were written for.
+	if err := refuseUnknownBodyClauses("an automation", "automation", name, body, automationBodyClause); err != nil {
+		return "", err
+	}
 	var sb strings.Builder
 	emitFuncHeader(&sb, "Automation", name, argsText, "")
 	for _, s := range steps {
@@ -1803,22 +2134,30 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 		// non-space and byte-identical in both views, so the extracted name is
 		// unchanged for every input that already worked.
 		header := scan[stepStart:stepHeaderEnd]
+		// A refusal of a step names the step's header, or -- for what the
+		// step says -- its first word: the `if`, `forEach`, `logic` ... that
+		// the translation below reads (rewrite_errors.go).
+		kw, kwWidth := firstWordAt(scan, stepStart)
 		nameMatch := stepBlockHeader.FindStringSubmatch(header)
 		if len(nameMatch) < 2 {
-			return nil, fmt.Errorf("step block: missing name")
+			return nil, refuseAtBody(kw, kwWidth, fmt.Errorf("step block: missing name"))
 		}
 		stepName := nameMatch[1]
 		openIdx := stepHeaderEnd - 1
 		closeIdx := matchBraceInBody(body, openIdx)
 		if closeIdx < 0 {
-			return nil, fmt.Errorf("step %q: missing closing brace", stepName)
+			return nil, refuseAtBody(openIdx, 1, fmt.Errorf("step %q: missing closing brace", stepName))
 		}
 		// trimCommentEdges, not TrimSpace: a leading or trailing comment here
 		// reaches splitLeadingIdent / the trailing-text guard as raw text and
 		// refuses the load (memql#2906).
 		stepBody := trimCommentEdges(body[openIdx+1 : closeIdx])
 		if stepBody == "" {
-			return nil, fmt.Errorf("step %q: body is empty", stepName)
+			return nil, refuseAtBody(kw, kwWidth, fmt.Errorf("step %q: body is empty", stepName))
+		}
+		leadAt, leadWidth := firstWordAt(scan, openIdx+1)
+		refuseStep := func(err error) error {
+			return refuseAtBody(leadAt, leadWidth, fmt.Errorf("step %q: %w", stepName, err))
 		}
 		// A `forEach`/`for` step body lowers to a top-level for-range loop
 		// statement (StepTypeForEach), not a `<name> := <call>` assignment
@@ -1829,7 +2168,7 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 		if lead == "forEach" || lead == "for" {
 			stmt, err := translateForEachStepCall(stepName, stepBody)
 			if err != nil {
-				return nil, fmt.Errorf("step %q: %w", stepName, err)
+				return nil, refuseStep(err)
 			}
 			out = append(out, automationStep{name: stepName, call: stmt, raw: true})
 			pos = closeIdx + 1
@@ -1838,7 +2177,7 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 		if lead == "switch" {
 			stmt, err := translateSwitchStepCall(stepName, stepBody)
 			if err != nil {
-				return nil, fmt.Errorf("step %q: %w", stepName, err)
+				return nil, refuseStep(err)
 			}
 			out = append(out, automationStep{name: stepName, call: stmt, raw: true})
 			pos = closeIdx + 1
@@ -1846,7 +2185,7 @@ func parseAutomationSteps(body string) ([]automationStep, error) {
 		}
 		call, err := translateStepCall(stepBody)
 		if err != nil {
-			return nil, fmt.Errorf("step %q: %w", stepName, err)
+			return nil, refuseStep(err)
 		}
 		out = append(out, automationStep{name: stepName, call: call})
 		pos = closeIdx + 1

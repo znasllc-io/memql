@@ -15,7 +15,7 @@ func TestQueryUnboundedInjectsExplicitPaginate(t *testing.T) {
 	source := `@unbounded("small bounded catalog -- never more than a handful of rows")
 @description("All providers.")
 query provider queryAllProviders {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   providerFull
 }`
 	out, err := NormaliseQuerySource(source)
@@ -32,22 +32,33 @@ query provider queryAllProviders {
 	}
 }
 
+// TestQueryUnboundedRequiresReason: a bare @unbounded is refused on the
+// authored path. Since memql#5359 the refusal is the annotation registry's
+// (@unbounded takes one string), raised by the parser; the rewriter no longer
+// runs a second, uncoded form check of its own.
 func TestQueryUnboundedRequiresReason(t *testing.T) {
 	source := `@unbounded
 @description("missing reason")
 query provider queryAllProviders {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   providerFull
 }`
-	if _, err := NormaliseQuerySource(source); err == nil {
+	lowered, err := NormaliseQuerySource(source)
+	if err == nil {
+		_, err = ParseFile(lowered)
+	}
+	if err == nil {
 		t.Fatal("expected bare @unbounded (no reason) to be rejected")
+	}
+	if !strings.Contains(err.Error(), "@unbounded on a query takes one string") || !strings.HasSuffix(err.Error(), "[annotation_form]") {
+		t.Fatalf("expected the registry's form refusal, got: %v", err)
 	}
 }
 
 func TestQueryUnboundedEmptyReasonRejected(t *testing.T) {
 	source := `@unbounded("")
 query provider queryAllProviders {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   providerFull
 }`
 	if _, err := NormaliseQuerySource(source); err == nil {
@@ -58,7 +69,7 @@ query provider queryAllProviders {
 func TestQueryUnboundedRejectsPaginateCombo(t *testing.T) {
 	source := `@unbounded("conflicts with paginate")
 query provider queryAllProviders {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   paginate 10
   shape   providerFull
 }`
@@ -70,7 +81,7 @@ query provider queryAllProviders {
 func TestQueryUnboundedRejectsSortCombo(t *testing.T) {
 	source := `@unbounded("conflicts with sort")
 query provider queryAllProviders {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   sort    "createdAt", "desc"
   shape   providerFull
 }`
@@ -84,7 +95,7 @@ query provider queryAllProviders {
 func TestQueryWithoutUnboundedUnchanged(t *testing.T) {
 	source := `@description("plain list query")
 query space queryActiveSpaces {
-  filter  payload.active==true
+  filter  row => row.active == true
   shape   spaceFull
 }`
 	out, err := NormaliseQuerySource(source)

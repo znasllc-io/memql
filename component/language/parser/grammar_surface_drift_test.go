@@ -84,23 +84,23 @@ var grammarSurfaceCorpus = []struct {
   args {
     id string @required
   }
-  filter row.id==args.id
+  filter row => row.id == args.id
   shape probeCard
 }`},
 	{"struct query: sort + paginate", true, `query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
   sort "row.createdAt", "desc"
   paginate 25
 }`},
 	{"struct query: count", true, `query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
   count
 }`},
 	{"struct query: asOf with the ?? latest fallback", true, `query thing probe {
   args {
     at string
   }
-  filter row.id!=""
+  filter row => row.id != ""
   asOf args.at ?? latest
 }`},
 	{"struct mutation: insert", true, `mutate thing probe {
@@ -136,9 +136,7 @@ var grammarSurfaceCorpus = []struct {
     return x
   }
 }`},
-	{"spec: bare return", true, `spec thing probe {
-  return active == true
-}`},
+	{"spec: bare return", true, `spec thing probe = row => row.active == true`},
 	{"shape: @row path list", true, `@row
 shape probe {
   row.id
@@ -186,7 +184,7 @@ automation probe {
   args {
     at string
   }
-  filter row.id!=""
+  filter row => row.id != ""
   asOf args.at
 }`},
 	{"retired expression builtin `year()` (93b365ed, memql#2707)", false, `logic probe {
@@ -199,10 +197,10 @@ automation probe {
 }`},
 	{"inline `concept` line in a struct query", false, `query thing probe {
   concept v1:probe:thing
-  filter row.id!=""
+  filter row => row.id != ""
 }`},
 	{"unknown struct-query clause", false, `query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
   project name
 }`},
 	{"named write block `insert <Concept> { }` (memql#988)", false, `mutate thing probe {
@@ -224,6 +222,103 @@ automation probe {
     id: args.id
   }
 }`},
+	// ---- the annotation registry's parse-time narrowings (memql#5359) -----
+	// The registry became the one annotation gate, at PARSE time, for every
+	// construct and field list. Each of these parsed on this path before it:
+	// the field lists accepted any annotation, the four function kinds were
+	// checked only by a load-time text scan of their names, an action had no
+	// check at all, and no check looked at an annotation's arguments.
+	{"unknown annotation on a prompt field (memql#5359)", false, `prompt probe {
+  topic string @bogusFieldAnnotation
+}`},
+	{"unknown annotation on a builtin field (memql#5359)", false, `builtin probe {
+  topic string @bogusFieldAnnotation
+}`},
+	{"a flag annotation given an argument (memql#5359)", false, `@serverOnly("yes")
+query thing probe {
+  filter row => row.id != ""
+}`},
+	{"unknown annotation on a query, refused at parse (memql#5359)", false, `@bogusAnnotation
+query thing probe {
+  filter row => row.id != ""
+}`},
+	{"unknown annotation on an action (memql#5359)", false, `@bogusAnnotation
+action probe {
+  capability script(script: "x")
+}`},
+	{"unknown keyword key on @trigger (memql#5359)", false, `@trigger(evnt="node.created")
+automation probe {
+  step run {
+    mutation createThing (id: "x")
+  }
+}`},
+	{"a non-repeatable annotation written twice (memql#5359)", false, `@description("one")
+@description("two")
+query thing probe {
+  filter row => row.id != ""
+}`},
+	{"@when() with empty parentheses on a rule", true, `@when()
+@policy("localFirst")
+rule probe { }`},
+	// A keyword key written in the shape its placement does not take: the
+	// parser stores a bare key as `true`, so a valued key written bare read
+	// as "" downstream -- this tool registered with no rate limit.
+	{"a valued keyword key written bare (memql#5359)", false, `@handler(type="function", name="x")
+@rateLimit(maxCalls, periodSeconds)
+tool probe {
+  x string
+}`},
+	{"the @trigger(on=...) synonym for event= (memql#5359)", true, `@trigger(on=participant.created)
+automation probe {
+  step run {
+    mutation createThing (id: "x")
+  }
+}`},
+	// Logic, automation and mutation bodies refuse a clause they do not
+	// take; each emitter kept what it recognised and dropped the rest.
+	{"an unlisted clause in an automation body (memql#5359)", false, `automation probe {
+  filter row.id != ""
+  step run {
+    mutation createThing (id: "x")
+  }
+}`},
+	{"an unlisted block in a logic body (memql#5359)", false, `logic probe {
+  step s {
+    mutation createThing (id: "x")
+  }
+  body {
+    return 1
+  }
+}`},
+	{"a stray top-level line in a mutation body (memql#5359)", false, `mutate thing probe {
+  insert {
+    id: "x"
+  }
+  filter row.id != ""
+}`},
+	// The named block written without its name, beside a named one (so the
+	// refusal is the missing name, not the missing step), and an unnamed
+	// block written twice.
+	{"a step block without its name (memql#5359)", false, `automation probe {
+  step {
+    mutation createThing (id: "x")
+  }
+  step run {
+    mutation createThing (id: "y")
+  }
+}`},
+	{"a second args block in a logic body (memql#5359)", false, `logic probe {
+  args {
+    x string
+  }
+  args {
+    y string
+  }
+  body {
+    return args.x
+  }
+}`},
+
 	// NOT in this corpus: the retired procedural `func (Query) name(ctx any)`
 	// author-side form. It is refused, but NOT by NormaliseAll + ParseFile --
 	// measured here, it parses clean at this layer, so an entry asserting

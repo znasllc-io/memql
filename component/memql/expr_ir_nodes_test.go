@@ -290,10 +290,17 @@ func TestArrayPredicate_CompilesToJSONBArraySQL(t *testing.T) {
 			args: []any{float64(0)},
 		},
 		{
-			name: "count, with the non-array guard inside the length",
+			name: "count, dispatching on the stored type: an array's length, a string's characters, else 0",
 			expr: &ArrayPredicateExpression{Field: irPayloadField("tags"), Method: ArrayMethodCount, CountOp: OpGt, CountValue: int64(2)},
-			sql:  `(COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(payload->'tags') = 'array' THEN payload->'tags' END), 0) > ?)`,
+			sql:  `((CASE jsonb_typeof(payload->'tags') WHEN 'array' THEN jsonb_array_length(payload->'tags') WHEN 'string' THEN char_length(payload #>> '{tags}') ELSE 0 END) > ?)`,
 			args: []any{float64(2)},
+		},
+		{
+			name: "count over an element field reads the element",
+			expr: &ArrayPredicateExpression{Field: irPayloadField("items"), Method: ArrayMethodAny, Param: "i",
+				Pred: &ArrayPredicateExpression{Field: irElementField("tags"), Method: ArrayMethodCount, CountOp: OpEq, CountValue: int64(0)}},
+			sql:  `(CASE WHEN jsonb_typeof(payload->'items') = 'array' THEN EXISTS (SELECT 1 FROM jsonb_array_elements(payload->'items') AS e(v) WHERE COALESCE((((CASE jsonb_typeof(e.v->'tags') WHEN 'array' THEN jsonb_array_length(e.v->'tags') WHEN 'string' THEN char_length(e.v #>> '{tags}') ELSE 0 END) = ?)), FALSE)) ELSE FALSE END)`,
+			args: []any{float64(0)},
 		},
 		{
 			name: "an element ordering is byte order too",
@@ -412,7 +419,13 @@ func TestArrayPredicate_InProcessRules(t *testing.T) {
 	}{
 		{"absent", `{}`, want{false, true, true, false, false, false, true}},
 		{"JSON null", `{"tags":null}`, want{false, true, true, false, false, false, true}},
-		{"a present scalar", `{"tags":"a"}`, want{false, false, true, false, false, false, false}},
+		// A stored value that is not an array satisfies nothing, and count()
+		// counts what is stored: a string its characters (code points, so
+		// "é中" is two, in five bytes), anything else none.
+		{"a present string", `{"tags":"a"}`, want{false, false, false, false, false, false, false}},
+		{"a present two-character string", `{"tags":"é中"}`, want{false, false, false, true, false, false, false}},
+		{"a present object", `{"tags":{"k":"a"}}`, want{false, false, true, false, false, false, false}},
+		{"a present number", `{"tags":7}`, want{false, false, true, false, false, false, false}},
 		{"empty", `{"tags":[]}`, want{false, true, true, false, false, false, true}},
 		{"just a", `{"tags":["a"]}`, want{true, true, false, false, false, false, true}},
 		{"a and b", `{"tags":["a","b"]}`, want{true, false, false, true, false, false, true}},

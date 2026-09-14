@@ -32,7 +32,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }
 
 @enabled
@@ -74,9 +74,7 @@ func TestSpecSliceRefusalNamesTheFileLine(t *testing.T) {
 
 @enabled
 @description("An item with a name.")
-spec item isNamed {
-  return name != ""
-}
+spec item isNamed = row => row.name != ""
 
 /// An item with a status, written with the retired null.
 spec item hasStatus = row => row.status != null`
@@ -109,7 +107,7 @@ concept widget {
 @description("first")
 @public
 query widget allA {
-  filter  status == "x"
+  filter  row => row.status == "x"
 }
 
 @description("second")
@@ -134,4 +132,80 @@ query widget unstatused {
 		return
 	}
 	t.Fatalf("no diagnostic for unstatused: %+v", rep.Diagnostics)
+}
+
+// TestRewriteRefusalNamesTheFileAndBundlePosition: a refusal the struct-form
+// rewriter makes -- here `refine` without `paginate` in the second query of a
+// file -- is placed at the refine clause by the unified function loader (the
+// file's line, through the slice's anchor) and by the authoring sandbox (the
+// bundle's), where the loader used to lead with the parse failure of the
+// unlowered construct and the sandbox fell back to the construct's header.
+func TestRewriteRefusalNamesTheFileAndBundlePosition(t *testing.T) {
+	file := `use demo.concepts.{ item }
+
+@enabled
+@description("A clean query.")
+query item queryItems {
+  args {
+    name  string  @required
+  }
+  filter  row => row.name == args.name
+}
+
+@enabled
+@description("Items refined in process, with no page for refine to run over.")
+query item refinedItems {
+  filter row => row.name == "x"
+  refine row => row.status == "open"
+}`
+	var target *FunctionSlice
+	for _, s := range ExtractFunctionSlices(file) {
+		if s.Name == "refinedItems" {
+			s := s
+			target = &s
+		}
+	}
+	if target == nil {
+		t.Fatal("no slice for refinedItems")
+	}
+	_, err := dispatchPerConstructParser(*target, "unified:demo/queries.memql", memorynodes.DefaultRegistry())
+	off := strings.Index(file, "refine row")
+	lineStart := strings.LastIndex(file[:off], "\n") + 1
+	line, col := 1+strings.Count(file[:off], "\n"), 1+utf8.RuneCountInString(file[lineStart:off])
+	if want := "rewrite error at line " + strconv.Itoa(line) + ", column " + strconv.Itoa(col) + ": "; err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Fatalf("got %v, want the refusal led by %q", err, want)
+	}
+
+	bundle := `@namespace("alpha")
+concept widget {
+  status string
+}
+
+@description("first")
+@public
+query widget allA {
+  filter  row => row.status == "x"
+}
+
+@description("second")
+@public
+query widget refined {
+  filter row => row.status == "x"
+  refine row => row.status == "y"
+}
+`
+	rep := SandboxCompileBundle(SplitBundleSource(bundle))
+	for _, d := range rep.Diagnostics {
+		if d.Name != "refined" {
+			continue
+		}
+		off := strings.Index(bundle, "refine row")
+		lineStart := strings.LastIndex(bundle[:off], "\n") + 1
+		line, col := 1+strings.Count(bundle[:off], "\n"), 1+utf8.RuneCountInString(bundle[lineStart:off])
+		if d.OK || d.Line != line || d.Column != col || d.EndColumn != col+len("refine") {
+			t.Fatalf("diagnostic ok=%v at %d:%d-%d:%d, want %d:%d-%d:%d (the refine clause): %s", d.OK, d.Line, d.Column, d.EndLine, d.EndColumn, line, col, line, col+len("refine"), d.Error)
+		}
+		return
+	}
+	t.Fatalf("no diagnostic for refined: %+v", rep.Diagnostics)
 }

@@ -105,7 +105,7 @@ query participant queryActiveParticipants {
   args {
     partitionId  string  @required
   }
-  filter participant.partitionId == args.partitionId
+  filter row => row.partitionId == args.partitionId
   shape  participantFull
 }`
 	if err := RejectLegacyProceduralAuthorForm(src); err != nil {
@@ -122,7 +122,7 @@ query participant queryActiveParticipants {
   args {
     partitionId  string  @required
   }
-  filter participant.partitionId == args.partitionId
+  filter row => row.partitionId == args.partitionId
   shape  participantFull
 }`
 	out, err := NormaliseAll(src)

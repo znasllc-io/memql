@@ -261,7 +261,7 @@ func TestV1CrossNamespaceImport(t *testing.T) {
 // bare-conjunct read was one line long too.
 func TestCrossNamespaceBareConjunctOnALegacyContinuationLine(t *testing.T) {
 	got := gateOn(t, map[string]string{
-		"common/traits.memql":   "trait isActiveRecord {\n  return active == true\n}\n",
+		"common/traits.memql":   "trait isActiveRecord = row => row.active == true\n",
 		"gadgets/queries.memql": v1Query("ownerUserId==actor.userId\n    && isActiveRecord"),
 	})
 	if len(got) != 1 {

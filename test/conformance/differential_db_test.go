@@ -23,18 +23,19 @@ package conformance
 // a refine clause over the same rows would fail the read. Each is named with
 // the case file (or the generated expression), the row and both answers.
 //
-// Two disagreements are known and recorded as open questions of the language
-// (component/memql/expr_lower_agreement_db_test.go, irEvalDivergentRows): a
-// bare condition over a stored non-boolean, which D8 refuses in process and
-// the SQL reads as "not true", and count() of a stored string, the string's
-// characters in process and 0 in the pushdown. The lane logs both.
+// There is no allowance: every row of every expression must agree, the
+// mistyped ones included. A stored value of the wrong type is data on both
+// sides (component/memql/expr_stored.go): not equal, not ordered, not a
+// member, not true, and counted by what it holds.
 //
-// ADVISORY until the freeze epic (dsl-v1-freeze): a disagreement is logged on
-// a line starting `DIFFERENTIAL:` and the test passes, unless
+// ADVISORY until memql#5386 (the freeze epic: "the differential lane joins the
+// required db-tests set") makes it required: a disagreement is logged on a
+// line starting `DIFFERENTIAL:` and the test passes, unless
 // MEMQL_DIFFERENTIAL_REQUIRED=1, which makes the first disagreement a failure.
-// An expression the lowering refuses at load is not a disagreement -- the
-// refusal IS its answer, and the corpus pins refusals -- but the lane counts
-// them, and fails when it compared nothing at all.
+// Zero disagreements is the lane's expected state, so required mode passes
+// today. An expression the lowering refuses at load is not a disagreement --
+// the refusal IS its answer, and the corpus pins refusals -- but the lane
+// counts them, and fails when it compared nothing at all.
 //
 // WHERE IT RUNS. The `mcp-conformance` job of .github/workflows/ci.yml runs
 // `go test -count=1 -timeout=300s -v ./test/conformance/...` against a
@@ -184,6 +185,12 @@ func laneMatrix() []string {
 		`row => row.flag != false`,
 		`row => row.flag`,
 		`row => !row.flag`,
+		// A bare field as an operand and as a ternary's branch is a condition
+		// too, and count() counts what the field stores.
+		`row => row.flag || row.value == "e"`,
+		`row => row.flag == true ? true : row.flag`,
+		`row => row.value.count() == 1`,
+		`row => row.value.count() == 0`,
 	)
 	return out
 }

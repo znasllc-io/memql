@@ -17,7 +17,7 @@ import (
 
 func TestQueryStructFormSortDirective(t *testing.T) {
 	source := `query space queryLatestSpaces {
-  filter  payload.active==true
+  filter  row => row.active == true
   sort    "createdAt", "desc"
   shape   spaceFull
 }`
@@ -33,7 +33,7 @@ func TestQueryStructFormSortDirective(t *testing.T) {
 
 func TestQueryStructFormSortDirectiveMultipleFields(t *testing.T) {
 	source := `query space queryActiveSpacesOrdered {
-  filter  payload.active==true
+  filter  row => row.active == true
   sort    "createdAt", "desc", "payload.name", "asc"
   shape   spaceFull
 }`
@@ -49,7 +49,7 @@ func TestQueryStructFormSortDirectiveMultipleFields(t *testing.T) {
 
 func TestQueryStructFormPaginateDirective(t *testing.T) {
 	source := `query space queryFirstTenSpaces {
-  filter  payload.active==true
+  filter  row => row.active == true
   paginate 10
   shape   spaceFull
 }`
@@ -70,7 +70,7 @@ func TestQueryStructFormPaginateDirective(t *testing.T) {
 // parser rejects.
 func TestQueryStructFormPaginateDirectiveOffsetRejected(t *testing.T) {
 	source := `query space querySpacesPage {
-  filter  payload.active==true
+  filter  row => row.active == true
   paginate 10, 20
   shape   spaceFull
 }`
@@ -87,7 +87,7 @@ func TestQueryStructFormPaginateDirectiveOffsetRejected(t *testing.T) {
 
 func TestQueryStructFormAsOfLatest(t *testing.T) {
 	source := `query space queryLatestAsOfNow {
-  filter  payload.active==true
+  filter  row => row.active == true
   asOf    latest
   shape   spaceFull
 }`
@@ -103,7 +103,7 @@ func TestQueryStructFormAsOfLatest(t *testing.T) {
 
 func TestQueryStructFormAsOfRFC3339(t *testing.T) {
 	source := `query space querySpacesAtTimestamp {
-  filter  payload.active==true
+  filter  row => row.active == true
   asOf    "2026-01-01T00:00:00Z"
   shape   spaceFull
 }`
@@ -124,7 +124,7 @@ func TestQueryStructFormAsOfRFC3339(t *testing.T) {
 // procedural query is byte-equivalent in semantics.
 func TestQueryStructFormAllDirectivesWrappingOrder(t *testing.T) {
 	source := `query space queryLatestActiveSpaceShaped {
-  filter  payload.active==true
+  filter  row => row.active == true
   asOf    latest
   sort    "createdAt", "desc"
   paginate 1
@@ -144,7 +144,7 @@ func TestQueryStructFormDirectivesWithoutShape(t *testing.T) {
 	// sort + paginate without an explicit shape -- the output should
 	// just be the wrapped filter (no outer shape() call).
 	source := `query space queryFirstFiveSpaces {
-  filter  payload.active==true
+  filter  row => row.active == true
   sort    "createdAt", "desc"
   paginate 5
 }`
@@ -168,7 +168,7 @@ func TestQueryStructFormBackwardCompatPlainFilterShape(t *testing.T) {
 	// is the "harmless regression-guard" case that pins backward
 	// compatibility for the existing 80+ cognition queries.
 	source := `query space queryActiveSpaces {
-  filter  payload.active==true
+  filter  row => row.active == true
   shape   spaceFull
 }`
 	out, err := NormaliseQuerySource(source)
@@ -187,7 +187,7 @@ func TestQueryStructFormBackwardCompatPlainFilterShape(t *testing.T) {
 // exclusive with shape / sort / paginate.
 func TestQueryStructFormCountDirective(t *testing.T) {
 	source := `query user userCount {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   count
 }`
 	out, err := NormaliseQuerySource(source)
@@ -216,7 +216,7 @@ func TestQueryStructFormCountNoFilter(t *testing.T) {
 
 func TestQueryStructFormCountRejectsShape(t *testing.T) {
 	source := `query user userCount {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   count
   shape   userFull
 }`
@@ -227,7 +227,7 @@ func TestQueryStructFormCountRejectsShape(t *testing.T) {
 
 func TestQueryStructFormCountRejectsPaginate(t *testing.T) {
 	source := `query user userCount {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   count
   paginate 10
 }`

@@ -27,7 +27,7 @@ func TestAutomationCondition_MigratedPatternsAreFindings(t *testing.T) {
 		{"retention date-math if", `automation probe {
   step apply {
     forEach item in decide.result {
-      if addDuration(item.createdAt, concat("P", coalesce(window.first().payload.value, "30"), "D")) < now {
+      if addDuration(item.createdAt, "P" + (window.first().payload.value ?? "30") + "D") < now {
         mutation expire ( id: item.id )
       }
     }
@@ -80,12 +80,12 @@ func TestAutomationCondition_SanctionedShapesPass(t *testing.T) {
     }
   }
   step teardown {
-    if steps.terminal.result == true && exists(event.node.id) {
+    if steps.terminal.result == true && event.node.id != nil {
       builtin teardown ( planId: event.node.id )
     }
   }
 }`},
-		{"relevance @filter equality", `@filter(event.node.payload.preferences.computerUseEnabled == false)
+		{"relevance @filter equality", `@filter(row => event.node.payload.preferences.computerUseEnabled == false)
 automation probe {
   step run { logic f ( event ) }
 }`},

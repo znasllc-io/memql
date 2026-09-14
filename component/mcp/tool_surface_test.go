@@ -111,6 +111,13 @@ func (e *fakeEngine) StageConstructDurable(ctx context.Context, owner string, c 
 	return nil
 }
 
+// DefineSessionBundle has no engine registries to lower in, so it defines as
+// the engine-free AuthorSessionBundle does; a test asserting the engine's
+// lowering drives a real engine instead.
+func (e *fakeEngine) DefineSessionBundle(reg *memql.AuthoredRuntimeRegistry, owner, bundle, origin string) (memql.SessionDefineResult, error) {
+	return memql.AuthorSessionBundle(reg, owner, bundle, origin)
+}
+
 func (e *fakeEngine) ExecuteInline(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error) {
 	e.query = query
 	e.inlineCalled = true

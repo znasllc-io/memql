@@ -15,9 +15,10 @@ package main
 //
 // The edit is langparser.PlanExpressions over the buffer, against the
 // predicate set memqlmigrate would collect for the same file: every source of
-// the workspace's DSL tree, the open buffers as they are rather than as they
-// were saved, and the core domains the workspace does not carry
-// (memql.WorkspacePredicateSources). Three rules keep it honest:
+// the workspace's DSL tree (memql.WorkspacePredicateSources), the open buffers
+// as they are rather than as they were saved, resolved over the embedded core
+// tree the workspace loads over (langparser.ResolvePredicatesOver). Three rules
+// keep it honest:
 //
 //  1. The unit of a fix is a top-level REGION -- a construct with the
 //     annotations above it -- because a construct is what parses on its own. A
@@ -47,6 +48,7 @@ import (
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/sense"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 const (
@@ -420,6 +422,9 @@ type rewriteState struct {
 	disk   map[string]uint64
 	scans  map[string]langparser.PredicateDeclarations
 	paths  []string // the keys of scans, sorted
+	// core is the embedded core tree's declarations, the base the workspace
+	// resolves over, as memqlmigrate resolves a tree.
+	core []langparser.PredicateDeclarations
 
 	predsKey string
 	preds    map[string]langparser.PredicateInfo
@@ -433,10 +438,15 @@ type fixMemo struct {
 	fixes     []regionFix
 }
 
-// load reads and scans the workspace's predicate sources. The scan is the
-// expensive half of collecting predicates, so it happens here, off the
-// request path, and a request rescans only the buffers that differ from disk.
+// load reads and scans the workspace's predicate sources, and the core tree's
+// once. The scan is the expensive half of collecting predicates, so it happens
+// here, off the request path, and a request rescans only the buffers that
+// differ from disk.
 func (st *rewriteState) load(root string) {
+	core, err := corePredicates()
+	if err != nil {
+		core = nil // the embedded tree always reads; a nil base only costs refusals
+	}
 	files, dir := memql.WorkspacePredicateSources(os.DirFS(root))
 	disk := make(map[string]uint64, len(files))
 	scans := make(map[string]langparser.PredicateDeclarations, len(files))
@@ -453,6 +463,7 @@ func (st *rewriteState) load(root string) {
 	st.gen++
 	st.dslDir = filepath.Join(root, filepath.FromSlash(dir))
 	st.disk, st.scans, st.paths = disk, scans, paths
+	st.core = core
 	st.predsKey, st.preds, st.predsErr = "", nil, nil
 	st.memo = nil
 }
@@ -512,7 +523,7 @@ func (st *rewriteState) predicates(open map[protocol.DocumentUri]string, uri pro
 		}
 		decls = append(decls, st.scans[p])
 	}
-	st.preds, st.predsErr = langparser.ResolvePredicates(decls)
+	st.preds, st.predsErr = langparser.ResolvePredicatesOver(st.core, decls)
 	st.predsKey = key
 	return st.preds, key, true, st.predsErr
 }
@@ -560,6 +571,12 @@ func (st *rewriteState) forget(uri protocol.DocumentUri) {
 	defer st.mu.Unlock()
 	delete(st.memo, uri)
 }
+
+// corePredicates is the embedded core tree's predicate declarations, scanned
+// once per process.
+var corePredicates = sync.OnceValues(func() ([]langparser.PredicateDeclarations, error) {
+	return langparser.ScanPredicateTree(memqldsl.Tree())
+})
 
 func contentHash(s string) uint64 {
 	h := fnv.New64a()

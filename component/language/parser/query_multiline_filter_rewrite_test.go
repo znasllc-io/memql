@@ -23,7 +23,8 @@ const multilineFilterReference = `query space q {
     ownerId string
     status  string
   }
-  filter  when(args.ownerId) { ownerId==args.ownerId } && when(args.status) { status==args.status }
+  filter  row => (args.ownerId == nil || row.ownerId == args.ownerId)
+              && (args.status == nil || row.status == args.status)
 }`
 
 func TestQueryMultiLineFilterMatchesSingleLine(t *testing.T) {
@@ -44,8 +45,8 @@ func TestQueryMultiLineFilterMatchesSingleLine(t *testing.T) {
     ownerId string
     status  string
   }
-  filter  when(args.ownerId) { ownerId==args.ownerId } &&
-          when(args.status) { status==args.status }
+  filter  row => (args.ownerId == nil || row.ownerId == args.ownerId)
+              && (args.status == nil || row.status == args.status)
 }`,
 		},
 		{
@@ -56,8 +57,8 @@ func TestQueryMultiLineFilterMatchesSingleLine(t *testing.T) {
     ownerId string
     status  string
   }
-  filter  when(args.ownerId) { ownerId==args.ownerId }
-          && when(args.status) { status==args.status }
+  filter  row => (args.ownerId == nil || row.ownerId == args.ownerId)
+              && (args.status == nil || row.status == args.status)
 }`,
 		},
 	}
@@ -83,8 +84,8 @@ func TestQueryMultiLineFilterDoesNotSwallowFollowingFields(t *testing.T) {
   args {
     ownerId string
   }
-  filter  when(args.ownerId) { ownerId==args.ownerId } &&
-          isActiveRecord
+  filter  row => (args.ownerId == nil || row.ownerId == args.ownerId)
+              && isActiveRecord(row)
   sort    "row.createdAt", "desc"
   shape   spaceFull
 }`
@@ -109,16 +110,15 @@ func TestQueryMultiLineFilterUnclosedDelimiters(t *testing.T) {
     a string
     b string
   }
-  filter  (a==args.a ||
-           b==args.b)
+  filter  row => row.a == args.a
+              || row.b == args.b
 }`,
 		"open brace": `query space q {
   args {
     a string
   }
-  filter  when(args.a) {
-            a==args.a
-          }
+  filter  row => args.a == nil
+              || row.a == args.a
 }`,
 	}
 	for name, source := range cases {
@@ -155,7 +155,7 @@ func TestQueryMultiLineFilterIgnoresBracesInStrings(t *testing.T) {
 // authoring error into a confusing one -- or into silence.
 func TestQueryUnknownFieldStillRejected(t *testing.T) {
 	source := `query space q {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shpe    spaceFull
 }`
 	_, err := NormaliseQuerySource(source)

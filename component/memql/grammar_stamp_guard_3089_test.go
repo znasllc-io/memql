@@ -52,7 +52,7 @@ func stampTestEngine(t *testing.T) *MemQLEngine {
 }
 
 // A stored spec whose source is VALID under the current grammar.
-const validStoredSpecSource = "spec activeRowTrait storedValidSpec {\n  return status == \"active\"\n}\n"
+const validStoredSpecSource = "spec activeRowTrait storedValidSpec = row => row.status == \"active\"\n"
 
 // A stored spec whose source does NOT compile under the current grammar -- the
 // "row predates a grammar move" rot case.

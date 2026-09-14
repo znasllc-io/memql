@@ -172,7 +172,7 @@ func TestAuthoredScheduler_EventTrigger_HonoursItsFilter(t *testing.T) {
 	loadConceptsForAuthored(t)
 	for _, c := range []struct{ name, filter string }{
 		{"v1 lambda over the row", `@filter(row => row.primaryEmail.includes("@acme.com"))`},
-		{"legacy condition", `@filter(payload.primaryEmail == "eve@acme.com")`},
+		{"legacy condition", `@filter(row => row.primaryEmail == "eve@acme.com")`},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			bus := events.NewBus()

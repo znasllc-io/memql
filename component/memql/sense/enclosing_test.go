@@ -50,7 +50,7 @@ func TestResolveEnclosingConstruct(t *testing.T) {
 		},
 		{
 			name: "closed construct leaves no enclosure",
-			src:  "query todo todos {\n  filter todo.done == false\n}\n",
+			src:  "query todo todos {\n  filter row => row.done == false\n}\n",
 		},
 	}
 	for _, tc := range cases {
@@ -70,7 +70,7 @@ func TestResolveEnclosingConstruct(t *testing.T) {
 // A top-level @ PRECEDES its construct: the receiver is the next header
 // below the cursor; at EOF there is none (union fallback preserved).
 func TestPreambleAnnotationReceiver(t *testing.T) {
-	src := "@\nquery todo todos {\n  filter todo.done == false\n}\n"
+	src := "@\nquery todo todos {\n  filter row => row.done == false\n}\n"
 	ctx := analyzeCursorContext(src, 1, 2)
 	if ctx.ReceiverType != "Query" {
 		t.Errorf("preamble @ above a query: ReceiverType = %q, want Query", ctx.ReceiverType)
@@ -97,7 +97,7 @@ func TestPreambleAnnotationReceiver(t *testing.T) {
 // populated, @ above a query stops offering mutation-only annotations.
 func TestAnnotationFilterEngaged(t *testing.T) {
 	s := New(&fakeRegistry{})
-	src := "@\nquery todo todos {\n  filter todo.done == false\n}\n"
+	src := "@\nquery todo todos {\n  filter row => row.done == false\n}\n"
 	items := s.Complete(src, 1, 2, "probe.memql")
 	got := map[string]bool{}
 	for _, it := range items {
