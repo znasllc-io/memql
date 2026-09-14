@@ -35,7 +35,11 @@
 // Path defaults to the current working directory. A single .memql
 // file scopes the diagnostic report to that file + its transitively-
 // imported neighbors; pointing at a directory loads the whole tree
-// rooted there.
+// rooted there. A directory that is itself one domain -- it directly
+// holds .memql files, as bundle/<domain> does -- is linted as that
+// domain, the way a node receives it: under its own name, with its
+// memql.toml inside it. A single file is linted within its directory
+// the same way.
 //
 // Exit codes:
 //
@@ -57,13 +61,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"testing/fstest"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/dslimports"
+	"github.com/znasllc-io/memql/core/dslfs"
 
 	// Connector declarations (epic memql#4378). The engine-parity pass
 	// below drives MemQLEngine.Init, which resolves every @origin and
@@ -154,7 +162,19 @@ func run(args []string) int {
 		return 2
 	}
 
-	root := os.DirFS(rootDir)
+	var root fs.FS = os.DirFS(rootDir)
+	// A root that is itself one domain directory -- `memqllint bundle/znas`,
+	// or a file inside one, whose directory is the root -- is linted as that
+	// domain, the way a node receives it: under its own name, with its
+	// memql.toml inside it. Linted as a bare root its files sit at depth 1,
+	// where no rule finds a domain, so a domain with no language line passed.
+	// memqlmigrate reads a root the same way (parser.LanguageLineRootIsDomain).
+	if domain, domainTree, ok := asDomainTree(rootDir); ok {
+		root = domainTree
+		if target != "" {
+			target = domain + "/" + target
+		}
+	}
 	tree, loadErr := dslimports.Load(root)
 	loadDiags := flattenDiagnostics(loadErr)
 
@@ -254,7 +274,7 @@ func buildReport(tree *dslimports.Tree, loadErr error, diags []error, target str
 	}
 	if len(diags) > 0 {
 		for _, d := range diags {
-			if target != "" && !errorMentionsFile(d, target) {
+			if target != "" && !aboutTarget(d, target) {
 				// Single-file mode: skip diagnostics about other
 				// files in the tree.
 				continue
@@ -288,6 +308,43 @@ func flattenDiagnostics(err error) []error {
 		return out
 	}
 	return []error{err}
+}
+
+// asDomainTree returns the directory rootDir as a tree holding the one domain
+// it is, <name>/..., when it is itself a domain directory
+// (parser.LanguageLineRootIsDomain) whose name a mount reads as a domain. ok
+// is false for any other root, which is linted as it stands.
+//
+// The files are read into memory: a domain is small, and fstest.MapFS is the
+// fs.FS over bytes already in memory -- the package imports neither `testing`
+// nor `flag`, which is why component/packages/probe.go takes it into
+// production code too.
+func asDomainTree(rootDir string) (name string, tree fs.FS, ok bool) {
+	dir := os.DirFS(rootDir)
+	paths, err := dslfs.WalkMemqlFiles(dir)
+	if err != nil || !langparser.LanguageLineRootIsDomain(paths) {
+		return "", nil, false
+	}
+	name = filepath.Base(rootDir)
+	if !langparser.LanguageLineDomainName(name) {
+		return "", nil, false
+	}
+	files := fstest.MapFS{}
+	err = fs.WalkDir(dir, ".", func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil || d.IsDir() {
+			return werr
+		}
+		data, rerr := fs.ReadFile(dir, p)
+		if rerr != nil {
+			return rerr
+		}
+		files[name+"/"+p] = &fstest.MapFile{Data: data}
+		return nil
+	})
+	if err != nil {
+		return "", nil, false
+	}
+	return name, files, true
 }
 
 // withoutParityEchoes drops each Load diagnostic the engine-parity pass
@@ -334,6 +391,18 @@ func parityCarries(parity []memql.LintDiagnostic, file, text string) bool {
 		}
 	}
 	return false
+}
+
+// aboutTarget reports whether a diagnostic belongs in a single-file report:
+// it names the target file, or it refuses the language line of the target's
+// domain. A refused line means no file of the domain is read, the target
+// included, and its text names the domain's memql.toml rather than the file.
+func aboutTarget(d error, target string) bool {
+	var line *dslimports.LanguageLineError
+	if errors.As(d, &line) {
+		return strings.HasPrefix(target, line.Problem.Domain+"/")
+	}
+	return errorMentionsFile(d, target)
 }
 
 // errorMentionsFile returns true if the diagnostic's text mentions

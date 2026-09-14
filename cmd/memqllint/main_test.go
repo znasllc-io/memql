@@ -192,6 +192,50 @@ func TestRun_RefusedLineOutsideTheParityMountIsStillReported(t *testing.T) {
 	}
 }
 
+// TestRun_ADomainDirectoryIsLintedAsItsDomain: pointed at one domain
+// directory rather than at its bundle -- or at one file inside it --
+// memqllint reads the directory the way a node receives it, as the domain it
+// is named for, with its memql.toml inside it (memql#5356). Read as a bare
+// root, its files sat at depth 1, where no rule finds a domain, so a domain
+// with no language line linted clean. memqlmigrate reads such a root the same
+// way, which is where it writes the line.
+func TestRun_ADomainDirectoryIsLintedAsItsDomain(t *testing.T) {
+	bundle := writeTreeAsIs(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/queries.memql":  testQueries,
+	})
+	domainDir := filepath.Join(bundle, "demo")
+	oneLine := func(what string, args ...string) {
+		t.Helper()
+		code, out := captureRun(t, append([]string{"--json"}, args...))
+		if code != 1 {
+			t.Fatalf("%s with no memql.toml: run() = %d, want 1\n%s", what, code, out)
+		}
+		var report Report
+		if err := json.Unmarshal([]byte(out), &report); err != nil {
+			t.Fatalf("%s: the --json report does not parse: %v\n%s", what, err, out)
+		}
+		if len(report.Errors) != 1 || !strings.Contains(report.Errors[0].Message, "[language_line_missing]") ||
+			!strings.Contains(report.Errors[0].Message, `domain "demo" declares no language line: add demo/memql.toml containing`) {
+			t.Errorf("%s: want exactly the missing line of domain demo, once, got:\n%s", what, out)
+		}
+	}
+	oneLine("the domain directory", domainDir)
+	oneLine("a file inside it", filepath.Join(domainDir, "queries.memql"))
+
+	// Positive control: the line memqlmigrate writes for this root, at the
+	// root, makes both lint clean.
+	line := dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render()
+	if err := os.WriteFile(filepath.Join(domainDir, dslfs.ManifestFile), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{domainDir, filepath.Join(domainDir, "queries.memql")} {
+		if code, out := captureRun(t, []string{target}); code != 0 {
+			t.Errorf("%s with its line declared: run() = %d, want 0\n%s", target, code, out)
+		}
+	}
+}
+
 // TestRun_UnreadRootManifestIsReported: a memql.toml at the root of the
 // linted tree is never read -- each domain carries its own -- so memqllint
 // prints it rather than letting an author believe it governs the bundle.

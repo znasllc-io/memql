@@ -205,6 +205,45 @@ func TestLanguageLineOnADomainDirectory(t *testing.T) {
 	}
 }
 
+// The loader asks no line of a domain the embedded tree owns: it speaks the
+// embedded dsl/memql.toml, and every mount skips a directory that collides
+// with one. So the rewrite writes nothing over the engine's own dsl/ -- where
+// it used to list 41 files no loader would read -- and nothing for a
+// core-named directory in a bundle, whether the bundle or the directory itself
+// is the root. The non-core domain beside it is the positive control.
+func TestLanguageLineWritesNoLineForACoreDomain(t *testing.T) {
+	if out, stderr, err := runMigrate(t, "--rewrite=language-line", "-check", filepath.Join("..", "..", "dsl")); err != nil || out != "" {
+		t.Errorf("over the engine's own dsl/: -check = %q, %v (%s); want nothing to write -- every domain there is core", out, err, stderr)
+	}
+
+	bundle := t.TempDir()
+	for rel, content := range map[string]string{
+		"library/queries.memql": "// shadows the core library domain\n",
+		"shop/queries.memql":    "// a product domain\n",
+	} {
+		full := filepath.Join(bundle, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checked, _, err := runMigrate(t, "--rewrite=language-line", "-check", bundle)
+	if !errors.Is(err, errChanged) || strings.TrimSpace(checked) != filepath.Join(bundle, "shop", dslfs.ManifestFile) {
+		t.Errorf("-check = %q, %v; want exactly shop's manifest -- library is a core domain the loader reads from the embedded tree", checked, err)
+	}
+
+	// The core-named directory handed over as the root, as one domain.
+	if out, _, err := runMigrate(t, "--rewrite=language-line", "-check", filepath.Join(bundle, "library")); err != nil || out != "" {
+		t.Errorf("the core-named domain directory as the root: -check = %q, %v; want nothing to write", out, err)
+	}
+	if out, _, err := runMigrate(t, "--rewrite=language-line", "-check", filepath.Join(bundle, "shop")); !errors.Is(err, errChanged) ||
+		strings.TrimSpace(out) != filepath.Join(bundle, "shop", dslfs.ManifestFile) {
+		t.Errorf("a product domain directory as the root: -check = %q, %v; want its own manifest at the root", out, err)
+	}
+}
+
 func TestTreeRewriteRefusesAFileArgument(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "concepts.memql")
 	if err := os.WriteFile(file, []byte("concept a {\n  id string\n}\n"), 0o644); err != nil {

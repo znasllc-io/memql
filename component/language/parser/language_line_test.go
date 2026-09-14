@@ -201,8 +201,9 @@ func TestCompareLanguageVersionsIsNumeric(t *testing.T) {
 }
 
 // LanguageLineDomainOf is the one rule for which tree files make a domain,
-// shared by the resolver and the migrator that writes the missing lines: the
-// first segment of any .memql file a loader reads, however deep.
+// shared by the resolver, LanguageLines.For and the migrator that writes the
+// missing lines: the first segment of any .memql file a loader reads, however
+// deep -- and, for a loader origin, of the path inside it.
 func TestLanguageLineDomainOf(t *testing.T) {
 	for path, want := range map[string]string{
 		"shop/concepts.memql":       "shop",
@@ -215,6 +216,12 @@ func TestLanguageLineDomainOf(t *testing.T) {
 		"shop/_wip/queries.memql":   "",
 		".attic/concepts.memql":     "",
 		"shop/memql.toml":           "",
+		// A registered construct's origin names the file it came from.
+		"unified:shop/queries.memql:listOrders":  "shop",
+		"unified:beta/sub/concepts.memql:widget": "beta",
+		"unified:concepts.memql:order":           "",
+		"unified:_parked/concepts.memql:order":   "",
+		"unified:shop/prompts/reply.tmpl:reply":  "",
 	} {
 		if got := LanguageLineDomainOf(path); got != want {
 			t.Errorf("LanguageLineDomainOf(%q) = %q, want %q", path, got, want)
@@ -340,7 +347,10 @@ func TestLanguageLinesForFindsTheDomainOfAPath(t *testing.T) {
 			t.Errorf("For(%q) = %+v, %v; want the line of good", p, line, ok)
 		}
 	}
-	for _, p := range []string{"stray.memql", "other/queries.memql", ""} {
+	// No line where the resolver counts no domain: a file at the root, a
+	// domain the tree does not hold, and a file no loader reads -- For asks
+	// LanguageLineDomainOf, the resolver's own rule, so the two cannot differ.
+	for _, p := range []string{"stray.memql", "other/queries.memql", "", "good/_wip/queries.memql", "good/_draft.memql", "good/prompts/x.tmpl"} {
 		if line, ok := lines.For(p); ok {
 			t.Errorf("For(%q) = %+v; want no line", p, line)
 		}

@@ -77,11 +77,11 @@ A newer line reads, for example:
 domain "storefront" declares memql = "1.1", newer than the 1.0 this engine speaks: run an engine that speaks 1.1, or declare memql = "1.0" in storefront/memql.toml [language_version_newer]
 ```
 
-A refused domain is read by no loader at all, so its author sees exactly one refusal per domain rather than everything that reading it under a line it did not declare would produce; fix the line, and the next boot reports what the domain itself holds. `memqllint` runs the same check over a bundle before it ships, and reports each refusal once.
+A refused domain is read by no loader at all, so its author sees exactly one refusal per domain rather than everything that reading it under a line it did not declare would produce; fix the line, and the next boot reports what the domain itself holds. `memqllint` runs the same check over a bundle before it ships, and reports each refusal once. Pointed at one domain directory instead of at the bundle (`memqllint bundle/storefront`, or a file inside it), it lints the directory as the domain it is named for, whose `memql.toml` is the one at that directory's root -- the same reading `memqlmigrate` gives a domain directory, and where it writes the line.
 
 ### Adding the line
 
-`memqlmigrate` writes the engine's line into every domain that has none, and leaves a domain that already declares one alone — moving a declared line is a decision about the tree, not a migration of it. Run it over a bundle root (or over one domain directory), with `-w` to write in place:
+`memqlmigrate` writes the engine's line into every domain that has none, and leaves a domain that already declares one alone — moving a declared line is a decision about the tree, not a migration of it. It asks the loader's own questions, so it also writes nothing for a domain the engine compiles in: that domain speaks `dsl/memql.toml`, and every mount skips a directory named after it. Run it over a bundle root (or over one domain directory), with `-w` to write in place:
 
 ```bash
 memqlmigrate --rewrite=language-line -w bundle/

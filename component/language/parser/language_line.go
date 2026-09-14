@@ -93,15 +93,25 @@ var ErrLanguageLineRefused = errors.New("the domain's language line is refused, 
 // for a file no loader reads -- one at the root, one under a `_`-prefixed
 // directory or with a `_`-prefixed name at any depth (dslfs.WalkMemqlFiles
 // skips them), one under a top-level `.`-prefixed directory (no mount mounts
-// one) -- and for anything that is not a .memql file. The resolver and
-// memqlmigrate --rewrite=language-line both key on it, so the migrator writes
-// exactly the lines the loader asks for.
+// one) -- and for anything that is not a .memql file.
+//
+// It also takes a loader origin, "<loader>:<path>:<name>" -- the form a
+// registered construct's Origin carries ("unified:shop/queries.memql:list")
+// -- and answers for the path inside it, which is how LanguageLines.For, and
+// so MemQLEngine.LanguageLineFor, is asked about a construct.
+//
+// The resolver, LanguageLines.For and memqlmigrate --rewrite=language-line
+// all key on it, and the migrator skips a domain the embedded tree owns as
+// the resolver does, so it writes exactly the lines the loader asks for.
 func LanguageLineDomainOf(path string) string {
+	if inner, ok := loaderOriginPath(path); ok {
+		path = inner
+	}
 	if !strings.HasSuffix(path, ".memql") {
 		return ""
 	}
 	segments := strings.Split(path, "/")
-	if len(segments) < 2 || strings.HasPrefix(segments[0], ".") {
+	if len(segments) < 2 || !LanguageLineDomainName(segments[0]) {
 		return ""
 	}
 	for _, seg := range segments {
@@ -110,6 +120,53 @@ func LanguageLineDomainOf(path string) string {
 		}
 	}
 	return segments[0]
+}
+
+// LanguageLineDomainName reports whether a directory named name is one a
+// mount reads as a domain: not empty, not `_`-prefixed (soft-disabled) and
+// not `.`-prefixed (hidden). It is LanguageLineDomainOf's rule for a path's
+// first segment.
+func LanguageLineDomainName(name string) bool {
+	return name != "" && !strings.Contains(name, "/") &&
+		!strings.HasPrefix(name, "_") && !strings.HasPrefix(name, ".")
+}
+
+// LanguageLineRootIsDomain reports whether the root of a tree is itself one
+// domain directory: it directly holds a .memql file a loader reads. paths are
+// the tree's files, root-relative.
+//
+// memqlmigrate and memqllint are handed such a root when an author points
+// them at one domain (bundle/<domain>) rather than at a bundle, and both then
+// read it the way a node receives it: as the domain its directory is named
+// for, whose memql.toml sits at the root. Read as a bare tree instead, its
+// files sit at depth 1, where LanguageLineDomainOf finds no domain at all.
+func LanguageLineRootIsDomain(paths []string) bool {
+	for _, p := range paths {
+		if !strings.Contains(p, "/") && strings.HasSuffix(p, ".memql") && !strings.HasPrefix(p, "_") {
+			return true
+		}
+	}
+	return false
+}
+
+// loaderOriginPath returns the tree path inside a loader origin,
+// "<loader>:<path>:<name>" with <path> a .memql file, and false for anything
+// else -- a plain tree path included, whatever its characters, so the rule
+// above reads a real path exactly as the walkers do.
+func loaderOriginPath(s string) (string, bool) {
+	loader, rest, ok := strings.Cut(s, ":")
+	if !ok || loader == "" || strings.ContainsAny(loader, "/.") {
+		return "", false
+	}
+	i := strings.LastIndexByte(rest, ':')
+	if i < 0 {
+		return "", false
+	}
+	inner, name := rest[:i], rest[i+1:]
+	if name == "" || strings.Contains(name, "/") || !strings.HasSuffix(inner, ".memql") {
+		return "", false
+	}
+	return inner, true
 }
 
 // LanguageLineProblem is one declaration the engine will not read.
@@ -171,9 +228,11 @@ func ResolveLanguageLines(tree fs.FS, core CoreTree) (LanguageLines, []LanguageL
 
 // For returns the line governing a file of the tree the lines were resolved
 // from. path is tree-relative ("<domain>/queries.memql"); a loader origin
-// ("unified:<path>:<name>") is accepted too.
+// ("unified:<path>:<name>") is accepted too. The domain is the resolver's own
+// answer (LanguageLineDomainOf), so a file the resolver counts in no domain
+// -- one no loader reads -- has no line here either.
 func (l LanguageLines) For(path string) (LanguageLine, bool) {
-	d := lineDomain(path)
+	d := LanguageLineDomainOf(path)
 	if d == "" {
 		return LanguageLine{}, false
 	}
@@ -210,18 +269,6 @@ func (l LanguageLines) Prepare(path string, src []byte) ([]byte, error) {
 		return nil, fmt.Errorf("the edition %s front end refused this file: %w", edition, err)
 	}
 	return []byte(out), nil
-}
-
-// lineDomain is the domain a tree path belongs to: its first segment, after
-// any loader origin prefix. A file at the root belongs to no domain.
-func lineDomain(p string) string {
-	if i := strings.IndexByte(p, ':'); i >= 0 && !strings.Contains(p[:i], "/") && strings.Contains(p[i+1:], "/") {
-		p = p[i+1:]
-	}
-	if i := strings.IndexByte(p, '/'); i > 0 {
-		return p[:i]
-	}
-	return ""
 }
 
 // resolveDomainLine reads one domain's declaration and checks it.
