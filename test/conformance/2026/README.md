@@ -19,7 +19,7 @@ examples a model is shown, so a case that loads is a form an author may copy.
 | `expr/<position>/` | One directory per expression position, from `component/language/tiers`. Each holds at least one case that loads and one that is refused. |
 | `statements/<construct>/<form>/` | For `logic` and `automation`, one directory per statement form and trailing clause (`parser.BodyStatementForms`), plus `scope/`, `body/` and `retired/` (one refusal per retired body form). Each form holds a case that runs and one that is refused; `statements_gate_test.go` holds them to the parser's lists. |
 | `negative/<construct>/` | One fault per file, the file named after the fault. |
-| `scenarios/<domain>/` | Whole automations as the product ships them, loaded together. |
+| `scenarios/<suite>/` | Whole automations as the product ships them, run over a database: one `scenario.json` per suite, naming shipped automations and mutations rather than copying them (see `scenarios/README.md`). The verdict runner does not read these directories. |
 | `fuzz/` | Inputs that once broke the parser. |
 
 ## A case directory
