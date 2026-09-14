@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/language/tiers"
 )
 
 // temporal_access_test.go proves the temporal-access (`asOf`) visibility
@@ -16,9 +17,9 @@ import (
 //     is deterministic and is NOT marked;
 //   - `asOf` used outside a query (a spec body here) is a load error.
 
-func temporalLoadRegistry() memoryNodes.Registry {
+func temporalLoadRegistry(t *testing.T) memoryNodes.Registry {
 	return newMemoryRegistry(map[string]*memoryNodes.Concept{
-		"v1:cluster:node": {Name: "v1:cluster:node"},
+		"v1:cluster:node": fixtureConcept(t, "v1:cluster:node", "concept node {\n  active  bool\n}\n"),
 	})
 }
 
@@ -37,10 +38,10 @@ func loadTemporalQuery(t *testing.T, name, asOfClause string) *Function {
 		"query node " + name + " {\n" +
 		argsBlock +
 		"  " + asOfClause + "\n" +
-		"  filter  payload.active == true\n" +
+		"  filter  row => row.active == true\n" +
 		"  shape   nodeCard\n" +
 		"}"
-	fn, err := tryParseNewFunctionSyntax(name, "query", src, "cluster.queries.memql", temporalLoadRegistry())
+	fn, err := tryParseNewFunctionSyntax(name, "query", src, "cluster.queries.memql", temporalLoadRegistry(t))
 	require.NoError(t, err)
 	require.NotNil(t, fn)
 	return fn
@@ -66,37 +67,38 @@ func TestQueryNoAsOfNotMarked(t *testing.T) {
 	src := "use cluster.concepts.{ node }\n\n" +
 		"@enabled\n" +
 		"query node queryPlainNodes {\n" +
-		"  filter  payload.active == true\n" +
+		"  filter  row => row.active == true\n" +
 		"  shape   nodeCard\n" +
 		"}"
-	fn, err := tryParseNewFunctionSyntax("queryPlainNodes", "query", src, "cluster.queries.memql", temporalLoadRegistry())
+	fn, err := tryParseNewFunctionSyntax("queryPlainNodes", "query", src, "cluster.queries.memql", temporalLoadRegistry(t))
 	require.NoError(t, err)
 	require.False(t, fn.LatestMode)
 }
 
 // TestSpecRejectsAsOf: a spec body is an atomic boolean predicate, not a
-// temporal read -- `asOf` is a load error. Driven through the struct-form
-// path every spec loads through (the shared parser, then specDeclToSpec);
-// the hand-rolled spec parser this test used to call was unreferenced from
-// production and is deleted (memql#5359).
+// temporal read -- `asOf` is a load error. Driven through the path every v1
+// spec loads through: the shared parser, specDeclToSpec, and the Init pass's
+// Lower at the spec-body position, which is where an edition-2026 body is
+// checked (a v1 spec body is a lambda, and nothing before Lower reads it).
+// The legacy body's validator worded the refusal "not allowed inside a spec";
+// Lower refuses the call because a name applied in a spec body is a
+// predicate, and asOf is not one.
 func TestSpecRejectsAsOf(t *testing.T) {
 	src := `@description("Boom: asOf in a spec body.")
-spec thing specReadsAsOf {
-  return asOf(active == true, latest)
-}`
+spec thing specReadsAsOf = row => asOf(row.active == true, latest)`
 	decl, err := languageParser.ParseSpecDecl(src)
-	if err == nil {
-		_, err = specDeclToSpec(decl, "test.memql")
-	}
-	if err == nil {
-		t.Fatal("expected a load error for asOf in a spec body, got nil")
-	}
-	// The live path refuses the temporal node when it validates the body as
-	// a boolean predicate; the retired hand-rolled parser worded it as
-	// "query-only".
-	if !strings.Contains(err.Error(), "not allowed inside a spec") {
-		t.Fatalf("expected the spec body refusal, got: %v", err)
-	}
+	require.NoError(t, err)
+	spec, err := specDeclToSpec(decl, "test.memql")
+	require.NoError(t, err)
+	require.NotNil(t, spec.Lambda, "a v1 spec body is a lambda")
+	_, err = Lower(spec.Lambda.Body, LowerEnv{
+		Position:  tiers.PositionSpecBody,
+		Param:     spec.Lambda.Params[0],
+		Predicate: (&MemQLEngine{specs: newSpecRegistry()}).predicateLookup(),
+	})
+	require.Error(t, err, "asOf in a spec body must not lower")
+	require.Contains(t, err.Error(), "does not lower in a spec or trait body")
+	require.Contains(t, err.Error(), "asOf(")
 }
 
 // The ruling that authorised `asOf args.X ?? latest` rested on one property:

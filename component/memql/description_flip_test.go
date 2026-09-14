@@ -28,7 +28,7 @@ func loadFlipProbe(t *testing.T, doc, annot string) *Function {
 		"    a string @required",
 		"  }",
 		"  body {",
-		"    return coalesce(args.a, \"\")",
+		"    return args.a ?? \"\"",
 		"  }",
 		"}")
 	fn, err := tryParseNewFunctionSyntax("flipProbeLogic", "logic", strings.Join(lines, "\n"), "common.logic.memql", dotAccessLoadRegistry())
