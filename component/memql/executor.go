@@ -396,6 +396,23 @@ func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr
 		return nil, fmt.Errorf("error() cannot be evaluated in query context; it is only valid in automation onError handlers")
 	case *ErrorExpression:
 		return nil, fmt.Errorf("error() cannot be evaluated in query context; it is only valid in automation control flow")
+	case *NotExpression:
+		// Reached only when the combined compiler refused THIS subtree -- a
+		// NOT over a compilable operand compiles, at the top of this call or
+		// of a recursive one. What is left is a negated set, and set
+		// complement is deliberately unsupported: see expr_not.go.
+		return nil, e.notDoesNotLowerError(node.Target)
+	case *ArrayPredicateExpression:
+		// Every collection predicate over a row array compiles; one that did
+		// not names a shape the lowering refuses (an array rooted outside the
+		// payload, an element predicate that does not compile). Compile it
+		// again to surface WHY rather than report an unsupported node.
+		if _, err := e.compileArrayPredicate(ctx, node, conceptContext, nil); err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("collection predicate %s compiled but was not combined; this is a bug", canonicalExpression(node))
+	case *PlanConstExpression:
+		return nil, errPlanConstantUnevaluated(node)
 	case *LiteralValueNode:
 		// A bare literal is a scalar value, not a node-set filter. It only
 		// reaches here if a literal-valued expression is used where a row
@@ -466,6 +483,23 @@ func resolveActorReferences(ctx context.Context, expr ExpressionNode) (Expressio
 			return nil, err
 		}
 		return &RelationshipExpression{Function: node.Function, Target: target, Label: node.Label}, nil
+	case *NotExpression:
+		target, err := resolveActorReferences(ctx, node.Target)
+		if err != nil {
+			return nil, err
+		}
+		return &NotExpression{Target: target}, nil
+	case *ArrayPredicateExpression:
+		// `row.members.any(m => m == actor.userId)`: the actor value sits on
+		// an ELEMENT comparison, and both halves need it resolved exactly as
+		// they need it on a field comparison.
+		pred, err := resolveActorReferences(ctx, node.Pred)
+		if err != nil {
+			return nil, err
+		}
+		copied := *node
+		copied.Pred = pred
+		return &copied, nil
 	default:
 		return expr, nil
 	}
@@ -528,6 +562,24 @@ func resolveExpressionForExecution(expr ExpressionNode, conceptContext string) (
 			Left:  left,
 			Right: right,
 		}, nil
+	case *NotExpression:
+		// A short id under a NOT is expanded by the SQL compiler exactly as
+		// one outside it is (compileIdComparison), so the in-process twin
+		// needs the full id here too -- or `!(row.id == "abc")` would keep in
+		// process the very row the SQL excluded.
+		target, err := resolveExpressionForExecution(node.Target, conceptContext)
+		if err != nil {
+			return nil, err
+		}
+		return &NotExpression{Target: target}, nil
+	case *ArrayPredicateExpression:
+		pred, err := resolveExpressionForExecution(node.Pred, conceptContext)
+		if err != nil {
+			return nil, err
+		}
+		copied := *node
+		copied.Pred = pred
+		return &copied, nil
 	default:
 		// Relationship expressions and other nodes are not part of the combined filter fast-path.
 		return expr, nil
@@ -572,6 +624,24 @@ func (e *MemQLEngine) expandSpecReferences(expr ExpressionNode) (ExpressionNode,
 			Target:   target,
 			Label:    node.Label,
 		}, nil
+	case *NotExpression:
+		// `!isArchived(row)` lowers to a NOT over a spec reference; the SQL
+		// half inlines the spec on its own (tryCompileCombinedFilterIn's spec
+		// arm), and the in-process half has no registry, so it must be
+		// inlined here or the post-filter fails the read on the first row.
+		target, err := e.expandSpecReferences(node.Target)
+		if err != nil {
+			return nil, err
+		}
+		return &NotExpression{Target: target}, nil
+	case *ArrayPredicateExpression:
+		pred, err := e.expandSpecReferences(node.Pred)
+		if err != nil {
+			return nil, err
+		}
+		copied := *node
+		copied.Pred = pred
+		return &copied, nil
 	default:
 		// Other expression types don't contain nested expressions that need expansion
 		return expr, nil

@@ -158,6 +158,16 @@ func (r *referenceRewriter) rewriteExpression(expr ExpressionNode) {
 		r.rewriteExpression(node.Target)
 	case *ConditionalFilterExpression:
 		r.rewriteExpression(node.Filter)
+	case *NotExpression:
+		// `!isArchived(row)` is a spec reference under a negation.
+		r.rewriteExpression(node.Target)
+	case *ArrayPredicateExpression:
+		r.rewriteExpression(node.Pred)
+	case *PlanConstExpression:
+		// Deliberately not rewritten. It carries a v1 AST, not IR, and the
+		// names in it are catalog functions the in-process evaluator
+		// resolves, not registered constructs; rewriting inside it would mean
+		// mutating a parsed tree this pass does not own.
 
 	// --- the reference-bearing nodes ---
 	case *SpecReferenceExpression:

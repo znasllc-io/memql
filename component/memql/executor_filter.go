@@ -23,14 +23,41 @@ import (
 // clause; resolveActorComparisonsToConstants folds them to a constant here so
 // the ctx-less post-filter evaluator preserves the AND/OR truth value without
 // re-resolving actor state it cannot see (#1659). It is never produced by the
-// parser -- only by the pre-post-filter rewrite.
+// parser -- only by the pre-post-filter rewrite, the caller-flag fold
+// (memql#4814), the row-authz lowering, and plan-constant replacement.
 type constantBoolExpression struct {
 	value bool
+
+	// planConstant marks a constant that a plan constant produced
+	// (PlanConstExpression, expr_plan_const.go). Only these fold the logical
+	// operators around them at expansion (TRUE && x -> x, FALSE || x -> x,
+	// ...), and only these let a deciding left operand skip expanding its
+	// right one. The older producers keep the tree shape they have always had
+	// -- TestFilterArgReferenceOnTheLeftHandSideIsBound pins the caller-flag
+	// constant sitting inside its disjunction -- which is behaviourally
+	// identical, so folding them too would be churn rather than a fix.
+	//
+	// NOT part of the node's identity: canonicalExpression renders the value
+	// alone, because two plans that differ only in where a constant came from
+	// select the same rows.
+	planConstant bool
 }
 
 func (*constantBoolExpression) isExpressionNode() {}
 
+// nodeMatchesExpression evaluates a predicate tree against one row: the
+// in-process twin of tryCompileCombinedFilter, which executeCombinedFilterQuery
+// re-runs on every candidate the SQL scan returned.
 func nodeMatchesExpression(node memorynodes.MemoryNode, expr ExpressionNode, payloadCache map[string]map[string]any) (bool, error) {
+	return nodeMatchesExpressionIn(node, expr, nil, payloadCache)
+}
+
+// nodeMatchesExpressionIn is nodeMatchesExpression with the collection element
+// in scope (nil at row level): the one evaluator for both the row and an
+// ArrayPredicateExpression's element predicate, so the two cannot drift into
+// different comparison rules. A comparison on arrayElementRoot reads the
+// element; every other node reads the row exactly as it does at the top.
+func nodeMatchesExpressionIn(node memorynodes.MemoryNode, expr ExpressionNode, elem *arrayElementFrame, payloadCache map[string]map[string]any) (bool, error) {
 	if expr == nil {
 		return true, nil
 	}
@@ -52,13 +79,16 @@ func nodeMatchesExpression(node memorynodes.MemoryNode, expr ExpressionNode, pay
 		// so the SQL-compile path and the in-process post-filter agree.
 		return literalTruthy(n.Value), nil
 	case *ComparisonExpression:
+		if isArrayElementField(n.Field) {
+			return elementMatchesComparison(elem, n)
+		}
 		return nodeMatchesComparison(node, n, payloadCache)
 	case *LogicalExpression:
-		left, err := nodeMatchesExpression(node, n.Left, payloadCache)
+		left, err := nodeMatchesExpressionIn(node, n.Left, elem, payloadCache)
 		if err != nil {
 			return false, err
 		}
-		right, err := nodeMatchesExpression(node, n.Right, payloadCache)
+		right, err := nodeMatchesExpressionIn(node, n.Right, elem, payloadCache)
 		if err != nil {
 			return false, err
 		}
@@ -70,6 +100,23 @@ func nodeMatchesExpression(node memorynodes.MemoryNode, expr ExpressionNode, pay
 		default:
 			return false, fmt.Errorf("unsupported logical operator %q", n.Op)
 		}
+	case *NotExpression:
+		// The twin of compileNotSQL. Exact two-valued negation: every arm of
+		// this evaluator already answers false wherever the SQL answers NULL
+		// (the absence rules), so negating the answer here is what NOT
+		// COALESCE(<sql>, FALSE) computes there.
+		if n.Target == nil {
+			return false, fmt.Errorf("`!` has no operand")
+		}
+		match, err := nodeMatchesExpressionIn(node, n.Target, elem, payloadCache)
+		if err != nil {
+			return false, err
+		}
+		return !match, nil
+	case *ArrayPredicateExpression:
+		return nodeMatchesArrayPredicate(node, n, elem, payloadCache)
+	case *PlanConstExpression:
+		return false, errPlanConstantUnevaluated(n)
 	default:
 		return false, fmt.Errorf("unsupported expression node %T", expr)
 	}
@@ -81,17 +128,26 @@ func nodeMatchesExpression(node memorynodes.MemoryNode, expr ExpressionNode, pay
 // Returns (compiledExpression, true) if successful, or (empty, false) if the expression contains
 // nodes that cannot be combined (e.g., RelationshipExpression, BuiltinFunctionExpression).
 func (e *MemQLEngine) tryCompileCombinedFilter(ctx context.Context, expr ExpressionNode, conceptContext string) (compiledExpression, bool) {
+	return e.tryCompileCombinedFilterIn(ctx, expr, conceptContext, nil)
+}
+
+// tryCompileCombinedFilterIn is tryCompileCombinedFilter with the collection
+// element in scope (nil at row level) -- the SQL half of
+// nodeMatchesExpressionIn. An ArrayPredicateExpression compiles its element
+// predicate through this same function in a child scope, so a comparison on
+// the element gets exactly the compiler a payload field gets.
+func (e *MemQLEngine) tryCompileCombinedFilterIn(ctx context.Context, expr ExpressionNode, conceptContext string, scope *sqlElementScope) (compiledExpression, bool) {
 	if expr == nil {
 		return compiledExpression{}, false
 	}
 
 	switch node := expr.(type) {
 	case *LogicalExpression:
-		leftFilter, leftOk := e.tryCompileCombinedFilter(ctx, node.Left, conceptContext)
+		leftFilter, leftOk := e.tryCompileCombinedFilterIn(ctx, node.Left, conceptContext, scope)
 		if !leftOk {
 			return compiledExpression{}, false
 		}
-		rightFilter, rightOk := e.tryCompileCombinedFilter(ctx, node.Right, conceptContext)
+		rightFilter, rightOk := e.tryCompileCombinedFilterIn(ctx, node.Right, conceptContext, scope)
 		if !rightOk {
 			return compiledExpression{}, false
 		}
@@ -112,6 +168,16 @@ func (e *MemQLEngine) tryCompileCombinedFilter(ctx context.Context, expr Express
 		return compiledExpression{sql: combinedSQL, args: combinedArgs}, true
 
 	case *ComparisonExpression:
+		// A comparison on the collection element in scope (expr_collection_sql.go).
+		// Outside a collection predicate there is no element to read, and the
+		// compile refuses rather than reading one.
+		if isArrayElementField(node.Field) {
+			filter, err := compileElementComparison(node, scope)
+			if err != nil {
+				return compiledExpression{}, false
+			}
+			return filter, true
+		}
 		// An `actor.<field>` comparison (e.g. `actor.role == "admin"`) is a
 		// constant at query time -- the resolved auth envelope. Bind the
 		// actor value + the comparison value as SQL parameters so the term
@@ -160,8 +226,10 @@ func (e *MemQLEngine) tryCompileCombinedFilter(ctx context.Context, expr Express
 		// The FUNCTION form rather than the `?|` operator, and that is not
 		// style: bun renders `?` as its own placeholder, so an operator
 		// spelled `?|` in a query string is consumed as a parameter marker
-		// and the statement no longer means what it reads as. The `in`
-		// compilation below reached the same conclusion.
+		// and the statement no longer means what it reads as. (The payload
+		// `in` compilation carried the same reasoning until memql#5366 took
+		// its array-overlap disjunct out: `in` is typed equality against
+		// each element now, and a scalar field never overlaps a list.)
 		//
 		// The "top-level key" half of the behaviour is also why the
 		// LOAD-TIME type check is load-bearing rather than tidy: a field
@@ -207,7 +275,34 @@ func (e *MemQLEngine) tryCompileCombinedFilter(ctx context.Context, expr Express
 		if err != nil {
 			return compiledExpression{}, false
 		}
-		return e.tryCompileCombinedFilter(ctx, spec.Expr, conceptContext)
+		return e.tryCompileCombinedFilterIn(ctx, spec.Expr, conceptContext, scope)
+
+	case *NotExpression:
+		// Compiles exactly when its operand does (expr_not.go). A NOT over an
+		// operand this function refuses -- a relationship traversal -- is
+		// refused with it, and evaluateExpressionSetWithContext then names it
+		// rather than computing a set complement.
+		if node.Target == nil {
+			return compiledExpression{}, false
+		}
+		inner, ok := e.tryCompileCombinedFilterIn(ctx, node.Target, conceptContext, scope)
+		if !ok {
+			return compiledExpression{}, false
+		}
+		return compileNotSQL(inner), true
+
+	case *ArrayPredicateExpression:
+		filter, err := e.compileArrayPredicate(ctx, node, conceptContext, scope)
+		if err != nil {
+			return compiledExpression{}, false
+		}
+		return filter, true
+
+	case *PlanConstExpression:
+		// Never compiled: argument expansion replaces every plan constant
+		// before a tree reaches SQL. One that got here was never expanded,
+		// and there is no value to bind for it.
+		return compiledExpression{}, false
 
 	default:
 		// RelationshipExpression, BuiltinFunctionExpression, etc. cannot be combined
@@ -281,6 +376,27 @@ func resolveActorComparisonsToConstants(ctx context.Context, expr ExpressionNode
 			return nil, err
 		}
 		return &LogicalExpression{Op: n.Op, Left: left, Right: right}, nil
+	case *NotExpression:
+		// `!(actor.role == "admin")` is as constant as the comparison it
+		// negates, and nodeMatchesComparison has no actor arm to fall back on
+		// -- an unfolded actor term under a NOT fails the read the way #1659's
+		// did at the top level.
+		target, err := resolveActorComparisonsToConstants(ctx, n.Target)
+		if err != nil {
+			return nil, err
+		}
+		return &NotExpression{Target: target}, nil
+	case *ArrayPredicateExpression:
+		// An element predicate may carry an actor term beside its element
+		// comparisons; the in-process twin reads it through
+		// nodeMatchesComparison, which needs it folded exactly as above.
+		pred, err := resolveActorComparisonsToConstants(ctx, n.Pred)
+		if err != nil {
+			return nil, err
+		}
+		copied := *n
+		copied.Pred = pred
+		return &copied, nil
 	default:
 		return expr, nil
 	}
@@ -751,11 +867,86 @@ func (e *MemQLEngine) canonicalizeRelationshipComparisons(ctx context.Context, e
 		copy.Left = left
 		copy.Right = right
 		return &copy
+	case *NotExpression:
+		if n == nil {
+			return expr
+		}
+		target := e.canonicalizeRelationshipComparisons(ctx, n.Target, conceptContext)
+		if target == n.Target {
+			return expr
+		}
+		return &NotExpression{Target: target}
+	case *ArrayPredicateExpression:
+		if n == nil {
+			return expr
+		}
+		// Row comparisons inside the element predicate get the ordinary
+		// treatment above. The element comparisons get the one this pass
+		// already gives `args.x in row.<field>` (OpHas, the payload arm):
+		// when the array is an @relationship field its elements are stored
+		// canonical, so `row.memberIds.any(m => m == args.userId)` compares
+		// against the canonical id too. Without it the two spellings of one
+		// question would disagree -- the membership form matching and the
+		// lambda form silently matching nothing for a bare id.
+		pred := e.canonicalizeRelationshipComparisons(ctx, n.Pred, conceptContext)
+		if concept := strings.TrimSpace(conceptContext); concept != "" && len(n.Field.Parts) == 2 &&
+			strings.EqualFold(strings.TrimSpace(n.Field.Parts[0]), "payload") {
+			pred = e.canonicalizeElementComparisons(ctx, pred, concept, strings.TrimSpace(n.Field.Parts[1]))
+		}
+		if pred == n.Pred {
+			return expr
+		}
+		copied := *n
+		copied.Pred = pred
+		return &copied
 	default:
 		// RelationshipExpression, SpecReferenceExpression,
 		// FunctionCallExpression, etc. don't carry comparison values
 		// directly; pass through. (Spec bodies get canonicalized
 		// when they're expanded inline in the comparable arm above.)
+		return expr
+	}
+}
+
+// canonicalizeElementComparisons rewrites the value of every comparison on the
+// BARE element (`$elem`, not a path under it) of a relationship array field to
+// its canonical id, walking the connectives of one element predicate. A nested
+// collection predicate is a different array and is left to its own pass; a
+// `startsWith` value is a prefix, which composing against a concept would turn
+// into an id that matches nothing (memql#4208's rule for the payload arm).
+func (e *MemQLEngine) canonicalizeElementComparisons(ctx context.Context, expr ExpressionNode, conceptName, fieldName string) ExpressionNode {
+	switch n := expr.(type) {
+	case *ComparisonExpression:
+		if n == nil || n.Operator == OpStartsWith || len(n.Field.Parts) != 1 || !isArrayElementField(n.Field) {
+			return expr
+		}
+		canon, ok := e.canonicalizeRelationshipFieldValue(ctx, conceptName, fieldName, n.Value)
+		if !ok {
+			return expr
+		}
+		rewritten := *n
+		rewritten.Value = canon
+		return &rewritten
+	case *LogicalExpression:
+		if n == nil {
+			return expr
+		}
+		left := e.canonicalizeElementComparisons(ctx, n.Left, conceptName, fieldName)
+		right := e.canonicalizeElementComparisons(ctx, n.Right, conceptName, fieldName)
+		if left == n.Left && right == n.Right {
+			return expr
+		}
+		return &LogicalExpression{Op: n.Op, Left: left, Right: right}
+	case *NotExpression:
+		if n == nil {
+			return expr
+		}
+		target := e.canonicalizeElementComparisons(ctx, n.Target, conceptName, fieldName)
+		if target == n.Target {
+			return expr
+		}
+		return &NotExpression{Target: target}
+	default:
 		return expr
 	}
 }
@@ -825,6 +1016,26 @@ func (e *MemQLEngine) resolveCanonicalIdComparisons(ctx context.Context, expr Ex
 			return expr
 		}
 		return &RelationshipExpression{Function: n.Function, Target: target, Label: n.Label}
+	case *NotExpression:
+		if n == nil {
+			return expr
+		}
+		target := e.resolveCanonicalIdComparisons(ctx, n.Target)
+		if target == n.Target {
+			return expr
+		}
+		return &NotExpression{Target: target}
+	case *ArrayPredicateExpression:
+		if n == nil {
+			return expr
+		}
+		pred := e.resolveCanonicalIdComparisons(ctx, n.Pred)
+		if pred == n.Pred {
+			return expr
+		}
+		copied := *n
+		copied.Pred = pred
+		return &copied
 	default:
 		return expr
 	}
@@ -962,6 +1173,13 @@ func extractConceptFromExpression(expr ExpressionNode) string {
 			return ""
 		}
 		return extractConceptFromExpression(node.Target)
+	case *NotExpression, *ArrayPredicateExpression:
+		// Deliberately NOT descended. `!(concept == X)` names the one concept
+		// the rows are NOT of, and taking X as the context would compose a
+		// bare short id against the wrong concept -- a filter that matches
+		// nothing, or worse, the row it was written to exclude. An element
+		// predicate reads an array, not the row's concept.
+		return ""
 	// Directive wrappers carry their filter on .Target. They normally
 	// get peeled off into plan fields by planQuery before the filter
 	// reaches this extractor -- but resolvePlanFunctions expands
@@ -1424,7 +1642,7 @@ func compileCreatedAtComparison(op ComparisonOperator, value any) (compiledExpre
 }
 
 func compilePayloadComparison(path []string, op ComparisonOperator, value any) (compiledExpression, error) {
-	jsonExpr, err := buildJSONPathExpression(path)
+	textExpr, err := buildJSONPathExpression(path)
 	if err != nil {
 		return compiledExpression{}, err
 	}
@@ -1435,92 +1653,89 @@ func compilePayloadComparison(path []string, op ComparisonOperator, value any) (
 		return compiledExpression{}, err
 	}
 
+	return compileJSONValueComparison(textExpr, jsonbExpr, op, value)
+}
+
+// compileJSONValueComparison is the comparison half of compilePayloadComparison,
+// parameterised by the operand's two spellings: textExpr, the TEXT extraction
+// (`payload #>> '{f}'`) a scalar comparison reads, and jsonbExpr, the jsonb
+// navigation (`payload->'f'`) that knows the stored value's JSON TYPE.
+//
+// Split out so a collection predicate's element (`e.v #>> '{}'`,
+// expr_collection_sql.go) compiles through EXACTLY this function. A second copy
+// of these rules for elements would be a second place for them to drift, and
+// the rows of a filter would then depend on whether the author reached a value
+// through a field or through an element.
+//
+// # Two rules decide every comparison (epic memql#5363, task memql#5366)
+//
+// ONE NOTION OF UNSET. An absent key, a JSON null, the `nil` literal and the
+// empty string are ONE value to `==`, `!=` and `in`. SQL spells "unset" as the
+// COALESCE below, and it means exactly that: the `#>>` extraction is NULL for a
+// missing key and for JSON null, and the empty text only for a JSON string ""
+// -- a number, a boolean, an object or an array never extracts as the empty
+// text. A whitespace-only string is a VALUE: a single space is not empty. So
+// `== nil` and `== ""` compile to the same fragment, and so do `!= nil` and
+// `!= ""`:
+//
+//	x == nil, x == ""   (COALESCE(x, '') = '')
+//	x != nil, x != ""   (COALESCE(x, '') <> '')
+//
+// This subsumes both carve-outs authoring rule 27 accumulated: #1708/#1714's
+// `!= ""` (the "is set" idiom must exclude an absent field) and edition 2026's
+// `== ""` (the "is not set" idiom must include one).
+//
+// TYPED COMPARISONS. A literal compares only with a stored value of its own
+// JSON type, which is the in-process evaluator's typed equality (`1 == "1"` is
+// false) and also what makes a malformed stored value harmless. This replaces
+// memql#3628's model, which cast the extracted TEXT by the literal's type: under
+// it a stored string "5" equalled the number 5, and a stored "abc" compared with
+// a number was a Postgres ERROR (`invalid input syntax for type numeric`) that
+// failed the whole read. Each comparison is guarded by the stored type:
+//
+//	string   (jsonb_typeof(p) = 'string' AND x <op> ?)
+//	number   (CASE WHEN jsonb_typeof(p) = 'number' THEN (x)::numeric <op> ? ELSE FALSE END)
+//	boolean  (CASE WHEN jsonb_typeof(p) = 'boolean' THEN (x)::boolean <op> ? ELSE FALSE END)
+//
+// The string form needs no cast, so its guard can be a plain AND. The casts sit
+// behind CASE, not AND, for the reason the Postgres manual gives in "Expression
+// Evaluation Rules": the order in which a WHERE clause evaluates the operands
+// of AND is not defined -- the planner flattens nested ANDs into the qual list
+// and may reorder them by cost -- so `jsonb_typeof(p) = 'number' AND
+// (x)::numeric > 1` can still run the cast on a string and raise. CASE is the
+// construct the manual names for forcing the order, and it answers FALSE where
+// the AND answers NULL, which is the same verdict in a WHERE clause and under
+// the two-valued negation below.
+//
+// `!=` IS EXACTLY `NOT (==)`, taken two-valued (compileNotSQL). That is what
+// keeps #1685's null-safety -- an absent field is not equal to 1, so `!= 1` is
+// true -- and what makes a stored "1" `!= 1` true under the typed rule.
+func compileJSONValueComparison(textExpr, jsonbExpr string, op ComparisonOperator, value any) (compiledExpression, error) {
 	switch op {
-	case OpMissing, OpNotMissing:
-		// Check if payload property is missing (NULL) or not missing (NOT NULL)
-		// PostgreSQL's #>> operator returns NULL when the key doesn't exist
-		operator := "IS NULL"
-		if op == OpNotMissing {
-			operator = "IS NOT NULL"
+	case OpMissing:
+		return compileUnsetSQL(textExpr, true), nil
+	case OpNotMissing:
+		return compileUnsetSQL(textExpr, false), nil
+	case OpEq, OpNe:
+		if isUnsetValue(value) {
+			return compileUnsetSQL(textExpr, op == OpEq), nil
 		}
-		return compiledExpression{
-			sql:  fmt.Sprintf("(%s %s)", jsonExpr, operator),
-			args: nil,
-		}, nil
-	case OpEq, OpNe, OpGt, OpGe, OpLt, OpLe:
-		kind, normalized, err := normalizeScalarValue(value)
+		eq, err := compileTypedComparison(textExpr, jsonbExpr, OpEq, value)
 		if err != nil {
 			return compiledExpression{}, err
 		}
-
-		var expr string
-		switch kind {
-		case valueKindString:
-			// All six comparison ops (==, !=, <, <=, >, >=) are valid on
-			// strings. PostgreSQL compares strings lexicographically,
-			// which is the right semantics for RFC-3339 datetime fields
-			// (the dominant motivation -- `payload.expiresAt<ctx.now`
-			// in the delegation / invitation sweep queries) and matches
-			// the normal ordering behaviour of SQL, Go, and most
-			// embedding languages. Previously we rejected ordered
-			// comparisons here with "string payload comparisons only
-			// support == or !=", which forced every expiry sweep to add
-			// a parallel integer-unix field to work around a purely
-			// artificial restriction.
-			expr = jsonExpr
-		case valueKindNumber:
-			expr = fmt.Sprintf("(%s)::numeric", jsonExpr)
-		case valueKindBool:
-			if op != OpEq && op != OpNe {
-				return compiledExpression{}, fmt.Errorf("boolean payload comparisons only support == or !=")
-			}
-			expr = fmt.Sprintf("(%s)::boolean", jsonExpr)
-		default:
-			return compiledExpression{}, fmt.Errorf("unsupported payload value type")
+		if op == OpEq {
+			return eq, nil
 		}
-
-		// NULL-safe inequality (#1685): a payload field that is ABSENT
-		// (JSON null / key missing -> the ->> extraction yields SQL NULL)
-		// is logically DISTINCT FROM any concrete value, so a `!=`
-		// predicate must MATCH it. Plain SQL `<>` returns NULL (not true)
-		// when either side is NULL, which silently drops every row that
-		// lacks the field -- the bug behind isNotDeleted
-		// (`payload.deleted != true`) excluding rows that never had a
-		// `deleted` key (the concept @default isn't always stamped). Use
-		// IS DISTINCT FROM so absent == not-equal == included. OpEq keeps
-		// plain `=` (absent is correctly NOT equal to the value).
-		//
-		// EXCEPTION -- comparison to the empty string (#1708/#1714): `!= ""`
-		// is the canonical "field is set" idiom across the DSL
-		// (isDeletionScheduled = `deletionScheduledAt != ""`,
-		// expiredConsumedAuthCodes = `consumedAt != ""`, etc). An ABSENT
-		// string field is logically EQUAL to "" (both mean "not set"), so it
-		// must NOT match `!= ""`. Under the #1685 IS DISTINCT FROM rule those
-		// queries wrongly returned every row whose field was absent (all
-		// active users / all expired codes). COALESCE the NULL to '' so an
-		// absent field reads as empty and is correctly excluded.
-		if op == OpNe {
-			if s, ok := normalized.(string); ok && s == "" {
-				return compiledExpression{
-					sql:  fmt.Sprintf("(COALESCE(%s, '') <> ?)", expr),
-					args: []any{normalized},
-				}, nil
-			}
-			return compiledExpression{
-				sql:  fmt.Sprintf("(%s IS DISTINCT FROM ?)", expr),
-				args: []any{normalized},
-			}, nil
-		}
-
-		sqlOp, err := sqlOperatorForComparison(op)
-		if err != nil {
-			return compiledExpression{}, err
-		}
-
-		return compiledExpression{
-			sql:  fmt.Sprintf("(%s %s ?)", expr, sqlOp),
-			args: []any{normalized},
-		}, nil
+		return compileNotSQL(eq), nil
+	case OpGt, OpGe, OpLt, OpLe:
+		// All four orderings are valid on strings, which is the right
+		// semantics for RFC 3339 datetime fields (`expiresAt > now`, the
+		// delegation / invitation sweeps). An ABSENT field orders as nothing:
+		// the typed guard is NULL for it and the row is not returned. A stored
+		// "" is a string like any other here -- the one notion of unset is a
+		// statement about equality, not about ordering.
+		return compileTypedComparison(textExpr, jsonbExpr, op, value)
 	case OpIn, OpOut:
 		// Owner bypass: caller-reference resolver may have substituted
 		// the value with ownerWildcardSentinel. For OpIn this means
@@ -1531,63 +1746,56 @@ func compilePayloadComparison(path []string, op ComparisonOperator, value any) (
 			}
 			return compiledExpression{sql: "FALSE"}, nil
 		}
-		collection, err := normalizeCollectionValues(value)
+		// `in` is `==` against each member, so an unset member (nil or "")
+		// admits the unset rows and the remaining members are compared typed.
+		// There is no array-field form any more: the old string-collection
+		// SQL also admitted a field that was an ARRAY overlapping the list, a
+		// row the in-process twin always rejected -- so it was only ever
+		// scanned to be dropped, and under `!` the drop would have flipped
+		// into a lost row. Membership of an array's elements is `v in
+		// row.<field>` (OpHas) or a collection predicate.
+		members, hasUnset, err := splitUnsetMembers(value)
 		if err != nil {
 			return compiledExpression{}, err
 		}
-
-		switch collection.kind {
-		case valueKindString:
-			// For string collections, support both scalar fields and array fields.
-			// - If field is an array: use jsonb_exists_any (any element matches)
-			// - If field is a scalar: use IN operator (value matches)
-
-			arrayArg := pq.Array(collection.strings)
-
-			if op == OpIn {
-				// (jsonb_typeof(payload->'field') = 'array' AND jsonb_exists_any(payload->'field', ARRAY[...]))
-				// OR
-				// (payload #>> '{field}' IN (...))
-				return compiledExpression{
-					sql: fmt.Sprintf(
-						"((jsonb_typeof(%s) = 'array' AND jsonb_exists_any(%s, ?::text[])) OR (%s IN (?)))",
-						jsonbExpr, jsonbExpr, jsonExpr,
-					),
-					args: []any{arrayArg, bun.In(collection.strings)},
-				}, nil
-			}
-			// OpOut: field is array AND array does NOT contain any of the values
-			//        OR field is NOT array AND scalar is NOT in the list
-			return compiledExpression{
-				sql: fmt.Sprintf(
-					"((jsonb_typeof(%s) = 'array' AND NOT jsonb_exists_any(%s, ?::text[])) OR (jsonb_typeof(%s) != 'array' AND %s NOT IN (?)))",
-					jsonbExpr, jsonbExpr, jsonbExpr, jsonExpr,
-				),
-				args: []any{arrayArg, bun.In(collection.strings)},
-			}, nil
-		case valueKindNumber:
-			operator := "IN"
-			if op == OpOut {
-				operator = "NOT IN"
-			}
-			expr := fmt.Sprintf("(%s)::numeric", jsonExpr)
-			return compiledExpression{
-				sql:  fmt.Sprintf("(%s %s (?))", expr, operator),
-				args: []any{bun.In(collection.numbers)},
-			}, nil
-		case valueKindBool:
-			operator := "IN"
-			if op == OpOut {
-				operator = "NOT IN"
-			}
-			expr := fmt.Sprintf("(%s)::boolean", jsonExpr)
-			return compiledExpression{
-				sql:  fmt.Sprintf("(%s %s (?))", expr, operator),
-				args: []any{bun.In(collection.bools)},
-			}, nil
-		default:
-			return compiledExpression{}, fmt.Errorf("unsupported payload collection type")
+		if len(members) == 0 && !hasUnset {
+			return compiledExpression{}, fmt.Errorf("collection literal cannot be empty")
 		}
+		var membership compiledExpression
+		if len(members) > 0 {
+			membership, err = compileTypedMembership(textExpr, jsonbExpr, members)
+			if err != nil {
+				return compiledExpression{}, err
+			}
+		}
+		if op == OpIn {
+			unset := compileUnsetSQL(textExpr, true)
+			switch {
+			case hasUnset && len(members) > 0:
+				return compiledExpression{
+					sql:  fmt.Sprintf("(%s OR %s)", unset.sql, membership.sql),
+					args: membership.args,
+				}, nil
+			case hasUnset:
+				return unset, nil
+			default:
+				return membership, nil
+			}
+		}
+		// OpOut, the legacy `not in` (edition 2026 spells it `!(x in list)`,
+		// which is NotExpression's two-valued negation). It keeps the rule it
+		// has always had: an unset field is NOT a match -- `deleted not in
+		// [true]` does not behave like `deleted != true` (authoring rule 27)
+		// -- and a set value matches when it is not a member.
+		set := compileUnsetSQL(textExpr, false)
+		if len(members) == 0 {
+			return set, nil
+		}
+		negated := compileNotSQL(membership)
+		return compiledExpression{
+			sql:  fmt.Sprintf("(%s AND %s)", set.sql, negated.sql),
+			args: negated.args,
+		}, nil
 	case OpStartsWith:
 		// `<field> startsWith <prefix>` (memql#4208). One bound text[]
 		// parameter whatever the right-hand shape was -- a single prefix is a
@@ -1598,8 +1806,9 @@ func compilePayloadComparison(path []string, op ComparisonOperator, value any) (
 		// emitted instead so the emitted SQL says what it means and binds no
 		// parameter for it.
 		//
-		// NULL (field absent / not a string) yields NULL and is never
-		// admitted, which matches the in-process evaluator.
+		// A prefix test is a question about a STRING, so the typed guard
+		// applies: a stored number is not tested by its digits. NULL (field
+		// absent) is never admitted, which matches the in-process evaluator.
 		prefixes, err := normalizePrefixValues(value)
 		if err != nil {
 			return compiledExpression{}, err
@@ -1608,12 +1817,32 @@ func compilePayloadComparison(path []string, op ComparisonOperator, value any) (
 			return compiledExpression{sql: "FALSE"}, nil
 		}
 		return compiledExpression{
-			sql:  fmt.Sprintf("((%s) ^@ ANY(?::text[]))", jsonExpr),
+			sql:  fmt.Sprintf("(jsonb_typeof(%s) = 'string' AND (%s) ^@ ANY(?::text[]))", jsonbExpr, textExpr),
 			args: []any{pq.Array(prefixes)},
 		}, nil
 	case OpHas:
 		// has checks if a JSONB array field contains a scalar value.
 		// Uses the @> containment operator: payload->'field' @> to_jsonb('value'::text)
+		//
+		// GUARDED TO AN ARRAY (memql#5366). jsonb containment is also true
+		// between two EQUAL SCALARS -- `'"a"'::jsonb @> '"a"'::jsonb` -- so a
+		// field holding the string "a" where an array was declared answered
+		// `"a" in row.tags` TRUE in SQL, while the in-process twin
+		// (compareScalarValues' OpHas arm) answers false for anything that is
+		// not an array. The combined path intersects the two, so the row was
+		// dropped either way -- until `!` arrived: under a negation the two
+		// flip, and the intersection would then drop a row the in-process
+		// side says matches. Membership is a question about an array, and
+		// both halves now say so.
+		//
+		// Containment is typed already (`[1] @> '"1"'` is false), which is the
+		// typed equality this whole function applies. An UNSET needle is `==`
+		// to an unset ELEMENT, so it looks for a "" element or a null one.
+		if isUnsetValue(value) {
+			return compiledExpression{
+				sql: fmt.Sprintf("(jsonb_typeof(%[1]s) = 'array' AND (%[1]s @> '[\"\"]'::jsonb OR %[1]s @> '[null]'::jsonb))", jsonbExpr),
+			}, nil
+		}
 		kind, normalized, err := normalizeScalarValue(value)
 		if err != nil {
 			return compiledExpression{}, err
@@ -1622,17 +1851,17 @@ func compilePayloadComparison(path []string, op ComparisonOperator, value any) (
 		switch kind {
 		case valueKindString:
 			return compiledExpression{
-				sql:  fmt.Sprintf("(%s @> to_jsonb(?::text))", jsonbExpr),
+				sql:  fmt.Sprintf("(jsonb_typeof(%s) = 'array' AND %s @> to_jsonb(?::text))", jsonbExpr, jsonbExpr),
 				args: []any{normalized},
 			}, nil
 		case valueKindNumber:
 			return compiledExpression{
-				sql:  fmt.Sprintf("(%s @> to_jsonb(?::numeric))", jsonbExpr),
+				sql:  fmt.Sprintf("(jsonb_typeof(%s) = 'array' AND %s @> to_jsonb(?::numeric))", jsonbExpr, jsonbExpr),
 				args: []any{normalized},
 			}, nil
 		case valueKindBool:
 			return compiledExpression{
-				sql:  fmt.Sprintf("(%s @> to_jsonb(?::boolean))", jsonbExpr),
+				sql:  fmt.Sprintf("(jsonb_typeof(%s) = 'array' AND %s @> to_jsonb(?::boolean))", jsonbExpr, jsonbExpr),
 				args: []any{normalized},
 			}, nil
 		default:
@@ -1641,6 +1870,152 @@ func compilePayloadComparison(path []string, op ComparisonOperator, value any) (
 	default:
 		return compiledExpression{}, fmt.Errorf("operator %q is not supported for payload filters", op)
 	}
+}
+
+// compileUnsetSQL is the one spelling of "unset" (unset=true) and "set"
+// (unset=false). See compileJSONValueComparison.
+func compileUnsetSQL(textExpr string, unset bool) compiledExpression {
+	op := "="
+	if !unset {
+		op = "<>"
+	}
+	return compiledExpression{sql: fmt.Sprintf("(COALESCE(%s, '') %s '')", textExpr, op)}
+}
+
+// compileTypedComparison compiles one typed comparison against a SET literal:
+// the stored value must be of the literal's JSON type, and then compares.
+func compileTypedComparison(textExpr, jsonbExpr string, op ComparisonOperator, value any) (compiledExpression, error) {
+	kind, normalized, err := normalizeScalarValue(value)
+	if err != nil {
+		return compiledExpression{}, err
+	}
+	sqlOp, err := sqlOperatorForComparison(op)
+	if err != nil {
+		return compiledExpression{}, err
+	}
+	switch kind {
+	case valueKindString:
+		// BYTE ORDER for the orderings, and the collation is what says so
+		// (edition 2026's absence table: "strings order by byte"). An
+		// uncollated `<` orders by the DATABASE's default collation, which is
+		// a locale's -- en_US puts `a` before `E` and weighs accents and
+		// punctuation differently from the bytes -- while the in-process twin
+		// compares Go strings, which is byte order. The combined path
+		// intersects the two, so under a locale collation a string range
+		// filter silently dropped every row the two orders disagreed about.
+		// `COLLATE "C"` makes the database compare bytes: for UTF-8, "C" is
+		// memcmp, which is exactly Go's order.
+		//
+		// The extraction is parenthesised because COLLATE binds tighter than
+		// `#>>`: `payload #>> '{f}' COLLATE "C"` would collate the path
+		// LITERAL and leave the comparison under the default. Equality stays
+		// uncollated -- a deterministic collation's `=` is already byte
+		// equality.
+		operand := textExpr
+		if isOrderingOperator(op) {
+			operand = fmt.Sprintf("(%s) COLLATE \"C\"", textExpr)
+		}
+		return compiledExpression{
+			sql:  fmt.Sprintf("(jsonb_typeof(%s) = 'string' AND %s %s ?)", jsonbExpr, operand, sqlOp),
+			args: []any{normalized},
+		}, nil
+	case valueKindNumber:
+		return compiledExpression{
+			sql:  fmt.Sprintf("(CASE WHEN jsonb_typeof(%s) = 'number' THEN (%s)::numeric %s ? ELSE FALSE END)", jsonbExpr, textExpr, sqlOp),
+			args: []any{normalized},
+		}, nil
+	case valueKindBool:
+		if isOrderingOperator(op) {
+			return compiledExpression{}, fmt.Errorf("boolean payload comparisons only support == or !=")
+		}
+		return compiledExpression{
+			sql:  fmt.Sprintf("(CASE WHEN jsonb_typeof(%s) = 'boolean' THEN (%s)::boolean %s ? ELSE FALSE END)", jsonbExpr, textExpr, sqlOp),
+			args: []any{normalized},
+		}, nil
+	default:
+		return compiledExpression{}, fmt.Errorf("unsupported payload value type")
+	}
+}
+
+// compileTypedMembership compiles `x in members` over SET members (no nil or
+// ""): typed, like compileTypedComparison, with the collection's one kind
+// choosing the guard.
+func compileTypedMembership(textExpr, jsonbExpr string, members []any) (compiledExpression, error) {
+	collection, err := normalizeCollectionValues(members)
+	if err != nil {
+		return compiledExpression{}, err
+	}
+	switch collection.kind {
+	case valueKindString:
+		return compiledExpression{
+			sql:  fmt.Sprintf("(jsonb_typeof(%s) = 'string' AND %s IN (?))", jsonbExpr, textExpr),
+			args: []any{bun.In(collection.strings)},
+		}, nil
+	case valueKindNumber:
+		return compiledExpression{
+			sql:  fmt.Sprintf("(CASE WHEN jsonb_typeof(%s) = 'number' THEN (%s)::numeric IN (?) ELSE FALSE END)", jsonbExpr, textExpr),
+			args: []any{bun.In(collection.numbers)},
+		}, nil
+	case valueKindBool:
+		return compiledExpression{
+			sql:  fmt.Sprintf("(CASE WHEN jsonb_typeof(%s) = 'boolean' THEN (%s)::boolean IN (?) ELSE FALSE END)", jsonbExpr, textExpr),
+			args: []any{bun.In(collection.bools)},
+		}, nil
+	default:
+		return compiledExpression{}, fmt.Errorf("unsupported payload collection type")
+	}
+}
+
+// isUnsetValue reports whether a value is one of the unset spellings a
+// comparison literal or a decoded stored value can take: nil (a missing key,
+// JSON null or the `nil` literal) or the empty string. A whitespace-only
+// string is a value.
+func isUnsetValue(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case string:
+		return t == ""
+	default:
+		return false
+	}
+}
+
+// isOrderingOperator reports whether op orders rather than equates.
+func isOrderingOperator(op ComparisonOperator) bool {
+	switch op {
+	case OpGt, OpGe, OpLt, OpLe:
+		return true
+	default:
+		return false
+	}
+}
+
+// splitUnsetMembers separates a membership list's unset members (nil, "")
+// from its set ones, which are the only ones a typed comparison can take.
+func splitUnsetMembers(value any) ([]any, bool, error) {
+	var raw []any
+	switch v := value.(type) {
+	case []any:
+		raw = v
+	case []string:
+		raw = make([]any, len(v))
+		for i := range v {
+			raw[i] = v[i]
+		}
+	default:
+		return nil, false, fmt.Errorf("expected collection literal")
+	}
+	members := make([]any, 0, len(raw))
+	hasUnset := false
+	for _, item := range raw {
+		if isUnsetValue(item) {
+			hasUnset = true
+			continue
+		}
+		members = append(members, item)
+	}
+	return members, hasUnset, nil
 }
 
 func buildJSONPathExpression(path []string) (string, error) {
@@ -1773,6 +2148,11 @@ func normalizeScalarValue(value any) (valueKind, any, error) {
 		// compile-time per query execution, so each query run sees
 		// "now" at its own dispatch time -- not at function-load time.
 		return valueKindString, time.Now().UTC().Format(time.RFC3339Nano), nil
+	case *PlanConstExpression:
+		// A comparison value that is still a plan constant was never
+		// expanded; name it rather than report "unsupported literal type
+		// *memql.PlanConstExpression", which reads like a type-system bug.
+		return 0, nil, errPlanConstantUnevaluated(v)
 	default:
 		return 0, nil, fmt.Errorf("unsupported literal type %T", value)
 	}
@@ -1982,45 +2362,34 @@ func nodeMatchesComparison(node memorynodes.MemoryNode, cmp *ComparisonExpressio
 			return false, err
 		}
 		if payloadMap == nil {
-			switch cmp.Operator {
-			case OpMissing:
-				return true, nil
-			case OpNotMissing:
-				return false, nil
-			default:
-				return false, nil
-			}
+			// A payload that decodes to no object (a JSON-null payload) has no
+			// fields, so every field of it is ABSENT -- which is also what the
+			// SQL half sees, since `#>>` into a JSON-null payload is NULL. This
+			// arm used to answer false for every operator but `== nil`, so it
+			// disagreed with the absence rules below on `!=` (and now on
+			// `== ""`). Stored rows cannot reach it -- the payload column is
+			// NOT NULL and every write validates an object -- but a disagreement
+			// between the halves is not made acceptable by being rare.
+			return matchJSONValue(nil, false, cmp.Operator, cmp.Value)
 		}
 		value, exists := valueAtPath(payloadMap, cmp.Field.Parts[1:])
-		switch cmp.Operator {
-		case OpMissing:
-			return !exists || value == nil, nil
-		case OpNotMissing:
-			return exists && value != nil, nil
-		default:
-			if !exists || value == nil {
-				// NULL-safe inequality (#1685): an absent field is DISTINCT
-				// FROM any concrete value, so `!=` MATCHES it -- mirrors the
-				// SQL IS DISTINCT FROM path so the post-filter and the SQL
-				// scan agree. Every other operator treats absent as a
-				// non-match.
-				//
-				// EXCEPTION (#1708/#1714): `!= ""` is the "is set" idiom; an
-				// absent string field equals "" (not set) and must NOT match.
-				// Mirrors the COALESCE(expr,'') <> '' SQL path above.
-				if cmp.Operator == OpNe {
-					if s, ok := cmp.Value.(string); ok && s == "" {
-						return false, nil
-					}
-					return true, nil
-				}
-				return false, nil
-			}
-			return compareScalarValues(value, cmp.Operator, cmp.Value)
-		}
+		return matchJSONValue(value, exists, cmp.Operator, cmp.Value)
 	}
 
 	return false, fmt.Errorf("field %q is not supported in queries", cmp.Field.Raw)
+}
+
+// matchJSONValue decides one comparison against a decoded JSON value read at a
+// path -- a payload field, or a collection element -- in process: the twin of
+// compileJSONValueComparison. A missing key reads as nil, exactly like JSON
+// null, because the `#>>` extraction the SQL reads is NULL for both; from there
+// compareScalarValues applies the same two rules the SQL does (one notion of
+// unset, typed comparisons).
+func matchJSONValue(value any, exists bool, op ComparisonOperator, expected any) (bool, error) {
+	if !exists {
+		value = nil
+	}
+	return compareScalarValues(value, op, expected)
 }
 
 func cachedPayloadMap(node memorynodes.MemoryNode, cache map[string]map[string]any) (map[string]any, error) {
@@ -2079,88 +2448,81 @@ func compareTimestamp(actual time.Time, expected string, op ComparisonOperator) 
 	}
 }
 
+// compareScalarValues decides one comparison over a decoded value (nil when
+// absent) in process. It is the twin of compileJSONValueComparison and carries
+// the same two rules (see that function):
+//
+//   - ONE NOTION OF UNSET: nil and "" are one value to ==, != and in; a
+//     whitespace-only string is a value.
+//   - TYPED COMPARISONS: a literal compares only with a value of its own JSON
+//     type -- a Go string for a string literal, a JSON number for a number
+//     literal, a bool for a boolean literal -- and anything else is not equal,
+//     not ordered and not a member. Nothing is cast.
+//
+// Besides the post-filter (matchJSONValue), resolveActorComparisonsToConstants
+// folds `actor.<field>` comparisons through it and the caller-flag fold
+// (memql#4814) folds `args.<flag>` comparisons, so all three read a comparison
+// the same way.
 func compareScalarValues(actual any, op ComparisonOperator, expected any) (bool, error) {
-	// `now()` / `timestamp()` -> RFC3339Nano string at eval time.
-	// Same lazy substitution used by compareEquality + the SQL
-	// compile path so comparison semantics stay aligned across
-	// the three branches.
+	// `now()` / `timestamp()` -> RFC3339Nano string at eval time, the same
+	// lazy substitution normalizeScalarValue makes on the SQL side.
 	if _, ok := expected.(*ast.TimestampExprFunc); ok {
 		expected = time.Now().UTC().Format(time.RFC3339Nano)
 	}
 	switch op {
+	case OpMissing:
+		return isUnsetValue(actual), nil
+	case OpNotMissing:
+		return !isUnsetValue(actual), nil
 	case OpEq, OpNe:
 		return compareEquality(actual, expected, op)
 	case OpGt, OpGe, OpLt, OpLe:
-		// String ordering branch: RFC-3339 timestamps compare
-		// lexicographically and that's the dominant case for `<` /
-		// `>` (every expiry-sweep query uses this shape). Try the
-		// numeric path first; if expected is a string and actual is
-		// a string, fall through to lexicographic comparison.
-		if expectedStr, ok := expected.(string); ok {
-			if actualStr, ok := payloadText(actual); ok {
-				switch op {
-				case OpGt:
-					return actualStr > expectedStr, nil
-				case OpGe:
-					return actualStr >= expectedStr, nil
-				case OpLt:
-					return actualStr < expectedStr, nil
-				case OpLe:
-					return actualStr <= expectedStr, nil
-				}
-			}
-			return false, nil
-		}
-		expectedNum, ok := literalToFloat(expected)
-		if !ok {
-			return false, fmt.Errorf("numeric comparison requires a number literal")
-		}
-		actualNum, ok := payloadNumeric(actual)
-		if !ok {
-			return false, nil
-		}
-		switch op {
-		case OpGt:
-			return actualNum > expectedNum, nil
-		case OpGe:
-			return actualNum >= expectedNum, nil
-		case OpLt:
-			return actualNum < expectedNum, nil
-		case OpLe:
-			return actualNum <= expectedNum, nil
-		}
+		return compareTypedOrdering(actual, op, expected)
 	case OpIn, OpOut:
 		// Owner-bypass: caller-reference resolver may have substituted
 		// the collection with ownerWildcardSentinel. OpIn means "match
 		// everything"; OpOut means "match nothing".
 		if _, ok := expected.(ownerWildcardSentinel); ok {
-			if op == OpIn {
-				return true, nil
+			return op == OpIn, nil
+		}
+		members, hasUnset, err := splitUnsetMembers(expected)
+		if err != nil {
+			return false, err
+		}
+		if len(members) == 0 && !hasUnset {
+			return false, fmt.Errorf("collection literal cannot be empty")
+		}
+		// Normalised whether or not this row needs it, so a list the SQL
+		// refuses (mixed member types) is refused here too.
+		var collection *normalizedCollection
+		if len(members) > 0 {
+			collection, err = normalizeCollectionValues(members)
+			if err != nil {
+				return false, err
 			}
-			return false, nil
 		}
-		collection, err := normalizeCollectionValues(expected)
-		if err != nil {
-			return false, err
-		}
-		inSet, err := valueInCollection(actual, collection)
-		if err != nil {
-			return false, err
+		unset := isUnsetValue(actual)
+		member := unset && hasUnset
+		if !unset && collection != nil {
+			member = typedValueInCollection(actual, collection)
 		}
 		if op == OpIn {
-			return inSet, nil
+			return member, nil
 		}
-		return !inSet, nil
+		// OpOut, the legacy `not in`: an unset value is never a match, and a
+		// set one matches when it is not a member (compileJSONValueComparison).
+		return !unset && !member, nil
 	case OpStartsWith:
-		// The in-process mirror of the `^@ ANY` SQL above: every candidate
-		// the SQL scan returns is re-evaluated here by
+		// The in-process mirror of the typed `^@ ANY` SQL: a prefix test is a
+		// question about a STRING, so a number is not tested by its digits.
+		// Every candidate the SQL scan returns is re-evaluated here by
 		// executeCombinedFilterQuery, so the two must agree on every case
 		// (empty list, blank prefix, absent field, non-string field).
 		prefixes, err := normalizePrefixValues(expected)
 		if err != nil {
 			return false, err
 		}
-		actualStr, ok := payloadText(actual)
+		actualStr, ok := actual.(string)
 		if !ok {
 			return false, nil
 		}
@@ -2173,7 +2535,9 @@ func compareScalarValues(actual any, op ComparisonOperator, expected any) (bool,
 		// it reaches the in-memory evaluator the array field is `actual`
 		// (LHS) and the membership scalar is `expected` (RHS). The SQL
 		// fast-path compiles this via the @> containment operator; this
-		// branch is the post-filter / non-pushdown mirror (#1674).
+		// branch is the post-filter / non-pushdown mirror (#1674). Element
+		// equality is compareEquality's, so it is typed like containment is,
+		// and an unset needle finds an unset element.
 		items, ok := payloadArrayElements(actual)
 		if !ok {
 			// Field is absent or not an array -> contains nothing.
@@ -2182,9 +2546,7 @@ func compareScalarValues(actual any, op ComparisonOperator, expected any) (bool,
 		for _, item := range items {
 			match, err := compareEquality(item, expected, OpEq)
 			if err != nil {
-				// Heterogeneous element vs scalar type mismatch is a
-				// non-match, not a query failure.
-				continue
+				return false, err
 			}
 			if match {
 				return true, nil
@@ -2194,7 +2556,54 @@ func compareScalarValues(actual any, op ComparisonOperator, expected any) (bool,
 	default:
 		return false, fmt.Errorf("operator %q is not supported for payload comparisons", op)
 	}
-	return false, nil
+}
+
+// compareTypedOrdering is the ordering half of compareScalarValues. An absent
+// value orders as nothing (every ordering is false), and the typed rule decides
+// the rest: a string literal orders only strings, by byte -- Go's string order,
+// which is what the SQL's `COLLATE "C"` reproduces -- and a number literal
+// orders only JSON numbers.
+func compareTypedOrdering(actual any, op ComparisonOperator, expected any) (bool, error) {
+	if actual == nil {
+		return false, nil
+	}
+	if want, ok := expected.(string); ok {
+		have, ok := actual.(string)
+		if !ok {
+			return false, nil
+		}
+		switch op {
+		case OpGt:
+			return have > want, nil
+		case OpGe:
+			return have >= want, nil
+		case OpLt:
+			return have < want, nil
+		default:
+			return have <= want, nil
+		}
+	}
+	if _, isBool := expected.(bool); isBool {
+		return false, fmt.Errorf("boolean payload comparisons only support == or !=")
+	}
+	want, ok := numericValue(expected)
+	if !ok {
+		return false, fmt.Errorf("numeric comparison requires a number literal, got %T", expected)
+	}
+	have, ok := typedNumber(actual)
+	if !ok {
+		return false, nil
+	}
+	switch op {
+	case OpGt:
+		return have > want, nil
+	case OpGe:
+		return have >= want, nil
+	case OpLt:
+		return have < want, nil
+	default:
+		return have <= want, nil
+	}
 }
 
 // payloadArrayElements normalizes a payload field value into a []any
@@ -2216,6 +2625,10 @@ func payloadArrayElements(value any) ([]any, bool) {
 	}
 }
 
+// compareEquality is typed, unset-aware equality: the in-process statement of
+// the SQL's COALESCE unset test (compileUnsetSQL) for an unset literal, and of
+// its jsonb_typeof-guarded comparison for a set one. `!=` is its exact
+// negation.
 func compareEquality(actual any, expected any, op ComparisonOperator) (bool, error) {
 	// Lazily evaluate `now()` / `timestamp()` AST nodes. They show up
 	// when the SQL fast-path didn't compile the comparison (e.g. JSON
@@ -2225,112 +2638,101 @@ func compareEquality(actual any, expected any, op ComparisonOperator) (bool, err
 	if _, ok := expected.(*ast.TimestampExprFunc); ok {
 		expected = time.Now().UTC().Format(time.RFC3339Nano)
 	}
-	switch want := expected.(type) {
-	case nil:
-		match := actual == nil
-		if op == OpEq {
-			return match, nil
-		}
-		return !match, nil
-	case bool:
-		actualBool, ok := payloadBool(actual)
-		if !ok {
-			if op == OpEq {
-				return false, nil
-			}
-			return true, nil
-		}
-		if op == OpEq {
-			return actualBool == want, nil
-		}
-		return actualBool != want, nil
-	case int64:
-		actualNum, ok := payloadNumeric(actual)
-		if !ok {
-			if op == OpEq {
-				return false, nil
-			}
-			return true, nil
-		}
-		expectedNum := float64(want)
-		if op == OpEq {
-			return actualNum == expectedNum, nil
-		}
-		return actualNum != expectedNum, nil
-	case float64:
-		actualNum, ok := payloadNumeric(actual)
-		if !ok {
-			if op == OpEq {
-				return false, nil
-			}
-			return true, nil
-		}
-		if op == OpEq {
-			return actualNum == want, nil
-		}
-		return actualNum != want, nil
-	case string:
-		actualStr, ok := payloadText(actual)
-		if !ok {
-			if op == OpEq {
-				return false, nil
-			}
-			return true, nil
-		}
-		if op == OpEq {
-			return actualStr == want, nil
-		}
-		return actualStr != want, nil
+	var equal bool
+	switch {
+	case isUnsetValue(expected):
+		equal = isUnsetValue(actual)
+	case isUnsetValue(actual):
+		equal = false
 	default:
-		return false, fmt.Errorf("unsupported literal type %T in comparison", expected)
+		switch want := expected.(type) {
+		case bool:
+			have, ok := actual.(bool)
+			equal = ok && have == want
+		case string:
+			have, ok := actual.(string)
+			equal = ok && have == want
+		default:
+			wantNum, ok := numericValue(expected)
+			if !ok {
+				return false, fmt.Errorf("unsupported literal type %T in comparison", expected)
+			}
+			haveNum, ok := typedNumber(actual)
+			equal = ok && haveNum == wantNum
+		}
 	}
+	if op == OpEq {
+		return equal, nil
+	}
+	return !equal, nil
 }
 
-// payloadText / payloadNumeric / payloadBool model ONE thing between them:
-// what the SQL push-down does to a STORED payload value before comparing it
-// (memql#3628).
-//
-// compilePayloadComparison emits `payload #>> '{path}'` -- a TEXT extraction
-// of the stored JSONB -- and then casts that text by the LITERAL's type:
-// `::numeric` for a number literal, `::boolean` for a boolean, no cast at all
-// for a string. executeCombinedFilterQuery re-evaluates the same predicate in
-// process on every scanned candidate, so these three have to reach the same
-// answer the database does or a combined-filter query returns different rows
-// depending on which path ran.
-//
-// So the rule is: render the decoded value as `#>>` renders it, then apply the
-// cast the literal selects. Nothing else normalises. Two consequences worth
-// stating, because their previous versions got both backwards:
-//
-//   - the TEXT comparison is VERBATIM. The `toString` these replace ran
-//     strings.TrimSpace over the stored value, which no `=` in Postgres does,
-//     so a payload of `" u-1 "` matched `== "u-1"` in process and not in SQL.
-//   - the numeric and boolean casts DO skip surrounding whitespace, because
-//     numeric_in and boolin do. Trimming is not banned; it belongs to the
-//     cast, not to the comparison.
-//
-// Direction of the fix, deliberately: the DATABASE is the source of truth.
-// The push-down is the primary filter and it runs against the stored bytes;
-// the post-filter is a re-check of the rows it already returned. Where the two
-// disagreed the composition was an intersection, so the old divergence was
-// always fail-CLOSED -- rows silently missing, no error explaining why.
+// typedNumber reads a decoded JSON NUMBER: every Go numeric type the payload
+// cache or a caller can produce, plus json.Number for a decoder that kept the
+// source text. A string of digits is NOT a number -- that is the typed rule --
+// and neither is a boolean.
+func typedNumber(value any) (float64, bool) {
+	if n, ok := value.(json.Number); ok {
+		f, err := n.Float64()
+		if err != nil {
+			return 0, false
+		}
+		return f, true
+	}
+	return numericValue(value)
+}
+
+// typedValueInCollection reports whether a SET value is a member of a
+// normalised collection under the typed rule.
+func typedValueInCollection(actual any, collection *normalizedCollection) bool {
+	switch collection.kind {
+	case valueKindString:
+		have, ok := actual.(string)
+		if !ok {
+			return false
+		}
+		for _, candidate := range collection.strings {
+			if have == candidate {
+				return true
+			}
+		}
+	case valueKindNumber:
+		have, ok := typedNumber(actual)
+		if !ok {
+			return false
+		}
+		for _, candidate := range collection.numbers {
+			if have == candidate {
+				return true
+			}
+		}
+	case valueKindBool:
+		have, ok := actual.(bool)
+		if !ok {
+			return false
+		}
+		for _, candidate := range collection.bools {
+			if have == candidate {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // payloadText renders a decoded payload value the way `payload #>> '{path}'`
-// renders the stored JSONB: a string as itself, a boolean as `true`/`false`,
-// a number in numeric's plain (never exponent) notation.
+// renders the stored JSONB: a string as itself, a boolean as `true`/`false`, a
+// number in numeric's plain (never exponent) notation.
 //
-// Two shapes are deliberately NOT reproduced, and report themselves
-// un-renderable so the comparison is a non-match rather than a wrong match:
-//
-//   - the exact spelling of a JSON number. jsonb keeps the token's numeric
-//     scale, so a stored `5.0` extracts as "5.0", and encoding/json has thrown
-//     the source text away by the time this sees a float64. Only reachable by
-//     comparing a fractional-zero or exponent-spelled number against a STRING
-//     literal; no authored filter in the corpus does that. A json.Number (if a
-//     caller decoded with UseNumber) keeps its source text and is exact.
-//   - objects and arrays. `#>>` renders those as jsonb's own normalised JSON
-//     text -- keys re-ordered, whitespace collapsed -- and reproducing that
-//     byte for byte is a jsonb serialiser, not a comparison helper.
+// It was the post-filter's half of memql#3628's model, in which the SQL cast
+// the extracted text by the literal's type and this file reproduced the cast.
+// Edition 2026 replaced that model with typed comparisons (compareScalarValues:
+// a literal compares only with a value of its own type), so the post-filter no
+// longer calls it. It survives for the two callers that keep their own
+// comparison rules and read a value AS TEXT on purpose: the legacy
+// collection-lambda evaluator's startsWith (evalCollComparison) and shape
+// match() conditions (compareValues). Objects and arrays report themselves
+// un-renderable, as before.
 func payloadText(value any) (string, bool) {
 	switch v := value.(type) {
 	case string:
@@ -2351,160 +2753,6 @@ func payloadText(value any) (string, bool) {
 		return strconv.FormatInt(v, 10), true
 	default:
 		return "", false
-	}
-}
-
-// payloadNumeric mirrors `(payload #>> '{path}')::numeric`: the extracted text
-// parsed as a number. A JSON STRING holding digits therefore compares equal to
-// a numeric literal, exactly as it does in SQL. numeric_in ignores surrounding
-// whitespace, so this does too.
-//
-// Residual, deliberate: text that will not parse is a Postgres ERROR
-// ("invalid input syntax for type numeric") and a non-match here. That is a
-// query-fails-versus-returns-nothing difference rather than a which-rows-do-I-
-// get one, and closing it would mean turning queries that work today into
-// failures -- the wrong direction for a fail-closed divergence.
-func payloadNumeric(value any) (float64, bool) {
-	switch v := value.(type) {
-	case float64:
-		return v, true
-	case float32:
-		return float64(v), true
-	case int:
-		return float64(v), true
-	case int32:
-		return float64(v), true
-	case int64:
-		return float64(v), true
-	case json.Number:
-		f, err := v.Float64()
-		if err != nil {
-			return 0, false
-		}
-		return f, true
-	case string:
-		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
-		if err != nil {
-			return 0, false
-		}
-		return f, true
-	default:
-		// A boolean is NOT 1/0 here: `'true'::numeric` is an error in
-		// Postgres, not one.
-		return 0, false
-	}
-}
-
-// payloadBool mirrors `(payload #>> '{path}')::boolean`: the extracted text
-// parsed by Postgres's boolean input. A JSON STRING "true" therefore compares
-// equal to a boolean literal, exactly as it does in SQL.
-//
-// Same ERROR-versus-non-match residual as payloadNumeric: `'maybe'::boolean`
-// is a Postgres error and a non-match here.
-func payloadBool(value any) (bool, bool) {
-	switch v := value.(type) {
-	case bool:
-		return v, true
-	case string:
-		return parsePostgresBool(v)
-	default:
-		return false, false
-	}
-}
-
-// parsePostgresBool reproduces boolin (src/backend/utils/adt/bool.c): any
-// unambiguous PREFIX of true / false / yes / no / on / off, plus the single
-// characters 1 and 0, case-insensitively, with surrounding whitespace ignored.
-// A bare "o" is ambiguous between on and off and is an error there, so it is a
-// non-parse here.
-//
-// Spelled out rather than narrowed to "true"/"false" on purpose: the point of
-// this file's changes is that the post-filter answers what the database
-// answers, and a narrower reader would re-open the divergence for every other
-// spelling instead of the two JSON happens to use.
-func parsePostgresBool(s string) (bool, bool) {
-	lower := strings.ToLower(strings.TrimSpace(s))
-	if lower == "" {
-		return false, false
-	}
-	switch lower[0] {
-	case 't':
-		return true, strings.HasPrefix("true", lower)
-	case 'f':
-		return false, strings.HasPrefix("false", lower)
-	case 'y':
-		return true, strings.HasPrefix("yes", lower)
-	case 'n':
-		return false, strings.HasPrefix("no", lower)
-	case 'o':
-		switch {
-		case lower == "o":
-			return false, false
-		case strings.HasPrefix("off", lower):
-			return false, true
-		case strings.HasPrefix("on", lower):
-			return true, true
-		}
-		return false, false
-	case '1':
-		return true, lower == "1"
-	case '0':
-		return false, lower == "0"
-	}
-	return false, false
-}
-
-func literalToFloat(value any) (float64, bool) {
-	switch v := value.(type) {
-	case float64:
-		return v, true
-	case int64:
-		return float64(v), true
-	default:
-		return 0, false
-	}
-}
-
-func valueInCollection(actual any, collection *normalizedCollection) (bool, error) {
-	if collection == nil {
-		return false, fmt.Errorf("collection is nil")
-	}
-	switch collection.kind {
-	case valueKindString:
-		actualStr, ok := payloadText(actual)
-		if !ok {
-			return false, nil
-		}
-		for _, candidate := range collection.strings {
-			if actualStr == candidate {
-				return true, nil
-			}
-		}
-		return false, nil
-	case valueKindNumber:
-		actualNum, ok := payloadNumeric(actual)
-		if !ok {
-			return false, nil
-		}
-		for _, candidate := range collection.numbers {
-			if actualNum == candidate {
-				return true, nil
-			}
-		}
-		return false, nil
-	case valueKindBool:
-		actualBool, ok := payloadBool(actual)
-		if !ok {
-			return false, nil
-		}
-		for _, candidate := range collection.bools {
-			if actualBool == candidate {
-				return true, nil
-			}
-		}
-		return false, nil
-	default:
-		return false, fmt.Errorf("unsupported collection kind %v", collection.kind)
 	}
 }
 

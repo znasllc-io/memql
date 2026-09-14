@@ -17,48 +17,34 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
-// memql#3628: the sibling of absent_field_comparison_test.go, for a field that
-// is PRESENT but not stored as the type the predicate's literal is.
+// The sibling of absent_field_comparison_test.go, for a field that is PRESENT
+// -- and in particular present with a JSON type other than the literal's.
 //
 // Same invariant, same reason. executeCombinedFilterQuery scans in SQL and
 // then re-evaluates the whole expression tree in process on every candidate,
-// so BOTH paths decide the row set. memql#2783 pinned their agreement for an
-// ABSENT field and stopped there; for a present, differently-typed value the
-// two used to disagree in five distinct ways:
-//
-//	payload                        predicate    SQL     post-filter (before)
-//	{"ownerUserId":" u-1 "}        == "u-1"     false   TRUE
-//	{"ownerUserId":5}              == "5"       true    FALSE
-//	{"ownerUserId":"5"}            == 5         true    FALSE
-//	{"ownerUserId":"true"}         == true      true    FALSE
-//	{"ownerUserId":"true"}         != true      false   TRUE
-//
-// The divergence was always fail-CLOSED -- the paths compose as an
-// intersection -- so this was never an authorization hole. Its symptom was a
-// query silently returning nothing for data stored slightly off-type, with no
-// error to explain why.
-//
-// "Intersection" undersells why the agreement matters, though. latestMatchingNodes
-// RELOADS each scanned id to its true latest version and re-evaluates the
-// predicate on THAT row -- which the SQL scan may never have examined, since
-// the scan returned the newest version matching the filter rather than the
-// newest version. So the post-filter is a second, independent decision over
-// possibly-different bytes. If its comparison rules differ from the
-// push-down's, "the latest row satisfies your predicate" quietly becomes "the
+// so BOTH paths decide the row set. latestMatchingNodes even RELOADS each
+// scanned id to its true latest version before re-evaluating, a row the SQL
+// scan may never have examined -- so if the two paths' comparison rules
+// differ, "the latest row satisfies your predicate" quietly becomes "the
 // latest row satisfies a DIFFERENT predicate than the one you wrote".
 //
-// THE DIRECTION IS DELIBERATE: the post-filter was changed to match the
-// DATABASE, not the other way round. The push-down is the primary filter and
-// it runs against the stored bytes. Changing the SQL instead would have taken
-// rows AWAY from queries that work today.
+// # memql#3628, and what replaced it
 //
-// What the database actually does, and therefore what payloadText /
-// payloadNumeric / payloadBool now model: extract the stored value as TEXT via
-// `#>>`, then cast that text by the LITERAL's type. So the text comparison is
-// verbatim (nothing is trimmed), while the numeric and boolean casts DO ignore
-// surrounding whitespace, because numeric_in and boolin do. Trimming is not
-// banned; it belongs to the cast rather than to the comparison, which is
-// exactly the distinction the old `toString` collapsed.
+// memql#3628 made the halves agree by having the post-filter copy what the
+// SQL did: extract the stored value as TEXT via `#>>`, then CAST that text by
+// the literal's type -- `::numeric` for a number literal, `::boolean` for a
+// boolean one. So a stored string "5" equalled the number 5, and a stored 5
+// equalled the string "5". It agreed, but it agreed on coercion, and it had a
+// sharper edge: a stored "abc" compared with a number literal was a Postgres
+// ERROR (`invalid input syntax for type numeric`) that failed the whole read.
+//
+// Edition 2026 (memql#5366) makes both halves TYPED instead: a literal
+// compares only with a stored value of its own JSON type, which is the
+// in-process evaluator's typed equality (`1 == "1"` is false). The SQL guards
+// each comparison on jsonb_typeof, so a mistyped stored value is simply not
+// equal, not ordered and not a member -- and never reaches a cast that could
+// raise. The text comparison is still VERBATIM (nothing is trimmed), and
+// numbers still compare numerically across int and float.
 
 // presentFieldCase is one comparison against a payload whose field is present.
 type presentFieldCase struct {
@@ -94,25 +80,37 @@ type presentFieldCase struct {
 
 	// dbSkip, when non-empty, keeps the case out of the db-gated check and
 	// says why. Only the collection shapes use it: their bound arguments go
-	// through pq.Array / bun.In, which the one-off `SELECT <fragment>`
-	// harness below does not reproduce faithfully enough to be evidence.
+	// through bun.In, which the one-off `SELECT <fragment>` harness below
+	// does not reproduce faithfully enough to be evidence.
 	dbSkip string
 
 	why string
 }
 
+// The fragments every case below is built from, spelled once.
+const (
+	presentStrEq  = `(jsonb_typeof(payload->'ownerUserId') = 'string' AND payload #>> '{ownerUserId}' = ?)`
+	presentNumEq  = `(CASE WHEN jsonb_typeof(payload->'ownerUserId') = 'number' THEN (payload #>> '{ownerUserId}')::numeric = ? ELSE FALSE END)`
+	presentBoolEq = `(CASE WHEN jsonb_typeof(payload->'ownerUserId') = 'boolean' THEN (payload #>> '{ownerUserId}')::boolean = ? ELSE FALSE END)`
+)
+
+// presentNot is the two-valued negation compileNotSQL wraps a fragment in.
+func presentNot(fragment string) string {
+	return "(NOT COALESCE((" + fragment + "), FALSE))"
+}
+
 func presentFieldCases() []presentFieldCase {
 	return []presentFieldCase{
-		// ---- the trimming asymmetry -------------------------------------
+		// ---- strings: verbatim, never trimmed ------------------------------
 		{
 			name:        "stored whitespace is NOT trimmed away before an == compare",
 			payloadJSON: `{"ownerUserId":" u-1 "}`,
 			extracted:   " u-1 ",
 			op:          OpEq,
 			value:       "u-1",
-			wantSQL:     `(payload #>> '{ownerUserId}' = ?)`,
+			wantSQL:     presentStrEq,
 			wantMatch:   false,
-			why:         "no `=` in Postgres trims its operands; the old toString ran TrimSpace over the STORED value and matched",
+			why:         "no `=` in Postgres trims its operands, and neither does the post-filter",
 		},
 		{
 			name:        "stored whitespace matches a literal carrying the same whitespace",
@@ -120,7 +118,7 @@ func presentFieldCases() []presentFieldCase {
 			extracted:   " u-1 ",
 			op:          OpEq,
 			value:       " u-1 ",
-			wantSQL:     `(payload #>> '{ownerUserId}' = ?)`,
+			wantSQL:     presentStrEq,
 			wantMatch:   true,
 			why:         "the value is comparable, just verbatim -- this is the other half of not trimming",
 		},
@@ -130,139 +128,305 @@ func presentFieldCases() []presentFieldCase {
 			extracted:   " u-1 ",
 			op:          OpNe,
 			value:       "u-1",
-			wantSQL:     `(payload #>> '{ownerUserId}' IS DISTINCT FROM ?)`,
+			wantSQL:     presentNot(presentStrEq),
 			wantMatch:   true,
-			why:         "IS DISTINCT FROM on two non-null texts is plain inequality; ' u-1 ' is not 'u-1'",
+			why:         "`!=` is the exact negation of `==`; ' u-1 ' is not 'u-1'",
+		},
+		{
+			name:        "byte order puts an uppercase E before a lowercase a",
+			payloadJSON: `{"ownerUserId":"E"}`,
+			extracted:   "E",
+			op:          OpLt,
+			value:       "a",
+			wantSQL:     `(jsonb_typeof(payload->'ownerUserId') = 'string' AND (payload #>> '{ownerUserId}') COLLATE "C" < ?)`,
+			wantMatch:   true,
+			why:         "strings order by byte on both halves; COLLATE \"C\" is what makes the database agree with Go",
 		},
 
-		// ---- stored number vs string literal ------------------------------
+		// ---- the one notion of unset, for a PRESENT value --------------------
 		{
-			name:        "a stored NUMBER compares equal to the matching string literal",
+			name:        "a stored empty string == \"\"",
+			payloadJSON: `{"ownerUserId":""}`,
+			extracted:   "",
+			op:          OpEq,
+			value:       "",
+			wantSQL:     `(COALESCE(payload #>> '{ownerUserId}', '') = '')`,
+			wantMatch:   true,
+			why:         "\"\" is unset, and unset equals unset",
+		},
+		{
+			name:        "a stored single space is a value, not unset",
+			payloadJSON: `{"ownerUserId":" "}`,
+			extracted:   " ",
+			op:          OpEq,
+			value:       "",
+			wantSQL:     `(COALESCE(payload #>> '{ownerUserId}', '') = '')`,
+			wantMatch:   false,
+			why:         "only the empty string is unset; whitespace is a value",
+		},
+		{
+			name:        "a stored empty string == nil",
+			payloadJSON: `{"ownerUserId":""}`,
+			extracted:   "",
+			op:          OpMissing,
+			value:       nil,
+			wantSQL:     `(COALESCE(payload #>> '{ownerUserId}', '') = '')`,
+			wantMatch:   true,
+			why:         "nil and \"\" are one value to == and !=",
+		},
+		{
+			name:        "a stored number is set",
+			payloadJSON: `{"ownerUserId":0}`,
+			extracted:   "0",
+			op:          OpNotMissing,
+			value:       nil,
+			wantSQL:     `(COALESCE(payload #>> '{ownerUserId}', '') <> '')`,
+			wantMatch:   true,
+			why:         "a number never extracts as the empty text, so it is never unset",
+		},
+
+		// ---- TYPED: a string literal against a stored number or boolean ------
+		{
+			name:        "a stored NUMBER is not equal to the matching string literal",
 			payloadJSON: `{"ownerUserId":5}`,
 			extracted:   "5",
 			op:          OpEq,
 			value:       "5",
-			wantSQL:     `(payload #>> '{ownerUserId}' = ?)`,
-			wantMatch:   true,
-			why:         "#>> extracts JSON as TEXT, so the stored 5 is the text '5'; the old toString refused every non-string outright",
+			wantSQL:     presentStrEq,
+			wantMatch:   false,
+			why:         "typed: 5 == \"5\" is false (memql#3628 compared the extracted text and said true)",
 		},
 		{
-			name:        "a stored NUMBER is not != the matching string literal",
+			name:        "stored 1 vs \"1\"",
+			payloadJSON: `{"ownerUserId":1}`,
+			extracted:   "1",
+			op:          OpEq,
+			value:       "1",
+			wantSQL:     presentStrEq,
+			wantMatch:   false,
+			why:         "typed equality, the coordinator's pinned case",
+		},
+		{
+			name:        "a stored NUMBER is != the matching string literal",
 			payloadJSON: `{"ownerUserId":5}`,
 			extracted:   "5",
 			op:          OpNe,
 			value:       "5",
-			wantSQL:     `(payload #>> '{ownerUserId}' IS DISTINCT FROM ?)`,
-			wantMatch:   false,
-			why:         "the != direction of the same coercion; the old path returned true and handed back a row SQL excluded",
-		},
-
-		// ---- stored string vs number literal ------------------------------
-		{
-			name:        "a stored STRING of digits compares equal to a number literal",
-			payloadJSON: `{"ownerUserId":"5"}`,
-			extracted:   "5",
-			op:          OpEq,
-			value:       int64(5),
-			wantSQL:     `((payload #>> '{ownerUserId}')::numeric = ?)`,
+			wantSQL:     presentNot(presentStrEq),
 			wantMatch:   true,
-			why:         "a number literal makes the push-down cast the extracted text to numeric, and '5'::numeric is 5",
+			why:         "the negation of a typed false",
 		},
 		{
-			name:        "the numeric cast ignores surrounding whitespace",
-			payloadJSON: `{"ownerUserId":" 5 "}`,
-			extracted:   " 5 ",
-			op:          OpEq,
-			value:       int64(5),
-			wantSQL:     `((payload #>> '{ownerUserId}')::numeric = ?)`,
-			wantMatch:   true,
-			why:         "numeric_in skips leading/trailing whitespace -- trimming belongs to the CAST, not to the comparison",
-		},
-		{
-			name:        "ordered comparison casts a stored string of digits too",
-			payloadJSON: `{"ownerUserId":"5"}`,
-			extracted:   "5",
-			op:          OpGt,
-			value:       int64(4),
-			wantSQL:     `((payload #>> '{ownerUserId}')::numeric > ?)`,
-			wantMatch:   true,
-			why:         "the cast is selected by the literal's type for every ordered operator, not just ==",
-		},
-		{
-			name:        "ordered comparison against a string literal stays lexicographic over the extracted text",
-			payloadJSON: `{"ownerUserId":5}`,
-			extracted:   "5",
-			op:          OpGt,
-			value:       "4",
-			wantSQL:     `(payload #>> '{ownerUserId}' > ?)`,
-			wantMatch:   true,
-			why:         "a string literal means no cast at all, so the stored number is compared as its text",
-		},
-
-		// ---- stored string vs boolean literal -----------------------------
-		{
-			name:        `a stored STRING "true" compares equal to a boolean literal`,
-			payloadJSON: `{"ownerUserId":"true"}`,
-			extracted:   "true",
-			op:          OpEq,
-			value:       true,
-			wantSQL:     `((payload #>> '{ownerUserId}')::boolean = ?)`,
-			wantMatch:   true,
-			why:         "a boolean literal makes the push-down cast to boolean, and 'true'::boolean is true",
-		},
-		{
-			name:        `a stored STRING "true" is not != a boolean literal`,
-			payloadJSON: `{"ownerUserId":"true"}`,
-			extracted:   "true",
-			op:          OpNe,
-			value:       true,
-			wantSQL:     `((payload #>> '{ownerUserId}')::boolean IS DISTINCT FROM ?)`,
-			wantMatch:   false,
-			why:         "the fifth row of the issue's matrix: the old path returned true and included a row SQL excluded",
-		},
-		{
-			name:        `Postgres boolean input accepts "on", so the post-filter must too`,
-			payloadJSON: `{"ownerUserId":"on"}`,
-			extracted:   "on",
-			op:          OpEq,
-			value:       true,
-			wantSQL:     `((payload #>> '{ownerUserId}')::boolean = ?)`,
-			wantMatch:   true,
-			why:         "boolin takes any unambiguous prefix of true/false/yes/no/on/off plus 1/0; a reader narrowed to 'true'/'false' would re-open the divergence for the rest",
-		},
-		{
-			name:        "a stored BOOLEAN compares equal to the matching string literal",
+			name:        "a stored BOOLEAN is not equal to the matching string literal",
 			payloadJSON: `{"ownerUserId":true}`,
 			extracted:   "true",
 			op:          OpEq,
 			value:       "true",
-			wantSQL:     `(payload #>> '{ownerUserId}' = ?)`,
-			wantMatch:   true,
-			why:         "the reverse direction: #>> renders a stored boolean as the text 'true'",
+			wantSQL:     presentStrEq,
+			wantMatch:   false,
+			why:         "typed: a boolean is not the string \"true\"",
+		},
+		{
+			name:        "a string ordering does not order a stored number",
+			payloadJSON: `{"ownerUserId":5}`,
+			extracted:   "5",
+			op:          OpGt,
+			value:       "4",
+			wantSQL:     `(jsonb_typeof(payload->'ownerUserId') = 'string' AND (payload #>> '{ownerUserId}') COLLATE "C" > ?)`,
+			wantMatch:   false,
+			why:         "typed: a string literal orders strings only (memql#3628 ordered the text '5')",
 		},
 
-		// ---- the same coercions under `in` --------------------------------
+		// ---- TYPED: a number literal ----------------------------------------
 		{
-			name:        "a stored NUMBER is found in a string collection",
+			name:        "a stored STRING of digits is not equal to a number literal",
+			payloadJSON: `{"ownerUserId":"5"}`,
+			extracted:   "5",
+			op:          OpEq,
+			value:       int64(5),
+			wantSQL:     presentNumEq,
+			wantMatch:   false,
+			why:         "typed: \"5\" == 5 is false (memql#3628 cast the text to numeric and said true)",
+		},
+		{
+			name:        "stored \"1\" vs 1",
+			payloadJSON: `{"ownerUserId":"1"}`,
+			extracted:   "1",
+			op:          OpEq,
+			value:       int64(1),
+			wantSQL:     presentNumEq,
+			wantMatch:   false,
+			why:         "typed equality, the coordinator's pinned case",
+		},
+		{
+			name:        "a stored string with surrounding whitespace is not a number either",
+			payloadJSON: `{"ownerUserId":" 5 "}`,
+			extracted:   " 5 ",
+			op:          OpEq,
+			value:       int64(5),
+			wantSQL:     presentNumEq,
+			wantMatch:   false,
+			why:         "the typed guard never reaches the cast that used to skip the whitespace",
+		},
+		{
+			name:        "a stored number equals a number literal",
+			payloadJSON: `{"ownerUserId":5}`,
+			extracted:   "5",
+			op:          OpEq,
+			value:       int64(5),
+			wantSQL:     presentNumEq,
+			wantMatch:   true,
+			why:         "the typed positive",
+		},
+		{
+			name:        "numbers compare numerically across int and float",
+			payloadJSON: `{"ownerUserId":5.0}`,
+			extracted:   "5.0",
+			op:          OpEq,
+			value:       int64(5),
+			wantSQL:     presentNumEq,
+			wantMatch:   true,
+			why:         "5.0 is 5; the scale jsonb keeps in the text does not matter to ::numeric or to Go",
+		},
+		{
+			name:        "a number ordering orders a stored number",
+			payloadJSON: `{"ownerUserId":5}`,
+			extracted:   "5",
+			op:          OpGt,
+			value:       int64(4),
+			wantSQL:     `(CASE WHEN jsonb_typeof(payload->'ownerUserId') = 'number' THEN (payload #>> '{ownerUserId}')::numeric > ? ELSE FALSE END)`,
+			wantMatch:   true,
+			why:         "the typed positive for an ordering",
+		},
+		{
+			name:        "a number ordering does not order a stored string of digits",
+			payloadJSON: `{"ownerUserId":"5"}`,
+			extracted:   "5",
+			op:          OpGt,
+			value:       int64(4),
+			wantSQL:     `(CASE WHEN jsonb_typeof(payload->'ownerUserId') = 'number' THEN (payload #>> '{ownerUserId}')::numeric > ? ELSE FALSE END)`,
+			wantMatch:   false,
+			why:         "typed: a string is not ordered against a number",
+		},
+		{
+			// Before memql#5366 this was not a false -- it was a Postgres
+			// ERROR that failed the whole read. The db-gated check below is
+			// what proves it no longer raises.
+			name:        "a malformed stored value never reaches the numeric cast",
+			payloadJSON: `{"ownerUserId":"abc"}`,
+			extracted:   "abc",
+			op:          OpGt,
+			value:       int64(4),
+			wantSQL:     `(CASE WHEN jsonb_typeof(payload->'ownerUserId') = 'number' THEN (payload #>> '{ownerUserId}')::numeric > ? ELSE FALSE END)`,
+			wantMatch:   false,
+			why:         "the CASE keeps the cast off a string, so 'abc' is simply not greater than 4",
+		},
+
+		// ---- TYPED: a boolean literal ---------------------------------------
+		{
+			name:        "stored \"true\" vs true",
+			payloadJSON: `{"ownerUserId":"true"}`,
+			extracted:   "true",
+			op:          OpEq,
+			value:       true,
+			wantSQL:     presentBoolEq,
+			wantMatch:   false,
+			why:         "typed: the string \"true\" is not the boolean (memql#3628 cast it and said true)",
+		},
+		{
+			name:        "stored \"true\" != true",
+			payloadJSON: `{"ownerUserId":"true"}`,
+			extracted:   "true",
+			op:          OpNe,
+			value:       true,
+			wantSQL:     presentNot(presentBoolEq),
+			wantMatch:   true,
+			why:         "the negation of a typed false",
+		},
+		{
+			name:        "Postgres boolean input would accept \"on\"; the typed rule does not cast it",
+			payloadJSON: `{"ownerUserId":"on"}`,
+			extracted:   "on",
+			op:          OpEq,
+			value:       true,
+			wantSQL:     presentBoolEq,
+			wantMatch:   false,
+			why:         "boolin takes any unambiguous prefix of true/false/yes/no/on/off; the typed guard never gets there",
+		},
+		{
+			name:        "a malformed stored value never reaches the boolean cast",
+			payloadJSON: `{"ownerUserId":"maybe"}`,
+			extracted:   "maybe",
+			op:          OpEq,
+			value:       true,
+			wantSQL:     presentBoolEq,
+			wantMatch:   false,
+			why:         "'maybe'::boolean is a Postgres ERROR; behind the CASE it is not evaluated",
+		},
+		{
+			name:        "a stored boolean equals a boolean literal",
+			payloadJSON: `{"ownerUserId":true}`,
+			extracted:   "true",
+			op:          OpEq,
+			value:       true,
+			wantSQL:     presentBoolEq,
+			wantMatch:   true,
+			why:         "the typed positive",
+		},
+
+		// ---- the same rules under `in` and `startsWith` ----------------------
+		{
+			name:        "a stored NUMBER is not in a string collection",
 			payloadJSON: `{"ownerUserId":5}`,
 			extracted:   "5",
 			op:          OpIn,
 			value:       []any{"5", "6"},
-			wantSQL:     `((jsonb_typeof(payload->'ownerUserId') = 'array' AND jsonb_exists_any(payload->'ownerUserId', ?::text[])) OR (payload #>> '{ownerUserId}' IN (?)))`,
-			wantMatch:   true,
-			dbSkip:      "bound args go through pq.Array + bun.In",
-			why:         "valueInCollection reads the same extracted text the scalar == path does",
+			wantSQL:     `(jsonb_typeof(payload->'ownerUserId') = 'string' AND payload #>> '{ownerUserId}' IN (?))`,
+			wantMatch:   false,
+			dbSkip:      "bound args go through bun.In",
+			why:         "`in` is `==` against each member, and == is typed",
 		},
 		{
-			name:        "a stored STRING of digits is found in a number collection",
+			name:        "a stored STRING of digits is not in a number collection",
 			payloadJSON: `{"ownerUserId":"5"}`,
 			extracted:   "5",
 			op:          OpIn,
 			value:       []any{int64(5), int64(6)},
-			wantSQL:     `((payload #>> '{ownerUserId}')::numeric IN (?))`,
+			wantSQL:     `(CASE WHEN jsonb_typeof(payload->'ownerUserId') = 'number' THEN (payload #>> '{ownerUserId}')::numeric IN (?) ELSE FALSE END)`,
+			wantMatch:   false,
+			dbSkip:      "bound args go through bun.In",
+			why:         "typed membership",
+		},
+		{
+			name:        "a stored string is in a string collection",
+			payloadJSON: `{"ownerUserId":"5"}`,
+			extracted:   "5",
+			op:          OpIn,
+			value:       []any{"5", "6"},
+			wantSQL:     `(jsonb_typeof(payload->'ownerUserId') = 'string' AND payload #>> '{ownerUserId}' IN (?))`,
 			wantMatch:   true,
 			dbSkip:      "bound args go through bun.In",
-			why:         "a number collection casts to numeric exactly as a number literal does",
+			why:         "the typed positive",
+		},
+		{
+			name:        "a stored number has no prefix",
+			payloadJSON: `{"ownerUserId":42}`,
+			extracted:   "42",
+			op:          OpStartsWith,
+			value:       "4",
+			wantSQL:     `(jsonb_typeof(payload->'ownerUserId') = 'string' AND (payload #>> '{ownerUserId}') ^@ ANY(?::text[]))`,
+			wantMatch:   false,
+			why:         "a prefix test is a question about a string (memql#4208 read the number's digits)",
+		},
+		{
+			name:        "a stored string has its prefix",
+			payloadJSON: `{"ownerUserId":"42"}`,
+			extracted:   "42",
+			op:          OpStartsWith,
+			value:       "4",
+			wantSQL:     `(jsonb_typeof(payload->'ownerUserId') = 'string' AND (payload #>> '{ownerUserId}') ^@ ANY(?::text[]))`,
+			wantMatch:   true,
+			why:         "the typed positive",
 		},
 	}
 }
@@ -289,97 +453,112 @@ func presentFieldComparison(op ComparisonOperator, value any) *ComparisonExpress
 	}
 }
 
+// presentJSONType is jsonb_typeof, restated: the JSON type of the stored
+// value, read off the fixture's own JSON text.
+func presentJSONType(t *testing.T, payloadJSON string) string {
+	t.Helper()
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal([]byte(payloadJSON), &payload))
+	switch payload["ownerUserId"].(type) {
+	case string:
+		return "string"
+	case float64:
+		return "number"
+	case bool:
+		return "boolean"
+	case nil:
+		return "null"
+	case map[string]any:
+		return "object"
+	case []any:
+		return "array"
+	}
+	t.Fatalf("unexpected stored value in %s", payloadJSON)
+	return ""
+}
+
 // sqlMatchesPresentRow computes whether an emitted fragment returns a row
-// whose extraction is the given TEXT.
+// whose stored value has the given JSON type and TEXT extraction.
 //
 // It is an independent restatement of Postgres, written out here rather than
 // borrowed from the production helpers, and it FAILS on any shape it does not
 // recognise -- the same discipline sqlMatchesAbsentRow adopted after an
 // inferring version turned the agreement check into a tautology.
-func sqlMatchesPresentRow(t *testing.T, fragment, extracted string, operand any) bool {
+func sqlMatchesPresentRow(t *testing.T, fragment, jsonType, extracted string, operand any) bool {
 	t.Helper()
-
-	// Which cast the push-down chose is visible in the fragment, and the
-	// cast decides what the operands ARE before any operator runs.
-	switch {
-	case strings.HasPrefix(fragment, "((jsonb_typeof("):
-		// String-collection membership. The first disjunct only fires for
-		// an array-valued field; every fixture here stores a scalar, so
-		// jsonb_typeof is 'string'/'number'/'boolean' and that disjunct is
-		// false. Guarded rather than assumed.
-		require.False(t, strings.HasPrefix(strings.TrimSpace(extracted), "["),
-			"an array-valued fixture would take the jsonb_exists_any disjunct; extend this model deliberately")
-		items := operandStrings(t, operand)
-		in := collectionHasText(items, extracted)
-		if strings.Contains(fragment, "NOT jsonb_exists_any") {
-			return !in
+	if left, op, right, ok := splitBinaryFragment(fragment); ok {
+		l := sqlMatchesPresentRow(t, left, jsonType, extracted, operand)
+		r := sqlMatchesPresentRow(t, right, jsonType, extracted, operand)
+		if op == "AND" {
+			return l && r
 		}
-		return in
+		return l || r
+	}
+	const text = "payload #>> '{ownerUserId}'"
+	guard := func(prefix, want string) (string, bool) {
+		if !strings.HasPrefix(fragment, prefix) {
+			return "", false
+		}
+		return strings.TrimPrefix(fragment, prefix), jsonType == want
+	}
+	switch {
+	case strings.HasPrefix(fragment, "(NOT COALESCE((") && strings.HasSuffix(fragment, "), FALSE))"):
+		inner := strings.TrimSuffix(strings.TrimPrefix(fragment, "(NOT COALESCE(("), "), FALSE))")
+		return !sqlMatchesPresentRow(t, inner, jsonType, extracted, operand)
 
-	case strings.Contains(fragment, ")::numeric"):
-		// numeric_in ignores surrounding whitespace and rejects anything
-		// that is not a number (a Postgres ERROR, which this models as a
-		// non-match -- see payloadNumeric's comment).
-		n, err := strconv.ParseFloat(strings.TrimSpace(extracted), 64)
-		if err != nil {
+	case fragment == "(COALESCE("+text+", '') = '')":
+		return extracted == ""
+	case fragment == "(COALESCE("+text+", '') <> '')":
+		return extracted != ""
+	}
+
+	if rest, typeOK := guard("(jsonb_typeof(payload->'ownerUserId') = 'string' AND ", "string"); rest != "" {
+		if !typeOK {
 			return false
 		}
-		if strings.Contains(fragment, "IN (?)") {
-			nums := operandFloats(t, operand)
-			found := false
-			for _, c := range nums {
-				if c == n {
-					found = true
-					break
+		switch {
+		case rest == text+" = ?)":
+			return extracted == operand.(string)
+		case rest == text+" IN (?))":
+			return collectionHasText(operandStrings(t, operand), extracted)
+		case rest == "("+text+") ^@ ANY(?::text[]))":
+			for _, prefix := range operandPrefixes(t, operand) {
+				if strings.HasPrefix(extracted, prefix) {
+					return true
 				}
 			}
-			if strings.Contains(fragment, "NOT IN (?)") {
-				return !found
-			}
-			return found
+			return false
+		case strings.HasPrefix(rest, "("+text+") COLLATE \"C\" "):
+			return applyOrderedOperator(t, rest, extracted, operand.(string))
 		}
-		return applyOrderedOperator(t, fragment, n, operandFloat(t, operand))
-
-	case strings.Contains(fragment, ")::boolean"):
-		// boolin: any unambiguous prefix of true/false/yes/no/on/off, plus
-		// 1/0, case-insensitive, whitespace ignored. Spelled out only for
-		// the spellings the fixtures use; anything else is a deliberate
-		// extension rather than a guess.
-		var b bool
-		switch strings.ToLower(strings.TrimSpace(extracted)) {
-		case "true", "t", "yes", "y", "on", "1":
-			b = true
-		case "false", "f", "no", "n", "off", "0":
-			b = false
-		default:
-			t.Fatalf("extraction %q is not a boolean literal Postgres accepts; extend this model deliberately", extracted)
+		t.Fatalf("unrecognised string comparison %q", fragment)
+	}
+	if rest, typeOK := guard("(CASE WHEN jsonb_typeof(payload->'ownerUserId') = 'number' THEN ", "number"); rest != "" {
+		if !typeOK {
+			return false
+		}
+		n, err := strconv.ParseFloat(extracted, 64)
+		require.NoError(t, err, "a stored number extracts as parseable digits")
+		if strings.Contains(rest, "IN (?)") {
+			for _, c := range operandFloats(t, operand) {
+				if c == n {
+					return true
+				}
+			}
+			return false
+		}
+		return applyOrderedOperator(t, rest, n, operandFloat(t, operand))
+	}
+	if rest, typeOK := guard("(CASE WHEN jsonb_typeof(payload->'ownerUserId') = 'boolean' THEN ", "boolean"); rest != "" {
+		if !typeOK {
+			return false
 		}
 		want, ok := operand.(bool)
-		require.True(t, ok, "a ::boolean fragment compares booleans; got %T", operand)
-		if strings.Contains(fragment, "IS DISTINCT FROM ?") {
-			return b != want
-		}
-		require.Contains(t, fragment, "= ?", "unrecognised operator in boolean fragment %q", fragment)
-		return b == want
-
-	default:
-		// No cast: a plain text comparison over the extracted value.
-		if strings.Contains(fragment, "IN (?)") {
-			items := operandStrings(t, operand)
-			found := collectionHasText(items, extracted)
-			if strings.Contains(fragment, "NOT IN (?)") {
-				return !found
-			}
-			return found
-		}
-		want, ok := operand.(string)
-		require.True(t, ok, "an uncast fragment compares text; got %T", operand)
-		if strings.Contains(fragment, "IS DISTINCT FROM ?") {
-			// Both sides are non-null here, so this is plain inequality.
-			return extracted != want
-		}
-		return applyOrderedOperator(t, fragment, extracted, want)
+		require.True(t, ok, "a boolean comparison compares booleans; got %T", operand)
+		return (extracted == "true") == want
 	}
+	t.Fatalf("unrecognised SQL shape %q -- extend this model deliberately", fragment)
+	return false
 }
 
 // applyOrderedOperator reads the comparison operator out of a fragment and
@@ -415,6 +594,14 @@ func operandStrings(t *testing.T, operand any) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+func operandPrefixes(t *testing.T, operand any) []string {
+	t.Helper()
+	if s, ok := operand.(string); ok {
+		return []string{s}
+	}
+	return operandStrings(t, operand)
 }
 
 func operandFloats(t *testing.T, operand any) []float64 {
@@ -462,9 +649,7 @@ func TestPresentPayloadField_SQLPushdownSemantics(t *testing.T) {
 
 // The invariant that protects correctness: a combined-filter query scans in
 // SQL and then re-filters in process, so if the two paths disagree about a
-// present-but-differently-typed value the rows you get depend on which path
-// ran. Every row of memql#3628's matrix fails this test against the old
-// post-filter.
+// present value the rows you get depend on which path ran.
 func TestPresentPayloadField_SQLAndPostFilterAgree(t *testing.T) {
 	for _, tc := range presentFieldCases() {
 		t.Run(tc.name, func(t *testing.T) {
@@ -475,7 +660,7 @@ func TestPresentPayloadField_SQLAndPostFilterAgree(t *testing.T) {
 
 			compiled, err := compilePayloadComparison([]string{"ownerUserId"}, tc.op, tc.value)
 			require.NoError(t, err)
-			sqlMatch := sqlMatchesPresentRow(t, compiled.sql, tc.extracted, tc.value)
+			sqlMatch := sqlMatchesPresentRow(t, compiled.sql, presentJSONType(t, tc.payloadJSON), tc.extracted, tc.value)
 
 			require.Equal(t, sqlMatch, post,
 				"SQL push-down and in-process post-filter disagree about %s %v %v; a combined-filter "+
@@ -492,7 +677,8 @@ func TestPresentPayloadField_SQLAndPostFilterAgree(t *testing.T) {
 //
 // The harness evaluates the emitted fragment directly over a synthetic payload
 // rather than seeding rows: the fragment is the whole subject, and `IS TRUE`
-// reproduces exactly what a WHERE clause does with a NULL result.
+// reproduces exactly what a WHERE clause does with a NULL result. The two
+// malformed cases are the ones this used to answer with an ERROR.
 func TestPresentPayloadField_SQLSemanticsMatchPostgres(t *testing.T) {
 	dsn := dbtest.DSN()
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())

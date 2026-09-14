@@ -16,6 +16,10 @@ func validateAIContext(expr ExpressionNode) error {
 		return validateAIContext(node.Right)
 	case *RelationshipExpression:
 		return validateAIContext(node.Target)
+	case *NotExpression:
+		return validateAIContext(node.Target)
+	case *ArrayPredicateExpression:
+		return validateAIContext(node.Pred)
 	default:
 		return nil
 	}

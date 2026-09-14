@@ -123,6 +123,22 @@ func (v *specValidator) expandExpression(expr ExpressionNode, allowInline bool) 
 		}, nil
 	case *ComparisonExpression:
 		return cloneExpressionNode(node), nil
+	case *NotExpression:
+		// `!isArchived(row)`: the spec under the negation is inlined like any
+		// other, so the negated body is what the validation below checks.
+		target, err := v.expandExpression(node.Target, allowInline)
+		if err != nil {
+			return nil, err
+		}
+		return &NotExpression{Target: target}, nil
+	case *ArrayPredicateExpression:
+		pred, err := v.expandExpression(node.Pred, allowInline)
+		if err != nil {
+			return nil, err
+		}
+		copied := cloneExpressionNode(node).(*ArrayPredicateExpression)
+		copied.Pred = pred
+		return copied, nil
 	case *RelationshipExpression:
 		target, err := v.expandExpression(node.Target, allowInline)
 		if err != nil {
@@ -225,6 +241,16 @@ func (u *specUsage) collect(expr ExpressionNode) {
 	case *LogicalExpression:
 		u.collect(node.Left)
 		u.collect(node.Right)
+	case *NotExpression:
+		// Descended: `!(concept == X)` still constrains the concept, and a
+		// spec must be concept-agnostic in either direction.
+		u.collect(node.Target)
+	case *ArrayPredicateExpression:
+		// The array itself is a payload path the spec reads; the element
+		// predicate's own fields are element-relative ($elem) and are not
+		// payload paths, which observeComparison's switch already ignores.
+		u.observeComparison(&ComparisonExpression{Field: node.Field})
+		u.collect(node.Pred)
 	case *RelationshipExpression:
 		u.collect(node.Target)
 	}

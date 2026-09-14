@@ -40,7 +40,7 @@ func evaluateSpecExpression(goCtx context.Context, engine *MemQLEngine, expr Exp
 	}
 	switch node := expr.(type) {
 	case *ComparisonExpression:
-		return evaluateSpecComparison(node, ctx)
+		return evaluateSpecComparison(goCtx, node, ctx)
 	case *LogicalExpression:
 		return evaluateSpecLogical(goCtx, engine, node, ctx)
 	case *ArithmeticExpression:
@@ -54,6 +54,37 @@ func evaluateSpecExpression(goCtx context.Context, engine *MemQLEngine, expr Exp
 		return node.Value, nil
 	case *BuiltinFunctionExpression:
 		return nil, fmt.Errorf("builtin function %q is not evaluable inside a spec body", node.Name)
+	case *NotExpression:
+		// Two-valued negation of the operand, read with the same truthiness
+		// evaluateSpecLogical reads && and || with.
+		operand, err := evaluateSpecExpression(goCtx, engine, node.Target, ctx)
+		if err != nil {
+			return nil, err
+		}
+		return !specTruthy(operand), nil
+	case *constantBoolExpression:
+		return node.value, nil
+	case *PlanConstExpression:
+		// A context-spec runs per call already, so a plan constant in its
+		// body is evaluated here, against the same envelope the body reads
+		// (#2623: one envelope), under the same predicate-position rule the
+		// query path applies at expansion.
+		value, err := evaluatePlanConstant(goCtx, node, planConstantBindings(nil, ctx))
+		if err != nil {
+			return nil, err
+		}
+		folded, err := planConstantPredicate(node, value)
+		if err != nil {
+			return nil, err
+		}
+		return folded.(*constantBoolExpression).value, nil
+	case *ArrayPredicateExpression:
+		// A collection predicate reads a ROW array, and a context-spec
+		// evaluates against the caller's envelope with no row in it. Refused
+		// by name rather than read against the envelope, which would be a
+		// different predicate from the one the author wrote.
+		return nil, fmt.Errorf("the collection predicate %s is not evaluable in a context-spec body: it reads a row "+
+			"array, and a context-spec has no row", canonicalExpression(node))
 	}
 	return nil, fmt.Errorf("unsupported expression type %T in spec body", expr)
 }
@@ -148,7 +179,7 @@ func evaluateSpecLogical(goCtx context.Context, engine *MemQLEngine, expr *Logic
 	return nil, fmt.Errorf("unsupported logical operator %v in spec body", expr.Op)
 }
 
-func evaluateSpecComparison(expr *ComparisonExpression, ctx map[string]any) (any, error) {
+func evaluateSpecComparison(goCtx context.Context, expr *ComparisonExpression, ctx map[string]any) (any, error) {
 	if expr == nil {
 		return nil, nil
 	}
@@ -156,7 +187,7 @@ func evaluateSpecComparison(expr *ComparisonExpression, ctx map[string]any) (any
 	if err != nil {
 		return nil, err
 	}
-	rhs, err := evaluateSpecValue(expr.Value, ctx)
+	rhs, err := evaluateSpecValue(goCtx, expr.Value, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +223,7 @@ func evaluateSpecFieldRef(ref FieldReference, ctx map[string]any) (any, error) {
 	return nil, fmt.Errorf("field reference %q not supported in spec body", ref.Raw)
 }
 
-func evaluateSpecValue(value any, ctx map[string]any) (any, error) {
+func evaluateSpecValue(goCtx context.Context, value any, ctx map[string]any) (any, error) {
 	switch v := value.(type) {
 	case *ArgReference:
 		return lookupPath(ctx, strings.Split(v.Path, ".")), nil
@@ -202,6 +233,14 @@ func evaluateSpecValue(value any, ctx map[string]any) (any, error) {
 			return nil, nil
 		}
 		return lookupPath(actor, strings.Split(v.Path, ".")), nil
+	case *PlanConstExpression:
+		// The value-position twin of the predicate arm in
+		// evaluateSpecExpression: evaluated against the spec's envelope.
+		evaluated, err := evaluatePlanConstant(goCtx, v, planConstantBindings(nil, ctx))
+		if err != nil {
+			return nil, err
+		}
+		return normalizePlanConstantValue(evaluated)
 	}
 	return value, nil
 }

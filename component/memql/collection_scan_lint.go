@@ -128,6 +128,14 @@ func walkForInMemoryScans(expr ExpressionNode, functions map[string]*Function, e
 	case *LogicalExpression:
 		walkForInMemoryScans(node.Left, functions, emit)
 		walkForInMemoryScans(node.Right, functions, emit)
+	case *NotExpression:
+		walkForInMemoryScans(node.Target, functions, emit)
+	case *ArrayPredicateExpression:
+		// A collection predicate over a row array is the pushdown form of a
+		// collection method -- the opposite of the in-memory scan this lint
+		// hunts -- so it is never a finding; only its element predicate is
+		// walked, for completeness.
+		walkForInMemoryScans(node.Pred, functions, emit)
 	case *ComparisonExpression:
 		if v, ok := node.Value.(ExpressionNode); ok {
 			walkForInMemoryScans(v, functions, emit)

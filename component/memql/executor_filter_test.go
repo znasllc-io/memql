@@ -9,55 +9,54 @@ import (
 	coreid "github.com/znasllc-io/memql/core/id"
 )
 
+// `in` over strings is TYPED membership (memql#5366): the stored value must be
+// a JSON string that is one of the members.
+//
+// It used to be "array-aware" as well -- a second disjunct admitted a field
+// that was an ARRAY overlapping the list (jsonb_exists_any). The in-process
+// twin never agreed (it could not read an array as a member), so every row
+// that disjunct admitted was dropped by the post-filter: the feature returned
+// nothing end to end, and under edition 2026's `!` the drop would have flipped
+// into a lost row. Membership of an array's elements is `v in row.<field>`
+// (OpHas) or a collection predicate (`row.tags.any(t => t in [...])`).
 func TestCompilePayloadComparisonInOperatorString(t *testing.T) {
-	// Test in with string values (should generate array-aware SQL)
 	result, err := compilePayloadComparison(
 		[]string{"topics"},
 		OpIn,
 		[]any{"filters", "shape"},
 	)
 	require.NoError(t, err)
-
-	// Should contain both array check (jsonb_typeof + jsonb_exists_any) and scalar check (IN)
-	require.Contains(t, result.sql, "jsonb_typeof")
-	require.Contains(t, result.sql, "jsonb_exists_any")
-	require.Contains(t, result.sql, "?::text[]")
-	require.Contains(t, result.sql, "IN")
-	// Args: text[] array + bun.In for scalar IN clause
-	require.Len(t, result.args, 2)
+	require.Equal(t, `(jsonb_typeof(payload->'topics') = 'string' AND payload #>> '{topics}' IN (?))`, result.sql)
+	require.NotContains(t, result.sql, "jsonb_exists_any", "the array-overlap disjunct is gone")
+	// Args: bun.In for the scalar IN clause, and nothing else.
+	require.Len(t, result.args, 1)
 }
 
+// The legacy `not in`: a SET value that is not a member (an unset field is
+// never a match -- authoring rule 27's `not in` asymmetry, kept).
 func TestCompilePayloadComparisonOutOperatorString(t *testing.T) {
-	// Test not in with string values (should generate array-aware SQL)
 	result, err := compilePayloadComparison(
 		[]string{"tags"},
 		OpOut,
 		[]any{"admin", "system"},
 	)
 	require.NoError(t, err)
-
-	// Should contain both array check with NOT and scalar NOT IN
-	require.Contains(t, result.sql, "jsonb_typeof")
-	require.Contains(t, result.sql, "NOT jsonb_exists_any")
-	require.Contains(t, result.sql, "?::text[]")
-	require.Contains(t, result.sql, "NOT IN")
-	// Args: text[] array + bun.In for scalar NOT IN clause
-	require.Len(t, result.args, 2)
+	require.Equal(t,
+		`((COALESCE(payload #>> '{tags}', '') <> '') AND (NOT COALESCE(((jsonb_typeof(payload->'tags') = 'string' AND payload #>> '{tags}' IN (?))), FALSE)))`,
+		result.sql)
+	require.Len(t, result.args, 1)
 }
 
+// Numbers are typed membership too, with the numeric cast behind a CASE so it
+// only ever sees a stored number (a stored "abc" can no longer raise).
 func TestCompilePayloadComparisonInOperatorNumbers(t *testing.T) {
-	// Test in with numeric values (should use simple IN, not array-aware)
 	result, err := compilePayloadComparison(
 		[]string{"score"},
 		OpIn,
 		[]any{int64(1), int64(2), int64(3)},
 	)
 	require.NoError(t, err)
-
-	// Numbers don't support array matching, just scalar IN
-	require.Contains(t, result.sql, "::numeric")
-	require.Contains(t, result.sql, "IN")
-	require.NotContains(t, result.sql, "jsonb_typeof") // No array check for numbers
+	require.Equal(t, `(CASE WHEN jsonb_typeof(payload->'score') = 'number' THEN (payload #>> '{score}')::numeric IN (?) ELSE FALSE END)`, result.sql)
 	require.Len(t, result.args, 1)
 }
 
@@ -85,7 +84,8 @@ func TestCompilePayloadComparisonDoesNotInlineValues(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NotContains(t, result.sql, "O''Brien")
-	require.Contains(t, result.sql, "jsonb_exists_any")
+	require.NotContains(t, result.sql, "O'Brien")
+	require.Contains(t, result.sql, "IN (?)", "the members are one bound parameter")
 }
 
 func TestBuildJSONBPathExpression(t *testing.T) {

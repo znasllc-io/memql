@@ -569,6 +569,17 @@ func firstOpaqueConjunct(conjuncts []ExpressionNode) string {
 				return "a disjunction"
 			}
 			return "a nested conjunction the flattener did not reach"
+		// The edition-2026 nodes (memql#5366). None of them is a leaf the
+		// matchers above can read -- a negation excludes rather than scopes,
+		// a collection predicate tests an array, and a plan constant has no
+		// value until a call evaluates it -- so they are opaque, and they
+		// are named so the undecidable verdict says what it could not see.
+		case *NotExpression:
+			return "a negation"
+		case *ArrayPredicateExpression:
+			return fmt.Sprintf("the collection predicate %s", canonicalExpression(n))
+		case *PlanConstExpression:
+			return "an unevaluated plan constant"
 		default:
 			return fmt.Sprintf("a %T the analyzer does not understand", c)
 		}

@@ -410,14 +410,19 @@ func stagedDataNoReadReason(kind, concept string) string {
 // keeps the named concept's rows out.
 //
 // Narrow on purpose. Two operators can express the exclusion -- `!=` and
-// `not in` -- and nothing else is credited: this arm exists so a filter
-// that has genuinely already done the work is not reported as changed, and
-// a matcher looser than that would credit an exclusion the predicate does
-// not actually duplicate. The engine AST has no NOT node (ast_converter.go
-// rejects it outright and points at the `!=` form), so negation always
-// arrives on the operator, which is why matching two operators is
-// exhaustive rather than a sample.
+// `not in` -- and so can edition 2026's `!` over the positive forms, and
+// nothing else is credited: this arm exists so a filter that has genuinely
+// already done the work is not reported as changed, and a matcher looser than
+// that would credit an exclusion the predicate does not actually duplicate.
+// The legacy AST had no NOT node (ast_converter.go rejected it and pointed at
+// the `!=` form), so negation used to arrive on the operator only; the IR now
+// carries NotExpression (memql#5366), and `!(row.concept == X)` / `!(row.concept
+// in [..X..])` exclude X exactly as `!=` / `not in` do, so they are credited
+// too. That keeps the list exhaustive rather than a sample.
 func stagedDataExcludesConcept(node ExpressionNode, concept string) bool {
+	if not, ok := node.(*NotExpression); ok && not != nil {
+		return stagedDataNegatedInclusion(not.Target, concept)
+	}
 	cmp, ok := node.(*ComparisonExpression)
 	if !ok || cmp == nil || !stagedDataIsConceptField(cmp.Field) {
 		return false
@@ -427,6 +432,30 @@ func stagedDataExcludesConcept(node ExpressionNode, concept string) bool {
 		v, isString := cmp.Value.(string)
 		return isString && strings.TrimSpace(v) == concept
 	case OpOut:
+		for _, item := range stagedDataStringList(cmp.Value) {
+			if item == concept {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// stagedDataNegatedInclusion reports whether the operand of a negation is a
+// POSITIVE statement that the rows are of the named concept -- `concept == X`
+// or `concept in [..X..]` -- so that negating it excludes X.
+func stagedDataNegatedInclusion(node ExpressionNode, concept string) bool {
+	cmp, ok := node.(*ComparisonExpression)
+	if !ok || cmp == nil || !stagedDataIsConceptField(cmp.Field) {
+		return false
+	}
+	switch cmp.Operator {
+	case OpEq:
+		v, isString := cmp.Value.(string)
+		return isString && strings.TrimSpace(v) == concept
+	case OpIn:
 		for _, item := range stagedDataStringList(cmp.Value) {
 			if item == concept {
 				return true
@@ -522,6 +551,11 @@ func StagedDataTraverses(expr ExpressionNode) bool {
 		return StagedDataTraverses(n.Target)
 	case *LogicalExpression:
 		return StagedDataTraverses(n.Left) || StagedDataTraverses(n.Right)
+	case *NotExpression:
+		// A negated traversal does not lower (expr_not.go), but the question
+		// here is what the construct REACHES, and naming the traversal is
+		// the honest answer about a construct that tries.
+		return StagedDataTraverses(n.Target)
 	default:
 		return false
 	}

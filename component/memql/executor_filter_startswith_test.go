@@ -13,16 +13,18 @@ import (
 // predicate (memql#4208): the SQL it compiles to, the in-process evaluation
 // that must agree with it, and the two seams that would otherwise be silent.
 //
-// The SQL contract: `(<text path> ^@ ANY(?::text[]))`, one bound text[]
-// parameter, never an inlined prefix. `^@` is Postgres starts_with() as an
-// operator -- a plain byte-prefix test, so a LIKE metacharacter in a prefix is
-// literal. ANY over an empty array is false, which is what makes "an empty
-// list matches nothing" hold in the database as well as in Go.
+// The SQL contract: `(jsonb_typeof(<jsonb path>) = 'string' AND (<text path>)
+// ^@ ANY(?::text[]))`, one bound text[] parameter, never an inlined prefix.
+// `^@` is Postgres starts_with() as an operator -- a plain byte-prefix test, so
+// a LIKE metacharacter in a prefix is literal. ANY over an empty array is
+// false, which is what makes "an empty list matches nothing" hold in the
+// database as well as in Go. The typed guard (memql#5366) makes a prefix test a
+// question about a STRING: a stored number is not tested by its digits.
 
 func TestCompilePayloadComparison_StartsWith_String(t *testing.T) {
 	result, err := compilePayloadComparison([]string{"codeReference"}, OpStartsWith, "integration.")
 	require.NoError(t, err)
-	require.Equal(t, "((payload #>> '{codeReference}') ^@ ANY(?::text[]))", result.sql)
+	require.Equal(t, "(jsonb_typeof(payload->'codeReference') = 'string' AND (payload #>> '{codeReference}') ^@ ANY(?::text[]))", result.sql)
 	require.Len(t, result.args, 1)
 	require.Equal(t, pq.Array([]string{"integration."}), result.args[0])
 }
@@ -31,7 +33,7 @@ func TestCompilePayloadComparison_StartsWith_List(t *testing.T) {
 	result, err := compilePayloadComparison([]string{"codeReference"}, OpStartsWith,
 		[]any{"integration.email.", "integration.shopify."})
 	require.NoError(t, err)
-	require.Equal(t, "((payload #>> '{codeReference}') ^@ ANY(?::text[]))", result.sql)
+	require.Equal(t, "(jsonb_typeof(payload->'codeReference') = 'string' AND (payload #>> '{codeReference}') ^@ ANY(?::text[]))", result.sql)
 	require.Len(t, result.args, 1)
 	require.Equal(t, pq.Array([]string{"integration.email.", "integration.shopify."}), result.args[0])
 }
@@ -77,7 +79,7 @@ func TestCompilePayloadComparison_StartsWith_BlankPrefixMatchesNothing(t *testin
 func TestCompilePayloadComparison_StartsWith_NestedPath(t *testing.T) {
 	result, err := compilePayloadComparison([]string{"source", "codeReference"}, OpStartsWith, "x")
 	require.NoError(t, err)
-	require.Equal(t, "((payload #>> '{source,codeReference}') ^@ ANY(?::text[]))", result.sql)
+	require.Equal(t, "(jsonb_typeof(payload->'source'->'codeReference') = 'string' AND (payload #>> '{source,codeReference}') ^@ ANY(?::text[]))", result.sql)
 }
 
 func TestCompilePayloadComparison_StartsWith_NeverInlinesThePrefix(t *testing.T) {
@@ -142,11 +144,12 @@ func TestCompareScalarValues_StartsWith(t *testing.T) {
 		{"blank beside a real prefix", "integration.shopify.sync", []any{"", "integration."}, true},
 		{"metacharacters are literal, not wildcards", "integration.ax", "integration.%", false},
 		{"literal metacharacter prefix matches its own text", "integration.%x", "integration.%", true},
-		// `#>>` extracts the TEXT form of whatever the field holds, so SQL
-		// prefix-tests a number by its digits; the in-process evaluator must
-		// say the same or the post-filter drops rows the scan admitted.
-		{"numeric field is tested by its text form, as #>> does", float64(42), "4", true},
-		{"numeric field text form miss", float64(42), "5", false},
+		// TYPED (memql#5366): a prefix test is a question about a STRING, on
+		// both halves -- the SQL guards on jsonb_typeof = 'string' -- so a
+		// stored number is not tested by its digits. Before, both halves
+		// read the number's TEXT form and 42 started with "4".
+		{"a numeric field is not a string, so it has no prefix", float64(42), "4", false},
+		{"a boolean field is not a string either", true, "t", false},
 		{"absent field never matches", nil, "integration.", false},
 	}
 	for _, tc := range cases {

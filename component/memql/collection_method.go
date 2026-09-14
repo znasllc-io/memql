@@ -305,6 +305,16 @@ func evalCollScalar(expr ExpressionNode, args map[string]any, locals map[string]
 		return evalCollBinaryComparison(node, args, locals)
 	case *LogicalExpression:
 		return evalCollLogical(node, args, locals)
+	case *NotExpression:
+		// The IR's `!` reaching the collection subset -- a predicate lowered
+		// for a filter and evaluated here instead -- negates the operand's
+		// truthiness, the same reading evalCollLogical gives && and ||, so
+		// the three connectives agree about what an operand means.
+		operand, err := evalCollScalar(node.Target, args, locals)
+		if err != nil {
+			return nil, err
+		}
+		return !IsTruthy(operand), nil
 	case *ArithmeticExpression:
 		return evalCollArithmetic(node, args, locals)
 	case *DotAccessExpression:

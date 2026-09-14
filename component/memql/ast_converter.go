@@ -1223,6 +1223,14 @@ func walkSpecRefs(expr ExpressionNode, visit func(FieldReference)) {
 	case *LogicalExpression:
 		walkSpecRefs(node.Left, visit)
 		walkSpecRefs(node.Right, visit)
+	case *NotExpression:
+		walkSpecRefs(node.Target, visit)
+	case *ArrayPredicateExpression:
+		// The array is a field the body reads; the element predicate's own
+		// fields are element-relative ($elem), which the callers' switches on
+		// the head segment already treat as neither row nor actor.
+		visit(node.Field)
+		walkSpecRefs(node.Pred, visit)
 	case *RelationshipExpression:
 		walkSpecRefs(node.Target, visit)
 	}
@@ -1266,6 +1274,12 @@ func normalizeSpecCallsToReferences(expr ExpressionNode) (ExpressionNode, error)
 			Left:  left,
 			Right: right,
 		}, nil
+	case *NotExpression:
+		target, err := normalizeSpecCallsToReferences(node.Target)
+		if err != nil {
+			return nil, err
+		}
+		return &NotExpression{Target: target}, nil
 	case *RelationshipExpression:
 		target, err := normalizeSpecCallsToReferences(node.Target)
 		if err != nil {

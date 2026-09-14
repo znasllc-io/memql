@@ -442,6 +442,19 @@ func rewriteFilterFieldRefs(expr ExpressionNode) error {
 			return err
 		}
 		return rewriteFilterFieldRefs(node.Right)
+	case *NotExpression:
+		return rewriteFilterFieldRefs(node.Target)
+	case *ArrayPredicateExpression:
+		// The array field gets the same normalisation a comparison field
+		// does (a bare `tags` is the payload property); the element
+		// predicate is walked for its row comparisons, and its element
+		// comparisons pass through filterFieldRef untouched by name.
+		field, err := filterFieldRef(node.Field)
+		if err != nil {
+			return err
+		}
+		node.Field = field
+		return rewriteFilterFieldRefs(node.Pred)
 	case *RelationshipExpression:
 		return rewriteFilterFieldRefs(node.Target)
 	case *SortExpression:
@@ -470,6 +483,15 @@ func rewriteFilterFieldRefs(expr ExpressionNode) error {
 //	<bare property>  -> payload.<property>   (epic #2292)
 func filterFieldRef(ref FieldReference) (FieldReference, error) {
 	if len(ref.Parts) == 0 {
+		return ref, nil
+	}
+	// The collection-element pseudo-root (expr_collection_sql.go) names the
+	// element in scope, never a payload property: prefixing it would compile
+	// `payload #>> '{$elem}'`, a path no stored row has. Deliberately NOT a
+	// reservedFilterHeadNames entry -- that set's second obligation is that
+	// every name in it is refused as a concept property, and `$elem` cannot
+	// be spelled as one in the first place.
+	if isArrayElementField(ref) {
 		return ref, nil
 	}
 	if strings.EqualFold(strings.TrimSpace(ref.Parts[0]), rowIntrinsicNamespace) {
@@ -589,6 +611,10 @@ func ensureNoDirectiveNodes(expr ExpressionNode) error {
 		return ensureNoDirectiveNodes(node.Right)
 	case *RelationshipExpression:
 		return ensureNoDirectiveNodes(node.Target)
+	case *NotExpression:
+		return ensureNoDirectiveNodes(node.Target)
+	case *ArrayPredicateExpression:
+		return ensureNoDirectiveNodes(node.Pred)
 	default:
 		return nil
 	}
@@ -1008,6 +1034,9 @@ func collectConceptFields(expr ExpressionNode, acc map[string][]FieldReference) 
 	case *LogicalExpression:
 		collectConceptFields(node.Left, acc)
 		collectConceptFields(node.Right, acc)
+	case *NotExpression:
+		// Not descended: field selections ride a `concept == X` the query
+		// READS, and under a negation X is the concept it excludes.
 	case *RelationshipExpression:
 		collectConceptFields(node.Target, acc)
 	case *SortExpression:
@@ -1078,6 +1107,9 @@ func collectCacheHints(expr ExpressionNode, acc map[string]int64) {
 	case *LogicalExpression:
 		collectCacheHints(node.Left, acc)
 		collectCacheHints(node.Right, acc)
+	case *NotExpression:
+		// Not descended, matching stampConceptCacheHint: a TTL belongs to
+		// the concept a query reads, not the one it negates away.
 	case *RelationshipExpression:
 		collectCacheHints(node.Target, acc)
 	case *SortExpression:

@@ -113,6 +113,21 @@ func (e *MemQLEngine) planReferencesActor(expr ExpressionNode) bool {
 		return false
 	case *LogicalExpression:
 		return e.planReferencesActor(node.Left) || e.planReferencesActor(node.Right)
+	case *NotExpression:
+		return e.planReferencesActor(node.Target)
+	case *ArrayPredicateExpression:
+		// `row.members.any(m => m == actor.userId)` depends on the caller as
+		// surely as the field comparison it generalises.
+		if pc, ok := node.CountValue.(*PlanConstExpression); ok && planConstantReadsRoot(pc, "actor") {
+			return true
+		}
+		return e.planReferencesActor(node.Pred)
+	case *PlanConstExpression:
+		// An expanded plan never carries one -- its value is already in the
+		// tree and therefore in the signature. One that survives (a
+		// registered spec body walked below) is judged by its source,
+		// conservatively: reading `actor` at all folds the caller in.
+		return planConstantReadsRoot(node, "actor")
 	case *RelationshipExpression:
 		return e.planReferencesActor(node.Target)
 	case *SortExpression:
@@ -138,6 +153,10 @@ func (e *MemQLEngine) planReferencesActor(expr ExpressionNode) bool {
 		}
 		// RHS: `payload.X == actor.Y` carries an *ActorReference value.
 		if _, ok := node.Value.(*ActorReference); ok {
+			return true
+		}
+		// RHS: a still-unevaluated plan constant, judged as above.
+		if pc, ok := node.Value.(*PlanConstExpression); ok && planConstantReadsRoot(pc, "actor") {
 			return true
 		}
 		// LHS: `actor.<field> <op> <value>`.

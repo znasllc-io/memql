@@ -906,6 +906,11 @@ func stampConceptCacheHint(expr ExpressionNode, seconds int) bool {
 		left := stampConceptCacheHint(n.Left, seconds)
 		right := stampConceptCacheHint(n.Right, seconds)
 		return left || right
+	case *NotExpression:
+		// Not descended: `!(concept == X)` is the concept the query does NOT
+		// read, and a TTL is a statement about the concept it does.
+		// collectCacheHints skips the same node for the same reason.
+		return false
 	case *RelationshipExpression:
 		return stampConceptCacheHint(n.Target, seconds)
 	case *SortExpression:
@@ -986,6 +991,10 @@ func containsBoundConceptEquality(expr ExpressionNode, boundConcept string) bool
 		}
 		return containsBoundConceptEquality(n.Left, boundConcept) ||
 			containsBoundConceptEquality(n.Right, boundConcept)
+	case *NotExpression:
+		// A negated equality is the opposite of a binding: `!(concept == X)`
+		// excludes X, so the bound-concept conjunct is still owed.
+		return false
 	default:
 		return false
 	}
@@ -1019,6 +1028,8 @@ func resolveBareConcept(expr ExpressionNode, boundConcept string) ExpressionNode
 			Left:  resolveBareConcept(n.Left, boundConcept),
 			Right: resolveBareConcept(n.Right, boundConcept),
 		}
+	case *NotExpression:
+		return &NotExpression{Target: resolveBareConcept(n.Target, boundConcept)}
 	case *RelationshipExpression:
 		return &RelationshipExpression{
 			Function: n.Function,
@@ -1276,6 +1287,12 @@ func collectFunctionRefsRecursive(expr ExpressionNode, refs *[]string) {
 	case *LogicalExpression:
 		collectFunctionRefsRecursive(node.Left, refs)
 		collectFunctionRefsRecursive(node.Right, refs)
+	case *NotExpression:
+		collectFunctionRefsRecursive(node.Target, refs)
+	case *ArrayPredicateExpression:
+		collectFunctionRefsRecursive(node.Pred, refs)
+	case *PlanConstExpression:
+		// A v1 AST: its calls are catalog functions, not constructs.
 	case *RelationshipExpression:
 		collectFunctionRefsRecursive(node.Target, refs)
 	case *SortExpression:
@@ -1361,6 +1378,10 @@ func walkForImpureLambda(expr ExpressionNode, functions map[string]*Function) er
 			return err
 		}
 		return walkForImpureLambda(node.Right, functions)
+	case *NotExpression:
+		return walkForImpureLambda(node.Target, functions)
+	case *ArrayPredicateExpression:
+		return walkForImpureLambda(node.Pred, functions)
 	case *BinaryComparisonExpression:
 		// An expression-led comparison operand can itself carry a collection
 		// chain with a lambda (`rows.any(r => mutate()) == true`); traverse
@@ -1398,6 +1419,10 @@ func findImpureCall(expr ExpressionNode, functions map[string]*Function) string 
 			return bad
 		}
 		return findImpureCall(node.Right, functions)
+	case *NotExpression:
+		return findImpureCall(node.Target, functions)
+	case *ArrayPredicateExpression:
+		return findImpureCall(node.Pred, functions)
 	case *CollectionMethodExpression:
 		if bad := findImpureCall(node.Receiver, functions); bad != "" {
 			return bad
