@@ -28,9 +28,9 @@ it in the epic's merge (plan Task 16 step 3). Update it each time you stop.
 
 ## State (2026-09-14)
 
-Done: Tasks 1-11; Task 12's statement cells with their completeness gate,
-and three of its four scenario suites. Since the last rebase onto the epic-2
-base:
+Done: Tasks 1-11; Task 12's statement cells with their completeness gate, and
+all four scenario suites the record names. Since the last rebase onto the
+epic-2 base:
 
 | Commit | What |
 |---|---|
@@ -41,6 +41,7 @@ base:
 | `daa0f0d99` | #5371: memql-10's three load gaps: a `trace` read (CheckBody, `body_unknown_name`), a `config.<key>` outside the allow-list (dslgate `statement-config-key`, `body_config_unknown`, shown by Sense too), and an unknown bare call (dslgate `statement-unknown-call`, `body_call_unknown`) |
 | `2596afda7` | #5371: the two statement-body gates report their coverage (`dslgate.StatementBodiesRead`), and the migrated tree passes them |
 | `6daca7fcc` | #5374: the scenario suites (`test/conformance/scenarios_db_test.go`, `test/conformance/2026/scenarios/<suite>/scenario.json`): decide-and-apply, forge, deployment; 8 scenarios, each live plus dryRun and resume variants over a real database |
+| the commit after `0a419fbad` | #5374: the campaigns suite, a generated event-email automation run under its author, with its redelivery claimed |
 
 The migrated tree passes the two statement-body gates, and the gates read
 all 85 of its bodies (58 automations, 27 logic):
@@ -127,13 +128,11 @@ Negative controls were run on each new check and restored.
      `scenarioRow.Legacy`, `scenarioLegacy` and the `legacy` branches in
      `scenarios_db_test.go`. The rows' own counts are what the statement
      bodies must produce, and this is the first run that holds them to it.
-3. **Task 12 step 4, the rest:**
-   - The campaigns suite, a generated event-email automation. It needs the
-     campaigns integration wired in the conformance rig, with a stub sender:
-     `component/emailrules.Generate`, a seeded rule, then a firing on a seeded
-     row, asserting the `v1:campaigns:delivery` row.
-   - After the flip, scenarios for the two deletion reminders and
-     `onDelegationCreated`, which the flip moves into automations.
+3. **Task 12 step 4, the rest:** after the flip, scenarios for the two
+   deletion reminders and `onDelegationCreated`, which the flip moves into
+   automations. The campaigns suite covers the operational lane (cluster
+   roles). The marketing lanes (audience, row address) go through the
+   campaigns worker, which the rig does not wire, so no scenario reaches them.
 4. **Tasks 14, 15 and 16:** the gates port, the docs, then ship. Open the PR
    only after epics 1 and 2 merge, with one `Closes #n` line per issue.
 
