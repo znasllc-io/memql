@@ -27,7 +27,16 @@ A directory that holds cases has one `expect.json`, the case files it names,
 and optionally a `fixture.memql` holding what the cases lean on (a concept a
 query reads, a spec a filter names). The fixture is loaded beside every case in
 the directory. Every `.memql` file in the directory is either the fixture or
-named by a case; the runner refuses a file nothing names.
+named by a case; the runner refuses a file nothing names. Any other file in the
+directory -- a prompt's or a seed's `@templateFile`, a `namespace.pin` -- is
+mounted beside every case in it under the same name, as it would sit beside a
+domain's `.memql` files.
+
+Each case loads as its own domain, and the load cases share boots, so the
+names a case declares must be unique across the corpus: a bare name two
+domains declare is ambiguous to every lookup by bare name (a tool's handler, an
+automation's step). A cell's constructs carry the annotation's name for that
+reason (`openTicketsCache`, `retitleTicketServerOnly`).
 
 ```json
 {
