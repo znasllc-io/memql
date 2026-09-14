@@ -19,7 +19,6 @@ use common.traits.{ isNotDeleted }
 
 /// Shopify DeliveryCarrierService, mirrored. Cluster-owner tier: commerce
 /// data is business data, not per-user data (design D5).
-@namespace("shopify")
 @origin("shopify")
 @rowAuthz(clusterOwner)
 @displayCard(primary="gid", secondary="name", status="deleted")

@@ -24,7 +24,6 @@ use common.traits.{ isNotDeleted }
 
 /// Shopify StoreCreditAccount, mirrored. Cluster-owner tier: commerce data
 /// is business data, not per-user data (design D5).
-@namespace("shopify")
 @origin("shopify")
 @rowAuthz(clusterOwner)
 @displayCard(primary="gid", secondary="updatedAt", status="deleted")

@@ -23,7 +23,7 @@ concept globalSecret {
   kind            string    @description("Optional tag to group secrets by type. Examples: 'vendor_api_key', 'oauth_secret', 'smtp_password'. Folded router API keys use 'vendor_api_key'.")
   description     string    @description("Human-readable description of the secret's purpose.")
   addedBy         string    @description("Identity subject that wrote the secret.")
-  active          bool      @default("true")  @description("When false the resolver skips this row and falls back. Useful for rotating a key without deleting history.")
+  active          bool  @description("When false the resolver skips this row and falls back. Useful for rotating a key without deleting history.")
   lastUsedAt      datetime  @description("Last time the resolver decrypted this secret. Empty until first use.")
   rotatedAt       datetime  @description("Timestamp of the most recent rotation (optional).")
 }
@@ -37,7 +37,7 @@ concept globalVariable {
   name         string!  @description("Variable name (uppercase with underscores by convention).")
   value        string!  @description("Variable value, always stored as string. Callers parse if they need typed data.")
   description  string  @description("Human-readable description of the variable's purpose.")
-  active       bool    @default("true")  @description("When false the resolver ignores this row.")
+  active       bool  @description("When false the resolver ignores this row.")
 }
 
 // ---- concepts/v1/platform/globalSecret/seed.memql ----
@@ -83,7 +83,7 @@ concept partitionSecret {
   kind            string    @description("Optional tag to group secrets by type. Examples: 'vendor_api_key', 'oauth_secret'. BYOK vendor keys use 'vendor_api_key'.")
   description     string    @description("Human-readable description of the secret's purpose.")
   addedBy         string    @description("Identity subject that wrote the secret.")
-  active          bool      @default("true")  @description("When false the resolver skips this row and falls back to the global v1:platform:globalSecret.")
+  active          bool  @description("When false the resolver skips this row and falls back to the global v1:platform:globalSecret.")
   lastUsedAt      datetime  @description("Last time the resolver decrypted this secret. Empty until first use.")
   rotatedAt       datetime  @description("Timestamp of the most recent rotation (optional).")
 }
@@ -100,7 +100,7 @@ concept partitionVariable {
   name         string!  @description("Variable name (uppercase with underscores by convention).")
   value        string!  @description("Variable value, always stored as string. Callers parse if they need typed data.")
   description  string  @description("Human-readable description of the variable's purpose.")
-  active       bool    @default("true")  @description("When false the resolver skips this row and falls back to the global v1:platform:globalVariable.")
+  active       bool  @description("When false the resolver skips this row and falls back to the global v1:platform:globalVariable.")
 }
 
 // ---- concepts/v1/platform/missingCapability/concept.memql ----
@@ -122,10 +122,10 @@ concept missingCapability {
   requestedByAgentId   string @description("v1:agents:agent.id of the agent (typically the Planner Agent) that logged the gap. Empty for system-level detection.")
   partitionId         string  @description("Optional space scope where the gap was detected. Useful for attributing 'this gap blocked work in space X'.")
   partitionScope  string  @description("Partition where the gap was detected. Empty = unknown. Helps de-duplicate platform-wide vs tenant-specific gaps.")
-  sightingCount   int     @default("1") @description("How many times this gap has been logged. New sightings of the same (kind, capability) increment rather than creating new rows. Drives 'most-requested capability' prioritization.")
+  sightingCount   int @description("How many times this gap has been logged. New sightings of the same (kind, capability) increment rather than creating new rows. Drives 'most-requested capability' prioritization.")
   firstSeenAt     datetime @description("When the first sighting was logged.")
   lastSeenAt      datetime @description("When the most recent sighting was logged.")
-  status          enum("open", "in_progress", "resolved", "wontfix") @default("open") @description("Lifecycle. 'open' = logged, nothing done yet. 'in_progress' = the platform team is working on it (manually set). 'resolved' = the capability shipped; the Planner Agent's next sighting will recreate as a fresh row if it still doesn't work. 'wontfix' = explicit dismissal.")
+  status          enum("open", "in_progress", "resolved", "wontfix") @description("Lifecycle. 'open' = logged, nothing done yet. 'in_progress' = the platform team is working on it (manually set). 'resolved' = the capability shipped; the Planner Agent's next sighting will recreate as a fresh row if it still doesn't work. 'wontfix' = explicit dismissal.")
   resolution      string  @description("Free-text note when status='resolved' or 'wontfix' explaining what shipped (or why we won't ship it).")
   exampleGoals    []string @description("List of Plan.goal strings that triggered this gap. Capped at the most recent N (engine policy); gives the prioritization view 'real users wanted X, Y, Z'.")
 
@@ -147,8 +147,8 @@ concept outboundRequest {
   target        string! @description("Where to deliver: a recipient email address for medium='email', an absolute URL for medium='webhook'. Must match the deployment's per-medium allowlist or the row fails fast.")
   subject       string  @description("Email subject line. Ignored for medium='webhook'.")
   body          string! @description("What to deliver: the email text body, or the JSON body POSTed to a webhook. Capped by MEMQL_OUTBOUND_MAX_PAYLOAD_BYTES at drain time. Never secret material. (Named body, not payload: shape paths reserve the payload prefix.)")
-  status        enum("pending", "sending", "sent", "retrying", "failed") @default("pending") @description("Delivery lifecycle. 'pending' = staged, awaiting the worker. 'sending' = a replica claimed it and is delivering. 'sent' = transport accepted it (sentAt stamped). 'retrying' = a retryable failure; eligible again at nextAttemptAt. 'failed' = permanent failure or attempts exhausted (see lastError).")
-  attempts      int     @default("0") @description("Delivery attempts made so far. Incremented on each failure; bounded by MEMQL_OUTBOUND_MAX_ATTEMPTS.")
+  status        enum("pending", "sending", "sent", "retrying", "failed") @description("Delivery lifecycle. 'pending' = staged, awaiting the worker. 'sending' = a replica claimed it and is delivering. 'sent' = transport accepted it (sentAt stamped). 'retrying' = a retryable failure; eligible again at nextAttemptAt. 'failed' = permanent failure or attempts exhausted (see lastError).")
+  attempts      int @description("Delivery attempts made so far. Incremented on each failure; bounded by MEMQL_OUTBOUND_MAX_ATTEMPTS.")
   lastError     string  @description("Most recent delivery error, truncated to 4KB. Empty on success.")
   nextAttemptAt datetime @description("When a 'retrying' row becomes eligible again (bounded exponential backoff with jitter). Compared Go-side by the worker.")
   sentAt        datetime @description("When the transport accepted the delivery.")
@@ -169,10 +169,10 @@ concept outboundRequest {
 @displayCard(primary="source", secondary="medium", tertiary="dedupeKey", status="status")
 concept inboundRequest {
   source        string! @description("Which allowlisted sender this arrived from -- the {source} path segment, matched against MEMQL_INBOUND_SOURCE_ALLOWLIST. Products filter their automation on it. Never caller-chosen beyond the allowlist: an unlisted source is refused before a row exists.")
-  medium        enum("webhook", "mailbox")! @default("webhook") @description("How it arrived. 'webhook' is a third party POSTing to /inbound/{source}. 'mailbox' is the Graph NDR reader (memql#4824) staging a delivery-status report it read out of our OWN sending mailbox -- which is why those rows are stamped signatureVerified even though nobody signed anything: provenance IS the verification there, and the field is what gates campaignIngestFeedback. The enum was written with one value and the note that a second inbound transport should not need a concept change; this is that second transport, and it did.")
+  medium        enum("webhook", "mailbox")! @description("How it arrived. 'webhook' is a third party POSTing to /inbound/{source}. 'mailbox' is the Graph NDR reader (memql#4824) staging a delivery-status report it read out of our OWN sending mailbox -- which is why those rows are stamped signatureVerified even though nobody signed anything: provenance IS the verification there, and the field is what gates campaignIngestFeedback. The enum was written with one value and the note that a second inbound transport should not need a concept change; this is that second transport, and it did.")
   body          string! @description("The verified raw request body, exactly as signed. Capped by MEMQL_INBOUND_MAX_BODY_BYTES at receive time -- a larger request is refused with 413 and no row is staged. Never secret material. (Named body, not payload: shape paths reserve the payload prefix.)")
   contentType   string  @description("The request's Content-Type, so a product automation can branch on JSON vs form-encoded without re-sniffing the body.")
-  status        enum("received", "processing", "processed", "failed") @default("received") @description("Product-side handling lifecycle, NOT delivery state -- the delivery already succeeded by the time a row exists. 'received' = staged, awaiting the product automation. 'processing'/'processed'/'failed' are stamped by the product as it works the row.")
+  status        enum("received", "processing", "processed", "failed") @description("Product-side handling lifecycle, NOT delivery state -- the delivery already succeeded by the time a row exists. 'received' = staged, awaiting the product automation. 'processing'/'processed'/'failed' are stamped by the product as it works the row.")
   dedupeKey     string  @description("The sender's own idempotency key when it supplies one via MEMQL_INBOUND_SOURCE_<NAME>_DEDUPE_HEADER, otherwise the SHA-256 of the raw body. RECORDED for a product automation to read; it does NOT decide the row id. Identity is the digest of the SIGNED payload, because the vendor signs the body and not this header -- deriving the id from an unsigned header let one captured delivery mint unbounded rows (memql#2957 landing review).")
   signatureVerified bool @description("Whether the HMAC signature was checked and matched. Supplied by the receiver through stageInboundRequest rather than stamped; an absent value reads as false. Only ever true, or false for a source explicitly configured scheme='none'; a FAILED check is refused at the edge and never staged, so this records which sources are running unverified rather than which requests failed.")
   receivedAt    datetime @description("When the receiver accepted the request.")
@@ -216,7 +216,7 @@ concept site {
   notes        string   @description("Operator-facing notes.")
   artifactId   string   @description("The v1:library:artifact row this site's current bundle was published from, when it was published from the Library rather than uploaded by CI or baked into the image. Provenance, not a serving input -- the edge reads bundleRef and never this. Empty for a site whose bundle arrived through POST /sites/{id}/bundles or file:///app/*.")
   binding      object   @description("Per-kind connection to the system this site fronts. Shape is decided by `kind`, and only one kind declares one today: shopify_storefront => {storeDomain, storefrontTokenRef}, where storeDomain is the myshopify.com host and storefrontTokenRef NAMES a v1:platform:globalSecret row holding the Storefront API token -- the token itself is never stored here, and the Admin API token never appears in either field. Empty for spa and static. A Storefront token is a client-side credential by Shopify's design, so the edge resolves the named secret at serve time into the site's runtime-config document; that is the only place it is dereferenced.")
-  deleted      bool     @default("false") @description("Soft-delete flag (memql#3717). isNotDeleted filters it out of siteByHostname/sitesAll/siteById so the edge stops resolving a deleted site's hostname; the row survives for history. deleteSite stamps this true. A systemOwned row is refused at the write path regardless of this field -- see the Go guard wired beside executeWrite.")
+  deleted      bool @description("Soft-delete flag (memql#3717). isNotDeleted filters it out of siteByHostname/sitesAll/siteById so the edge stops resolving a deleted site's hostname; the row survives for history. deleteSite stamps this true. A systemOwned row is refused at the write path regardless of this field -- see the Go guard wired beside executeWrite.")
   packageId    string   @description("The v1:platform:package this site was deployed from (epic memql#4794, D7), or EMPTY for a hand-made site -- which stays fully supported and is the majority of rows today. Set by the pipeline on the FIRST deploy of a package deployable and never cleared, because it is what a redeploy uses to find the site it published last time instead of creating a second one at a second hostname.")
   packageDeployableName string @description("The manifest deployable name this site serves (epic memql#4794, D2/D7). Together with packageId it is the key a redeploy republishes through -- which is exactly why the manifest refuses two deployables sharing a name. Empty whenever packageId is.")
 

@@ -29,7 +29,7 @@
 /// overlay (a base row can only be materialized by a system actor); the
 /// validateHealingBaseImmutable guard rejects any attempt to write tier=base here.
 @actor
-mutate healedOverride proposeOverride {
+mutation healedOverride proposeOverride {
   args {
     overrideId            string!
     baseConstructId       string!
@@ -62,7 +62,7 @@ mutate healedOverride proposeOverride {
 /// becomes resolution-eligible -- the two-tier resolver prefers it over base. Owned: gated by
 /// ownerUserId==actor.userId in the update read-merge.
 @actor
-mutate healedOverride validateOverride {
+mutation healedOverride validateOverride {
   args {
     overrideId  string!
     version     int!
@@ -83,7 +83,7 @@ mutate healedOverride validateOverride {
 /// RECORDED for audit, not silently dropped. Owned: gated by ownerUserId==actor.userId in the
 /// update read-merge.
 @actor
-mutate healedOverride rejectOverride {
+mutation healedOverride rejectOverride {
   args {
     overrideId       string!
     rejectionReason  string

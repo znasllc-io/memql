@@ -37,7 +37,7 @@
 /// server-side increment would stamp a number that says the write happened, not what it was made
 /// from, and the client's "is this row newer than mine" test would have nothing to compare.
 @actor
-mutate desktop saveMyDesktop {
+mutation desktop saveMyDesktop {
   args {
     revision  int!
     document  object!

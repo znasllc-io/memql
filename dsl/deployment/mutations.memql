@@ -46,7 +46,7 @@
 // coalesce to "" when the caller omits them.
 /// Create a v1:cluster:deployment record at deploy start (status defaults to pending). Uses
 /// deploymentId as the concept id so status transitions append to one timeline. #1872.
-mutate deployment createDeployment {
+mutation deployment createDeployment {
   args {
     deploymentId         string!
     status               enum("pending", "in_progress", "succeeded", "failed", "superseded", "rolled_back")
@@ -94,7 +94,7 @@ mutate deployment createDeployment {
 /// Transition a v1:cluster:deployment's status (pending -> in_progress -> succeeded|failed;
 /// succeeded -> superseded; any -> rolled_back). Read-merge update: only status + updatedAt change,
 /// deploy metadata inherits. #1872.
-mutate deployment updateDeploymentStatus {
+mutation deployment updateDeploymentStatus {
   args {
     deploymentId  string!
     status        enum("pending", "in_progress", "succeeded", "failed", "superseded", "rolled_back")!
@@ -258,7 +258,7 @@ mutate deployment updateDeploymentStatus {
 /// is hash(concat(shortId(deploymentId), ':', nodeType)) so re-pins append to one timeline and a
 /// bare or canonical deploymentId derive the same row.
 /// Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
-mutate deploymentNodeSpec createDeploymentNodeSpec {
+mutation deploymentNodeSpec createDeploymentNodeSpec {
   args {
     // Bare short id, or the canonical form of one -- and nothing else
     // (#2981). shortId() strips ONE canonical prefix, so the bare/canonical
@@ -315,7 +315,7 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
 /// Re-pin a v1:cluster:deploymentNodeSpec's version / replicas / imageDigest by (deploymentId,
 /// nodeType). Read-merge update: deploymentId + nodeType inherit, only the spec fields + updatedAt
 /// change. Append under the same hashed composite concept id. Epic 2 / #2094.
-mutate deploymentNodeSpec updateDeploymentNodeSpec {
+mutation deploymentNodeSpec updateDeploymentNodeSpec {
   args {
     // Bare short id, or the canonical form of one -- and nothing else
     // (#2981). shortId() strips ONE canonical prefix, so the bare/canonical

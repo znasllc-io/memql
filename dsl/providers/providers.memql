@@ -4,7 +4,7 @@
 // files cover the other construct kinds.
 
 @base
-@type("Anthropic")
+@vendor("Anthropic")
 provider anthropic {
   auth {
     // Workload identity federation is the ONLY door (memql#4333, and the key
@@ -193,7 +193,7 @@ provider claudeSonnet {
 
 /// OpenAI text-embedding-3-large for high-fidelity vector embeddings (3072 dimensions)
 @extends("openai")
-@type("OpenAIEmbedding")
+@vendor("OpenAIEmbedding")
 @model("text-embedding-3-large")
 @modality("embedding")
 provider embedding3Large {
@@ -213,7 +213,7 @@ provider embedding3Large {
 /// OpenAI text-embedding-3-small for cheaper vector embeddings (1536 dimensions); default for
 /// high-volume retrieval
 @extends("openai")
-@type("OpenAIEmbedding")
+@vendor("OpenAIEmbedding")
 @model("text-embedding-3-small")
 @modality("embedding")
 provider embedding3Small {
@@ -227,7 +227,7 @@ provider embedding3Small {
 // ---- providers/v1/openai/moderationOmni.memql ----
 
 @base
-@type("OpenAI")
+@vendor("OpenAI")
 provider openai {
   auth {
     // OpenAI workload identity federation (memql#5088). The 2026-08-22 record
@@ -395,7 +395,7 @@ provider reasoning4Mini {
 /// There is no `auth` block, and that is the point of the whole epic: the
 /// credential for a local model is owning the machine.
 @base
-@type("Fleet")
+@vendor("Fleet")
 provider fleet { }
 
 // ---- providers/v1/app/app.memql ----
@@ -425,5 +425,5 @@ provider fleet { }
 /// There is no `auth` block. The credential for an app door is a person having
 /// signed into an app on a machine they own.
 @base
-@type("SubscriptionApp")
+@vendor("SubscriptionApp")
 provider app { }

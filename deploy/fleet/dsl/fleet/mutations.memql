@@ -53,7 +53,7 @@ use fleet.concepts.{ instance, subscriber, subscription, usageMeter }
 /// than a half-written record. Owned: ownerUserId is stamped from actor.userId, so a caller can
 /// only ever create their own account.
 @actor
-mutate subscriber createSubscriber {
+mutation subscriber createSubscriber {
   args {
     subscriberId  string!
     companyName   string!
@@ -73,7 +73,7 @@ mutate subscriber createSubscriber {
 /// the engine's row-authz write guard refuses the update outright when the target row belongs to
 /// somebody else.
 @actor
-mutate subscriber updateSubscriberBilling {
+mutation subscriber updateSubscriberBilling {
   args {
     subscriberId  string!
     companyName   string
@@ -93,7 +93,7 @@ mutate subscriber updateSubscriberBilling {
 /// billing history, and the only thing standing between that and reality is that this value comes
 /// out of a signature-verified event body rather than out of a form.
 @actor
-mutate subscriber linkStripeCustomer {
+mutation subscriber linkStripeCustomer {
   args {
     subscriberId      string!
     stripeCustomerId  string!
@@ -109,7 +109,7 @@ mutate subscriber linkStripeCustomer {
 /// NOT stop service on its own -- see the concept's status doc for why cutting a customer off over
 /// an expired card loses both the customer and the invoice.
 @actor
-mutate subscriber setSubscriberStatus {
+mutation subscriber setSubscriberStatus {
   args {
     subscriberId  string!
     status        string!  @enum("active", "delinquent", "cancelled")
@@ -130,7 +130,7 @@ mutate subscriber setSubscriberStatus {
 /// the customer selected. The difference matters: a subscription created from an intent rather than
 /// from a payment is a subscription that can exist without money behind it.
 @actor
-mutate subscription createSubscription {
+mutation subscription createSubscription {
   args {
     subscriptionId  string!
     subscriberId    string!
@@ -154,7 +154,7 @@ mutate subscription createSubscription {
 /// Record the Stripe subscription and price ids. Written from the webhook path; this is the join
 /// key every later Stripe event resolves against.
 @actor
-mutate subscription linkStripeSubscription {
+mutation subscription linkStripeSubscription {
   args {
     subscriptionId        string!
     stripeSubscriptionId  string!
@@ -172,7 +172,7 @@ mutate subscription linkStripeSubscription {
 /// clock, because a subscription that is active is not in any grace period by definition, and
 /// leaving a stale graceEndsAt behind is how a recovered account gets torn down a week later.
 @actor
-mutate subscription activateSubscription {
+mutation subscription activateSubscription {
   args {
     subscriptionId  string!
   }
@@ -189,7 +189,7 @@ mutate subscription activateSubscription {
 /// month lengths, time zones and proration are Stripe's problem and getting them subtly wrong here
 /// would show up as an allowance that resets on the wrong day.
 @actor
-mutate subscription setSubscriptionPeriod {
+mutation subscription setSubscriptionPeriod {
   args {
     subscriptionId      string!
     currentPeriodStart  datetime!
@@ -206,7 +206,7 @@ mutate subscription setSubscriptionPeriod {
 /// Move a subscription to 'past_due' and start the dunning clock. Service continues until
 /// graceEndsAt passes; see the concept doc.
 @actor
-mutate subscription recordPaymentFailure {
+mutation subscription recordPaymentFailure {
   args {
     subscriptionId  string!
     graceEndsAt     datetime!
@@ -223,7 +223,7 @@ mutate subscription recordPaymentFailure {
 /// re-rendering the tenant's values. Customer-callable: an upgrade is a customer decision, and the
 /// money follows through Stripe rather than being asserted here.
 @actor
-mutate subscription requestTierChange {
+mutation subscription requestTierChange {
   args {
     subscriptionId  string!
     tier            string!  @enum("trial", "node", "graph", "mesh", "enterprise")
@@ -246,7 +246,7 @@ mutate subscription requestTierChange {
 /// Orbit, whose code is not in this repository. A rename here is a wire change whose blast radius
 /// cannot be measured from inside this tree.
 @actor
-mutate subscription setSubscriptionAddOns {
+mutation subscription setSubscriptionAddOns {
   args {
     subscriptionId  string!
     haAddOn         bool!
@@ -261,7 +261,7 @@ mutate subscription setSubscriptionAddOns {
 /// Schedule a cancellation. NOT immediate: the customer paid through the period, so the row stays
 /// active until cancelAt passes. What this write does is set the date the lifecycle sweep acts on.
 @actor
-mutate subscription requestCancellation {
+mutation subscription requestCancellation {
   args {
     subscriptionId  string!
     cancelAt        datetime!
@@ -276,7 +276,7 @@ mutate subscription requestCancellation {
 /// End a subscription: no further billing, and the grace clock on the data starts. Written by the
 /// lifecycle sweep when cancelAt passes, and by the `customer.subscription.deleted` webhook.
 @actor
-mutate subscription endSubscription {
+mutation subscription endSubscription {
   args {
     subscriptionId  string!
     status          string!  @enum("paused", "cancelled")
@@ -311,7 +311,7 @@ mutate subscription endSubscription {
 /// shape is corrected on the next re-render from the same source. Recorded here because the
 /// argument list looks like a choice and is not one.
 @actor
-mutate instance createInstance {
+mutation instance createInstance {
   args {
     instanceId       string!
     subscriptionId   string!
@@ -341,7 +341,7 @@ mutate instance createInstance {
 
 /// Mark an instance as being brought up. The transient state Orbit renders as progress.
 @actor
-mutate instance markInstanceProvisioning {
+mutation instance markInstanceProvisioning {
   args {
     instanceId  string!
   }
@@ -356,7 +356,7 @@ mutate instance markInstanceProvisioning {
 /// Mark an instance as up and serving. Stamps provisionedAt, which is the customer-visible created
 /// date and the start of any uptime commitment.
 @actor
-mutate instance markInstanceRunning {
+mutation instance markInstanceRunning {
   args {
     instanceId  string!
   }
@@ -374,7 +374,7 @@ mutate instance markInstanceRunning {
 /// hibernation sweeps can answer "how long has this been down" from one field read rather than by
 /// walking row history.
 @actor
-mutate instance markInstanceSuspended {
+mutation instance markInstanceSuspended {
   args {
     instanceId  string!
   }
@@ -389,7 +389,7 @@ mutate instance markInstanceSuspended {
 /// Mark an instance as torn down. Terminal: the volumes are gone and a resume is no longer possible,
 /// which is why this is a different state from 'suspended' rather than a flag on it.
 @actor
-mutate instance markInstanceTornDown {
+mutation instance markInstanceTornDown {
   args {
     instanceId  string!
   }
@@ -404,7 +404,7 @@ mutate instance markInstanceTornDown {
 /// The row stays 'failed' until something retries it -- the control plane does not guess at whether
 /// a half-provisioned tenant should be resumed or destroyed.
 @actor
-mutate instance markInstanceFailed {
+mutation instance markInstanceFailed {
   args {
     instanceId  string!
     lastError   string!
@@ -422,7 +422,7 @@ mutate instance markInstanceFailed {
 /// one reconciliation, and conflating the two is how a tier change reports success before the pods
 /// have rolled.
 @actor
-mutate instance setInstanceShape {
+mutation instance setInstanceShape {
   args {
     instanceId       string!
     tier             string!  @enum("trial", "node", "graph", "mesh", "enterprise")
@@ -447,7 +447,7 @@ mutate instance setInstanceShape {
 /// Stamp the last time this instance served a request. The input to idle hibernation. Written by
 /// the tenant's own heartbeat, because the control plane cannot see the tenant's traffic.
 @actor
-mutate instance recordInstanceActivity {
+mutation instance recordInstanceActivity {
   args {
     instanceId  string!
   }
@@ -470,7 +470,7 @@ mutate instance recordInstanceActivity {
 /// See the concept header: an allowance is a promise about a period, and a period already in flight
 /// must not be re-priced by a tier change or a price change.
 @actor
-mutate usageMeter openUsageMeter {
+mutation usageMeter openUsageMeter {
   args {
     meterId         string!
     subscriptionId  string!
@@ -497,7 +497,7 @@ mutate usageMeter openUsageMeter {
 /// same place that has to answer "does this turn get admitted", and splitting the two would let a
 /// turn be admitted against a total that was already stale.
 @actor
-mutate usageMeter recordUsage {
+mutation usageMeter recordUsage {
   args {
     meterId   string!
     consumed  float!
@@ -515,7 +515,7 @@ mutate usageMeter recordUsage {
 /// `overage` is what the next push owes -- which is what makes the push idempotent under retry and
 /// self-healing after a missed one, rather than a permanently lost charge.
 @actor
-mutate usageMeter markUsageReported {
+mutation usageMeter markUsageReported {
   args {
     meterId           string!
     reportedToStripe  float!
@@ -530,7 +530,7 @@ mutate usageMeter markUsageReported {
 /// Close a meter at period end. No further increments are accepted; a late one is then visibly
 /// refused rather than landing silently on a period that has already been invoiced.
 @actor
-mutate usageMeter closeUsageMeter {
+mutation usageMeter closeUsageMeter {
   args {
     meterId  string!
   }
@@ -543,7 +543,7 @@ mutate usageMeter closeUsageMeter {
 
 /// Mark a closed meter as fully reported -- its final overage reached Stripe and the row is history.
 @actor
-mutate usageMeter markUsageMeterReported {
+mutation usageMeter markUsageMeterReported {
   args {
     meterId  string!
   }
@@ -609,7 +609,7 @@ mutate usageMeter markUsageMeterReported {
 /// customer pauses, by the trial-expiry sweep, and by the hibernation sweep. The controller picks it
 /// up from the transient status and settles the row at `suspended`.
 @actor
-mutate instance requestInstanceSuspend {
+mutation instance requestInstanceSuspend {
   args {
     instanceId  string!
   }
@@ -623,7 +623,7 @@ mutate instance requestInstanceSuspend {
 /// Ask the fleet to bring a suspended instance back up. Written by Orbit on resume and by the
 /// trial-conversion path.
 @actor
-mutate instance requestInstanceResume {
+mutation instance requestInstanceResume {
   args {
     instanceId  string!
   }
@@ -643,7 +643,7 @@ mutate instance requestInstanceResume {
 /// export offer. A one-click "delete everything" in a console is a support ticket waiting to happen
 /// and there is no reason to build one.
 @actor
-mutate instance requestInstanceTeardown {
+mutation instance requestInstanceTeardown {
   args {
     instanceId  string!
   }

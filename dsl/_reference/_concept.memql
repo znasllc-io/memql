@@ -414,12 +414,12 @@ concept referenceExample {
 @description("Every supported field type, one of each.")
 concept fieldTypes {
   textField        string                      @description("UTF-8 text.")
-  flagField        bool       @default("false") @description("Boolean.")
-  countField       int        @default("0")     @description("Integer.")
-  ratioField       float      @default("0.0")   @description("Floating-point.")
+  flagField        bool @description("Boolean.")
+  countField       int     @description("Integer.")
+  ratioField       float   @description("Floating-point.")
   whenField        datetime                     @description("RFC3339 timestamp.")
   arrayField       []string                     @description("Array of strings.")
-  statusField      enum("active", "archived", "deleted") @default("active")
+  statusField      enum("active", "archived", "deleted")
   anyField         any                          @description("Untyped JSON.")
 }
 
@@ -613,15 +613,15 @@ concept fieldTypes {
 //                       in the body, and emits no field metadata.)
 //
 // DECLARED METADATA -- parsed and emitted, acted on by NOTHING (memql#2960):
-//   @unique             Emits `x-unique`. There is no uniqueness check
+//             Emits `x-unique`. There is no uniqueness check
 //                       anywhere in the engine or the database; two rows may
 //                       carry the same value and nothing objects.
-//   @immutable          Emits `x-immutable`. Nothing prevents an update. The
+//          Emits `x-immutable`. Nothing prevents an update. The
 //                       immutability that does exist in the tree is bespoke
 //                       per construct (validateRbacBaseRoleImmutable,
 //                       validateHealingBaseImmutable) and is not driven by
 //                       this annotation.
-//   @default("value")   Emits `default` into the schema and is NEVER APPLIED
+//   Emits `default` into the schema and is NEVER APPLIED
 //                       on insert -- Concept.Create validates and marshals the
 //                       payload verbatim. Fill a value with the `??`
 //                       null-coalescing operator in the mutation body instead.
@@ -631,14 +631,14 @@ concept fieldTypes {
 //                       `bool` takes exactly `true`/`false`, `int` a base-10
 //                       integer, `float` a number, `datetime` an RFC3339
 //                       timestamp or "" for unset, and `string`/`enum` take the
-//                       literal verbatim -- never coerced, so `@default("0")` on
+//                       literal verbatim -- never coerced, so `` on
 //                       a string field is the STRING "0". `object`, `array`,
 //                       `map` and `any` keep an untyped lowering, because the
 //                       declaration does not narrow the literal to one reading.
 //
 //                       Until memql#3248 the lowering guessed from the
 //                       literal's shape with no datetime branch at all, so
-//                       `whenField datetime @default("true")` emitted the bool
+//                       `whenField datetime` emitted the bool
 //                       true as the default of a field declared
 //                       format: date-time, in silence. Refusal matters even
 //                       though nothing is applied on insert: the emitted
@@ -668,7 +668,7 @@ concept fieldTypes {
 //                       topology, which is strictly worse than the silent
 //                       no-op it would replace.
 //                       (2) NESTED OBJECT LEAVES. A @default inside an object
-//                       block (`preferences { theme string @default("auto") }`)
+//                       block (`preferences { theme string }`)
 //                       is out of scope, because no write form can stamp a
 //                       single leaf -- a mutation writes the parent object
 //                       wholesale. Their @default is schema documentation that
@@ -721,10 +721,10 @@ concept fieldTypes {
 //     and TestDefaultIsCoalescedOrStamped makes an unstamped one fail at
 //     authoring time instead of never. See the @default entry above for the
 //     gate's two carve-outs.
-//   - @unique / @immutable  DECIDED, and the decision is no. memql#3037 was
+//   - /  DECIDED, and the decision is no. memql#3037 was
 //     closed not-planned: uniqueness over an append-only hypertable means
 //     "unique among current rows", which is an epic with a migration story,
-//     and @immutable's cost is defining which read-merge-write rewrites are
+//     and's cost is defining which read-merge-write rewrites are
 //     legitimate. Neither has a forcing case. Treat both as permanent declared
 //     metadata; reopen only with a concrete failure that one would have caught.
 //
@@ -737,7 +737,7 @@ concept fieldAnnotations {
   // String constraints
   slug         string! @pattern("^[a-z][a-z0-9-]{0,49}$") @description("URL slug.")
   shortText    string @minLength(1) @maxLength(280) @description("Tweet-shaped string.")
-  uniqueKey    string! @unique @description("Intended to be unique. NOT enforced -- @unique is declared metadata (memql#2960).")
+  uniqueKey    string! @description("Intended to be unique. NOT enforced -- is declared metadata (memql#2960).")
 
   // Numeric constraints
   ratingScore  int    @minimum(1) @maximum(5) @description("1-5 rating scale.")
@@ -746,12 +746,12 @@ concept fieldAnnotations {
   // Defaults. NONE of these is ever filled in for you -- @default is declared
   // metadata (memql#2960). A row inserted without `status` has no `status`.
   // Fill it in the mutation body with `??` instead.
-  status       enum("draft", "published") @default("draft") @description("Declared default only. NOT applied on insert -- use `?? \"draft\"` in the mutation (memql#2960).")
-  createdYear  int    @default("2026") @description("Declared default only. NOT applied on insert -- nothing backfills this (memql#2960).")
-  isPinned     bool   @default("false") @description("Declared default only. NOT applied on insert (memql#2960).")
+  status       enum("draft", "published") @description("Declared default only. NOT applied on insert -- use `?? \"draft\"` in the mutation (memql#2960).")
+  createdYear  int @description("Declared default only. NOT applied on insert -- nothing backfills this (memql#2960).")
+  isPinned     bool @description("Declared default only. NOT applied on insert (memql#2960).")
 
   // Immutability + secrecy
-  externalId   string! @immutable @description("Foreign-system id, intended never to change. NOT enforced -- @immutable is declared metadata (memql#2960).")
+  externalId   string! @description("Foreign-system id, intended never to change. NOT enforced -- is declared metadata (memql#2960).")
   apiKey       string @secret @description("Sensitive. The function-args validator prints <redacted> for a rejected value. No other surface redacts it -- not query results, not the automation args binder, not the tool-args validator, and never its length (memql#3036, memql#3117).")
 
   // Server-owned fields. @internal is server-only in BOTH directions;
@@ -813,7 +813,7 @@ concept variantExample {
   body  object!  @variant(discriminator="kind") {
     text {
       content   string!
-      wordCount int    @default("0")
+      wordCount int
     }
     image {
       url       string!
@@ -864,9 +864,9 @@ concept nestedExample {
 
   // Inline nested object: the body declares its own fields.
   settings {
-    autoTranscribe  bool   @default("true")
-    maxAttendees    int    @default("5") @minimum(1) @maximum(50)
-    theme           enum("light", "dark", "auto") @default("auto")
+    autoTranscribe  bool
+    maxAttendees    int @minimum(1) @maximum(50)
+    theme           enum("light", "dark", "auto")
   }
 }
 

@@ -27,7 +27,7 @@
 // component/secret.Encrypt before this mutation is called.
 
 @description("Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.")
-mutate globalSecret setGlobalSecret {
+mutation globalSecret setGlobalSecret {
   args {
     id              string!
     name            string!
@@ -60,7 +60,7 @@ mutate globalSecret setGlobalSecret {
 // `make variable-set SCOPE=global` to populate instance defaults.
 
 @description("Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable.")
-mutate globalVariable setGlobalVariable {
+mutation globalVariable setGlobalVariable {
   args {
     id           string!
     name         string!
@@ -92,7 +92,7 @@ mutate globalVariable setGlobalVariable {
 // ciphertext remains in the time-series history under the same id.
 
 @description("Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The encryptedValue and fingerprint are produced by the backend secret helper; this mutation only stores them.")
-mutate partitionSecret setPartitionSecret {
+mutation partitionSecret setPartitionSecret {
   args {
     id              string!
     name            string!
@@ -126,7 +126,7 @@ mutate partitionSecret setPartitionSecret {
 // and by automations that write per-tenant config.
 
 @description("Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable.")
-mutate partitionVariable setPartitionVariable {
+mutation partitionVariable setPartitionVariable {
   args {
     id           string!
     name         string!
@@ -144,7 +144,7 @@ mutate partitionVariable setPartitionVariable {
 }
 
 @description("Per Q7 missing-capability surface: log a new gap the Planner Agent identified during a Plan. First sighting creates the row; repeat sightings (same (kind, capability)) call bumpMissingCapabilitySighting instead so the row stays unique-by-capability and sightingCount climbs. Status defaults to 'open'.")
-mutate missingCapability logMissingCapability {
+mutation missingCapability logMissingCapability {
   args {
     missingId       string!
     kind            string!
@@ -175,7 +175,7 @@ mutate missingCapability logMissingCapability {
 }
 
 @description("Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments sightingCount and refreshes lastSeenAt. The Planner Agent calls this when it encounters a known gap; aggregated counts feed the platform-roadmap prioritization view.")
-mutate missingCapability bumpMissingCapabilitySighting {
+mutation missingCapability bumpMissingCapabilitySighting {
   args {
     missingId       string!
     sightingCount   int!
@@ -190,7 +190,7 @@ mutate missingCapability bumpMissingCapabilitySighting {
 }
 
 @description("Operator-driven status transition on a missingCapability row. Used by the platform team's backlog tooling to mark a gap as in_progress, resolved (with a note on what shipped), or wontfix.")
-mutate missingCapability updateMissingCapabilityStatus {
+mutation missingCapability updateMissingCapabilityStatus {
   args {
     missingId   string!
     status      string!
@@ -231,7 +231,7 @@ mutate missingCapability updateMissingCapabilityStatus {
 
 @createOnly("status", "attempts")
 @description("Stage an outbound delivery (memql#2521): insert a v1:platform:outboundRequest row with status='pending' for the engine outbound worker to drain. Credentials are never part of the row; targets must satisfy the deployment's per-medium allowlist or the worker fails the row fast. Idempotent by requestId: a re-stage onto an existing row preserves the worker-owned status/attempts (@createOnly, fylo#63) rather than resetting delivery state.")
-mutate outboundRequest stageOutboundRequest {
+mutation outboundRequest stageOutboundRequest {
   args {
     requestId    string!
     medium       string!
@@ -262,7 +262,7 @@ mutate outboundRequest stageOutboundRequest {
 // but products should treat delivery state as read-only.
 
 @description("Stamp a delivery-state transition on a v1:platform:outboundRequest row (memql#2521). Called by the engine outbound worker (sending/sent/retrying/failed + attempt metadata); operators may set status='pending' to requeue a failed row.")
-mutate outboundRequest updateOutboundRequestStatus {
+mutation outboundRequest updateOutboundRequestStatus {
   args {
     requestId      string!
     status         string!
@@ -309,7 +309,7 @@ mutate outboundRequest updateOutboundRequestStatus {
 
 @createOnly("status", "processedAt", "lastError")
 @description("Stage a verified inbound delivery (memql#2957): insert a v1:platform:inboundRequest row with status='received' for a product automation to drain. Called by the engine inbound receiver once the source allowlist and signature check have passed; the signing secret is never part of the row. Idempotent by requestId: a redelivery preserves the product-owned handling state (@createOnly) instead of replaying it.")
-mutate inboundRequest stageInboundRequest {
+mutation inboundRequest stageInboundRequest {
   args {
     requestId          string!
     source             string!
@@ -341,7 +341,7 @@ mutate inboundRequest stageInboundRequest {
 // 'received'.
 
 @description("Stamp a handling transition on a v1:platform:inboundRequest row (memql#2957). Called by the product automation draining the row (processing/processed/failed); the engine receiver only ever writes the initial 'received'.")
-mutate inboundRequest updateInboundRequestStatus {
+mutation inboundRequest updateInboundRequestStatus {
   args {
     requestId    string!
     status       string!
@@ -400,7 +400,7 @@ mutate inboundRequest updateInboundRequestStatus {
 /// systemOwned-delete refusal is: none of it is expressible here, and a UI-only check is not a check.
 @actor
 @description("Create a site")
-mutate site createSite {
+mutation site createSite {
   args {
     siteId       string!
     hostname     string!  @maxLength(253) @pattern("^[a-z0-9][a-z0-9.-]*[a-z0-9]$")
@@ -443,7 +443,7 @@ mutate site createSite {
 /// operator publishes to any, and a cross-user write is refused before the merge -- which is why the
 /// guard reads the PRIOR row rather than the merged payload.
 @description("Point a site at a bundle version")
-mutate site updateSiteBundle {
+mutation site updateSiteBundle {
   args {
     siteId     string!
     bundleRef  string!
@@ -463,7 +463,7 @@ mutate site updateSiteBundle {
 /// rather than by anything here -- see updateSiteBundle's note for why the split is where it is.
 @description("Set a site's status")
 @requiresCapability("execute", "app:deployables/publish")
-mutate site updateSiteStatus {
+mutation site updateSiteStatus {
   args {
     siteId  string!
     status  enum("draft", "live", "disabled")!
@@ -496,7 +496,7 @@ mutate site updateSiteStatus {
 /// account is consulted: tying a site to a client changes who the work is FOR and never who may
 /// read or write it.
 @description("Point a deployable at the client it is for")
-mutate site updateSiteAccount {
+mutation site updateSiteAccount {
   args {
     siteId     string!
     accountId  string
@@ -527,7 +527,7 @@ mutate site updateSiteAccount {
 /// the row's owner, or a cluster owner through the explicit escape. A systemOwned row is refused for
 /// both, because the seed re-writes it at every boot.
 @description("Replace a deployable's runtime settings")
-mutate site updateSiteSettings {
+mutation site updateSiteSettings {
   args {
     siteId    string!
     settings  object!
@@ -549,7 +549,7 @@ mutate site updateSiteSettings {
 /// another's deployable, and an operator can delete any non-systemOwned one.
 @description("Soft-delete a site")
 @requiresCapability("execute", "app:deployables/retire")
-mutate site deleteSite {
+mutation site deleteSite {
   args {
     siteId  string!
   }
@@ -570,7 +570,7 @@ mutate site deleteSite {
 /// audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next
 /// boot, never what a running node has loaded.
 @description("Persist a pack's per-instance enablement state in v1:platform:packState. Absence of a row means enabled; the flip takes effect as each node restarts.")
-mutate packState setPackEnabled {
+mutation packState setPackEnabled {
   args {
     id          string!
     packDomain  string!
@@ -631,7 +631,7 @@ mutate packState setPackEnabled {
 /// taking a caller's token is a verification primitive that verifies nothing, however well scoped.
 @serverOnly
 @description("Create a custom-domain binding in v1:platform:customDomain, pending DNS verification. The ownership token is minted server-side.")
-mutate customDomain createCustomDomain {
+mutation customDomain createCustomDomain {
   args {
     domainId   string!
     siteId     string!
@@ -659,7 +659,7 @@ mutate customDomain createCustomDomain {
 /// kubectl.
 @description("Start removing a custom-domain binding. The row walks to `removing` and the reconciliation sweep takes the Ingress and Certificate away.")
 @requiresCapability("execute", "app:deployables/domains")
-mutate customDomain removeCustomDomain {
+mutation customDomain removeCustomDomain {
   args {
     domainId  string!
   }
@@ -686,7 +686,7 @@ mutate customDomain removeCustomDomain {
 /// cluster's DNS that nobody checked.
 @serverOnly
 @description("Record a failed custom-domain verification pass: the typed reason, what was observed, and when the sweep looked.")
-mutate customDomain recordCustomDomainCheck {
+mutation customDomain recordCustomDomainCheck {
   args {
     domainId       string!
     failureReason  string!
@@ -718,7 +718,7 @@ mutate customDomain recordCustomDomainCheck {
 /// cluster's DNS that nobody checked.
 @serverOnly
 @description("Promote a custom domain to `issuing` after both DNS checks pass, stamping when the name was verified.")
-mutate customDomain markCustomDomainVerified {
+mutation customDomain markCustomDomainVerified {
   args {
     domainId       string!
     verifiedAt     datetime!
@@ -756,7 +756,7 @@ mutate customDomain markCustomDomainVerified {
 /// cluster's DNS that nobody checked.
 @serverOnly
 @description("Record a refused or failed certificate issuance on a custom domain, keeping it in `issuing` so the next sweep pass retries.")
-mutate customDomain recordCustomDomainIssuanceFailure {
+mutation customDomain recordCustomDomainIssuanceFailure {
   args {
     domainId       string!
     failureReason  string!
@@ -789,7 +789,7 @@ mutate customDomain recordCustomDomainIssuanceFailure {
 /// cluster's DNS that nobody checked.
 @serverOnly
 @description("Record an issuance pass that applied the objects and is waiting for the certificate to become Ready. Clears any previous failure and moves lastCheckedAt.")
-mutate customDomain recordCustomDomainIssuingProgress {
+mutation customDomain recordCustomDomainIssuingProgress {
   args {
     domainId       string!
     note           string
@@ -814,7 +814,7 @@ mutate customDomain recordCustomDomainIssuingProgress {
 /// cluster's DNS that nobody checked.
 @serverOnly
 @description("Mark a custom domain live once its certificate is Ready. The edge resolves the hostname to its site from this write on.")
-mutate customDomain markCustomDomainLive {
+mutation customDomain markCustomDomainLive {
   args {
     domainId       string!
     issuedAt       datetime!
@@ -842,7 +842,7 @@ mutate customDomain markCustomDomainLive {
 /// cluster's DNS that nobody checked.
 @serverOnly
 @description("Close a custom domain's walk once the Ingress and Certificate are gone. The row survives with its terminal status; nothing deletes.")
-mutate customDomain markCustomDomainRemoved {
+mutation customDomain markCustomDomainRemoved {
   args {
     domainId       string!
     removedAt      datetime!
@@ -884,7 +884,7 @@ mutate customDomain markCustomDomainRemoved {
 /// door for a name nobody proved they own.
 @serverOnly
 @description("Open a front door for an account's reserved MemQL name, pending DNS. The three hosts are derived from reservedName by frontdoor.AccountHosts.")
-mutate accountFrontDoor createAccountFrontDoor {
+mutation accountFrontDoor createAccountFrontDoor {
   args {
     doorId        string!
     accountId     string!
@@ -913,7 +913,7 @@ mutate accountFrontDoor createAccountFrontDoor {
 /// be asserted rather than made, which is the one thing the whole walk rests on.
 @serverOnly
 @description("Record a front-door verification pass that did not advance: what each host looked like, the typed reason, and when.")
-mutate accountFrontDoor recordAccountFrontDoorCheck {
+mutation accountFrontDoor recordAccountFrontDoorCheck {
   args {
     doorId         string!
     status         enum("pending_dns", "verifying", "issuing", "removing")!
@@ -941,7 +941,7 @@ mutate accountFrontDoor recordAccountFrontDoorCheck {
 /// their say-so against a rate limit the whole cluster shares.
 @serverOnly
 @description("Mark a front door verified: all three hosts point at this cluster, and issuance may begin.")
-mutate accountFrontDoor markAccountFrontDoorVerified {
+mutation accountFrontDoor markAccountFrontDoorVerified {
   args {
     doorId         string!
     hostChecks     object!
@@ -967,7 +967,7 @@ mutate accountFrontDoor markAccountFrontDoorVerified {
 /// supply it truthfully, so a scoped write would only make it forgeable.
 @serverOnly
 @description("Record a front-door issuance pass that applied the five objects and is waiting for the three-SAN certificate to become Ready. Clears any previous failure and moves lastCheckedAt.")
-mutate accountFrontDoor recordAccountFrontDoorIssuingProgress {
+mutation accountFrontDoor recordAccountFrontDoorIssuingProgress {
   args {
     doorId         string!
     failureDetail  string
@@ -991,7 +991,7 @@ mutate accountFrontDoor recordAccountFrontDoorIssuingProgress {
 /// write no_acme_issuer onto a door that is issuing perfectly well, and the sweep would believe it.
 @serverOnly
 @description("Record a typed issuance refusal or failure on a front door, keeping it at issuing so the sweep retries on the schedule.")
-mutate accountFrontDoor recordAccountFrontDoorIssuanceFailure {
+mutation accountFrontDoor recordAccountFrontDoorIssuanceFailure {
   args {
     doorId         string!
     failureReason  string!
@@ -1016,7 +1016,7 @@ mutate accountFrontDoor recordAccountFrontDoorIssuanceFailure {
 /// error, their client's employees, our name on it.
 @serverOnly
 @description("Mark a front door live once its certificate is Ready. All three hosts answer from this write on.")
-mutate accountFrontDoor markAccountFrontDoorLive {
+mutation accountFrontDoor markAccountFrontDoorLive {
   args {
     doorId         string!
     issuedAt       datetime!
@@ -1046,7 +1046,7 @@ mutate accountFrontDoor markAccountFrontDoorLive {
 /// already have; this write is the consequence, not the control.
 @serverOnly
 @description("Move a front door to removing because the reservation behind it is gone. The next sweep pass unbinds the Ingresses and the Certificate.")
-mutate accountFrontDoor requestAccountFrontDoorRemoval {
+mutation accountFrontDoor requestAccountFrontDoorRemoval {
   args {
     doorId         string!
     failureReason  string
@@ -1075,7 +1075,7 @@ mutate accountFrontDoor requestAccountFrontDoorRemoval {
 /// without this mutation that transition was reversible.
 @serverOnly
 @description("Record a typed failure during a front door's teardown, KEEPING it at removing so the next sweep retries the unbind rather than re-provisioning the door.")
-mutate accountFrontDoor recordAccountFrontDoorRemovalFailure {
+mutation accountFrontDoor recordAccountFrontDoorRemovalFailure {
   args {
     doorId         string!
     failureReason  string!
@@ -1102,7 +1102,7 @@ mutate accountFrontDoor recordAccountFrontDoorRemovalFailure {
 /// recordAccountFrontDoorCheck once driftFailures reaches its bound.
 @serverOnly
 @description("Record a re-check of a LIVE front door: what each host looked like, the consecutive-failure count, and when. Keeps the door serving -- demotion is a separate write once the drift is sustained.")
-mutate accountFrontDoor recordAccountFrontDoorDrift {
+mutation accountFrontDoor recordAccountFrontDoorDrift {
   args {
     doorId         string!
     hostChecks     object!
@@ -1128,7 +1128,7 @@ mutate accountFrontDoor recordAccountFrontDoorDrift {
 /// row being the one anybody reads.
 @serverOnly
 @description("Mark a front door removed once the unbind script has taken the objects away. Terminal; the row survives as the audit.")
-mutate accountFrontDoor markAccountFrontDoorRemoved {
+mutation accountFrontDoor markAccountFrontDoorRemoved {
   args {
     doorId         string!
     removedAt      datetime!
@@ -1165,7 +1165,7 @@ mutate accountFrontDoor markAccountFrontDoorRemoved {
 /// crashes still counts against the ceiling -- a worker that dies mid-delivery must not give the
 /// entry infinite lives. actor.userId scoping does not apply: the caller is the drain worker.
 @serverOnly
-mutate outboxEntry markOutboxDelivering {
+mutation outboxEntry markOutboxDelivering {
   args {
     entryId   string!
     attempts  int!
@@ -1181,7 +1181,7 @@ mutate outboxEntry markOutboxDelivering {
 /// recognising the idempotency key on a redelivery counts as success. actor.userId scoping does
 /// not apply: the caller is the drain worker.
 @serverOnly
-mutate outboxEntry markOutboxDelivered {
+mutation outboxEntry markOutboxDelivered {
   args {
     entryId      string!
     deliveredAt  datetime!
@@ -1198,7 +1198,7 @@ mutate outboxEntry markOutboxDelivered {
 /// set and the worker skips it until nextAttemptAt. actor.userId scoping does not apply: the caller
 /// is the drain worker.
 @serverOnly
-mutate outboxEntry markOutboxFailed {
+mutation outboxEntry markOutboxFailed {
   args {
     entryId        string!
     nextAttemptAt  datetime!
@@ -1216,7 +1216,7 @@ mutate outboxEntry markOutboxFailed {
 /// worker never picks a dead entry up again, which is the whole difference between dead and failed.
 /// actor.userId scoping does not apply: the caller is the drain worker.
 @serverOnly
-mutate outboxEntry markOutboxDead {
+mutation outboxEntry markOutboxDead {
   args {
     entryId    string!
     lastError  string
@@ -1233,7 +1233,7 @@ mutate outboxEntry markOutboxDead {
 /// again on the first hiccup. actor.userId scoping does not apply -- the row is the deployment's,
 /// and the operator gate is the concept's clusterOwner tier plus the adminops caller.
 @serverOnly
-mutate outboxEntry retryOutboxEntry {
+mutation outboxEntry retryOutboxEntry {
   args {
     entryId  string!
   }
@@ -1250,7 +1250,7 @@ mutate outboxEntry retryOutboxEntry {
 /// row is audit history and the queue read filters on status. actor.userId scoping does not apply
 /// for the same reason retryOutboxEntry's does not.
 @serverOnly
-mutate outboxEntry discardOutboxEntry {
+mutation outboxEntry discardOutboxEntry {
   args {
     entryId  string!
     reason   string
@@ -1266,7 +1266,7 @@ mutate outboxEntry discardOutboxEntry {
 /// append onto the same timeline every time. actor.userId scoping does not apply: the writer is the
 /// sync runtime, acting for no user.
 @serverOnly
-mutate syncState upsertSyncState {
+mutation syncState upsertSyncState {
   args {
     stateId          string!
     conceptId        string!
@@ -1307,7 +1307,7 @@ mutate syncState upsertSyncState {
 /// matters is the concept's clusterOwner tier plus the owner/admin check at the operator surface
 /// that calls this; the annotation keeps the write off the wire entirely.
 @serverOnly
-mutate syncState setSyncPaused {
+mutation syncState setSyncPaused {
   args {
     stateId  string!
     paused   bool!
@@ -1358,7 +1358,7 @@ mutate syncState setSyncPaused {
 @actor
 @description("Register a package this cluster tracks and can deploy")
 @requiresCapability("execute", "app:deployables/sources")
-mutate package createPackage {
+mutation package createPackage {
   args {
     packageId     string!
     name          string!  @maxLength(120)
@@ -1388,7 +1388,7 @@ mutate package createPackage {
 /// so re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides.
 @description("Update a package's tracked ref or the credential it fetches under")
 @requiresCapability("execute", "app:deployables/sources")
-mutate package updatePackageSource {
+mutation package updatePackageSource {
   args {
     packageId     string!
     repoRef       string   @maxLength(200)
@@ -1422,7 +1422,7 @@ mutate package updatePackageSource {
 @description("Turn deployables of a source off, by name")
 @addToSet("disabledDeployables")
 @requiresCapability("execute", "app:deployables/retire")
-mutate package disablePackageDeployables {
+mutation package disablePackageDeployables {
   args {
     packageId       string!
     deployableNames []string!
@@ -1442,7 +1442,7 @@ mutate package disablePackageDeployables {
 @description("Turn deployables of a source back on, by name")
 @removeFromSet("disabledDeployables")
 @requiresCapability("execute", "app:deployables/retire")
-mutate package enablePackageDeployables {
+mutation package enablePackageDeployables {
   args {
     packageId       string!
     deployableNames []string!
@@ -1461,7 +1461,7 @@ mutate package enablePackageDeployables {
 /// decision, which is what makes an auto-run's provenance honest.
 @description("Turn auto-deploy on or off for a tracked source")
 @requiresCapability("execute", "app:deployables/sources")
-mutate package setPackageAutoDeploy {
+mutation package setPackageAutoDeploy {
   args {
     packageId   string!
     autoDeploy  boolean!
@@ -1491,7 +1491,7 @@ mutate package setPackageAutoDeploy {
 /// package's state, not on who is asking.
 @serverOnly
 @description("Set a package's lifecycle status")
-mutate package setPackageStatus {
+mutation package setPackageStatus {
   args {
     packageId  string!
     status     enum("active", "archived")!
@@ -1513,7 +1513,7 @@ mutate package setPackageStatus {
 /// there, so the scoped form would refuse the only legitimate caller it has.
 @serverOnly
 @description("Record the source version now serving for a package")
-mutate package recordPackageDeployedVersion {
+mutation package recordPackageDeployedVersion {
   args {
     packageId        string!
     deployedVersion  string!
@@ -1535,7 +1535,7 @@ mutate package recordPackageDeployedVersion {
 /// Scoping bounds whose row is touched; the problem is that the value has one true source.
 @serverOnly
 @description("Record the package name the manifest declares")
-mutate package recordPackageName {
+mutation package recordPackageName {
   args {
     packageId  string!
     name       string!
@@ -1564,7 +1564,7 @@ mutate package recordPackageName {
 /// keep it forever.
 @serverOnly
 @description("Record the deployables a package's manifest declares")
-mutate package recordPackageDeployables {
+mutation package recordPackageDeployables {
   args {
     packageId  string!
     declares   []object!
@@ -1587,7 +1587,7 @@ mutate package recordPackageDeployables {
 /// has an upstream update it does not have, which is a claim about a row they already own.
 @serverOnly
 @description("Record the newest upstream version a package's source has reached")
-mutate package recordPackageUpstreamVersion {
+mutation package recordPackageUpstreamVersion {
   args {
     packageId           string!
     latestKnownVersion  string!
@@ -1623,7 +1623,7 @@ mutate package recordPackageUpstreamVersion {
 @serverOnly
 @actor
 @description("Open a package deployment attempt")
-mutate packageDeployment openPackageDeployment {
+mutation packageDeployment openPackageDeployment {
   args {
     deploymentId   string!
     packageId      string!
@@ -1671,7 +1671,7 @@ mutate packageDeployment openPackageDeployment {
 /// filter would refuse the only path that legitimately calls it.
 @serverOnly
 @description("Record that a package deployment's node is still running it")
-mutate packageDeployment heartbeatPackageDeployment {
+mutation packageDeployment heartbeatPackageDeployment {
   args {
     deploymentId  string!
     heartbeatAt   datetime!
@@ -1702,7 +1702,7 @@ mutate packageDeployment heartbeatPackageDeployment {
 /// tier is what admits the sweep to the rows.
 @serverOnly
 @description("Close a package deployment whose node was lost mid-run")
-mutate packageDeployment abandonPackageDeployment {
+mutation packageDeployment abandonPackageDeployment {
   args {
     deploymentId  string!
     stoppedAt     string
@@ -1730,7 +1730,7 @@ mutate packageDeployment abandonPackageDeployment {
 /// without any of the work having happened.
 @serverOnly
 @description("Advance a package deployment to its next stage")
-mutate packageDeployment advancePackageDeployment {
+mutation packageDeployment advancePackageDeployment {
   args {
     deploymentId  string!
     status        enum("analyzing", "awaiting_confirm", "building", "staging_dsl", "rolling", "publishing")!
@@ -1758,7 +1758,7 @@ mutate packageDeployment advancePackageDeployment {
 /// caller outright on the common path -- the pipeline reads this flag under no person at all.
 @serverOnly
 @description("Flag a running deployment as cancel-requested. The pipeline reads it at its next stage boundary and closes the run `cancelled`.")
-mutate packageDeployment requestPackageDeploymentCancel {
+mutation packageDeployment requestPackageDeploymentCancel {
   args {
     deploymentId  string!
   }
@@ -1789,7 +1789,7 @@ mutate packageDeployment requestPackageDeploymentCancel {
 /// conclusion, not a preference, and there is no person in scope at the moment it is made.
 @serverOnly
 @description("Record which deployables a package deployment is for")
-mutate packageDeployment recordPackageDeploymentScope {
+mutation packageDeployment recordPackageDeploymentScope {
   args {
     deploymentId  string!
     scopedTo      []string!
@@ -1815,7 +1815,7 @@ mutate packageDeployment recordPackageDeploymentScope {
 @serverOnly
 @noUnset("snapshotArtifactId")
 @description("Record a package deployment's analysis report")
-mutate packageDeployment recordPackageDeploymentReport {
+mutation packageDeployment recordPackageDeploymentReport {
   args {
     deploymentId        string!
     report              object!
@@ -1842,7 +1842,7 @@ mutate packageDeployment recordPackageDeploymentReport {
 /// scoped to their own rows would still be free to make falsely about their own deploy.
 @serverOnly
 @description("Close a package deployment at a terminal status")
-mutate packageDeployment closePackageDeployment {
+mutation packageDeployment closePackageDeployment {
   args {
     deploymentId  string!
     status        enum("succeeded", "refused", "failed", "abandoned", "cancelled")!
@@ -1872,7 +1872,7 @@ mutate packageDeployment closePackageDeployment {
 /// owner never chose. The site is the caller's; the consequence is not.
 @serverOnly
 @description("Bind a site to the package deployable that produced it")
-mutate site recordSitePackageOrigin {
+mutation site recordSitePackageOrigin {
   args {
     siteId                 string!
     packageId              string!
@@ -1899,7 +1899,7 @@ mutate site recordSitePackageOrigin {
 /// users -- it is the ability to skip the confirmation and the disable-first rule.
 @serverOnly
 @description("Set a site's lifecycle status, including archived")
-mutate site setSiteStatus {
+mutation site setSiteStatus {
   args {
     siteId  string!
     status  enum("draft", "live", "disabled", "archived")!
@@ -1931,7 +1931,7 @@ mutate site setSiteStatus {
 @serverOnly
 @actor
 @description("Land a credential sealed by the sourceCredentialCreate capability")
-mutate sourceCredential createSourceCredential {
+mutation sourceCredential createSourceCredential {
   args {
     credentialId    string!
     host            string!
@@ -1955,7 +1955,7 @@ mutate sourceCredential createSourceCredential {
 /// revoke a credential they do not hold. The row stays -- it is the audit history of what fetched
 /// under it -- and every source fetching under it refuses at its next fetch until it is switched.
 @description("Revoke a source credential; the row is kept as history")
-mutate sourceCredential revokeSourceCredential {
+mutation sourceCredential revokeSourceCredential {
   args {
     credentialId  string!
   }
@@ -1975,7 +1975,7 @@ mutate sourceCredential revokeSourceCredential {
 /// a self-scoped filter would refuse the one path that legitimately calls it.
 @serverOnly
 @description("Record when a source credential was last unsealed for a fetch or a poll")
-mutate sourceCredential touchSourceCredential {
+mutation sourceCredential touchSourceCredential {
   args {
     credentialId  string!
     lastUsedAt    datetime!
@@ -2019,7 +2019,7 @@ mutate sourceCredential touchSourceCredential {
 @serverOnly
 @actor
 @description("Land a GitHub App grant from the connect callback")
-mutate sourceCredential createGithubAppGrant {
+mutation sourceCredential createGithubAppGrant {
   args {
     credentialId     string!
     host             string!
@@ -2059,7 +2059,7 @@ mutate sourceCredential createGithubAppGrant {
 /// picked. The seal is the authorization, and only a node holds the key.
 @serverOnly
 @description("Replace a GitHub App grant's tokens and installations on reconnect")
-mutate sourceCredential updateGithubAppGrant {
+mutation sourceCredential updateGithubAppGrant {
   args {
     credentialId     string!
     encryptedValue   string!
@@ -2091,7 +2091,7 @@ mutate sourceCredential updateGithubAppGrant {
 /// so a self-scoped filter would refuse the one path that most needs to refresh.
 @serverOnly
 @description("Record a GitHub App user token the engine refreshed server-side")
-mutate sourceCredential refreshGithubAppGrantToken {
+mutation sourceCredential refreshGithubAppGrantToken {
   args {
     credentialId    string!
     encryptedValue  string!
@@ -2121,7 +2121,7 @@ mutate sourceCredential refreshGithubAppGrantToken {
 /// on which that claim could be composed.
 @serverOnly
 @description("Replace a GitHub App grant's installation ids from a webhook delivery")
-mutate sourceCredential recordGithubAppInstallations {
+mutation sourceCredential recordGithubAppInstallations {
   args {
     credentialId     string!
     installationIds  []string
@@ -2145,7 +2145,7 @@ mutate sourceCredential recordGithubAppInstallations {
 /// configuration state, however the args were scoped.
 @serverOnly
 @description("Write one node's readiness verdict for one module as a new version of its deterministic row.")
-mutate moduleReadiness recordModuleReadiness {
+mutation moduleReadiness recordModuleReadiness {
   args {
     rowId       string!
     module      string!
@@ -2199,7 +2199,7 @@ mutate moduleReadiness recordModuleReadiness {
 /// Readable and writable are separate questions and this is the answer to the second one.
 @serverOnly
 @createOnly("providerRef", "dimensions", "previousRef", "reembedRunId")
-mutate embedderBinding recordEmbedderBindingPlan {
+mutation embedderBinding recordEmbedderBindingPlan {
   args {
     bindingId     string!
     providerRef   string!
@@ -2226,7 +2226,7 @@ mutate embedderBinding recordEmbedderBindingPlan {
 /// space, ranked confidently, with no error anywhere. The guard is that only the builtin that ran
 /// steps one to three can call this.
 @serverOnly
-mutate embedderBinding activateEmbedderBinding {
+mutation embedderBinding activateEmbedderBinding {
   args {
     bindingId    string!
     activatedAt  datetime!
@@ -2266,7 +2266,7 @@ mutate embedderBinding activateEmbedderBinding {
 /// write here directly.
 @actor
 @serverOnly
-mutate modelMeasurement recordModelMeasurement {
+mutation modelMeasurement recordModelMeasurement {
   args {
     measurementId        string!
     machineId            string!
@@ -2308,7 +2308,7 @@ mutate modelMeasurement recordModelMeasurement {
 /// which would leave the fold unable to write its own output.
 @actor
 @serverOnly
-mutate modelEvidence recordModelEvidence {
+mutation modelEvidence recordModelEvidence {
   args {
     evidenceId          string!
     modelId             string!
@@ -2349,7 +2349,7 @@ mutate modelEvidence recordModelEvidence {
 /// mirrors the outcome so the next fold can read it without re-reading every approval.
 @actor
 @serverOnly
-mutate modelEvidence recordEvidenceDecision {
+mutation modelEvidence recordEvidenceDecision {
   args {
     evidenceId  string!
     proposal    string!

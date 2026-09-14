@@ -10,7 +10,6 @@
 // acceptance: the DSL declaration here + the Go capability in pack.go
 // are the two ends of the same wire.
 
-@enabled
 @executor("integration.referencepack.composeGreeting")
 @args(profile="object")
 @description("Compose a greeting string for a user via the reference pack's Go integration capability. Demonstrates a pack contributing a DSL-callable builtin backed by Go.")

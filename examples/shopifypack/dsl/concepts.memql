@@ -11,7 +11,6 @@
 // inbound webhooks or add a second cart.
 
 @version("1.0.0")
-@namespace("shopifypack")
 @description("One attached Shopify shop. Token fields hold secret names (MEMQL_SHOPIFY_*), never the token values. Sync is a data toggle so a client can pause ingest without a rebuild.")
 @displayCard(primary="storeDomain", secondary="syncEnabled", status="syncEnabled")
 @rowAuthz(owner="ownerUserId")
