@@ -1114,7 +1114,11 @@ func publishFromCall(call *lcall) (*lstmt, error) {
 			}
 			st.topic = v
 		case "payload":
-			st.payload = strings.TrimSpace(a.value)
+			v := strings.TrimSpace(a.value)
+			if !strings.HasPrefix(v, "{") {
+				return nil, fmt.Errorf("publishEvent: the payload %s is not a map literal; a publish statement's payload is written { k: v }", v)
+			}
+			st.payload = v
 			st.payloadCol = a.col
 		case "kind":
 			return nil, fmt.Errorf("publishEvent: `kind:` has no publish-statement spelling; drop it by hand if the default kind is meant")
