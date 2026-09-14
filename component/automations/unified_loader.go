@@ -82,7 +82,13 @@ var automationLooseHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Z
 // Directories whose name starts with `_` or `.` are skipped as soft-disabled,
 // matching every other DSL walker.
 func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
-	tree := memqldsl.Tree()
+	return l.loadFromTree(memqldsl.Tree())
+}
+
+// loadFromTree is LoadFromUnifiedTree over tree: `<domain>/...` directories,
+// each carrying its memql.toml. The step-order gate hands it the DSL bundles
+// the engine tree does not hold (deploy/fleet/dsl, examples/<pack>/dsl).
+func (l *Loader) loadFromTree(tree fs.FS) ([]*Automation, error) {
 	var out []*Automation
 	// Hard load problems collected across the whole walk (memql#2830). We
 	// keep walking after the first one so the operator gets the COMPLETE

@@ -1561,7 +1561,17 @@ func (p *Parser) parseGoStyleAutomationBody(name string) (*AutomationDef, error)
 }
 
 // parseGoStyleStep parses a Go-style step: name := type { ... } or name, err := type { ... }
+// The step is stamped with the line its name is written on.
 func (p *Parser) parseGoStyleStep() (*StepDef, error) {
+	line, _ := p.current.At()
+	step, err := p.parseGoStyleStepAssignment()
+	if step != nil {
+		step.Line = line
+	}
+	return step, err
+}
+
+func (p *Parser) parseGoStyleStepAssignment() (*StepDef, error) {
 	// Parse name(s)
 	names := []string{p.current.Literal}
 	p.advance()
@@ -1595,6 +1605,21 @@ func (p *Parser) parseGoStyleStep() (*StepDef, error) {
 		if err := p.expect(TokenParenClose); err != nil {
 			return nil, err
 		}
+	}
+
+	// A named switch step: `name := switch <expr> { case ...: ... }`, which
+	// is what the struct form's `step name { switch <expr> { ... } }` lowers
+	// to. The step's id is the author's name, as every other step's is: a
+	// bare switch statement has none, and the id synthesized for one from
+	// its subject gave two switch steps on one subject one id (memql#5367).
+	if p.check(TokenKeywordSwitch) {
+		step, err := p.parseSwitchStep()
+		if err != nil {
+			return nil, err
+		}
+		step.ID = names[0]
+		step.RetryCount = retryCount
+		return step, nil
 	}
 
 	// Function-call step with conditional wrapper:
@@ -2970,6 +2995,7 @@ func attributeToRelationshipDecl(attr *Attribute) (*RelationshipDecl, error) {
 func (p *Parser) parseForRangeStep() (*StepDef, error) {
 	loopStartPos := p.current.Pos
 	loopStartLine := p.current.Line
+	loopLine, _ := p.current.At()
 
 	if err := p.expect(TokenKeywordFor); err != nil {
 		return nil, err
@@ -3095,6 +3121,7 @@ func (p *Parser) parseForRangeStep() (*StepDef, error) {
 	return &StepDef{
 		ID:   stepId,
 		Type: StepTypeForEach,
+		Line: loopLine,
 		Config: &ForEachStepConfig{
 			Source:     source,
 			Filter:     filter,
@@ -3237,6 +3264,7 @@ func (p *Parser) parseIfBodyStatements() ([]StepDef, error) {
 				// the same callee name.
 				pos := p.current.Pos
 				line := p.current.Line
+				authoredLine, _ := p.current.At()
 				call, err := p.parseV1StepCall("an if-body statement")
 				if err != nil {
 					return nil, err
@@ -3245,6 +3273,7 @@ func (p *Parser) parseIfBodyStatements() ([]StepDef, error) {
 					ID:     fmt.Sprintf("anon_%d_L%d", pos, line),
 					Type:   StepTypeFunction,
 					Config: &FunctionStepConfig{Name: call.Name, Args: v1CallArgs(call)},
+					Line:   authoredLine,
 				})
 				continue
 			}
@@ -3274,8 +3303,11 @@ func (p *Parser) parseIfBodyStatements() ([]StepDef, error) {
 	return steps, nil
 }
 
-// parseSwitchStep parses a Go-style switch statement as a step
+// parseSwitchStep parses a Go-style switch statement as a step. A bare switch
+// statement has no name, so its id is synthesized from its subject; the named
+// form, `name := switch ...`, replaces it with the name (parseGoStyleStep).
 func (p *Parser) parseSwitchStep() (*StepDef, error) {
+	line, _ := p.current.At()
 	if err := p.expect(TokenKeywordSwitch); err != nil {
 		return nil, err
 	}
@@ -3358,6 +3390,7 @@ func (p *Parser) parseSwitchStep() (*StepDef, error) {
 	return &StepDef{
 		ID:   "switch_" + expression,
 		Type: StepTypeSwitch,
+		Line: line,
 		Config: &SwitchStepConfig{
 			Expression:     expression,
 			Cases:          cases,
@@ -3848,6 +3881,7 @@ func (p *Parser) parseStep() (*StepDef, error) {
 	}
 
 	stepId := p.current.Literal
+	stepLine, _ := p.current.At()
 	p.advance()
 
 	if !p.check(TokenColon) {
@@ -3923,6 +3957,7 @@ func (p *Parser) parseStep() (*StepDef, error) {
 		Condition:     condition,
 		ConditionExpr: conditionExpr,
 		Config:        config,
+		Line:          stepLine,
 	}, nil
 }
 

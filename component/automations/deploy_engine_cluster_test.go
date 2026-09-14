@@ -185,7 +185,7 @@ func TestDeployEngineClusterCompiles(t *testing.T) {
 	if rbt == nil || rbt.Function == nil || rbt.Function.Name != "deployRollbackTarget" {
 		t.Fatal("rollbackTarget step must decide via logic deployRollbackTarget")
 	}
-	rb := stepByID(auto.Steps, "switch_steps.rollbackTarget.result")
+	rb := stepByID(auto.Steps, "rollback")
 	if rb == nil || rb.Switch == nil {
 		t.Fatal("rollback must switch on steps.rollbackTarget.result")
 	}
