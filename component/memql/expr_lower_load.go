@@ -200,7 +200,7 @@ func specLowerEnv(spec *Spec, shapes *ShapeRegistry, concepts memoryNodes.Regist
 		} else if concept, err := specBindingConcept(concepts, spec); err == nil && concept != nil {
 			env.Concept = concept
 		} else {
-			return env, fmt.Errorf("binding %q resolves to neither an imported shape nor a concept", spec.BoundName)
+			return env, specBindingRefusal(spec, shapes, concepts)
 		}
 	}
 	// D1: over an @actor shape the parameter IS the envelope and is spelled

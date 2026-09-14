@@ -210,6 +210,16 @@ type Spec struct {
 	// refine clause, an automation condition -- where there is no SQL. Nil
 	// for a pre-2026 `{ return ... }` body, whose Expr is converted at load.
 	Lambda *ast.LambdaExpr
+
+	// Uses are the file-top `use` imports in force where the spec was
+	// written: the tree file's for a loaded spec, the construct source's own
+	// for an authored one (a bundle's spec slice carries the bundle's import
+	// preamble, so its stored row does too). The binding resolves through
+	// them FIRST -- an import that names the bound name decides which shape
+	// or concept it is, exactly as a query's signature concept resolves --
+	// then the spec's own domain, then the whole tree (specBindingShape /
+	// specBindingConcept). Parsed once and never mutated, so clones share it.
+	Uses []*ast.UseDeclaration
 }
 
 func (s *Spec) clone() *Spec {
@@ -230,6 +240,8 @@ func (s *Spec) clone() *Spec {
 		// it -- and they must carry it: the registry hands out clones, and a
 		// clone without the lambda is a v1 predicate EvalExpr cannot apply.
 		Lambda: s.Lambda,
+		// And the imports, or a clone would bind differently than its source.
+		Uses: s.Uses,
 	}
 }
 
