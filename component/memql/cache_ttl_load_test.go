@@ -15,9 +15,9 @@ import (
 // the wiring, `@cache` was parsed onto fn.CacheTTL but never stamped onto
 // the executable expression, so caching never engaged on any struct query.
 
-func cacheLoadRegistry() memoryNodes.Registry {
+func cacheLoadRegistry(t *testing.T) memoryNodes.Registry {
 	return newMemoryRegistry(map[string]*memoryNodes.Concept{
-		"v1:agents:agentRole": {Name: "v1:agents:agentRole"},
+		"v1:agents:agentRole": fixtureConcept(t, "v1:agents:agentRole", "concept agentRole {\n  active  bool\n}\n"),
 	})
 }
 
@@ -29,10 +29,10 @@ func loadCachedQueryHints(t *testing.T, cacheAnnotation string) map[string]int64
 		"@enabled\n" +
 		cacheAnnotation + "\n" +
 		"query agentRole queryRolesCached {\n" +
-		"  filter  payload.active == true\n" +
+		"  filter  row => row.active == true\n" +
 		"  shape   agentRole\n" +
 		"}"
-	fn, err := tryParseNewFunctionSyntax("queryRolesCached", "query", src, "agents.queries.memql", cacheLoadRegistry())
+	fn, err := tryParseNewFunctionSyntax("queryRolesCached", "query", src, "agents.queries.memql", cacheLoadRegistry(t))
 	require.NoError(t, err)
 	require.NotNil(t, fn)
 	require.Equal(t, cacheAnnotationTTL(cacheAnnotation), fn.CacheTTL)
