@@ -15,7 +15,7 @@ import (
 //
 // # The rule
 //
-// `hash(concat(a, sep, b))` keys two values into one string and is injective
+// `hash(a + sep + b)` keys two values into one string and is injective
 // only if the split is recoverable. memql#2980 closed one instance by
 // constraining the trailing part with `@pattern("^[^:]+$")`. That works where
 // the part is drawn from a known set; it does not work where the part is
@@ -30,7 +30,7 @@ import (
 // # Scope, stated honestly
 //
 // This checks the DSL files whose id derivations were converted, by path. It
-// is NOT the tree-wide shape detector -- find every `id: hash(concat(...))`
+// is NOT the tree-wide shape detector -- find every `id: hash(a + ... + b)`
 // and verify its parts are constrained or digested -- which memql#3009 argues
 // for and which triage explicitly scoped out as its own piece with its own
 // false-positive design problem. A NEW file adopting the separator form will
@@ -46,9 +46,8 @@ var perPartHashedIdFiles = []string{
 	"cluster/mutations.memql",
 }
 
-// separatorInsideHashConcat matches a `":"` literal used as a concat separator
-// inside a hash(concat(...)) call: a bare `, ":",` sequence, or its edition-2026
-// spelling `+ ":" +` (epic memql#5363) -- concatSeparatorRe reads both.
+// separatorInsideHashConcat matches a `":"` literal used as a concatenation
+// separator inside a hash(...) call: `+ ":" +` (concatSeparatorRe).
 //
 // Deliberately narrow. A colon inside a string VALUE (`"v1:cluster:node"`) or
 // in prose is not a separator, and flagging those would make the gate noisy
@@ -56,7 +55,7 @@ var perPartHashedIdFiles = []string{
 var separatorInsideHashConcat = concatSeparatorRe
 
 func TestConvertedIdDerivationsKeepPerPartHashing(t *testing.T) {
-	bothCorpora(t, checkConvertedIdDerivationsKeepPerPartHashing)
+	onTree(t, checkConvertedIdDerivationsKeepPerPartHashing)
 }
 
 func checkConvertedIdDerivationsKeepPerPartHashing(t *testing.T, c corpus) {
@@ -110,12 +109,9 @@ func checkConvertedIdDerivationsKeepPerPartHashing(t *testing.T, c corpus) {
 // It exercises separatorInsideHashConcat, the SAME variable the sweep uses.
 func TestPerPartHashingGateMatchesASeparatorAndNotAValue(t *testing.T) {
 	for _, bad := range []string{
-		`          args.partitionId, ":",`,
-		`      canonicalId(args.participantId, participant), ":",`,
-		`      shortId(args.deploymentId), ":", args.nodeType`,
-		// Edition 2026 spells the same separator as a `+` operand.
 		`        shortId(args.deploymentId) + ":" +`,
 		`      id: hash(args.partitionId + ":" + args.key)`,
+		`      canonicalId(args.participantId, "participant") + ":" + args.x`,
 	} {
 		if !separatorInsideHashConcat.MatchString(bad) {
 			t.Errorf("the gate does not match a separator, so it would report clean forever: %q", bad)
@@ -123,11 +119,10 @@ func TestPerPartHashingGateMatchesASeparatorAndNotAValue(t *testing.T) {
 	}
 	for _, ok := range []string{
 		`          hash(args.partitionId),`,
-		`    id: concat("utt-", hash(concat(`,
-		`  filter  kind == "v1:cognition:utterance"`,       // a colon inside a VALUE
-		`// was hash(concat(a, ":", b)) before memql#3009`, // prose (also skipped by the comment check)
-		`      hash(canonicalId(args.participantId, participant)),`,
-		`      id: hash(hash(args.partitionId) + hash(args.key))`, // the per-part form, edition 2026
+		`  filter  row => row.kind == "v1:cognition:utterance"`, // a colon inside a VALUE
+		`// was hash(a + ":" + b) before memql#3009`,            // prose (skipped by the comment check)
+		`      hash(canonicalId(args.participantId, "participant")),`,
+		`      id: hash(hash(args.partitionId) + hash(args.key))`, // the per-part form
 		`    id: "utt-" + hash(hash(a) + hash(b))`,
 	} {
 		if separatorInsideHashConcat.MatchString(ok) && !strings.HasPrefix(strings.TrimSpace(ok), "//") {

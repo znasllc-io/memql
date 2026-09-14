@@ -4,54 +4,42 @@ package dslconformance
 // starts with this literal", for the gates that look for a prefix baked into
 // an id (epic memql#5363, task memql#5368).
 //
-// Edition 2026 retires `concat(a, b)` for `a + b`, and the codemod rewrites
-// every call. Three gates in this package looked for the call's spelling --
-// `concat("ga-"`, `concat("v1:ns:concept:",`, `, ":",` inside one -- and each
-// would have matched nothing on the migrated tree and reported it clean. They
-// read both spellings here, from one place, so they cannot drift apart about
-// what the new one looks like.
+// A string concatenation is `a + b` (edition 2026 retired `concat(a, b)`).
+// Three gates in this package look for a prefix or separator baked into one --
+// `"ga-" +`, `"v1:ns:concept:" +`, `+ ":" +` -- and read it here, from one
+// place, so they cannot drift apart about what the spelling looks like.
 
 import (
 	"regexp"
 	"testing"
 )
 
-var (
-	// concatCallLiteralRe is the legacy spelling: a concat() call whose first
-	// argument is a string literal.
-	concatCallLiteralRe = regexp.MustCompile(`\bconcat\(\s*"((?:[^"\\]|\\.)*)"`)
-	// plusLiteralRe is edition 2026's: a string literal that is the left
-	// operand of `+`. A literal that only ever sits on the RIGHT of a `+` is
-	// not a prefix of what the expression produces, so it is not read.
-	plusLiteralRe = regexp.MustCompile(`"((?:[^"\\]|\\.)*)"\s*\+`)
-)
+// plusLiteralRe matches a string literal that is the left operand of `+`. A
+// literal that only ever sits on the RIGHT of a `+` is not a prefix of what the
+// expression produces, so it is not read.
+var plusLiteralRe = regexp.MustCompile(`"((?:[^"\\]|\\.)*)"\s*\+`)
 
 // concatLiteralPrefixes returns the literal each string concatenation on line
-// starts with, in either edition's spelling.
+// starts with.
 func concatLiteralPrefixes(line string) []string {
 	var out []string
-	for _, re := range []*regexp.Regexp{concatCallLiteralRe, plusLiteralRe} {
-		for _, m := range re.FindAllStringSubmatch(line, -1) {
-			out = append(out, m[1])
-		}
+	for _, m := range plusLiteralRe.FindAllStringSubmatch(line, -1) {
+		out = append(out, m[1])
 	}
 	return out
 }
 
 // concatSeparatorRe matches a `":"` literal used as a SEPARATOR in a string
-// concatenation: `, ":",` between two concat() arguments, or `+ ":" +`
-// between two operands.
-var concatSeparatorRe = regexp.MustCompile(`,\s*":"\s*,|\+\s*":"\s*\+`)
+// concatenation: `+ ":" +` between two operands.
+var concatSeparatorRe = regexp.MustCompile(`\+\s*":"\s*\+`)
 
-func TestConcatLiteralReadersReadBothEditions(t *testing.T) {
+func TestConcatLiteralReaders(t *testing.T) {
 	for _, tc := range []struct {
 		line string
 		want []string
 	}{
-		{`id: concat("ga-", hash(email))`, []string{"ga-"}},
 		{`id: "ga-" + hash(email)`, []string{"ga-"}},
 		{`id: args.id ?? ("node-" + hash(hash(args.nodeType) + hash(now)))`, []string{"node-"}},
-		{`ref: concat("v1:identity:user:", args.userId)`, []string{"v1:identity:user:"}},
 		{`ref: "v1:identity:user:" + args.userId`, []string{"v1:identity:user:"}},
 		// A literal on the right of `+` is a suffix, not a prefix.
 		{`label: args.name + " (copy)"`, nil},
@@ -69,7 +57,7 @@ func TestConcatLiteralReadersReadBothEditions(t *testing.T) {
 			}
 		}
 	}
-	for _, sep := range []string{`hash(concat(a, ":", b))`, `hash(a + ":" + b)`, `shortId(args.d) + ":" +`} {
+	for _, sep := range []string{`hash(a + ":" + b)`, `shortId(args.d) + ":" +`} {
 		if !concatSeparatorRe.MatchString(sep) {
 			t.Errorf("concatSeparatorRe does not match the separator in %q", sep)
 		}

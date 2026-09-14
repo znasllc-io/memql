@@ -127,8 +127,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
-	"github.com/znasllc-io/memql/component/language/dslclause"
 )
 
 // personScopedConcepts are the bound concepts whose rows identify a PERSON, so
@@ -155,12 +153,10 @@ var personScopedConcepts = map[string]bool{
 	"invitation":       true,
 }
 
-// callerArgIdSelection matches row SELECTION by the `id` intrinsic against a
-// caller-supplied arg, in either spelling. Rule 22 moved filter intrinsics to
-// the `row.` namespace, so both are accepted -- matching only the current
-// spelling is how the previous detector came to report a meaningless zero
-// (see the note on userScopeFieldRe).
-var callerArgIdSelection = regexp.MustCompile(`(?m)(?:^[ \t]*id:[ \t]*args\.|(?:\brow\.)?\bid[ \t]*==[ \t]*args\.)[A-Za-z_]`)
+// callerArgIdLine matches an update block's `id:` line taking a
+// caller-supplied arg -- the other half of a construct's row selection, beside
+// its filter (rowFieldComparedToArg).
+var callerArgIdLine = regexp.MustCompile(`(?m)^[ \t]*id:[ \t]*args\.[A-Za-z_]`)
 
 // callerArgSelectionExemptions records constructs that select a person-scoped
 // row by a caller-supplied id with no caller check, and are known-outstanding
@@ -304,7 +300,7 @@ var (
 	actorShapeDeclRe = regexp.MustCompile(`(?m)^@actor[ \t]*\r?\n(?:[ \t]*(?:@[^\n]*|//[^\n]*)\r?\n)*[ \t]*shape[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 	// specDeclRe matches a spec declaration: `spec <binding> <name> {`, or
 	// edition 2026's brace-less `spec <binding> <name> = row => ...` (epic
-	// memql#5363). Without the `=` arm every spec in a migrated tree is
+	// memql#5363). Without the `=` arm every spec in the tree is
 	// declared nowhere, and the gates that compute their vocabulary from the
 	// declarations -- this one, the admin-gate pair -- lose all of it at once.
 	specDeclRe = regexp.MustCompile(`(?m)^[ \t]*spec[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*[{=]`)
@@ -338,9 +334,9 @@ func actorBoundSpecNames(t *testing.T, c corpus) map[string]bool {
 }
 
 func TestCallerSuppliedRowSelectionOnPersonScopedConcepts(t *testing.T) {
-	bothCorpora(t, func(t *testing.T, c corpus) {
+	onTree(t, func(t *testing.T, c corpus) {
 		flagged, seen, scanned := callerArgFindings(t, c)
-		// Measured when the floor was set: 103 in each edition.
+		// Measured when the floor was set: 103.
 		if scanned < 80 {
 			t.Fatalf("scanned %d person-scoped constructs -- the detector is not measuring what its name says (the failure mode that made the previous user-scope detector report a meaningless zero); check constructHeaderRe and personScopedConcepts against the tree", scanned)
 		}
@@ -351,8 +347,7 @@ func TestCallerSuppliedRowSelectionOnPersonScopedConcepts(t *testing.T) {
 
 		// A stale exemption is worse than a missing one: it reports that a
 		// finding is tracked when the construct it names no longer exists, so
-		// the next author trusts a line that measures nothing. Asked of BOTH
-		// editions, so an entry the migrated corpus stops reaching fails too.
+		// the next author trusts a line that measures nothing.
 		for _, m := range []struct {
 			name    string
 			entries map[string]string
@@ -373,19 +368,18 @@ func TestCallerSuppliedRowSelectionOnPersonScopedConcepts(t *testing.T) {
 // the `id` intrinsic compared against a caller-supplied argument: its filter,
 // or an `update` block's `id:` line.
 //
-// An edition-2026 filter is read as a tree (rowFieldComparedToArg): a
-// comparison, in EITHER operand order, between the lambda parameter's `id` and
-// an `args.*` path, or a membership test of the parameter's `id` in one. The
-// legacy regex reads only `id==args.x` left to right, so `args.x == row.id`
-// was invisible to it; the v1 half does not inherit that.
+// The filter is read as a tree (rowFieldComparedToArg): a comparison, in
+// EITHER operand order, between the lambda parameter's `id` and an `args.*`
+// path, or a membership test of the parameter's `id` in one.
 func selectsByCallerSuppliedId(body string) bool {
-	surface := rowSelectionSurface(body)
 	clause := filterClauseOf(body)
-	if !dslclause.OpensLambda(clause) {
-		return callerArgIdSelection.MatchString(surface)
+	// The surface is the filter line, when there is one, and then the update
+	// block's `id:` lines.
+	ids := rowSelectionSurface(body)
+	if clause != "" {
+		_, ids, _ = strings.Cut(ids, "\n")
 	}
-	// The update block's `id:` lines are the rest of the surface.
-	if _, ids, ok := strings.Cut(surface, "\n"); ok && callerArgIdSelection.MatchString(ids) {
+	if callerArgIdLine.MatchString(ids) {
 		return true
 	}
 	return rowFieldComparedToArg(clause, "id", true)
