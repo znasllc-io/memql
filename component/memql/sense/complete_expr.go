@@ -197,16 +197,20 @@ func (s *Service) completeExpression(ctx CursorContext, source string, line, col
 		}
 	}
 
-	// 9. An automation's declared args resolve bare (G2, memql#2364).
-	if ctx.Enclosing.Keyword == "automation" {
+	// 9. A legacy automation's declared args resolve bare (G2, memql#2364). A
+	// body written in statements reads them `args.x` (epic memql#5370) and
+	// refuses the bare name, so it is not offered there.
+	if ctx.Enclosing.Keyword == "automation" && !inStatementBody(strings.Split(source, "\n"), line, ctx.Enclosing) {
 		items = append(items, automationArgsFieldCompletions(source, line, ctx.Prefix)...)
 	}
 	return items
 }
 
-// statementKeywords are the words that open a statement in a logic body. `nil`
-// is a literal (offered above) and `when` is retired, so neither is here.
-var statementKeywords = []string{"if", "else", "for", "range", "switch", "case", "default", "return", "continue", "break", "retry"}
+// statementKeywords are the words that open a statement in a logic body, or
+// trail one (edition 2026, epic memql#5370). `nil` is a literal (offered
+// above), `publish` is an automation's only (D14), and `range`, `when`,
+// `continue` and `break` are not statements.
+var statementKeywords = []string{"if", "else", "for", "switch", "case", "default", "parallel", "branch", "return", "retry", "wait", "on"}
 
 // atStatementStart reports whether the cursor line holds nothing before the
 // prefix being typed.

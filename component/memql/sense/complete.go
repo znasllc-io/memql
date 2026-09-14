@@ -39,6 +39,11 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 	case ContextReceiver:
 		items = s.completeReceiver(ctx.Prefix)
 	case ContextFuncBody:
+		// A body written in statements (epic memql#5370) has its own set.
+		if construct, ok := statementBody(source, line, ctx.Enclosing); ok {
+			items = s.completeStatementBody(ctx.Prefix, ctx.Enclosing, construct)
+			break
+		}
 		items = s.completeFuncBody(ctx.Prefix, ctx.Enclosing, source)
 		// G2 (memql#2364): inside an automation body that declares an
 		// `args { }` block, offer the declared field names -- they resolve
