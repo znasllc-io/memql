@@ -292,20 +292,22 @@ func TestDiagnose_RetiredFormCarriesItsRule(t *testing.T) {
 		rules[f.Rule] = true
 	}
 	svc := New(nil)
+	// The sources are legacy on purpose -- a retired form is the subject -- so
+	// each carries memqlmigrate:keep for the Go-fixture migration.
 	for _, tc := range []struct{ name, src, want string }{
-		{"query filter", "query thing things {\n  filter  status == args.status\n}\n", "retired_filter_without_lambda"},
-		{"trigger filter", "@trigger(event=\"node.updated\", concept=\"v1:x:thing\", partition=\"*\")\n@filter(payload.status == \"archived\")\n" +
-			"automation onArchived {\n  step s {\n    logic doIt ( event )\n  }\n}\n", "retired_filter_annotation"},
-		{"spec body", "spec thing isOpen {\n  return status == \"open\"\n}\n", "retired_spec_return_body"},
-		{"trait body", "trait isOpen {\n  return status == \"open\"\n}\n", "retired_trait_return_body"},
-		{"cond call", "logic doIt {\n  args {\n    x string\n  }\n  body {\n    return cond(args.x == \"a\", 1, 2)\n  }\n}\n", "retired_cond_call"},
-		{"null", "logic doIt {\n  args {\n    x string\n  }\n  body {\n    return args.x == null\n  }\n}\n", "retired_null"},
+		{"query filter", "query thing things {\n  filter  status == args.status\n}\n", "retired_filter_without_lambda"}, // memqlmigrate:keep
+		{"trigger filter", "@trigger(event=\"node.updated\", concept=\"v1:x:thing\", partition=\"*\")\n@filter(payload.status == \"archived\")\n" + // memqlmigrate:keep
+			"automation onArchived {\n  step s {\n    logic doIt ( event )\n  }\n}\n", "retired_filter_annotation"}, // memqlmigrate:keep
+		{"spec body", "spec thing isOpen {\n  return status == \"open\"\n}\n", "retired_spec_return_body"},                                          // memqlmigrate:keep
+		{"trait body", "trait isOpen {\n  return status == \"open\"\n}\n", "retired_trait_return_body"},                                             // memqlmigrate:keep
+		{"cond call", "logic doIt {\n  args {\n    x string\n  }\n  body {\n    return cond(args.x == \"a\", 1, 2)\n  }\n}\n", "retired_cond_call"}, // memqlmigrate:keep
+		{"null", "logic doIt {\n  args {\n    x string\n  }\n  body {\n    return args.x == null\n  }\n}\n", "retired_null"},                        // memqlmigrate:keep
 		// The legacy object literal's key-less entry is a retired form: its
 		// refusal writes the entry out, the fix the codemod makes.
-		{"key-less map entry", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a: 1, args.x.y }\n  }\n}\n", "retired_keyless_map_entry"},
+		{"key-less map entry", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a: 1, args.x.y }\n  }\n}\n", "retired_keyless_map_entry"}, // memqlmigrate:keep
 		// Not a retired form: the plain code stays. A dotted KEY is refused
 		// with "nest a map", which no rewrite performs.
-		{"dotted map key", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a.b: 1 }\n  }\n}\n", "parse-error"},
+		{"dotted map key", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a.b: 1 }\n  }\n}\n", "parse-error"}, // memqlmigrate:keep
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			errs := errorDiags(svc.Diagnose(tc.src, "test.memql"))
@@ -319,5 +321,33 @@ func TestDiagnose_RetiredFormCarriesItsRule(t *testing.T) {
 				t.Errorf("%s is not a rule of parser.V1RetiredForms", tc.want)
 			}
 		})
+	}
+}
+
+// TestRefusedAnnotationDiagnosticCoversTheAnnotation: a refused annotation's
+// diagnostic spans the annotation it refuses -- the `@` and its name, where
+// the parser put the error -- not a fixed ten columns from its start.
+func TestRefusedAnnotationDiagnosticCoversTheAnnotation(t *testing.T) {
+	s := New(&fakeRegistry{})
+	for _, tc := range []struct {
+		src        string
+		start, end Position
+	}{
+		{"@bogus\nquery thing probe {\n  filter row.id != \"\"\n}\n", Position{Line: 1, Column: 1}, Position{Line: 1, Column: 7}},
+		{"prompt probe {\n  x string @nope\n}\n", Position{Line: 2, Column: 12}, Position{Line: 2, Column: 17}},
+	} {
+		var found bool
+		for _, d := range s.Diagnose(tc.src, "probe.memql") {
+			if d.Code != "invalid-annotation" {
+				continue
+			}
+			found = true
+			if d.Range.Start != tc.start || d.Range.End != tc.end {
+				t.Errorf("%q: range %+v, want %+v..%+v", tc.src, d.Range, tc.start, tc.end)
+			}
+		}
+		if !found {
+			t.Errorf("%q: no invalid-annotation diagnostic", tc.src)
+		}
 	}
 }

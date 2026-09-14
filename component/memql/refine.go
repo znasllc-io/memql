@@ -101,9 +101,10 @@ func (s refineScope) Lookup(name string) (any, bool) {
 
 // applyRefine filters one SQL page through a refine lambda, in page order, and
 // counts what it kept and dropped (metrics.QueryRefineRows). A row the
-// predicate cannot decide -- a condition that is not boolean on this row's
-// data, an in-process error -- fails the read naming the row: dropping it
-// silently would make an error look like a short page.
+// predicate cannot decide -- a computed value that is not boolean, an
+// in-process error -- fails the read naming the row: dropping it silently
+// would make an error look like a short page. A stored value of the wrong
+// type is decided, as the pushdown decides it: it is not true.
 func (e *MemQLEngine) applyRefine(ctx context.Context, refine *RefineExpression, query string, nodes []memorynodes.MemoryNode) ([]memorynodes.MemoryNode, error) {
 	if refine == nil || refine.Lambda == nil || len(nodes) == 0 {
 		return nodes, nil

@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
   "name": "MemQL",
   "scopeName": "source.memql",
-  "comment": "Generated from dslspec by 'memql-lsp gen-grammar'. Do not edit by hand. GrammarVersion: 2026.09-dsl-v1-expressions-b80c0409",
+  "comment": "Generated from dslspec by 'memql-lsp gen-grammar'. Do not edit by hand. GrammarVersion: 2026.09-dsl-v1-expressions-4485b389",
   "patterns": [
     {
       "include": "#comments"
@@ -98,7 +98,7 @@
     },
     "control-keywords": {
       "name": "keyword.control.memql",
-      "match": "\\b(?:accept|args|auth|body|else|filter|for|if|in|insert|params|range|return|shape|stamp|startsWith|update|when)\\b"
+      "match": "\\b(?:accept|args|asOf|auth|body|count|else|filter|for|if|in|insert|paginate|params|precondition|range|refine|return|shape|sort|stamp|startsWith|step|update|when)\\b"
     },
     "function-calls": {
       "match": "\\b(addDuration|aliasOf|canonicalId|childOf|contains|createdBy|daysBetween|equals|error|hash|ids|lower|owns|parentOf|references|secret|shortId|systemSecret|systemVar|toString|trim|upper|var)\\s*(\\()",

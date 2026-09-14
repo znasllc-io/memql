@@ -167,7 +167,6 @@ func TestSigilAndEnumType_OtherFieldParsers(t *testing.T) {
 	bf, err := ParseFile(`builtin probeBuiltin {
   level enum("low", "high")!
   tag string!
-  @handler(type="function", name="x")
 }`)
 	if err != nil {
 		t.Fatalf("builtin parse: %v", err)

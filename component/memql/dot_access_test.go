@@ -209,7 +209,6 @@ func dotAccessLoadRegistry() memoryNodes.Registry {
 func TestLogicDotAccess_CallResultObjectRejectedAtLoad(t *testing.T) {
 	src := strings.Join([]string{
 		"@enabled",
-		"@useQuery(getUser)",
 		"@description(\"call-result field access must fail at load\")",
 		"logic logicCallResultPluck {",
 		"  args {",
@@ -270,7 +269,6 @@ func TestLogicDotAccessLoads(t *testing.T) {
 func TestLogicDotAccessLoads_MultiStep(t *testing.T) {
 	src := strings.Join([]string{
 		"@enabled",
-		"@useQuery(queryThing)",
 		"@description(\"pluck a field off a step result\")",
 		"logic logicPluckStepField {",
 		"  args {",

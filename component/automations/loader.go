@@ -227,15 +227,10 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 // longhand compiled against the one-line header the author wrote: a parse
 // error or a rewriter refusal is reported where authored has it (memql#5364).
 func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, error) {
-	// Close the annotation silent-tolerance gap (#2712): automations reach
-	// this dedicated loader instead of the function slicer's gate, so an
-	// unknown / dead / retired annotation would otherwise be silently
-	// dropped. Run the same allow-list + retired-name gate every function
-	// kind uses. The source is already terse-lowered here (unified_loader),
-	// and the helper re-lowers idempotently for any direct caller.
-	if err := memql.ValidateAutomationAnnotations(source); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
+	// An unknown / dead / retired annotation on an automation (#2712) is
+	// refused by the parser below, against the annotation registry, when
+	// parseResolveCompile parses the lowered source (memql#5359) -- the same
+	// gate every construct runs, so there is no second text scan here.
 
 	// The three raw-text gates below scan a COMMENT-BLANKED view, not the raw
 	// slice (memql#2872).
@@ -664,10 +659,9 @@ func resolveConceptByTrailingSegment(registry memoryNodes.Registry, name, nsHint
 // which case existence is not checked; every production construction site
 // passes the live registry.
 //
-// Three load-time refusals live here (memql#3614):
-//
-//   - Exactly one @trigger per automation. The parser folds attributes in
-//     order, so a second @trigger silently overwrote the first.
+// Two load-time refusals live here (memql#3614); the third, exactly one
+// @trigger per automation, is the annotation registry's repeat rule at parse
+// time (memql#5359):
 //
 //   - An unrecognised `event=` may not carry concept= / partition=. Those
 //     kwargs are meaningful ONLY to the structured node.* form: for any other
@@ -693,23 +687,6 @@ func normalizeStructuredTriggers(file *languageParser.File, registry memoryNodes
 			continue
 		}
 		autoBody, _ := fd.Body.(*languageParser.AutomationDef)
-
-		// One @trigger, and only one. The parser's attribute fold is
-		// last-write-wins per kwarg, so two triggers produced an automation
-		// wired to whichever one happened to come second -- with the first
-		// discarded and no signal at all.
-		triggers := 0
-		for _, attr := range fd.Attributes {
-			if attr.Name == languageParser.AttrTrigger {
-				triggers++
-			}
-		}
-		if triggers > 1 {
-			return fmt.Errorf("automation %q carries %d @trigger annotations -- exactly one is allowed. "+
-				"The parser folds them in order, so all but the last are silently discarded. "+
-				"Merge them into one @trigger, or split the automation",
-				fd.Name, triggers)
-		}
 
 		for _, attr := range fd.Attributes {
 			if attr.Name != languageParser.AttrTrigger {

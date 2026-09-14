@@ -5,10 +5,6 @@ builtin shopifyEnsureSubscriptions {
 }
 
 @sdk
-
-@sdk
-
-@sdk
 @executor("integration.shopify.runComplianceJobs")
 @description("Run the queued privacy jobs whose hold has elapsed: export a customer's data to the Library, scrub a redacted customer's PII across every version, purge a redacted shop's whole mirror. Every action is audited; shop/redact re-checks reachability first so a reverted uninstall does not cost the mirror.")
 builtin shopifyRunComplianceJobs {

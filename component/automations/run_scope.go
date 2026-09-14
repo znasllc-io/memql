@@ -395,7 +395,8 @@ func (e *Evaluator) EvalV1(ctx context.Context, n ast.ExpressionNode) (any, erro
 }
 
 // EvalV1Condition evaluates one parsed v1 condition over the run: a boolean,
-// with absent read as false and anything else refused (condition_not_boolean).
+// with absent read as false, a stored row field of another type not true, and
+// anything else refused (condition_not_boolean).
 func (e *Evaluator) EvalV1Condition(ctx context.Context, n ast.ExpressionNode) (bool, error) {
 	return memql.EvalCondition(ctx, n, e.RunScope(), e.ExprOptions())
 }

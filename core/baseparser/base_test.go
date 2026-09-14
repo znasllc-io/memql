@@ -316,55 +316,6 @@ func TestErrorf(t *testing.T) {
 	}
 }
 
-func TestValidateConstructAnnotations(t *testing.T) {
-	// Plain happy-path: only allow-listed annotations present.
-	src := `@enabled
-@description("x")
-spec activeRowTrait foo {
-  return x == 1
-}`
-	allowed := map[string]bool{"description": true, "enabled": true, "shape": true}
-	if err := ValidateConstructAnnotations(src, "spec", allowed); err != nil {
-		t.Fatalf("expected nil, got %v", err)
-	}
-
-	src2 := `@description("x")
-@bogus
-spec activeRowTrait foo { return true }`
-	err := ValidateConstructAnnotations(src2, "spec", allowed)
-	if err == nil {
-		t.Fatal("expected error for @bogus")
-	}
-	if !strings.Contains(err.Error(), "@bogus") {
-		t.Fatalf("err = %v, expected mention of @bogus", err)
-	}
-
-	// The @use* family is hard-rejected with a migration hint even
-	// when the construct's allow-list includes them. Verifies the
-	// PR C lockdown: file-top `use <module>.{ ... }` imports replace
-	// the per-construct annotations.
-	srcUse := `@description("x")
-@useShape(participantFull)
-spec activeRowTrait foo { return x == 1 }`
-	allowedWithUse := map[string]bool{"description": true, "useShape": true}
-	if err = ValidateConstructAnnotations(srcUse, "spec", allowedWithUse); err == nil {
-		t.Fatal("expected @useShape to be rejected post-lockdown")
-	}
-	if !strings.Contains(err.Error(), "@useShape") || !strings.Contains(err.Error(), "retired") {
-		t.Fatalf("err = %v, expected mention of @useShape + retired", err)
-	}
-
-	srcAuto := `@description("ok")
-@trigger(event="x")
-automation foo {
-  // body
-}`
-	allowedAuto := map[string]bool{"description": true, "trigger": true}
-	if err := ValidateConstructAnnotations(srcAuto, "automation", allowedAuto); err != nil {
-		t.Fatalf("expected nil, got %v", err)
-	}
-}
-
 func TestPosPlus(t *testing.T) {
 	b := newBase("abcd")
 	if got := b.PosPlus(2); got != 2 {

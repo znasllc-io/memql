@@ -102,10 +102,9 @@ func TestRetiredExprBuiltinsGoneFromCallableSet(t *testing.T) {
 }
 
 // TestRetiredInternalAnnotationOnDeclarativeKinds pins the #2708 pointed
-// hint on the parser's declarative-kind validator (builtin / shape / prompt
-// / ...), which routes through validateDeclAnnotations rather than the
-// baseparser gate -- both must emit the retirement message, not the generic
-// unknown-annotation error.
+// hint on the declarative kinds (builtin / shape / prompt / ...), whose
+// annotations the parser holds to the annotation registry (memql#5359) -- the
+// retirement message, not the generic unknown-annotation error.
 func TestRetiredInternalAnnotationOnDeclarativeKinds(t *testing.T) {
 	src := "@internal\n@executor(\"help\")\nbuiltin probeInternal {\n}\n"
 	_, err := ParseBuiltinDecl(src)
@@ -115,9 +114,8 @@ func TestRetiredInternalAnnotationOnDeclarativeKinds(t *testing.T) {
 }
 
 // TestRetiredRoleAnnotationOnDeclarativeKinds is the #2709 twin: the buried
-// @role must also carry the pointed message through the declarative-kind
-// validator, on both a builtin and a shape (the two dedicated-loader kinds
-// that route through validateDeclAnnotations).
+// @role must also carry the pointed message through the registry check, on
+// both a builtin and a shape (the two dedicated-loader kinds).
 func TestRetiredRoleAnnotationOnDeclarativeKinds(t *testing.T) {
 	if _, err := ParseBuiltinDecl("@role(\"admin\")\n@executor(\"help\")\nbuiltin probeRole {\n}\n"); err == nil || !strings.Contains(err.Error(), "#2709") {
 		t.Fatalf("@role on a builtin must carry the bury hint, got: %v", err)
