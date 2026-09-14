@@ -95,10 +95,11 @@ var ErrLanguageLineRefused = errors.New("the domain's language line is refused, 
 // skips them), one under a top-level `.`-prefixed directory (no mount mounts
 // one) -- and for anything that is not a .memql file.
 //
-// It also takes a loader origin, "<loader>:<path>:<name>" -- the form a
-// registered construct's Origin carries ("unified:shop/queries.memql:list")
-// -- and answers for the path inside it, which is how LanguageLines.For, and
-// so MemQLEngine.LanguageLineFor, is asked about a construct.
+// It also takes a loader origin -- "<kind>:<path>", which the functions
+// loader puts on every query, mutate and logic ("unified:shop/queries.memql"),
+// or "<kind>:<path>:<name>" ("unified:shop/queries.memql:list") -- and
+// answers for the path inside it, which is how LanguageLines.For, and so
+// MemQLEngine.LanguageLineFor, is asked about a construct.
 //
 // The resolver, LanguageLines.For and memqlmigrate --rewrite=language-line
 // all key on it, and the migrator skips a domain the embedded tree owns as
@@ -149,14 +150,17 @@ func LanguageLineRootIsDomain(paths []string) bool {
 	return false
 }
 
-// loaderOriginPath returns the tree path inside a loader origin,
-// "<loader>:<path>:<name>" with <path> a .memql file, and false for anything
-// else -- a plain tree path included, whatever its characters, so the rule
-// above reads a real path exactly as the walkers do.
+// loaderOriginPath returns the tree path inside a loader origin -- a
+// "<kind>:" prefix whose left side has no `/`, then a .memql path, then
+// optionally ":<name>" -- and false for anything else, so a plain tree path,
+// which has no such prefix, is read exactly as the walkers read it.
 func loaderOriginPath(s string) (string, bool) {
-	loader, rest, ok := strings.Cut(s, ":")
-	if !ok || loader == "" || strings.ContainsAny(loader, "/.") {
+	kind, rest, ok := strings.Cut(s, ":")
+	if !ok || kind == "" || strings.Contains(kind, "/") {
 		return "", false
+	}
+	if strings.HasSuffix(rest, ".memql") {
+		return rest, true
 	}
 	i := strings.LastIndexByte(rest, ':')
 	if i < 0 {

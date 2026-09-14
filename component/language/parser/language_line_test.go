@@ -216,12 +216,18 @@ func TestLanguageLineDomainOf(t *testing.T) {
 		"shop/_wip/queries.memql":   "",
 		".attic/concepts.memql":     "",
 		"shop/memql.toml":           "",
-		// A registered construct's origin names the file it came from.
+		// A registered construct's origin names the file it came from: the
+		// two-part form the functions loader puts on every query, mutate and
+		// logic, and the three-part form with the construct's name.
+		"unified:shop/queries.memql":             "shop",
+		"unified:beta/sub/concepts.memql":        "beta",
 		"unified:shop/queries.memql:listOrders":  "shop",
 		"unified:beta/sub/concepts.memql:widget": "beta",
+		"unified:concepts.memql":                 "",
 		"unified:concepts.memql:order":           "",
 		"unified:_parked/concepts.memql:order":   "",
 		"unified:shop/prompts/reply.tmpl:reply":  "",
+		"unified:shop/prompts/reply.tmpl":        "",
 	} {
 		if got := LanguageLineDomainOf(path); got != want {
 			t.Errorf("LanguageLineDomainOf(%q) = %q, want %q", path, got, want)
@@ -341,7 +347,10 @@ func TestLanguageLinesForFindsTheDomainOfAPath(t *testing.T) {
 	lines := LanguageLines{
 		"good": {Domain: "good", Source: "good/memql.toml", Language: "1.0", Edition: "2026"},
 	}
-	for _, p := range []string{"good/queries.memql", "good/sub/concepts.memql", "unified:good/queries.memql:fooQuery"} {
+	// The two-part origin is what the functions loader stamps on every query,
+	// mutate and logic ("unified:" + the file's path), so a hook asked about
+	// one of those must find its line.
+	for _, p := range []string{"good/queries.memql", "good/sub/concepts.memql", "unified:good/queries.memql", "unified:good/queries.memql:fooQuery"} {
 		line, ok := lines.For(p)
 		if !ok || line.Domain != "good" {
 			t.Errorf("For(%q) = %+v, %v; want the line of good", p, line, ok)
