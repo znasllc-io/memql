@@ -1,0 +1,2069 @@
+{
+  "construct": "worker/logic.memql workerInvocationRetentionSweep",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 2 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 2 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 2 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 2 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 2 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 2 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 2 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 2 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "bff"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 3 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 3 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 3 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 3 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 3 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 3 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "schema args 3 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 3 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "event": {
+            "kind": "node.created",
+            "payload": {
+              "agentId": "agent-1",
+              "createdBySubject": "subject-0",
+              "id": "v1:probe:thing:1",
+              "identityId": "identity-1",
+              "identitySubject": "subject-1",
+              "identityType": "passkey",
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "node": {
+                "id": "v1:cluster:node:n1",
+                "type": "agent"
+              },
+              "partitionId": "space-1",
+              "recordType": "contact",
+              "roleCeiling": "user",
+              "scopes": [
+                "read"
+              ],
+              "status": "succeeded"
+            },
+            "topic": "graph.node.created.v1:probe:thing"
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          },
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:expiredWorkerInvocations-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "expiredWorkerInvocations-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

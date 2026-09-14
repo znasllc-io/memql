@@ -1,34 +1,41 @@
 package steps
 
-// logic_v1_corpus_test.go -- the logic-body equivalence corpus (memql#5367).
+// logic_v1_corpus_test.go -- the logic-body corpus (memql#5367).
 //
-// Every logic construct of the tree is run twice against the same fixture
-// inputs: as the tree writes it today, and as `memqlmigrate
-// --rewrite=expressions` migrates it, built with the edition-2026 grammar.
-// Every construct call either run makes is answered by one probe, which
-// records it. The two runs must return the same result and make the same
-// calls, in the same order. This is the run-time half of the migration's
-// no-change claim for logic bodies; the load-time half is component/memql's
-// TestV1CorpusLogicBodiesBuild.
+// Every logic construct of the tree is run against the same fixture inputs --
+// argument variants, four actors, two row counts -- with every construct call
+// answered by one probe, which records it. Each ARM runs the tree its own way,
+// and every arm must return the same result and make the same calls, in the
+// same order, as every other arm and as the GOLDENS: the agreed runs, one JSON
+// file per construct under testdata/logic_corpus/<domain>/<name>.json.
+//
+// # Before and after the flip
+//
+// Before the tree is migrated to edition 2026, two arms run: the legacy build
+// of the tree as it is, and the v1 build of the tree as `memqlmigrate
+// --rewrite=expressions` migrates it (the codemod's own entry points, run in
+// process). Their agreement is what the goldens were written from, with
+// `go test -run TestLogicCorpusRuns -update`: the migration's no-change claim
+// for logic bodies, at run time (the load-time half is component/memql's
+// TestV1CorpusLogicBodiesBuild).
+//
+// After the flip the tree IS edition 2026 -- the flip migrates it and turns
+// on langparser.DefaultOptions.ExpressionsV1 in one change -- so the v1 arm
+// reads the tree's own files, with no codemod step (logicCorpusSources keys on
+// DefaultOptions), and the legacy arm, which has no legacy source left to
+// read, is deleted by deleting its line in TestLogicCorpusRuns. The v1 arm
+// against the goldens is then the whole test.
 //
 // # Arms
 //
-// An arm is one way of running a logic construct: the file source it reads
-// (the tree as it is, or as a rewrite migrates it) and a runner. A run is a
-// function from (source, fixture arguments, probe) to a result; the calls it
-// made are the probe's record. Today there are two arms, both through the
-// engine's own logic dispatch -- engine.Execute of the construct's call, with
-// the LogicRunner wired, so the engine decides between fn.Expr and
-// fn.LogicSteps exactly as it does in production -- one over the legacy
-// build and one over the v1 build.
-//
-// A runner that replaces today's adds its arm to the arms
-// TestV1CorpusLogicBodiesRunTheLegacyRuns builds, over the same fixtures,
-// before the legacy arm is deleted: a logicArm is a name, the file source it
-// reads (a later rewrite's output is a third field of corpusSource) and a run
-// function. Nothing here is specific to today's runners but the two arms
-// themselves: the fixtures, the probe, the answers and the comparison are
-// shared, and a construct call's answer is given in the statement's own
+// An arm is a name, the source it reads, and a run: a function from (source,
+// fixture arguments, probe) to a result; the calls it made are the probe's
+// record. Today's two go through the engine's own logic dispatch --
+// engine.Execute of the construct's call, with the LogicRunner wired, so the
+// engine decides between fn.Expr and fn.LogicSteps as it does in production.
+// A runner that replaces them adds its arm to the list in TestLogicCorpusRuns
+// and is held to the same goldens. Nothing but the two arms is specific to
+// today's runners: a construct call's answer is given in the statement's own
 // terms -- a query answers its rows (a []any of row maps), a builtin its
 // result, a logic its return value, a mutation the row it wrote -- which each
 // arm adapts to its runner (probeRegistry and probeFakes do it for today's).
@@ -36,24 +43,29 @@ package steps
 // them. Journal writes are not calls: only construct calls and published
 // events are recorded.
 //
-// The legacy arm is the reference, and in a handful of constructs it does not
-// do what the body says (logicLegacyDefects: each checked, each mended only
-// in the part that is defective), so every other arm is held to what the body
-// says there.
+// In ten constructs the legacy build does not do what the body says
+// (logicLegacyDefects: each checked, each mended only in the part that is
+// defective). The goldens hold what the body says, and name the defect where
+// the legacy build differs.
 //
 // Two things the comparison does not pin, because a later runner may answer
 // them differently without changing what a logic does: the envelope a result
 // comes back in (canonicalResult reads an engine result as its flat output or
 // its rows, so `return query x()` compares as the rows) and the text of an
-// error (two refusals compare equal).
+// error (two refusals compare equal). Instants are masked: two runs a moment
+// apart disagree on the clock.
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -168,11 +180,14 @@ func probeRowPayload(now time.Time, name string, i int, args map[string]any) map
 // fixtures
 // ---------------------------------------------------------------------------
 
-// corpusSource is one .memql file of the tree, as it is and as the
-// expressions codemod migrates it.
+// corpusSource is one .memql file of the tree: as it is, and in edition 2026.
 type corpusSource struct {
-	Path             string
-	Legacy, Migrated string
+	Path string
+	// Current is the file as the tree has it.
+	Current string
+	// V1 is the file in edition 2026: Current once the tree is migrated,
+	// and the expressions codemod's rewrite of it before.
+	V1 string
 }
 
 // logicFixture is one run: a logic construct, the arguments it is called
@@ -187,24 +202,34 @@ type logicFixture struct {
 	Label string // the argument variant, for messages
 }
 
-// logicCorpusSources reads the tree the engine loads, and migrates it with
-// memqlmigrate --rewrite=expressions' own entry points (CollectPredicates
-// over every file, then RewriteExpressions per file).
+// logicCorpusSources reads the tree the engine loads. The tree is written in
+// the grammar the engine parses it with by default -- the flip migrates the
+// tree and turns on langparser.DefaultOptions.ExpressionsV1 in one change --
+// so once that is edition 2026 the files are their own v1 source; before, the
+// v1 source is memqlmigrate --rewrite=expressions' output, from its own entry
+// points (CollectPredicates over every file, then RewriteExpressions per
+// file).
 func logicCorpusSources(t *testing.T) []*corpusSource {
 	t.Helper()
 	files := baseloader.ReadAll(nil)
 	require.NotEmpty(t, files, "the tree reads no .memql file")
+	out := make([]*corpusSource, 0, len(files))
+	if languageParser.DefaultOptions.ExpressionsV1 {
+		for _, f := range files {
+			out = append(out, &corpusSource{Path: f.Path, Current: f.Content, V1: f.Content})
+		}
+		return out
+	}
 	byPath := make(map[string][]byte, len(files))
 	for _, f := range files {
 		byPath[f.Path] = []byte(f.Content)
 	}
 	preds, err := languageParser.CollectPredicates(byPath)
 	require.NoError(t, err)
-	out := make([]*corpusSource, 0, len(files))
 	for _, f := range files {
 		migrated, err := languageParser.RewriteExpressions([]byte(f.Content), preds)
 		require.NoErrorf(t, err, "the codemod refuses %s", f.Path)
-		out = append(out, &corpusSource{Path: f.Path, Legacy: f.Content, Migrated: string(migrated)})
+		out = append(out, &corpusSource{Path: f.Path, Current: f.Content, V1: string(migrated)})
 	}
 	return out
 }
@@ -324,7 +349,10 @@ func logicFieldValue(f *memql.FunctionArgsField) any {
 // logicArm is one way of running a logic construct. run is called once per
 // fixture with the source the arm reads; the probe is that fixture's.
 type logicArm struct {
-	name   string
+	name string
+	// legacy marks the arm that runs the legacy grammar, whose defects
+	// (logicLegacyDefects) are mended before it is compared.
+	legacy bool
 	source func(*corpusSource) string
 	run    func(ctx context.Context, src, path, name string, args map[string]any, probe *logicProbe) (any, error)
 }
@@ -356,9 +384,9 @@ func todayArm(t *testing.T, name string, v1 bool, sources []*corpusSource) logic
 		}
 	}
 
-	pick := func(f *corpusSource) string { return f.Legacy }
+	pick := func(f *corpusSource) string { return f.Current }
 	if v1 {
-		pick = func(f *corpusSource) string { return f.Migrated }
+		pick = func(f *corpusSource) string { return f.V1 }
 	}
 
 	// build builds one logic construct from a file's source in the arm's
@@ -395,7 +423,7 @@ func todayArm(t *testing.T, name string, v1 bool, sources []*corpusSource) logic
 	built := map[string]*memql.Function{}
 	var failures []string
 	for _, f := range sources {
-		for _, slice := range memql.ExtractFunctionSlices(f.Legacy) {
+		for _, slice := range memql.ExtractFunctionSlices(f.Current) {
 			if slice.Kind != languageParser.FunctionTypeLogic {
 				continue
 			}
@@ -416,6 +444,7 @@ func todayArm(t *testing.T, name string, v1 bool, sources []*corpusSource) logic
 
 	return logicArm{
 		name:   name,
+		legacy: !v1,
 		source: pick,
 		run: func(ctx context.Context, src, path, logic string, args map[string]any, probe *logicProbe) (any, error) {
 			fn, err := build(src, path, logic)
@@ -805,10 +834,31 @@ func newLogicRecord(result any, err error, calls []probeCall) logicRecord {
 	return rec
 }
 
-// String is the record as the comparison reads it, instants masked.
-func (r logicRecord) String() string {
+// logicInstantMask is what an instant reads as in a compared record and in
+// a golden.
+const logicInstantMask = "<ts>"
+
+// outcome is the record as the comparison reads it and a golden stores it:
+// its JSON value, instants masked, every map's keys sorted.
+func (r logicRecord) outcome() any {
 	raw, _ := json.Marshal(r)
-	return logicTimestamp.ReplaceAllString(string(raw), "<ts>")
+	var out any
+	_ = json.Unmarshal([]byte(logicTimestamp.ReplaceAllString(string(raw), logicInstantMask)), &out)
+	return out
+}
+
+// String is outcome as comparable text.
+func (r logicRecord) String() string {
+	raw, _ := json.Marshal(r.outcome())
+	return string(raw)
+}
+
+// recordOf reads a golden outcome back as a record, for a mend to edit.
+func recordOf(outcome any) logicRecord {
+	raw, _ := json.Marshal(outcome)
+	var out logicRecord
+	_ = json.Unmarshal(raw, &out)
+	return out
 }
 
 // clone is a deep copy, for a mend to edit.
@@ -1029,9 +1079,11 @@ func governanceDefect(builtin string, actorFields []string, targetSlugArg string
 	}
 }
 
+// isInstant reports whether v is an instant -- or the mask a golden stores
+// one as.
 func isInstant(v any) bool {
 	s, ok := v.(string)
-	return ok && logicTimestamp.MatchString(s) && logicTimestamp.FindString(s) == s
+	return ok && (s == logicInstantMask || (logicTimestamp.MatchString(s) && logicTimestamp.FindString(s) == s))
 }
 
 func eventCall(rec *logicRecord, topic string) *probeCall {
@@ -1112,67 +1164,290 @@ func mendResultPath(legacy, other *logicRecord, path []string, want func(any) bo
 }
 
 // ---------------------------------------------------------------------------
+// goldens
+// ---------------------------------------------------------------------------
+
+// updateLogicGoldens rewrites the goldens from the runs, once every arm
+// agrees with every other.
+var updateLogicGoldens = flag.Bool("update", false, "rewrite "+logicGoldenDir+" from TestLogicCorpusRuns' runs; every arm must agree")
+
+// logicGoldenDir holds one golden file per logic construct,
+// <domain>/<name>.json: its construct, and its runs by run key, each with
+// the run's input, its outcome as the comparison reads it (logicRecord.outcome)
+// and, where the legacy build does not do what the body says, the defect.
+const logicGoldenDir = "testdata/logic_corpus"
+
+// goldenFileFor is the golden file of a fixture's construct.
+func goldenFileFor(fx logicFixture) string {
+	domain, _, _ := strings.Cut(fx.File.Path, "/")
+	return filepath.Join(logicGoldenDir, domain, fx.Name+".json")
+}
+
+// goldenRunKey names one run within its construct's golden file.
+func goldenRunKey(fx logicFixture) string {
+	return fmt.Sprintf("%s | actor %s | %d rows", fx.Label, fx.Role, fx.Rows)
+}
+
+// goldenInput is what a run is called with, as a golden stores it.
+func goldenInput(fx logicFixture) any {
+	return jsonValue(map[string]any{"args": fx.Args, "actor": fx.Role, "rows": fx.Rows})
+}
+
+// jsonValue is v's JSON value; jsonText is its text, every map's keys sorted.
+func jsonValue(v any) any {
+	raw, _ := json.Marshal(v)
+	var out any
+	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
+func jsonText(v any) string {
+	raw, _ := json.Marshal(v)
+	return string(raw)
+}
+
+// logicGoldenRuns is the golden set: file -> run key -> run.
+type logicGoldenRuns map[string]map[string]map[string]any
+
+// readLogicGoldens reads every golden file. The layout is fixed --
+// <domain>/<name>.json -- so it is read a directory at a time.
+func readLogicGoldens() (logicGoldenRuns, error) {
+	out := logicGoldenRuns{}
+	domains, err := os.ReadDir(logicGoldenDir)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range domains {
+		if !d.IsDir() {
+			continue
+		}
+		files, err := os.ReadDir(filepath.Join(logicGoldenDir, d.Name()))
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range files {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") {
+				continue
+			}
+			path := filepath.Join(logicGoldenDir, d.Name(), f.Name())
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				return nil, err
+			}
+			var file struct {
+				Runs map[string]map[string]any `json:"runs"`
+			}
+			if err := json.Unmarshal(raw, &file); err != nil {
+				return nil, fmt.Errorf("%s: %w", path, err)
+			}
+			out[path] = file.Runs
+		}
+	}
+	return out, nil
+}
+
+// goldenFile is one construct's golden file as -update writes it.
+type goldenFile struct {
+	construct string
+	runs      map[string]any
+}
+
+// writeLogicGoldens replaces the golden set with files: indented, keys
+// sorted, `<` and `>` as themselves, so a change reads as a line diff.
+func writeLogicGoldens(files map[string]*goldenFile) error {
+	if err := os.RemoveAll(logicGoldenDir); err != nil {
+		return err
+	}
+	for path, gf := range files {
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetEscapeHTML(false)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(map[string]any{"construct": gf.construct, "runs": gf.runs}); err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // the gate
 // ---------------------------------------------------------------------------
 
-// TestV1CorpusLogicBodiesRunTheLegacyRuns: every logic construct of the tree,
-// migrated by the codemod and built with the edition-2026 grammar, returns
-// what its legacy build returns and makes the same construct calls, in the
-// same order, for every fixture -- argument variants, actors and row counts --
-// except where the legacy build does not do what the body says
-// (logicLegacyDefects), and there it does what the body says.
-func TestV1CorpusLogicBodiesRunTheLegacyRuns(t *testing.T) {
+// compareRuns compares two runs of one fixture. When exactly one of them is
+// the legacy arm's and the construct has a legacy defect that applies, the
+// defect is checked and mended first (mended reports it).
+func compareRuns(fx logicFixture, aLegacy bool, a logicRecord, bLegacy bool, b logicRecord) (mended bool, err error) {
+	a, b = a.clone(), b.clone()
+	if d, ok := logicLegacyDefects[fx.Name]; ok && aLegacy != bLegacy && d.applies(fx) {
+		legacy, other := &a, &b
+		if bLegacy {
+			legacy, other = &b, &a
+		}
+		if err := d.mend(fx, legacy, other); err != nil {
+			return false, fmt.Errorf("the legacy defect (%s) does not hold: %w", d.why, err)
+		}
+		mended = true
+	}
+	if a.String() != b.String() {
+		return mended, fmt.Errorf("they differ")
+	}
+	return mended, nil
+}
+
+// TestLogicCorpusRuns: every logic construct of the tree, run by every arm
+// against every fixture, returns what its golden holds and makes the calls
+// the golden holds, in their order -- and every arm agrees with every other,
+// the legacy arm where it does not do what the body says excepted
+// (logicLegacyDefects). With -update it writes the goldens from the runs
+// instead, once they agree.
+func TestLogicCorpusRuns(t *testing.T) {
 	sources := logicCorpusSources(t)
-	// The reference arm first; every other arm is compared with it.
+	// The first arm is the one the others are compared with. The flip deletes
+	// the legacy arm's line: the tree then has no legacy source, and the v1
+	// arm against the goldens is the whole test.
 	arms := []logicArm{
 		todayArm(t, "legacy", false, sources),
 		todayArm(t, "v1", true, sources),
 	}
-	reference := arms[0]
+	legacyRuns := false
+	golden := -1 // the arm an -update writes the goldens from
+	for i, arm := range arms {
+		legacyRuns = legacyRuns || arm.legacy
+		if golden < 0 && !arm.legacy {
+			golden = i
+		}
+	}
 
 	fixtures := logicFixtures(t, sources)
 	require.Greater(t, len(fixtures), 300, "dozens of logic constructs times their variants; a small count means the fixtures went blind")
 
+	update := *updateLogicGoldens
+	goldens, readErr := readLogicGoldens()
+	switch {
+	case update:
+		require.GreaterOrEqualf(t, golden, 0, "-update writes what the bodies say, which no legacy arm is: add an arm that is not legacy")
+	default:
+		require.NoErrorf(t, readErr, "the logic corpus has no goldens to compare with in %s -- write them with `go test -run TestLogicCorpusRuns -update`", logicGoldenDir)
+	}
+
 	now := time.Now().UTC()
-	compared, refusedAlike, logics := 0, 0, map[string]bool{}
+	written := map[string]*goldenFile{}
+	taken := map[string]bool{}
 	mended := map[string]int{}
+	constructs := map[string]bool{}
+	matched, refused := 0, 0
 	var diffs []string
 	for _, fx := range fixtures {
 		ctx := auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "user-corpus", Role: auth.Role(fx.Role)}))
-		run := func(arm logicArm) logicRecord {
+		records := make([]logicRecord, len(arms))
+		for i, arm := range arms {
 			probe := &logicProbe{rows: fx.Rows, now: now}
 			res, err := arm.run(ctx, arm.source(fx.File), fx.File.Path, fx.Name, fx.Args, probe)
-			return newLogicRecord(res, err, probe.calls)
+			records[i] = newLogicRecord(res, err, probe.calls)
 		}
-		ref := run(reference)
-		for _, arm := range arms[1:] {
-			want, got := ref.clone(), run(arm)
-			where := fmt.Sprintf("%s [%s, actor %s, %d rows]", fx.Key, fx.Label, fx.Role, fx.Rows)
-			if d, ok := logicLegacyDefects[fx.Name]; ok && d.applies(fx) {
-				if err := d.mend(fx, &want, &got); err != nil {
-					diffs = append(diffs, fmt.Sprintf("%s\n    legacy defect (%s) does not hold: %v\n    %s: %s\n    %s: %s",
-						where, d.why, err, reference.name, ref, arm.name, got))
-					continue
-				}
+		file, key := goldenFileFor(fx), goldenRunKey(fx)
+		where := fmt.Sprintf("%s [%s]", fx.Key, key)
+		constructs[fx.Key] = true
+
+		agreed := true
+		for i := 1; i < len(arms); i++ {
+			m, err := compareRuns(fx, arms[0].legacy, records[0], arms[i].legacy, records[i])
+			if m {
 				mended[fx.Name]++
 			}
-			if want.String() != got.String() {
-				diffs = append(diffs, fmt.Sprintf("%s\n    %s: %s\n    %s: %s", where, reference.name, want, arm.name, got))
+			if err != nil {
+				agreed = false
+				diffs = append(diffs, fmt.Sprintf("%s: the %s and %s arms: %v\n    %s: %s\n    %s: %s",
+					where, arms[0].name, arms[i].name, err, arms[0].name, records[0], arms[i].name, records[i]))
+			}
+		}
+
+		if update {
+			if !agreed {
 				continue
 			}
-			if want.Refused {
-				refusedAlike++
+			entry := map[string]any{"input": goldenInput(fx), "outcome": records[golden].outcome()}
+			if d, ok := logicLegacyDefects[fx.Name]; ok && d.applies(fx) && legacyRuns {
+				entry["legacyDefect"] = d.why
+			} else if prev, ok := goldens[file][key]; ok && !legacyRuns && jsonText(prev["outcome"]) == records[golden].String() && prev["legacyDefect"] != nil {
+				// No legacy arm left to show the defect: an unchanged run keeps
+				// the note an earlier -update wrote.
+				entry["legacyDefect"] = prev["legacyDefect"]
 			}
-			compared++
-			logics[fx.Key] = true
+			gf := written[file]
+			if gf == nil {
+				gf = &goldenFile{construct: fx.Key, runs: map[string]any{}}
+				written[file] = gf
+			}
+			if _, dup := gf.runs[key]; dup {
+				diffs = append(diffs, where+": two fixtures share one golden run key")
+			}
+			gf.runs[key] = entry
+			if records[golden].Refused {
+				refused++
+			}
+			continue
+		}
+
+		entry, ok := goldens[file][key]
+		if !ok {
+			diffs = append(diffs, where+": no golden run -- if the fixtures changed on purpose, rewrite the goldens with -update")
+			continue
+		}
+		taken[file+"\x00"+key] = true
+		if got, want := jsonText(goldenInput(fx)), jsonText(entry["input"]); got != want {
+			diffs = append(diffs, fmt.Sprintf("%s: the fixture is not the golden's input\n    golden:  %s\n    fixture: %s", where, want, got))
+			continue
+		}
+		want := recordOf(entry["outcome"])
+		if want.Refused {
+			refused++
+		}
+		for i, arm := range arms {
+			m, err := compareRuns(fx, arm.legacy, records[i], false, want)
+			if m {
+				mended[fx.Name]++
+			}
+			if err != nil {
+				diffs = append(diffs, fmt.Sprintf("%s: the %s arm and the golden: %v\n    golden: %s\n    %s: %s",
+					where, arm.name, err, want, arm.name, records[i]))
+				continue
+			}
+			matched++
 		}
 	}
-	require.Emptyf(t, diffs, "%d runs differ:\n%s", len(diffs), strings.Join(diffs, "\n"))
-	for name, d := range logicLegacyDefects {
-		require.Positivef(t, mended[name], "the legacy defect of %s (%s) applies to no run: the entry is stale", name, d.why)
+
+	if !update {
+		for file, runs := range goldens {
+			for key := range runs {
+				if !taken[file+"\x00"+key] {
+					diffs = append(diffs, fmt.Sprintf("%s [%s]: a golden run no fixture makes -- if the fixtures changed on purpose, rewrite the goldens with -update", file, key))
+				}
+			}
+		}
 	}
-	require.Less(t, refusedAlike, compared/2, "most runs must return a result; a majority of refusals means the fixtures do not reach the bodies")
-	t.Logf("%d runs identical over %d logic constructs (%d refused alike, %d with a legacy defect mended)", compared, len(logics), refusedAlike, sumInts(mended))
+	sort.Strings(diffs)
+	require.Emptyf(t, diffs, "%d runs differ:\n%s", len(diffs), strings.Join(diffs, "\n"))
+	if legacyRuns {
+		for name, d := range logicLegacyDefects {
+			require.Positivef(t, mended[name], "the legacy defect of %s (%s) applies to no run: the entry is stale", name, d.why)
+		}
+	}
+	require.Less(t, refused, len(fixtures)/2, "most runs must return a result; a majority of refusals means the fixtures do not reach the bodies")
+
+	if update {
+		require.NoError(t, writeLogicGoldens(written))
+		t.Logf("wrote %d golden runs over %d logic constructs to %s (%d refused, %d legacy-defect mends)", len(fixtures), len(written), logicGoldenDir, refused, sumInts(mended))
+		return
+	}
+	t.Logf("%d arm runs match the goldens over %d logic constructs and %d fixtures (%d refused, %d legacy-defect mends)", matched, len(constructs), len(fixtures), refused, sumInts(mended))
 }
 
 func sumInts(m map[string]int) int {
@@ -1189,11 +1464,13 @@ func logicFixtures(t *testing.T, sources []*corpusSource) []logicFixture {
 	t.Helper()
 	var out []logicFixture
 	for _, f := range sources {
-		for _, slice := range memql.ExtractFunctionSlices(f.Legacy) {
+		for _, slice := range memql.ExtractFunctionSlices(f.Current) {
 			if slice.Kind != languageParser.FunctionTypeLogic {
 				continue
 			}
-			fn, err := memql.BuildFunctionConstruct(f.Legacy, slice.Name, "unified:"+f.Path, memorynodes.DefaultRegistry())
+			// The tree's own build, in the grammar the tree is written in:
+			// only its args block is read, which both grammars read alike.
+			fn, err := memql.BuildFunctionConstruct(f.Current, slice.Name, "unified:"+f.Path, memorynodes.DefaultRegistry())
 			require.NoError(t, err)
 			variants := logicSchemaArgs(fn)
 			labels := make([]string, len(variants))

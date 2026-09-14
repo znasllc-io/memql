@@ -1,0 +1,557 @@
+{
+  "construct": "deployment/logic.memql deployGateGreen",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "gate": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "gate": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "gate": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "gate": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "gate": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "gate": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "gate": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "gate": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "gate": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "gate": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "gate": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "gate": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "gate": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "gate": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "gate": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "gate": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "gate": {
+            "passed": true
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": true
+      }
+    },
+    "variant 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "gate": {
+            "passed": true
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": true
+      }
+    },
+    "variant 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "gate": {
+            "passed": true
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": true
+      }
+    },
+    "variant 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "gate": {
+            "passed": true
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": true
+      }
+    },
+    "variant 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "gate": {
+            "passed": true
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": true
+      }
+    },
+    "variant 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "gate": {
+            "passed": true
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": true
+      }
+    },
+    "variant 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "gate": {
+            "passed": true
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": true
+      }
+    },
+    "variant 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "gate": {
+            "passed": true
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": true
+      }
+    },
+    "variant 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "gate": {
+            "passed": false
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "gate": {
+            "passed": false
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "gate": {
+            "passed": false
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "gate": {
+            "passed": false
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "gate": {
+            "passed": false
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "gate": {
+            "passed": false
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "gate": {
+            "passed": false
+          }
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "gate": {
+            "passed": false
+          }
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 2 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "gate": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 2 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "gate": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 2 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "gate": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 2 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "gate": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 2 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "gate": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 2 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "gate": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 2 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "gate": {}
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    },
+    "variant 2 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "gate": {}
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": false
+      }
+    }
+  }
+}

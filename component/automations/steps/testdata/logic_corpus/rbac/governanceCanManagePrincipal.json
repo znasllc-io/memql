@@ -1,0 +1,1701 @@
+{
+  "construct": "rbac/logic.memql governanceCanManagePrincipal",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 200,
+              "actorUserId": "user-corpus",
+              "targetRank": 100,
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 200,
+            "actorUserId": "user-corpus",
+            "targetRank": 100,
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 300,
+              "actorUserId": "user-corpus",
+              "targetRank": 100,
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 300,
+            "actorUserId": "user-corpus",
+            "targetRank": 100,
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true,
+              "actorRank": 400,
+              "actorUserId": "user-corpus",
+              "targetRank": 100,
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true,
+            "actorRank": 400,
+            "actorUserId": "user-corpus",
+            "targetRank": 100,
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 100,
+              "actorUserId": "user-corpus",
+              "targetRank": 100,
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 100,
+            "actorUserId": "user-corpus",
+            "targetRank": 100,
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 200,
+              "actorUserId": "user-corpus",
+              "targetRank": 100,
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 200,
+            "actorUserId": "user-corpus",
+            "targetRank": 100,
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 300,
+              "actorUserId": "user-corpus",
+              "targetRank": 100,
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 300,
+            "actorUserId": "user-corpus",
+            "targetRank": 100,
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true,
+              "actorRank": 400,
+              "actorUserId": "user-corpus",
+              "targetRank": 100,
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true,
+            "actorRank": 400,
+            "actorUserId": "user-corpus",
+            "targetRank": 100,
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "targetRoleSlug": "s-targetRoleSlug",
+          "targetUserId": "s-targetUserId",
+          "verb": "s-verb"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "s-targetRoleSlug"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 100,
+              "actorUserId": "user-corpus",
+              "targetRank": 100,
+              "targetRoleSlug": "s-targetRoleSlug",
+              "targetUserId": "s-targetUserId",
+              "verb": "s-verb"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 100,
+            "actorUserId": "user-corpus",
+            "targetRank": 100,
+            "targetRoleSlug": "s-targetRoleSlug",
+            "targetUserId": "s-targetUserId",
+            "verb": "s-verb"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "targetRoleSlug": "user",
+          "targetUserId": "user-2",
+          "verb": "update"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "user",
+              "targetUserId": "user-2",
+              "verb": "update"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "user",
+            "targetUserId": "user-2",
+            "verb": "update"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "targetRoleSlug": "user",
+          "targetUserId": "user-2",
+          "verb": "update"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 200,
+              "actorUserId": "user-corpus",
+              "targetRank": 100,
+              "targetRoleSlug": "user",
+              "targetUserId": "user-2",
+              "verb": "update"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 200,
+            "actorUserId": "user-corpus",
+            "targetRank": 100,
+            "targetRoleSlug": "user",
+            "targetUserId": "user-2",
+            "verb": "update"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "targetRoleSlug": "user",
+          "targetUserId": "user-2",
+          "verb": "update"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "user",
+              "targetUserId": "user-2",
+              "verb": "update"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "user",
+            "targetUserId": "user-2",
+            "verb": "update"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "targetRoleSlug": "user",
+          "targetUserId": "user-2",
+          "verb": "update"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 300,
+              "actorUserId": "user-corpus",
+              "targetRank": 100,
+              "targetRoleSlug": "user",
+              "targetUserId": "user-2",
+              "verb": "update"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 300,
+            "actorUserId": "user-corpus",
+            "targetRank": 100,
+            "targetRoleSlug": "user",
+            "targetUserId": "user-2",
+            "verb": "update"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "targetRoleSlug": "user",
+          "targetUserId": "user-2",
+          "verb": "update"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "user",
+              "targetUserId": "user-2",
+              "verb": "update"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "user",
+            "targetUserId": "user-2",
+            "verb": "update"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "targetRoleSlug": "user",
+          "targetUserId": "user-2",
+          "verb": "update"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true,
+              "actorRank": 400,
+              "actorUserId": "user-corpus",
+              "targetRank": 100,
+              "targetRoleSlug": "user",
+              "targetUserId": "user-2",
+              "verb": "update"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true,
+            "actorRank": 400,
+            "actorUserId": "user-corpus",
+            "targetRank": 100,
+            "targetRoleSlug": "user",
+            "targetUserId": "user-2",
+            "verb": "update"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "targetRoleSlug": "user",
+          "targetUserId": "user-2",
+          "verb": "update"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "user",
+              "targetUserId": "user-2",
+              "verb": "update"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "user",
+            "targetUserId": "user-2",
+            "verb": "update"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "targetRoleSlug": "user",
+          "targetUserId": "user-2",
+          "verb": "update"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 100,
+              "actorUserId": "user-corpus",
+              "targetRank": 100,
+              "targetRoleSlug": "user",
+              "targetUserId": "user-2",
+              "verb": "update"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 100,
+            "actorUserId": "user-corpus",
+            "targetRank": 100,
+            "targetRoleSlug": "user",
+            "targetUserId": "user-2",
+            "verb": "update"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "targetRoleSlug": "owner",
+          "targetUserId": "user-2",
+          "verb": "delete"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "owner",
+              "targetUserId": "user-2",
+              "verb": "delete"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "owner",
+            "targetUserId": "user-2",
+            "verb": "delete"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "targetRoleSlug": "owner",
+          "targetUserId": "user-2",
+          "verb": "delete"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "admin"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 200,
+              "actorUserId": "user-corpus",
+              "targetRank": 400,
+              "targetRoleSlug": "owner",
+              "targetUserId": "user-2",
+              "verb": "delete"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 200,
+            "actorUserId": "user-corpus",
+            "targetRank": 400,
+            "targetRoleSlug": "owner",
+            "targetUserId": "user-2",
+            "verb": "delete"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "targetRoleSlug": "owner",
+          "targetUserId": "user-2",
+          "verb": "delete"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "owner",
+              "targetUserId": "user-2",
+              "verb": "delete"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "owner",
+            "targetUserId": "user-2",
+            "verb": "delete"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "targetRoleSlug": "owner",
+          "targetUserId": "user-2",
+          "verb": "delete"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "developer"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 300,
+              "actorUserId": "user-corpus",
+              "targetRank": 400,
+              "targetRoleSlug": "owner",
+              "targetUserId": "user-2",
+              "verb": "delete"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 300,
+            "actorUserId": "user-corpus",
+            "targetRank": 400,
+            "targetRoleSlug": "owner",
+            "targetUserId": "user-2",
+            "verb": "delete"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "targetRoleSlug": "owner",
+          "targetUserId": "user-2",
+          "verb": "delete"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "owner",
+              "targetUserId": "user-2",
+              "verb": "delete"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "owner",
+            "targetUserId": "user-2",
+            "verb": "delete"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "targetRoleSlug": "owner",
+          "targetUserId": "user-2",
+          "verb": "delete"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": true,
+              "actorRank": 400,
+              "actorUserId": "user-corpus",
+              "targetRank": 400,
+              "targetRoleSlug": "owner",
+              "targetUserId": "user-2",
+              "verb": "delete"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": true,
+            "actorRank": 400,
+            "actorUserId": "user-corpus",
+            "targetRank": 400,
+            "targetRoleSlug": "owner",
+            "targetUserId": "user-2",
+            "verb": "delete"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "targetRoleSlug": "owner",
+          "targetUserId": "user-2",
+          "verb": "delete"
+        },
+        "rows": 0
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorUserId": "user-corpus",
+              "targetRoleSlug": "owner",
+              "targetUserId": "user-2",
+              "verb": "delete"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorUserId": "user-corpus",
+            "targetRoleSlug": "owner",
+            "targetUserId": "user-2",
+            "verb": "delete"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    },
+    "variant 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "targetRoleSlug": "owner",
+          "targetUserId": "user-2",
+          "verb": "delete"
+        },
+        "rows": 2
+      },
+      "legacyDefect": "`actor.role` and `actor.isClusterOwner` compile to `arg(...)` text: roleBySlug is asked for the slug `arg(\"actor.role\")` and rbacGovernPrincipal receives the actor's fields unevaluated",
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "slug": "user"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "slug": "owner"
+            },
+            "kind": "query",
+            "name": "roleBySlug"
+          },
+          {
+            "args": {
+              "actorIsOwner": false,
+              "actorRank": 100,
+              "actorUserId": "user-corpus",
+              "targetRank": 400,
+              "targetRoleSlug": "owner",
+              "targetUserId": "user-2",
+              "verb": "delete"
+            },
+            "kind": "builtin",
+            "name": "rbacGovernPrincipal"
+          }
+        ],
+        "result": {
+          "args": {
+            "actorIsOwner": false,
+            "actorRank": 100,
+            "actorUserId": "user-corpus",
+            "targetRank": 400,
+            "targetRoleSlug": "owner",
+            "targetUserId": "user-2",
+            "verb": "delete"
+          },
+          "builtin": "rbacGovernPrincipal"
+        }
+      }
+    }
+  }
+}

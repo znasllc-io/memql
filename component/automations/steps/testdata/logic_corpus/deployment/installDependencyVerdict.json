@@ -1,0 +1,493 @@
+{
+  "construct": "deployment/logic.memql installDependencyVerdict",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "passed": "s-passed"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "passed": "s-passed"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "passed": "s-passed"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "passed": "s-passed"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "passed": "s-passed"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "passed": "s-passed"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "passed": "s-passed"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "passed": "s-passed"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "passed": true
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ok"
+      }
+    },
+    "variant 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "passed": true
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ok"
+      }
+    },
+    "variant 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "passed": true
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ok"
+      }
+    },
+    "variant 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "passed": true
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ok"
+      }
+    },
+    "variant 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "passed": true
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ok"
+      }
+    },
+    "variant 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "passed": true
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ok"
+      }
+    },
+    "variant 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "passed": true
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ok"
+      }
+    },
+    "variant 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "passed": true
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "ok"
+      }
+    },
+    "variant 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "passed": false
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "passed": false
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "passed": false
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "passed": false
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "passed": false
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "passed": false
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "passed": false
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "passed": false
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 2 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 2 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 2 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 2 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 2 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 2 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 2 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    },
+    "variant 2 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "missing"
+      }
+    }
+  }
+}
