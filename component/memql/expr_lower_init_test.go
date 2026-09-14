@@ -54,7 +54,10 @@ spec actorEnvelope callerIsOwner = actor => actor.role == "owner"
 func bootLowerTree(t *testing.T, files map[string]string) (*MemQLEngine, error) {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
-	root := fstest.MapFS{}
+	// The domain declares its language line, as every mounted domain must
+	// (memql#5357): without one its concepts are never built and Init
+	// refuses the tree before any construct reaches Lower.
+	root := fstest.MapFS{"lowerinit/memql.toml": languageLineFile()}
 	for name, body := range files {
 		root["lowerinit/"+name] = &fstest.MapFile{Data: []byte(body)}
 	}
