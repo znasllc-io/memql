@@ -196,11 +196,16 @@ func offersConcept(items []protocol.CompletionItem, name string) bool {
 	return false
 }
 
-// noticeLead is how every notification about a failed build opens: exactly
-// what a failed build takes away. Keywords, annotations and snippets come from
-// the static spec and stay; hover, and every name the build would have loaded,
-// go (fix round 1, item 2).
-const noticeLead = "MemQL cannot load this workspace, so hover is off and completion offers keywords, " +
+// noticeTail is how every notification about refused language lines ends,
+// after the sentences that name the domains and their fixes: exactly what the
+// failure takes away until they are fixed. Keywords, annotations and snippets
+// come from the static spec and stay; hover, and every name the build would
+// have loaded, go (fix round 1, item 2; the polish round put the cause first).
+const noticeTail = " Until then MemQL cannot load this workspace: hover is off, and completion offers keywords, " +
+	"annotations and snippets but no loaded concepts, fields or functions."
+
+// bootNoticeTail ends the notification for a failure with no refused line.
+const bootNoticeTail = " Until it boots, hover is off, and completion offers keywords, " +
 	"annotations and snippets but no loaded concepts, fields or functions."
 
 // TestLanguageLine_AnUnmigratedWorkspaceSaysWhyAndClearsWhenFixed is the
@@ -211,7 +216,7 @@ const noticeLead = "MemQL cannot load this workspace, so hover is off and comple
 //
 //  1. an open file of the domain carries the refusal on its first line;
 //  2. the quick fix for it writes the file, with exactly these documentChanges;
-//  3. one notification says what is off, and why;
+//  3. one notification names the domain and the fix, then says what is off;
 //  4. a rebuild that fails the same way says nothing new;
 //  5. an EMPTY memql.toml -- a "New File", a touch, or the quick fix with the
 //     editor's refactoring auto-save off -- turns the refusal from missing to
@@ -309,9 +314,9 @@ func walkTheAuthorsPath(t *testing.T, root, dir string) {
 		t.Errorf("step 2: code actions\n got: %s\nwant: %s", got, wantActions)
 	}
 
-	// 3. One notification: what is off, the domain, and the fix.
-	wantNotice := noticeLead + ` Domain "gadgets" has no memql.toml: use the quick fix on any of its files, or add ` +
-		manifestRel + `.`
+	// 3. One notification: the domain and its fix, then what is off.
+	wantNotice := `Domain "gadgets" has no memql.toml: use the quick fix on any of its files, or add ` +
+		manifestRel + `.` + noticeTail
 	shown := c.shown()
 	if len(shown) != 1 {
 		t.Fatalf("step 3: %d notifications; want exactly one: %+v", len(shown), shown)
@@ -521,7 +526,7 @@ func TestLanguageLine_ARepositoryRootNamesTheDomainsRealPath(t *testing.T) {
 		t.Errorf("the quick fix creates %s; want %s", jsonOf(t, actions[0].Edit.DocumentChanges[0]), wantURI)
 	}
 	_, lines := s.getBuild()
-	want := noticeLead + ` Domain "gadgets" has no memql.toml: use the quick fix on any of its files, or add dsl/gadgets/memql.toml.`
+	want := `Domain "gadgets" has no memql.toml: use the quick fix on any of its files, or add dsl/gadgets/memql.toml.` + noticeTail
 	if got := buildFailureNotice(lines, true); got != want {
 		t.Errorf("notice = %q; want %q", got, want)
 	}
@@ -692,11 +697,11 @@ func refusedLines(root string, refusals ...refusal) memql.WorkspaceLanguageLines
 }
 
 // TestLanguageLine_TheNoticeIsWrittenFromItsCause pins every sentence the
-// failure notification can say (fix round 1, items 1 and 6): what a failed
-// build takes away, then one sentence per family of refused domains naming its
-// fix -- a missing file, a file that does not read yet, a newer MemQL, an older
-// one, a line this server does not read -- or, for any other failure, where the
-// list is. Never the engine's report.
+// failure notification can say (fix round 1, items 1 and 6). It leads with the
+// cause: one sentence per family of refused domains naming its fix -- a missing
+// file, a file that does not read yet, a newer MemQL, an older one, a line this
+// server does not read -- or, for any other failure, where the list is. Then
+// what the failure takes away until it is fixed. Never the engine's report.
 func TestLanguageLine_TheNoticeIsWrittenFromItsCause(t *testing.T) {
 	const (
 		missing   = langparser.CodeLanguageLineMissing
@@ -714,57 +719,57 @@ func TestLanguageLine_TheNoticeIsWrittenFromItsCause(t *testing.T) {
 	}{
 		{"one domain without a line",
 			refusedLines("", refusal{"gadgets", missing, ""}), true,
-			noticeLead + ` Domain "gadgets" has no memql.toml: use the quick fix on any of its files, or add gadgets/memql.toml.`},
+			`Domain "gadgets" has no memql.toml: use the quick fix on any of its files, or add gadgets/memql.toml.` + noticeTail},
 		{"one domain without a line, for a client with no quick fix",
 			refusedLines("dsl", refusal{"gadgets", missing, ""}), false,
-			noticeLead + ` Domain "gadgets" has no memql.toml: add dsl/gadgets/memql.toml; the error on any of the domain's files shows the lines to write.`},
+			`Domain "gadgets" has no memql.toml: add dsl/gadgets/memql.toml; the error on any of the domain's files shows the lines to write.` + noticeTail},
 		{"two domains without a line",
 			refusedLines("", refusal{"gadgets", missing, ""}, refusal{"widgets", missing, ""}), true,
-			noticeLead + ` Domains "gadgets" and "widgets" have no memql.toml: use the quick fix on any of their files, or add a memql.toml to each.`},
+			`Domains "gadgets" and "widgets" have no memql.toml: use the quick fix on any of their files, or add a memql.toml to each.` + noticeTail},
 		{"two domains without a line, for a client with no quick fix",
 			refusedLines("", refusal{"gadgets", missing, ""}, refusal{"widgets", missing, ""}), false,
-			noticeLead + ` Domains "gadgets" and "widgets" have no memql.toml: add one to each; the error on any of their files shows the lines to write.`},
+			`Domains "gadgets" and "widgets" have no memql.toml: add one to each; the error on any of their files shows the lines to write.` + noticeTail},
 		{"six domains without a line",
 			refusedLines("", refusal{"a", missing, ""}, refusal{"b", missing, ""}, refusal{"c", missing, ""},
 				refusal{"d", missing, ""}, refusal{"e", missing, ""}, refusal{"f", missing, ""}), true,
-			noticeLead + ` Domains "a", "b", "c" and 3 more have no memql.toml: use the quick fix on any of their files, or add a memql.toml to each.`},
+			`Domains "a", "b", "c" and 3 more have no memql.toml: use the quick fix on any of their files, or add a memql.toml to each.` + noticeTail},
 		{"a memql.toml that does not read yet",
 			refusedLines("", refusal{"gadgets", malformed, ""}), true,
-			noticeLead + ` The memql.toml of domain "gadgets" does not read yet: the error on any of the domain's files shows what a memql.toml must declare.`},
+			`The memql.toml of domain "gadgets" does not read yet: the error on any of the domain's files shows what a memql.toml must declare.` + noticeTail},
 		{"two memql.toml files that do not read yet",
 			refusedLines("", refusal{"gadgets", malformed, ""}, refusal{"widgets", malformed, ""}), true,
-			noticeLead + ` The memql.toml files of domains "gadgets" and "widgets" do not read yet: the error on any of those domains' files shows what a memql.toml must declare.`},
+			`The memql.toml files of domains "gadgets" and "widgets" do not read yet: the error on any of those domains' files shows what a memql.toml must declare.` + noticeTail},
 		{"a newer line",
 			refusedLines("", refusal{"gadgets", newer, ""}), true,
-			noticeLead + ` Domain "gadgets" is written for a newer MemQL than this extension's language server reads: update the extension.`},
+			`Domain "gadgets" is written for a newer MemQL than this extension's language server reads: update the extension.` + noticeTail},
 		{"an edition later than every one this server reads",
 			refusedLines("", refusal{"gadgets", edition, later}), true,
-			noticeLead + ` Domain "gadgets" is written for a newer MemQL than this extension's language server reads: update the extension.`},
+			`Domain "gadgets" is written for a newer MemQL than this extension's language server reads: update the extension.` + noticeTail},
 		{"an older line",
 			refusedLines("", refusal{"gadgets", older, ""}, refusal{"widgets", older, ""}), true,
-			noticeLead + ` Domains "gadgets" and "widgets" are written for an older MemQL than this extension's language server reads, and need migrating to MemQL ` +
-				langparser.LanguageVersion + `.`},
+			`Domains "gadgets" and "widgets" are written for an older MemQL than this extension's language server reads, and need migrating to MemQL ` +
+				langparser.LanguageVersion + `.` + noticeTail},
 		{"an edition that is not a later one",
 			refusedLines("", refusal{"gadgets", edition, "1999"}), true,
-			noticeLead + ` Domain "gadgets" declares a language line this extension's language server does not read: the error on any of its files says why.`},
+			`Domain "gadgets" declares a language line this extension's language server does not read: the error on any of its files says why.` + noticeTail},
 		{"an edition that is not a year",
 			refusedLines("", refusal{"gadgets", edition, "2O26"}, refusal{"widgets", edition, "twenty"}), true,
-			noticeLead + ` Domains "gadgets" and "widgets" declare language lines this extension's language server does not read: the error on any of their files says why.`},
+			`Domains "gadgets" and "widgets" declare language lines this extension's language server does not read: the error on any of their files says why.` + noticeTail},
 		{"one domain wrong in two ways is named by the file that does not read",
 			refusedLines("", refusal{"gadgets", newer, ""}, refusal{"gadgets", malformed, ""}), true,
-			noticeLead + ` The memql.toml of domain "gadgets" does not read yet: the error on any of the domain's files shows what a memql.toml must declare.`},
+			`The memql.toml of domain "gadgets" does not read yet: the error on any of the domain's files shows what a memql.toml must declare.` + noticeTail},
 		{"every family at once, missing ones with their quick fix",
 			refusedLines("", refusal{"cogs", newer, ""}, refusal{"gadgets", missing, ""}, refusal{"sprockets", malformed, ""},
 				refusal{"widgets", missing, ""}), true,
-			noticeLead + ` Domains "gadgets" and "widgets" have no memql.toml: use the quick fix on any of their files, or add a memql.toml to each.` +
+			`Domains "gadgets" and "widgets" have no memql.toml: use the quick fix on any of their files, or add a memql.toml to each.` +
 				` The memql.toml of domain "sprockets" does not read yet: the error on any of the domain's files shows what a memql.toml must declare.` +
-				` Domain "cogs" is written for a newer MemQL than this extension's language server reads: update the extension.`},
+				` Domain "cogs" is written for a newer MemQL than this extension's language server reads: update the extension.` + noticeTail},
 		{"a failure with no line refused",
 			refusedLines("dsl"), true,
-			noticeLead + ` The workspace would not boot: the Problems panel lists the errors the editor can see in open files, and "memqllint dsl" prints the full report.`},
+			`This workspace would not boot: the Problems panel lists the errors the editor can see in open files, and "memqllint dsl" prints the full report.` + bootNoticeTail},
 		{"a failure with no line refused, domains at the top",
 			refusedLines(""), true,
-			noticeLead + ` The workspace would not boot: the Problems panel lists the errors the editor can see in open files, and "memqllint ." prints the full report.`},
+			`This workspace would not boot: the Problems panel lists the errors the editor can see in open files, and "memqllint ." prints the full report.` + bootNoticeTail},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := buildFailureNotice(tc.lines, tc.createsFiles); got != tc.want {

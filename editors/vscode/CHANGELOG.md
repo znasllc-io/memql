@@ -28,6 +28,8 @@ someone deciding whether to install rather than for someone reading the repo.
 - **The parse-time refusals.** Annotations are checked as you type against one
   registry of where each may be written and with what arguments. A misplaced,
   mis-argued or retired annotation is an error that names the fix.
+- Closing a file now clears its diagnostics, because the language server
+  analyzes open files only.
 
 ## 0.3.1
 

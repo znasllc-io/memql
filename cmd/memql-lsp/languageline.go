@@ -412,20 +412,23 @@ func editionIsNewer(edition string) bool {
 }
 
 // buildFailureNotice is the notification for a failed build, written from its
-// cause: what a failed build takes away, then one sentence per family of
-// refused domains, each naming its fix. A failure with no refused line says
-// the workspace would not boot and where its errors are listed, and does not
-// paste the engine's multi-line report -- that is the log line's.
+// cause and leading with it: one sentence per family of refused domains, each
+// naming its fix, then what the failure takes away until they are fixed. A
+// failure with no refused line says the workspace would not boot and where its
+// errors are listed, and does not paste the engine's multi-line report -- that
+// is the log line's.
 //
 // createsFiles is whether the client can take the quick fix: the notice
 // offers it only then.
 func buildFailureNotice(lines memql.WorkspaceLanguageLines, createsFiles bool) string {
 	// Exactly what goes: hover, and every name the build would have loaded.
 	// Keyword, annotation and snippet completion is the static spec's and
-	// stays; so does a use line's, which reads the file tree. "Loaded" is the
-	// word that keeps the second true.
-	const lead = "MemQL cannot load this workspace, so hover is off and completion offers keywords, " +
-		"annotations and snippets but no loaded concepts, fields or functions."
+	// stays. So does a use line's, which reads the file tree: in a workspace
+	// of several domains it still completes the names of the ones that read,
+	// which is why this says what is missing rather than "only keywords,
+	// annotations and snippets", and why it says "loaded".
+	const whatIsOff = "hover is off, and completion offers keywords, annotations and snippets " +
+		"but no loaded concepts, fields or functions."
 
 	families := map[lineFamily][]string{}
 	familyOfDomain := map[string]lineFamily{}
@@ -448,19 +451,18 @@ func buildFailureNotice(lines memql.WorkspaceLanguageLines, createsFiles bool) s
 		if lintRoot == "" {
 			lintRoot = "."
 		}
-		return lead + " The workspace would not boot: the Problems panel lists the errors the editor can see in open files, " +
-			"and \"memqllint " + lintRoot + "\" prints the full report."
+		return "This workspace would not boot: the Problems panel lists the errors the editor can see in open files, " +
+			"and \"memqllint " + lintRoot + "\" prints the full report. Until it boots, " + whatIsOff
 	}
 
-	var b strings.Builder
-	b.WriteString(lead)
+	var sentences []string
 	for f := familyMissing; f <= familyNewer; f++ {
 		if domains := families[f]; len(domains) > 0 {
-			b.WriteString(" ")
-			b.WriteString(familySentence(f, domains, lines.Root, createsFiles))
+			sentences = append(sentences, familySentence(f, domains, lines.Root, createsFiles))
 		}
 	}
-	return b.String()
+	sentences = append(sentences, "Until then MemQL cannot load this workspace: "+whatIsOff)
+	return strings.Join(sentences, " ")
 }
 
 // familySentence is the notification's sentence for one family of refused
