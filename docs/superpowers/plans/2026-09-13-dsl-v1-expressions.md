@@ -70,23 +70,22 @@ Retired and refused in v1 positions, each naming `memqlmigrate --rewrite=express
 
 ### The absence table (D8) -- one table, reproduced by both evaluators, pinned by the corpus and the differential lane
 
-"Absent" means the key is missing OR its value is JSON null.
+"Unset" means the key is missing, its value is JSON null, the `nil` literal, or the empty string: in `==`/`!=` these are ONE value (settled 2026-09-13 during Task 5; it completes rule 27's "absent equals blank" and keeps `==` symmetric and `!` an exact negation).
 
-| Expression | `x` absent | Notes |
+| Expression | `x` unset | Notes |
 |---|---|---|
-| `x == v` (v not nil, not `""`) | false | |
-| `x == ""` | **true** | an absent string equals blank (completes rule 27; lowers to `COALESCE(x, '') = ''`) |
-| `x != v` (v not nil, not `""`) | true | `IS DISTINCT FROM` |
-| `x != ""` | false | `COALESCE(x, '') <> ''` |
-| `x == nil` | true | `IS NULL` |
-| `x != nil` | false | `IS NOT NULL` |
+| `x == v` (v set) | false | |
+| `x == ""`, `x == nil` | **true** | unset equals unset; lowers to `COALESCE(x, '') = ''` |
+| `x != v` (v set) | true | `IS DISTINCT FROM` |
+| `x != ""`, `x != nil` | false | `COALESCE(x, '') <> ''` |
 | `x < v`, `<=`, `>`, `>=` | false | |
-| `x in list`, `v in x`, `x startsWith p`, `s.includes(t)` | false | |
+| `x in list` | true only if the list holds `""` or `nil` | `in` is `==` against each element |
+| `v in x` (x unset), `x startsWith p`, `s.includes(t)` | false | a blank prefix or needle matches nothing (rule 32) |
 | `!e` | negation of `e` | every lowered predicate is two-valued, so `!(x == v)` is exactly `x != v` |
 | `a ?? b` | `b` | also when `a` is a blank or whitespace-only string (rule 30) |
 | `x.f`, `x.?f` | absent | both propagate absence at run time; `.?` is REQUIRED at load when the object may be absent (an optional object field, an optional arg, an untyped value), and `.` is refused there with the `.?` spelling |
 
-Typed equality: `1 == "1"` is false; numbers compare numerically across int and float. Strings order by byte (`COLLATE "C"` in SQL), so RFC3339 UTC timestamps order correctly. There is no truthiness: a condition must be boolean, statically where the type is known (refused at load, naming the type) and at run time otherwise (`condition_not_boolean`).
+Typed equality: `1 == "1"` is false; numbers compare numerically across int and float; the SQL twin guards each typed comparison with `jsonb_typeof` so a stored string never equals a number literal (and never raises a cast error). Strings order by byte (`COLLATE "C"` in SQL), so RFC3339 UTC timestamps order correctly. There is no truthiness: a condition must be boolean, statically where the type is known (refused at load, naming the type) and at run time otherwise (`condition_not_boolean`).
 
 ### Tiers (D11)
 
