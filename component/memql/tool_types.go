@@ -93,6 +93,13 @@ type ToolHandler struct {
 
 	// Body is the request body template (for type "webhook").
 	Body map[string]any `json:"body,omitempty"`
+
+	// queryV1 is Query parsed as an edition-2026 handler, set when the tool
+	// loads from `.memql` (toolDeclToTool); nil for a legacy `$args.`
+	// handler and for a tool built in Go, whose handler is parsed on each
+	// call instead (tool_handler_v1.go). Immutable once set, so clone shares
+	// it.
+	queryV1 *toolQueryV1
 }
 
 // ToolAnnotations provides hints about tool behavior for AI models.
@@ -153,10 +160,10 @@ func (t *Tool) clone() *Tool {
 	}
 
 	cloned := &Tool{
-		Name:            t.Name,
-		Description:     t.Description,
-		MCPExposed:      t.MCPExposed,
-		Origin:          t.Origin,
+		Name:        t.Name,
+		Description: t.Description,
+		MCPExposed:  t.MCPExposed,
+		Origin:      t.Origin,
 	}
 
 	if t.InputSchema != nil {
@@ -220,6 +227,9 @@ func (h *ToolHandler) clone() *ToolHandler {
 		FunctionName: h.FunctionName,
 		URL:          h.URL,
 		Method:       h.Method,
+		// The parsed handler is immutable, so the clone shares it; leaving
+		// it out would silently re-parse a registry clone on every call.
+		queryV1: h.queryV1,
 	}
 
 	if h.Shape != nil {

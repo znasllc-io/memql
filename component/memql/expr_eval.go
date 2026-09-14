@@ -66,6 +66,27 @@ type ExprScope interface {
 	Lookup(name string) (any, bool)
 }
 
+// ExprMembers is a scope value that answers its own member reads: `x.f` on
+// one is x.ExprMember("f"), computed when -- and only when -- the read is
+// evaluated, and an error it returns reaches EvalExpr's caller unchanged, as
+// a hook's does.
+//
+// It exists for a value whose fields may REFUSE. The actor envelope a
+// mutation value binds is the first: `actor.userId` against an envelope that
+// names nobody is refused rather than written as "" (memql#3620), and only an
+// expression that actually reads the field may be refused for it -- the
+// untaken branch of `p ? actor.userId : args.owner`, or the arm of `??` that
+// is never reached, reads nothing. A plain map would have to be built with
+// every field resolved up front, so the refusal would fire on reads that
+// never happen, or not fire at all.
+//
+// The value itself is not a value of the language: anything that needs it
+// whole (a comparison, `+`, a function argument) normalises it, and an
+// implementation that has no whole form says so from its MarshalJSON.
+type ExprMembers interface {
+	ExprMember(field string) (any, error)
+}
+
 // MapScope is the simple scope: names to values.
 type MapScope map[string]any
 
@@ -337,10 +358,15 @@ func (ev *exprEvaluator) ident(e *ast.IdentExpr, scope ExprScope) (any, error) {
 //   - a row -> an intrinsic column, or the payload (ExprRow.exprMember).
 //   - a list and a numeric field ("0", "-1") -> that element, counting from
 //     the end when negative; out of range is Absent.
+//   - a value implementing ExprMembers -> its own answer, error included,
+//     asked before anything else (see ExprMembers).
 //   - anything else is normalised first (a typed map or slice, a struct by
 //     JSON round trip as the automations resolver read it) and then read;
 //     a scalar has no fields, so its member is Absent.
 func exprMember(obj any, field string, node ast.ExpressionNode) (any, error) {
+	if m, ok := obj.(ExprMembers); ok {
+		return m.ExprMember(field)
+	}
 	v, err := exprNormalize(obj)
 	if err != nil {
 		return nil, exprErr(node, "operand_type", "cannot read .%s: %v", field, err)

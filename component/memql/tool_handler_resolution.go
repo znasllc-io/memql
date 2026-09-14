@@ -54,6 +54,12 @@ func toolHandlerTargets(tool *Tool) []string {
 		}
 		return []string{name}
 	case "query":
+		// A handler parsed at load names its one target in its AST; the
+		// text scan below remains for a legacy `$args.` handler and for a
+		// tool built in Go.
+		if plan := tool.Handler.queryV1; plan != nil {
+			return []string{plan.target()}
+		}
 		var out []string
 		seen := map[string]bool{}
 		for _, m := range toolQueryConstructCall.FindAllStringSubmatch(tool.Handler.Query, -1) {

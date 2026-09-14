@@ -698,12 +698,15 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 
 	switch strings.ToLower(strings.TrimSpace(handler.Type)) {
 	case "query":
-		query := strings.TrimSpace(handler.Query)
-		if query == "" {
+		if strings.TrimSpace(handler.Query) == "" {
 			return nil, fmt.Errorf("query handler has no query defined")
 		}
-		if args != nil {
-			query = substituteArgsInMemqlQuery(query, args)
+		// An edition-2026 handler evaluates its arguments and renders the
+		// call from their values; a legacy `$args.` handler substitutes
+		// (renderToolQuery, tool_handler_v1.go).
+		query, err := handler.renderToolQuery(ctx, args)
+		if err != nil {
+			return nil, fmt.Errorf("tool %q: %w", tool.Name, err)
 		}
 		result, err := e.Execute(ctx, query)
 		if err != nil {
