@@ -155,7 +155,7 @@ var ByReceiver map[string][]string                   // DERIVED from the placeme
 ```
 - Refusal order for a name not accepted on `r`: retired (for `r` or every receiver) with its hint; else accepted on other receivers -> misplaced naming them; else unknown with a did-you-mean from `r`'s names and the full list.
 - Form messages are generated from `Forms` and `Example`: `@cache on a query takes one number, as in @cache(300)`.
-- The placements must accept every form the in-tree corpus writes (measured census: `cmd`-free script in the session scratchpad; re-run it over `dsl/`, `examples/`, and the two local product bundles before fixing a form). Known outliers: `@when()` (FormEmpty on rule), `@filter(<expr>)` (FormExpression | FormString), `@rowAuthz(owner="x", clusterOwner)` (keywords with flag keys), `@cache(300)` and `@cache(ttl="300")`, `@visibility` (retired: inert).
+- The placements must accept every form the in-tree corpus writes (measured census: `cmd`-free script in the session scratchpad; re-run it over `dsl/`, `examples/`, and the two local product bundles before fixing a form). Known outliers: `@when()` (FormEmpty on rule), `@filter(<expr>)` (FormExpression | FormString), `@rowAuthz(owner="x", clusterOwner)` (keywords with flag keys), `@cache(300)` and `@cache(ttl="300")`, `@visibility` (retired: read by nothing).
 
 **Wiring:** a parser helper `parser.annotationUse(*ast.Attribute) annotations.Use` feeds the check from every construct parser at parse time (shape, builtin, prompt, policy, rule, spec, trait, tool, provider, seed, action, capability, and function attributes in `attachAttributes`); field lists call it per field (`ArgsField`, `ToolField`, `PromptField`, `BuiltinField`); `concept_parser.go` calls it for `Concept`, `ConceptBody` (`@relationship`) and `ConceptField`. The per-construct switches keep argument SEMANTICS only; their default branches go. The load-time text gate and its allow-list plumbing are deleted once the parse-time check covers the four function kinds.
 
@@ -176,7 +176,7 @@ var ByReceiver map[string][]string                   // DERIVED from the placeme
 **Page design (the frontend-design pass):** front matter; a two-sentence lead saying the page is generated from the registry and the command that regenerates it; "At a glance" as four compact matrices by family (Functions: query mutate logic automation; Data: concept shape spec seed; AI: prompt provider policy rule tool; Capabilities: builtin action capability) plus one for fields (concept field, args field, tool field, prompt field, builtin field), rows grouped by what the annotation does, cells `yes` or empty; then "By construct" listing each receiver's annotations with the canonical example; then "Annotations", one entry per name (`### @cache`): where accepted, argument form in words, the keyword table when it has keys, the example per receiver, the doc; then "Retired" (name, where, what to write instead). No emojis, no decorative labels; every heading is a real anchor.
 
 - [ ] **Step 1:** Test first: `TestAttributeMatrixIsGenerated` compares the committed file byte for byte with `dslspec.AttributeMatrix()`; a second assertion that every placement appears and no name the check refuses appears. FAIL.
-- [ ] **Step 2:** Implement the renderer and the command; `make docs-matrix`. PASS. Run `go test -count=1 .` and the makefile help gate.
+- [ ] **Step 2:** Implement the renderer and the command, then run the new docs-matrix target. PASS. Run `go test -count=1 .` and the makefile help gate.
 - [ ] **Step 3:** Commit: `Issue #5360: the attribute matrix is generated from the registry and pinned`.
 
 ### Task 5: The corpus cells and the two completeness gates (#5361)
@@ -223,6 +223,6 @@ export function compareLanguage(cluster: LanguageFacts, extension: LanguageFacts
 ### Task 7: Integration and ship
 
 - [ ] Merge the task branches in order 1, 2, 3, 6, 4, 5; resolve conflicts by reading both sides.
-- [ ] Final `GrammarVersion` (digest) once; `make vscode-grammar`; `parser.EditorRelease`, the extension version, `memql.grammarVersion` and the CHANGELOG section agree; `make docs-matrix`; `make arch-model`; `make proto-gen-check`.
+- [ ] Final `GrammarVersion` (digest) once; `make vscode-grammar`; `parser.EditorRelease`, the extension version, `memql.grammarVersion` and the CHANGELOG section agree; regenerate the matrix (docs-matrix target); `make arch-model`; `make proto-gen-check`.
 - [ ] Verification matrix, all green, output read: `make test`; `MEMQL_REQUIRE_DB=1` db-gated trees against a real Postgres when one is reachable; the seven node-tag builds; `scripts/ci/module-boundaries.sh`; `go run ./cmd/memqllint dsl/`; `make vscode-test`; `make sdk-ts-typecheck`; `gitleaks dir .` over the diff; `go test -count=1 . ./scripts/...`.
 - [ ] Delete this plan; open the PR (body: `Closes #5356` ... one line each, the carried design record #5355, the wire change note for the frontend); watch CI; merge through the queue or `scripts/dev/merge-as-owner.sh`; close any issue the merge did not; remove the worktree and local branches.
