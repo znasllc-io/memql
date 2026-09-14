@@ -32,7 +32,7 @@
 //   binding             none (deliberately unbound)   exactly one shape XOR concept
 //   body                `return <bare bool>`          `return <bare bool>`
 //   classification      row-spec (SQL)                row-spec OR context-spec, by binding
-//   author lifecycle    @enabled / @disabled OK       @enabled / @disabled OK
+//   author lifecycle    @disabled OK                  @disabled OK
 //
 // =============================================================================
 //   1. Spec-level annotations
@@ -42,7 +42,8 @@
 // narrow:
 //
 //   @description("text")    Human-readable description.   optional
-//   @enabled / @disabled    Lifecycle.                    optional
+//   @disabled               Lifecycle. @enabled is        optional
+//                           RETIRED (epic memql#5375).
 //
 // The @shape("...") pin is REMOVED (epic #2281) -- the binding moved to
 // the signature. The legacy `@use*` family (@useConcept / @useShape / ...)
@@ -244,9 +245,10 @@ spec agent richPredicate {
 //   10a. Lifecycle annotations ACCEPTED on specs
 // =============================================================================
 //
-//   @enabled  /  @disabled
+//   @disabled  (and the RETIRED @enabled)
 //     Specs accept the same lifecycle flags as functions / builtins /
-//     prompts / traits. @enabled (the explicit-on default) registers the
+//     prompts / traits. @enabled was the explicit-on default and is RETIRED
+//     in epic memql#5375 -- a no-op that read like a switch. It registered the
 //     spec; @disabled parses it but skips registration so it can be
 //     re-enabled later without deleting it.
 //

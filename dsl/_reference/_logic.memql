@@ -52,7 +52,11 @@
 // Every annotation goes above the `logic` keyword.
 //
 //   @description("text")   Human-readable description.                optional
-//   @enabled / @disabled   Lifecycle flag (shared across constructs). @enabled
+//   @disabled              Lifecycle flag (shared across constructs). The
+//                          companion @enabled is RETIRED (epic memql#5375):
+//                          constructs are on by default, so it was a no-op
+//                          that read like a switch. What follows describes
+//                          the retired form; do not write it. @enabled
 //                          is the explicit-on default (a no-op); @disabled
 //                          skips the logic at load.                    optional
 //
@@ -230,7 +234,9 @@ logic engineNodeTypes {
 // (§2.1 the purity line, §2.2 collections + temporal, §3 the construct matrix).
 //
 // Temporal reads are query-only: a query may carry `asOf latest` (mark its
-// contract `@latestMode` so consumers see it is time-dependent) or
+// contract `@latestMode` -- RETIRED in epic memql#5375, since the engine
+// derives time-dependence from `asOf latest` in the body and the annotation
+// could contradict what it restated) or
 // `asOf <ts>` (deterministic); logic / automation never time-travel directly
 // (ADR §2.3 / #2305).
 //

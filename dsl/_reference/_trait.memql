@@ -29,7 +29,9 @@
 // =============================================================================
 //
 //   @description("text")   Human-readable description.
-//   @enabled               Accepted no-op: traits are enabled by default.
+//   @enabled               RETIRED (epic memql#5375). It was an accepted
+//                          no-op -- traits are enabled by default -- which
+//                          is exactly why it went: it read like a switch.
 //   @disabled              Parsed but never registered (#2607).
 //
 // @shape / @row / @actor / @useConcept(...) and the rest of the retired
@@ -142,10 +144,11 @@ trait isSeedRow {
 //   - Composed into a concept- or shape-bound spec at the call site.
 //
 // =============================================================================
-//   7. Lifecycle: @enabled and @disabled
+//   7. Lifecycle: @disabled (and the RETIRED @enabled)
 // =============================================================================
 //
-//   - absent or @enabled = registered (enabled is the default; the
+//   - absent = registered (enabled is the default, and @enabled is retired;
+//     the
 //     annotation is an accepted no-op).
 //   - @disabled = parse the trait but skip registration (#2607).
 

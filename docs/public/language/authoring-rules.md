@@ -1770,7 +1770,7 @@ top level always has (memql#3641):
 concept user {
   preferences {
     theme               enum("light", "dark", "system")
-    computerUseEnabled  bool  @default("true")
+    computerUseEnabled  bool
   }
 }
 ```
@@ -2359,8 +2359,9 @@ filter consumedAt != ""     // does NOT match rows with no `consumedAt` key
 
 - Plain SQL `<>` yields NULL, not true, when the field is missing, so
   `deleted != true` silently DROPPED every row that never had a
-  `deleted` key -- the concept `@default` is not always stamped
-  (#1685). Hence `IS DISTINCT FROM`.
+  `deleted` key -- nothing stamps a default on insert at all, which is
+  why the concept-field `@default` that used to suggest otherwise is
+  retired (#1685, epic memql#5375). Hence `IS DISTINCT FROM`.
 - An absent string field is logically equal to `""` -- both mean "not
   set" -- and `!= ""` is the canonical *is set* idiom
   (`deletionScheduledAt != ""`, `consumedAt != ""`). Under the bare
@@ -2591,9 +2592,14 @@ absent when it is not absent by any reading.
 (#1614): `f: args.f ?? ""` has to be able to land an explicit empty
 string, because a `null` there fails JSON-schema validation on a
 non-required string field. The whole corpus is written against that
-rule, and the ARGUMENT position has no other spelling — `@default` on an
-args field is rejected at load (#991), so `??` is the only mechanism
-that fills a value. Changing the operator under the corpus to settle a
+rule, and NO field position has another spelling — `@default` is rejected
+at load on an args field (#991) and, since epic memql#5375, on a concept
+field too. Neither was ever applied on insert, so a field carrying one
+did not default; the concept-field form was published as the
+JSON-Schema `default` keyword, which no validator applies. `??` is the
+only mechanism that fills a value. (`@default` DOES stay on a `tool` /
+`prompt` / `builtin` field, where the body IS the schema handed to the
+model and `default` is a value the model reads.) Changing the operator under the corpus to settle a
 naming complaint would be the larger defect.
 
 **What to do about it.** When a stored value must survive a caller

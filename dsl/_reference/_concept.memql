@@ -39,7 +39,18 @@ use identity.concepts.{ user }
 //
 //   @description("text")        Human-readable description.
 //   @version("MAJOR.MINOR.PATCH") Strict semver. Major flows into ID prefix.
-//   @namespace("foo[:bar:baz]")  Colon-separated lowercase identifiers.
+//   @namespace(...)             RETIRED (epic memql#5375). A concept's
+//                               namespace is its domain DIRECTORY, or that
+//                               directory's one-line namespace.pin -- the
+//                               annotation could only restate one of those
+//                               or silently disagree with it, and a
+//                               disagreement is the moved-file guard firing
+//                               rather than a feature. Pin a deliberate
+//                               id-preserving divergence with a
+//                               namespace.pin file (#2614); dsl/deployment
+//                               pins "cluster" and dsl/shopify/generated
+//                               pins "shopify". Refuses at load naming
+//                               `memqlmigrate --rewrite=attributes`.
 //   @type("object"|"collection"|"reference")  Default: object.
 //   @rowAuthz(<tier>)           Who may see this concept's rows -- see below.
 //
@@ -241,7 +252,6 @@ use identity.concepts.{ user }
 // genuine non-defaults. Everything else is optional. @description is
 // conventional but not required.
 
-@namespace("reference")
 @description("Smallest legal concept declaration -- one required string field.")
 concept minimal {
   name string! @description("Display name.")
@@ -263,14 +273,12 @@ concept minimal {
 //   - Absent @version defaults to 1.0.0 (#2613): the shipping baseline
 //     needs no annotation. Annotate only genuine non-defaults.
 
-@namespace("reference")
 @description("No @version annotation: the 1.0.0 default applies. ID prefix is v1:.")
 concept versionedV1 {
   field string!
 }
 
 @version("2.5.7")        // post-breaking-change, minor + patch reflect evolution
-@namespace("reference")
 @description("Example bumping past major version 2. ID prefix becomes v2:.")
 concept versionedV2 {
   field string!
@@ -288,13 +296,11 @@ concept versionedV2 {
 //     mirrors it.
 //   - Every segment must start with a lowercase letter.
 
-@namespace("worker")
 @description("Single-segment namespace.")
 concept singleSegmentNs {
   field string!
 }
 
-@namespace("worker:call:trace")
 @description("Multi-segment namespace. Assembles to v1:worker:call:trace:nested.")
 concept nestedNs {
   field string!
@@ -359,14 +365,12 @@ concept nestedNs {
 // existing rows; an unnecessary reference concept retired later means
 // migrating every product-side row that pointed at it.
 
-@namespace("reference")
 @type("object")
 @description("Default record-shaped concept.")
 concept objectExample {
   field string!
 }
 
-@namespace("reference")
 @type("collection")
 @description("Collection concept -- requires a @relationship(type=\"contains\", ...).")
 concept collectionExample {
@@ -377,7 +381,6 @@ concept collectionExample {
   memberIds []string
 }
 
-@namespace("reference")
 @type("reference")
 @description("Reference concept -- requires a @relationship(type=\"alias\"|\"equals\", ...).")
 concept referenceExample {
@@ -410,7 +413,6 @@ concept referenceExample {
 //   []datetime enforces RFC3339 per entry, and [][]string keeps its inner
 //   type (memql#2951).
 
-@namespace("reference")
 @description("Every supported field type, one of each.")
 concept fieldTypes {
   textField        string                      @description("UTF-8 text.")
@@ -731,7 +733,6 @@ concept fieldTypes {
 // Unknown @-annotations on a field are rejected at load time with
 //   `unknown property annotation @<name> on field "<field>"`.
 
-@namespace("reference")
 @description("Every field-level annotation in use.")
 concept fieldAnnotations {
   // String constraints
@@ -805,7 +806,6 @@ concept fieldAnnotations {
 //   being enforced. If the field really is an arbitrary object, drop the
 //   annotation rather than leaving it branch-less.
 
-@namespace("reference")
 @description("Discriminated-union example: the `body` field's shape depends on `kind`.")
 concept variantExample {
   kind  enum("text", "image", "embed")!
@@ -857,7 +857,6 @@ concept variantExample {
 //   silently become. Put the annotation on the line(s) BEFORE the property it
 //   applies to.
 
-@namespace("reference")
 @description("A flat concept with a nested settings sub-object.")
 concept nestedExample {
   name   string!
@@ -944,7 +943,6 @@ concept nestedExample {
 //   object block (`field="lineage.originatingPlanId"`). The engine walks the
 //   path on both the write and the filter side.
 
-@namespace("reference")
 @description("A concept with two relationship decorators.")
 concept relationshipExample {
   // Parent: this row hangs off a participant. `participant` resolves through
@@ -1007,7 +1005,6 @@ concept relationshipExample {
 // @scope annotation is a load-time error. Declare these concepts exactly
 // like any other; nothing in the body changes.
 
-@namespace("cluster")
 @description("Example of an infrastructure-metadata concept that every node loads.")
 concept globalInfraExample {
   hostname  string!
@@ -1057,7 +1054,6 @@ concept globalInfraExample {
 //
 // See docs/public/concepts/data-origins.md.
 
-@namespace("shopify")
 @description("A MIRROR: Shopify owns this data; MemQL holds a faithful read-only copy.")
 @origin("shopify")
 concept mirrorExample {
@@ -1065,7 +1061,6 @@ concept mirrorExample {
   availableForSale  bool!
 }
 
-@namespace("wholesale")
 @description("An ORIGIN: MemQL owns this data and pushes every change out to Shopify.")
 @origin("memql")
 @mirroredTo("shopify")
@@ -1076,7 +1071,6 @@ concept originExample {
 
 // A NATIVE concept needs no declaration at all -- native is the default,
 // and it is what all but a handful of concepts are.
-@namespace("planner")
 @description("NATIVE: MemQL owns this data and nobody else holds a copy.")
 concept nativeExample {
   goal  string!

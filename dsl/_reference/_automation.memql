@@ -37,7 +37,8 @@
 //   1. Automation-level annotations
 // =============================================================================
 //
-//   @enabled / @disabled    Lifecycle flag. @enabled is the explicit-on
+//   @disabled               Lifecycle flag. The companion @enabled is
+//                           RETIRED (epic memql#5375); it was the explicit-on
 //                           default; @disabled skips the automation at load.
 //   @description("text")    Human-readable description.            optional
 //   @trigger(...)           The reactive surface. EXACTLY ONE per automation
@@ -205,7 +206,7 @@ automation deployWithArgs {
 // PURE (no mutations / actions inside the lambda); the side effects live in
 // the forEach step body. See `_logic.memql` §6 for the full method surface.
 //
-//   @enabled
+//   (@enabled was here and is RETIRED -- epic memql#5375)
 //   @trigger(event="deploy.requested", concept="v1:cluster:deployment")
 //   @description("Deploy the MemQL ENGINE cluster. No bff / product nodes.")
 //   automation deployEngineCluster {
