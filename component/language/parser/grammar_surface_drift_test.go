@@ -235,6 +235,42 @@ query thing probe {
 	{"@when() with empty parentheses on a rule", true, `@when()
 @policy("localFirst")
 rule probe { }`},
+	// A keyword key written in the shape its placement does not take: the
+	// parser stores a bare key as `true`, so a valued key written bare read
+	// as "" downstream -- this tool registered with no rate limit.
+	{"a valued keyword key written bare (memql#5359)", false, `@handler(type="function", name="x")
+@rateLimit(maxCalls, periodSeconds)
+tool probe {
+  x string
+}`},
+	{"the @trigger(on=...) synonym for event= (memql#5359)", true, `@trigger(on=participant.created)
+automation probe {
+  step run {
+    mutation createThing (id: "x")
+  }
+}`},
+	// Logic, automation and mutation bodies refuse a clause they do not
+	// take; each emitter kept what it recognised and dropped the rest.
+	{"an unlisted clause in an automation body (memql#5359)", false, `automation probe {
+  filter row.id != ""
+  step run {
+    mutation createThing (id: "x")
+  }
+}`},
+	{"an unlisted block in a logic body (memql#5359)", false, `logic probe {
+  step s {
+    mutation createThing (id: "x")
+  }
+  body {
+    return 1
+  }
+}`},
+	{"a stray top-level line in a mutation body (memql#5359)", false, `mutate thing probe {
+  insert {
+    id: "x"
+  }
+  filter row.id != ""
+}`},
 
 	// NOT in this corpus: the retired procedural `func (Query) name(ctx any)`
 	// author-side form. It is refused, but NOT by NormaliseAll + ParseFile --

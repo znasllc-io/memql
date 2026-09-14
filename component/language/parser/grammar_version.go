@@ -68,7 +68,32 @@ package parser
 //     bare word as a tool field's `@default`, and every other form the
 //     registry's placement does not list;
 //   - an unknown keyword key (`@trigger(evnt=...)`);
-//   - a non-repeatable annotation written twice.
+//   - a keyword key written in the shape its placement does not take: a
+//     valued key written bare (`@rateLimit(maxCalls, periodSeconds)`, which
+//     registered the tool with no limit; `@cache(ttl)`) or a flag key given a
+//     value (`@rowAuthz(clusterOwner="x")`);
+//   - a non-repeatable annotation written twice;
+//   - a clause a logic, automation or mutation body does not take: the logic
+//     and automation emitters kept the clauses they recognised and dropped
+//     everything else (a `filter` line in an automation, a `step` block in a
+//     logic), and the mutation body dropped a top-level line that was
+//     neither a block nor a field. A `step` or `precondition` block without
+//     its name, and a second `args` or `body` block in a logic or
+//     automation, are refused with them.
+//
+// `@trigger(on=<concept>.<event>)` stays legal: the synonym for event= that
+// the automation loader and the concept resolver fold, which the first cut of
+// the registry had refused.
+//
+// Four narrowings happen at LOAD, in the concept translator
+// (component/database), not on this path, so the digest cannot record them;
+// the concept tests pin them instead: the key-shape rule for a concept's
+// keyword annotations (@rowAuthz, @composable, @displayCard, @relationship,
+// @variant); an unknown @relationship key, which the translator used to
+// ignore; the repeat rule on a concept's annotations; and the field spellings
+// its readers accepted and dropped -- a `value=` keyword on a numeric bound or
+// a description (`@minLength(value=5)`), a quoted number (`@minimum("5")`), and
+// a bare word other than true/false as a @default (`@default(open)`).
 //
 // # Narrowings the 2026.08 bump covered
 //
@@ -102,7 +127,7 @@ import (
 // The digest suffix is not decoration: TestGrammarVersionCarriesTheSurfaceDigest
 // recomputes it and requires this string to end with it, which is what makes a
 // grammar move impossible to land without editing this line (memql#3089).
-const GrammarVersion = "2026.09-dsl-v1-foundations-0b5d30ce"
+const GrammarVersion = "2026.09-dsl-v1-foundations-cffc394c"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test
