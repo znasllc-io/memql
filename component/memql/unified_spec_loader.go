@@ -41,11 +41,25 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry, report ...*Lo
 	// query's signature concept does; the slice the parser reads carries no
 	// imports, so they ride on the Spec. A file whose imports do not parse
 	// leaves its specs with none -- the dslimports lanes report the import.
-	usesByPath := make(map[string][]*languageParser.UseDeclaration, len(files))
+	//
+	// Parsed on demand, once per file that yields a spec or trait: every boot
+	// runs this, and parsing the imports of every file in the tree -- most of
+	// which declare no predicate -- cost a boot ~60ms for nothing.
+	contentByPath := make(map[string]string, len(files))
 	for _, f := range files {
-		if uses, err := parsedUseDeclarations(f.Content); err == nil && len(uses) > 0 {
-			usesByPath[f.Path] = uses
+		contentByPath[f.Path] = f.Content
+	}
+	usesByPath := make(map[string][]*languageParser.UseDeclaration)
+	usesOf := func(path string) []*languageParser.UseDeclaration {
+		if uses, done := usesByPath[path]; done {
+			return uses
 		}
+		uses, err := parsedUseDeclarations(contentByPath[path])
+		if err != nil {
+			uses = nil
+		}
+		usesByPath[path] = uses
+		return uses
 	}
 
 	parse := func(origin string, raw []byte) (*Spec, error) {
@@ -58,7 +72,7 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry, report ...*Lo
 			return nil, err
 		}
 		if spec != nil {
-			spec.Uses = usesByPath[unifiedOriginPath(origin, decl.Name)]
+			spec.Uses = usesOf(unifiedOriginPath(origin, decl.Name))
 		}
 		// nil, nil = @disabled (the intentional-skip contract). Reserve
 		// the name: promotion guards refuse it and diagnostics say
