@@ -3,6 +3,7 @@ package parser
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -201,8 +202,9 @@ func TestCompareLanguageVersionsIsNumeric(t *testing.T) {
 }
 
 // LanguageLineDomainOf is the one rule for which tree files make a domain,
-// shared by the resolver and the migrator that writes the missing lines: the
-// first segment of any .memql file a loader reads, however deep.
+// shared by the resolver, LanguageLines.For and the migrator that writes the
+// missing lines: the first segment of any .memql file a loader reads, however
+// deep -- and, for a loader origin, of the path inside it.
 func TestLanguageLineDomainOf(t *testing.T) {
 	for path, want := range map[string]string{
 		"shop/concepts.memql":       "shop",
@@ -215,9 +217,85 @@ func TestLanguageLineDomainOf(t *testing.T) {
 		"shop/_wip/queries.memql":   "",
 		".attic/concepts.memql":     "",
 		"shop/memql.toml":           "",
+		// A registered construct's origin names the file it came from: the
+		// two-part form the functions loader puts on every query, mutate and
+		// logic, and the three-part form with the construct's name.
+		"unified:shop/queries.memql":             "shop",
+		"unified:beta/sub/concepts.memql":        "beta",
+		"unified:shop/queries.memql:listOrders":  "shop",
+		"unified:beta/sub/concepts.memql:widget": "beta",
+		"unified:concepts.memql":                 "",
+		"unified:concepts.memql:order":           "",
+		"unified:_parked/concepts.memql:order":   "",
+		"unified:shop/prompts/reply.tmpl:reply":  "",
+		"unified:shop/prompts/reply.tmpl":        "",
 	} {
 		if got := LanguageLineDomainOf(path); got != want {
 			t.Errorf("LanguageLineDomainOf(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+// MountableDomainRoot is the one rule memqllint and memqlmigrate ask about a
+// directory handed to them ITSELF: is it a domain a mount would read? Not a
+// `_`/`.` name, not a core domain, not a directory holding no .memql file,
+// and not a sub-namespace -- of a parent holding .memql files (agents/roles),
+// or of a core domain whose files all sit in sub-namespaces
+// (shopify/generated).
+func TestMountableDomainRoot(t *testing.T) {
+	tree := fstest.MapFS{
+		"bundle/znas/concepts.memql":    memqlFile(),
+		"bundle/_draft/concepts.memql":  memqlFile(),
+		"bundle/.hidden/concepts.memql": memqlFile(),
+		"bundle/library/concepts.memql": memqlFile(),
+		"bundle/empty/prompts/x.tmpl":   {Data: []byte("{{.x}}")},
+		"agents/concepts.memql":         memqlFile(),
+		"agents/roles/civic.memql":      memqlFile(),
+		"shopify/generated/order.memql": memqlFile(),
+	}
+	core := currentCore("library", "shopify")
+	for _, tc := range []struct {
+		parent, name string
+		want         bool
+	}{
+		{"bundle", "znas", true},
+		{"bundle", "_draft", false},
+		{"bundle", ".hidden", false},
+		{"bundle", "library", false},
+		{"bundle", "empty", false},
+		{"agents", "roles", false},
+		{"shopify", "generated", false},
+	} {
+		parent, err := fs.Sub(tree, tc.parent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := MountableDomainRoot(parent, tc.parent, tc.name, core); got != tc.want {
+			t.Errorf("MountableDomainRoot(%s/%s) = %v, want %v", tc.parent, tc.name, got, tc.want)
+		}
+	}
+}
+
+// CheckLanguageLineFile holds one file to exactly the checks the resolver
+// runs over a tree: the same problems, codes and messages, for every kind of
+// declaration it refuses, and none for a good one.
+func TestCheckLanguageLineFileIsTheResolversCheck(t *testing.T) {
+	for _, text := range []string{
+		"memql = \"1.0\"\nedition = \"2026\"\n",
+		"memql = \"1.1\"\nedition = \"2026\"\n",
+		"memql = \"0.9\"\nedition = \"2026\"\n",
+		"memql = \"1.0\"\nedition = \"2027\"\n",
+		"memql = \"01.0\"\nedition = \"2026\"\n",
+		"[language]\n",
+		"edition = \"2026\"\n",
+	} {
+		_, want := ResolveLanguageLines(fstest.MapFS{
+			"znas/memql.toml":    manifestFile(text),
+			"znas/queries.memql": memqlFile(),
+		}, currentCore())
+		_, got := CheckLanguageLineFile("znas", "znas/memql.toml", []byte(text))
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("memql.toml %q:\n got %+v\nwant %+v", text, got, want)
 		}
 	}
 }
@@ -233,7 +311,7 @@ func TestLanguageLineMessagesNameTheFix(t *testing.T) {
 	}
 	wantMissing := fmt.Sprintf("domain \"znas\" declares no language line: add znas/memql.toml containing\n"+
 		"  memql = %q\n  edition = %q\n"+
-		"(or run: memqlmigrate --rewrite=language-line <tree>) [language_line_missing]", LanguageVersion, Edition)
+		"(or run: memqlmigrate --rewrite=language-line -w <dir>, where <dir> is the directory that holds znas/) [language_line_missing]", LanguageVersion, Edition)
 	if problems[0].Message != wantMissing {
 		t.Errorf("missing-line message:\n got %q\nwant %q", problems[0].Message, wantMissing)
 	}
@@ -334,13 +412,19 @@ func TestLanguageLinesForFindsTheDomainOfAPath(t *testing.T) {
 	lines := LanguageLines{
 		"good": {Domain: "good", Source: "good/memql.toml", Language: "1.0", Edition: "2026"},
 	}
-	for _, p := range []string{"good/queries.memql", "good/sub/concepts.memql", "unified:good/queries.memql:fooQuery"} {
+	// The two-part origin is what the functions loader stamps on every query,
+	// mutate and logic ("unified:" + the file's path), so a hook asked about
+	// one of those must find its line.
+	for _, p := range []string{"good/queries.memql", "good/sub/concepts.memql", "unified:good/queries.memql", "unified:good/queries.memql:fooQuery"} {
 		line, ok := lines.For(p)
 		if !ok || line.Domain != "good" {
 			t.Errorf("For(%q) = %+v, %v; want the line of good", p, line, ok)
 		}
 	}
-	for _, p := range []string{"stray.memql", "other/queries.memql", ""} {
+	// No line where the resolver counts no domain: a file at the root, a
+	// domain the tree does not hold, and a file no loader reads -- For asks
+	// LanguageLineDomainOf, the resolver's own rule, so the two cannot differ.
+	for _, p := range []string{"stray.memql", "other/queries.memql", "", "good/_wip/queries.memql", "good/_draft.memql", "good/prompts/x.tmpl"} {
 		if line, ok := lines.For(p); ok {
 			t.Errorf("For(%q) = %+v; want no line", p, line)
 		}

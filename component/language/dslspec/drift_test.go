@@ -13,10 +13,11 @@ package dslspec
 // component/language/annotations without an import cycle: the parser does
 // NOT import dslspec. Since memql#5359 the construct set, the body clauses
 // and the clause keywords are DERIVED from the parser's exported tables
-// (parser.TopLevelDeclKeywords, parser.StructFormKeywords,
-// parser.BodyClauses), so this test pins the hand-authored remainder --
-// constructCatalog, clauseDocs, the next-rules -- to those tables, and
-// asserts the derived projections against them by name.
+// (parser.ConstructKeywords -- itself parser.TopLevelDeclKeywords,
+// parser.StructFormKeywords and `use` -- and parser.BodyClauses), so this
+// test pins the hand-authored remainder -- constructCatalog, clauseDocs,
+// the next-rules -- to those tables, and asserts the derived projections
+// against them by name.
 //
 // Each assertion names the exact drifted symbol so a future failure is
 // self-explaining ("add X to dslspec constructs()" / "remove Y").
@@ -34,8 +35,10 @@ import (
 // author-facing construct in dslspec but is handled by the parser
 // BEFORE parseDefinition (so it is not in TopLevelDeclKeywords) and is
 // not a struct-form rewrite stage (so it is not in StructFormKeywords).
-// The drift test adds it explicitly to the expected union.
-const useImportKeyword = useKeyword
+// The drift test adds it explicitly to the expected union, which it builds
+// on its own rather than reading parser.ConstructKeywords, the table
+// dslspec's construct set comes from.
+const useImportKeyword = "use"
 
 // specConstructKeywords returns the set of construct keywords dslspec
 // currently declares.
@@ -306,18 +309,41 @@ func TestStructFormConstructsAreFunctionCategory(t *testing.T) {
 	}
 }
 
+// receiverKeyToConstructKeywords maps an annotations-registry receiver key to
+// the author-facing construct keyword(s) it governs, derived from
+// constructs(): a construct receiver governs the constructs naming it as
+// their AnnotationReceiver (the "Spec" receiver backs both `spec` and
+// `trait`); a field receiver governs the constructs whose field list it
+// checks; ConceptBody governs the concept. A key no construct names, and no
+// construct's field list is checked by, maps to nothing. Only this test
+// needs the mapping, so it lives here rather than in the spec.
+func receiverKeyToConstructKeywords(receiverKey string) []string {
+	set := map[string]bool{}
+	if receiverKey == string(annotations.ConceptBody) {
+		set["concept"] = true
+	}
+	for _, c := range constructs() {
+		if c.AnnotationReceiver == receiverKey && receiverKey != "" {
+			set[c.Keyword] = true
+		}
+		if string(fieldReceiverFor(c)) == receiverKey && receiverKey != "" {
+			set[c.Keyword] = true
+		}
+	}
+	return sortedSet(set)
+}
+
 // TestAnnotationsProjectRegistryFromRegistrySide asserts -- from the
 // REGISTRY side (#2124 assertion 2) -- that dslspec's Annotations is an
 // exact projection of annotations.ByReceiver + annotations.Docs:
 //
 //   - every annotation name in the registry appears exactly once in the
 //     spec, with its registry doc,
-//   - every receiver key in the registry maps (via
-//     receiverKeyToConstructKeywords) to at least one REAL construct
-//     keyword dslspec declares,
-//   - and -- the new-receiver guard -- no receiver key falls through
-//     receiverKeyToConstructKeywords' default branch (which would surface
-//     the raw key as a fake "construct").
+//   - and -- the new-receiver guard -- every receiver key in the registry
+//     maps (receiverKeyToConstructKeywords, above) to at least one REAL
+//     construct keyword dslspec declares. The mapping reads constructs(),
+//     so a receiver key no construct names and no construct's field list
+//     is checked by maps to nothing, and fails here by name.
 //
 // The spec_test.go side already checks the projection from the spec
 // side; this checks it from the registry side and additionally fails on
@@ -327,9 +353,9 @@ func TestAnnotationsProjectRegistryFromRegistrySide(t *testing.T) {
 
 	// New-receiver guard: every registry receiver key must map to
 	// construct keywords dslspec actually declares. A new key added to
-	// annotations.ByReceiver that receiverKeyToConstructKeywords does not
-	// handle falls through to its default branch (returns the raw key),
-	// which is NOT a construct keyword -- caught here.
+	// annotations.ByReceiver that no construct names as its
+	// AnnotationReceiver, and that fieldReceiverFor gives to no construct,
+	// maps to nothing -- caught here.
 	for receiverKey := range annotations.ByReceiver {
 		mapped := receiverKeyToConstructKeywords(receiverKey)
 		if len(mapped) == 0 {
@@ -340,11 +366,10 @@ func TestAnnotationsProjectRegistryFromRegistrySide(t *testing.T) {
 		}
 		for _, kw := range mapped {
 			if !specConstructs[kw] {
-				t.Errorf("DRIFT: annotations.ByReceiver has a NEW receiver key %q that "+
-					"receiverKeyToConstructKeywords maps to %q, which is not a dslspec construct keyword -- "+
-					"add a case for %q in receiverKeyToConstructKeywords "+
-					"(component/language/dslspec/spec.go) mapping it to its construct keyword(s)",
-					receiverKey, kw, receiverKey)
+				t.Errorf("DRIFT: annotations.ByReceiver receiver key %q maps to %q, which is not a dslspec "+
+					"construct keyword -- fix the mapping in receiverKeyToConstructKeywords (drift_test.go) "+
+					"or the construct catalog (component/language/dslspec/constructs.go)",
+					receiverKey, kw)
 			}
 		}
 	}

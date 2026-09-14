@@ -148,6 +148,262 @@ func TestRun_BundleWithoutLanguageLineExitsOne(t *testing.T) {
 	}
 }
 
+// TestRun_AMistypedKeywordIsOneRefusal: a top-level statement opened by a
+// word no construct is spelled with is refused by both passes -- by Load,
+// which runs the construct-keyword gate over each whole file and whose parser
+// raises the same refusal, and by the gate the parity pass runs at Init
+// (memql#5356). memqllint printed two, with two keyword lists that disagreed:
+// the parser's listed the internal `func`, the gate's listed `use`. The
+// parser now raises the gate's own refusal from the one table
+// (ConstructKeywords), and memqllint prints it once: Load's copy, which names
+// the line of the file. The retired `import ( ... )` block is the same
+// statement-level refusal, naming its replacement.
+func TestRun_AMistypedKeywordIsOneRefusal(t *testing.T) {
+	cases := []struct {
+		name, queries string
+		want          []string
+	}{
+		{
+			name:    "a typo'd construct keyword",
+			queries: strings.Replace(testQueries, "query item queryItems", "qurey item queryItems", 1),
+			want: []string{
+				"demo/queries.memql:", "line 5: qurey is not a construct keyword: did you mean query?",
+				"The constructs are: " + strings.Join(langparser.ConstructKeywords(), ", ") + " [construct_unknown]",
+			},
+		},
+		{
+			name:    "the retired import block",
+			queries: "import (\n\t\"./concepts\"\n)\n\n" + testQueries,
+			want: []string{
+				"demo/queries.memql:", "line 1: the import ( ... ) block is retired: a construct is imported with a file-top use line",
+				"[construct_unknown]",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out := captureRun(t, []string{"--json", writeTree(t, map[string]string{
+				"demo/concepts.memql": testConcepts,
+				"demo/queries.memql":  tc.queries,
+			})})
+			if code != 1 {
+				t.Fatalf("run() = %d, want 1\n%s", code, out)
+			}
+			var report Report
+			if err := json.Unmarshal([]byte(out), &report); err != nil {
+				t.Fatalf("the --json report does not parse: %v\n%s", err, out)
+			}
+			if len(report.Errors) != 1 {
+				t.Fatalf("one statement must be one refusal, got %d:\n%s", len(report.Errors), out)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(report.Errors[0].Message, w) {
+					t.Errorf("the refusal must carry %q, got %q", w, report.Errors[0].Message)
+				}
+			}
+		})
+	}
+
+	// Positive control: the same query, spelled right and with no import
+	// block, lints clean -- so the refusals above are the statement, and not
+	// a fixture that fails for some other reason.
+	if code, out := captureRun(t, []string{writeTree(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/queries.memql":  testQueries,
+	})}); code != 0 {
+		t.Errorf("the control: run() = %d, want 0\n%s", code, out)
+	}
+}
+
+// TestRun_ARefusalBothPassesMakeNamesTheFileLine (memql#5356): an annotation
+// the registry refuses is refused by Load, which parses the whole file, and by
+// the parity pass, whose query loader parses one construct at a time -- so the
+// parity copy counts its line from the top of that construct ("line 3" here),
+// and the rewriter that lowers the first query moves the parser's own count a
+// line down. memqllint prints the refusal once, naming line 12, the line of
+// the file the author wrote it on.
+func TestRun_ARefusalBothPassesMakeNamesTheFileLine(t *testing.T) {
+	queries := testQueries + `
+
+@bogus
+@enabled
+@description("A second query.")
+query item queryByStatus {
+  args {
+    status  string  @required
+  }
+  filter  status == args.status
+}`
+	if got := strings.Split(queries, "\n")[11]; got != "@bogus" {
+		t.Fatalf("the fixture's line 12 is %q, want @bogus", got)
+	}
+	code, report, out := jsonReport(t, writeTree(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/queries.memql":  queries,
+	}))
+	if code != 1 || len(report.Errors) != 1 {
+		t.Fatalf("one refused annotation: run() = %d, want 1 with exactly one error:\n%s", code, out)
+	}
+	msg := report.Errors[0].Message
+	for _, want := range []string{"demo/queries.memql:", "at line 12, column 1:", `query "queryByStatus": unknown annotation @bogus`, "[annotation_unknown]"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the refusal must carry %q, got %q", want, msg)
+		}
+	}
+}
+
+// TestRun_RefusedLineOutsideTheParityMountIsStillReported: boot mounts every
+// domain directory, but the parity pass mounts only one that directly holds a
+// .memql file (MountOverlayDomains) -- so a domain holding only a
+// sub-namespace refuses boot without its line and is Load's alone to report.
+// memqllint drops Load's copy of a refusal only when the parity pass carries
+// the same one, never merely because the parity pass ran: here it reports
+// demo's (mounted, refused by both passes, printed once) and beta's (Load's
+// alone), and a dedupe that dropped every Load refusal would lose beta's.
+func TestRun_RefusedLineOutsideTheParityMountIsStillReported(t *testing.T) {
+	files := map[string]string{
+		"demo/concepts.memql":     testConcepts,
+		"beta/sub/concepts.memql": "/// A widget.\nconcept widget {\n  label  string\n}\n",
+	}
+	code, out := captureRun(t, []string{"--json", writeTreeAsIs(t, files)})
+	if code != 1 {
+		t.Fatalf("two domains with no memql.toml: run() = %d, want 1\n%s", code, out)
+	}
+	var report Report
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("the --json report does not parse: %v\n%s", err, out)
+	}
+	if len(report.Errors) != 2 {
+		t.Fatalf("want exactly two diagnostics, the missing line of demo and of beta, got:\n%s", out)
+	}
+	for _, domain := range []string{"demo", "beta"} {
+		n := 0
+		for _, e := range report.Errors {
+			if strings.Contains(e.Message, "[language_line_missing]") && strings.Contains(e.Message, `domain "`+domain+`" declares no language line`) {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("want the missing line of domain %s exactly once, got %d:\n%s", domain, n, out)
+		}
+	}
+
+	// Positive control: declaring both lines leaves nothing to report.
+	line := dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render()
+	files["demo/memql.toml"], files["beta/memql.toml"] = line, line
+	if code, out := captureRun(t, []string{writeTreeAsIs(t, files)}); code != 0 {
+		t.Errorf("the same domains declaring their lines: run() = %d, want 0\n%s", code, out)
+	}
+}
+
+// jsonReport runs the CLI with --json and parses what it prints.
+func jsonReport(t *testing.T, args ...string) (int, Report, string) {
+	t.Helper()
+	code, out := captureRun(t, append([]string{"--json"}, args...))
+	var report Report
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("the --json report does not parse: %v\n%s", err, out)
+	}
+	return code, report, out
+}
+
+// TestRun_ADomainDirectoryChecksItsOwnLanguageLine (memql#5356): pointed at
+// one domain directory -- or a file inside it -- memqllint lints it as the
+// bare root it always did, and checks the domain's OWN memql.toml, which no
+// other pass can see from inside the domain. A missing file is one WARNING
+// that leaves the exit code alone, because whether the directory is a
+// mounted domain depends on the tree it is mounted in; a malformed or newer
+// one is an error with its code. The bundle root still refuses the missing
+// line as an error, as boot does.
+func TestRun_ADomainDirectoryChecksItsOwnLanguageLine(t *testing.T) {
+	bundle := writeTreeAsIs(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/queries.memql":  testQueries,
+	})
+	domainDir := filepath.Join(bundle, "demo")
+	for _, target := range []string{domainDir, filepath.Join(domainDir, "queries.memql")} {
+		code, report, out := jsonReport(t, target)
+		if code != 0 || len(report.Errors) != 0 {
+			t.Errorf("%s with no memql.toml: run() = %d, want 0 with no error -- a missing line here is a warning:\n%s", target, code, out)
+		}
+		if len(report.Warnings) != 1 {
+			t.Fatalf("%s: want exactly one warning, got:\n%s", target, out)
+		}
+		for _, want := range []string{
+			`domain "demo" declares no language line, and boot refuses a mounted domain without one`,
+			"Add demo/memql.toml containing",
+			"memqlmigrate --rewrite=language-line -w " + bundle,
+			"Linting " + bundle + ", the directory that holds it, checks it exactly as boot does",
+		} {
+			if !strings.Contains(report.Warnings[0].Message, want) {
+				t.Errorf("%s: the warning must say %q, got %q", target, want, report.Warnings[0].Message)
+			}
+		}
+	}
+	// The human report prints it once, and exits as before.
+	if code, out := captureRun(t, []string{domainDir}); code != 0 || strings.Count(out, "WARNING:") != 1 {
+		t.Errorf("human output: run() = %d, want 0 with one WARNING line:\n%s", code, out)
+	}
+
+	// A file that is there is held to the loader's own checks.
+	for text, code := range map[string]string{
+		"memql = \"1.1\"\nedition = \"2026\"\n": "[language_version_newer]",
+		"[language]\n":                          "[language_line_malformed]",
+	} {
+		if err := os.WriteFile(filepath.Join(domainDir, dslfs.ManifestFile), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		exit, report, out := jsonReport(t, domainDir)
+		if exit != 1 || len(report.Errors) != 1 || !strings.Contains(report.Errors[0].Message, code) ||
+			!strings.Contains(report.Errors[0].Message, `domain "demo"`) || len(report.Warnings) != 0 {
+			t.Errorf("memql.toml %q: want exit 1 with one %s error naming demo and no warning, got %d:\n%s", text, code, exit, out)
+		}
+	}
+
+	// Positive control: the line memqlmigrate writes, at the root, is clean.
+	line := dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render()
+	if err := os.WriteFile(filepath.Join(domainDir, dslfs.ManifestFile), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{domainDir, filepath.Join(domainDir, "queries.memql")} {
+		if code, report, out := jsonReport(t, target); code != 0 || len(report.Errors) != 0 || len(report.Warnings) != 0 {
+			t.Errorf("%s with its line declared: run() = %d, want 0 with nothing to report:\n%s", target, code, out)
+		}
+	}
+
+	// And the bundle root, which boot mounts, still refuses a missing line.
+	if err := os.Remove(filepath.Join(domainDir, dslfs.ManifestFile)); err != nil {
+		t.Fatal(err)
+	}
+	if code, report, out := jsonReport(t, bundle); code != 1 || len(report.Errors) != 1 ||
+		!strings.Contains(report.Errors[0].Message, "[language_line_missing]") {
+		t.Errorf("the bundle root: want exit 1 with the missing line as the one error, got %d:\n%s", code, out)
+	}
+}
+
+// TestRun_ADirectoryNoMountReadsAsADomainGetsNoLanguageLineCheck: three
+// targets that linted green before this epic, and must again -- with no
+// language-line output at all, because none is a domain a mount would read:
+// a single file inside a sub-namespace of a domain that holds .memql files
+// (dsl/agents/roles), a sub-namespace of a core domain (dsl/shopify/
+// generated), and a pack's dsl/ directory, which carries its own valid line.
+// The last also printed a parity error while the root was mounted under its
+// directory's name: the pack registers that tree as shopifypack, so a guessed
+// name judged its @namespace against "dsl".
+func TestRun_ADirectoryNoMountReadsAsADomainGetsNoLanguageLineCheck(t *testing.T) {
+	for _, target := range []string{
+		filepath.Join("..", "..", "dsl", "agents", "roles", "agriculture.memql"),
+		filepath.Join("..", "..", "dsl", "shopify", "generated"),
+		filepath.Join("..", "..", "examples", "shopifypack", "dsl"),
+	} {
+		code, report, out := jsonReport(t, target)
+		if code != 0 || len(report.Errors) != 0 || len(report.Warnings) != 0 || strings.Contains(out, "language line") ||
+			strings.Contains(out, "language_line") {
+			t.Errorf("%s: run() = %d, want 0 with no language-line output:\n%s", target, code, out)
+		}
+	}
+}
+
 // TestRun_UnreadRootManifestIsReported: a memql.toml at the root of the
 // linted tree is never read -- each domain carries its own -- so memqllint
 // prints it rather than letting an author believe it governs the bundle.

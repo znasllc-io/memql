@@ -11,10 +11,11 @@ import (
 // for "what can a .memql declaration start with".
 //
 // DERIVED from the parser wherever the parser can say it (memql#5359):
-//   - the SET of constructs is parser.StructFormKeywords (the struct-form
-//     rewriter's family: query / mutate / logic / automation) plus
-//     parser.TopLevelDeclKeywords (the parser's top-level dispatch) plus
-//     the `use` import;
+//   - the SET of constructs is parser.ConstructKeywords, the one table of
+//     words that open a top-level statement -- the struct-form rewriter's
+//     family (query / mutate / logic / automation), the parser's top-level
+//     dispatch, and the `use` import -- which the parser's refusal of any
+//     other word and the load gate construct_unknown read too (memql#5356);
 //   - each construct's BodyBlocks are parser.BodyClauses -- the clauses the
 //     rewriter and the construct parsers accept, pinned to them by the
 //     parser's own tests;
@@ -44,20 +45,18 @@ func constructs() []Construct {
 	return out
 }
 
-// useKeyword is the file-top import statement: an author-facing construct
-// the parser handles before its top-level dispatch, so it is in neither of
-// the parser's keyword lists.
+// useKeyword is the file-top import statement: a word that opens a top-level
+// statement (it is in parser.ConstructKeywords) but declares nothing, so the
+// declaration keywords leave it out (declarationKeywords).
 const useKeyword = "use"
 
-// constructKeywords is the parser's construct set, in the order
-// constructCatalog lists them; a keyword the catalog does not know is
-// appended in sorted order (and fails the drift test for its missing entry).
+// constructKeywords is the parser's construct set (parser.ConstructKeywords),
+// in the order constructCatalog lists them; a keyword the catalog does not
+// know is appended in sorted order (and fails the drift test for its missing
+// entry).
 func constructKeywords() []string {
-	set := map[string]bool{useKeyword: true}
-	for _, kw := range parser.StructFormKeywords {
-		set[kw] = true
-	}
-	for _, kw := range parser.TopLevelDeclKeywords {
+	set := map[string]bool{}
+	for _, kw := range parser.ConstructKeywords() {
 		set[kw] = true
 	}
 	var out []string

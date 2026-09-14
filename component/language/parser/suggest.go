@@ -105,26 +105,28 @@ func didYouMean(name string, candidates []string) string {
 // BEFORE parseDefinition's contextual-keyword dispatch runs, so they are
 // deliberately absent from topLevelDeclParsers / TopLevelDeclKeywords: the
 // query / mutate / logic / automation family. They are still valid words an
-// author types, so the fail-loud error surface must recognise them (in the
-// expected-keyword hint list) and offer them as did-you-mean candidates -- a
-// typo'd `quer` should suggest `query` even though the parser never dispatches
-// `query` itself. Kept as an explicit list so TestDeclarationKeywordNamesInSync
-// can prove declarationKeywordNames = TopLevelDeclKeywords + this family.
+// author types, so the call-position did-you-mean below offers them -- a
+// typo'd `quer allNodes(...)` should suggest `query`. Kept as an explicit list
+// so TestDeclarationKeywordNamesInSync can prove declarationKeywordNames =
+// TopLevelDeclKeywords + this family.
 var rewriterHandledDeclKeywords = []string{"automation", "logic", "mutate", "query"}
 
 // declarationKeywordNames is the flat, sorted, hand-maintained literal of every
 // author-facing top-level DECLARATION keyword: the contextual constructs
 // dispatched by topLevelDeclParsers PLUS the rewriter-handled query / mutate /
-// logic / automation family (rewriterHandledDeclKeywords).
+// logic / automation family (rewriterHandledDeclKeywords). It serves only the
+// CALL-position hint below; a top-level statement no construct parser takes is
+// refused from ConstructKeywords, the one construct-keyword table
+// (refuseTopLevelToken, memql#5356).
 //
 // It is deliberately a LITERAL rather than derived from topLevelDeclParsers /
-// TopLevelDeclKeywords. The did-you-mean pools below are consulted from
+// TopLevelDeclKeywords. The did-you-mean pool below is consulted from
 // parseIdentifierExpression, which sits transitively inside topLevelDeclParsers'
-// own package-var initialization graph; deriving these pools from
-// TopLevelDeclKeywords (which is derived FROM topLevelDeclParsers) would form a
-// Go initialization cycle. TestDeclarationKeywordNamesInSync guards this literal
-// against drift from the real dispatch table + the rewriter-handled family, so
-// the single-source-of-truth property is preserved by a test instead of a
+// own package-var initialization graph; deriving it from TopLevelDeclKeywords
+// (which is derived FROM topLevelDeclParsers) would form a Go initialization
+// cycle. TestDeclarationKeywordNamesInSync guards this literal against drift
+// from the real dispatch table + the rewriter-handled family, so the
+// single-source-of-truth property is preserved by a test instead of a
 // compile-time derivation.
 var declarationKeywordNames = []string{
 	"action", "automation", "builtin", "capability", "concept", "logic",
@@ -167,22 +169,6 @@ func kindSuggestionCandidates() []string {
 	for kw := range invocationKindKeywords {
 		set[kw] = true
 	}
-	for _, kw := range declarationKeywordNames {
-		set[kw] = true
-	}
-	return sortedKeys(set)
-}
-
-// topLevelKeywordHintKeywords is the full author-facing set of tokens that can
-// legally open a top-level construct: `func` (the internal procedural form) +
-// every declaration keyword (declarationKeywordNames, which already folds in
-// the rewriter-handled query / mutate / logic / automation family). It is BOTH
-// the expected-keyword hint list AND the did-you-mean candidate pool for
-// parseDefinition's unknown-token error, so the error names every keyword an
-// author might have meant -- including the ones the rewriter consumes upstream,
-// which the old hint list omitted (#2358).
-func topLevelKeywordHintKeywords() []string {
-	set := map[string]bool{"func": true}
 	for _, kw := range declarationKeywordNames {
 		set[kw] = true
 	}

@@ -43,6 +43,7 @@ import (
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/core/component"
+	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
@@ -61,6 +62,12 @@ type PackageDSLResult struct {
 	// Diagnostics is every problem strict boot would print, construct by
 	// construct. Empty means this tree mounts clean.
 	Diagnostics []LintDiagnostic
+	// UnreadRootManifest is the diagnostic for a memql.toml at the root of the
+	// tree (language_line_unread), or nil. It is NOT in Diagnostics: no mount
+	// reads a root file -- each domain declares its line in its own
+	// <domain>/memql.toml -- so boot refuses nothing for it, and a deploy must
+	// neither be refused for it nor be told it "would refuse boot".
+	UnreadRootManifest *LintDiagnostic
 }
 
 // AnalyzePackageDSL validates the product-DSL half of a candidate package.
@@ -81,6 +88,9 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 	defer unmount()
 
 	result := PackageDSLResult{Mounted: mounted, SkippedCore: skippedCore}
+	if msg, unread := memqldsl.UnreadRootManifest(root); unread {
+		result.UnreadRootManifest = &LintDiagnostic{File: dslfs.ManifestFile, Message: msg}
+	}
 
 	concepts, conceptSkips, err := BuildUnifiedConcepts(logger, memqldsl.Tree())
 
@@ -94,7 +104,6 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 	}
 	if err != nil {
 		result.Diagnostics = append(result.Diagnostics, LintDiagnostic{Message: err.Error()})
-		result.Diagnostics = withUnreadRootManifest(result.Diagnostics, root)
 		sortDiagnostics(result.Diagnostics)
 		return result, nil
 	}
@@ -123,7 +132,6 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 	if initErr != nil && !strings.Contains(initErr.Error(), "strict DSL boot refused") {
 		result.Diagnostics = append(result.Diagnostics, LintDiagnostic{Message: initErr.Error()})
 	}
-	result.Diagnostics = withUnreadRootManifest(result.Diagnostics, root)
 
 	sortDiagnostics(result.Diagnostics)
 	// The concept build and Init both refuse a domain whose language line the
