@@ -219,8 +219,8 @@ func TestConditionRefusals(t *testing.T) {
 
 // TestGeneratedAutomationIsV1: the construct parses with the edition-2026
 // grammar on and compiles as a v1 automation -- the trigger filter a lambda,
-// the step's arguments expression leaves the run's scope resolves -- which the
-// automations runtime prepares without refusal.
+// its one statement's arguments expression leaves the run's scope resolves --
+// which the automations runtime prepares without refusal.
 func TestGeneratedAutomationIsV1(t *testing.T) {
 	src := generate(t, `payload.role == "admin" && payload.active == true`)
 	normalised, err := langparser.NormaliseAll(src)
@@ -256,7 +256,8 @@ func TestGeneratedAutomationIsV1(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"filter":"row =\u003e row.role == \"admin\" \u0026\u0026 row.active == true"`,
-		`"nodeId":{"$expr":"id"}`,
+		`"body":"statements"`,
+		`"nodeId":{"$expr":"args.id"}`,
 		`"event":{"$expr":"event"}`,
 		`"emailRuleId":"v1:campaigns:emailRule:ab12cd34"`,
 	} {
@@ -277,17 +278,19 @@ func TestGeneratedAutomationIsV1(t *testing.T) {
 	}
 }
 
-// TestGeneratedAutomationLoadsBeforeTheFlip: today the authoring pipeline
-// parses with the legacy grammar, which accepts the lambda filter (a pushdown
-// position). The construct loads as a legacy automation whose filter is still
-// evaluated as the lambda it is.
-func TestGeneratedAutomationLoadsBeforeTheFlip(t *testing.T) {
+// TestGeneratedAutomationLoadsAsStatements: the authoring pipeline's load path
+// takes the construct as an edition-2026 statement body (epic memql#5370) --
+// one builtin statement -- whose trigger filter is the lambda it is.
+func TestGeneratedAutomationLoadsAsStatements(t *testing.T) {
 	src := generate(t, `row.role == "admin"`)
 	a, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(src, "authored:emailrules")
 	if err != nil {
-		t.Fatalf("the legacy load path refused the construct: %v\n%s", err, src)
+		t.Fatalf("the load path refused the construct: %v\n%s", err, src)
 	}
-	if a.IsV1() || a.Trigger == nil || a.Trigger.FilterLambda == nil {
-		t.Fatalf("v1=%v trigger=%+v: want a legacy automation whose lambda filter was parsed", a.IsV1(), a.Trigger)
+	if !a.IsV1() || !a.IsStatementBody() || a.Trigger == nil || a.Trigger.FilterLambda == nil {
+		t.Fatalf("v1=%v statements=%v trigger=%+v: want a statement body whose lambda filter was parsed", a.IsV1(), a.IsStatementBody(), a.Trigger)
+	}
+	if len(a.Steps) != 1 || a.Steps[0].Function == nil || a.Steps[0].Function.Name != "emailRuleFire" || a.Steps[0].Function.Kind != "builtin" {
+		t.Fatalf("steps %+v: want the one builtin statement", a.Steps)
 	}
 }
