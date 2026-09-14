@@ -147,11 +147,15 @@ type PublishStatement struct {
 }
 
 // ReturnStatement is `return [<value>]`. It ends the body; in an automation,
-// the run.
+// the run. The value is an expression or, as on the right of `:=`, a whole
+// construct call (`return builtin ensureDailySpace(userId: args.id)`): at most
+// one of Call and Value is set, and neither for a bare `return`.
 type ReturnStatement struct {
-	// Value is nil for a bare `return`.
+	Call  *ConstructCall
 	Value ExpressionNode
-	Span  Span
+	// Mods carries Retry only, and only with a Call.
+	Mods StatementMods
+	Span Span
 }
 
 func (*AssignStatement) node()            {}
@@ -291,6 +295,7 @@ func StatementExpressions(s BodyStatement) []ExpressionNode {
 			add(t.Payload)
 		}
 	case *ReturnStatement:
+		addCall(t.Call)
 		add(t.Value)
 	}
 	return out

@@ -105,6 +105,7 @@ The body compiler emits the executor's step list in SOURCE ORDER; there is no to
 | `parallel { branch a { } }` | `type: "parallel"`, `parallel: {wait, branches: [{id: "a", type: "block", block: {steps: [...]}}]}` |
 | `publish "t" { ... }` | `type: "event"`, `event: {topic: "t", payload: {...value leaves...}}` |
 | `return v` | `type: "return"`, `return: {value: "<canonical v1 source>"}` |
+| `return <call>` | the call's own step (as for `x := <call>`, without `binds`) carrying `returns: true`: the sequence ends after it with the call's value as the return value, so the call is journaled, previewed and retried like any call |
 
 Expression leaves follow epic 2's encoding: fields that are always an expression (`condition`, `forEach.source`, `forEach.filter`, `expression`, `return.value`) carry canonical v1 source (`ast.FormatExpr`); a value inside an args or payload map is `{"$expr": "<source>"}`.
 
@@ -287,7 +288,9 @@ type PublishStatement struct {
 	Span    Span
 }
 type ReturnStatement struct {
-	Value ExpressionNode // nil for a bare return
+	Call  *ConstructCall // at most one of Call and Value; neither for a bare return
+	Value ExpressionNode
+	Mods  StatementMods  // Retry only, with a Call
 	Span  Span
 }
 
@@ -626,7 +629,7 @@ func rewriteDeclarationsAndTriggers(src string) string
 
 **Files:**
 - Create: `component/automations/sequence.go`, `component/automations/sequence_test.go`
-- Modify: `component/automations/types.go` (`Step.Binds`; step types `expression`, `return`, `block`; `ExpressionStepConfig{Expression string}`, `ReturnStepConfig{Value string}`, `BlockStepConfig{Steps []*Step}`; `FunctionStepConfig.Kind`; `AutomationExecution.Output any`), `component/automations/executor.go` (the main loop becomes a call to `runSequence`), `component/automations/run_scope.go` (bindings by name, child scopes, the row projection), `component/automations/steps/foreach.go` (children through `runSequence` in a child scope named by `As`), `steps/parallel.go` (branches as `block` steps; `wait any`), `steps/action.go` (value is the capability result; envelope to metadata), `steps/automation.go` (value is the sub-run's `Output`), `steps/function.go` (value unwrapped), `steps/steps.go` (register `expression`, `return`, `block`), `component/automations/loader.go` (`validateSteps` knows the new types), `component/work/kind.go` (the new step types), `component/automations/journal.go` (`closeRun` writes `outcome.returned`). The `switch` step type and executor stay until Task 13: legacy bodies still compile to them until the tree migrates.
+- Modify: `component/automations/types.go` (`Step.Binds`; `Step.Returns` -- the `return <call>` form: the sequence ends after the step with its value; step types `expression`, `return`, `block`; `ExpressionStepConfig{Expression string}`, `ReturnStepConfig{Value string}`, `BlockStepConfig{Steps []*Step}`; `FunctionStepConfig.Kind`; `AutomationExecution.Output any`), `component/automations/executor.go` (the main loop becomes a call to `runSequence`), `component/automations/run_scope.go` (bindings by name, child scopes, the row projection), `component/automations/steps/foreach.go` (children through `runSequence` in a child scope named by `As`), `steps/parallel.go` (branches as `block` steps; `wait any`), `steps/action.go` (value is the capability result; envelope to metadata), `steps/automation.go` (value is the sub-run's `Output`), `steps/function.go` (value unwrapped), `steps/steps.go` (register `expression`, `return`, `block`), `component/automations/loader.go` (`validateSteps` knows the new types), `component/work/kind.go` (the new step types), `component/automations/journal.go` (`closeRun` writes `outcome.returned`). The `switch` step type and executor stay until Task 13: legacy bodies still compile to them until the tree migrates.
 
 **Interfaces:**
 - Consumes: epic 2's `memql.EvalExpr`, `memql.EvalCondition`, `memql.ExprRow`, `RunScope`; Task 4's JSON.
@@ -652,7 +655,7 @@ type sequenceContext struct {
 }
 ```
 
-- [ ] **Step 1: Failing tests** (`sequence_test.go`, DB-free with a fake step registry): source order is execution order; a skipped step binds nothing and a later read is absent; the sibling-branch rebinding binds whichever ran; `retry(2)` runs a failing step three times then fails; `retry(1) on error continue` continues with the name absent; `return` stops the loop and a following step never runs; `return` inside a `for` body stops the enclosing sequence; `for` binds its variable in a child scope and a body name is gone after the loop; `parallel wait any` finishes on the first success; a `block` branch runs its steps in order; an `expression` step evaluates through `EvalExpr`; a query result reads as rows (`rows.first().email`) and marshals back to node maps inside a call argument; an action step's value is its capability result with the envelope in metadata.
+- [ ] **Step 1: Failing tests** (`sequence_test.go`, DB-free with a fake step registry): source order is execution order; a skipped step binds nothing and a later read is absent; the sibling-branch rebinding binds whichever ran; `retry(2)` runs a failing step three times then fails; `retry(1) on error continue` continues with the name absent; `return` stops the loop and a following step never runs; a call step with `returns: true` ends the loop with the call's value (and, retried, with the value of the attempt that succeeded); `return` inside a `for` body stops the enclosing sequence; `for` binds its variable in a child scope and a body name is gone after the loop; `parallel wait any` finishes on the first success; a `block` branch runs its steps in order; an `expression` step evaluates through `EvalExpr`; a query result reads as rows (`rows.first().email`) and marshals back to node maps inside a call argument; an action step's value is its capability result with the envelope in metadata.
 - [ ] **Step 2: Run** `go test github.com/znasllc-io/memql/component/automations/ -run 'TestSequence'` -- fail.
 - [ ] **Step 3: Implement.** A legacy automation (no step carries `binds`, and its JSON came from the legacy compile) keeps today's loop semantics through the same `runSequence`: `binds` absent means the step binds under its id, which is what `SetStepResult(step.ID, ...)` does today, so the legacy tree keeps passing until Task 13.
 - [ ] **Step 4: Run** `MEMQL_REQUIRE_DB=1 ... go test -count=1 ./component/automations/...` and `go test github.com/znasllc-io/memql/component/automations/...`.

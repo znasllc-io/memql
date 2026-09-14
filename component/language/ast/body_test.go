@@ -103,6 +103,8 @@ func statementSamples() map[string]struct {
 		"publish": {&PublishStatement{Topic: "t", Payload: &MapExpr{Entries: []MapEntry{{Key: "k", Value: id("publishValue")}}}},
 			[]string{"publishValue"}},
 		"return": {&ReturnStatement{Value: id("returnValue")}, []string{"returnValue"}},
+		"returnCall": {&ReturnStatement{Call: ccall("builtin", "b", NamedArg{Name: "k", Value: id("returnCallArg")})},
+			[]string{"returnCallArg"}},
 	}
 }
 

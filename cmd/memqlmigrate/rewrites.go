@@ -94,7 +94,7 @@ var registry = []rewrite{
 		doc:   "strip @description(\"...\") from args fields, which the parser refuses",
 		plain: rewriteArgsDescription},
 	{name: "bodies", edition: "2026", epic: "dsl-v1-bodies",
-		doc:  "step blocks and body { } -> statements in the order they ran; the terse header expanded; publishing logic moved into its automation; kinds on every call; steps.x.result, x.result and the argument pun -> x; args read args.x; rows read fields directly; mutate -> mutation; partition= off @trigger",
+		doc:  "(run after expressions) step blocks and body { } -> statements in the order they ran; the terse header expanded; publishing logic moved into its automation; kinds on every call; steps.x.result, x.result and the argument pun -> x; args read args.x; rows read fields directly; mutate -> mutation; partition= off @trigger",
 		tree: rewriteBodies},
 	{name: "language-line", edition: "2026", epic: "dsl-v1-foundations",
 		doc:  "declare memql = \"" + langparser.LanguageVersion + "\" and edition = \"2026\" in every domain that has no " + dslfs.ManifestFile,
