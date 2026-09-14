@@ -46,14 +46,11 @@ type readinessResolvers struct {
 	// state is the report's own word, touched is "any slot present",
 	// registered=false means the integration is not on this node.
 	IntegrationState func(ctx context.Context, name string) (state string, touched bool, registered bool, err error)
-	// Logger records the reads this evaluator DECLINES TO FAIL ON.
-	//
-	// Every resolver here answers "not present" rather than an error, which is
-	// the right shape for a verdict -- but it means a read that BROKE and a
-	// door that is genuinely shut produce the same report. On the `ai` arm
-	// those two are the difference between "set up inference" and "readiness
-	// could not ask", and the first is what a person is shown. The log line is
-	// the only place the difference survives.
+	// Logger records the reads that FAILED. A failed read answers Unknown with
+	// a closed-vocabulary reason (design record
+	// 2026-09-14-readiness-convergence, D1); the log line is where the error
+	// itself survives, because a row is broadcast to every signed-in reader
+	// and an error string may carry an address or a DSN fragment.
 	//
 	// Optional: nil is a valid resolver set, and the pure tests pass one.
 	Logger *slog.Logger
@@ -136,25 +133,35 @@ func evaluateModule(ctx context.Context, r readinessResolvers, mod envregistry.M
 	}
 	switch {
 	case mod.Evaluator == envregistry.EvaluatorInferenceStatus:
-		// A READ THAT FAILS LEAVES EVERY DOOR SHUT. This verdict is what the
-		// core gate branches on, and "we could not ask" reported as an open
-		// door sends somebody into a console whose every feature then
-		// refuses -- which is strictly worse than the gate they were on.
+		// A READ THAT FAILS IS UNKNOWN, NOT A SHUT DOOR (D1 of the 2026-09-14
+		// readiness-convergence record).
+		//
+		// The arm used to leave every door shut, on the argument that "we
+		// could not ask" reported as an open door sends somebody into a
+		// console whose every feature then refuses. That is the right
+		// direction for the GATE and the wrong one for a PERSISTED ROW: the
+		// row outlives the failure, is folded against other nodes' correct
+		// rows, and read "Partly set up" on the owner's cluster for a whole
+		// deploy (2026-09-13). The fold sets Unknown aside and the writer
+		// never persists it over a known row, so the gate still cannot OPEN
+		// on a read that broke -- it only stops CLOSING on one.
 		var regs []readiness.RegistrationFacts
 		if r.Registrations != nil {
 			got, err := r.Registrations(ctx)
-			switch {
-			case err == nil:
-				regs = got
-			case r.Logger != nil:
-				// SAID OUT LOUD, because the verdict cannot say it. What the
-				// person sees either way is "set up inference"; only this line
-				// distinguishes a cluster with no door from one whose fleet
-				// could not be read -- and the second is an operator problem
-				// with a completely different repair.
-				r.Logger.Warn("readiness: could not read the fleet, so every inference door reads shut",
-					"module", mod.Name, "nodeId", nodeId, "nodeType", nodeType, "error", err)
+			if err != nil {
+				// SAID OUT LOUD, with the error, because the row carries only
+				// the closed-vocabulary reason: a cluster whose fleet could not
+				// be read is an operator problem with a completely different
+				// repair from a cluster with no door.
+				if r.Logger != nil {
+					r.Logger.Warn("readiness: could not read the fleet; the inference verdict is unknown, not unconfigured",
+						"module", mod.Name, "nodeId", nodeId, "nodeType", nodeType, "error", err)
+				}
+				out.State = readiness.Unknown
+				out.Reason = readiness.ReasonFleetReadFailed
+				return out
 			}
+			regs = got
 		}
 		out.Lanes = readiness.InferenceLanes(readiness.InferenceInput{
 			Registrations:        regs,
@@ -178,10 +185,23 @@ func evaluateModule(ctx context.Context, r readinessResolvers, mod envregistry.M
 			state, touched, registered, err = r.IntegrationState(ctx, name)
 		}
 		switch {
-		// A probe that failed, or an integration this node does not carry,
-		// says nothing about whether a person did the setup. Unconfigured
-		// would send them to a form they may not need.
-		case err != nil || !registered:
+		// A probe that FAILED -- or answered with a report this evaluator
+		// cannot read -- says nothing about whether a person did the setup,
+		// and it is not "not hosted here" either: unknown, with the reason,
+		// so a fresh node can say "could not evaluate" and a node with a
+		// known row keeps it (readiness_write.go). It used to share
+		// notApplicable with the case below, and a node that DOES carry the
+		// integration hid behind the word for one that does not.
+		case err != nil:
+			if r.Logger != nil {
+				r.Logger.Warn("readiness: integration probe failed; the verdict is unknown",
+					"module", mod.Name, "integration", name, "nodeId", nodeId, "nodeType", nodeType, "error", err)
+			}
+			out.State = readiness.Unknown
+			out.Reason = readiness.ReasonIntegrationProbeFailed
+		// An integration this node does not carry is not applicable here.
+		// Unconfigured would send a person to a form they may not need.
+		case !registered:
 			out.State = readiness.NotApplicable
 		// unhealthy is CONFIGURED: the setup was done and the send is
 		// failing for some other reason, which is a different repair.

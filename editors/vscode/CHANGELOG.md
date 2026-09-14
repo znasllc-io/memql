@@ -38,10 +38,12 @@ someone deciding whether to install rather than for someone reading the repo.
   Hovering one shows your own construct rewritten: on
   `filter status == args.owner`, the hover shows
   `filter row => row.status == args.owner`.
-<!-- Quick fix, pending its landing in cmd/memql-lsp. When it does, add:
 - An underlined spelling offers a quick fix, **Rewrite to edition 2026**, which
-  rewrites the file the same way.
--->
+  rewrites that construct the way `memqlmigrate` would and changes only the
+  lines it has to. **Rewrite the file to edition 2026** does every construct at
+  once, and runs on save if `source.fixAll` is in your
+  `editor.codeActionsOnSave`. A construct the rewrite cannot convert, such as a
+  relationship traversal, keeps its underline and offers no fix.
 
 ## 0.3.1
 

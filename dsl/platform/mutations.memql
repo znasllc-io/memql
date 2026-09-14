@@ -2138,7 +2138,8 @@ mutate moduleReadiness recordModuleReadiness {
     module      string!
     nodeId      string!
     nodeType    string!
-    state       enum("configured", "partial", "unconfigured", "notApplicable")!
+    state       enum("configured", "partial", "unconfigured", "notApplicable", "unknown")!
+    reason      string
     core        boolean
     lanes       []object
     reportedAt  string!
@@ -2149,6 +2150,7 @@ mutate moduleReadiness recordModuleReadiness {
     nodeId:      args.nodeId
     nodeType:    args.nodeType
     state:       args.state
+    reason:      args.reason ?? ""
     core:        args.core ?? false
     lanes:       args.lanes ?? []
     reportedAt:  args.reportedAt

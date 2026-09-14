@@ -28,11 +28,10 @@ type engineImpactStore struct {
 // doc re-validates before a shared construct's edit goes live. De-duplicated
 // (one bundle can declare several edges to the same construct).
 func (s *engineImpactStore) ActiveDependentBundleIds(ctx context.Context, owner, toKind, toName string) ([]string, error) {
-	args, err := json.Marshal(map[string]string{"toName": toName, "toKind": toKind})
-	if err != nil {
-		return nil, err
-	}
-	res, err := s.engine.Execute(ctx, "dependentsOfConstruct("+string(args)+")")
+	// The named-argument form; a marshalled map in the parens is the
+	// object-literal form the parser refuses (see SetConstructStatus).
+	res, err := s.engine.Execute(ctx, fmt.Sprintf(`query dependentsOfConstruct(toName:%s, toKind:%s)`,
+		langparser.QuoteString(toName), langparser.QuoteString(toKind)))
 	if err != nil {
 		return nil, err
 	}

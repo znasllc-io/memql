@@ -14,6 +14,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/language/compiler"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
 func ruleWith(condition string) Rule {
@@ -95,14 +96,92 @@ func TestV1ConditionsAccepted(t *testing.T) {
 	}
 }
 
+// TestConditionsWithAnAtInAStringLoad: inside a string literal, an `@` -- and
+// a brace or a semicolon -- is text. The injection guard exists because the
+// condition used to be spliced into the construct raw; it is re-printed from
+// its parse now, a literal through QuoteString, so the conditions an email
+// rule is most often written with (an exact address, a domain) are accepted
+// by the form check, generate with the literal intact, and load through the
+// real compiler on every path a rule takes: Gate 1, which activation runs;
+// the legacy load path the authoring pipeline uses today; and the v1 compile
+// and runtime preparation the flip turns on.
+func TestConditionsWithAnAtInAStringLoad(t *testing.T) {
+	for _, c := range []struct{ cond, filter string }{
+		{`row.email == "boss@acme.com"`, `row.email == "boss@acme.com"`},
+		{`row.email.includes("@acme.com")`, `row.email.includes("@acme.com")`},
+		// The legacy spelling converts, literal and all.
+		{`payload.email == "boss@acme.com"`, `row.email == "boss@acme.com"`},
+		{`row.subject == "Re: {ticket}; closed"`, `row.subject == "Re: {ticket}; closed"`},
+	} {
+		t.Run(c.cond, func(t *testing.T) {
+			if err := ruleWith(c.cond).Validate(); err != nil {
+				t.Fatalf("the form check refused it: %v", err)
+			}
+			src := generate(t, c.cond)
+			// memqlmigrate:keep -- builds the expected v1 filter; not a fixture.
+			if want := "@filter(row => " + c.filter + ")\n"; !strings.Contains(src, want) {
+				t.Fatalf("generated no %s:\n%s", strings.TrimSpace(want), src)
+			}
+			loadsThroughTheRealCompiler(t, src)
+		})
+	}
+}
+
+// loadsThroughTheRealCompiler takes a generated construct through every
+// loader a rule meets, and fails naming the one that refused it.
+func loadsThroughTheRealCompiler(t *testing.T, src string) {
+	t.Helper()
+	if report := memqlengine.ValidateBundle(src, "campaigns/automations.memql"); !report.OK {
+		t.Fatalf("Gate 1 refused the construct:\n%s\ndiagnostics: %+v", src, report.Diagnostics)
+	}
+	legacy, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(src, "authored:emailrules")
+	if err != nil {
+		t.Fatalf("the legacy load path refused the construct: %v\n%s", err, src)
+	}
+	if legacy.Trigger == nil || legacy.Trigger.FilterLambda == nil {
+		t.Fatalf("the legacy load path lost the lambda filter: %+v", legacy.Trigger)
+	}
+	normalised, err := langparser.NormaliseAll(src)
+	if err != nil {
+		t.Fatalf("normalise: %v", err)
+	}
+	file, err := langparser.ParseFileWithOptions(normalised, langparser.Options{ExpressionsV1: true})
+	if err != nil {
+		t.Fatalf("the construct does not parse with ExpressionsV1 on: %v\n%s", err, src)
+	}
+	res, err := compiler.NewDefault().CompileFile(file)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	b, err := json.Marshal(res.Automations[0].JSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a automations.Automation
+	if err := json.Unmarshal(b, &a); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if err := automations.PrepareExpressions(&a); err != nil {
+		t.Fatalf("the runtime refused the compiled construct: %v", err)
+	}
+	if !a.IsV1() || a.Trigger.FilterLambda == nil {
+		t.Fatal("the runtime did not load the construct as v1 with its lambda filter")
+	}
+}
+
 // TestConditionRefusals: each refusal, and the words it is refused with. The
 // message is shown to the person who typed the condition, so each names the
 // problem in plain words and the fix in one sentence.
 func TestConditionRefusals(t *testing.T) {
 	for _, c := range []struct{ cond, want string }{
-		{`row.role == "admin"; drop`, "has to fit on one line"},
 		{"row.role == \"admin\"\n@disabled", "has to fit on one line"},
-		{`row.role == "admin" } automation evil {`, "can't contain braces, @ or semicolons"},
+		{"row.email == \"boss@acme.com\"\n@disabled", "has to fit on one line"},
+		// Outside a string literal, the injection shapes stay refused.
+		{`row.role == "admin"; drop`, "can only appear inside quotes"},
+		{`row.role == "admin" } automation evil {`, "can only appear inside quotes"},
+		{`row.role == "admin" @disabled`, "can only appear inside quotes"},
+		{`row.email == boss@acme.com`, "can only appear inside quotes"},
+		{`row.email == "boss@acme.com") @trigger(event="node.created"`, "can only appear inside quotes"},
 		{`row.role ==`, "The condition isn't valid:"},
 		{`1 == 1`, "has to test a field of the record that changed"},
 		{`event.kind == "node.created"`, "has to test a field of the record that changed"},

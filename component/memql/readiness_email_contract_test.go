@@ -28,13 +28,17 @@ func TestIntegrationReadinessEnvelopeSelection(t *testing.T) {
 		{"configured", `{"integrations":[{"name":"email","state":"configured"}]}`, readiness.Configured},
 		{"unhealthy remains configured", `{"integrations":[{"name":"email","state":"unhealthy"}]}`, readiness.Configured},
 		{"credential touched", `{"integrations":[{"name":"email","state":"needs_configuration","credentials":[{"present":true}]}]}`, readiness.Partial},
-		{"unknown state", `{"integrations":[{"name":"email","state":"future_state","settings":[{"source":"env"}]}]}`, readiness.NotApplicable},
-		{"empty state", `{"integrations":[{"name":"email","state":""}]}`, readiness.NotApplicable},
-		{"missing named report", `{"integrations":[{"name":"other","state":"configured"}]}`, readiness.NotApplicable},
-		{"malformed", `{"integrations":`, readiness.NotApplicable},
-		{"wrong shape", `{"integrations":{}}`, readiness.NotApplicable},
-		{"null", `null`, readiness.NotApplicable},
-		{"root state is not a report", `{"state":"configured"}`, readiness.NotApplicable},
+		// A REPORT THE EVALUATOR CANNOT READ IS UNKNOWN (D1 of the 2026-09-14
+		// readiness-convergence record): it cannot establish whether setup is
+		// complete, which is the failed-probe path -- and a failed probe is no
+		// longer spelled notApplicable, the word for "not hosted here".
+		{"unknown state", `{"integrations":[{"name":"email","state":"future_state","settings":[{"source":"env"}]}]}`, readiness.Unknown},
+		{"empty state", `{"integrations":[{"name":"email","state":""}]}`, readiness.Unknown},
+		{"missing named report", `{"integrations":[{"name":"other","state":"configured"}]}`, readiness.Unknown},
+		{"malformed", `{"integrations":`, readiness.Unknown},
+		{"wrong shape", `{"integrations":{}}`, readiness.Unknown},
+		{"null", `null`, readiness.Unknown},
+		{"root state is not a report", `{"state":"configured"}`, readiness.Unknown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cap := IntegrationCapability{Handler: func(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
@@ -60,8 +64,9 @@ func TestIntegrationReadinessEnvelopeSelection(t *testing.T) {
 		cap := IntegrationCapability{Handler: func(context.Context, map[string]any, int) ([]memorynodes.MemoryNode, error) {
 			return nil, errors.New("fixture failure")
 		}}
-		if got := evaluateIntegrationReadinessForTest("email", cap).State; got != readiness.NotApplicable {
-			t.Fatal(got)
+		got := evaluateIntegrationReadinessForTest("email", cap)
+		if got.State != readiness.Unknown || got.Reason != readiness.ReasonIntegrationProbeFailed {
+			t.Fatalf("got %s reason %q, want unknown with %q", got.State, got.Reason, readiness.ReasonIntegrationProbeFailed)
 		}
 	})
 }

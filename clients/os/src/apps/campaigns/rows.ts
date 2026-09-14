@@ -858,44 +858,94 @@ export function recipientModeLabel(mode: string): string {
   return RECIPIENT_MODES.find((m) => m.value === mode)?.label ?? mode;
 }
 
+/** One run of a rule's sentence. `code` marks something the person TYPED --
+ *  the condition, the address field -- which is shown in the code face. */
+export interface SentencePart {
+  text: string;
+  code?: true;
+}
+
 /**
- * A rule as one sentence, for the list line.
+ * A rule as one sentence, for the list line and the detail's headline.
  *
  * The list reads the same way the builder does, deliberately: somebody who
  * built a rule by filling in a sentence should recognise it in the list
  * without translating. Missing pieces render as their placeholder rather than
  * collapsing the sentence -- a half-built draft is a real state and it should
  * read as one.
+ *
+ * THE CONDITION IS QUOTED, NEVER REWORDED. It is the one expression a person
+ * types in the OS, so it is shown the way it was typed, in the code face --
+ * `row.role == "admin"`, never "its role is admin". Rewording it would be a
+ * second copy of the grammar, and that copy would drift from the one that
+ * runs. A legacy `payload.` condition, which the engine still converts, is
+ * shown as stored.
+ *
+ * THE CONDITION COMES LAST, after the recipients: that is where the builder
+ * asks for it, and a long condition in the middle would hold "When a user
+ * changes" open across a line of code. The list line is cut to one line, so
+ * last is also what keeps the template and the recipients readable there.
  */
-export function ruleSentence(
+export function ruleSentenceParts(
   rule: EmailRuleRow,
   names: { template: string; audience: string },
-): string {
+): SentencePart[] {
   const subject = rule.triggerConcept === "" ? "something" : `a ${conceptEntity(rule.triggerConcept)}`;
   const verb = rule.eventKind === "updated" ? "changes" : "is created";
   const template = names.template === "" ? "a template" : names.template;
-  let who: string;
+  let who: SentencePart[];
   switch (rule.recipientMode) {
     case "cluster_roles":
-      who =
-        rule.recipientRoles.length === 0
-          ? "the cluster owner"
-          : rule.recipientRoles.join(" and ") + " in this cluster";
+      who = [
+        {
+          text:
+            rule.recipientRoles.length === 0
+              ? "the cluster owner"
+              : rule.recipientRoles.join(" and ") + " in this cluster",
+        },
+      ];
       break;
     case "audience":
-      who = names.audience === "" ? "an audience" : `everyone in ${names.audience}`;
+      who = [{ text: names.audience === "" ? "an audience" : `everyone in ${names.audience}` }];
       break;
     case "row_address":
       who =
         rule.recipientField === ""
-          ? "an address on the row"
-          : `the address in ${rule.recipientField}`;
+          ? [{ text: "an address on the row" }]
+          : [{ text: "the address in " }, { text: rule.recipientField, code: true }];
       break;
     default:
-      who = "somebody";
+      who = [{ text: "somebody" }];
   }
-  const when = rule.condition.trim() === "" ? "" : `, but only when ${rule.condition.trim()}`;
-  return `When ${subject} ${verb}${when}, email ${template} to ${who}.`;
+  const condition = rule.condition.trim();
+  const when: SentencePart[] =
+    condition === "" ? [] : [{ text: ", but only when " }, { text: condition, code: true }];
+  return [{ text: `When ${subject} ${verb}, email ${template} to ` }, ...who, ...when, { text: "." }];
+}
+
+/** The same sentence as plain text: the list line's full reading, on hover,
+ *  for when one line cuts it short. */
+export function ruleSentence(
+  rule: EmailRuleRow,
+  names: { template: string; audience: string },
+): string {
+  return ruleSentenceParts(rule, names)
+    .map((part) => part.text)
+    .join("");
+}
+
+/**
+ * What `row` is in a rule's condition, in the words of the rule's own
+ * sentence: "the user that changed".
+ *
+ * THE NOUN IS THE ONE THE BUILDER'S SENTENCE CHOSE, so the caption under the
+ * condition points at the thing named just above it rather than at an
+ * abstraction the person has to map back. Before a concept is chosen it is
+ * "the record".
+ */
+export function conditionRowIs(rule: { triggerConcept: string; eventKind: string }): string {
+  const noun = rule.triggerConcept === "" ? "record" : conceptEntity(rule.triggerConcept);
+  return rule.eventKind === "updated" ? `the ${noun} that changed` : `the ${noun} that was created`;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,23 @@
+{
+  "name": "the federation lane is node-scoped: a replica deployed without it still reads partial, nothing is stale",
+  "now": "2026-09-13T12:00:00Z",
+  "reports": [
+    {"module": "ai", "nodeId": "agent-a", "nodeType": "agent", "state": "configured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": true, "slots": [{"name": "live", "present": true}]}
+    ], "reportedAt": "2026-09-13T11:59:30Z"},
+    {"module": "ai", "nodeId": "bff-product-a", "nodeType": "bff", "state": "unconfigured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-13T11:40:00Z"}
+  ],
+  "nodes": [
+    {"nodeId": "agent-a", "health": "healthy", "lastSeen": "2026-09-13T11:59:40Z"},
+    {"nodeId": "bff-product-a", "health": "healthy", "lastSeen": "2026-09-13T11:59:40Z"}
+  ],
+  "expect": [
+    {"module": "ai", "state": "partial", "disagreement": ["bff-product-a=unconfigured", "agent-a=configured"], "unknown": [], "stale": []}
+  ]
+}

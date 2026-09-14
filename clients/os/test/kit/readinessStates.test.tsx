@@ -10,7 +10,9 @@ import {
   gateFor,
   markToneFor,
   SetupGroup,
+  setAsideLabel,
   stateWords,
+  verdictDetail,
   SurfaceUnconfigured,
 } from "../../src/kit/ReadinessStates";
 import { canConfigure } from "../../src/kit/ReadinessStates";
@@ -21,7 +23,7 @@ import { installSeededAccess } from "../seededAccess";
 import type { Verdict } from "../../src/system/readinessFold";
 
 function verdict(module: string, state: Verdict["state"], lanes: Verdict["lanes"] = []): Verdict {
-  return { module, state, core: false, disagreement: [], nodes: [], lanes };
+  return { module, state, core: false, disagreement: [], nodes: [], lanes, unknown: [], stale: [], aside: [] };
 }
 
 function readiness(loaded: boolean, verdicts: Verdict[]): Readiness {
@@ -111,6 +113,58 @@ describe("stateWords", () => {
     expect(stateWords(verdict("ai", "unconfigured"))).toBe("Not set up");
     expect(stateWords(verdict("ai", "partial"))).toBe("Partly set up");
     expect(stateWords(verdict("ai", "configured"))).toBe("Set up");
+  });
+
+  // TWO CAUSES OF `partial`, TWO NAMES (memql#5259). Nodes that DIFFER --
+  // some set up, some not -- are not a half-filled form, and "Partly set up"
+  // sent the owner looking for one. A lane every node agrees is half-filled
+  // keeps its old word.
+  it("names nodes that differ apart from a half-filled setup", () => {
+    const differ = verdict("ai", "partial");
+    differ.nodes = [
+      { nodeId: "a", nodeType: "agent", state: "configured", reportedAt: "" },
+      { nodeId: "b", nodeType: "bff", state: "unconfigured", reportedAt: "" },
+    ];
+    expect(stateWords(differ)).toBe("Set up on some nodes");
+    const halfEverywhere = verdict("storage", "partial");
+    halfEverywhere.nodes = [
+      { nodeId: "a", nodeType: "bff", state: "partial", reportedAt: "" },
+      { nodeId: "b", nodeType: "bff", state: "unconfigured", reportedAt: "" },
+    ];
+    expect(stateWords(halfEverywhere)).toBe("Partly set up");
+  });
+
+  // TWO CAUSES OF `unreported`, TWO NAMES. Nodes that answered and could not
+  // finish the check are not nodes that never answered, and neither is a
+  // reason to send anybody to a form.
+  it("names a check that failed apart from nobody answering", () => {
+    const failed = verdict("ai", "unreported");
+    failed.unknown = ["bff-a", "bff-b"];
+    expect(stateWords(failed)).toBe("Could not check");
+  });
+
+  // A NODE BEHIND THE CLUSTER CHANGES NO WORD: the verdict reads exactly as it
+  // would without it, and only the detail names it.
+  it("does not let a stale node change the words", () => {
+    const withStale = verdict("ai", "configured");
+    withStale.stale = ["edge-a"];
+    expect(stateWords(withStale)).toBe("Set up");
+    expect(verdictDetail(withStale)).toMatch(/1 node catching up: edge-a\./);
+    expect(setAsideLabel(withStale)).toBe("1 catching up");
+    // A node that could not check outranks one catching up, and a verdict
+    // whose own words say it gets no label beside them.
+    withStale.unknown = ["bff-b"];
+    expect(setAsideLabel(withStale)).toBe("1 could not check");
+    const failed = verdict("ai", "unreported");
+    failed.unknown = ["bff-b"];
+    expect(setAsideLabel(failed)).toBe("");
+  });
+
+  it("keeps the detail to one line however many nodes there are", () => {
+    const many = verdict("ai", "configured");
+    many.unknown = ["n1", "n2", "n3", "n4", "n5"];
+    expect(verdictDetail(many)).toBe("5 nodes could not check: n1, n2, n3 and 2 more. Not counted; each retries on its own.");
+    expect(verdictDetail(verdict("ai", "configured"))).toBe("");
   });
 });
 
@@ -234,13 +288,23 @@ describe("SetupGroup", () => {
     expect(screen.queryByText("MEMQL_AZURE_BLOB_CONTAINER")).toBeNull();
   });
 
-  it("names the disagreeing nodes so a mid-rollout state reads as one", () => {
+  // NODES THAT DIFFER READ AS WHAT THEY ARE, and the nodes are a hover away
+  // (memql#5259). The raw `bff-b=unconfigured, bff-a=configured` pairs used to
+  // be printed into the row itself -- a list of pod names beside a mark, on a
+  // surface where a person reads the answer, not the fold.
+  it("says set up on some nodes and puts the nodes in the title, not the row", () => {
     const v = verdict("storage", "partial");
     v.disagreement = ["bff-b=unconfigured", "bff-a=configured"];
+    v.nodes = [
+      { nodeId: "bff-b", nodeType: "bff", state: "unconfigured", reportedAt: "2026-09-13T11:58:00Z" },
+      { nodeId: "bff-a", nodeType: "bff", state: "configured", reportedAt: "2026-09-13T11:58:00Z" },
+    ];
     render(
       withSession(<SetupGroup app="Files" requires={["storage"]} wants={[]} readiness={readiness(true, [v])} />, "owner"),
     );
-    expect(screen.getByText(/bff-b=unconfigured, bff-a=configured/)).toBeTruthy();
+    const state = screen.getByText("Set up on some nodes");
+    expect(state.closest("[title]")?.getAttribute("title")).toMatch(/Not set up on bff-b\./);
+    expect(screen.queryByText(/bff-b=unconfigured/)).toBeNull();
   });
 
   it("says it is still reading rather than showing a set of wrong answers", () => {

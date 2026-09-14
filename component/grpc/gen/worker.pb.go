@@ -2469,8 +2469,26 @@ type AppSessionStart struct {
 	// started without it can still end with a transcript, and only a
 	// session that asked can be disappointed.
 	ResponseSchemaJson string `protobuf:"bytes,13,opt,name=response_schema_json,json=responseSchemaJson,proto3" json:"response_schema_json,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// level is the call's LEVEL -- one of core/airoute's closed four, "fast",
+	// "strong", "reasoning" or "embeddings" -- which says how much
+	// intelligence the step needs rather than which model serves it (design
+	// D8 of docs/superpowers/specs/2026-09-13-app-session-recording-and-
+	// learning-program-design.md). The COCKPIT owns the translation into the
+	// app's own knobs -- Claude Code's --model and --effort, Codex's model and
+	// model_reasoning_effort -- from one table per app that the machine's
+	// owner may override in policy.yaml, because the knob names are the app's
+	// and only the machine knows which app, at which version, is installed.
+	//
+	// EMPTY MEANS NO LEVEL WAS NAMED, and the app runs at its own defaults --
+	// which is what every session did before this field (a person's `open`,
+	// an engine that predates it). A level the cockpit has no translation for
+	// is REFUSED rather than defaulted: a session run at a level nobody chose
+	// reports a model nobody asked for. "embeddings" is always refused (D10):
+	// an embedding must come from the embedder of the index it is written
+	// into, and no app exposes one.
+	Level         string `protobuf:"bytes,14,opt,name=level,proto3" json:"level,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AppSessionStart) Reset() {
@@ -2590,6 +2608,13 @@ func (x *AppSessionStart) GetAppSessionRef() string {
 func (x *AppSessionStart) GetResponseSchemaJson() string {
 	if x != nil {
 		return x.ResponseSchemaJson
+	}
+	return ""
+}
+
+func (x *AppSessionStart) GetLevel() string {
+	if x != nil {
+		return x.Level
 	}
 	return ""
 }
@@ -2840,7 +2865,20 @@ type AppSessionEnd struct {
 	// unreadable because the run that produced it also failed. A session
 	// that ends without one still yields its transcript and artifacts,
 	// exactly as before.
-	ResultJson    string `protobuf:"bytes,7,opt,name=result_json,json=resultJson,proto3" json:"result_json,omitempty"`
+	ResultJson string `protobuf:"bytes,7,opt,name=result_json,json=resultJson,proto3" json:"result_json,omitempty"`
+	// model is the model the APP REPORTED serving this session with: Claude
+	// Code's result event (`modelUsage`), Codex's thread settings as its
+	// app-server or mcp-server stated them, replaced by any reroute the app
+	// announced. NOT the model the cockpit asked for -- a request is not a
+	// report, and a servedModel copied from the request would record as
+	// measured something nobody measured (design D9). EMPTY MEANS THE APP DID
+	// NOT SAY, which the engine records as unknown.
+	Model string `protobuf:"bytes,8,opt,name=model,proto3" json:"model,omitempty"`
+	// effort is the reasoning effort the APP REPORTED running at, under the
+	// same rule. An app that states no effort (Claude Code's headless output
+	// states none) or that ignored the one it was given leaves this EMPTY --
+	// never the requested value, never a guess.
+	Effort        string `protobuf:"bytes,9,opt,name=effort,proto3" json:"effort,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2920,6 +2958,20 @@ func (x *AppSessionEnd) GetError() string {
 func (x *AppSessionEnd) GetResultJson() string {
 	if x != nil {
 		return x.ResultJson
+	}
+	return ""
+}
+
+func (x *AppSessionEnd) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *AppSessionEnd) GetEffort() string {
+	if x != nil {
+		return x.Effort
 	}
 	return ""
 }
@@ -3061,7 +3113,15 @@ type ModelCallStart struct {
 	// image carries the kind="image" KNOBS -- size, count, format. The prompt
 	// rides `messages`, for the reason on `speech` above. The generation seed is
 	// ModelCallParams.seed, reused rather than duplicated here.
-	Image         *ModelCallImageRequest `protobuf:"bytes,15,opt,name=image,proto3" json:"image,omitempty"`
+	Image *ModelCallImageRequest `protobuf:"bytes,15,opt,name=image,proto3" json:"image,omitempty"`
+	// level is the call's LEVEL (core/airoute's closed four), the same word
+	// AppSessionStart.level carries (design D8). The router has ALREADY chosen
+	// `model` from this machine's advertisement, so a worker serving from a
+	// local runtime reads the level for its ledger and its own logs and never
+	// substitutes another model on the strength of it: a level steers an app,
+	// which has knobs, while a runtime has only the model it was asked for.
+	// Empty means the engine named none.
+	Level         string `protobuf:"bytes,16,opt,name=level,proto3" json:"level,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3199,6 +3259,13 @@ func (x *ModelCallStart) GetImage() *ModelCallImageRequest {
 		return x.Image
 	}
 	return nil
+}
+
+func (x *ModelCallStart) GetLevel() string {
+	if x != nil {
+		return x.Level
+	}
+	return ""
 }
 
 // ModelCallTool is one function the model may call, as the caller
@@ -4316,7 +4383,19 @@ type ModelCallUsage struct {
 	// model is what the runtime ACTUALLY ran, which is not always what
 	// was asked for (a quantisation alias, a tag resolving to a digest).
 	// A token count without the model it was spent on cannot be read.
-	Model         string `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`
+	//
+	// It is also the served-model report design D9 asks of ModelCallEnd, so
+	// that report lives HERE rather than in a second `model` on the end
+	// message: two places for one fact are two places for it to disagree.
+	Model string `protobuf:"bytes,4,opt,name=model,proto3" json:"model,omitempty"`
+	// effort is the reasoning effort the RUNTIME REPORTED running at, beside
+	// the model and for the same reason: a count spent at an unknown effort
+	// cannot be compared with one spent at a known one (design D9). Empty
+	// means the runtime stated none -- which is every local runtime a cockpit
+	// serves from today, since neither Ollama nor an OpenAI-compatible
+	// response carries an effort -- and the engine records that as unknown,
+	// never as a guess taken from the request.
+	Effort        string `protobuf:"bytes,5,opt,name=effort,proto3" json:"effort,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4375,6 +4454,13 @@ func (x *ModelCallUsage) GetKnown() bool {
 func (x *ModelCallUsage) GetModel() string {
 	if x != nil {
 		return x.Model
+	}
+	return ""
+}
+
+func (x *ModelCallUsage) GetEffort() string {
+	if x != nil {
+		return x.Effort
 	}
 	return ""
 }
@@ -5414,7 +5500,7 @@ const file_worker_proto_rawDesc = "" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x12\x1f\n" +
 	"\vdetail_json\x18\x02 \x01(\fR\n" +
 	"detailJson\x12*\n" +
-	"\x02ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\xb4\x03\n" +
+	"\x02ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"\xca\x03\n" +
 	"\x0fAppSessionStart\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x10\n" +
@@ -5432,7 +5518,8 @@ const file_worker_proto_rawDesc = "" +
 	" \x01(\tR\x05runId\x12\x17\n" +
 	"\astep_id\x18\v \x01(\tR\x06stepId\x12&\n" +
 	"\x0fapp_session_ref\x18\f \x01(\tR\rappSessionRef\x120\n" +
-	"\x14response_schema_json\x18\r \x01(\tR\x12responseSchemaJson\"\xb6\x01\n" +
+	"\x14response_schema_json\x18\r \x01(\tR\x12responseSchemaJson\x12\x14\n" +
+	"\x05level\x18\x0e \x01(\tR\x05level\"\xb6\x01\n" +
 	"\x10AppSessionLimits\x12>\n" +
 	"\x1bcredential_lifetime_seconds\x18\x01 \x01(\x03R\x19credentialLifetimeSeconds\x120\n" +
 	"\x14max_duration_seconds\x18\x02 \x01(\x03R\x12maxDurationSeconds\x120\n" +
@@ -5451,7 +5538,7 @@ const file_worker_proto_rawDesc = "" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x16\n" +
 	"\x06stream\x18\x02 \x01(\tR\x06stream\x12\x12\n" +
 	"\x04data\x18\x03 \x01(\fR\x04data\x12\x10\n" +
-	"\x03seq\x18\x04 \x01(\x04R\x03seq\"\x9e\x02\n" +
+	"\x03seq\x18\x04 \x01(\x04R\x03seq\"\xcc\x02\n" +
 	"\rAppSessionEnd\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x1b\n" +
@@ -5461,12 +5548,14 @@ const file_worker_proto_rawDesc = "" +
 	"\x15produced_artifact_ids\x18\x05 \x03(\tR\x13producedArtifactIds\x12\x14\n" +
 	"\x05error\x18\x06 \x01(\tR\x05error\x12\x1f\n" +
 	"\vresult_json\x18\a \x01(\tR\n" +
-	"resultJson\"\x8a\x01\n" +
+	"resultJson\x12\x14\n" +
+	"\x05model\x18\b \x01(\tR\x05model\x12\x16\n" +
+	"\x06effort\x18\t \x01(\tR\x06effort\"\x8a\x01\n" +
 	"\x0fAppSessionUsage\x12!\n" +
 	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens\x12\x19\n" +
 	"\bcost_usd\x18\x03 \x01(\x01R\acostUsd\x12\x14\n" +
-	"\x05known\x18\x04 \x01(\bR\x05known\"\xd2\x05\n" +
+	"\x05known\x18\x04 \x01(\bR\x05known\"\xe8\x05\n" +
 	"\x0eModelCallStart\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x14\n" +
@@ -5484,7 +5573,8 @@ const file_worker_proto_rawDesc = "" +
 	"\x05tools\x18\f \x03(\v2&.znasllc.memql.worker.v1.ModelCallToolR\x05tools\x12=\n" +
 	"\x05audio\x18\r \x01(\v2'.znasllc.memql.worker.v1.ModelCallAudioR\x05audio\x12@\n" +
 	"\x06speech\x18\x0e \x01(\v2(.znasllc.memql.worker.v1.ModelCallSpeechR\x06speech\x12D\n" +
-	"\x05image\x18\x0f \x01(\v2..znasllc.memql.worker.v1.ModelCallImageRequestR\x05image\"n\n" +
+	"\x05image\x18\x0f \x01(\v2..znasllc.memql.worker.v1.ModelCallImageRequestR\x05image\x12\x14\n" +
+	"\x05level\x18\x10 \x01(\tR\x05level\"n\n" +
 	"\rModelCallTool\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x12'\n" +
@@ -5570,12 +5660,13 @@ const file_worker_proto_rawDesc = "" +
 	"\x05width\x18\x01 \x01(\x05R\x05width\x12\x16\n" +
 	"\x06height\x18\x02 \x01(\x05R\x06height\x12\x14\n" +
 	"\x05count\x18\x03 \x01(\x05R\x05count\x12\x16\n" +
-	"\x06format\x18\x04 \x01(\tR\x06format\"\x84\x01\n" +
+	"\x06format\x18\x04 \x01(\tR\x06format\"\x9c\x01\n" +
 	"\x0eModelCallUsage\x12!\n" +
 	"\finput_tokens\x18\x01 \x01(\x03R\vinputTokens\x12#\n" +
 	"\routput_tokens\x18\x02 \x01(\x03R\foutputTokens\x12\x14\n" +
 	"\x05known\x18\x03 \x01(\bR\x05known\x12\x14\n" +
-	"\x05model\x18\x04 \x01(\tR\x05model\"H\n" +
+	"\x05model\x18\x04 \x01(\tR\x05model\x12\x16\n" +
+	"\x06effort\x18\x05 \x01(\tR\x06effort\"H\n" +
 	"\x0fModelCallCancel\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +
