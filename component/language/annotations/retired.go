@@ -1,5 +1,7 @@
 package annotations
 
+import "sort"
+
 // retired.go holds the annotations an author may still write from habit and
 // the pointed message each one earns. They moved here from core/baseparser
 // (the construct-level retirements and the @row hint) and from the
@@ -50,10 +52,62 @@ var retiredOn = map[retiredKey]string{
 // so a member nobody listed is refused the same way.
 const useFamilyHint = "declare the dependency with a file-top `use <module>.{ ... }` import instead, and put a bound concept in the signature (`query <Concept> <name> { ... }`)"
 
+// useFamilyPrefix is what every member of the retired @use* family starts
+// with, before its upper-case letter.
+const useFamilyPrefix = "use"
+
 // isUseFamily reports whether name is a member of the retired @use* family:
 // "use" followed by an upper-case letter.
 func isUseFamily(name string) bool {
-	return len(name) > 3 && name[:3] == "use" && name[3] >= 'A' && name[3] <= 'Z'
+	n := len(useFamilyPrefix)
+	return len(name) > n && name[:n] == useFamilyPrefix && name[n] >= 'A' && name[n] <= 'Z'
+}
+
+// Retirement is one retired annotation as the tables above record it: where
+// it is retired and the hint its refusal carries. It is a read-only view for
+// the generated attribute matrix, which lists every retirement; Check reads
+// the tables themselves.
+type Retirement struct {
+	// Receiver is where the name is retired. Empty means every receiver that
+	// does not accept the name (retiredEverywhere).
+	Receiver Receiver
+	// Name is the retired name. When Prefix is set it is the prefix of a
+	// retired family instead: every name that continues it with an upper-case
+	// letter is retired (the @use* family: @useConcept, @useShape, ...).
+	Name   string
+	Prefix bool
+	// Hint is the migration hint the refusal carries.
+	Hint string
+}
+
+// Retirements returns every retirement, sorted by name. A name retired
+// everywhere comes before its receiver-specific entries, which follow in
+// receiver order. The result is a fresh slice the caller may keep.
+func Retirements() []Retirement {
+	out := make([]Retirement, 0, len(retiredEverywhere)+len(retiredOn)+1)
+	for name, hint := range retiredEverywhere {
+		out = append(out, Retirement{Name: name, Hint: hint})
+	}
+	for key, hint := range retiredOn {
+		out = append(out, Retirement{Receiver: key.receiver, Name: key.name, Hint: hint})
+	}
+	out = append(out, Retirement{Name: useFamilyPrefix, Prefix: true, Hint: useFamilyHint})
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return retirementRank(out[i]) < retirementRank(out[j])
+	})
+	return out
+}
+
+// retirementRank orders the entries of one name: everywhere first, then the
+// receivers in receiver order.
+func retirementRank(r Retirement) int {
+	if r.Receiver == "" {
+		return -1
+	}
+	return receiverIndex[r.Receiver]
 }
 
 // retiredHint returns the migration hint for name on r, or false when name is

@@ -410,7 +410,7 @@ var placementTable = concat(
 		{Receiver: ConceptField, Name: "pattern", Forms: FormString, Example: `@pattern("^[a-z][a-z0-9-]*$")`},
 		{Receiver: ConceptField, Name: "pii", Forms: FormFlag, Example: "@pii"},
 		{Receiver: ConceptField, Name: "required", Forms: FormFlag, Example: "@required"},
-		{Receiver: ConceptField, Name: "secret", Forms: FormFlag, Example: "@secret"},
+		{Receiver: ConceptField, Name: "secret", Forms: FormFlag, Example: "@secret", Doc: docSecretField},
 		{Receiver: ConceptField, Name: "serverSet", Forms: FormFlag, Example: "@serverSet"},
 		{Receiver: ConceptField, Name: "unique", Forms: FormFlag, Example: "@unique"},
 		{Receiver: ConceptField, Name: "variant", Forms: FormKeywords, Keys: variantKeys, Example: `@variant(discriminator="kind")`},
