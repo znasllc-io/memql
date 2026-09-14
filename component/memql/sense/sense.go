@@ -118,6 +118,21 @@ type CompletionItem struct {
 	// WITHOUT this flag inserts literally -- dollar signs visible in
 	// the buffer -- which is why the flag exists rather than sniffing.
 	IsSnippet bool
+	// AdditionalEdits are edits the completion makes ELSEWHERE in the
+	// document, never overlapping where InsertText goes: the file-top `use`
+	// import a concept completion adds for a concept the file does not import
+	// yet (memql#5359). The LSP layer sends them as additionalTextEdits. A
+	// consumer that cannot apply them must not offer the item: its insert text
+	// alone is not what its label promises.
+	AdditionalEdits []TextEdit
+}
+
+// TextEdit is one edit a completion makes besides its insert text. Positions
+// are 1-based, like every Sense position; a Range whose start and end meet is
+// an insertion.
+type TextEdit struct {
+	Range   Range
+	NewText string
 }
 
 // PlainInsertText renders an item's insert text for a consumer without
