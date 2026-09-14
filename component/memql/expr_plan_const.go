@@ -114,6 +114,51 @@ func planConstantBindings(args map[string]any, ambient map[string]any) map[strin
 	return bindings
 }
 
+// withAmbientDefaults binds every ambient root a plan constant may read that
+// bindings lack, so `actor`, `config` and `now` are ALWAYS names in a plan
+// constant's scope, whatever path built it.
+//
+// A plan is expanded without an envelope on more than one path -- the public
+// Parse, a statement rendered and resolved to check it -- and there the
+// expansion holds no ambient map. The legacy grammar read a missing actor as
+// absent, so `actor.isClusterOwner == true` was simply false; the edition-2026
+// evaluator reads a name the scope does not bind as unknown_name, so the same
+// predicate refused the whole query ("actor is not defined"). An unknown ROOT
+// is still a refusal -- Lower refuses it at load -- but these three are the
+// language's own roots, never unknown.
+//
+// The defaults are the envelope buildAmbientEnvelope builds for an absent
+// context (#2801, #2623: one envelope, not two): the DENYING actor -- every
+// key present, the owner bits false, the ids empty and so unset -- the clock,
+// and the allow-listed config over no snapshot. Denying rather than empty on
+// purpose: under the absence table an EMPTY actor would read
+// `actor.isClusterOwner != false` as true, the fail-open #2801 closed; the
+// denying envelope reads it false, as a context spec does. The map passed in
+// is not modified -- it may be a capture another evaluation reuses.
+func withAmbientDefaults(bindings map[string]any) map[string]any {
+	missing := false
+	for _, root := range planConstantAmbientRoots {
+		if _, ok := bindings[root]; !ok {
+			missing = true
+			break
+		}
+	}
+	if !missing {
+		return bindings
+	}
+	out := make(map[string]any, len(bindings)+len(planConstantAmbientRoots))
+	for k, v := range bindings {
+		out[k] = v
+	}
+	defaults := buildAmbientEnvelope(context.Background(), nil)
+	for _, root := range planConstantAmbientRoots {
+		if _, ok := out[root]; !ok {
+			out[root] = defaults[root]
+		}
+	}
+	return out
+}
+
 // formatPlanConstant renders a plan constant's source for messages and for the
 // canonical signature.
 func formatPlanConstant(pc *PlanConstExpression) string {

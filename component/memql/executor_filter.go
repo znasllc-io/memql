@@ -723,6 +723,16 @@ func (e *MemQLEngine) latestMatchingNodes(
 }
 
 func (e *MemQLEngine) compileComparisonExpressionWithContext(expr *ComparisonExpression, conceptContext string) (compiledExpression, error) {
+	return compileComparisonIn(e.concepts, expr, conceptContext)
+}
+
+// compileComparisonIn is the comparison compiler over an explicit concept
+// registry -- the one a `concept == <id>` literal is checked against. The
+// executor compiles against the engine's own registry; a load-time dry compile
+// of an authored construct compiles against the registry its bundle binds
+// (core concepts plus the concepts the bundle declares), so a query over a
+// concept declared in the same bundle is not refused as unknown.
+func compileComparisonIn(concepts memorynodes.Registry, expr *ComparisonExpression, conceptContext string) (compiledExpression, error) {
 	if expr == nil {
 		return compiledExpression{}, fmt.Errorf("comparison expression is nil")
 	}
@@ -744,7 +754,7 @@ func (e *MemQLEngine) compileComparisonExpressionWithContext(expr *ComparisonExp
 	if info, ok := resolveIntrinsicField(field); ok && len(expr.Field.Parts) == 1 {
 		switch info.kind {
 		case intrinsicFieldConcept:
-			return e.compileConceptComparison(expr.Operator, expr.Value)
+			return compileConceptComparisonIn(concepts, expr.Operator, expr.Value)
 		case intrinsicFieldId:
 			return compileIdComparison(expr.Operator, expr.Value, conceptContext)
 		case intrinsicFieldType:
@@ -1257,6 +1267,12 @@ func extractConceptFromExpression(expr ExpressionNode) string {
 }
 
 func (e *MemQLEngine) compileConceptComparison(op ComparisonOperator, value any) (compiledExpression, error) {
+	return compileConceptComparisonIn(e.concepts, op, value)
+}
+
+// compileConceptComparisonIn compiles a `concept` comparison, checking an
+// equality's literal against concepts (nil checks nothing).
+func compileConceptComparisonIn(concepts memorynodes.Registry, op ComparisonOperator, value any) (compiledExpression, error) {
 	switch op {
 	case OpEq, OpNe:
 		conceptName, err := ensureString(value)
@@ -1275,8 +1291,8 @@ func (e *MemQLEngine) compileConceptComparison(op ComparisonOperator, value any)
 		// concepts) and ensures a binary that doesn't embed a concept
 		// schema can neither read nor write that concept's data.
 		// Part of the per-binary security model for BFF nodes.
-		if op == OpEq && e.concepts != nil {
-			if _, err := e.concepts.Get(conceptName); err != nil {
+		if op == OpEq && concepts != nil {
+			if _, err := concepts.Get(conceptName); err != nil {
 				return compiledExpression{}, fmt.Errorf("concept %q not found in registry", conceptName)
 			}
 		}
@@ -1331,8 +1347,8 @@ func (e *MemQLEngine) compileConceptComparison(op ComparisonOperator, value any)
 				continue
 			}
 			// Read isolation: validate each concept in the list.
-			if e.concepts != nil {
-				if _, err := e.concepts.Get(trimmed); err != nil {
+			if concepts != nil {
+				if _, err := concepts.Get(trimmed); err != nil {
 					return compiledExpression{}, fmt.Errorf("concept %q not found in registry", trimmed)
 				}
 			}

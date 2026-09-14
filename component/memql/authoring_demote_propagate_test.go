@@ -36,14 +36,14 @@ func TestAuthoringDemotePropagation_CrossNode(t *testing.T) {
 	})
 
 	// Engine A handles the demote, removes locally, and broadcasts.
-	engA := &MemQLEngine{specs: newSpecRegistry()}
+	engA := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	engA.SetEventBus(busA)
 	storeA := seedPromotedSpec(t, engA, "owner-1")
 
 	// Engine B: a DIFFERENT engine. Seed it with the SAME construct promoted (as
 	// if it had received the original promote broadcast), so the demote has
 	// something to remove there.
-	engB := &MemQLEngine{specs: newSpecRegistry()}
+	engB := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	engB.SetEventBus(busB)
 	_ = seedPromotedSpec(t, engB, "owner-1")
 	if _, ok := engB.specs.Lookup("mcpSessSpec"); !ok {

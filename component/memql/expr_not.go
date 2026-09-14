@@ -96,30 +96,38 @@ func (e *MemQLEngine) notDoesNotLowerError(target ExpressionNode) error {
 // visiting guards a cyclic spec graph; the loader refuses cycles, so it only
 // has to be correct, not informative.
 func (e *MemQLEngine) treeReachesRelationship(expr ExpressionNode, visiting map[string]struct{}) bool {
+	return treeReachesRelationshipVia(expr, e.predicateLookup(), visiting)
+}
+
+// treeReachesRelationshipVia is treeReachesRelationship over an explicit spec
+// lookup: the engine's registry at run time, the scope an authored construct
+// is lowered in at load (its bundle's specs included). A nil lookup sees
+// through no spec reference.
+func treeReachesRelationshipVia(expr ExpressionNode, lookup func(string) (*Spec, bool), visiting map[string]struct{}) bool {
 	switch n := expr.(type) {
 	case nil:
 		return false
 	case *RelationshipExpression:
 		return true
 	case *LogicalExpression:
-		return e.treeReachesRelationship(n.Left, visiting) || e.treeReachesRelationship(n.Right, visiting)
+		return treeReachesRelationshipVia(n.Left, lookup, visiting) || treeReachesRelationshipVia(n.Right, lookup, visiting)
 	case *NotExpression:
-		return e.treeReachesRelationship(n.Target, visiting)
+		return treeReachesRelationshipVia(n.Target, lookup, visiting)
 	case *SpecReferenceExpression:
 		name := strings.TrimSpace(n.Name)
-		if e == nil || e.specs == nil || name == "" {
+		if lookup == nil || name == "" {
 			return false
 		}
 		if _, seen := visiting[name]; seen {
 			return false
 		}
-		spec, err := e.specs.Get(name)
-		if err != nil || spec == nil {
+		spec, ok := lookup(name)
+		if !ok || spec == nil {
 			return false
 		}
 		visiting[name] = struct{}{}
 		defer delete(visiting, name)
-		return e.treeReachesRelationship(spec.Expr, visiting)
+		return treeReachesRelationshipVia(spec.Expr, lookup, visiting)
 	default:
 		return false
 	}

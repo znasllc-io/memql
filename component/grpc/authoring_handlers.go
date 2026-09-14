@@ -47,7 +47,15 @@ func (s *streamSession) handleAuthoringValidateBundle(envelope *memqlv1.MemqlCli
 		return err
 	}
 
-	report := memqlengine.ValidateBundle(msg.GetSources(), msg.GetOrigin())
+	// Through the engine when there is one, so the report carries every
+	// refusal the lowering makes in its registries (memql#5366) -- a query
+	// applying a context spec to a row is refused here, not at its first call.
+	var report memqlengine.SandboxReport
+	if s.service != nil && s.service.engine != nil {
+		report = s.service.engine.ValidateAuthoredBundle(msg.GetSources(), msg.GetOrigin())
+	} else {
+		report = memqlengine.ValidateBundle(msg.GetSources(), msg.GetOrigin())
+	}
 	return s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{
 		Payload: &memqlv1.MemqlServerMessage_AuthoringValidateBundleResult{
 			AuthoringValidateBundleResult: &memqlv1.AuthoringValidateBundleResult{
@@ -86,7 +94,16 @@ func (s *streamSession) handleAuthoringSessionDefineBundle(envelope *memqlv1.Mem
 			"authoring_session_define_bundle: an authenticated owner is required to session-define a bundle")
 	}
 
-	res, err := memqlengine.AuthorSessionBundle(s.authoredSessionRegistry(), owner, msg.GetSources(), msg.GetOrigin())
+	// Through the engine when there is one: its define lowers the bundle's
+	// queries, specs and traits in the engine's registries (memql#5366), so a
+	// construct that does not lower is refused here with its diagnostic.
+	var res memqlengine.SessionDefineResult
+	var err error
+	if s.service != nil && s.service.engine != nil {
+		res, err = s.service.engine.DefineSessionBundle(s.authoredSessionRegistry(), owner, msg.GetSources(), msg.GetOrigin())
+	} else {
+		res, err = memqlengine.AuthorSessionBundle(s.authoredSessionRegistry(), owner, msg.GetSources(), msg.GetOrigin())
+	}
 
 	result := &memqlv1.AuthoringSessionDefineBundleResult{
 		RequestId:   requestId,
