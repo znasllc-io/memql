@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+// sortByID runs topoSortSteps over steps named by unique ids, with each step's
+// reads keyed by its id, and answers the order as ids.
+func sortByID(name string, order []string, deps map[string]map[string]struct{}) ([]string, error) {
+	byPos := make([]map[string]struct{}, len(order))
+	for i, id := range order {
+		byPos[i] = deps[id]
+	}
+	sorted, err := topoSortSteps(name, order, byPos)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(sorted))
+	for i, pos := range sorted {
+		out[i] = order[pos]
+	}
+	return out, nil
+}
+
 func TestTopoSortSteps_NoDeps(t *testing.T) {
 	order := []string{"a", "b", "c"}
 	deps := map[string]map[string]struct{}{
@@ -12,7 +30,7 @@ func TestTopoSortSteps_NoDeps(t *testing.T) {
 		"b": {},
 		"c": {},
 	}
-	sorted, err := topoSortSteps("test", order, deps)
+	sorted, err := sortByID("test", order, deps)
 	if err != nil {
 		t.Fatalf("topoSort: %v", err)
 	}
@@ -29,7 +47,7 @@ func TestTopoSortSteps_ForwardReferenceReorders(t *testing.T) {
 		"a": {"b": {}},
 		"b": {},
 	}
-	sorted, err := topoSortSteps("test", order, deps)
+	sorted, err := sortByID("test", order, deps)
 	if err != nil {
 		t.Fatalf("topoSort: %v", err)
 	}
@@ -48,7 +66,7 @@ func TestTopoSortSteps_DiamondDeps(t *testing.T) {
 		"c": {"a": {}},
 		"d": {"b": {}, "c": {}},
 	}
-	sorted, err := topoSortSteps("test", order, deps)
+	sorted, err := sortByID("test", order, deps)
 	if err != nil {
 		t.Fatalf("topoSort: %v", err)
 	}
@@ -71,7 +89,7 @@ func TestTopoSortSteps_CycleDetected(t *testing.T) {
 		"a": {"b": {}},
 		"b": {"a": {}},
 	}
-	_, err := topoSortSteps("test", order, deps)
+	_, err := sortByID("test", order, deps)
 	if err == nil {
 		t.Fatalf("expected cycle error")
 	}
@@ -90,7 +108,7 @@ func TestTopoSortSteps_PreservesSourceOrderForIndependentSteps(t *testing.T) {
 		"c": {},
 		"d": {"a": {}},
 	}
-	sorted, err := topoSortSteps("test", order, deps)
+	sorted, err := sortByID("test", order, deps)
 	if err != nil {
 		t.Fatalf("topoSort: %v", err)
 	}
@@ -125,7 +143,7 @@ func TestTopoSortSteps_SourceOrderWhenDependenciesPointBack(t *testing.T) {
 		"advance":       {"decide": {}},
 		"persistRouted": {},
 	}
-	sorted, err := topoSortSteps("routeRequest", order, deps)
+	sorted, err := sortByID("routeRequest", order, deps)
 	if err != nil {
 		t.Fatalf("topoSort: %v", err)
 	}
@@ -148,7 +166,7 @@ func TestTopoSortSteps_StepsReleasedTogetherKeepSourceOrder(t *testing.T) {
 		"e": {"a": {}},
 	}
 	for i := 0; i < 100; i++ {
-		sorted, err := topoSortSteps("test", order, deps)
+		sorted, err := sortByID("test", order, deps)
 		if err != nil {
 			t.Fatalf("topoSort: %v", err)
 		}
@@ -169,11 +187,45 @@ func TestTopoSortSteps_ForwardReferenceMovesOnlyTheProvider(t *testing.T) {
 		"b": {},
 		"y": {},
 	}
-	sorted, err := topoSortSteps("test", order, deps)
+	sorted, err := sortByID("test", order, deps)
 	if err != nil {
 		t.Fatalf("topoSort: %v", err)
 	}
 	if got := strings.Join(sorted, ","); got != "x,b,a,y" {
 		t.Errorf("got %s, want x,b,a,y: b moves ahead of a, and y stays last", got)
+	}
+}
+
+// TestTopoSortSteps_TwoStepsWithOneIdAreBothOrdered: the sort tracks steps by
+// position, so two steps carrying one id are two steps. Keyed by id, emitting
+// the first marked both done, the second was never emitted, and every
+// automation in the fleet bundle -- two switch steps on one subject, both
+// given the id the parser made from that subject -- failed to compile with
+// "dependency cycle among steps []" (memql#5367). The compiler now refuses
+// such an automation before sorting it; the sort must not need it to.
+func TestTopoSortSteps_TwoStepsWithOneIdAreBothOrdered(t *testing.T) {
+	ids := []string{"command", "switch_steps.command.result", "switch_steps.command.result"}
+	deps := []map[string]struct{}{
+		{},
+		{"command": {}},
+		{"command": {}},
+	}
+	sorted, err := topoSortSteps("provisionInstanceOnCreate", ids, deps)
+	if err != nil {
+		t.Fatalf("topoSort: %v", err)
+	}
+	if len(sorted) != 3 || sorted[0] != 0 || sorted[1] != 1 || sorted[2] != 2 {
+		t.Errorf("got positions %v, want [0 1 2]: every step, in source order", sorted)
+	}
+
+	// A read of an id two steps carry waits for both of them.
+	ids = []string{"a", "reader", "a"}
+	deps = []map[string]struct{}{{}, {"a": {}}, {}}
+	sorted, err = topoSortSteps("test", ids, deps)
+	if err != nil {
+		t.Fatalf("topoSort: %v", err)
+	}
+	if len(sorted) != 3 || sorted[0] != 0 || sorted[1] != 2 || sorted[2] != 1 {
+		t.Errorf("got positions %v, want [0 2 1]: the reader runs after both steps named a", sorted)
 	}
 }
