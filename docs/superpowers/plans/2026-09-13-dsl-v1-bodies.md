@@ -139,6 +139,7 @@ Runtime rules: a skipped statement binds nothing. `retry(n)` retries a failed ca
 - `examples/deploypack/dsl/logic.memql` `driveDeploymentInProgress` and `recordReconciledState`: today `observed`/`reconciled`/`obsProbe` consumers ran BEFORE the statements they read (undotted references were invisible to the sort), so both always answered empty. Source order fixes them.
 - The seven logic bodies that published (`dsl/identity/logic.memql` x4, `dsl/safety/logic.memql` x2, `dsl/data/logic.memql` x1) move into their automations; the logic constructs are deleted.
 - `switch` compares with typed equality; every switch in the tree compares strings, so no row changes.
+- `dsl/forge` `recordTransition`: an update that leaves a request's status unchanged stops being recorded as a transition. The legacy compiler read `transitionEventKind`'s `old == st` as `old == "st"`, a comparison with the literal text, so every unchanged-status update appended another `requestEvent`. It is the logic goldens' recorded `legacyDefect`, and the forge scenario `unchanged-status-records-nothing` shows it on real rows (its `legacy` count, deleted at the flip). A trail with fewer events is the fix, not a regression.
 - `x := mutation m(...)` now names the written row, and an action statement's value is its capability's result.
 
 ---
