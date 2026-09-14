@@ -94,12 +94,20 @@ var rewriters = map[string]rewriter{
 	"actor-binding":            langparser.RewriteActorBinding,
 	"doc-comment-descriptions": langparser.RewriteDocCommentDescriptions,
 	"null-coalesce":            langparser.RewriteNullCoalesce,
+	// The attribute cleanup of epic memql#5375 (D17). Construct-aware: see
+	// attributes.go for why three of the names it touches survive on one
+	// receiver and are retired on another. Pair it with
+	// `attributes-namespace` below for a whole-tree migration.
+	"attributes": rewriteAttributes,
 }
 
 var pathRewriters = map[string]pathRewriter{
 	"same-domain-use":   rewriteSameDomainUse,
 	"namespace-default": rewriteNamespaceDefault,
 	"row-authz":         rewriteRowAuthz,
+	// The @namespace half of `attributes`: redundancy depends on the
+	// directory's namespace.pin, so it cannot be decided from the file.
+	"attributes-namespace": rewriteAttributesNamespace,
 }
 
 // rewriteNamespaceDefault strips @namespace annotations that restate the
