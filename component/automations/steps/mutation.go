@@ -60,6 +60,14 @@ func (e *MutationExecutor) Execute(ctx context.Context, step *automations.Step, 
 		concept = evaluated
 	}
 
+	// A v1 step (memql#5367): id, parent and aliasOf are expressions parsed
+	// at load, and the payload's leaves are literals or parsed expressions.
+	// Everything evaluates to a value first; the insert text is then built
+	// from values only.
+	if x := step.Exprs; x != nil {
+		return e.executeV1(ctx, step, stepCtx, result, concept, x)
+	}
+
 	// Evaluate the ID if present (use evaluateValue to handle concat() and other functions)
 	id := cfg.ID
 	if id != "" {
@@ -86,7 +94,44 @@ func (e *MutationExecutor) Execute(ctx context.Context, step *automations.Step, 
 
 	// Build the insert query with proper JSON payload
 	query := e.buildInsertQuery(concept, id, evaluatedPayload, cfg.Parent, cfg.AliasOf)
+	return e.runInsert(ctx, step, stepCtx, result, concept, query)
+}
 
+// executeV1 is a v1 step's half of Execute: id, parent and aliasOf are
+// expressions evaluated to text, the payload's leaves resolve to values
+// (an absent leaf is omitted, rule 30), and the insert is built from values
+// only -- the payload through json.Marshal, the strings through QuoteString.
+func (e *MutationExecutor) executeV1(ctx context.Context, step *automations.Step, stepCtx *Context, result *automations.StepResult, concept string, x *automations.StepExprs) (*automations.StepResult, error) {
+	fail := func(what string, err error) (*automations.StepResult, error) {
+		result.Status = "failed"
+		result.Error = fmt.Sprintf("failed to evaluate %s: %v", what, err)
+		result.CompletedAt = time.Now()
+		result.Duration = result.CompletedAt.Sub(result.StartedAt)
+		return result, fmt.Errorf("failed to evaluate %s: %w", what, err)
+	}
+	id, err := v1Text(ctx, stepCtx.Evaluator, x.ID)
+	if err != nil {
+		return fail("id", err)
+	}
+	parent, err := v1Text(ctx, stepCtx.Evaluator, x.Parent)
+	if err != nil {
+		return fail("parent", err)
+	}
+	aliasOf, err := v1Text(ctx, stepCtx.Evaluator, x.AliasOf)
+	if err != nil {
+		return fail("aliasOf", err)
+	}
+	payload, err := stepCtx.Evaluator.ResolveV1Map(ctx, step.Mutation.Payload)
+	if err != nil {
+		return fail("payload", err)
+	}
+	query := e.buildInsertQuery(concept, id, payload, parent, aliasOf)
+	return e.runInsert(ctx, step, stepCtx, result, concept, query)
+}
+
+// runInsert executes a built insert and records the step: the half of a
+// mutation step both grammars share.
+func (e *MutationExecutor) runInsert(ctx context.Context, step *automations.Step, stepCtx *Context, result *automations.StepResult, concept, query string) (*automations.StepResult, error) {
 	if stepCtx.Logger != nil {
 		stepCtx.Logger.Debug("executing mutation step",
 			"step", step.ID,

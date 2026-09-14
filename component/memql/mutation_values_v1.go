@@ -491,7 +491,7 @@ type actorEnvelopeV1 struct {
 }
 
 // ExprMember binds one envelope field.
-func (a actorEnvelopeV1) ExprMember(field string) (any, error) {
+func (a actorEnvelopeV1) ReadMember(field string) (any, error) {
 	return resolveActorReference(a.ctx, "actor."+field)
 }
 

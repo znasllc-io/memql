@@ -25,6 +25,7 @@ package automations
 // same deterministic boolean evaluator that powers Step.Condition.
 
 import (
+	"context"
 	"fmt"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"regexp"
@@ -248,7 +249,16 @@ func EvaluatePreconditions(preconditions []*Precondition, eval *Evaluator) (*Pre
 		if pc == nil || strings.TrimSpace(pc.Check) == "" {
 			continue
 		}
-		ok, err := eval.EvaluateCondition(pc.Check)
+		var ok bool
+		var err error
+		if pc.checkExpr != nil {
+			// A v1 automation's check, parsed at load: booleans only, so a
+			// check that is not boolean is a MISS -- the same conservative
+			// reading an erroring check gets below.
+			ok, err = eval.EvalV1Condition(context.Background(), pc.checkExpr)
+		} else {
+			ok, err = eval.EvaluateCondition(pc.Check)
+		}
 		if err != nil || !ok {
 			return pc, true
 		}

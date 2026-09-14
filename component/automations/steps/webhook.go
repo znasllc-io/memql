@@ -67,8 +67,15 @@ func (e *WebhookExecutor) Execute(ctx context.Context, step *automations.Step, s
 
 	webhook := step.Webhook
 
-	// Evaluate URL with $ expressions
-	url, err := stepCtx.Evaluator.EvaluateString(webhook.URL)
+	// Evaluate URL with $ expressions -- or, for a v1 step, the URL
+	// expression parsed at load (memql#5367).
+	var url string
+	var err error
+	if x := step.Exprs; x != nil {
+		url, err = v1RequiredText(ctx, stepCtx.Evaluator, x.URL, "webhook url")
+	} else {
+		url, err = stepCtx.Evaluator.EvaluateString(webhook.URL)
+	}
 	if err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("failed to evaluate URL: %v", err)
@@ -103,7 +110,13 @@ func (e *WebhookExecutor) Execute(ctx context.Context, step *automations.Step, s
 		}
 	} else if webhook.Body != nil {
 		// Evaluate $ expressions in body
-		evaluatedBody, err := stepCtx.Evaluator.EvaluateMap(webhook.Body)
+		var evaluatedBody map[string]any
+		var err error
+		if step.Exprs != nil {
+			evaluatedBody, err = stepCtx.Evaluator.ResolveV1Map(ctx, webhook.Body)
+		} else {
+			evaluatedBody, err = stepCtx.Evaluator.EvaluateMap(webhook.Body)
+		}
 		if err != nil {
 			result.Status = "failed"
 			result.Error = fmt.Sprintf("failed to evaluate body: %v", err)
@@ -141,9 +154,27 @@ func (e *WebhookExecutor) Execute(ctx context.Context, step *automations.Step, s
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	// Set headers with $ expression evaluation
+	// Set headers with $ expression evaluation. A v1 step's headers are its
+	// parsed value leaves (Exprs.Headers) -- a header whose value is an
+	// expression is not in the string map at all (value_leaves.go).
+	headers := make(map[string]string, len(webhook.Headers))
 	for key, value := range webhook.Headers {
-		evaluatedValue, err := stepCtx.Evaluator.EvaluateString(value)
+		headers[key] = value
+	}
+	if x := step.Exprs; x != nil {
+		headers = make(map[string]string, len(x.Headers))
+		for key := range x.Headers {
+			headers[key] = ""
+		}
+	}
+	for key, value := range headers {
+		var evaluatedValue string
+		var err error
+		if x := step.Exprs; x != nil {
+			evaluatedValue, err = v1Text(ctx, stepCtx.Evaluator, x.Headers[key])
+		} else {
+			evaluatedValue, err = stepCtx.Evaluator.EvaluateString(value)
+		}
 		if err != nil {
 			result.Status = "failed"
 			result.Error = fmt.Sprintf("failed to evaluate header %s: %v", key, err)

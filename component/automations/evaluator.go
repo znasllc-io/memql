@@ -147,6 +147,12 @@ func (e *Evaluator) hasCustomRoot(name string) bool {
 }
 
 // Clone creates a copy of the evaluator for nested contexts.
+//
+// Every resolver travels with the copy, the canonicalId one included. It used
+// to be left behind, so a canonicalId() inside a forEach or parallel branch
+// silently fell back to the raw value while the same call one level up
+// canonicalised it; no shipped automation calls canonicalId inside a loop,
+// so carrying it changes no run in the tree (memql#5367).
 func (e *Evaluator) Clone() *Evaluator {
 	clone := &Evaluator{
 		input:                  e.input,
@@ -158,6 +164,7 @@ func (e *Evaluator) Clone() *Evaluator {
 		systemVariableResolver: e.systemVariableResolver,
 		secretResolver:         e.secretResolver,
 		systemSecretResolver:   e.systemSecretResolver,
+		canonicalIdResolver:    e.canonicalIdResolver,
 		logger:                 e.logger,
 	}
 	for k, v := range e.steps {

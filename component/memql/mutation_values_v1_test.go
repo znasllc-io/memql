@@ -834,7 +834,7 @@ type exprMembersProbe struct {
 	asked   []string
 }
 
-func (p *exprMembersProbe) ExprMember(field string) (any, error) {
+func (p *exprMembersProbe) ReadMember(field string) (any, error) {
 	p.asked = append(p.asked, field)
 	if err, ok := p.refuse[field]; ok {
 		return nil, err
