@@ -3,6 +3,7 @@
 // Usage:
 //
 //	memqlmigrate [--edition=<edition>] --rewrite=<name>[,<name>...] [-w] [-check] <path>...
+//	memqlmigrate --rewrite=bodies --go-fixtures [-w] [-v] [--exclude=PREFIX,...] <path>...
 //	memqlmigrate --grammar-version
 //
 // Companion to memqlfmt. Where memqlfmt normalises whitespace and
@@ -36,6 +37,11 @@
 // "==> path <==" header. Rewrites apply at the lexical layer; the tool is
 // conservative and leaves input unchanged when it cannot safely perform the
 // transformation.
+//
+// --go-fixtures runs the bodies rewrite over the MemQL that Go test files
+// embed in string literals instead of over .memql files (gofixtures.go): dry
+// unless -w, reporting every literal it refuses; -v lists the literals it
+// changes too; --exclude names path prefixes to leave alone.
 //
 // Exit codes: 0 done, 1 a rewrite failed or -check found files that would
 // change, 2 a usage error (an unknown flag, edition or rewrite).
@@ -131,6 +137,10 @@ type opts struct {
 	rewrites []string
 	check    bool
 	write    bool
+	// goFixtures, verbose and excludes are the --go-fixtures mode's.
+	goFixtures bool
+	verbose    bool
+	excludes   []string
 }
 
 func main() {
@@ -172,6 +182,20 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return errUsage
+	}
+	if o.goFixtures {
+		if len(o.rewrites) != 1 || o.rewrites[0] != "bodies" || o.check {
+			fmt.Fprintln(stderr, "memqlmigrate: --go-fixtures runs the bodies rewrite alone: --rewrite=bodies --go-fixtures [-w] [-v]")
+			return errUsage
+		}
+		excludes := o.excludes
+		if excludes == nil {
+			excludes = goFixtureDefaultExcludes
+		}
+		if err := runGoFixtures(stdout, paths, goFixtureOptions{write: o.write, verbose: o.verbose, excludes: excludes}); err != nil {
+			return fmt.Errorf("memqlmigrate: %w", err)
+		}
+		return nil
 	}
 
 	sets, err := loadWorkingSets(paths, pipeline)
@@ -238,6 +262,12 @@ func parseFlags(args []string, stderr io.Writer) (opts, []string, error) {
 			o.write = true
 		case a == "-check":
 			o.check = true
+		case a == "--go-fixtures":
+			o.goFixtures = true
+		case a == "-v":
+			o.verbose = true
+		case strings.HasPrefix(a, "--exclude="):
+			o.excludes = append(o.excludes, splitCSV(strings.TrimPrefix(a, "--exclude="))...)
 		case a == "--rewrite", a == "--edition":
 			if i+1 >= len(args) {
 				fmt.Fprintf(stderr, "memqlmigrate: %s requires a value\n", a)
