@@ -75,6 +75,38 @@ func (s MapScope) Lookup(name string) (any, bool) {
 	return v, ok
 }
 
+// ExprObject is a value a scope hands out that answers its own member reads
+// and stands for an underlying value everywhere else. It exists for run state
+// that is too costly or too dynamic to materialise as a map on every lookup --
+// an automation step, whose `.result`, `.status` and `.count` are views over
+// one stored result, and whose bare name means the result itself (the
+// automations runtime's RunScope).
+//
+// ExprMember answers `.field`; ok=false defers to the member of ExprValue().
+// ExprValue is what the object IS for every other use -- comparison,
+// arithmetic, a method receiver, an argument, a container element. An object
+// never escapes an evaluation: EvalExpr resolves it to its ExprValue before
+// returning it and before storing it in a list, a map or a named argument, so
+// callers see plain values only.
+type ExprObject interface {
+	ExprMember(field string) (any, bool)
+	ExprValue() any
+}
+
+// exprResolveObject replaces an ExprObject by the value it stands for. An
+// object whose value is itself an object resolves again, so a chain of views
+// ends at a plain value.
+func exprResolveObject(v any) any {
+	for i := 0; i < 16; i++ {
+		o, ok := v.(ExprObject)
+		if !ok || o == nil {
+			return v
+		}
+		v = o.ExprValue()
+	}
+	return v
+}
+
 // absentValue is the type of Absent.
 type absentValue struct{}
 
@@ -97,11 +129,17 @@ var Absent absentValue
 // IsAbsent reports whether v is absent: the Absent sentinel, nil, or a typed
 // nil (a nil pointer, map or slice) -- the Go shapes of JSON null.
 func IsAbsent(v any) bool {
-	switch v.(type) {
+	switch x := v.(type) {
 	case nil, absentValue:
 		return true
 	case bool, string, int, int64, float64:
 		return false
+	case ExprObject:
+		r := exprResolveObject(x)
+		if _, still := r.(ExprObject); still {
+			return false
+		}
+		return IsAbsent(r)
 	}
 	rv := reflect.ValueOf(v)
 	switch rv.Kind() {
@@ -163,7 +201,11 @@ type EvalOptions struct {
 // caller unchanged so a typed refusal stays typed.
 func EvalExpr(ctx context.Context, n ast.ExpressionNode, scope ExprScope, opts EvalOptions) (any, error) {
 	ev := newExprEvaluator(ctx, scope, opts)
-	return ev.eval(n, ev.root)
+	v, err := ev.eval(n, ev.root)
+	if err != nil {
+		return nil, err
+	}
+	return exprResolveObject(v), nil
 }
 
 // EvalCondition evaluates n and requires a boolean: absent is false, and any
@@ -337,10 +379,18 @@ func (ev *exprEvaluator) ident(e *ast.IdentExpr, scope ExprScope) (any, error) {
 //   - a row -> an intrinsic column, or the payload (ExprRow.exprMember).
 //   - a list and a numeric field ("0", "-1") -> that element, counting from
 //     the end when negative; out of range is Absent.
+//   - an ExprObject answers the read itself; a field it does not answer is
+//     read from the value it stands for.
 //   - anything else is normalised first (a typed map or slice, a struct by
 //     JSON round trip as the automations resolver read it) and then read;
 //     a scalar has no fields, so its member is Absent.
 func exprMember(obj any, field string, node ast.ExpressionNode) (any, error) {
+	if o, ok := obj.(ExprObject); ok && o != nil {
+		if x, answered := o.ExprMember(field); answered {
+			return x, nil
+		}
+		obj = exprResolveObject(o)
+	}
 	v, err := exprNormalize(obj)
 	if err != nil {
 		return nil, exprErr(node, "operand_type", "cannot read .%s: %v", field, err)
@@ -878,8 +928,10 @@ func (ev *exprEvaluator) condition(v any, node ast.ExpressionNode, role string) 
 // exprCoalesceArm prepares one `??` arm for coalesceSelect: the Absent
 // sentinel becomes the mutation templates' missingValue (so the one selection
 // rule treats both notions of missing alike), a typed nil becomes nil, and a
-// named string type becomes a string so its blankness is visible.
+// named string type becomes a string so its blankness is visible. An
+// ExprObject is the value it stands for, so a blank one is blank.
 func exprCoalesceArm(v any) any {
+	v = exprResolveObject(v)
 	switch v.(type) {
 	case absentValue:
 		return missingValue{}
@@ -910,6 +962,7 @@ func (ev *exprEvaluator) list(e *ast.ListExpr, scope ExprScope) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		v = exprResolveObject(v)
 		if _, absent := v.(absentValue); absent {
 			continue
 		}
@@ -927,6 +980,7 @@ func (ev *exprEvaluator) mapLiteral(e *ast.MapExpr, scope ExprScope) (any, error
 		if err != nil {
 			return nil, err
 		}
+		v = exprResolveObject(v)
 		if _, absent := v.(absentValue); absent {
 			continue
 		}
@@ -1268,6 +1322,7 @@ func (ev *exprEvaluator) constructCall(e *ast.CallExpr, scope ExprScope) (any, e
 		if err != nil {
 			return nil, err
 		}
+		v = exprResolveObject(v)
 		if _, absent := v.(absentValue); absent {
 			continue
 		}
@@ -1806,6 +1861,7 @@ func exprClampCount(c exprNumber, n int) int {
 // be stored inside a list or map a method builds: the sentinel never escapes
 // into a container.
 func exprUnsentinel(v any) any {
+	v = exprResolveObject(v)
 	if _, absent := v.(absentValue); absent {
 		return nil
 	}
@@ -1859,12 +1915,18 @@ func exprKey(v any) string {
 // correctly by byte), json.RawMessage (decoded), typed slices and
 // string-keyed maps (the []map[string]any trap MaterializeRows documents),
 // pointers, and structs by JSON round trip, as the automations resolver read
-// them. A typed nil is nil. A value with no JSON form (a func, a channel) is
-// an error.
+// them. An ExprObject is the value it stands for. A typed nil is nil. A value
+// with no JSON form (a func, a channel) is an error.
 func exprNormalize(v any) (any, error) {
 	switch x := v.(type) {
 	case nil, absentValue, bool, string, int64, float64, ExprRow:
 		return v, nil
+	case ExprObject:
+		r := exprResolveObject(x)
+		if _, still := r.(ExprObject); still {
+			return nil, fmt.Errorf("a %T resolves to another object and never to a value", x)
+		}
+		return exprNormalize(r)
 	case []any:
 		if x == nil {
 			return nil, nil
