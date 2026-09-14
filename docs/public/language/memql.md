@@ -9,7 +9,7 @@ owner: znas
 
 # MemQL
 
-> **Last Updated:** June 11, 2026
+> **Last Updated:** September 13, 2026
 
 MemQL is the query and mutation language that powers the memory engine. It provides a deterministic, append-only interface for reading and writing concept-backed data stored in TimescaleDB. This document is the canonical reference for MemQL behavior. **Whenever the query language changes or new capabilities ship, update this guide alongside the code change.**
 
@@ -27,6 +27,67 @@ MemQL has two surfaces, and this guide covers both:
 2. **Runtime query strings** — expressions passed to `engine.Execute(ctx, query)` (or over gRPC / the WebSocket bridge / MCP). These are plain filter expressions, calls to DSL-defined functions, `insert(...)` literals, and introspection meta-commands.
 
 Anything that needs a projection (shape), a reusable predicate (spec), or AI involvement is defined in the DSL and *referenced* from runtime queries — the runtime string surface is intentionally small.
+
+## The language line
+
+Every tree of `.memql` files declares the language it is written in, in a two-line `memql.toml` beside its files:
+
+```toml
+memql = "1.0"
+edition = "2026"
+```
+
+- `memql` is the **language line**, written `<major>.<minor>`. It is what later versions of the language key meaning on: when a behaviour changes between two lines, a tree is read with the meaning of the line it declares, the way a Go module is read under its `go` line.
+- `edition` is the coarse label that names the parser front end the tree is written for. An engine refuses an edition it has no front end for.
+
+The file is a strict subset of TOML: blank lines, `#` comments, and exactly those two `key = "value"` lines. A table, a third key, an unquoted value or a key written twice is refused with its line number.
+
+### Where it lives: in every domain directory
+
+**Every domain directory carries its own `<domain>/memql.toml`.** A domain directory is the only thing that reaches a node: a bundle image copies domain directories into `MEMQL_DSL_PATH`, a package deploy stages each domain on its own, and every mount reads domain directories and skips the files at its root. A declaration at the root of a bundle would never arrive, so there is no inheritance from one — a `memql.toml` at the root of `MEMQL_DSL_PATH`, or of a tree `memqllint` mounts, is never read, and the mount logs a warning saying it belongs inside each domain directory.
+
+```
+bundle/
+├── storefront/
+│   ├── memql.toml
+│   ├── concepts.memql
+│   └── queries.memql
+└── orders/
+    ├── memql.toml
+    └── mutations.memql
+```
+
+The engine's own embedded tree is compiled in as one tree, so it declares its line once, at `dsl/memql.toml`, and every core domain speaks it.
+
+### What the engine refuses
+
+A domain the engine will not read refuses boot, and its concepts are dropped before any of them reaches the database. It is the same strict gate as a construct that fails to parse, so `MEMQL_DSL_ALLOW_SKIPS=1` is the operator break-glass. Each refusal names the file to fix and ends with a stable code:
+
+| Code | When |
+|---|---|
+| `language_line_missing` | a domain that is not compiled into the engine has no `memql.toml` |
+| `language_line_malformed` | the file does not read, lacks one of its two keys, or `memql` is not `<major>.<minor>` |
+| `language_version_newer` | the domain declares a newer line than this engine speaks |
+| `language_version_unsupported` | the domain declares an older line; this engine reads only `1.0` |
+| `edition_unknown` | the engine has no front end for the declared edition |
+
+A newer line reads, for example:
+
+```text
+domain "storefront" declares memql = "1.1", newer than the 1.0 this engine speaks: run an engine that speaks 1.1, or declare memql = "1.0" in storefront/memql.toml [language_version_newer]
+```
+
+A refused domain still parses, with the engine's own edition, so one boot reports every problem the tree has rather than the first. `memqllint` runs the same check over a bundle before it ships, and reports each refusal once.
+
+### Adding the line
+
+`memqlmigrate` writes the engine's line into every domain that has none, and leaves a domain that already declares one alone — moving a declared line is a decision about the tree, not a migration of it. Run it over a bundle root (or over one domain directory), with `-w` to write in place:
+
+```bash
+memqlmigrate --rewrite=language-line -w bundle/
+```
+
+Later epics that change the language register their rewrites in the same registry, keyed by edition; the [versioning rule](authoring-rules.md#grammar-versioning-and-the-migration-channel) says when one is owed.
 
 ## Quick Start
 

@@ -31,9 +31,12 @@ func diagsContain(diags []LintDiagnostic, sub string) bool {
 	return false
 }
 
+// lint runs the parity pass over root with every fixture domain declaring the
+// engine's own language line (memql#5357), so each test sees only the problem
+// its fixture is about.
 func lint(t *testing.T, root fstest.MapFS) []LintDiagnostic {
 	t.Helper()
-	diags, _, err := LintUnifiedTree(nil, root)
+	diags, _, err := LintUnifiedTree(nil, withLanguageLines(root))
 	if err != nil {
 		t.Fatalf("LintUnifiedTree: %v", err)
 	}

@@ -61,6 +61,10 @@ type MemQLEngine struct {
 	// reports NOTHING rather than an empty set, so nobody can read "no rules
 	// are loaded" off an engine that never had a loader wired.
 	rules *RuleRegistry
+	// languageLines is the declared language line of every domain of the tree
+	// Init loaded (memql#5357), read through LanguageLineFor. Written by Init
+	// alone, before any loader runs; nil on an engine that has not run it.
+	languageLines LanguageLines
 
 	// aiResolver is the router seam every model call in this package goes
 	// through (epic memql#5127). Installed from app/; unwired it REFUSES

@@ -11,6 +11,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"strings"
+
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // MountOverlayDomains registers every product-domain directory found at the
@@ -37,6 +39,13 @@ import (
 // place. The other skips are self-evident from the root's own shape -- a file,
 // a "_"-prefixed soft-disable, a sidecar with no .memql in it -- and reporting
 // them would bury the collision signal in noise.
+//
+// A memql.toml at the root beside a product domain is reported through the
+// logger (memql#5357): no mount reads a root file, so each domain carries its
+// own <domain>/memql.toml, and one at the root is a declaration its author
+// believes governs the tree while nothing does. A root holding core domains
+// alone is the engine's own dsl/, whose root memql.toml IS read -- it is the
+// embedded line -- so that one is not reported.
 func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore []string, unmount func()) {
 	noop := func() {}
 	if root == nil {
@@ -56,8 +65,12 @@ func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore 
 		core[d] = struct{}{}
 	}
 
+	rootManifest, productDomains := false, 0
 	for _, e := range entries {
 		if !e.IsDir() {
+			if e.Name() == dslfs.ManifestFile {
+				rootManifest = true
+			}
 			continue
 		}
 		domain := e.Name()
@@ -71,7 +84,11 @@ func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore 
 		if !directoryHasMemqlFile(root, domain) {
 			continue
 		}
-		if _, isCore := core[domain]; isCore {
+		_, isCore := core[domain]
+		if !isCore {
+			productDomains++
+		}
+		if isCore {
 			if logger != nil {
 				logger.Warn("lint overlay mount: ignoring domain that collides with a core embedded domain",
 					"component", "dsl.lintMount", "domain", domain)
@@ -110,6 +127,11 @@ func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore 
 		}
 		RegisterTree(domain, sub)
 		mounted = append(mounted, domain)
+	}
+
+	if rootManifest && productDomains > 0 && logger != nil {
+		logger.Warn("lint overlay mount: "+dslfs.ManifestFile+" at the root is never read; declare the language line in each domain directory as <domain>/"+dslfs.ManifestFile,
+			"component", "dsl.lintMount")
 	}
 
 	unmount = func() {

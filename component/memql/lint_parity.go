@@ -25,8 +25,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/znasllc-io/memql/core/component"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/memql/baseloader"
+	"github.com/znasllc-io/memql/core/component"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
@@ -120,10 +121,7 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 	// parse-phase skip).
 	if eng.loadReport != nil {
 		for _, s := range eng.loadReport.Skipped {
-			diags = append(diags, LintDiagnostic{
-				File:    s.File,
-				Message: fmt.Sprintf("%s %q (%s): %s", s.Keyword, s.Name, s.Phase, s.Err),
-			})
+			diags = append(diags, LintDiagnostic{File: s.File, Message: skipDiagnostic(s)})
 		}
 		for _, d := range eng.loadReport.Duplicates {
 			diags = append(diags, LintDiagnostic{Message: "duplicate construct: " + d.String()})
@@ -146,5 +144,29 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 		}
 		return diags[i].Message < diags[j].Message
 	})
-	return diags, skippedCore, nil
+	return dedupeDiagnostics(diags), skippedCore, nil
+}
+
+// skipDiagnostic is how the offline passes print one load-report skip. A
+// ConceptSkip that stands for a tree-level refusal (a refused language line,
+// memql#5357) prints through here too, which is what makes the concept-phase
+// copy of a refusal and Init's copy one diagnostic rather than two.
+func skipDiagnostic(s baseloader.Skip) string {
+	return fmt.Sprintf("%s %q (%s): %s", s.Keyword, s.Name, s.Phase, s.Err)
+}
+
+// dedupeDiagnostics drops a diagnostic identical to the one before it, in a
+// list already sorted by file then message. The concept build and Init both
+// refuse a domain whose language line the engine will not read (memql#5357),
+// so a pass that collects both holds that refusal twice; an author must read
+// it once.
+func dedupeDiagnostics(diags []LintDiagnostic) []LintDiagnostic {
+	out := make([]LintDiagnostic, 0, len(diags))
+	for i, d := range diags {
+		if i > 0 && d == diags[i-1] {
+			continue
+		}
+		out = append(out, d)
+	}
+	return out
 }

@@ -74,11 +74,11 @@ query widget catalogFixtureWidgets {
 func mountCatalogFixture(t *testing.T) *MemQLEngine {
 	t.Helper()
 
-	memqldsl.RegisterTree(catalogFixtureDomain, fstest.MapFS{
+	memqldsl.RegisterTree(catalogFixtureDomain, withLanguageLine(fstest.MapFS{
 		"concepts.memql": {Data: []byte(catalogFixtureConcepts)},
 		"shapes.memql":   {Data: []byte(catalogFixtureShapes)},
 		"queries.memql":  {Data: []byte(catalogFixtureQueries)},
-	})
+	}))
 	t.Cleanup(func() {
 		memqldsl.UnregisterTree(catalogFixtureDomain)
 		concept.ReplaceAll(nil)

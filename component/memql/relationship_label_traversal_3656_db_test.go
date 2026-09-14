@@ -252,11 +252,11 @@ spec agent labelScopedIsRespondsAsAgent {
 func mountLabelFixture(t *testing.T) {
 	t.Helper()
 	before := memorynodes.All()
-	memqldsl.RegisterTree(labelFixtureDomain, fstest.MapFS{
+	memqldsl.RegisterTree(labelFixtureDomain, withLanguageLine(fstest.MapFS{
 		"concepts.memql": {Data: []byte(labelFixtureConcepts)},
 		"queries.memql":  {Data: []byte(labelFixtureQueries)},
 		"specs.memql":    {Data: []byte(labelFixtureSpecs)},
-	})
+	}))
 	t.Cleanup(func() {
 		memqldsl.UnregisterTree(labelFixtureDomain)
 		memorynodes.ReplaceAll(before)

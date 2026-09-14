@@ -20,6 +20,7 @@ package memql
 // this becomes the only path.
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -30,6 +31,7 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/baseloader"
 	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
@@ -41,6 +43,12 @@ type ConceptSkip struct {
 	File    string // origin path in the DSL tree
 	Concept string // canonical id the concept would have had
 	Err     error  // why the schema build failed
+	// Refusal is set when the skip is about the TREE rather than one concept:
+	// a domain whose language line the engine refuses (memql#5357). None of
+	// that domain's concepts is built, Concept is empty, and the skip is the
+	// very entry Init records on its load report, rendered the same way, so a
+	// caller holding both (LintUnifiedTree, AnalyzePackageDSL) prints it once.
+	Refusal *baseloader.Skip
 }
 
 // String leads with the CONSEQUENCE rather than the cause. The wrapped error
@@ -48,6 +56,9 @@ type ConceptSkip struct {
 // and what the author needs first, is that the whole concept is gone -- not
 // the property (memql#2909).
 func (s ConceptSkip) String() string {
+	if s.Refusal != nil {
+		return skipDiagnostic(*s.Refusal)
+	}
 	return fmt.Sprintf("concept %q DROPPED, so every query, mutation and shape bound to it "+
 		"will fail at runtime: %v", s.Concept, s.Err)
 }
@@ -129,6 +140,28 @@ func BuildUnifiedConcepts(logger *slog.Logger, tree fs.FS) (map[string]*memoryNo
 		return nil, nil, fmt.Errorf("walk unified DSL tree: %w", err)
 	}
 
+	// A domain whose language line the engine refuses contributes NO concept
+	// (memql#5357). This runs before Init and before any concept reaches the
+	// database, so it is the first gate a newer or undeclared tree meets: a
+	// concept read under a language the engine does not speak is not a
+	// concept it can vouch for. One skip per refusal, identical to the entry
+	// Init records, so app/database.go refuses boot here and the offline
+	// passes print it once.
+	lines, lineProblems := ResolveLanguageLines(tree)
+	refusedDomains := map[string]bool{}
+	for _, p := range lineProblems {
+		refusedDomains[p.Domain] = true
+		refusal := languageLineSkip(p)
+		skips = append(skips, ConceptSkip{File: p.Source, Err: errors.New(p.Message), Refusal: &refusal})
+		if logger != nil {
+			logger.Warn("unified loader: skipping the concepts of a domain whose language line is refused",
+				"component", "memql.unifiedLoader",
+				"domain", p.Domain,
+				"file", p.Source,
+				"error", p.Message)
+		}
+	}
+
 	// Pass 1: read + parse every concept file, cache its decls + `use`
 	// imports, and build a global index dir -> { conceptName -> canonicalId }.
 	// The index is what resolves @relationship targets written as
@@ -146,6 +179,9 @@ func BuildUnifiedConcepts(logger *slog.Logger, tree fs.FS) (map[string]*memoryNo
 	index := make(map[string]map[string]string) // dir -> conceptName -> canonicalId
 
 	for _, p := range paths {
+		if line, ok := lines.For(p); ok && refusedDomains[line.Domain] {
+			continue
+		}
 		file, openErr := tree.Open(p)
 		if openErr != nil {
 			if logger != nil {

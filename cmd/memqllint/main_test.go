@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // captureRun runs the CLI with args while capturing everything it writes to
@@ -36,7 +39,27 @@ func captureRun(t *testing.T, args []string) (int, string) {
 }
 
 // writeTree materializes a DSL fixture under a temp dir and returns its root.
+// Every domain directory declares the engine's own language line unless the
+// fixture writes one itself: a bundle domain must carry its own (memql#5357),
+// and each test here is about the one defect its fixture names.
 func writeTree(t *testing.T, files map[string]string) string {
+	t.Helper()
+	withLines := make(map[string]string, len(files))
+	for rel, content := range files {
+		withLines[rel] = content
+	}
+	for rel := range files {
+		if dir, base, ok := strings.Cut(rel, "/"); ok && !strings.Contains(base, "/") && strings.HasSuffix(base, ".memql") {
+			if _, declared := withLines[dir+"/"+dslfs.ManifestFile]; !declared {
+				withLines[dir+"/"+dslfs.ManifestFile] = dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render()
+			}
+		}
+	}
+	return writeTreeAsIs(t, withLines)
+}
+
+// writeTreeAsIs materializes exactly the files given, language line or not.
+func writeTreeAsIs(t *testing.T, files map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
 	for rel, content := range files {
@@ -75,6 +98,30 @@ query item queryItems {
 	})
 	if code := run([]string{root}); code != 0 {
 		t.Errorf("clean tree: run() = %d, want 0", code)
+	}
+}
+
+// TestRun_BundleWithoutLanguageLineExitsOne: memqllint is the pre-boot gate a
+// product bundle has, so a domain the engine would refuse for declaring no
+// language line (memql#5357) must fail the lint with the line to add -- once.
+func TestRun_BundleWithoutLanguageLineExitsOne(t *testing.T) {
+	root := writeTreeAsIs(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+	})
+	code, out := captureRun(t, []string{"--json", root})
+	if code != 1 {
+		t.Fatalf("a bundle domain with no memql.toml: run() = %d, want 1\n%s", code, out)
+	}
+	if n := strings.Count(out, "[language_line_missing]"); n != 1 {
+		t.Errorf("want the missing line reported exactly once, got %d:\n%s", n, out)
+	}
+	if !strings.Contains(out, "add demo/memql.toml containing") {
+		t.Errorf("the report must name the file to add:\n%s", out)
+	}
+
+	// The same bundle declaring the line lints clean.
+	if code := run([]string{writeTree(t, map[string]string{"demo/concepts.memql": testConcepts})}); code != 0 {
+		t.Errorf("the same bundle with its language line: run() = %d, want 0", code)
 	}
 }
 

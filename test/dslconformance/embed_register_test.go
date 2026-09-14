@@ -10,6 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/dslfs"
 	"github.com/znasllc-io/memql/dsl"
 )
 
@@ -31,6 +33,10 @@ import (
 // synthetic overlay. Unregistering is unconditional and a no-op for
 // the domains that were only ever offered to a RegisterTree expected
 // to panic.
+// languageLine is the memql.toml every domain-shaped overlay carries: a mounted
+// domain declares the language it is written in (memql#5357).
+var languageLine = dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render()
+
 func uniqueDomain(t *testing.T) string {
 	t.Helper()
 	// t.Name slashes happen with t.Run; replace them so the result
@@ -48,6 +54,7 @@ func uniqueDomain(t *testing.T) string {
 func TestRegisterTree_MountsOverlayAlongsideEmbedded(t *testing.T) {
 	domain := uniqueDomain(t)
 	overlay := fstest.MapFS{
+		"memql.toml":              {Data: []byte(languageLine)},
 		"queries.memql":           {Data: []byte("// plugin queries\n")},
 		"prompts/agentReply.tmpl": {Data: []byte("plugin prompt body")},
 	}
@@ -74,6 +81,7 @@ func TestRegisterTree_MountsOverlayAlongsideEmbedded(t *testing.T) {
 func TestRegisterTree_OverlayFilesReadable(t *testing.T) {
 	domain := uniqueDomain(t)
 	overlay := fstest.MapFS{
+		"memql.toml":              {Data: []byte(languageLine)},
 		"queries.memql":           {Data: []byte("// plugin queries body\n")},
 		"prompts/agentReply.tmpl": {Data: []byte("plugin prompt body")},
 	}
@@ -84,6 +92,9 @@ func TestRegisterTree_OverlayFilesReadable(t *testing.T) {
 	for path, want := range map[string]string{
 		domain + "/queries.memql":           "// plugin queries body\n",
 		domain + "/prompts/agentReply.tmpl": "plugin prompt body",
+		// The domain's language line is read through this same path
+		// (memql#5357), so it must travel with the overlay.
+		domain + "/memql.toml": languageLine,
 	} {
 		data, err := fs.ReadFile(tree, path)
 		require.NoError(t, err, "ReadFile(%q)", path)
@@ -98,6 +109,7 @@ func TestRegisterTree_OverlayFilesReadable(t *testing.T) {
 func TestRegisterTree_OverlayReadDir(t *testing.T) {
 	domain := uniqueDomain(t)
 	overlay := fstest.MapFS{
+		"memql.toml":     {Data: []byte(languageLine)},
 		"queries.memql":  {Data: []byte("a")},
 		"shapes.memql":   {Data: []byte("b")},
 		"prompts/x.tmpl": {Data: []byte("c")},
@@ -111,7 +123,7 @@ func TestRegisterTree_OverlayReadDir(t *testing.T) {
 		names = append(names, e.Name())
 	}
 	sort.Strings(names)
-	assert.Equal(t, []string{"prompts", "queries.memql", "shapes.memql"}, names)
+	assert.Equal(t, []string{"memql.toml", "prompts", "queries.memql", "shapes.memql"}, names)
 }
 
 // TestRegisterTree_PanicsOnCoreDomainCollision asserts that a pack

@@ -1,0 +1,4 @@
+# The language line of every domain compiled into the engine (a mounted domain
+# declares its own). See docs/public/language/memql.md, "The language line".
+memql = "1.0"
+edition = "2026"
