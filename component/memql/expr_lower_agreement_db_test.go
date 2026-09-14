@@ -26,20 +26,24 @@ import (
 // disagreement drops rows silently. EvalExpr must agree on every row whose
 // field holds a value of the type the body reads -- which is every row of a
 // concept whose schema declared the field, since the write path validates
-// against it. It departs from the SQL on exactly two kinds of MISTYPED row,
-// and the rows are named below (irEvalDivergentRows) so the allowance cannot
-// grow silently: each must be exercised, and no other row may diverge.
+// against it. The rows on which it still departs from the SQL are named below
+// (irEvalDivergentRows) so the allowance cannot grow silently: each must be
+// exercised, and no other row may diverge.
 //
-//   - It REFUSES a value it cannot read at all -- a boolean position holding a
-//     string, a list method or `in` over a scalar (condition_not_boolean,
-//     in_requires_list, operand_type) -- where the SQL can only answer "no".
-//     That is D8's runtime typing.
-//   - It ANSWERS a list method over a non-list differently: it reads a lone
-//     object as a one-element list and counts a string's characters, the
-//     step-result convenience its collection methods keep
-//     (exprCollection), where the pushdown's rules table answers any/all over
-//     a non-array false and count 0. Recorded for the differential lane
-//     (memql#5369), which decides which side a mistyped row should move.
+// A stored value that is present and not a list, where the body expects one --
+// the right side of `in`, the receiver of any(), all() or count() -- used to
+// be refused (in_requires_list, operand_type) or read as a one-element list
+// when an object; it now answers as the pushdown does: not a member, no
+// element passes, none counted (expr_stored.go, memql#5369). Two departures
+// remain, each a question of the language rather than a bug in one side:
+//
+//   - A BOOLEAN POSITION holding a string ("true", "maybe"): D8 refuses a
+//     non-boolean condition at run time (condition_not_boolean), and a refine
+//     clause fails the read naming the row (refine_test.go); the SQL cannot
+//     refuse one row, so it reads "not true".
+//   - count() over a stored STRING in a list-or-untyped field: EvalExpr counts
+//     its characters (string.count, which is where Lower sends a string's
+//     count), and the pushdown's count of a non-array is 0.
 //
 // Every body runs bare and negated, the negation lowered from source.
 
@@ -81,11 +85,9 @@ func irV1Bodies() []string {
 // from the SQL (see the file header), and how: "refuses" -- it errors where
 // the SQL answers -- and/or "answers" -- it returns the other boolean.
 var irEvalDivergentRows = map[string][]string{
-	"irB a string true":         {"refuses"},
-	"irB malformed":             {"refuses"},
-	"irTags a non-array scalar": {"refuses", "answers"},
-	"irNums a non-array scalar": {"refuses"},
-	"irTags an object":          {"refuses", "answers"},
+	"irB a string true":         {"refuses"}, // row.irB as a condition: D8's run-time refusal
+	"irB malformed":             {"refuses"}, // the same, over "maybe"
+	"irTags a non-array scalar": {"answers"}, // row.irTags.count() over "a": characters, not elements
 }
 
 func TestV1LoweredBodiesAgreeAcrossBothEvaluators(t *testing.T) {

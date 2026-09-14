@@ -582,6 +582,11 @@ func (ev *exprEvaluator) binary(e *ast.BinaryExpr, scope ExprScope) (any, error)
 	case "<", "<=", ">", ">=":
 		return exprOrdered(e.Op, l, r), nil
 	case "in":
+		// A stored value that is not a list has no members (expr_stored.go);
+		// a computed one is refused by exprIn.
+		if exprStoredMismatch(r) && exprStoredRead(e.Right, scope) {
+			return false, nil
+		}
 		return exprIn(e, l, r)
 	case "startsWith":
 		return exprStartsWith(e, l, r)
@@ -1329,7 +1334,8 @@ func (ev *exprEvaluator) applyPredicate(e *ast.CallExpr, param string, body ast.
 	}
 	ev.predDepth++
 	defer func() { ev.predDepth-- }()
-	v, err := ev.eval(body, &exprLambdaScope{parent: ev.root, names: []string{param}, values: []any{arg}})
+	v, err := ev.eval(body, &exprLambdaScope{parent: ev.root, names: []string{param}, values: []any{arg},
+		stored: []bool{exprStoredRead(e.Args[0], scope)}})
 	if err != nil {
 		return nil, err
 	}
@@ -1416,6 +1422,14 @@ func (ev *exprEvaluator) method(e *ast.CallExpr, scope ExprScope) (any, error) {
 		// A method only a string has (includes) decides about every
 		// receiver itself.
 		return ev.dispatchMethod(e, strFn, recv, scope)
+	}
+	// A stored value that is present and not a list answers any(), all()
+	// and count() as the pushdown does -- a mismatch satisfies nothing
+	// (expr_stored.go) -- except that a string keeps its own count().
+	if _, isString := recv.(string); exprStoredMismatch(recv) && !(isString && onString) && exprStoredRead(e.Receiver, scope) {
+		if answer, ok := exprStoredListAnswer(e.Name); ok {
+			return answer, nil
+		}
 	}
 	if s, isString := recv.(string); isString {
 		if !onString {
@@ -1832,7 +1846,8 @@ func (ev *exprEvaluator) bind(e *ast.CallExpr, i int, parent ExprScope) *exprBou
 		ev:     ev,
 		method: e.Name,
 		body:   lam.Body,
-		scope:  exprLambdaScope{parent: parent, names: lam.Params[:1], values: make([]any, 1)},
+		scope: exprLambdaScope{parent: parent, names: lam.Params[:1], values: make([]any, 1),
+			stored: []bool{e.Receiver != nil && exprStoredRead(e.Receiver, parent)}},
 	}
 }
 
@@ -1856,6 +1871,10 @@ type exprLambdaScope struct {
 	parent ExprScope
 	names  []string
 	values []any
+	// stored marks the names bound to a value read out of a stored row: the
+	// element of a collection method over one, a predicate's argument when it
+	// is one (expr_stored.go). Shorter than names means not stored.
+	stored []bool
 }
 
 // Lookup finds a parameter, else asks the parent.
