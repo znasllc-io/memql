@@ -1,8 +1,8 @@
 # Scenarios
 
 Whole automations as the product ships them: the decide-and-apply sweeps, the
-forge state machine and the deployment pipeline, each run over a real database
-by `test/conformance/scenarios_db_test.go`. A scenario names the automations
+forge state machine, the deployment pipeline and the campaigns engine's event
+emails, each run over a real database by `test/conformance/scenarios_db_test.go`. A scenario names the automations
 and the mutations it uses. It never copies them, because a copy can pass while
 the shipped automation breaks. The same scenarios run before and after the
 body language's migration, over the legacy bodies and then over the statement
@@ -48,8 +48,13 @@ has none, nor any `.memql` file.
   event is either the graph event the step before published for a row,
   `{ "action": "updated", "concept": "v1:forge:request", "id": ... }`, or,
   for a topic no write publishes, one the scenario publishes itself,
-  `{ "topic": "deploy.requested", "payload": { ... } }`. A run must end
-  `completed` unless the step names another `status`.
+  `{ "topic": "deploy.requested", "payload": { ... } }`. `"redeliver": true`
+  delivers the previous fire's event again, which is what a first-fire claim
+  guards. A run must end `completed` unless the step names another `status`.
+- **`"emailRule": { "$id": "rule" }`** in place of `automation` runs what the
+  shipped generator (`component/emailrules`) writes for that seeded rule. It
+  runs under the author's envelope, the rule's owner named by `as`, as the
+  authored runtime runs it.
 - **`actions`** answers the calls the automations' actions dispatch, keyed by
   capability, and by script for a `shell.script` call
   (`"shell.script:deploy.gate"`). A stub answers every call, so no script
@@ -67,7 +72,8 @@ has none, nor any `.memql` file.
   must end with the same rows and calls.
 
 Values: `{ "$id": "x" }` is a seeded id, tagged per run and per variant so
-runs share a database safely. `{ "$ago": "PT10M" }` is the instant that long
+runs share a database safely (`x-<tag>`, or `x` with `{tag}` replaced where
+it holds one, as in an address). `{ "$ago": "PT10M" }` is the instant that long
 before now. A `legacy` entry on a `where` row gives its count under the legacy
 bodies, with the defect that makes it differ. The runner refuses the entry
 once the tree is in statements.

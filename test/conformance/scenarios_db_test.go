@@ -55,6 +55,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/emailrules"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/memql"
@@ -103,13 +104,19 @@ type scenarioActor struct {
 }
 
 // scenarioFire is one step after the seeds: a shipped automation run on a
-// schedule tick or on an event the step before it published, or a write
-// through a shipped mutation (Mutation, Args, As), which publishes events
-// for the next step.
+// schedule tick or on an event the step before it published; the automation
+// the shipped event-email generator writes for a seeded rule (EmailRule),
+// run on an event under the rule author's envelope (As names the author);
+// or a write through a shipped mutation (Mutation, Args, As), which
+// publishes events for the next step.
 type scenarioFire struct {
 	Automation string         `json:"automation"`
+	EmailRule  any            `json:"emailRule"`
 	Schedule   bool           `json:"schedule"`
 	Event      *scenarioEvent `json:"event"`
+	// Redeliver delivers the event the previous fire delivered, again: the
+	// bus handing one event to a subscriber twice.
+	Redeliver bool `json:"redeliver"`
 	// Status is the run's expected status; "completed" when empty.
 	Status string `json:"status"`
 
@@ -326,11 +333,21 @@ func checkScenarioShape(t *testing.T, where string, sc scenarioCase, autos map[s
 	}
 	for i, f := range sc.Fire {
 		if f.Mutation != "" {
-			if f.Automation != "" || f.Schedule || f.Event != nil {
+			if f.Automation != "" || f.EmailRule != nil || f.Schedule || f.Event != nil {
 				t.Errorf("%s: fire %d is a write or an automation, not both", where, i)
 			}
 			if !isMutation(f.Mutation) {
 				t.Errorf("%s: fire %d writes through mutation %q, which the tree does not ship", where, i, f.Mutation)
+			}
+			continue
+		}
+		if f.Redeliver && (i == 0 || f.Event != nil || f.Schedule || (sc.Fire[i-1].Event == nil && !sc.Fire[i-1].Redeliver)) {
+			t.Errorf("%s: fire %d redelivers the event the fire before it delivered, and names no event of its own", where, i)
+			continue
+		}
+		if f.EmailRule != nil {
+			if f.Automation != "" || f.Schedule || (!f.Redeliver && (f.Event == nil || f.Event.Action == "")) {
+				t.Errorf("%s: fire %d runs a rule's generated automation, on a graph event and on nothing else", where, i)
 			}
 			continue
 		}
@@ -340,6 +357,7 @@ func checkScenarioShape(t *testing.T, where string, sc scenarioCase, autos map[s
 			continue
 		}
 		switch {
+		case f.Redeliver:
 		case f.Schedule == (f.Event != nil):
 			t.Errorf("%s: fire %d is on a schedule or on an event, and exactly one", where, i)
 		case f.Schedule && a.Schedule == "":
@@ -426,6 +444,26 @@ func newScenarioRig(t *testing.T, env *Env, autos map[string]*automations.Automa
 		quiet: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		run:   strconv.FormatInt(time.Now().UnixNano()%1_000_000_000, 36),
 	}
+	// The event-email rules' builtin reaches the emailrules integration, a
+	// self-registering plug-in the app materializes at boot; the rig
+	// materializes that one the same way.
+	for _, p := range memql.RegisteredPlugins() {
+		if p.Name != emailrules.IntegrationName {
+			continue
+		}
+		prov, err := p.Factory(memql.PluginContext{
+			Logger:      r.quiet,
+			Engine:      env.Eng,
+			BunDB:       func() *bun.DB { return env.DB },
+			DirectBunDB: func() *bun.DB { return env.DB },
+		})
+		if err != nil || prov == nil {
+			t.Fatalf("materialize the %s plug-in: %v", p.Name, err)
+		}
+		if err := env.Eng.RegisterIntegration(prov); err != nil {
+			t.Fatalf("register the %s plug-in: %v", p.Name, err)
+		}
+	}
 	bus := env.Eng.EventBus()
 	if bus == nil {
 		t.Fatal("the rig's engine has no event bus, so no write would publish the events a scenario fires on")
@@ -453,6 +491,8 @@ type variant struct {
 	window int
 	// legacy is set while the scenario's automations are in the retired forms.
 	legacy bool
+	// delivered is the event the last fire delivered.
+	delivered *events.Event
 }
 
 func (r *scenarioRig) variant(t *testing.T, sc scenarioCase, kind string) *variant {
@@ -626,7 +666,7 @@ func (v *variant) step(i int, reg automations.StepExecutorRegistry) {
 	}
 	exec := v.execute(v.executor(reg), i)
 	if want := statusOf(f); exec.Status != want {
-		v.t.Fatalf("fire %d: %s's run is %s, want %s: %s", i, f.Automation, exec.Status, want, exec.Error)
+		v.t.Fatalf("fire %d: %s's run is %s, want %s: %s", i, exec.AutomationName, exec.Status, want, exec.Error)
 	}
 }
 
@@ -635,24 +675,75 @@ func (v *variant) step(i int, reg automations.StepExecutorRegistry) {
 func (v *variant) execute(ex *automations.Executor, i int) *automations.AutomationExecution {
 	v.t.Helper()
 	f := v.sc.Fire[i]
+	ctx := context.Background()
 	a := v.rig.autos[f.Automation]
+	if f.EmailRule != nil {
+		a, ctx = v.generated(f)
+	}
 	var ev *events.Event
-	if f.Event != nil {
+	switch {
+	case f.Redeliver:
+		if v.delivered == nil {
+			v.t.Fatalf("fire %d redelivers an event, and no fire before it delivered one", i)
+		}
+		again := *v.delivered
+		ev = &again
+	case f.Event != nil:
 		e := v.event(f.Event)
 		ev = &e
 	}
+	if ev != nil && f.EmailRule != nil && !events.Match(a.Trigger.Event, ev.Topic) {
+		v.t.Fatalf("fire %d: the rule's generated automation is triggered by %s, which does not take %s", i, a.Trigger.Event, ev.Topic)
+	}
+	v.delivered = ev
 	// This run is the step the next event fire reads its event from.
 	v.mark()
 	var exec *automations.AutomationExecution
 	if ev == nil {
-		exec, _ = ex.Execute(context.Background(), a, "scenario:schedule")
+		exec, _ = ex.Execute(ctx, a, "scenario:schedule")
 	} else {
-		exec, _ = ex.ExecuteWithEvent(context.Background(), a, "event:"+ev.Topic, ev)
+		exec, _ = ex.ExecuteWithEvent(ctx, a, "event:"+ev.Topic, ev)
 	}
 	if exec == nil {
 		v.t.Fatalf("fire %d: %s left no execution record", i, a.Name)
 	}
 	return exec
+}
+
+// generated is the automation the shipped generator writes for the fire's
+// seeded rule, compiled as the runtime compiles it, and the context the
+// authored runtime runs it under: its author's envelope.
+func (v *variant) generated(f scenarioFire) (*automations.Automation, context.Context) {
+	v.t.Helper()
+	ruleID, _ := v.resolve(f.EmailRule).(string)
+	author := scenarioOwner
+	if f.As != nil && f.As.UserID != "" {
+		author = f.As.UserID
+	}
+	ctx := automations.AuthorContext(context.Background(), author)
+	rule, ok, err := emailrules.NewStore(storeEngine{v.rig.env.Eng}).RuleByID(ctx, ruleID)
+	if err != nil || !ok {
+		v.t.Fatalf("read email rule %s as its author %s: found %v, %v", ruleID, author, ok, err)
+	}
+	src, err := emailrules.GenerateAutomation(rule)
+	if err != nil {
+		v.t.Fatalf("generate the automation of email rule %s: %v", ruleID, err)
+	}
+	a, err := automations.NewLoader(automations.LoaderOptions{Logger: v.rig.quiet, Registry: v.rig.env.Registry}).
+		CompileSource(src, "authored:emailRule:"+ruleID)
+	if err != nil {
+		v.t.Fatalf("compile the automation generated for email rule %s: %v\n%s", ruleID, err, src)
+	}
+	return a, ctx
+}
+
+// storeEngine is the engine behind the emailrules store's narrow interface,
+// as the plug-in adapts it: the result handed back as any, which
+// MaterializeRows reads either way.
+type storeEngine struct{ eng *memql.MemQLEngine }
+
+func (e storeEngine) Execute(ctx context.Context, q string) (any, error) {
+	return e.eng.Execute(ctx, q)
 }
 
 func (v *variant) executor(reg automations.StepExecutorRegistry) *automations.Executor {
@@ -907,13 +998,17 @@ func (v *variant) cleanup() {
 }
 
 // resolve replaces a scenario value's placeholders: {"$id": "x"} is id x
-// under the variant's tag, and {"$ago": "PT10M"} the instant that long before
+// under the variant's tag ("x-<tag>", or x with {tag} replaced where x holds
+// it, as in an address), and {"$ago": "PT10M"} the instant that long before
 // now, in RFC3339.
 func (v *variant) resolve(x any) any {
 	switch x := x.(type) {
 	case map[string]any:
 		if len(x) == 1 {
 			if id, ok := x["$id"].(string); ok {
+				if strings.Contains(id, "{tag}") {
+					return strings.ReplaceAll(id, "{tag}", v.tag)
+				}
 				return id + "-" + v.tag
 			}
 			if d, ok := x["$ago"].(string); ok {
