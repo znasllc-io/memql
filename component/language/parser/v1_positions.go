@@ -202,9 +202,7 @@ func (p *Parser) parseAttributeArgValue(attrName, argName string, argTok Token) 
 			}
 			return lam, nil
 		}
-		if p.opts.ExpressionsV1 {
-			return nil, v1Retired(argTok, ruleFilterAnnotation)
-		}
+		return nil, v1Retired(argTok, ruleFilterAnnotation)
 	}
 	return p.parseValue()
 }
@@ -218,9 +216,6 @@ func formatV1(n ExpressionNode) string { return ast.FormatExpr(n) }
 // operand of the join under the directive wrappers. from is the index of the
 // body's first token.
 func (p *Parser) checkV1QueryFilter(body ExpressionNode, from int) error {
-	if !p.opts.ExpressionsV1 {
-		return nil
-	}
 	base := unwrapQueryDirectives(body)
 	and, ok := base.(*LogicalExpr)
 	if !ok || and.Op != LogicalAnd {
@@ -313,10 +308,6 @@ func unwrapQueryDirectives(n ExpressionNode) ExpressionNode {
 // block: with ExpressionsV1 on, a v1 expression -- its canonical source and
 // its node -- and otherwise today's canonicalised string and no node.
 func (p *Parser) parseStepCondition() (string, ExpressionNode, error) {
-	if !p.opts.ExpressionsV1 {
-		s, err := p.parseConditionExpression()
-		return s, nil, err
-	}
 	n, err := p.parseV1Expression()
 	if err != nil {
 		return "", nil, err
@@ -384,35 +375,37 @@ func (p *Parser) parseV1StepCall(what string) (*ast.CallExpr, error) {
 	return call, nil
 }
 
-// ifStatementToStepsV1 is ifStatementToSteps over v1 conditions: each step
-// under the if carries the if's condition, ANDed with its own, and the else
-// branch carries its negation -- as nodes, so the stamped Condition string is
-// canonical v1 source rather than the legacy `(a) and (b)` / `not (...)`.
-func ifStatementToStepsV1(stmt *IfStmt) []StepDef {
+// ifStatementToSteps flattens a parsed IfStmt into a list of conditional
+// StepDefs, so the runtime sees a flat list of gated steps rather than a
+// nested if: each step under the if carries the if's condition, ANDed with
+// its own, and the else branch carries its negation -- as nodes, so the
+// stamped Condition string is canonical v1 source. An empty if body is no
+// steps.
+func ifStatementToSteps(stmt *IfStmt) []StepDef {
 	if stmt == nil {
 		return nil
 	}
 	cond := stmt.Condition
 	var out []StepDef
 	for _, step := range stmt.ThenSteps {
-		out = append(out, stampStepConditionV1(step, cond))
+		out = append(out, stampStepCondition(step, cond))
 	}
 	negated := &ast.UnaryExpr{Op: "!", Operand: cond}
 	if stmt.ElseIf != nil {
-		for _, step := range ifStatementToStepsV1(stmt.ElseIf) {
-			out = append(out, stampStepConditionV1(step, negated))
+		for _, step := range ifStatementToSteps(stmt.ElseIf) {
+			out = append(out, stampStepCondition(step, negated))
 		}
 	} else {
 		for _, step := range stmt.ElseSteps {
-			out = append(out, stampStepConditionV1(step, negated))
+			out = append(out, stampStepCondition(step, negated))
 		}
 	}
 	return out
 }
 
-// stampStepConditionV1 ANDs outer onto a step's condition, and onto every step
+// stampStepCondition ANDs outer onto a step's condition, and onto every step
 // inside a for-range the step owns (they do not inherit it otherwise).
-func stampStepConditionV1(step StepDef, outer ExpressionNode) StepDef {
+func stampStepCondition(step StepDef, outer ExpressionNode) StepDef {
 	if outer == nil {
 		return step
 	}
@@ -424,7 +417,7 @@ func stampStepConditionV1(step StepDef, outer ExpressionNode) StepDef {
 	step.Condition = formatV1(step.ConditionExpr)
 	if cfg, ok := step.Config.(*ForEachStepConfig); ok && cfg != nil {
 		for i := range cfg.Do {
-			cfg.Do[i] = stampStepConditionV1(cfg.Do[i], outer)
+			cfg.Do[i] = stampStepCondition(cfg.Do[i], outer)
 		}
 	}
 	return step
@@ -433,9 +426,6 @@ func stampStepConditionV1(step StepDef, outer ExpressionNode) StepDef {
 // parseMutationValue parses one insert()/update() argument value: a v1 node
 // with ExpressionsV1 on, today's template value otherwise.
 func (p *Parser) parseMutationValue() (any, error) {
-	if !p.opts.ExpressionsV1 {
-		return p.parseValueMaybeCoalesce()
-	}
 	n, err := p.parseV1Expression()
 	if err != nil {
 		return nil, err

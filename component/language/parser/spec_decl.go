@@ -114,44 +114,14 @@ func (p *Parser) parseSpecDecl(attrs []*ast.Attribute, isTrait bool) (*ast.SpecD
 		return decl, nil
 	}
 
-	if p.opts.ExpressionsV1 && p.check(TokenBraceOpen) {
+	// The braced `{ return ... }` body is retired; anything else after the
+	// signature is not a spec.
+	if p.check(TokenBraceOpen) {
 		rule := ruleSpecReturnBody
 		if isTrait {
 			rule = ruleTraitReturnBody
 		}
 		return nil, v1Retired(p.current, rule)
 	}
-
-	if err := p.expect(TokenBraceOpen); err != nil {
-		return nil, err
-	}
-
-	// ADR Decision 5: `body { }` is the procedural marker reserved for
-	// `logic`; a spec/trait is a bare `return <expr>`, never a body block.
-	// Catch a wrongly-added `body { ... }` here with a body-rule-pointing
-	// error before the generic "must be a return" message.
-	if p.check(TokenIdentifier) && p.current.Literal == "body" && p.peekAhead(1).Type == TokenBraceOpen {
-		return nil, newParseErrorf(&p.current, "%s", bodyRuleForbiddenMessage(keyword, decl.Name))
-	}
-
-	// The body MUST be a single `return <boolean expression>`. The old
-	// bare-expression form is rejected with a migration-pointing error.
-	if !p.check(TokenKeywordReturn) {
-		return nil, newParseErrorf(&p.current, "%s %q body must be a `return <boolean expression>` -- the old bare-expression form is retired (epic #2281). Wrap the predicate in `return ...` and read bound fields by bare name", keyword, decl.Name)
-	}
-	p.advance()
-
-	expr, err := p.parseExpression()
-	if err != nil {
-		return nil, err
-	}
-	if expr == nil {
-		return nil, newParseErrorf(&p.current, "%s %q: body is empty (expected `return <boolean expression>`)", keyword, decl.Name)
-	}
-	decl.Body = expr
-
-	if err := p.expect(TokenBraceClose); err != nil {
-		return nil, err
-	}
-	return decl, nil
+	return nil, newParseErrorf(&p.current, "expected `=` and the %s's predicate after %q, as in %s = row => <predicate>; got %q", keyword, decl.Name, keyword, p.current.Literal)
 }
