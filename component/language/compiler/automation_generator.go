@@ -407,20 +407,39 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	}, nil
 }
 
-// topoSortSteps sorts step IDs by their dependency graph using Kahn's
-// algorithm. Among steps with equal depth (no ordering constraint),
-// the original source order is preserved so the output is deterministic.
-// Returns an error if a cycle is detected or if a step references an
-// unknown step ID (typo detection).
+// topoSortSteps orders step IDs so every step runs after the steps it depends
+// on (deps[A] holds the steps A reads), and is otherwise in SOURCE order: of
+// the steps ready to run, the one written first runs first -- a stable
+// topological sort. When the source is already in dependency order the result
+// is the source order exactly, which is what the statement form of a body
+// means (D12) and what the legacy runtime did. A step that reads a step
+// written after it is the one thing that moves: its provider is pulled ahead
+// of it, and nothing else changes place.
+//
+// The earlier sort was breadth-first (Kahn's algorithm with a FIFO queue), so
+// "ready" meant "ready in the same round": a step with no dependencies ran
+// ahead of an EARLIER step that depended on the first one, and two steps
+// released by the same provider came out in map-iteration order. In
+// forge's routeRequest that put `persistRouted` (independent) ahead of
+// `advance` (reads `steps.decide`), the reverse of source order (memql#5367).
+//
+// Returns an error if a cycle is detected or if a step references an unknown
+// step ID (typo detection).
 func topoSortSteps(automationName string, sourceOrder []string, deps map[string]map[string]struct{}) ([]string, error) {
 	allSteps := make(map[string]struct{}, len(sourceOrder))
 	for _, id := range sourceOrder {
 		allSteps[id] = struct{}{}
 	}
 
-	// Check for unknown references (typos).
-	for id, depSet := range deps {
-		for dep := range depSet {
+	// Check for unknown references (typos), in source order so the error
+	// names the same reference every time.
+	for _, id := range sourceOrder {
+		names := make([]string, 0, len(deps[id]))
+		for dep := range deps[id] {
+			names = append(names, dep)
+		}
+		sort.Strings(names)
+		for _, dep := range names {
 			if _, ok := allSteps[dep]; !ok {
 				return nil, fmt.Errorf(
 					"automation %q: step %q references unknown step %q -- check for a typo, or add the step",
@@ -429,72 +448,40 @@ func topoSortSteps(automationName string, sourceOrder []string, deps map[string]
 		}
 	}
 
-	// Kahn's algorithm.
-	inDegree := make(map[string]int, len(sourceOrder))
-	for _, id := range sourceOrder {
-		inDegree[id] = 0
-	}
-	for _, depSet := range deps {
-		for dep := range depSet {
-			inDegree[dep] += 0 // ensure key exists
+	emitted := make(map[string]bool, len(sourceOrder))
+	ready := func(id string) bool {
+		for dep := range deps[id] {
+			if !emitted[dep] {
+				return false
+			}
 		}
+		return true
 	}
-	// Reverse: for each step, count how many OTHER steps depend on IT.
-	// Actually Kahn's uses in-degree of the CONSUMER, not the provider.
-	// Let me re-think: deps[A] = {B, C} means "A depends on B and C".
-	// In the DAG, edges go from B->A and C->A (B must run before A).
-	// In-degree of A = number of dependencies it has = len(deps[A]).
-	for _, id := range sourceOrder {
-		inDegree[id] = len(deps[id])
-	}
-
-	// Queue: steps with no dependencies, in source order.
-	queue := make([]string, 0)
-	for _, id := range sourceOrder {
-		if inDegree[id] == 0 {
-			queue = append(queue, id)
-		}
-	}
-
-	// Reverse adjacency: provider -> list of consumers (steps that
-	// depend on it). We need this to decrement in-degree when a
-	// provider is emitted.
-	consumers := make(map[string][]string)
-	for id, depSet := range deps {
-		for dep := range depSet {
-			consumers[dep] = append(consumers[dep], id)
-		}
-	}
-
 	sorted := make([]string, 0, len(sourceOrder))
-	for len(queue) > 0 {
-		// Pop first (preserves source order among equal-depth steps).
-		id := queue[0]
-		queue = queue[1:]
-		sorted = append(sorted, id)
-
-		// Every step that depends on `id` loses one dependency.
-		for _, consumer := range consumers[id] {
-			inDegree[consumer]--
-			if inDegree[consumer] == 0 {
-				queue = append(queue, consumer)
-			}
-		}
-	}
-
-	if len(sorted) != len(sourceOrder) {
-		// Cycle detected -- find the participating steps.
-		var cycle []string
+	for len(sorted) < len(sourceOrder) {
+		// The first step in source order whose dependencies have all run.
+		next := ""
 		for _, id := range sourceOrder {
-			if inDegree[id] > 0 {
-				cycle = append(cycle, id)
+			if !emitted[id] && ready(id) {
+				next = id
+				break
 			}
 		}
-		return nil, fmt.Errorf(
-			"automation %q: dependency cycle among steps %v -- each step references one or more of the others",
-			automationName, cycle)
+		if next == "" {
+			// Cycle detected -- name the participating steps.
+			var cycle []string
+			for _, id := range sourceOrder {
+				if !emitted[id] {
+					cycle = append(cycle, id)
+				}
+			}
+			return nil, fmt.Errorf(
+				"automation %q: dependency cycle among steps %v -- each step references one or more of the others",
+				automationName, cycle)
+		}
+		emitted[next] = true
+		sorted = append(sorted, next)
 	}
-
 	return sorted, nil
 }
 

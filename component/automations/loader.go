@@ -393,12 +393,12 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 	return &automation, nil
 }
 
-// parseResolveCompile parses source, runs concept resolution on the AST, then compiles.
-// This replaces compiler.CompileSource to insert the resolution step.
-//
-// authored is the text source was derived from; parse positions are reported
-// against it (languageParser.PositionLowering, memql#5364).
-func (l *Loader) parseResolveCompile(authored, source, path string) (*compiler.CompileResult, error) {
+// parseAutomationFile lowers an automation slice's struct forms and parses it,
+// with the author's positions (authored) carried in the tokens. It is the
+// parse half of parseResolveCompile, shared with the step-order gate, which
+// reads the step order the compiler is handed. file is nil when the source
+// parses to something other than a file; lowered is the lowered source.
+func parseAutomationFile(authored, source string) (file *languageParser.File, lowered string, err error) {
 	// Apply struct-form rewriters before tokenisation. The automation
 	// loader bypasses compiler.CompileSource (so it can interleave
 	// concept resolution between parse and compile), which means it
@@ -406,18 +406,18 @@ func (l *Loader) parseResolveCompile(authored, source, path string) (*compiler.C
 	if languageParser.LooksLikeStructLogic(source) {
 		rewritten, err := languageParser.NormaliseLogicSource(source)
 		if err != nil {
-			return nil, languageParser.PositionRewriteError(authored, fmt.Errorf("logic rewrite: %w", err))
+			return nil, "", languageParser.PositionRewriteError(authored, fmt.Errorf("logic rewrite: %w", err))
 		}
 		source = rewritten
 	}
 	if languageParser.LooksLikeStructAutomation(source) {
 		rewritten, err := languageParser.NormaliseAutomationSource(source)
 		if err != nil {
-			return nil, languageParser.PositionRewriteError(authored, fmt.Errorf("automation rewrite: %w", err))
+			return nil, "", languageParser.PositionRewriteError(authored, fmt.Errorf("automation rewrite: %w", err))
 		}
 		source = rewritten
 	} else if languageParser.LooksLikeLegacyAutomation(source) {
-		return nil, fmt.Errorf("automation source: `func (Automation) NAME(...)` is retired -- author the struct form: `automation NAME { step <name> { logic <bareName> { ... } } }`. See dsl/v1/automations/v1/identity/expireDelegations/automation.memql for a worked example.")
+		return nil, "", fmt.Errorf("automation source: `func (Automation) NAME(...)` is retired -- author the struct form: `automation NAME { step <name> { logic <bareName> { ... } } }`. See dsl/v1/automations/v1/identity/expireDelegations/automation.memql for a worked example.")
 	}
 
 	// Tokenize the lowering with the author's positions carried in it, so a
@@ -426,7 +426,7 @@ func (l *Loader) parseResolveCompile(authored, source, path string) (*compiler.C
 	lexer := languageParser.NewLexer(languageParser.PositionLowering(authored, source))
 	tokens, err := lexer.Tokenize()
 	if err != nil {
-		return nil, fmt.Errorf("lexer error: %w", err)
+		return nil, "", fmt.Errorf("lexer error: %w", err)
 	}
 
 	// Parse
@@ -434,13 +434,26 @@ func (l *Loader) parseResolveCompile(authored, source, path string) (*compiler.C
 	p.SetDocComments(lexer.DocComments())
 	ast, err := p.Parse()
 	if err != nil {
-		return nil, fmt.Errorf("parser error: %w", err)
+		return nil, "", fmt.Errorf("parser error: %w", err)
 	}
 
-	file, ok := ast.(*languageParser.File)
-	if !ok {
+	f, _ := ast.(*languageParser.File)
+	return f, source, nil
+}
+
+// parseResolveCompile parses source, runs concept resolution on the AST, then compiles.
+// This replaces compiler.CompileSource to insert the resolution step.
+//
+// authored is the text source was derived from; parse positions are reported
+// against it (languageParser.PositionLowering, memql#5364).
+func (l *Loader) parseResolveCompile(authored, source, path string) (*compiler.CompileResult, error) {
+	file, lowered, err := parseAutomationFile(authored, source)
+	if err != nil {
+		return nil, err
+	}
+	if file == nil {
 		// Fall back to CompileSource for non-file AST (shouldn't happen for automations)
-		return compiler.CompileSource(source)
+		return compiler.CompileSource(lowered)
 	}
 
 	// Resolve use declarations if present
