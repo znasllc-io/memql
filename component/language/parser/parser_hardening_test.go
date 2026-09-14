@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"reflect"
 	"sort"
 	"strings"
@@ -168,24 +169,37 @@ func TestRequireEOF_TrailingSemicolonsTolerated(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Fix 3: parseDefinition's expected-keyword hint is the full set + did-you-mean.
+// Fix 3 (#2358), now one refusal (memql#5356): a top-level statement opened by
+// a word that is no construct keyword is refused with construct_unknown's own
+// refusal -- the one the load gate gives the line.
 // ---------------------------------------------------------------------------
 
-func TestParseDefinition_UnknownKeyword_ListsRewriterHandledKinds(t *testing.T) {
+func TestParseDefinition_UnknownKeyword_IsTheConstructUnknownRefusal(t *testing.T) {
 	// A file that reaches parseDefinition (leading annotation) with a typo'd
-	// construct keyword. The previously-omitted rewriter-handled keywords
-	// (query/mutate/logic/automation) must now appear in the hint.
-	_, err := ParseFile("@enabled\nconept foo { }")
+	// construct keyword.
+	src := "@enabled\nconept foo { }"
+	_, err := ParseFile(src)
 	if err == nil {
 		t.Fatal("expected an error for the typo'd `conept` keyword, got nil")
 	}
-	msg := err.Error()
-	for _, want := range []string{"'query'", "'mutate'", "'logic'", "'automation'"} {
-		if !strings.Contains(msg, want) {
-			t.Errorf("expected-keyword hint should list %s (it omitted these before #2358)\n  full: %s", want, msg)
-		}
+	gate := FindUnknownConstructKeywords(src)
+	if len(gate) != 1 {
+		t.Fatalf("the load gate must refuse the line too, got %+v", gate)
 	}
-	if !strings.Contains(msg, "did you mean 'concept'?") {
+	var cause *UnknownConstructKeyword
+	if !errors.As(err, &cause) || cause.Keyword != "conept" || cause.Message != gate[0].Message {
+		t.Fatalf("the parse error must carry the load gate's refusal as its cause\n  parse: %v\n  gate:  %q", err, gate[0].Message)
+	}
+	msg := err.Error()
+	if !strings.HasSuffix(msg, gate[0].Message) {
+		t.Errorf("the parse error must read as the gate's refusal; got: %s", msg)
+	}
+	// One table: every construct keyword, the rewriter-handled family the
+	// hint once omitted included, and `use`; no internal `func`.
+	if !strings.Contains(msg, "The constructs are: "+strings.Join(ConstructKeywords(), ", ")+" [construct_unknown]") {
+		t.Errorf("the refusal must list ConstructKeywords(); got: %s", msg)
+	}
+	if !strings.Contains(msg, "did you mean concept?") {
 		t.Errorf("expected a `concept` suggestion for `conept`; got: %s", msg)
 	}
 }
@@ -195,9 +209,9 @@ func TestParseDefinition_UnknownKeyword_SuggestsNearest(t *testing.T) {
 		src  string
 		want string
 	}{
-		{"@description(\"x\")\nquer participant qFoo { }", "did you mean 'query'?"},
-		{"use cognition.concepts.{ space }\n\nshaep space s { row.id }", "did you mean 'shape'?"},
-		{"@enabled\nmutaton space createSpace { }", "did you mean 'mutate'?"},
+		{"@description(\"x\")\nquer participant qFoo { }", "did you mean query?"},
+		{"use cognition.concepts.{ space }\n\nshaep space s { row.id }", "did you mean shape?"},
+		{"@enabled\nmutaton space createSpace { }", "did you mean mutate?"},
 	}
 	for _, tc := range cases {
 		_, err := ParseFile(tc.src)

@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"reflect"
 	"sort"
 	"strings"
@@ -77,6 +78,51 @@ func TestFindUnknownConstructKeywords(t *testing.T) {
 	}
 	if wantMsg := "predicate is not a construct keyword. The constructs are: " + all + " [construct_unknown]"; got[1].Message != wantMsg {
 		t.Errorf("no-suggestion message:\n got %q\nwant %q", got[1].Message, wantMsg)
+	}
+}
+
+// The retired file-top `import ( ... )` block loaded before epic memql#5356;
+// it is refused now, BY NAME, with its replacement -- not with the generic
+// keyword list. Wherever the parser cannot take the word as a statement
+// (after a construct), it raises the same refusal, so one statement is one
+// refusal.
+func TestTheImportBlockIsRefusedNamingUse(t *testing.T) {
+	const want = "the import ( ... ) block is retired: a construct is imported with a file-top use line, use <domain>.<file>.{ names } [construct_unknown]"
+	got := FindUnknownConstructKeywords("import (\n\t\"../shop/concepts\"\n)\n\nconcept a {\n  b string\n}\n")
+	if len(got) != 1 || got[0].Line != 1 || got[0].Keyword != "import" || got[0].Message != want {
+		t.Fatalf("the import block: got %+v, want one refusal at line 1 reading %q", got, want)
+	}
+
+	_, err := ParseFile("concept a {\n  b string\n}\nimport (\n\t\"x\"\n)\n")
+	var cause *UnknownConstructKeyword
+	if !errors.As(err, &cause) || cause.Message != want {
+		t.Errorf("an import the parser cannot take must raise the gate's refusal, got: %v", err)
+	}
+}
+
+// The parser refuses a top-level token by its KIND. Only a word is a
+// statement the load gate reads, so only a word gets construct_unknown: a
+// stray string keeps the unexpected-token error, and the gate says nothing
+// about it either. A `use` line after a construct is told where use lines go,
+// and `use` is not offered among the words expected there.
+func TestTheParserRefusesATopLevelTokenByItsKind(t *testing.T) {
+	src := "concept a {\n  b string\n}\n\"hello\"\n"
+	_, err := ParseFile(src)
+	var cause *UnknownConstructKeyword
+	if err == nil || errors.As(err, &cause) || strings.Contains(err.Error(), "[construct_unknown]") ||
+		!strings.Contains(err.Error(), `unexpected token "hello"`) {
+		t.Errorf("a stray string must be an unexpected token, not construct_unknown; got: %v", err)
+	}
+	if got := FindUnknownConstructKeywords(src); len(got) != 0 {
+		t.Errorf("the load gate reads no statement in a stray string, and must say nothing; got %+v", got)
+	}
+
+	_, err = ParseFile("concept a {\n  b string\n}\nuse shop.concepts.{ order }\n")
+	if err == nil || !strings.Contains(err.Error(), "a use line must come before the file's first construct") {
+		t.Fatalf("a use line after a construct must be told where use lines go; got: %v", err)
+	}
+	if strings.Contains(err.Error(), "one of") {
+		t.Errorf("the refusal of a late use line must not list `use` among the words expected; got: %v", err)
 	}
 }
 

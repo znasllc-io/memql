@@ -20,26 +20,43 @@ const diagnosticsDebounce = 300 * time.Millisecond
 const rebuildDebounce = 300 * time.Millisecond
 
 // publishDiagnostics runs Sense's Diagnose over the document's current buffer and
-// pushes the mapped diagnostics to the client. A closed/unknown document, or a
-// nil Sense service, publishes an empty set (which also clears stale squiggles).
+// pushes the mapped diagnostics to the client, together with the refusal of the
+// document's language line when the last build refused it (languageline.go). A
+// closed/unknown document, or a nil Sense service, publishes nothing; a
+// publish always carries the whole set, so one without a refusal clears the
+// squiggle the previous one drew.
 func (s *server) publishDiagnostics(notify glsp.NotifyFunc, uri protocol.DocumentUri) {
+	// Held from reading the buffer to sending, so a close cannot slip between
+	// the two and be overwritten by what was computed before it (didClose).
+	s.publishMu.Lock()
+	defer s.publishMu.Unlock()
 	text, ok := s.docs.get(uri)
 	if !ok {
 		return
 	}
-	svc := s.getSense()
+	svc, lines := s.getBuild()
 	if svc == nil {
 		return
 	}
-	senseDiags := svc.Diagnose(text, uriToPath(uri))
-	lspDiags := make([]protocol.Diagnostic, 0, len(senseDiags))
-	for _, d := range senseDiags {
-		lspDiags = append(lspDiags, toLSPDiagnostic(text, d))
-	}
+	lspDiags := senseDiagnostics(svc, uri, text)
+	// Beside Sense's own, never instead of them: a refused domain's files still
+	// get their syntax and reference diagnostics.
+	lspDiags = append(lspDiags, s.languageLineDiagnostics(uri, text, lines)...)
 	notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 		URI:         uri,
 		Diagnostics: lspDiags,
 	})
+}
+
+// senseDiagnostics is Sense's Diagnose over a document's buffer, in the LSP
+// wire form.
+func senseDiagnostics(svc *sense.Service, uri protocol.DocumentUri, text string) []protocol.Diagnostic {
+	senseDiags := svc.Diagnose(text, uriToPath(uri))
+	out := make([]protocol.Diagnostic, 0, len(senseDiags))
+	for _, d := range senseDiags {
+		out = append(out, toLSPDiagnostic(text, d))
+	}
+	return out
 }
 
 // toLSPDiagnostic maps a Sense diagnostic to the LSP wire form: Sense's 1-based
@@ -153,12 +170,23 @@ func (d *diagnosticsDebouncer) stopAll() {
 // timer (the rebuild is not per-document).
 type rebuildDebouncer struct {
 	mu    sync.Mutex
-	timer *time.Timer
+	timer debounceTimer
 	delay time.Duration
+	// newTimer arms the pending timer: realDebounceTimer in production, a clock
+	// a test fires by hand otherwise -- the seam diagnosticsDebouncer has, for
+	// the same reason (memql#3253). A test driving a rebuild end to end then
+	// runs it when it says so, rather than sleeping past the debounce.
+	newTimer debounceTimerFunc
 }
 
 func newRebuildDebouncer(delay time.Duration) *rebuildDebouncer {
-	return &rebuildDebouncer{delay: delay}
+	return newRebuildDebouncerWithTimers(delay, realDebounceTimer)
+}
+
+// newRebuildDebouncerWithTimers is newRebuildDebouncer with the timer source
+// injected. Nothing but a test passes anything other than realDebounceTimer.
+func newRebuildDebouncerWithTimers(delay time.Duration, newTimer debounceTimerFunc) *rebuildDebouncer {
+	return &rebuildDebouncer{delay: delay, newTimer: newTimer}
 }
 
 func (r *rebuildDebouncer) schedule(fn func()) {
@@ -167,7 +195,7 @@ func (r *rebuildDebouncer) schedule(fn func()) {
 	if r.timer != nil {
 		r.timer.Stop()
 	}
-	r.timer = time.AfterFunc(r.delay, fn)
+	r.timer = r.newTimer(r.delay, fn)
 }
 
 func (r *rebuildDebouncer) stop() {

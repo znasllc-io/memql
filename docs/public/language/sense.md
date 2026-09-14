@@ -539,17 +539,21 @@ FAILS when the live grammar (the parser's top-level dispatch plus the
 struct-form rewriter) or the annotations registry moves ahead of the
 spec.
 
-The test imports the parser and the annotation registry; production
-`dslspec` code imports the parser only for the two labels naming the
-language (`Edition`, `GrammarVersion`, memql#5362), and the parser
-imports nothing from `dslspec`, so neither creates an import cycle. It
-compares the spec's construct set
-against the parser's own authoritative, introspectable lists
-(`parser.TopLevelDeclKeywords`, `parser.StructFormKeywords`) -- not a
-hand-copied literal -- and names the exact drifted symbol on failure
-(for example "add X to dslspec constructs()" / "remove Y"). Add a new
-construct to the grammar without adding it to the spec, and this test
-goes red.
+The test imports the parser and the annotation registry. Production
+`dslspec` code imports the parser too, and derives from it rather than
+restating it: the two labels naming the language (`Edition`,
+`GrammarVersion`, memql#5362), the construct set
+(`parser.ConstructKeywords`, the one table of words that open a top-level
+statement) and the body clauses each construct takes
+(`parser.BodyClauses`). The parser imports nothing from `dslspec`, so
+neither creates an import cycle. What `dslspec` still writes by hand is
+what the parser cannot say -- each construct's category, doc and
+annotation receiver -- and the test compares that catalog against the
+parser's own lists (`parser.TopLevelDeclKeywords`,
+`parser.StructFormKeywords`), not a hand-copied literal, naming the exact
+drifted symbol on failure (for example "add X to dslspec constructs()" /
+"remove Y"). Add a new construct to the grammar without its catalog
+entry in the spec, and this test goes red.
 
 The `SpecVersion` constant (`1.1.0`) versions the JSON envelope shape,
 not its contents: a new construct or annotation does NOT move it. A

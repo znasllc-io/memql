@@ -691,15 +691,7 @@ func (p *Parser) parseDefinition() (Node, error) {
 			attributes = nil
 		}
 	default:
-		// Story S3 (#2358): the expected-keyword hint now lists the FULL
-		// author-facing set -- `func` + every contextual declaration keyword +
-		// the rewriter-handled query/mutate/logic/automation family (previously
-		// omitted, so a typo'd `query` got a hint list that didn't contain
-		// `query`). A Levenshtein did-you-mean points at the nearest keyword
-		// (`quer` -> `query`, `conept` -> `concept`).
-		hint := topLevelKeywordHintKeywords()
-		return nil, newParseErrorf(&p.current, "unexpected token %q, expected a top-level declaration keyword -- one of %s%s",
-			p.current.Literal, renderKeywordList(hint), didYouMean(p.current.Literal, hint))
+		return nil, p.refuseTopLevelToken()
 	}
 
 	if err != nil {
@@ -715,6 +707,61 @@ func (p *Parser) parseDefinition() (Node, error) {
 	}
 
 	return def, nil
+}
+
+// refuseTopLevelToken refuses a top-level statement no construct parser
+// takes (memql#5356), deciding by the token's KIND:
+//
+//   - A word -- an identifier or a keyword token -- that is not a construct
+//     keyword (a typo'd `qurey`, a retired `import`, a keyword only another
+//     edition spells) gets construct_unknown's own refusal, the one the load
+//     gate gives the line (FindUnknownConstructKeywords): the same message,
+//     read from the same table (ConstructKeywords) with the same
+//     did-you-mean, and carried as the cause. One statement is one refusal,
+//     whether the author meets it in the editor, in memqllint or at boot.
+//   - A `use` line here comes after a construct, and use lines are read only
+//     at the top of a file: the refusal says so, rather than naming `use`
+//     among the words it expected.
+//   - Anything else -- a stray string, number or symbol, which the load gate
+//     does not read as a statement -- is an unexpected token, and the words
+//     that could open a declaration here are named from the same table,
+//     without `use`.
+func (p *Parser) refuseTopLevelToken() error {
+	tok := p.current
+	if tok.Type == TokenKeywordUse {
+		return newParseErrorf(&tok, "a use line must come before the file's first construct -- move it to the top of the file")
+	}
+	if tok.Type == TokenIdentifier || isKeywordToken(tok.Type) {
+		if m := statementHead.FindStringSubmatch(tok.Literal); m != nil && !isConstructKeyword(m[1]) {
+			u := unknownConstruct(tok.Line, m[1])
+			return &ParseError{Message: u.Message, Pos: tok.Pos, Line: tok.Line, Column: tok.Column, Cause: u}
+		}
+	}
+	return newParseErrorf(&tok, "unexpected token %q, expected a top-level declaration keyword -- one of %s",
+		tok.Literal, strings.Join(declarationKeywords(), ", "))
+}
+
+// declarationKeywords is ConstructKeywords without the `use` import: the
+// words a declaration opens with, which is all a statement can open with
+// once the file's first construct is behind it.
+func declarationKeywords() []string {
+	var out []string
+	for _, k := range ConstructKeywords() {
+		if k != "use" {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// isConstructKeyword reports whether word opens a top-level statement.
+func isConstructKeyword(word string) bool {
+	for _, k := range ConstructKeywords() {
+		if k == word {
+			return true
+		}
+	}
+	return false
 }
 
 // parseAttribute parses a Python-style @attribute decorator.

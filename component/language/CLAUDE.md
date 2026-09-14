@@ -16,11 +16,12 @@ verify anything here.
 
 | Package | Owns | Imported by |
 |---|---|---|
-| `parser/` | Lexer, parser, and the **struct-form rewriter**. Every `.memql` construct is authored in struct form; the rewriter translates it to the procedural form the grammar reads, before the parser proper sees it. | ~286 files |
+| `parser/` | Lexer, parser, and the **struct-form rewriter**. Every `.memql` construct is authored in struct form; the rewriter translates it to the procedural form the grammar reads, before the parser proper sees it. Also the language's labels and the language line: `parser/edition.go` (`LanguageVersion`, `Edition`, and the per-edition front ends a file is read through), `parser/grammar_version.go` (`GrammarVersion`, the fine label, which must end with the authored-surface digest its drift test computes) and `parser/language_line.go` (which domain declares which line in its `memql.toml`, and the refusals every loader reports) (epic memql#5356). | ~286 files |
 | `ast/` | The AST node types, in their own module so consumers can depend on the shape without pulling in the lexer/parser. `parser` re-exports every symbol as a type alias, so old call sites still compile; **new code imports `ast/` directly**. | ~64 files |
 | `compiler/` | AST -> output format (primarily the `.json` the automation scheduler consumes), plus the linter, the CQS validator, and the automation generator. | ~8 files |
 | `annotations/` | The annotation **registry**: every receiver (each construct, the concept body, each field list), every annotation it accepts with its argument forms, keyword keys and example, the retired/misplaced hints, and `Check` / `CheckAll`, which answer with a stable `annotation_*` code (memql#5359). A leaf package -- it imports nothing inside the repo -- so the parser, the concept translator and the editor surface all derive from it with no import cycle. | ~12 files |
-| `dslspec/` | The single machine-readable spec of the authoring surface: constructs, keywords, operators, field types, and the legal-next rules that drive completion. Derives annotations FROM `annotations/` rather than re-listing them, and exports as portable JSON (memql#2122-2125). | ~9 files |
+| `dslspec/` | The single machine-readable spec of the authoring surface: constructs, keywords, operators, field types, and the legal-next rules that drive completion. Derives the construct set and each construct's body clauses FROM the parser (`parser.ConstructKeywords`, `parser.BodyClauses`) and the annotations FROM `annotations/` rather than re-listing them, and exports as portable JSON (memql#2122-2125). It also renders the attribute matrix (`dslspec/matrix.go`, written by `cmd/attributematrix` to `docs/public/language/attribute-matrix.md` and pinned by `make docs-matrix-check`). | ~16 files |
+| `tiers/` | The tier manifest of D11, seeded with the expression positions only (`Positions()`). A position's value is also the name of its conformance-corpus directory (`test/conformance/2026/expr/<position>/`), which the corpus's second completeness gate reads; the expressions epic adds the node kinds and functions each position allows. | ~3 files |
 | `dslclause/` | One answer to "which keywords terminate a filter clause", shared by the text-scanning gates so they cannot drift about it (memql#2815). Owns clause EXTRACTION only, not predicate decomposition -- the package comment says why that split is deliberate. | ~5 files |
 | `pagination/` | The pure classifier behind the pagination authoring rule: a list-returning query must carry `paginate`, `sort`, `count`, or `@unbounded("reason")` (memql#1965). Operates on raw source text using line structure only. | ~3 files |
 | `functions/` | The function catalog (D10): every function and method an edition-2026 expression can call, one entry and one spelling each, with its signature, its tier and the retired spellings it replaces, plus the operator table (`Operators()`). The two evaluators, Sense and the generated docs read it. | ~6 files |
@@ -116,11 +117,21 @@ mistake this layout exists to prevent:
   `component/memql`'s `TestEveryReceiverGateReadsTheRegistry` drives every
   receiver's real gate, so a gate that stops reading the registry fails
   there by name.
-- **Constructs / keywords / operators / field types / legal-next** live in
-  `dslspec/`. There was no pre-existing registry -- the truth was split
-  between `parser/parser.go`'s top-level dispatch and `parser/rewriter.go`.
-  A drift test introspects both and fails when the spec falls out of
-  lockstep.
+- **Constructs and their body clauses** are the parser's. The words that
+  open a top-level statement are one table, `parser.ConstructKeywords()` --
+  the struct-form rewriter's family, the top-level dispatch table and
+  `use` -- which the parser's refusal of any other word and the load gate
+  `construct_unknown` both read (memql#5356); the clauses each construct
+  takes are `parser.BodyClauses`. `dslspec/` derives both, and hand-authors
+  only what the parser cannot say (each construct's category, doc and
+  annotation receiver) plus the keywords, operators, field types and
+  legal-next rules. Its drift test fails when that hand-authored remainder
+  falls out of lockstep with the parser.
+- **The language line and editions** live in `parser/` (`edition.go`,
+  `language_line.go`): every loader, in every module, resolves a tree with
+  `ResolveLanguageLines` and reads each file through `LanguageLines.Prepare`,
+  and `memqlmigrate` and `memqllint` key on the same domain rule
+  (`LanguageLineDomainOf`).
 - **Filter-clause terminators** live in `dslclause/`.
 - **The expression vocabulary** lives in `functions/` (the catalog and the
   operator table) and `tiers/` (the manifest); **precedence and the retired

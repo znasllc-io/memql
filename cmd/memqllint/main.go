@@ -35,7 +35,12 @@
 // Path defaults to the current working directory. A single .memql
 // file scopes the diagnostic report to that file + its transitively-
 // imported neighbors; pointing at a directory loads the whole tree
-// rooted there.
+// rooted there. When the directory -- or a single file's directory --
+// is itself a domain a mount would read (parser.MountableDomainRoot),
+// its own memql.toml is held to the loader's language-line checks: a
+// bad one is an error, and a missing one a WARNING, which leaves the
+// exit code alone. Linting the directory that holds the domain checks
+// it exactly as boot does.
 //
 // Exit codes:
 //
@@ -55,14 +60,19 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/dslimports"
+	"github.com/znasllc-io/memql/core/dslfs"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 
 	// Connector declarations (epic memql#4378). The engine-parity pass
 	// below drives MemQLEngine.Init, which resolves every @origin and
@@ -155,6 +165,10 @@ func run(args []string) int {
 
 	root := os.DirFS(rootDir)
 	tree, loadErr := dslimports.Load(root)
+	loadDiags := flattenDiagnostics(loadErr)
+	// The root's own language line, when the root is itself a domain a mount
+	// would read: nothing below can see it (rootLanguageLine says why).
+	rootLineErrs, rootLineWarning := rootLanguageLine(rootDir)
 
 	// Referential-integrity passes (#2509): Form B use-decl module +
 	// symbol resolution, signature-concept existence, insert/update
@@ -191,7 +205,9 @@ func run(args []string) int {
 		if perr != nil {
 			integrityErrs = append(integrityErrs, fmt.Errorf("engine-parity lint: %w", perr))
 		}
-		for _, d := range parityDiags {
+		// A refusal both passes make prints once, from Load, whose copy
+		// names the line of the file.
+		for _, d := range withoutLoadEchoes(parityDiags, loadDiags) {
 			if d.File != "" {
 				integrityErrs = append(integrityErrs, fmt.Errorf("%s: %s", d.File, d.Message))
 			} else {
@@ -200,9 +216,18 @@ func run(args []string) int {
 		}
 	}
 
-	report := buildReport(tree, loadErr, integrityErrs, target)
+	report := buildReport(tree, loadErr, append(loadDiags, integrityErrs...), target)
 	report.Root = rootDir
 	report.ParitySkippedDomains = paritySkipped
+	// The root's line is the target's own domain's in either mode, so the
+	// single-file filter does not apply to it.
+	for _, e := range rootLineErrs {
+		report.Errors = append(report.Errors, Diagnostic{Level: "error", Message: e.Error()})
+	}
+	sort.SliceStable(report.Errors, func(i, j int) bool { return report.Errors[i].Message < report.Errors[j].Message })
+	if rootLineWarning != "" {
+		report.Warnings = append(report.Warnings, Diagnostic{Level: "warning", Message: rootLineWarning})
+	}
 
 	if jsonOut {
 		return emitJSON(report)
@@ -223,17 +248,26 @@ type Report struct {
 	// embedded tree owns the namespace -- but without them a clean report is
 	// ambiguous between "parity-checked and clean" and "never parity-checked".
 	ParitySkippedDomains []string `json:"paritySkippedDomains,omitempty"`
+	// Warnings is what the run found that does not fail it: a root that is
+	// itself a domain a mount would read, and declares no language line.
+	// Whether that directory IS a mounted domain depends on the tree it is
+	// mounted in, which this run cannot see, so it warns and leaves the exit
+	// code alone.
+	Warnings []Diagnostic `json:"warnings,omitempty"`
 }
 
-// Diagnostic carries one error from the load pipeline. Level is
-// always "error" today; warning + info levels land when the
-// downstream validators wire in.
+// Diagnostic carries one finding: Level "error" from the load pipeline and
+// the lanes after it, "warning" for Report.Warnings.
 type Diagnostic struct {
 	Level   string `json:"level"`
 	Message string `json:"message"`
 }
 
-func buildReport(tree *dslimports.Tree, loadErr error, integrityErrs []error, target string) *Report {
+// buildReport renders the run: diags is every diagnostic to print -- Load's,
+// flattened, then the integrity lanes' and the parity pass's, without its
+// echoes of Load's refusals -- and loadErr only decides whether the load
+// order is shown.
+func buildReport(tree *dslimports.Tree, loadErr error, diags []error, target string) *Report {
 	r := &Report{}
 	if tree != nil {
 		r.Files = len(tree.Files)
@@ -244,8 +278,6 @@ func buildReport(tree *dslimports.Tree, loadErr error, integrityErrs []error, ta
 			r.Order = tree.Order
 		}
 	}
-	diags := flattenDiagnostics(loadErr)
-	diags = append(diags, integrityErrs...)
 	if len(diags) > 0 {
 		for _, d := range diags {
 			if target != "" && !errorMentionsFile(d, target) {
@@ -284,6 +316,121 @@ func flattenDiagnostics(err error) []error {
 	return []error{err}
 }
 
+// rootLanguageLine checks the language line of a root that is itself a
+// domain a mount would read -- `memqllint bundle/znas`, or a file inside it,
+// whose directory is the root (memql#5356). Nothing else here can: Load reads
+// the root as a bare tree, whose files sit at depth 1 where no rule finds a
+// domain, and the parity pass mounts only the directories INSIDE the root.
+// Nor is the root renamed into a domain to make them see it: which name a
+// directory is mounted under is the tree's fact, not the directory's, so a
+// guessed name makes the parity pass judge the files under the wrong domain.
+//
+// The one rule deciding whether the root is such a domain is
+// parser.MountableDomainRoot, which memqlmigrate asks too: not a
+// sub-namespace, not a `_` or `.` name, not a core domain. For one:
+//
+//   - a memql.toml there is held to the loader's own checks
+//     (parser.CheckLanguageLineFile), each refusal an error with its code;
+//   - a missing one is a WARNING, never an error: whether the directory IS a
+//     mounted domain depends on the tree it is mounted in, which this run
+//     cannot see. The warning says what boot does and how to add the file,
+//     and that linting the directory holding it checks it as boot does.
+func rootLanguageLine(rootDir string) (errs []error, warning string) {
+	parentDir := filepath.Dir(rootDir)
+	name := filepath.Base(rootDir)
+	if !langparser.MountableDomainRoot(os.DirFS(parentDir), filepath.Base(parentDir), name, memqldsl.EmbeddedTree{}) {
+		return nil, ""
+	}
+	source := name + "/" + dslfs.ManifestFile
+	data, err := os.ReadFile(filepath.Join(rootDir, dslfs.ManifestFile))
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		current := dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}
+		var lines strings.Builder
+		for _, l := range strings.SplitAfter(current.Render(), "\n") {
+			if l != "" {
+				lines.WriteString("    " + l)
+			}
+		}
+		return nil, fmt.Sprintf("domain %q declares no language line, and boot refuses a mounted domain without one. "+
+			"Add %s containing\n%s  or run: memqlmigrate --rewrite=language-line -w %s\n"+
+			"  Linting %s, the directory that holds it, checks it exactly as boot does.",
+			name, source, lines.String(), parentDir, parentDir)
+	case err != nil:
+		return []error{fmt.Errorf("%s: %w", source, err)}, ""
+	}
+	_, problems := langparser.CheckLanguageLineFile(name, source, data)
+	for _, p := range problems {
+		errs = append(errs, &dslimports.LanguageLineError{Problem: p})
+	}
+	return errs, ""
+}
+
+// withoutLoadEchoes drops each engine-parity diagnostic that repeats a
+// refusal Load made, so an author reads one refusal once (memql#5356).
+//
+// Both passes refuse some things: a domain whose language line the engine
+// will not read, a statement no construct keyword opens (construct_unknown),
+// and a statement the parser refuses with a coded refusal, an annotation the
+// registry refuses among them -- Load because a caller that runs it alone
+// (memql-cockpit's `memql lint`) must see what boot refuses, the parity pass
+// because it IS boot. Load's copy is the one kept, because it names the line
+// of the FILE: Load parses and scans whole files and reports the line the
+// author wrote, while the parity pass's loaders parse one construct at a
+// time, so a parse refusal there counts its line from the top of that
+// construct's slice. A parity diagnostic is an echo only when it is about the
+// SAME file and carries a refusal Load made, never merely because Load ran:
+// Load's parse stops at a file's first refusal, so a refusal in a later
+// construct of that file is the parity pass's alone to report, and it prints
+// as that pass words it, its line counted from the top of the construct.
+func withoutLoadEchoes(parity []memql.LintDiagnostic, load []error) []memql.LintDiagnostic {
+	type refusal struct{ file, text string }
+	var made []refusal
+	for _, d := range load {
+		if file, text, ok := refusalOf(d); ok {
+			made = append(made, refusal{file, text})
+		}
+	}
+	if len(made) == 0 {
+		return parity
+	}
+	out := make([]memql.LintDiagnostic, 0, len(parity))
+	for _, p := range parity {
+		echo := false
+		for _, r := range made {
+			if p.File == r.file && strings.Contains(p.Message, r.text) {
+				echo = true
+				break
+			}
+		}
+		if !echo {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// refusalOf returns the file and the text of a Load diagnostic that the
+// parity pass also makes, in the same words: a domain's language line the
+// engine will not read, a statement no construct keyword opens, or a parse
+// refusal carrying a typed cause. ok is false for every other diagnostic.
+func refusalOf(d error) (file, text string, ok bool) {
+	var line *dslimports.LanguageLineError
+	if errors.As(d, &line) {
+		return line.Problem.Source, line.Problem.Message, true
+	}
+	var keyword *dslimports.ConstructKeywordError
+	if errors.As(d, &keyword) {
+		return keyword.File, keyword.Refusal.Message, true
+	}
+	var parse *dslimports.FileParseError
+	var refused *langparser.ParseError
+	if errors.As(d, &parse) && errors.As(parse.Err, &refused) && refused.Cause != nil {
+		return parse.File, refused.Message, true
+	}
+	return "", "", false
+}
+
 // errorMentionsFile returns true if the diagnostic's text mentions
 // the file (or anything in its directory). Used by single-file mode
 // to filter the report. Currently a string-contains check; structured
@@ -309,6 +456,7 @@ func emitJSON(r *Report) int {
 func emitHuman(r *Report, rootDir string) int {
 	if len(r.Errors) == 0 {
 		fmt.Printf("OK: %d file(s) loaded, no diagnostics.\n", r.Files)
+		emitWarnings(r)
 		emitParitySkips(r)
 		return 0
 	}
@@ -316,8 +464,17 @@ func emitHuman(r *Report, rootDir string) int {
 	for _, d := range r.Errors {
 		fmt.Printf("  - %s\n", d.Message)
 	}
+	emitWarnings(r)
 	emitParitySkips(r)
 	return 1
+}
+
+// emitWarnings prints what the run found that does not fail it. It never
+// changes the exit code.
+func emitWarnings(r *Report) {
+	for _, w := range r.Warnings {
+		fmt.Printf("WARNING: %s\n", w.Message)
+	}
 }
 
 // paritySkipListMax bounds the human-readable skip list. The benign in-repo

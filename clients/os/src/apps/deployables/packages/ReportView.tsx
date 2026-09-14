@@ -51,8 +51,8 @@ export function ReportView({ report, only }: { report: AnalysisReport | null; on
   // every problem on the report AND the per-deployable ones on their own
   // deployable, so a non-fatal problem scoped to an app is in both places --
   // and until `deployable_target_not_offered` arrived (epic memql#4885) the
-  // only non-fatal problem was the Go pack's, which this block already
-  // suppressed by hand with `goPacks.length === 0`. The new one printed
+  // only non-fatal problem was the Go pack's, which the foot of the report
+  // suppressed by hand. The new one printed
   // "iOS is not offered on this cluster yet" twice on one screen: once inside
   // the mobile app's card, where it belongs, and once at the foot of the
   // report under the MemQL heading, which is about DSL domains and has nothing
@@ -66,8 +66,16 @@ export function ReportView({ report, only }: { report: AnalysisReport | null; on
       .filter((d) => d.problem !== undefined)
       .map((d) => `${d.problem?.code}|${d.problem?.scope ?? d.name}`),
   );
+  // The same holds for the Go pack: its problem repeats the note the Go
+  // section below draws, so it is left out while that section is there -- by
+  // its code, and only it. The foot used to vanish whole beside a Go pack, and
+  // every other note with it: a package with a bff/ was never told that its
+  // dsl/memql.toml is read by nothing (epic memql#5356).
   const notes = problems.filter(
-    (p) => !p.fatal && !shownOnAnApp.has(`${p.code}|${p.scope ?? ""}`),
+    (p) =>
+      !p.fatal &&
+      !shownOnAnApp.has(`${p.code}|${p.scope ?? ""}`) &&
+      !(goPacks.length > 0 && p.code === "go_pack_not_deployable"),
   );
 
   return (
@@ -163,7 +171,7 @@ export function ReportView({ report, only }: { report: AnalysisReport | null; on
         </section>
       ) : null}
 
-      {notes.length > 0 && goPacks.length === 0 ? (
+      {notes.length > 0 ? (
         <div className="os-report-problems">
           {notes.map((p, i) => (
             <ProblemNotice key={`${p.code}-${i}`} problem={p} tone="warn" />

@@ -289,13 +289,15 @@ func docsDeclaredConstructs(t *testing.T) map[string]string {
 			return err
 		}
 		// Underscore-prefixed entries are soft-disabled and never loaded, for
-		// FILES as well as directories -- component/memql/dslfs/walker.go:40,49
-		// skips both, and including them would let this gate demand a rename to
-		// a construct the engine does not load: its own defect, inverted. Dot
-		// entries are skipped too, which is stricter than walker.go (its only
-		// dot handling is dirs-only, in workspace_graph.go's isDSLRoot) -- a
-		// `.scratch.memql` would load for the engine but is treated here as not
-		// being repo content, matching the git-tracked-only sweep below.
+		// FILES as well as directories -- core/dslfs/walker.go:40,49 skips
+		// both, and including them would let this gate demand a rename to a
+		// construct the engine does not load: its own defect, inverted. Dot
+		// entries are skipped too, which is stricter than the engine: it skips
+		// only a dot-prefixed DOMAIN directory (holdsDomains in
+		// component/memql/workspace_graph.go, and the mounts), never a
+		// dot-prefixed file -- a `.scratch.memql` would load for the engine but
+		// is treated here as not being repo content, matching the
+		// git-tracked-only sweep below.
 		name := d.Name()
 		if d.IsDir() {
 			if strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {

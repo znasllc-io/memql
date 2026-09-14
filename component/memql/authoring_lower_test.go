@@ -97,8 +97,34 @@ func positionOf(t *testing.T, src, needle string) (int, int) {
 	return line, col
 }
 
-func TestAuthoringLower_DefineRegistersLoweredForms(t *testing.T) {
+// TestAuthoringLower runs the cases that only READ the lowerinit engine --
+// each defines into a fresh session registry, validates, or compiles a
+// bundle against it, and none writes the engine's own registries -- over ONE
+// boot of it, as subtests keeping their names. The fixture cannot be booted
+// once for the package: bootLowerDomains mounts it over the process-wide
+// concept registry and restores that through t.Cleanup, and a parent test's
+// cleanup runs when the parent finishes, so this is exactly as isolated as a
+// boot per case was, at one boot. The cases that promote, stage or
+// re-hydrate into an engine keep booting their own (below): they write it.
+//
+// ADDING A CASE: write `func authoringLower<Name>(t *testing.T, eng
+// *MemQLEngine)` and list it here -- if it only reads the engine.
+func TestAuthoringLower(t *testing.T) {
 	eng := bootAuthoringEngine(t)
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T, *MemQLEngine)
+	}{
+		{"DefineRegistersLoweredForms", authoringLowerDefineRegistersLoweredForms},
+		{"DefineRefusesWithTheThreePartMessageOnTheAuthorsLine", authoringLowerDefineRefusesWithTheThreePartMessageOnTheAuthorsLine},
+		{"TheEngineRefusesWhatTheBundleAloneCannot", authoringLowerTheEngineRefusesWhatTheBundleAloneCannot},
+		{"ADanglingImportKeepsTheReferenceDiagnostic", authoringLowerADanglingImportKeepsTheReferenceDiagnostic},
+	} {
+		t.Run(tc.name, func(t *testing.T) { tc.run(t, eng) })
+	}
+}
+
+func authoringLowerDefineRegistersLoweredForms(t *testing.T, eng *MemQLEngine) {
 	reg := NewAuthoredRuntimeRegistry()
 	{
 		res, err := eng.DefineSessionBundle(reg, "owner-1", sessionGoodBundle, "")
@@ -121,8 +147,7 @@ func TestAuthoringLower_DefineRegistersLoweredForms(t *testing.T) {
 	require.Contains(t, canonicalExpression(unwrapToFilter(fn.Expr)), "spec(ishighticket)")
 }
 
-func TestAuthoringLower_DefineRefusesWithTheThreePartMessageOnTheAuthorsLine(t *testing.T) {
-	eng := bootAuthoringEngine(t)
+func authoringLowerDefineRefusesWithTheThreePartMessageOnTheAuthorsLine(t *testing.T, eng *MemQLEngine) {
 	reg := NewAuthoredRuntimeRegistry()
 	var res SessionDefineResult
 	var err error
@@ -149,8 +174,7 @@ func TestAuthoringLower_DefineRefusesWithTheThreePartMessageOnTheAuthorsLine(t *
 	require.Equal(t, col, s.Column)
 }
 
-func TestAuthoringLower_TheEngineRefusesWhatTheBundleAloneCannot(t *testing.T) {
-	eng := bootAuthoringEngine(t)
+func authoringLowerTheEngineRefusesWhatTheBundleAloneCannot(t *testing.T, eng *MemQLEngine) {
 	const misKinded = `use lowerinit.concepts.{ ticket }
 use lowerinit.specs.{ callerIsOwner }
 
@@ -330,8 +354,7 @@ func TestAuthoringLower_AnUnloweredSessionSpecIsRefusedByNameNeverInlinedAsNothi
 	require.Contains(t, err.Error(), "has no lowered body")
 }
 
-func TestAuthoringLower_ADanglingImportKeepsTheReferenceDiagnostic(t *testing.T) {
-	eng := bootAuthoringEngine(t)
+func authoringLowerADanglingImportKeepsTheReferenceDiagnostic(t *testing.T, eng *MemQLEngine) {
 	var rep SandboxReport
 	rep = SandboxCompileBundleWithEngine([]SandboxConstruct{{
 		Kind: "spec",
@@ -375,8 +398,25 @@ func bootTwinTicketDomains(t *testing.T) *MemQLEngine {
 const twinImportMessage = "binding \"ticket\" is declared by more than one domain, and no file-top `use` import says which -- " +
 	"import the one you mean: `use lowerinit.concepts.{ ticket }` or `use lowertwin.concepts.{ ticket }`"
 
-func TestAuthoringLower_ASessionSpecBindsThroughItsImports(t *testing.T) {
+// TestAuthoringLowerTwoTickets runs the read-only cases over the two-domain
+// engine (bootTwinTicketDomains) on one boot, as TestAuthoringLower does
+// over lowerinit's: defines into fresh session registries, and a promote the
+// engine refuses before it registers anything. The case that promotes and
+// re-hydrates keeps its own engine.
+func TestAuthoringLowerTwoTickets(t *testing.T) {
 	eng := bootTwinTicketDomains(t)
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T, *MemQLEngine)
+	}{
+		{"ASessionSpecBindsThroughItsImports", authoringLowerASessionSpecBindsThroughItsImports},
+		{"AnAmbiguousBindingWithNoImportIsRefusedAtPromote", authoringLowerAnAmbiguousBindingWithNoImportIsRefusedAtPromote},
+	} {
+		t.Run(tc.name, func(t *testing.T) { tc.run(t, eng) })
+	}
+}
+
+func authoringLowerASessionSpecBindsThroughItsImports(t *testing.T, eng *MemQLEngine) {
 	define := func(origin, src string) (SessionDefineResult, *AuthoredRuntimeRegistry, error) {
 		reg := NewAuthoredRuntimeRegistry()
 		var res SessionDefineResult
@@ -488,8 +528,7 @@ spec ticket isTwinHeld = row => row.state == "held"
 	}
 }
 
-func TestAuthoringLower_AnAmbiguousBindingWithNoImportIsRefusedAtPromote(t *testing.T) {
-	eng := bootTwinTicketDomains(t)
+func authoringLowerAnAmbiguousBindingWithNoImportIsRefusedAtPromote(t *testing.T, eng *MemQLEngine) {
 	persist := &fakePromoteStore{}
 	var res PromoteBundleResult
 	var err error
