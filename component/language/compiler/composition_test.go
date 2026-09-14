@@ -17,12 +17,12 @@ func (Query) getUsers() {
 
 @enabled
 func (Query) getUserById() {
-  concept==v1:user;id==args.id
+  concept==v1:user && (row => row.id == args.id)
 }
 
 @enabled
 func (Query) getUsersByRole() {
-  concept==v1:user;payload.role==args.role
+  concept==v1:user && (row => row.role == args.role)
 }
 `
 	ast := mustParse(t, source)
@@ -81,15 +81,15 @@ func TestValidateFileComposition_MutationWithQueries(t *testing.T) {
 	source := `
 @enabled
 func (Mutation) createUser() {
-  insert("v1:user", payload={"name": args.name})
+  insert("v1:user", payload={name: args.name})
 }
 
 func (Query) validateEmail() {
-  concept==v1:user;payload.email==args.email
+  concept==v1:user && (row => row.email == args.email)
 }
 
 func (Query) checkDuplicate() {
-  concept==v1:user;payload.name==args.name
+  concept==v1:user && (row => row.name == args.name)
 }
 `
 	ast := mustParse(t, source)
@@ -296,7 +296,7 @@ func TestValidateFileComposition_ArgsWithoutBlock(t *testing.T) {
 @enabled
 @description("Search users")
 func (Query) searchUsers(args any) {
-  concept==v1:user; ?.payload.role==args.role
+  concept==v1:user && (row => args.role == nil || row.role == args.role)
 }
 `
 	ast := mustParse(t, source)
@@ -324,7 +324,7 @@ args {
   status  string
 }
 func (Query) searchUsers(args any) {
-  concept==v1:user; ?.payload.role==args.role
+  concept==v1:user && (row => args.role == nil || row.role == args.role)
 }
 `
 	ast := mustParse(t, source)

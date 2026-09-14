@@ -62,11 +62,7 @@ func CompileSource(source string) (*CompileResult, error) {
 
 	case *parser.FunctionDef:
 		// Single function definition
-		result := &CompileResult{
-			Warnings: LintFile(&parser.File{
-				Definitions: []parser.Node{node},
-			}),
-		}
+		result := &CompileResult{}
 		switch node.Type {
 		case parser.FunctionTypeAutomation:
 			automation, err := compiler.compileAutomation(node)
