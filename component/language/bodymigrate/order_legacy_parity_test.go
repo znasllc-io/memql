@@ -10,13 +10,13 @@ package bodymigrate
 // rewrite long after -- so it carries its own copy (legacyGraph,
 // legacyFlatOrder). This test is what makes the copy trustworthy while the
 // original still exists: for every automation and logic in the tree it
-// compiles the body with the real compiler many times over (its tie order came
-// from Go map iteration) and requires
+// compiles the body with the real compiler and requires
 //
-//   - every order the compiler produced to respect the copy's dependency edges
-//     (the copy invents no edge), and
-//   - when the copy sees no tie, every order the compiler produced to equal the
-//     copy's (the copy misses no edge and sorts the same way).
+//   - the compiler's order to respect the copy's dependency edges (the copy
+//     invents no edge), and
+//   - the compiler's order to equal the copy's (the copy misses no edge and
+//     sorts the same way). The sort is stable since epic 2's flip
+//     (memql#5367), so one compile is the whole answer.
 //
 // DELETED WITH THE COMPILER'S SORT in the flip (Task 13 of the plan): after
 // that there is nothing to hold the copy to, and its goldens carry it.
@@ -87,36 +87,26 @@ func checkFileOrders(t *testing.T, file, src string) int {
 				file, c.kind, c.name, len(nodes), len(steps.source), steps.source)
 			continue
 		}
-		flat, ties := legacyFlatOrder(nodes, deps)
-		seen := map[string]bool{}
-		for run := 0; run < 24; run++ {
-			order := steps.compile()
-			key := strings.Join(order, ",")
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			pos := map[int]int{}
-			for k, id := range order {
-				pos[steps.index[id]] = k
-			}
-			for i, ds := range deps {
-				for d := range ds {
-					if pos[d] > pos[i] {
-						t.Errorf("%s: %s %s: the compiler ran %s before %s, which the copy says it waits for",
-							file, c.kind, c.name, steps.source[i], steps.source[d])
-					}
+		flat := legacyFlatOrder(nodes, deps)
+		order := steps.compile()
+		pos := map[int]int{}
+		for k, id := range order {
+			pos[steps.index[id]] = k
+		}
+		for i, ds := range deps {
+			for d := range ds {
+				if pos[d] > pos[i] {
+					t.Errorf("%s: %s %s: the compiler ran %s before %s, which the copy says it waits for",
+						file, c.kind, c.name, steps.source[i], steps.source[d])
 				}
 			}
-			if len(ties) == 0 {
-				var want []string
-				for _, n := range flat {
-					want = append(want, steps.source[n])
-				}
-				if key != strings.Join(want, ",") {
-					t.Errorf("%s: %s %s: the compiler ran %v; the copy says %v", file, c.kind, c.name, order, want)
-				}
-			}
+		}
+		var want []string
+		for _, n := range flat {
+			want = append(want, steps.source[n])
+		}
+		if strings.Join(order, ",") != strings.Join(want, ",") {
+			t.Errorf("%s: %s %s: the compiler ran %v; the copy says %v", file, c.kind, c.name, order, want)
 		}
 		checked++
 	}

@@ -4,30 +4,28 @@ package bodymigrate
 // comment every move carries (epic memql#5370, task memql#5373; D6 and the
 // "failure modes" of section 4 epic 3).
 //
-// THE RETIRED BODIES DID NOT RUN IN THE ORDER THEY WERE WRITTEN. The compiler
-// sorted steps topologically over the references it could SEE, and it saw
-// less than it looked like: a dotted reference whose first segment was a step
-// id (`decide.result`, `result.First()`) and `first(x)` / `last(x)` -- never a
-// `steps.`-rooted reference (its first segment is `steps`, not a step) and
-// never an undotted bare name (`observedProbe`). Kahn's queue then popped
-// every initially-free step first, so a step that depended on the first step
-// ran after ALL of them, wherever it was written. And the consumer list was
-// built by iterating a Go map, so steps one release freed together ran in an
-// order that changed from load to load.
+// A RETIRED BODY RUNS IN THE ORDER ITS COMPILER SORTS IT. Since epic 2's flip
+// (memql#5367) the compiler takes a step's dependencies to be every free name
+// of its expressions that names a step -- dotted or not, `steps.<id>` included,
+// conditions, loop sources and filters and nested steps all read -- and sorts
+// stably: the next step to run is the first in source order whose
+// dependencies have all run. So a step runs where it is written unless it
+// reads a step written after it. (The compiler before that saw only dotted
+// first segments and ran co-released steps in Go map order; a bundle last
+// run on it moves to today's order when it upgrades, which is epic 2's
+// change, not this rewrite's.)
 //
 // A statement body runs in source order. So the rewrite decides the order to
-// WRITE, from what ran:
+// WRITE, from what runs:
 //
-//   - T is today's order: that sort, with co-released consumers in source order
-//     (the one of today's possible orders nearest the author's).
+//   - T is today's order: that sort.
 //   - D is every reference, as the scope checker sees them.
 //   - T respects D: write T. Behaviour is unchanged; every moved statement says so.
 //   - T reads a name before it is bound (the engine read nothing there): write
 //     the source order when it respects D, else the D-order nearest the source.
 //     The statements that read nothing today say so -- this is a fix, and the
-//     comment is how the reviewer finds it.
-//   - Where today's order between two side-effecting statements was one of
-//     several, the later one says that too.
+//     comment is how the reviewer finds it. T and D read the same references,
+//     so this arm is for a body T cannot sort (a cycle the compiler refuses).
 
 import (
 	"fmt"
@@ -71,7 +69,7 @@ func flattenLegacy(stmts []*lstmt) []legacyNode {
 			if st.form == formCall || st.form == formIfCall || st.form == formExpr || st.form == formPublish {
 				id = st.name
 			}
-			out = append(out, legacyNode{top: top, id: id, text: condText + " " + legacySeenText(st, true)})
+			out = append(out, legacyNode{top: top, id: id, text: condText + " " + legacySeenText(st)})
 		}
 	}
 	for i, st := range stmts {
@@ -80,78 +78,48 @@ func flattenLegacy(stmts []*lstmt) []legacyNode {
 	return out
 }
 
-// legacySeenText is the text the retired compiler scanned for a step's
-// references (collectAllStepReferences): its condition, its call arguments, a
-// loop's source and the calls in its body, a switch subject and its cases'
-// calls. A NESTED step's condition is not scanned -- stepExpressionStrings
-// reads a loop's, a case's and a branch's children by configuration only --
-// and neither is a loop's filter; withCond is false below the top level.
-func legacySeenText(st *lstmt, withCond bool) string {
-	var parts []string
-	callText := func(c *lcall) {
-		if c == nil {
-			return
-		}
-		for _, a := range c.args {
-			parts = append(parts, a.value)
-		}
-	}
-	switch st.form {
-	case formCall:
-		callText(st.call)
-	case formIfCall:
-		if withCond {
-			parts = append(parts, st.cond)
-		}
-		callText(st.call)
-	case formExpr, formReturn:
-		parts = append(parts, st.expr)
-	case formPublish:
-		parts = append(parts, st.topic, st.payload)
-	case formFor:
-		parts = append(parts, st.source)
-		for _, inner := range st.body {
-			parts = append(parts, legacySeenText(inner, false))
-		}
-	case formSwitch:
-		parts = append(parts, st.subject)
-		for _, c := range st.cases {
-			for _, inner := range c.body {
-				parts = append(parts, legacySeenText(inner, false))
-			}
-		}
-	case formParallel:
-		for _, br := range st.par {
-			for _, inner := range br.body {
-				parts = append(parts, legacySeenText(inner, false))
-			}
-		}
-	}
-	return strings.Join(parts, " ")
+// legacySeenText is every expression text the compiler reads for a step's
+// references (collectStepReferencesV1): its conditions and arguments at every
+// depth, a loop's source and filter, a switch subject and its cases, a
+// parallel's branches.
+func legacySeenText(st *lstmt) string {
+	return strings.Join(statementTexts(st), " ")
 }
 
-// legacySeenRefs returns the step ids the retired compiler found in text: a
-// dotted run whose first segment is an id, and first(x) / last(x).
-func legacySeenRefs(text string, ids map[string]bool) map[string]bool {
-	out := map[string]bool{}
+// freeNames are the names text reads as roots: an identifier not reached
+// through `.` and not a map or argument key, `steps.<id>` read as <id>.
+func freeNames(text string) []string {
+	var out []string
 	toks := tokenizeExpr(text)
-	for i := 0; i < len(toks); i++ {
-		t := toks[i]
+	for k := 0; k < len(toks); k++ {
+		t := toks[k]
 		if t.kind != 'i' {
 			continue
 		}
-		prev := significant(toks, i-1, -1)
+		prev := significant(toks, k-1, -1)
 		if prev >= 0 && toks[prev].kind == 'o' && (toks[prev].text == "." || toks[prev].text == ".?") {
 			continue
 		}
-		if (t.text == "first" || t.text == "last") && i+3 < len(toks) && toks[i+1].text == "(" &&
-			toks[i+2].kind == 'i' && toks[i+3].text == ")" && ids[toks[i+2].text] {
-			out[toks[i+2].text] = true
-			continue
+		next := significant(toks, k+1, 1)
+		if next >= 0 && toks[next].text == ":" {
+			continue // a key
 		}
-		// Dotted: the identifier is directly followed by `.<ident>`.
-		if i+2 < len(toks) && toks[i+1].kind == 'o' && toks[i+1].text == "." && toks[i+2].kind == 'i' && ids[t.text] {
-			out[t.text] = true
+		name := t.text
+		if name == "steps" && k+2 < len(toks) && toks[k+1].text == "." && toks[k+2].kind == 'i' {
+			name = toks[k+2].text
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// legacySeenRefs returns the step ids the compiler finds in text: every free
+// name that is one.
+func legacySeenRefs(text string, ids map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	for _, name := range freeNames(text) {
+		if ids[name] {
+			out[name] = true
 		}
 	}
 	return out
@@ -185,67 +153,50 @@ func legacyGraph(stmts []*lstmt) ([]legacyNode, []map[int]bool) {
 	return nodes, deps
 }
 
-// legacyFlatOrder is the retired compiler's order over its step list (Kahn,
-// FIFO, co-released consumers in source order) and the groups of steps one
-// release freed together -- the orders it chose between at random.
-func legacyFlatOrder(nodes []legacyNode, deps []map[int]bool) (flat []int, tieNodes [][]int) {
-	indeg := make([]int, len(nodes))
-	consumers := make([][]int, len(nodes))
-	for i := range nodes {
-		indeg[i] = len(deps[i])
-		for j := range deps[i] {
-			consumers[j] = append(consumers[j], i)
-		}
-	}
-	for j := range consumers {
-		sort.Ints(consumers[j])
-	}
-	var queue []int
-	for i := range nodes {
-		if indeg[i] == 0 {
-			queue = append(queue, i)
-		}
-	}
-	for len(queue) > 0 {
-		n := queue[0]
-		queue = queue[1:]
-		flat = append(flat, n)
-		var freed []int
-		for _, c := range consumers[n] {
-			indeg[c]--
-			if indeg[c] == 0 {
-				queue = append(queue, c)
-				freed = append(freed, c)
+// legacyFlatOrder is the compiler's order over its step list
+// (topoSortSteps): the next step is the first in source order whose
+// dependencies have all run. It chooses between no orders, so there is
+// nothing to say about ties.
+func legacyFlatOrder(nodes []legacyNode, deps []map[int]bool) []int {
+	done := make([]bool, len(nodes))
+	var flat []int
+	for len(flat) < len(nodes) {
+		next := -1
+		for i := range nodes {
+			if done[i] {
+				continue
+			}
+			ready := true
+			for d := range deps[i] {
+				if !done[d] {
+					ready = false
+					break
+				}
+			}
+			if ready {
+				next = i
+				break
 			}
 		}
-		if len(freed) > 1 {
-			tieNodes = append(tieNodes, freed)
+		if next < 0 {
+			// A cycle: the compiler refuses the body at load, so there is no
+			// today's order; the source order stands.
+			flat = flat[:0]
+			for i := range nodes {
+				flat = append(flat, i)
+			}
+			return flat
 		}
+		done[next] = true
+		flat = append(flat, next)
 	}
-	if len(flat) != len(nodes) {
-		// A cycle: the retired compiler refused the body at load, so there is
-		// no today's order; the source order stands.
-		flat = nil
-		for i := range nodes {
-			flat = append(flat, i)
-		}
-		tieNodes = nil
-	}
-	return flat, tieNodes
+	return flat
 }
 
-// legacyOrder reproduces the retired compiler's order over top-level
-// statements, and the tie groups among them.
-func legacyOrder(stmts []*lstmt) (order []int, ties [][]int, interleaved map[int]bool) {
+// legacyOrder reproduces the compiler's order over top-level statements.
+func legacyOrder(stmts []*lstmt) (order []int, interleaved map[int]bool) {
 	nodes, deps := legacyGraph(stmts)
-	flat, tieNodes := legacyFlatOrder(nodes, deps)
-	for _, g := range tieNodes {
-		var group []int
-		for _, f := range g {
-			group = append(group, nodes[f].top)
-		}
-		ties = append(ties, group)
-	}
+	flat := legacyFlatOrder(nodes, deps)
 	// Map flattened steps back to top-level statements, first occurrence.
 	seen := map[int]bool{}
 	lastPos := map[int]int{}
@@ -267,7 +218,7 @@ func legacyOrder(stmts []*lstmt) (order []int, ties [][]int, interleaved map[int
 			order = append(order, i)
 		}
 	}
-	return order, ties, interleaved
+	return order, interleaved
 }
 
 // trueRefs returns, for each top-level statement, the top-level statements it
@@ -302,24 +253,7 @@ func trueRefs(stmts []*lstmt) []map[int]bool {
 	for i, st := range stmts {
 		out[i] = map[int]bool{}
 		for _, text := range statementTexts(st) {
-			toks := tokenizeExpr(text)
-			for k := 0; k < len(toks); k++ {
-				t := toks[k]
-				if t.kind != 'i' {
-					continue
-				}
-				prev := significant(toks, k-1, -1)
-				if prev >= 0 && toks[prev].kind == 'o' && (toks[prev].text == "." || toks[prev].text == ".?") {
-					continue
-				}
-				next := significant(toks, k+1, 1)
-				if next >= 0 && toks[next].text == ":" {
-					continue // a key
-				}
-				name := t.text
-				if name == "steps" && k+2 < len(toks) && toks[k+1].text == "." && toks[k+2].kind == 'i' {
-					name = toks[k+2].text
-				}
+			for _, name := range freeNames(text) {
 				if j, ok := owner[name]; ok && j != i {
 					out[i][j] = true
 				}
@@ -519,7 +453,7 @@ func planOrder(stmts []*lstmt, ix *Index) orderPlan {
 		plan.order = source
 		return plan
 	}
-	today, ties, interleaved := legacyOrder(stmts)
+	today, interleaved := legacyOrder(stmts)
 	deps := trueRefs(stmts)
 	todayOK := respects(today, deps)
 	switch {
@@ -542,11 +476,11 @@ func planOrder(stmts []*lstmt, ix *Index) orderPlan {
 		// says what it now precedes.
 		if p > i && p > 0 {
 			plan.comments[i] = append(plan.comments[i], fmt.Sprintf(
-				"// memqlmigrate: moved below %s -- the engine ran this after it, ordering steps by the references it could see rather than by source %s",
+				"// memqlmigrate: moved below %s -- the engine ran this after it, because this reads a step written after it %s",
 				label(stmts[plan.order[p-1]]), orderIssue))
 		} else if p+1 < len(plan.order) {
 			plan.comments[i] = append(plan.comments[i], fmt.Sprintf(
-				"// memqlmigrate: moved above %s -- the engine ran this before it, ordering steps by the references it could see rather than by source %s",
+				"// memqlmigrate: moved above %s -- the engine ran this before it, because that reads a step written after it %s",
 				label(stmts[plan.order[p+1]]), orderIssue))
 		}
 	}
@@ -580,19 +514,6 @@ func planOrder(stmts []*lstmt, ix *Index) orderPlan {
 				list, verb, pron, orderIssue))
 		}
 		return plan
-	}
-	for _, group := range ties {
-		var effect []int
-		for _, i := range group {
-			if sideEffecting(stmts[i], ix) {
-				effect = append(effect, i)
-			}
-		}
-		for k := 1; k < len(effect); k++ {
-			plan.comments[effect[k]] = append(plan.comments[effect[k]], fmt.Sprintf(
-				"// memqlmigrate: the engine ran this and %s in no fixed order; they now run in the order written %s",
-				label(stmts[effect[0]]), orderIssue))
-		}
 	}
 	for i := range interleaved {
 		plan.comments[i] = append(plan.comments[i], fmt.Sprintf(

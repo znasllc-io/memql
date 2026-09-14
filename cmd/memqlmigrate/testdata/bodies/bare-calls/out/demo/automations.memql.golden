@@ -9,9 +9,8 @@ automation demoBareCalls {
     mode: "initial"
   )
   decide := logic accessRequestExpirySweep(event: event)
-  legacyVerb := mutation expireAccessRequest(requestId: "r1")
-  // memqlmigrate: moved below legacyVerb -- the engine ran this after it, ordering steps by the references it could see rather than by source (memql#5373)
   for item in decide {
     mutation expireAccessRequest(requestId: item.id)
   }
+  legacyVerb := mutation expireAccessRequest(requestId: "r1")
 }

@@ -36,10 +36,6 @@ automation releaseWorkspaceOnRunTerminal {
 
   terminal := logic runIsTerminal(status: args.status)
   decide := logic releaseWorkspaceOnRunTerminal(event: event)
-  if terminal == true && exists(args.id) {
-    teardown := builtin workbenchTeardownDirectory(runId: args.id)
-  }
-  // memqlmigrate: moved below teardown -- the engine ran this after it, ordering steps by the references it could see rather than by source (memql#5373)
   for item in decide.nodes() {
     if terminal == true && item.status == "provisioned" {
       mutation releaseWorkspace(
@@ -47,5 +43,8 @@ automation releaseWorkspaceOnRunTerminal {
         reason: "run_terminal"
       )
     }
+  }
+  if terminal == true && exists(args.id) {
+    teardown := builtin workbenchTeardownDirectory(runId: args.id)
   }
 }

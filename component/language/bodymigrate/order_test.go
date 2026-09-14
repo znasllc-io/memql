@@ -28,51 +28,52 @@ func names(stmts []*lstmt, order []int) string {
 }
 
 func TestBodiesOrderPolicy(t *testing.T) {
-	t.Run("today respects every reference: write today's order", func(t *testing.T) {
-		// b waits for a through a dotted reference the compiler saw; c was free
-		// from the start, so the engine ran it before b.
+	t.Run("a statement reading a later step moves below it, and says so", func(t *testing.T) {
+		// a reads c, written after it: the compiler runs the first ready step
+		// in source order, so b, then c, then a.
 		stmts, plan := orderOf(t, `
 logic l {
   body {
-    a := builtin one()
-    b := builtin two(v: a.first())
+    a := builtin one(v: c.first())
+    b := builtin two()
     c := builtin three()
     return c
   }
 }`)
-		if got := names(stmts, plan.order); got != "a,c,b,the return" {
-			t.Fatalf("order = %s, want a,c,b,the return", got)
+		if got := names(stmts, plan.order); got != "b,c,a,the return" {
+			t.Fatalf("order = %s, want b,c,a,the return", got)
 		}
-		// b is the statement the engine delayed: it waited for a, and Kahn's
-		// queue let c, free from the start, run first.
-		if len(plan.comments[1]) != 1 || !strings.Contains(plan.comments[1][0], "moved below c -- the engine ran this after it") {
-			t.Fatalf("b's comment = %q, want one naming the move below c", plan.comments[1])
+		if len(plan.comments[0]) != 1 || !strings.Contains(plan.comments[0][0], "moved below c -- the engine ran this after it") {
+			t.Fatalf("a's comment = %q, want one naming the move below c", plan.comments[0])
 		}
-		if len(plan.comments[2]) != 0 {
-			t.Fatalf("c kept its place relative to the rest; its comments = %q", plan.comments[2])
+		for _, i := range []int{1, 2} {
+			if len(plan.comments[i]) != 0 {
+				t.Fatalf("%s kept its place; its comments = %q", label(stmts[i]), plan.comments[i])
+			}
 		}
 	})
-	t.Run("today read a name unbound: write the source order and say so", func(t *testing.T) {
+	t.Run("every reference is an edge: an undotted read keeps the source order, uncommented", func(t *testing.T) {
+		// The compiler before epic 2's flip saw no undotted name and ran seen
+		// before probe; today's compiler sees it.
 		stmts, plan := orderOf(t, `
 logic l {
   body {
     r := builtin one()
-    probe := coalesce(r.first().x, "")
-    seen := cond(probe == "", false, true)
+    probe := r.first().x ?? ""
+    seen := probe == "" ? false : true
     return seen
   }
 }`)
 		if got := names(stmts, plan.order); got != "r,probe,seen,the return" {
 			t.Fatalf("order = %s, want the source order", got)
 		}
-		if len(plan.comments[2]) != 1 || !strings.Contains(plan.comments[2][0], "before probe, which it reads, so it read nothing") {
-			t.Fatalf("seen's comment = %q", plan.comments[2])
-		}
-		if len(plan.comments[1]) != 0 {
-			t.Fatalf("probe moved nowhere and read nothing early; its comments = %q", plan.comments[1])
+		for i, c := range plan.comments {
+			if len(c) > 0 {
+				t.Fatalf("statement %d carries %q; nothing moved", i, c)
+			}
 		}
 	})
-	t.Run("a tie between side effects is named; a tie between values is not", func(t *testing.T) {
+	t.Run("steps freed together run in the order written, uncommented", func(t *testing.T) {
 		stmts, plan := orderOf(t, `
 @trigger(event="x")
 automation a {
@@ -89,21 +90,9 @@ automation a {
 		if got := names(stmts, plan.order); got != "d,m1,m2" {
 			t.Fatalf("order = %s", got)
 		}
-		if len(plan.comments[2]) != 1 || !strings.Contains(plan.comments[2][0], "in no fixed order") {
-			t.Fatalf("m2's comment = %q, want the tie named", plan.comments[2])
-		}
-		_, plan = orderOf(t, `
-logic l {
-  body {
-    d := builtin decide()
-    x := d.first()
-    y := d.last()
-    return x
-  }
-}`)
 		for i, c := range plan.comments {
 			if len(c) > 0 {
-				t.Fatalf("statement %d carries %q; a tie between values changes nothing", i, c)
+				t.Fatalf("statement %d carries %q; the order is the one written", i, c)
 			}
 		}
 	})
