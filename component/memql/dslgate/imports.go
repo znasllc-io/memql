@@ -180,6 +180,15 @@ type declaredAt struct {
 	file      string
 }
 
+// useFor is the import that brings name into scope: the dotted path of the
+// file that declares it, which is what a `use` path names. A kind is not a
+// file name -- queries live in queries.memql and logic in logic.memql -- so
+// the file is read, not derived.
+func useFor(d declaredAt, name string) string {
+	stem := strings.TrimSuffix(path.Base(d.file), ".memql")
+	return fmt.Sprintf("use %s.%s.{ %s }", strings.ReplaceAll(d.namespace, "/", "."), stem, name)
+}
+
 // scanCrossNamespaceImports is a CORPUS-level gate: whether a reference crosses
 // a namespace boundary cannot be answered from one file, because it depends on
 // where the referenced name is declared.
@@ -290,8 +299,8 @@ func scanCrossNamespaceImports(files []SourceFile, opts Options) []Violation {
 				Gate: GateCrossNamespaceImport,
 				File: p,
 				Kind: d.kind,
-				Detail: fmt.Sprintf("references %s %q, which namespace %q declares, with no import naming it -- add `use %s.%ss.{ %s }` (memql#3803)",
-					d.kind, name, d.namespace, strings.ReplaceAll(d.namespace, "/", "."), d.kind, name),
+				Detail: fmt.Sprintf("references %s %q, which namespace %q declares, with no import naming it -- add `%s` (memql#3803)",
+					d.kind, name, d.namespace, useFor(d, name)),
 			})
 		}
 
