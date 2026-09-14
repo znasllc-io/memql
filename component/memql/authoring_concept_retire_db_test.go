@@ -46,13 +46,12 @@ type retireDBFixture struct {
 
 func newRetireDBFixture(suffix string) retireDBFixture {
 	ns := "retire3756" + strings.ReplaceAll(suffix, "-", "")
-	conceptSrc := fmt.Sprintf(`@version("1.0.0")
-@namespace(%q)
+	conceptSrc := `@version("1.0.0")
 @description("A concept taught to a running cluster, then withdrawn")
 concept demoWidget {
   ownerUserId  string
   label        string
-}`, ns)
+}`
 	mutationSrc := fmt.Sprintf(`use %s.concepts.{ demoWidget }
 
 @description("Create a demo widget")
@@ -120,10 +119,10 @@ func retireDBEngine(t *testing.T) (*MemQLEngine, context.Context) {
 // object-literal form the grammar REMOVED in memql#2335 and the parser now
 // refuses -- a pre-existing break in the durable promote's persistence that is
 // invisible to every fake-store test and is not this issue's to fix.
-func promoteBundleIntoEngine(t *testing.T, e *MemQLEngine, owner, source string) {
+func promoteBundleIntoEngine(t *testing.T, e *MemQLEngine, owner, source, origin string) {
 	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	res, err := AuthorSessionBundle(reg, owner, source, "trainingns/concepts.memql")
+	res, err := AuthorSessionBundle(reg, owner, source, origin)
 	if err != nil {
 		var detail []string
 		for _, d := range res.Diagnostics {
@@ -159,7 +158,7 @@ func TestConceptRowCount_DoesNotVaryWithTheActor(t *testing.T) {
 	eng, ctx := retireDBEngine(t)
 	fx := newRetireDBFixture(uniqueSuffix("count"))
 
-	promoteBundleIntoEngine(t, eng, "owner-a", fx.bundle)
+	promoteBundleIntoEngine(t, eng, "owner-a", fx.bundle, fx.namespace+"/concepts.memql")
 
 	// Two rows, both written by user A.
 	userA := auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: "owner-a", Role: auth.RoleWriter})
@@ -182,7 +181,7 @@ func TestConceptRowCount_DoesNotVaryWithTheActor(t *testing.T) {
 
 	// The instrument can move: a concept with nothing under it counts zero.
 	empty := newRetireDBFixture(uniqueSuffix("countempty"))
-	promoteBundleIntoEngine(t, eng, "owner-a", empty.concept)
+	promoteBundleIntoEngine(t, eng, "owner-a", empty.concept, empty.namespace+"/concepts.memql")
 	zero, err := eng.countConceptRows(userB, empty.conceptId)
 	require.NoError(t, err)
 	require.Equal(t, int64(0), zero, "a concept nothing was ever written to must count zero")
@@ -201,7 +200,7 @@ func TestDemoteConcept_EndToEnd_RetiredStaysReadableAndRefusesWrites(t *testing.
 	eng, ctx := retireDBEngine(t)
 	fx := newRetireDBFixture(uniqueSuffix("e2e"))
 
-	promoteBundleIntoEngine(t, eng, "owner-a", fx.bundle)
+	promoteBundleIntoEngine(t, eng, "owner-a", fx.bundle, fx.namespace+"/concepts.memql")
 	userA := auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: "owner-a", Role: auth.RoleWriter})
 	runMutation(t, userA, eng, "createDemoWidget", map[string]any{
 		"widgetId": "e2e-" + fx.namespace,
@@ -237,7 +236,7 @@ func TestDemoteConcept_EndToEnd_RetiredStaysReadableAndRefusesWrites(t *testing.
 	}
 
 	// RE-PROMOTING UN-RETIRES, and writes resume.
-	promoteBundleIntoEngine(t, eng, "owner-a", fx.concept)
+	promoteBundleIntoEngine(t, eng, "owner-a", fx.concept, fx.namespace+"/concepts.memql")
 	runMutation(t, userA, eng, "createDemoWidget", map[string]any{
 		"widgetId": "e2e3-" + fx.namespace,
 		"label":    "after the re-promote",
@@ -256,7 +255,7 @@ func TestDemoteConcept_EndToEnd_ZeroRowsRemovesAndFreesTheName(t *testing.T) {
 	eng, ctx := retireDBEngine(t)
 	fx := newRetireDBFixture(uniqueSuffix("empty"))
 
-	promoteBundleIntoEngine(t, eng, "owner-a", fx.concept)
+	promoteBundleIntoEngine(t, eng, "owner-a", fx.concept, fx.namespace+"/concepts.memql")
 	if _, err := eng.concepts.Get(fx.conceptId); err != nil {
 		t.Fatalf("pre-condition: the promoted concept is not registered: %v", err)
 	}
@@ -272,7 +271,7 @@ func TestDemoteConcept_EndToEnd_ZeroRowsRemovesAndFreesTheName(t *testing.T) {
 		t.Error("the concept is still registered after a zero-row demote")
 	}
 
-	promoteBundleIntoEngine(t, eng, "owner-a", fx.concept)
+	promoteBundleIntoEngine(t, eng, "owner-a", fx.concept, fx.namespace+"/concepts.memql")
 	if _, err := eng.concepts.Get(fx.conceptId); err != nil {
 		t.Errorf("re-promote reported success but the concept is not registered: %v", err)
 	}

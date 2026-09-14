@@ -203,7 +203,7 @@ automation probe {
     return args.x + n
   }
 }`},
-	{"struct mutation: edition-2026 values", true, `mutate thing probe {
+	{"struct mutation: edition-2026 values", true, `mutation thing probe {
   args {
     id string @required
     name string
@@ -338,7 +338,7 @@ automation probe {
     return 1
   }
 }`},
-	{"a stray top-level line in a mutation body (memql#5359)", false, `mutate thing probe {
+	{"a stray top-level line in a mutation body (memql#5359)", false, `mutation thing probe {
   insert {
     id: "x"
   }
@@ -447,7 +447,7 @@ automation probe {
     return args.x == null
   }
 }`},
-	{"struct mutation: concat(a, b) value (retired_concat_call)", false, `mutate thing probe {
+	{"struct mutation: concat(a, b) value (retired_concat_call)", false, `mutation thing probe {
   args {
     id string @required
   }
@@ -455,7 +455,7 @@ automation probe {
     id: concat("thing-", args.id)
   }
 }`},
-	{"struct mutation: a quoted map key", false, `mutate thing probe {
+	{"struct mutation: a quoted map key", false, `mutation thing probe {
   args {
     id string @required
   }

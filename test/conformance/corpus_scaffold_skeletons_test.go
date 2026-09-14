@@ -322,12 +322,12 @@ func scaffoldSkeleton(p annotations.Placement, ann string) (fixture, src string,
 
 	case annotations.Tool:
 		if p.Name == "destructive" || p.Name == "requiresConfirmation" {
-			fixture := scaffoldTicket + "\n/// Close a ticket.\nmutate ticket closeTicket" + s + " {\n" + scaffoldArgs([2]string{"ticketId", "string!"}) +
+			fixture := scaffoldTicket + "\n/// Close a ticket.\nmutation ticket closeTicket" + s + " {\n" + scaffoldArgs([2]string{"ticketId", "string!"}) +
 				"  update {\n    id: args.ticketId\n    status: \"closed\"\n  }\n}\n"
 			return fixture, scaffoldDoc(p, "") + `@handler(type="function", name="closeTicket` + s + `")` + "\n" + line +
 				"tool closeSupportTicket" + s + " {\n  ticketId  string!  @description(\"The ticket to close.\")\n}\n", nil
 		}
-		fixture := scaffoldTicket + "\n/// Open a ticket with a title.\nmutate ticket openTicket" + s + " {\n" + scaffoldArgs([2]string{"title", "string!"}) +
+		fixture := scaffoldTicket + "\n/// Open a ticket with a title.\nmutation ticket openTicket" + s + " {\n" + scaffoldArgs([2]string{"title", "string!"}) +
 			"  insert {\n    title: args.title\n    status: \"open\"\n  }\n}\n"
 		handler := `@handler(type="function", name="openTicket` + s + `")` + "\n"
 		if p.Name == "handler" {
@@ -483,7 +483,7 @@ func scaffoldSkeleton(p annotations.Placement, ann string) (fixture, src string,
 			// The runtime stamps agentId (with ownerUserId and partitionId)
 			// over whatever the model sent; the function handler receives it
 			// as an argument like any other field.
-			fixture = scaffoldTicketWith([2]string{"openedByAgentId", "string"}) + "\n/// Open a ticket, recording which agent opened it.\nmutate ticket openTicket" + s + " {\n" +
+			fixture = scaffoldTicketWith([2]string{"openedByAgentId", "string"}) + "\n/// Open a ticket, recording which agent opened it.\nmutation ticket openTicket" + s + " {\n" +
 				scaffoldArgs([2]string{"title", "string!"}, [2]string{"agentId", "string"}) +
 				"  insert {\n    title: args.title\n    status: \"open\"\n    openedByAgentId: args.agentId\n  }\n}\n"
 			return fixture, "/// Open a support ticket; the runtime records which agent opened it.\n@handler(type=\"function\", name=\"openTicket" + s + "\")\ntool openSupportTicket" + s + " {\n" +
@@ -534,7 +534,7 @@ func scaffoldDateKeyFields(ann string) string {
 func scaffoldMutation(p annotations.Placement, s, line string) (string, string, map[string]string) {
 	upd := func(doc, name string, args [][2]string, setLines string, extra ...[2]string) (string, string, map[string]string) {
 		all := append([][2]string{{"ticketId", "string!"}}, args...)
-		return scaffoldTicketWith(extra...), scaffoldDoc(p, doc) + line + "mutate ticket " + name + s + " {\n" + scaffoldArgs(all...) +
+		return scaffoldTicketWith(extra...), scaffoldDoc(p, doc) + line + "mutation ticket " + name + s + " {\n" + scaffoldArgs(all...) +
 			"  update {\n    id: args.ticketId\n" + setLines + "  }\n}\n", nil
 	}
 	switch p.Name {
@@ -554,7 +554,7 @@ func scaffoldMutation(p annotations.Placement, s, line string) (string, string, 
 		return upd("", "forgetTicketReporter", nil, "    status: \"redacted\"\n", [2]string{"reporterEmail", "string  @pii"})
 	case "createOnly":
 		return scaffoldTicketWith([2]string{"attempts", "int"}), scaffoldDoc(p, "") + line +
-			"mutate ticket openTicket" + s + " {\n" + scaffoldArgs([2]string{"ticketId", "string!"}, [2]string{"title", "string!"}) +
+			"mutation ticket openTicket" + s + " {\n" + scaffoldArgs([2]string{"ticketId", "string!"}, [2]string{"title", "string!"}) +
 			"  insert {\n    id: args.ticketId\n    title: args.title\n    status: \"open\"\n    attempts: 0\n  }\n}\n", nil
 	}
 	return upd("Retitle one ticket.", "retitleTicket", [][2]string{{"title", "string!"}}, "    title: args.title\n")
@@ -563,7 +563,7 @@ func scaffoldMutation(p annotations.Placement, s, line string) (string, string, 
 // scaffoldAutomation is the automation skeleton: when a node joins the
 // cluster, raise a ticket through the fixture's mutation.
 func scaffoldAutomation(p annotations.Placement, s, ann string) (string, string, map[string]string) {
-	fixture := scaffoldTicket + "\n/// Raise a ticket with a title.\nmutate ticket raiseTicket" + s + " {\n" + scaffoldArgs([2]string{"title", "string!"}) +
+	fixture := scaffoldTicket + "\n/// Raise a ticket with a title.\nmutation ticket raiseTicket" + s + " {\n" + scaffoldArgs([2]string{"title", "string!"}) +
 		"  insert {\n    title: args.title\n    status: \"open\"\n  }\n}\n"
 	trigger := `@trigger(event="node.created", concept="v1:cluster:node", partition="*")` + "\n"
 	name := "welcomeNode" + s
@@ -580,7 +580,7 @@ func scaffoldAutomation(p annotations.Placement, s, ann string) (string, string,
 		args = "  args {\n    /// The ticket's title.\n    title  string!\n  }\n\n"
 		step = "  step raise {\n    mutation raiseTicket" + s + " (title: args.title)\n  }\n"
 	case "actor":
-		fixture = scaffoldTicket + "\n/// Raise a ticket with a title and an owner.\nmutate ticket raiseTicket" + s + " {\n" +
+		fixture = scaffoldTicket + "\n/// Raise a ticket with a title and an owner.\nmutation ticket raiseTicket" + s + " {\n" +
 			scaffoldArgs([2]string{"title", "string!"}, [2]string{"ownerUserId", "string!"}) +
 			"  insert {\n    title: args.title\n    status: \"open\"\n    ownerUserId: args.ownerUserId\n  }\n}\n"
 		step = "  step raise {\n    mutation raiseTicket" + s + " (title: \"A node joined the cluster\", ownerUserId: actor.userId)\n  }\n"

@@ -5555,7 +5555,7 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 	// classic `mutate` (mutation *declaration* verb) written in *call*
 	// position where the *invocation* noun `mutation` belongs. Historically
 	// the leading word lowered to a bare SpecReferenceExpr and the entire
-	// `<ident>(...)` call was silently DROPPED (`mutate createNode(id:"x")`
+	// `<ident>(...)` call was silently DROPPED (`mutation createNode(id:"x")`
 	// parsed as SpecReferenceExpr{Name:"mutate"}, err=nil). Reject it with a
 	// Levenshtein nearest-kind hint so a typo can no longer become a silent
 	// semantic change.

@@ -58,7 +58,7 @@ func TestLogicCollectionMethodLoads(t *testing.T) {
 // method was refused in a filter, whatever it read.)
 func TestQueryFilterCollectionMethodScope(t *testing.T) {
 	load := func(args, filter string) error {
-		lines := []string{"use common.concepts.{ thing }", "", "@enabled", "@description(\"probe\")", "query thing queryCollectionScope {"}
+		lines := []string{"use common.concepts.{ thing }", "", "@description(\"probe\")", "query thing queryCollectionScope {"}
 		if args != "" {
 			lines = append(lines, "  args {", "    "+args, "  }")
 		}

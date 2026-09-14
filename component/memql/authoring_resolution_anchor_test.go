@@ -167,7 +167,7 @@ func TestSignatureOffsetFallsBackInsideTheConstruct(t *testing.T) {
 }
 
 // TestMutationSignatureUsesTheMutateKeyword covers the one kind whose name and
-// keyword differ. A `mutation` is declared `mutate NAME`, so a scan keyed on
+// keyword differ. A `mutation` is declared `mutation NAME`, so a scan keyed on
 // the kind string alone would miss every mutation in the tree and silently
 // anchor them all at their annotation line.
 func TestMutationSignatureUsesTheMutateKeyword(t *testing.T) {

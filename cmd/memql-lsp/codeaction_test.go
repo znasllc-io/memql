@@ -37,7 +37,7 @@ import (
 // when the predicate set is the tree's, which is what makes the fix a
 // tree-level answer rather than a file-level guess.
 var codemodWorkspace = map[string]string{
-	"fylo/concepts.memql": "@namespace(\"fylo\")\nconcept order {\n  status  string\n  ownerUserId  string\n}\n",
+	"fylo/concepts.memql": "concept order {\n  status  string\n  ownerUserId  string\n}\n",
 	"fylo/shapes.memql":   "@actor\nshape actorEnvelope {\n  actor.role\n}\n",
 	"fylo/specs.memql":    "use fylo.shapes.{ actorEnvelope }\n\nspec actorEnvelope isAdmin {\n  return role == \"admin\"\n}\n",
 	"fylo/queries.memql": "use fylo.concepts.{ order }\nuse fylo.specs.{ isAdmin }\n\n" +
@@ -565,7 +565,7 @@ func TestCodeAction_CorePredicatesResolve(t *testing.T) {
 func TestCodeAction_SpecOverACoreActorShape(t *testing.T) {
 	const rel = "fylo/specs.memql"
 	root := writeWorkspace(t, map[string]string{
-		"fylo/concepts.memql": "@namespace(\"fylo\")\nconcept order {\n  status  string\n}\n",
+		"fylo/concepts.memql": "concept order {\n  status  string\n}\n",
 		rel:                   "use common.shapes.{ actorEnvelope }\n\nspec actorEnvelope isAdmin {\n  return role == \"admin\"\n}\n\nquery order adminOrders {\n  filter  isAdmin\n}\n",
 	})
 	s := workspaceServer(t, root)

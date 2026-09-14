@@ -145,11 +145,11 @@ var bodyClauseFixtures = map[string]map[string]string{
 		"count":    "query thing probe {\n  filter row => row.id != \"\"\n  count\n}",
 	},
 	"mutate": {
-		"args":   "mutate thing probe {\n  args {\n    id string!\n  }\n  insert {\n    id: args.id\n  }\n}",
-		"insert": "mutate thing probe {\n  insert {\n    id: \"x\"\n  }\n}",
-		"update": "mutate thing probe {\n  update {\n    id: \"x\"\n  }\n}",
-		"accept": "mutate thing probe {\n  args {\n    name string!\n  }\n  accept { name }\n}",
-		"stamp":  "mutate thing probe {\n  args {\n    name string!\n  }\n  accept { name }\n  stamp { createdAt: now }\n}",
+		"args":   "mutation thing probe {\n  args {\n    id string!\n  }\n  insert {\n    id: args.id\n  }\n}",
+		"insert": "mutation thing probe {\n  insert {\n    id: \"x\"\n  }\n}",
+		"update": "mutation thing probe {\n  update {\n    id: \"x\"\n  }\n}",
+		"accept": "mutation thing probe {\n  args {\n    name string!\n  }\n  accept { name }\n}",
+		"stamp":  "mutation thing probe {\n  args {\n    name string!\n  }\n  accept { name }\n  stamp { createdAt: now }\n}",
 	},
 	"logic": {
 		"args": "logic probe {\n  args {\n    x string\n  }\n  body {\n    return args.x\n  }\n}",
@@ -203,7 +203,7 @@ func TestBodyClausesMatchWhatTheParsersAccept(t *testing.T) {
 // where a probed clause goes.
 var bodyProbeFixtures = map[string]string{
 	"query":      "query thing probe {\n  filter row => row.id != \"\"\n  %s\n}",
-	"mutate":     "mutate thing probe {\n  insert {\n    id: \"x\"\n  }\n  %s\n}",
+	"mutate":     "mutation thing probe {\n  insert {\n    id: \"x\"\n  }\n  %s\n}",
 	"logic":      "logic probe {\n  %s\n  body {\n    return 1\n  }\n}",
 	"automation": "automation probe {\n  %s\n  step run {\n    mutation createThing (id: \"x\")\n  }\n}",
 	"action":     "action probe {\n  %s\n  capability script(script: \"x\")\n}",

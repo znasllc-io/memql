@@ -736,9 +736,9 @@ func conceptDiffDBEngine(t *testing.T) (*MemQLEngine, context.Context) {
 // folded in. A bare "N of M constructs did not compile" says only THAT a fixture
 // was rejected, never why, which is the difference between a five-second fix and
 // a bisect.
-func promoteOrFail(t *testing.T, eng *MemQLEngine, ctx context.Context, source string) {
+func promoteOrFail(t *testing.T, eng *MemQLEngine, ctx context.Context, source, origin string) {
 	t.Helper()
-	res, err := eng.PromoteBundleDurable(ctx, "owner-1", source, "trainingns/concepts.memql", false)
+	res, err := eng.PromoteBundleDurable(ctx, "owner-1", source, origin, false)
 	if err == nil {
 		return
 	}
@@ -807,8 +807,8 @@ mutation order createOrder%s {
   }
 }`, ns, ns)
 
-	promoteOrFail(t, eng, ctx, v1)
-	promoteOrFail(t, eng, ctx, querySrc+"\n\n"+mutationSrc)
+	promoteOrFail(t, eng, ctx, v1, ns+"/concepts.memql")
+	promoteOrFail(t, eng, ctx, querySrc+"\n\n"+mutationSrc, ns+"/concepts.memql")
 
 	// Write a number the test chose, so "real count" means this number.
 	const rows = 7
@@ -836,7 +836,7 @@ concept order {
   status       enum("draft", "placed", "shipped")
 }`)
 
-	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, "trainingns/concepts.memql", false)
+	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, ns+"/concepts.memql", false)
 	if err == nil {
 		t.Fatal("re-promoting with `sku` removed was allowed against a table that holds rows carrying it")
 	}
@@ -862,7 +862,7 @@ concept order {
 	}
 
 	// The override is the same call with the flag, and it must actually land.
-	overridden, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, "trainingns/concepts.memql", true)
+	overridden, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, ns+"/concepts.memql", true)
 	if err != nil {
 		t.Fatalf("allow_breaking must land the change: %v", err)
 	}
@@ -913,8 +913,8 @@ mutation ticket createTicket%s {
   }
 }`, ns, ns)
 
-	promoteOrFail(t, eng, ctx, v1)
-	promoteOrFail(t, eng, ctx, mutationSrc)
+	promoteOrFail(t, eng, ctx, v1, ns+"/concepts.memql")
+	promoteOrFail(t, eng, ctx, mutationSrc, ns+"/concepts.memql")
 
 	// Five rows, of which exactly two hold the value that is about to become
 	// illegal. A count of 5 would be "every row"; a count of 2 is the answer.
@@ -933,7 +933,7 @@ concept ticket {
   status       enum("open", "closed")
 }`)
 
-	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, "trainingns/concepts.memql", false)
+	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, ns+"/concepts.memql", false)
 	if err == nil {
 		t.Fatal("narrowing an enum away from a value rows still hold was allowed")
 	}

@@ -46,7 +46,6 @@ package memql
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -78,23 +77,28 @@ func (s *recordingPromoteStore) CreatePromoteConstruct(ctx context.Context, cons
 
 // stagedDataDBConceptSrc builds a uniquely-namespaced concept source so two runs
 // (or two agents sharing a database) cannot claim the same canonical id.
-func stagedDataDBConceptSrc(ns string) string {
-	return fmt.Sprintf(`@version("1.0.0")
-@namespace(%q)
+func stagedDataDBConceptSrc() string {
+	return `@version("1.0.0")
 @description("A concept taught to a running cluster, with its data staged")
 concept stagedWidget {
   ownerUserId  string
   label        string
-}`, ns)
+}`
 }
+
+// stagedDataDBOrigin is the tree-relative path a uniquely-namespaced fixture is
+// authored against. Since memql#5375 retired @namespace, the origin's leading
+// segment IS the bundle's domain, so this is what keeps two concurrent runs
+// from claiming the same canonical id.
+func stagedDataDBOrigin(ns string) string { return ns + "/concepts.memql" }
 
 // promoteConceptThroughTheRealStore authors a concept and durably promotes it
 // through the production enginePromoteStore -- the point of this file. The
 // helpers everywhere else deliberately avoid that store; here it is the subject.
-func promoteConceptThroughTheRealStore(t *testing.T, eng *MemQLEngine, ctx context.Context, owner, source string, opts ...PromoteDurableOption) *recordingPromoteStore {
+func promoteConceptThroughTheRealStore(t *testing.T, eng *MemQLEngine, ctx context.Context, owner, source, origin string, opts ...PromoteDurableOption) *recordingPromoteStore {
 	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	res, err := AuthorSessionBundle(reg, owner, source, "trainingns/concepts.memql")
+	res, err := AuthorSessionBundle(reg, owner, source, origin)
 	if err != nil {
 		var detail []string
 		for _, d := range res.Diagnostics {
@@ -151,7 +155,7 @@ func TestConceptDataStagedDurable_StampLandsOnTheRowAndReadsBack(t *testing.T) {
 
 	stagedOwner := "owner-" + uniqueSuffix("stagedon")
 	stagedNs := "staged3974" + strings.ReplaceAll(uniqueSuffix("on"), "-", "")
-	staged := promoteConceptThroughTheRealStore(t, eng, ctx, stagedOwner, stagedDataDBConceptSrc(stagedNs), WithConceptDataStaged())
+	staged := promoteConceptThroughTheRealStore(t, eng, ctx, stagedOwner, stagedDataDBConceptSrc(), stagedDataDBOrigin(stagedNs), WithConceptDataStaged())
 	stagedRow := readBackConstructRow(t, eng, ctx, stagedOwner, staged.bundleId)
 
 	require.True(t, stagedRow.ConceptDataStaged,
@@ -165,7 +169,7 @@ func TestConceptDataStagedDurable_StampLandsOnTheRowAndReadsBack(t *testing.T) {
 	// genuinely different concept and a genuinely different row.
 	liveOwner := "owner-" + uniqueSuffix("stagedoff")
 	liveNs := "staged3974" + strings.ReplaceAll(uniqueSuffix("off"), "-", "")
-	live := promoteConceptThroughTheRealStore(t, eng, ctx, liveOwner, stagedDataDBConceptSrc(liveNs))
+	live := promoteConceptThroughTheRealStore(t, eng, ctx, liveOwner, stagedDataDBConceptSrc(), stagedDataDBOrigin(liveNs))
 	liveRow := readBackConstructRow(t, eng, ctx, liveOwner, live.bundleId)
 
 	require.False(t, liveRow.ConceptDataStaged,

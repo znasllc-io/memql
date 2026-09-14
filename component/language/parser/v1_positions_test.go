@@ -594,7 +594,7 @@ automation probe {
 
 // TestMutationValuesV1: insert/update values parse v1.
 func TestMutationValuesV1(t *testing.T) {
-	src := `mutate thing probe {
+	src := `mutation thing probe {
   args {
     id string @required
     name string
@@ -631,7 +631,7 @@ func TestRetiredSpellingsInProcessPositions(t *testing.T) {
 		"cond in a return":             {"logic probe {\n  args {\n    a bool\n  }\n  body {\n    return cond(args.a, 1, 2)\n  }\n}", "retired_cond_call"},
 		"concat on a step":             {"logic probe {\n  args {\n    a string\n  }\n  body {\n    x := concat(args.a, \"b\")\n    return x\n  }\n}", "retired_concat_call"},
 		"exists in an if":              {"logic probe {\n  args {\n    a string\n  }\n  body {\n    if exists(args.a) {\n      x := f(a: args.a)\n    }\n    return args.a\n  }\n}", "retired_exists_call"},
-		"coalesce in a mutation value": {"mutate thing probe {\n  args {\n    id string @required\n    a string\n  }\n  insert {\n    id: args.id\n    a: coalesce(args.a, \"x\")\n  }\n}", "retired_coalesce_call"},
+		"coalesce in a mutation value": {"mutation thing probe {\n  args {\n    id string @required\n    a string\n  }\n  insert {\n    id: args.id\n    a: coalesce(args.a, \"x\")\n  }\n}", "retired_coalesce_call"},
 		"cond in a step argument":      {"@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  step first {\n    logic other(x: cond(true, 1, 2))\n  }\n}", "retired_cond_call"},
 	}
 	for name, c := range cases {

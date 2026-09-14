@@ -53,7 +53,7 @@ func TestNegativeLoad_MalformedBodyPerKind(t *testing.T) {
 		{"shape", "x/shapes.memql", "@row\nshape s {\n  row.id\n  123 456 789\n}\n"},
 		{"spec", "x/specs.memql", "spec activeRowTrait s = row => row.status ==== \"x\" &&&& true\n"},
 		{"trait", "x/traits.memql", "trait t = row => row.active ==== true\n"},
-		{"mutation", "x/mutations.memql", "use cognition.concepts.{ space }\nmutate space m {\n  ?? !! garbage\n}\n"},
+		{"mutation", "x/mutations.memql", "use cognition.concepts.{ space }\nmutation space m {\n  ?? !! garbage\n}\n"},
 		{"query", "x/queries.memql", "use cognition.concepts.{ space }\nquery space q {\n  filter row => @@@ !!! broken\n  shape spaceFull\n}\n"},
 		{"logic", "x/logic.memql", "logic l {\n  args { event object @required }\n  return 1\n}\n"}, // missing body{}
 		{"automation", "x/automations.memql", "@trigger(event=)\nautomation a {\n  step run { logic doThing { event: event } }\n}\n"},

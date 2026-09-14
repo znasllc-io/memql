@@ -130,14 +130,14 @@ func TestExpressionPositionsAreDetected(t *testing.T) {
 		{"step argument", "automation sweep {\n  step record {\n    mutation createTodo(title: ", tiers.PositionStepArgument, "", ""},
 		{"logic body", "logic compute {\n  body {\n    x := ", tiers.PositionLogicBody, "", ""},
 		{"logic return", "logic compute {\n  body {\n    return ", tiers.PositionLogicBody, "", ""},
-		{"mutation value", "mutate todo createTodo {\n  insert {\n    title: ", tiers.PositionMutationValue, "", ""},
-		{"stamp value", "mutate todo createTodo {\n  insert {\n    accept { title }\n    stamp {\n      createdBy: ", tiers.PositionMutationValue, "", ""},
+		{"mutation value", "mutation todo createTodo {\n  insert {\n    title: ", tiers.PositionMutationValue, "", ""},
+		{"stamp value", "mutation todo createTodo {\n  insert {\n    accept { title }\n    stamp {\n      createdBy: ", tiers.PositionMutationValue, "", ""},
 		{"tool default", "tool searchTodos {\n  limit integer @default(\"", tiers.PositionToolDefault, "", ""},
 		{"tool handler query", "@handler(type=\"query\", query=\"concept==v1:todos:todo && ", tiers.PositionQueryFilter, "", ""},
 		{"prompt default", "prompt summarize {\n  style string @default(\"", tiers.PositionPromptInput, "", ""},
 		{"refine clause", v1Query + "  filter row => row.done == false\n  paginate 20\n  refine row => row.", tiers.PositionQueryRefine, "row", "todo"},
 		// Not an expression position at all.
-		{"a mutation field name", "mutate todo createTodo {\n  insert {\n    tit", "", "", ""},
+		{"a mutation field name", "mutation todo createTodo {\n  insert {\n    tit", "", "", ""},
 		{"an args block", "logic compute {\n  args {\n    x ", "", "", ""},
 		{"a concept body", "concept todo {\n  title ", "", "", ""},
 	}

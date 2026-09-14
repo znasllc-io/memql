@@ -1029,7 +1029,7 @@ func TestRewriteExpressions_KeylessMapEntries(t *testing.T) {
 
 	// A mutation's write block is the struct-form rewriter's: left alone, a
 	// nested map inside it included.
-	mut := "mutate thing m {\n  insert {\n    id: args.id\n    meta: { args.a.b }\n  }\n}\n"
+	mut := "mutation thing m {\n  insert {\n    id: args.id\n    meta: { args.a.b }\n  }\n}\n"
 	if got := xmtRewrite(t, mut, nil); got != mut {
 		t.Errorf("a write block was touched:\n%s", got)
 	}

@@ -34,7 +34,7 @@ func receiverFixture(r annotations.Receiver, name, ann string) string {
 	case annotations.Query:
 		return ann + "\nquery thing probe {\n  filter row => row.id != \"\"\n}\n"
 	case annotations.Mutation:
-		return ann + "\nmutate thing probe {\n  args {\n    id string!\n  }\n  update {\n    id: args.id\n  }\n}\n"
+		return ann + "\nmutation thing probe {\n  args {\n    id string!\n  }\n  update {\n    id: args.id\n  }\n}\n"
 	case annotations.Logic:
 		return ann + "\nlogic probe {\n  body {\n    return 1\n  }\n}\n"
 	case annotations.Automation:

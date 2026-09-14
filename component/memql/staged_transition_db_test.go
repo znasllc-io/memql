@@ -66,7 +66,7 @@ func TestTrainConstructConceptData_ClearsTheStampOnARealRow(t *testing.T) {
 
 	owner := "owner-" + uniqueSuffix("train3986")
 	ns := "train3986" + strings.ReplaceAll(uniqueSuffix("ns"), "-", "")
-	staged := promoteConceptThroughTheRealStore(t, eng, ctx, owner, stagedDataDBConceptSrc(ns), WithConceptDataStaged())
+	staged := promoteConceptThroughTheRealStore(t, eng, ctx, owner, stagedDataDBConceptSrc(), stagedDataDBOrigin(ns), WithConceptDataStaged())
 
 	row := readBackConstructRow(t, eng, ctx, owner, staged.bundleId)
 	require.True(t, row.ConceptDataStaged,

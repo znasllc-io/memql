@@ -167,7 +167,7 @@ func TestBodyBlocksCarryTheFactsTheHandListGotWrong(t *testing.T) {
 	}
 	for _, clause := range []string{"accept", "stamp"} {
 		if !has("mutate", clause) {
-			t.Errorf("mutate BodyBlocks lack %q", clause)
+			t.Errorf("mutation BodyBlocks lack %q", clause)
 		}
 	}
 }

@@ -25,7 +25,13 @@ func TestRunScopedAuthoredQueryResolvesSiblingShape(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reg := NewAuthoredRuntimeRegistry()
-			source := fmt.Sprintf(`@row
+			// `todo` is a CORE concept and this bundle is authored in its own
+			// private domain, so the signature concept has to be imported --
+			// the ambient same-domain rule cannot reach it (memql#5375 made
+			// the origin the only source of a bundle's domain).
+			source := fmt.Sprintf(`use todos.concepts.{ todo }
+
+@row
 shape todo executionTodoCard { %s }
 @actor
 query todo executionTodos {

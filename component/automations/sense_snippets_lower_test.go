@@ -108,12 +108,12 @@ var snippetBodies = map[string]struct {
 	"query": {"query thing probe {\n  ", map[string][2]string{
 		"args": {"query thing probe {\n  %s\n  filter row => row.id == args.x\n}", "x string"},
 	}},
-	"mutate": {"mutate thing probe {\n  ", map[string][2]string{
-		"args":   {"mutate thing probe {\n  %s\n  update {\n    id: args.x\n  }\n}", "x string"},
-		"insert": {"mutate thing probe {\n  %s\n}", `id: "x"`},
-		"update": {"mutate thing probe {\n  %s\n}", `id: "x"`},
-		"accept": {"mutate thing probe {\n  args {\n    name string!\n  }\n  %s\n}", "name"},
-		"stamp":  {"mutate thing probe {\n  args {\n    name string!\n  }\n  accept { name }\n  %s\n}", "createdAt: now"},
+	"mutate": {"mutation thing probe {\n  ", map[string][2]string{
+		"args":   {"mutation thing probe {\n  %s\n  update {\n    id: args.x\n  }\n}", "x string"},
+		"insert": {"mutation thing probe {\n  %s\n}", `id: "x"`},
+		"update": {"mutation thing probe {\n  %s\n}", `id: "x"`},
+		"accept": {"mutation thing probe {\n  args {\n    name string!\n  }\n  %s\n}", "name"},
+		"stamp":  {"mutation thing probe {\n  args {\n    name string!\n  }\n  accept { name }\n  %s\n}", "createdAt: now"},
 	}},
 	"logic": {"logic probe {\n  ", map[string][2]string{
 		"args": {"logic probe {\n  %s\n  body {\n    return args.x\n  }\n}", "x string"},

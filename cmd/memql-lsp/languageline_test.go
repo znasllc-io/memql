@@ -27,7 +27,6 @@ import (
 // gadgetConcept is a domain's only file: a concept that loads clean, so the
 // domain can be refused for nothing but its language line.
 const gadgetConcept = `@version("1.0.0")
-@namespace("gadgets")
 @description("A gadget.")
 concept gadget {
   label string @required @description("Label")

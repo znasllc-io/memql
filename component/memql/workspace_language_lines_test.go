@@ -205,7 +205,6 @@ func TestOfflineSense_AProductRepositoryMountsItsOneDomain(t *testing.T) {
 	const probeID = "v1:znas:znasLineProbe"
 	root := fstest.MapFS{
 		"dsl/znas/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("znas")
 @description("A probe of the product domain.")
 concept znasLineProbe {
   label  string  @required  @description("Probe label.")
