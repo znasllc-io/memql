@@ -171,6 +171,12 @@ func visitExpression(expr parser.ExpressionNode, known map[string]struct{}, call
 		visitExpression(e.Target, known, calls)
 	case *parser.PaginateExpr:
 		visitExpression(e.Target, known, calls)
+	case *parser.RefineExpr:
+		// The refine clause (memql#5366) wraps the paginated query, whose
+		// calls are what CQS judges; the lambda is a v1 AST whose calls are
+		// catalog functions and predicates, and the engine refuses a
+		// construct call in it at load.
+		visitExpression(e.Target, known, calls)
 	case *parser.SelectExpr:
 		visitExpression(e.Target, known, calls)
 	case *parser.DepthExpr:

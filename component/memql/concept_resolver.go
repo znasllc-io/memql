@@ -596,6 +596,12 @@ func (r *ConceptResolver) resolveNode(node languageParser.Node, symbols map[stri
 		return r.resolveNode(n.Target, symbols)
 	case *languageParser.PaginateExpr:
 		return r.resolveNode(n.Target, symbols)
+	case *languageParser.RefineExpr:
+		// The refine clause wraps the paginated query (memql#5366); the
+		// query's `concept == <name>` binding sits inside it and must resolve
+		// like any other directive's target. The lambda is a v1 AST and names
+		// no concept.
+		return r.resolveNode(n.Target, symbols)
 	case *languageParser.SelectExpr:
 		return r.resolveNode(n.Target, symbols)
 	case *languageParser.TimestampExpr:

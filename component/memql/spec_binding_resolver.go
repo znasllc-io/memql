@@ -117,10 +117,20 @@ func resolveOneSpecBinding(spec *Spec, shapes *ShapeRegistry, concepts memoryNod
 		}
 	}
 
+	// An edition-2026 body (memql#5366) is NOT rewritten here: it has no Expr
+	// yet, and when it does it will not need one -- Lower emits the final
+	// access forms (`payload.<f>`, the canonical intrinsic, the shape's stored
+	// path) directly, and its fields are read through the lambda parameter,
+	// never bare, so there is no bare field for a mapper to find. Its binding
+	// is resolved (the mapper above refuses a binding that does not resolve)
+	// and its kind is set, which is what the Init pass lowers it against.
+	spec.Kind = kind
+	if spec.Lambda != nil {
+		return nil
+	}
 	if err := rewriteSpecFields(spec.Expr, mapper); err != nil {
 		return err
 	}
-	spec.Kind = kind
 	spec.ExprSource = canonicalExpression(spec.Expr)
 	return nil
 }

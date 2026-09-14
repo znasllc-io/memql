@@ -1105,11 +1105,23 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// would over-count under the time-series versioning model (multiple
 	// versions per id) and skip the in-process post-filter / actor folds.
 	if plan.Count {
+		if plan.Refine != nil {
+			// count aggregates in SQL and reads no page for refine to run
+			// over; the struct-form rewriter refuses the pair, and a raw
+			// query string reaching here is refused on the same terms.
+			return nil, fmt.Errorf("refine cannot be combined with count: count reads no page for refine to run over")
+		}
 		return e.executeCountPlan(ctx, plan, effectiveTimestamp, sorter, startTime)
 	}
 
 	var cacheKey string
-	useCache := e.cache != nil && len(plan.Mutations) == 0
+	// NOT cached when the query refines (memql#5366). The refine lambda reads
+	// bindings the plan signature does not carry -- the call's arguments,
+	// the actor, the clock -- and its answer changes with them while plan.Root
+	// does not, so a cached page would be served to a call it does not answer.
+	// A refined query is a bounded page read by construction; the cache buys
+	// it little and would cost correctness.
+	useCache := e.cache != nil && len(plan.Mutations) == 0 && plan.Refine == nil
 	signature := e.planCacheSignature(ctx, plan)
 	fieldSignature := projectionSignature(plan.Fields, plan.ConceptFields, plan.Metadata)
 	// Resolve named shape reference to a compiled template.
@@ -1152,9 +1164,20 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		metrics.ResultCacheQueryRead(plan.SourceFunction, false)
 	}
 
-	nodes, err := e.evaluateExpression(ctx, plan.Root, effectiveTimestamp, limit, sorter)
+	page, err := e.evaluateExpression(ctx, plan.Root, effectiveTimestamp, limit, sorter)
 	if err != nil {
 		return nil, err
+	}
+
+	// The refine clause (memql#5366): the in-process predicate over the page
+	// SQL just read, between the read and the bundle (refine.go). The page
+	// itself is kept for the cursor below.
+	nodes := page
+	if plan.Refine != nil {
+		nodes, err = e.applyRefine(ctx, plan.Refine, plan.SourceFunction, page)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	bundle, err := e.buildGraphBundle(ctx, nodes, depth, effectiveTimestamp)
@@ -1169,9 +1192,13 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// An exhausted set (a short page) leaves the cursor empty. Only emit for
 	// keyset-eligible orderings; payload-sorted full-scan queries fall back to
 	// the in-memory path and carry no SQL keyset cursor.
-	if limit > 0 && len(nodes) >= limit {
+	//
+	// The SQL PAGE decides, not what refine kept: a page refine thinned (or
+	// emptied) still continues from the last row the database returned, so a
+	// caller paging through a refined query never skips the rows that follow.
+	if limit > 0 && len(page) >= limit {
 		if eligible, _ := keysetEligibleSort(sorter); eligible && (keysetActive || plan.After != nil || len(plan.Sort) > 0 || plan.Limit != nil) {
-			if next, encErr := encodeCursor(nodes[len(nodes)-1], sorter.signatureValue()); encErr == nil {
+			if next, encErr := encodeCursor(page[len(page)-1], sorter.signatureValue()); encErr == nil {
 				result.SetCursor(next)
 				result.SetHasMore(true)
 			}

@@ -146,6 +146,8 @@ func walkForInMemoryScans(expr ExpressionNode, functions map[string]*Function, e
 		walkForInMemoryScans(node.Target, functions, emit)
 	case *PaginateExpression:
 		walkForInMemoryScans(node.Target, functions, emit)
+	case *RefineExpression:
+		walkForInMemoryScans(node.Target, functions, emit)
 	case *SelectExpression:
 		walkForInMemoryScans(node.Target, functions, emit)
 	case *TimestampExpression:
@@ -230,6 +232,8 @@ func peelDirectiveWrappers(expr ExpressionNode) ExpressionNode {
 		case *SortExpression:
 			expr = n.Target
 		case *PaginateExpression:
+			expr = n.Target
+		case *RefineExpression:
 			expr = n.Target
 		case *SelectExpression:
 			expr = n.Target

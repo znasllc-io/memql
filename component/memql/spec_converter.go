@@ -97,6 +97,34 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 		return nil, err
 	}
 
+	// Edition 2026: `spec <bound> <name> = row => ...` / `trait <name> = row
+	// => ...` (memql#5366). The body is the v1 lambda, and it is NOT converted
+	// here: what its parameter reads depends on the binding (a concept's
+	// declared fields, a shape's projected keys, nothing for a trait), which
+	// is resolved after shapes load. The engine's Init pass lowers it into
+	// Expr against that binding (lowerAllPushdownPositions); until then Expr
+	// is nil, and resolveSpecBindings sets only the kind.
+	if decl.Lambda != nil {
+		if decl.Body != nil {
+			return nil, fmt.Errorf("%s: %s %q has both a `{ return ... }` body and an `=` lambda; write one", origin, kindLabel, decl.Name)
+		}
+		if len(decl.Lambda.Params) != 1 {
+			return nil, fmt.Errorf("%s: %s %q takes a lambda of one parameter, the row: = row => <predicate>", origin, kindLabel, decl.Name)
+		}
+		if disabled {
+			return nil, nil
+		}
+		return &Spec{
+			Name:        decl.Name,
+			Description: languageParser.EffectiveDescription(decl.DocComment, description),
+			ExprSource:  ast.FormatExpr(decl.Lambda),
+			Origin:      origin,
+			BoundName:   decl.BoundName,
+			IsTrait:     decl.IsTrait,
+			Lambda:      decl.Lambda,
+		}, nil
+	}
+
 	if decl.Body == nil {
 		return nil, fmt.Errorf("%s: %s %q: body is empty (expected `return <boolean expression>`)", origin, kindLabel, decl.Name)
 	}
