@@ -125,7 +125,7 @@ Runtime rules: a skipped statement binds nothing. `retry(n)` retries a failed ca
 
 ### The migration (`--rewrite=bodies`, D6)
 
-- **Order.** For every body, compute T (today's order: Kahn over the references the legacy compiler could see -- dotted names whose first segment is a step id, `first(x)` / `last(x)`; never `steps.`-rooted, never an undotted bare name -- FIFO queue, co-released consumers in source order) and D (every reference, as the new scope checker sees it). If T respects D, emit T. If T reads a name before it is bound (today's engine read nothing there), emit the source order when it respects D, else the D-topological order nearest the source. Every statement whose position differs from the source, and every statement that today ran before a name it reads, gets one `// memqlmigrate:` comment naming the move and why. Where today's order among side-effecting statements was not fixed (co-released consumers; the legacy consumer list is built from Go map iteration), the later statement's comment says so.
+- **Order.** For every body, compute T (today's order) and D (every reference, as the new scope checker sees it). If T respects D, emit T. If T reads a name before it is bound (today's engine read nothing there), emit the source order when it respects D, else the D-topological order nearest the source. Every statement whose position differs from the source, and every statement that today ran before a name it reads, gets one `// memqlmigrate:` comment naming the move and why. *As built after epic 2's flip:* today's compiler (memql#5367) takes every free name that names a step as a dependency, and runs the first ready step in source order. T mirrors it, so T and D read the same references and nothing chooses between orders. On the tree, no statement moves.
 - **Kinds.** Every call gets its kind from a declaration index over the tree being rewritten plus the engine's embedded tree; a name that resolves to no construct, or to two kinds, is reported and the file is left unchanged.
 - **References.** `steps.x.result[.f]`, `x.result[.f]` (x a step) and the bare-argument pun become `x[.f]`; action references drop their three `.result` climbs; `.payload.<f>` on a row value (a loop variable over rows, `.first()` / `.last()` / an element of a rows value) becomes `.<f>`; `First() Last() Empty() Nodes()` become their lowercase methods; in an automation, a bare args field and `event.payload.<f>` become `args.<f>` (declaring `<f> any` when missing).
 - **Statements.** `step n { <call> }` becomes `n := <call>`; `step n { if c { <call> } }` becomes `if c { n := <call> }`; `step n { forEach x in s where f { ... } }` / `for x := range s if f` become `for x in s if f { ... }` (the step name is dropped: a `for` binds nothing); `switch` keeps its shape; `parallel { wait: "all", failFast: ..., branches: [...] }` becomes `parallel { branch ... }`; every legacy `action` spelling becomes `action <name>(...) [on surface(...)]`; logic `x := if c { <call> }` becomes `if c { x := <call> }`, `x := retry(n) <call>` becomes `x := <call> retry(n)`; `publishEvent(topic: "t", payload: p)` becomes `publish "t" p`; object-literal shorthand entries (`{ args.event.payload.id }`) expand to `id: ...`.
@@ -135,11 +135,10 @@ Runtime rules: a skipped statement binds nothing. `retry(n)` retries a failed ca
 
 ### Behaviour changes the PR body must call out
 
-- `dsl/workbench/automations.memql` `releaseWorkspaceOnRunTerminal`: today `teardown` ran before the per-workspace release loop (its `steps.terminal` reference was invisible to the sort). The migration keeps that order and says so in a comment; the order is now visible and reviewable.
-- `examples/deploypack/dsl/logic.memql` `driveDeploymentInProgress` and `recordReconciledState`: today `observed`/`reconciled`/`obsProbe` consumers ran BEFORE the statements they read (undotted references were invisible to the sort), so both always answered empty. Source order fixes them.
+- *(Moved to epic 2, whose sort fixed them before this epic's rewrite runs: `releaseWorkspaceOnRunTerminal`'s teardown order and deploypack's unread names. Both now run as written.)*
 - The seven logic bodies that published (`dsl/identity/logic.memql` x4, `dsl/safety/logic.memql` x2, `dsl/data/logic.memql` x1) move into their automations; the logic constructs are deleted.
 - `switch` compares with typed equality; every switch in the tree compares strings, so no row changes.
-- `dsl/forge` `recordTransition`: an update that leaves a request's status unchanged stops being recorded as a transition. The legacy compiler read `transitionEventKind`'s `old == st` as `old == "st"`, a comparison with the literal text, so every unchanged-status update appended another `requestEvent`. It is the logic goldens' recorded `legacyDefect`, and the forge scenario `unchanged-status-records-nothing` shows it on real rows (its `legacy` count, deleted at the flip). A trail with fewer events is the fix, not a regression.
+- *(Moved to epic 2: forge `recordTransition` stops recording an unchanged status as a transition, since its v1 expressions compare `old == st` as values. memql-10's #5427 names it, and the forge scenario `unchanged-status-records-nothing` holds it on real rows.)*
 - `x := mutation m(...)` now names the written row, and an action statement's value is its capability's result.
 
 ---
@@ -890,19 +889,18 @@ at delivery, and end the body with the Claude Code attribution line):
 
     ### Behaviour changes
 
-    - `dsl/forge` `recordTransition`: an update that leaves a request's status unchanged is no longer recorded as a transition. The legacy compiler read `transitionEventKind`'s `old == st` as a comparison with the literal text `"st"`. The logic goldens record it as a legacy defect, and the scenario `unchanged-status-records-nothing` shows it on real rows.
-    - `examples/deploypack` `driveDeploymentInProgress` and `recordReconciledState`: four statements used to run before the values they read (undotted references were invisible to the old sort), so they read nothing. They now run after them.
     - The seven logic bodies that published (`dsl/identity` x4, `dsl/safety` x2, `dsl/data` x1) move into the one automation each was called from. The logic constructs are deleted, and `dsl/data/logic.memql` and `dsl/safety/logic.memql` go with them.
-    - `dsl/workbench` `releaseWorkspaceOnRunTerminal` keeps its old order, `teardown` first, with a comment. The order is now written down where it used to be accidental.
     - An action statement's value is its capability's result. `x := mutation m(...)` names the written row. A `switch` compares with typed equality, and every switch in the tree compares strings.
 
     ### Census of the rewrite's comments
 
     | Tree | Comments | What |
     |---|---|---|
-    | `dsl/` | 8 | 7 publishing logic inlined into their automations; 1 order kept (workbench teardown) |
-    | `examples/` | 4 | deploypack: statements that ran before what they read now run after it |
+    | `dsl/` | 7 | the 7 publishing logic inlined into their automations |
+    | `examples/` | 0 | |
     | `deploy/fleet/dsl` | 0 | |
+
+    No statement moves. Epic 2's stable sort already runs every body as it is written.
 
     ### Verification
 

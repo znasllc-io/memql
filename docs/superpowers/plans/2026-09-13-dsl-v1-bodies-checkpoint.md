@@ -9,10 +9,10 @@ it in the epic's merge (plan Task 16 step 3). Update it each time you stop.
 - **Worktree:** `/home/znas/memql-projects/epic-dsl-v1-bodies`, branch
   `epic/dsl-v1-bodies`. It is local only and has never been pushed; other
   sessions on this machine share its refs.
-- **Base:** the branch's epic-3 commits (everything after `f03fc3fc3`) sit on
-  memql-10's `epic/dsl-v1-expressions` at `f03fc3fc3`. That local branch has
-  moved to `461333dbc` since, and it is not on origin. Rebase with
-  `git -C /home/znas/memql-projects/epic-dsl-v1-bodies rebase --onto epic/dsl-v1-expressions f03fc3fc3`.
+- **Base:** epic 2's flip is MERGED in: `b7a1afa30` merges memql-10's
+  `epic/dsl-v1-expressions` at `c6c52144c` (the flip `f507402bb` plus its plan's
+  deletion). The branches are local and not on origin. Take later epic-2 work
+  the same way: `git -C /home/znas/memql-projects/epic-dsl-v1-bodies merge epic/dsl-v1-expressions`.
 - **Read first:** this file, then the plan from Task 12 on (its "As built"
   notes under Tasks 9-13 record what differs from the steps), then the design
   record `docs/superpowers/specs/2026-09-13-dsl-v1-language-freeze-program-design.md`
@@ -29,8 +29,8 @@ it in the epic's merge (plan Task 16 step 3). Update it each time you stop.
 ## State (2026-09-14)
 
 Done: Tasks 1-11; Task 12's statement cells with their completeness gate, and
-all four scenario suites the record names. Since the last rebase onto the
-epic-2 base:
+all four scenario suites the record names; Task 15's docs; epic 2's flip
+merged. Commits since the base:
 
 | Commit | What |
 |---|---|
@@ -45,6 +45,10 @@ epic-2 base:
 | `45340627a` | #5371: the body language documented: memql.md's Bodies section, Logic and Automations rewritten; authoring rules 1, 11b, 11c, 13, 14, 15, 17, 18, 21, 21c; the root and component/language CLAUDE.md |
 | `5cdc8ad02` | #5371: G5's refusal says `args.<field>` and names `memqlmigrate --rewrite=bodies` |
 | `d48e527bc` | #3803 (found on the way): the cross-namespace import gate's hint names the declaring file, where it spelled `querys` / `logics` |
+| `b7a1afa30` | the merge of epic 2's flip: nine conflicts resolved (the commit message lists each), and this branch's uses of the deleted switch fixed |
+| `f0565eecc` | #5373: the rewrite's model of today's order follows epic 2's stable sort; the goldens keep every body as written (cases renamed workbench-source-order, deploypack-undotted-reads) |
+| `9df496005` | #5374: the automation corpus declares no legacy defect (epic 2 fixed all of them); goldens regenerated |
+| `513c9603a` | #5374: the scenarios carry no legacy count (epic 2 fixed the forge no-op) |
 
 The migrated tree passes the two statement-body gates, and the gates read
 all 85 of its bodies (58 automations, 27 logic):
@@ -62,11 +66,8 @@ Negative controls were run on each new check and restored.
 
 - `TestArchitectureModelIsNotStale` is red on the base as well. The regen is
   plan Task 16.
-- `scripts/ci/module-boundaries.sh`: `component/actions`, `component/database`,
-  `component/skills` and `component/workjournal`, each a go.mod missing the
-  `component/language/dslclause` require. memql-10's `461333dbc` on
-  `epic/dsl-v1-expressions` fixes exactly those four files, and the next rebase
-  brings it. Every other module passes.
+- `bodymigrate` `TestLegacyOrderMatchesTheCompiler`, on the fleet bundle only:
+  epic 2's compiler refuses those automations (step 1 below).
 
 ## Peers
 
@@ -93,43 +94,23 @@ Negative controls were run on each new check and restored.
 
 ## Next, in order
 
-1. **Take memql-10's flip** when its SHA arrives. Measured again on
-   2026-09-14 against `dslv1/flip` at `f507402bb`:
-   `git merge-tree --write-tree dslv1/flip epic/dsl-v1-bodies` finds textual
-   conflicts in 9 files. The resolutions, read off the conflict hunks:
-   - `component/automations/types.go`: their flip deletes the `Expressions`
-     dialect field (everything is v1). Take that deletion, keep this branch's
-     `Body`, `Binds`, `Returns`, `Expression`, `Return` and `Block`, and drop
-     "v1 too" from the comments.
-   - `component/automations/args_resolution.go`: theirs is
-     `return validateArgsResolutionV1(a)`. Keep this branch's early `nil` for
-     a statement body above it. At this branch's flip every automation is a
-     statement body, and G2 goes.
-   - `component/automations/steps/sandbox_registry.go`: keep the
-     `fn.LogicBody` -> `RunLogicBody` branch, and reconcile `stepCallArgs`'
-     signature. This branch passes `s.resolveLogicCallArgs`.
-   - `test/conformance/corpus_test.go` (memql-b1's file): keep the `call`
-     hook (`r.c.Call != ""`) on their `corpusParse`.
-   - `component/automations/evaluator.go`,
-     `component/automations/steps/logic_v1_corpus_test.go`,
-     `component/emailrules/generate_v1_test.go`,
-     `component/memql/negative_load_test.go` and
-     `test/conformance/2026/README.md`: read each hunk; neither side's
-     intent is known in advance.
-
-   Re-measure when the SHA arrives. The peers merge rather than rebase
-   (`Merge branch 'dslv1/eval' into dslv1/flip`), and a merge resolves those
-   conflicts once where a rebase of this branch's commits could meet them
-   several times. Use the rebase command above only if the program wants linear
-   history. Where their flip deletes a legacy half this branch touched, take
-   the deletion. A clean textual merge still needs the build, the DB-free tree
-   and the db-gated trees: a symbol their flip deletes can be one this branch
-   still calls.
-2. **Task 13, the flip.** Steps 1-9 are in the plan, with the "As built, before
-   the flip" bullets. This session adds:
-   - Automation corpus: delete the legacy arm, `automationLegacyDefects` and
-     the legacy half of `compareAutomationRuns`, and keep the goldens as the
-     statement arm's contract (as with the logic corpus).
+1. **Take memql-10's fleet fix** when its SHA arrives (#5427). Their flip's
+   stable sort cannot compile any automation in
+   deploy/fleet/dsl/fleet/automations.memql: two switch steps on
+   `steps.command.result` get one generated id, the sort keys "emitted" by
+   id, and the loop reports a cycle among no steps. They are making a switch
+   step's id the author's step name, refusing duplicate ids, and making the
+   sort index-based. Until it lands, `TestLegacyOrderMatchesTheCompiler`
+   (bodymigrate) fails on the fleet automations and nothing else. Merge it
+   as the flip was merged, then rerun the parity test.
+2. **Task 13, the flip.** Unblocked, since epic 2's grammar is the only one.
+   Steps 1-9 are in the plan, with its "As built, before the flip" bullets.
+   `memqlmigrate --rewrite=bodies` alone now carries the tree (it is v1
+   already), and it leaves 7 comments, the inlined publishing logic, and no
+   order move. This session adds:
+   - Automation corpus: delete the legacy arm, the now-empty
+     `automationLegacyDefects` and the legacy half of `compareAutomationRuns`,
+     and keep the goldens as the statement arm's contract.
    - `migrated_tree_load_test.go`: delete the line that reads the `mutation`
      declaration header back as `mutate`.
    - `git rm dsl/data/logic.memql dsl/safety/logic.memql`: every logic in them
@@ -140,6 +121,7 @@ Negative controls were run on each new check and restored.
      anything once the parser refuses the retired forms. Replace it with the
      parser's refusal, or delete it. The comments in `statement_bodies.go` and
      Sense's `diagnose_body_scope.go` that say "until the flip" change with it.
+   - `bodymigrate/order_legacy_parity_test.go` goes with the compiler's sort.
    - Docs owed at the flip:
      - every `mutate <Concept> <name> {` in markdown becomes `mutation` (D13);
      - `partition="*"` goes from authoring-rules rule 10's sentence, the
@@ -148,17 +130,12 @@ Negative controls were run on each new check and restored.
        refuses the kwarg (`trigger_partition_retired`);
      - component/language/CLAUDE.md's "Until the flip ..." sentence becomes
        the parser's refusal.
-   - Scenarios: they run over the statement bodies from the flip on. The
-     runner then refuses the `legacy` entries in
-     `scenarios/forge-state-machine/scenario.json`; delete them, and delete
-     `scenarioRow.Legacy`, `scenarioLegacy` and the `legacy` branches in
-     `scenarios_db_test.go`. The rows' own counts are what the statement
-     bodies must produce, and this is the first run that holds them to it.
+   - The scenarios then run over the statement bodies. They carry no legacy
+     entries, so the same expectations hold.
 3. **Task 12 step 4, the rest:** after the flip, scenarios for the two
    deletion reminders and `onDelegationCreated`, which the flip moves into
-   automations. The campaigns suite covers the operational lane (cluster
-   roles). The marketing lanes (audience, row address) go through the
-   campaigns worker, which the rig does not wire, so no scenario reaches them.
+   automations. The marketing lanes of the campaigns engine (audience, row
+   address) go through the campaigns worker, which the rig does not wire.
 4. **Task 14, the gates port.** These read body text or the legacy step AST:
    - `test/dslconformance`: `bootstrap_forwards_every_field`,
      `agentauthz_stamped_userid`, `callgraph_contract`,
@@ -170,10 +147,10 @@ Negative controls were run on each new check and restored.
      `subautomation_calls.go`, `dslgate.go`.
 
    Each must still reach a positive over statement bodies.
-5. **Task 15 is done** (`45340627a`) apart from the flip's items above.
-   **Task 16, ship:** the PR body is drafted in the plan (Task 16, "PR body
-   draft"). Open the PR only after epics 1 and 2 merge, with one `Closes #n`
-   line per issue.
+5. **Task 16, ship.** The PR body is drafted in the plan (Task 16, "PR body
+   draft"). Epic 2 took three behaviour changes this plan once listed: forge's
+   no-op transition, and the workbench and deploypack orders. Open the PR
+   only after epics 1 and 2 merge, with one `Closes #n` line per issue.
 
 ## Facts not in the code
 
