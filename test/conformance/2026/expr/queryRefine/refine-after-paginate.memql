@@ -1,0 +1,6 @@
+/// Open tickets whose title mentions a disk, from one page of the open ones.
+query ticket qrDiskTickets {
+  filter row => row.status == "open"
+  paginate 50
+  refine row => row.title.includes("disk")
+}

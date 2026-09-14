@@ -1,0 +1,8 @@
+/// Tickets in the given status.
+query ticket qfDollarArgs {
+  args {
+    status  string  @required
+  }
+  filter row => row.status == $args.status
+  paginate 20
+}

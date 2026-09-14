@@ -1,0 +1,5 @@
+/// Search the goals, with a prefix test for a default.
+@handler(type="query", query="concept==v1:work:goal")
+tool tdStartsWith {
+  limit  integer  @default("10" startsWith "1") @description("How many goals to return.")
+}

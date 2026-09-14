@@ -1,0 +1,5 @@
+/// A support ticket: the row a prompt input here describes.
+concept ticket {
+  title     string
+  status    string
+}

@@ -1,0 +1,1 @@
+lbIsOpen(args.ticket) && (args.urgent == true || args.priority > 3)

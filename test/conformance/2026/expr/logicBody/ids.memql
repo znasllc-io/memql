@@ -1,0 +1,1 @@
+{hash: hash("a"), short: shortId("v1:work:goal:g1"), canonical: canonicalId(args.goalId, "v1:work:goal")}

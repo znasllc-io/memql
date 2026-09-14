@@ -1,0 +1,5 @@
+/// Tickets that expire within a day of now: the bound is a plan constant, computed once per call.
+query ticket qfExpiringTickets {
+  filter row => row.expiresAt < addDuration(now, "P1D")
+  paginate 20
+}

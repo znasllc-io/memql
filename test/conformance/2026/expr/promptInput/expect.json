@@ -1,0 +1,107 @@
+{
+  "cases": [
+    {
+      "file": "prompt-default-construct-call.memql",
+      "verdict": "refuse_parse",
+      "message": "expected ')'",
+      "note": "constructCall: a prompt input computes a value and runs nothing."
+    },
+    {
+      "file": "tone.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {},
+      "expect": "plain"
+    },
+    {
+      "file": "tone.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "tone": "formal"
+      },
+      "expect": "formal"
+    },
+    {
+      "file": "headline.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "title": "disk full",
+        "tags": [
+          "ops",
+          "hw"
+        ]
+      },
+      "expect": "DISK FULL (2 tags)"
+    },
+    {
+      "file": "recent-tags.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "tags": [
+          "a",
+          "",
+          "b",
+          "c"
+        ]
+      },
+      "expect": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "file": "input-map.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "title": "Disk full",
+        "urgent": true,
+        "status": "open"
+      },
+      "expect": {
+        "flags": [
+          true,
+          true
+        ],
+        "since": "2025-12-26T03:04:05Z",
+        "title": "Disk full"
+      }
+    },
+    {
+      "file": "priority-word.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "priority": 5
+      },
+      "expect": "high"
+    },
+    {
+      "file": "optional-author.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {},
+      "expect": "someone"
+    },
+    {
+      "file": "brief.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "words": 10,
+        "title": "RFC 9110",
+        "draft": false
+      },
+      "expect": true
+    },
+    {
+      "file": "nil-value.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "expect": null
+    }
+  ]
+}

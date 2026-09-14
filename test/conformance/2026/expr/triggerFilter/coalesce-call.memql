@@ -1,0 +1,11 @@
+/// Note a goal, filtered with the retired coalesce().
+@trigger(event="node.updated", concept="v1:work:goal")
+@filter(row => coalesce(row.closeReason, "") != "")
+automation tfCoalesceCall {
+  args {
+    id  string
+  }
+  step note {
+    mutation tfNoteGoal(goalId: args.id, note: "changed")
+  }
+}

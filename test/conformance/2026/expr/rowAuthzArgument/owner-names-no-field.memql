@@ -1,0 +1,6 @@
+/// A note whose owner names a field it does not declare.
+@rowAuthz(owner="authorUserId")
+concept raMissingOwner {
+  ownerUserId  string
+  body         string
+}

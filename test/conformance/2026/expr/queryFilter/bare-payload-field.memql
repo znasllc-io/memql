@@ -1,0 +1,5 @@
+/// Open tickets, with the payload field written as a bare name.
+query ticket qfBareField {
+  filter row => status == "open"
+  paginate 20
+}

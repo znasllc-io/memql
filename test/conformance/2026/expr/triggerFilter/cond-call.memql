@@ -1,0 +1,11 @@
+/// Note a goal, filtered with the retired cond().
+@trigger(event="node.updated", concept="v1:work:goal")
+@filter(row => cond(row.status == "closed", true, false))
+automation tfCondCall {
+  args {
+    id  string
+  }
+  step note {
+    mutation tfNoteGoal(goalId: args.id, note: "changed")
+  }
+}

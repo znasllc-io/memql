@@ -1,0 +1,5 @@
+/// Tickets in neither of two statuses.
+query ticket qfNotIn {
+  filter row => row.status not in ["closed", "archived"]
+  paginate 20
+}

@@ -1,0 +1,5 @@
+/// A filter that is a string, not a condition.
+query ticket qfNonBoolean {
+  filter row => row.title
+  paginate 20
+}

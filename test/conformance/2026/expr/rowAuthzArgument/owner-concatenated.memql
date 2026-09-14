@@ -1,0 +1,6 @@
+/// A note whose owner field is concatenated.
+@rowAuthz(owner="owner" + "UserId")
+concept raConcatOwner {
+  ownerUserId  string
+  body         string
+}

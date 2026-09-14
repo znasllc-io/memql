@@ -1,0 +1,5 @@
+/// Search the goals, with a conditional default.
+@handler(type="query", query="concept==v1:work:goal")
+tool tdTernary {
+  limit  integer  @default(true ? 10 : 20) @description("How many goals to return.")
+}

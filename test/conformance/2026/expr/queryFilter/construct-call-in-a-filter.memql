@@ -1,0 +1,5 @@
+/// A filter that runs a query for every row.
+query ticket qfConstructCall {
+  filter row => row.id in query qfOpenTickets()
+  paginate 20
+}

@@ -1,0 +1,5 @@
+/// A support ticket: the rows a tool here searches.
+concept ticket {
+  title     string
+  status    string
+}

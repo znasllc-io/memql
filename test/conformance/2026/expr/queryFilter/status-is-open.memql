@@ -1,1 +1,1 @@
-status == "open"
+row => row.status == "open"

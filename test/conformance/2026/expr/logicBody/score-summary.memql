@@ -1,0 +1,1 @@
+{sum: args.scores.sum(s => s), min: args.scores.min(s => s), max: args.scores.max(s => s), avg: args.scores.avg(s => s)}

@@ -1,0 +1,6 @@
+/// A note its owner or a cluster owner reads.
+@rowAuthz(owner="ownerUserId", clusterOwner)
+concept raOverseenNote {
+  ownerUserId  string
+  body         string
+}

@@ -1,0 +1,5 @@
+/// Search the goals, with a disjunction for a default.
+@handler(type="query", query="concept==v1:work:goal")
+tool tdOr {
+  limit  integer  @default(true || false) @description("How many goals to return.")
+}

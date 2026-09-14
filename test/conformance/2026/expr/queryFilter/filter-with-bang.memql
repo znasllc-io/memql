@@ -1,5 +1,5 @@
-/// Tickets that are not open, written with the unary `!` the filter grammar refuses.
-query ticket notOpenTickets {
-  filter !(status == "open")
+/// Tickets that are not open, written with the unary `!` edition 2026 admits at every position.
+query ticket qfNotOpenTickets {
+  filter row => !(row.status == "open")
   paginate 20
 }

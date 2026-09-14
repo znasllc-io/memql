@@ -1,0 +1,5 @@
+/// Search the goals, with a method call for a default.
+@handler(type="query", query="concept==v1:work:goal")
+tool tdMethodCall {
+  limit  integer  @default("10".count()) @description("How many goals to return.")
+}

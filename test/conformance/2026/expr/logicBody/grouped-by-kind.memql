@@ -1,0 +1,1 @@
+args.items.groupBy(i => i.kind).count()

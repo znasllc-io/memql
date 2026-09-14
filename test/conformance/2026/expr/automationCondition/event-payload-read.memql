@@ -1,0 +1,25 @@
+/// Write a note about a goal, from the event it changed in.
+mutate goalNote acNoteGoalFromEvent {
+  args {
+    goalId  string  @required
+    note    string
+  }
+  insert {
+    id:      args.goalId
+    goalId:  args.goalId
+    note:    args.note ?? ""
+  }
+}
+
+/// Note a goal when it closes, reading the event payload by a dotted path.
+@trigger(event="node.updated", concept="v1:work:goal")
+automation acEventPayload {
+  args {
+    id  string
+  }
+  step note {
+    if event.payload.status == "closed" {
+      mutation acNoteGoalFromEvent(goalId: args.id, note: "closed")
+    }
+  }
+}

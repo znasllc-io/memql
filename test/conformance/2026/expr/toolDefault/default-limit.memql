@@ -1,0 +1,5 @@
+/// Search the goals.
+@handler(type="query", query="concept==v1:work:goal")
+tool tdSearchGoals {
+  limit  integer  @default("10") @description("How many goals to return.")
+}

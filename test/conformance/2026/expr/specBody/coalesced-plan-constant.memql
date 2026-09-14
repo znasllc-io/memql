@@ -1,0 +1,1 @@
+row => row.closedAt < (now ?? "9999-12-31T00:00:00Z")

@@ -1,0 +1,1 @@
+{goalId: args.id, urgent: !(args.priority < 3), weight: -args.priority * 2}

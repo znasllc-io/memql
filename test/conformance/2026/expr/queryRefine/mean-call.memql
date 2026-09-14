@@ -1,0 +1,6 @@
+/// Open tickets above the mean, with the retired mean().
+query ticket qrMeanCall {
+  filter row => row.status == "open"
+  paginate 50
+  refine row => row.priority > mean(args.scores)
+}

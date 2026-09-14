@@ -1,0 +1,1 @@
+{tomorrow: addDuration(now, "P1D"), days: daysBetween("2025-12-31", now)}

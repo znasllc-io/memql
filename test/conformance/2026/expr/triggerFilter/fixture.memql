@@ -1,0 +1,34 @@
+/// A support ticket: the row the trigger filters here are decided over.
+concept ticket {
+  title     string
+  status    string
+  code      string
+  priority  int
+  urgent    bool
+  tags      []string
+  lineage {
+    planId  string
+  }
+}
+
+/// A note about a goal, written when the goal changes.
+concept goalNote {
+  goalId  string
+  note    string
+}
+
+/// Write a note about a goal.
+mutate goalNote tfNoteGoal {
+  args {
+    goalId  string  @required
+    note    string
+  }
+  insert {
+    id:      args.goalId
+    goalId:  args.goalId
+    note:    args.note ?? ""
+  }
+}
+
+/// Archived tickets.
+trait tfIsArchived = row => row.status == "archived"

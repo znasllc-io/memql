@@ -1,0 +1,2 @@
+/// Tickets that are closed.
+trait sbIsClosed = row => row.status == "closed"

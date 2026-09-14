@@ -1,0 +1,5 @@
+/// Search the goals, with a coalesced default.
+@handler(type="query", query="concept==v1:work:goal")
+tool tdCoalesce {
+  limit  integer  @default(args.limit ?? 10) @description("How many goals to return.")
+}

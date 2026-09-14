@@ -1,0 +1,5 @@
+/// Tickets sorted by a key written as an optional member.
+query ticket soOptionalMember {
+  sort row.?createdAt
+  paginate 20
+}

@@ -1,0 +1,11 @@
+/// Note a goal, filtered with the retired timestamp().
+@trigger(event="node.updated", concept="v1:work:goal")
+@filter(row => row.closedAt < timestamp())
+automation tfTimestampCall {
+  args {
+    id  string
+  }
+  step note {
+    mutation tfNoteGoal(goalId: args.id, note: "changed")
+  }
+}
