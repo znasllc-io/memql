@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Complete returns completion suggestions at a cursor position.
@@ -190,22 +191,34 @@ func (s *Service) completeFuncBody(prefix string, enc EnclosingConstruct, source
 
 	var items []CompletionItem
 
-	// Construct-scoped body blocks (#2627): the spec's BodyBlocks for
-	// THIS construct, offered where a block can open (directly in the
+	// Construct-scoped body clauses (#2627): the spec's BodyBlocks for
+	// THIS construct, offered where a clause can start (directly in the
 	// construct body, not nested inside another block). A logic body
-	// never offers `filter`; a shape body never offers `insert`.
+	// never offers `filter`; a shape body never offers `insert`. A LINE
+	// clause (`filter <expr>`, `paginate 25`) is inserted as its keyword and
+	// a space: it opens no block, and the `filter {` this used to insert is
+	// a form the rewriter refuses (memql#5359).
 	if len(enc.Blocks) == 0 {
 		for _, blk := range bodyBlocksForConstruct(enc) {
-			if strings.HasPrefix(blk, prefix) {
+			if !strings.HasPrefix(blk, prefix) {
+				continue
+			}
+			if parser.IsLineClause(blk) {
 				items = append(items, CompletionItem{
-					Label: blk, Kind: "keyword", Detail: enc.Keyword + " block",
-					Documentation: KeywordDocs[blk], InsertText: blk + " {",
+					Label: blk, Kind: "keyword", Detail: enc.Keyword + " clause",
+					Documentation: specClauseDoc(blk), InsertText: blk + " ",
 					SortPriority: 2,
 				})
-				// The snippet form opens the block and places the cursor
-				// inside (#2629).
-				items = append(items, blockSnippet(blk, enc.Keyword))
+				continue
 			}
+			items = append(items, CompletionItem{
+				Label: blk, Kind: "keyword", Detail: enc.Keyword + " block",
+				Documentation: specClauseDoc(blk), InsertText: blk + " {",
+				SortPriority: 2,
+			})
+			// The snippet form opens the block and places the cursor
+			// inside (#2629).
+			items = append(items, blockSnippet(blk, enc.Keyword))
 		}
 	}
 

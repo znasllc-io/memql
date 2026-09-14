@@ -67,8 +67,11 @@ var constructSkeletons = []struct {
 }{
 	{
 		keyword: "query", label: "query <Concept> <name> { ... }",
-		doc:  "A read construct bound to a concept: filter clause plus optional args and shape.",
-		body: "query ${1:Concept} ${2:name} {\n\tfilter ${1:Concept}.${3:field} == args.${4:arg}\n\t$0\n}",
+		doc: "A read construct bound to a concept: filter clause plus optional args and shape.",
+		// A filter reads the bound concept's payload fields BARE; the
+		// `<Concept>.field` spelling this skeleton used to insert is refused
+		// at load by the canonical filter-syntax gate.
+		body: "query ${1:Concept} ${2:name} {\n\tfilter ${3:field} == args.${4:arg}\n\t$0\n}",
 	},
 	{
 		keyword: "mutate", label: "mutate <Concept> <name> { ... }",

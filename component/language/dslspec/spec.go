@@ -21,21 +21,21 @@
 // Source-of-truth boundaries (deliberate, see the A1 design note on #2122)
 //
 //   - Annotations + their per-receiver legality are DERIVED from
-//     component/language/annotations (the existing #991 registry that
-//     already backs both the load-time gate and the editor). dslspec does
-//     NOT re-list them; Annotations() inverts that registry so the spec
-//     cannot disagree with it.
-//   - Constructs, keywords, operators, field-types, and legal-next rules
-//     have no pre-existing Go registry -- the truth was split across the
-//     parser's top-level dispatch (component/language/parser/parser.go) and
-//     the struct-form rewriter (parser/rewriter.go). dslspec is the SoT for
-//     those; the drift test (#2124) introspects the parser/rewriter and
-//     asserts this spec stays in lockstep, rather than this package
-//     importing the (heavy, non-introspectable-by-switch) parser.
+//     component/language/annotations, the registry every parser checks
+//     annotations against (memql#5359). dslspec does NOT re-list them;
+//     Annotations() inverts that registry so the spec cannot disagree with
+//     it.
+//   - The construct set, each construct's body clauses and the clause
+//     keywords are DERIVED from the parser (parser.StructFormKeywords,
+//     parser.TopLevelDeclKeywords, parser.BodyClauses; memql#5359).
+//     Operators, field types, legal-next rules and each construct's doc
+//     have no Go registry and are authored here; the drift test (#2124)
+//     holds them against the parser.
 //
-// The package is a near-leaf: it imports only component/language/annotations
-// (itself a leaf), so component/memql/sense and the gRPC/SDK export layer
-// can both consume it without an import cycle.
+// The package imports component/language/annotations (a leaf) and
+// component/language/parser, which does not import dslspec, so
+// component/memql/sense and the gRPC/SDK export layer can both consume it
+// without an import cycle.
 package dslspec
 
 import (
@@ -99,10 +99,12 @@ type Construct struct {
 	// Completion uses this to suggest a concept (or an import) right after
 	// the keyword.
 	ConceptInSignature bool `json:"conceptInSignature"`
-	// BodyBlocks lists the named sub-blocks legal inside this construct's
-	// body (e.g. args / filter / shape for a query; insert / update for a
-	// mutation; params / auth for a provider). Empty for constructs whose
-	// body is a bare field/path/expression list.
+	// BodyBlocks lists the clauses legal inside this construct's body, in
+	// authoring order -- blocks (`args { }`, `insert { }`, `step x { }`) and
+	// line clauses (`filter <expr>`, `paginate 25`) alike, which
+	// parser.IsLineClause tells apart. Derived from parser.BodyClauses
+	// (memql#5359). Empty for constructs whose body is a bare
+	// field/path/expression list.
 	BodyBlocks []string `json:"bodyBlocks,omitempty"`
 	// FieldAnnotations lists the annotations legal on this construct's
 	// fields -- a concept's fields, the fields of an args block, or the field

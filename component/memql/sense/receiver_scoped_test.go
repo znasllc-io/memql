@@ -83,14 +83,14 @@ func TestConstructScopedBodyCompletion(t *testing.T) {
 		want, absent []string
 	}{
 		{
-			name: "query body offers its blocks only",
+			name: "query body offers its clauses only",
 			src:  "query todo todos {\n  ",
-			want: []string{"args", "filter", "shape"}, absent: []string{"insert", "update", "body"},
+			want: []string{"args", "filter", "shape", "sort", "paginate", "asOf", "count"}, absent: []string{"insert", "update", "body"},
 		},
 		{
 			name: "mutate body offers write blocks",
 			src:  "mutate todo createTodo {\n  ",
-			want: []string{"args", "insert", "update"}, absent: []string{"filter", "shape", "body"},
+			want: []string{"args", "insert", "update", "accept", "stamp"}, absent: []string{"filter", "shape", "body"},
 		},
 		{
 			name: "logic body offers body, never filter",
@@ -98,9 +98,12 @@ func TestConstructScopedBodyCompletion(t *testing.T) {
 			want: []string{"args", "body"}, absent: []string{"filter", "insert", "shape"},
 		},
 		{
-			name: "automation body offers body, never insert",
+			// An automation has no body block -- its body is step blocks
+			// (emitAutomation refuses `body { }`); offering `body` here was
+			// the stale hand list memql#5359 replaced.
+			name: "automation body offers steps, never body or insert",
 			src:  "@trigger(event=\"x.y\")\nautomation onThing {\n  ",
-			want: []string{"args", "body"}, absent: []string{"insert", "filter", "shape"},
+			want: []string{"args", "step", "precondition"}, absent: []string{"insert", "filter", "shape", "body"},
 		},
 	}
 	for _, tc := range cases {

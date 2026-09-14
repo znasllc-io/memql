@@ -38,18 +38,31 @@ func TestSnippetEscapingAndDegradation(t *testing.T) {
 func TestBlockAndSkeletonSnippets(t *testing.T) {
 	s := New(&fakeRegistry{})
 
-	// Block snippet inside a construct body.
+	// Block snippet inside a construct body. `args` opens a block; `filter`
+	// is a LINE clause (`filter <expr>`), so it gets no block snippet and is
+	// inserted as its keyword and a space -- the `filter {` this used to
+	// offer is a form the rewriter refuses (memql#5359).
 	src := "query todo todos {\n  "
 	lines := strings.Split(src, "\n")
-	var blockSnip *CompletionItem
+	var blockSnip, filterItem *CompletionItem
 	for _, it := range s.Complete(src, len(lines), len(lines[len(lines)-1])+1, "probe.memql") {
-		if it.Kind == "snippet" && strings.HasPrefix(it.Label, "filter") {
+		if it.Kind == "snippet" && strings.HasPrefix(it.Label, "args") {
 			c := it
 			blockSnip = &c
 		}
+		if it.Kind == "snippet" && strings.HasPrefix(it.Label, "filter") {
+			t.Errorf("filter is a line clause; it must not be offered as a block snippet: %+v", it)
+		}
+		if it.Kind == "keyword" && it.Label == "filter" {
+			c := it
+			filterItem = &c
+		}
+	}
+	if filterItem == nil || filterItem.InsertText != "filter " {
+		t.Errorf("query body must offer the filter line clause inserted as `filter `, got %+v", filterItem)
 	}
 	if blockSnip == nil {
-		t.Fatal("query body must offer a filter block snippet")
+		t.Fatal("query body must offer an args block snippet")
 	}
 	if !blockSnip.IsSnippet {
 		t.Error("block snippet must be flagged IsSnippet")
