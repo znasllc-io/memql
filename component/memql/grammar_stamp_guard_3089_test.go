@@ -48,15 +48,27 @@ func stampTestEngine(t *testing.T) *MemQLEngine {
 	// survives-a-bump assertion below unable to distinguish "the stamp guard
 	// blocked it" from "the harness has no registry".
 	eng.specs = newSpecRegistry()
+	// The promote lowers the spec against the shared registries, resolving its
+	// binding first (memql#5366), so the core @actor shape the stored spec
+	// binds must be there too -- or the valid row would be refused for a
+	// missing binding, which the stamp guard has nothing to do with.
+	eng.shapes = coreShapesForTest(t)
 	return eng
 }
 
-// A stored spec whose source is VALID under the current grammar.
-const validStoredSpecSource = "spec activeRowTrait storedValidSpec = row => row.status == \"active\"\n"
+// A stored spec whose source is VALID under the current grammar: a context
+// spec over the core @actor shape.
+const validStoredSpecSource = "spec actorEnvelope storedValidSpec = actor => actor.role == \"admin\"\n"
 
 // A stored spec whose source does NOT compile under the current grammar -- the
-// "row predates a grammar move" rot case.
-const rottedStoredSpecSource = "spec activeRowTrait storedRottedSpec {\n  return status ==== \"x\" &&&& true\n}\n"
+// "row predates a grammar move" rot case: a pre-2026 body, valid when it was
+// written, which edition 2026 refuses. Legacy on purpose, so the fixture tool
+// leaves it: memqlmigrate:keep
+const rottedStoredSpecSource = "spec actorEnvelope storedRottedSpec {\n  return role == \"admin\"\n}\n"
+
+// A stored spec that does not compile under ANY grammar -- a defect in its own
+// source, which no migration fixes.
+const brokenStoredSpecSource = "spec actorEnvelope storedBrokenSpec = actor => actor.role ==== \"x\"\n"
 
 // TestStampGuard_ValidStoredConstructSurvivesABump is the destructive-bump
 // regression, and it is the reason the ordering was inverted rather than worked
@@ -153,10 +165,10 @@ func TestStampGuard_CurrentStampKeepsItsOwnError(t *testing.T) {
 
 	err := eng.recompileAndPromoteRow(context.Background(), AuthoringConstructRow{
 		Kind:           "spec",
-		Name:           "storedRottedSpec",
+		Name:           "storedBrokenSpec",
 		BundleId:       "authoring:bundle:stamp3",
 		OwnerUserId:    "u-owner",
-		Source:         rottedStoredSpecSource,
+		Source:         brokenStoredSpecSource,
 		Status:         "active",
 		GrammarVersion: languageParser.GrammarVersion,
 	})

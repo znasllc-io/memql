@@ -24,13 +24,23 @@ func bug1074Registry() memoryNodes.Registry {
 	})
 }
 
+// bug1074QueryRegistry is the same concept declared (declaredConcept): a
+// query's filter is lowered at load against its fields, and the stub declares
+// none. The mutation cases keep the stub -- a mutation's template is not
+// lowered.
+func bug1074QueryRegistry(t *testing.T) memoryNodes.Registry {
+	return newMemoryRegistry(map[string]*memoryNodes.Concept{
+		"v1:cognition:space": declaredConcept(t, "v1:cognition:space", "  status  string"),
+	})
+}
+
 func TestLoader_QueryWithFuncTokenInLineComment(t *testing.T) {
-	registry := bug1074Registry()
+	registry := bug1074QueryRegistry(t)
 	src := "use cognition.concepts.{ space }\n\n" +
 		"// Migrated from the legacy `func (Query)` procedural form -- see memql#1074.\n" +
 		"@description(\"recent active spaces\")\n" +
 		"query space queryRecentSpacesLine {\n" +
-		"  filter  payload.status == \"active\"\n" +
+		"  filter  row => row.status == \"active\"\n" +
 		"  shape   space\n" +
 		"}"
 
@@ -42,14 +52,14 @@ func TestLoader_QueryWithFuncTokenInLineComment(t *testing.T) {
 }
 
 func TestLoader_QueryWithFuncTokenInBlockComment(t *testing.T) {
-	registry := bug1074Registry()
+	registry := bug1074QueryRegistry(t)
 	src := "use cognition.concepts.{ space }\n\n" +
 		"/*\n" +
 		" * Was once `func (Query) queryRecentSpaces(ctx any) (any, error)`.\n" +
 		" * Now struct form. memql#1074.\n" +
 		" */\n" +
 		"query space queryRecentSpacesBlock {\n" +
-		"  filter  payload.status == \"active\"\n" +
+		"  filter  row => row.status == \"active\"\n" +
 		"  shape   space\n" +
 		"}"
 
@@ -116,7 +126,7 @@ func TestExtractFunctionSlices_IgnoresFuncTokenInComment(t *testing.T) {
 	src := "use cognition.concepts.{ space }\n\n" +
 		"// once a `func (Query)` procedural form -- memql#1074\n" +
 		"query space queryRecentSpacesSlice {\n" +
-		"  filter  payload.status == \"active\"\n" +
+		"  filter  row => row.status == \"active\"\n" +
 		"  shape   space\n" +
 		"}\n\n" +
 		"/* func (Mutation) legacyWrite(ctx any) error */\n" +

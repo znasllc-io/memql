@@ -67,7 +67,7 @@ func TestDefine_RejectsInvalidBundle(t *testing.T) {
 	ctx := withMCPSession(context.Background(), "owner-1", reg)
 	// Dangling operator -> Gate-1 compile failure.
 	res := callMCPTool(ctx, eng, "developer", TierAuthoring, "", toolDefine,
-		map[string]any{"bundle": `spec actorEnvelope brokenSpec { return role == }`})
+		map[string]any{"bundle": `spec actorEnvelope brokenSpec = actor => actor.role ==`})
 	if !isError(res) {
 		t.Fatalf("invalid bundle should be an error result, got %v", res)
 	}

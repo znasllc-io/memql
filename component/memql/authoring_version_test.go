@@ -63,9 +63,21 @@ const sharedSpecGood = `trait isRefund = row => row.kind == "refund"`
 const sharedSpecEditGood = `trait isRefund = row => row.kind == "refundEscalation"`
 
 // An edit that does NOT parse -- dependents must FAIL re-validation.
-const sharedSpecEditBroken = `trait isRefund { return kind == }`
+const sharedSpecEditBroken = `trait isRefund = row => row.kind ==`
 
-func dependentConstructs() []memql.SandboxConstruct {
+// dependentConstructs is a dependent bundle: the shared trait and a query
+// over the core authoring bundle concept. Gate 1 compiles against a clone of
+// the process-wide concept registry, and the query's filter is lowered against
+// the concept it binds (memql#5366), so the core concepts are loaded first --
+// left to whichever test ran before, the query bound nothing when this file
+// ran alone, and failed re-validation for THAT: the good edit read as broken,
+// and the broken edit's tests passed for a reason that had nothing to do with
+// the edit.
+func dependentConstructs(t *testing.T) []memql.SandboxConstruct {
+	t.Helper()
+	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
+		t.Fatalf("load the core concepts: %v", err)
+	}
 	return []memql.SandboxConstruct{
 		{Kind: "trait", Name: "isRefund", Source: sharedSpecGood},
 		{Kind: "query", Name: "queryRefundsForOwner", Source: `use authoring.concepts.{ bundle }
@@ -82,7 +94,7 @@ query bundle queryRefundsForOwner {
 func TestAnalyzeImpact_GoodEditPasses(t *testing.T) {
 	edited := memql.EditedConstruct{Kind: "trait", Name: "isRefund", NewSource: sharedSpecEditGood}
 	res := memql.AnalyzeImpact(edited, map[string][]memql.SandboxConstruct{
-		"dep-bundle-1": dependentConstructs(),
+		"dep-bundle-1": dependentConstructs(t),
 	})
 	if !res.AllPassed {
 		t.Fatalf("a valid shared-construct edit should pass impact analysis: %+v", res.Dependents)
@@ -98,13 +110,20 @@ func TestAnalyzeImpact_GoodEditPasses(t *testing.T) {
 func TestAnalyzeImpact_BrokenEditFails(t *testing.T) {
 	edited := memql.EditedConstruct{Kind: "trait", Name: "isRefund", NewSource: sharedSpecEditBroken}
 	res := memql.AnalyzeImpact(edited, map[string][]memql.SandboxConstruct{
-		"dep-bundle-1": dependentConstructs(),
+		"dep-bundle-1": dependentConstructs(t),
 	})
 	if res.AllPassed {
 		t.Fatal("a broken shared-construct edit must FAIL impact analysis (dependents would break)")
 	}
 	if len(res.Dependents) != 1 || res.Dependents[0].OK {
-		t.Errorf("expected the dependent to fail re-validation: %+v", res.Dependents)
+		t.Fatalf("expected the dependent to fail re-validation: %+v", res.Dependents)
+	}
+	// And fail it for the EDIT: the one construct that fails is the edited
+	// trait, and the query beside it still compiles.
+	for _, d := range res.Dependents[0].Diagnostics {
+		if d.OK != (d.Name != "isRefund") {
+			t.Errorf("%s %s OK=%v: only the edited trait should fail (%s)", d.Kind, d.Name, d.OK, d.Error)
+		}
 	}
 }
 
@@ -138,7 +157,7 @@ func (s fakeImpactStore) ConstructsAsSandbox(_ context.Context, bundleId string)
 // through the store and re-validates them; a broken edit fails the gate.
 func TestAnalyzeConstructEdit_StoreDriven(t *testing.T) {
 	store := fakeImpactStore{dependents: map[string][]memql.SandboxConstruct{
-		"dep-1": dependentConstructs(),
+		"dep-1": dependentConstructs(t),
 	}}
 	edited := memql.EditedConstruct{Kind: "trait", Name: "isRefund", NewSource: sharedSpecEditBroken}
 	res, err := memql.AnalyzeConstructEditWithStore(context.Background(), store, "user-a", edited)

@@ -51,7 +51,7 @@ mutate participant joinSpace {
 // TestResolveCanonicalIdConceptRefs_StringFormUntouched proves the change is
 // additive: the existing quoted string form passes through unchanged.
 func TestResolveCanonicalIdConceptRefs_StringFormUntouched(t *testing.T) {
-	src := `filter  payload.partitionId==canonicalId(args.partitionId, "v1:cognition:space") && isActiveRecord`
+	src := `filter  row => row.partitionId == canonicalId(args.partitionId, "v1:cognition:space") && isActiveRecord(row)`
 	got, err := cidResolver(t).ResolveCanonicalIdConceptRefs(src)
 	if err != nil {
 		t.Fatalf("resolve: %v", err)

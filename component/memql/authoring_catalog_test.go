@@ -55,7 +55,7 @@ func TestCatalogKey_Shape(t *testing.T) {
 
 // TestCatalogKey_BadSourceErrors: unparseable source returns an error.
 func TestCatalogKey_BadSourceErrors(t *testing.T) {
-	if _, err := CatalogKey("spec", `spec actorEnvelope broken { return role == }`); err == nil {
+	if _, err := CatalogKey("spec", `spec actorEnvelope broken = actor => actor.role ==`); err == nil {
 		t.Errorf("expected an error for unparseable spec source")
 	}
 	if _, err := CatalogKey("automation", `automation a { }`); err == nil {

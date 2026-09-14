@@ -55,7 +55,7 @@ func TestCatalogMatchText_NoDescription(t *testing.T) {
 
 // TestCatalogMatchText_BadSource: unparseable source errors.
 func TestCatalogMatchText_BadSource(t *testing.T) {
-	if _, err := CatalogMatchText("spec", `spec actorEnvelope broken { return role == }`); err == nil {
+	if _, err := CatalogMatchText("spec", `spec actorEnvelope broken = actor => actor.role ==`); err == nil {
 		t.Errorf("expected an error for unparseable source")
 	}
 }

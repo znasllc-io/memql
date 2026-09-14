@@ -127,7 +127,7 @@ func TestSandboxCompileBundle_NoMutationOfConceptRegistry(t *testing.T) {
 func TestSandboxCompileBundle_AggregatesOK(t *testing.T) {
 	rep := SandboxCompileBundle([]SandboxConstruct{
 		{Kind: "spec", Name: "good", Source: `spec actorEnvelope good = actor => actor.role == "admin"`},
-		{Kind: "spec", Name: "bad", Source: `spec actorEnvelope bad { return role == }`}, // dangling operator
+		{Kind: "spec", Name: "bad", Source: `spec actorEnvelope bad = actor => actor.role ==`}, // dangling operator
 		{Kind: "automation", Name: "skip", Source: "automation skip { }"},
 	})
 	if rep.OK {

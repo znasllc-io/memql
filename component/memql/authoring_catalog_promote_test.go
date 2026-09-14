@@ -68,7 +68,7 @@ func TestPlanCatalogPromotion_RequiresIDAndBundle(t *testing.T) {
 // TestPlanCatalogPromotion_BadSource: an unparseable construct cannot be
 // promoted (you only promote constructs that compiled in the sandbox).
 func TestPlanCatalogPromotion_BadSource(t *testing.T) {
-	_, err := PlanCatalogPromotion("c1", "spec", "broken", `spec actorEnvelope broken { return role == }`, "b1")
+	_, err := PlanCatalogPromotion("c1", "spec", "broken", `spec actorEnvelope broken = actor => actor.role ==`, "b1")
 	if err == nil {
 		t.Errorf("expected an error for unparseable source")
 	}

@@ -85,6 +85,21 @@ func bootLowerDomains(t *testing.T, domains map[string]map[string]string) (*MemQ
 	return eng, eng.Init(concept.DefaultRegistry())
 }
 
+// declaredConcept builds a concept the way the loader does -- from a
+// declaration -- so it carries the definition schema an edition-2026 filter is
+// lowered against (memql#5366). A bare {Name} stub declares no fields, and a
+// query load over one is refused for that ("read the declared fields of ...")
+// before it reaches whatever the test is about. id is the canonical id; fields
+// is the declaration's body, one field per line.
+func declaredConcept(t *testing.T, id, fields string) *concept.Concept {
+	t.Helper()
+	parts := strings.Split(id, ":")
+	c, err := concept.ParseConceptMemQL([]byte("concept "+parts[len(parts)-1]+" {\n"+fields+"\n}\n"), strings.Join(parts, "/"))
+	require.NoError(t, err, id)
+	c.Name = id
+	return c
+}
+
 // lowerInitSkips is the load report's entries for the fixture domain.
 func lowerInitSkips(eng *MemQLEngine) []string {
 	var out []string

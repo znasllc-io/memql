@@ -78,7 +78,7 @@ func TestAuthorSessionBundle_ValidatesAndRegisters(t *testing.T) {
 // An invalid bundle registers nothing and reports the failure.
 func TestAuthorSessionBundle_RejectsInvalid(t *testing.T) {
 	reg := NewAuthoredRuntimeRegistry()
-	res, err := AuthorSessionBundle(reg, "owner-1", `spec actorEnvelope broken { return role == }`, "")
+	res, err := AuthorSessionBundle(reg, "owner-1", `spec actorEnvelope broken = actor => actor.role ==`, "")
 	if err == nil {
 		t.Fatal("expected an error for an invalid bundle")
 	}

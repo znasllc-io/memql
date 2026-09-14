@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -37,7 +38,7 @@ type stubRegistry struct{ ids []string }
 func (s stubRegistry) List() []*memoryNodes.Concept {
 	out := make([]*memoryNodes.Concept, 0, len(s.ids))
 	for _, id := range s.ids {
-		out = append(out, &memoryNodes.Concept{Name: id, NodeType: "object"})
+		out = append(out, stubConcept(id))
 	}
 	return out
 }
@@ -45,10 +46,22 @@ func (s stubRegistry) List() []*memoryNodes.Concept {
 func (s stubRegistry) Get(name string) (*memoryNodes.Concept, error) {
 	for _, id := range s.ids {
 		if id == name {
-			return &memoryNodes.Concept{Name: id, NodeType: "object"}, nil
+			return stubConcept(id), nil
 		}
 	}
 	return nil, fmt.Errorf("concept %q not registered", name)
+}
+
+// stubConcept is a concept that exists and declares no fields. It carries an
+// EMPTY definition schema rather than none: a query's edition-2026 filter is
+// lowered at load against the bound concept's declared fields (memql#5366),
+// and a concept with no definition at all is refused there -- "read the
+// declared fields" -- before the scope rule under test is reached. The
+// fixtures' filters read only row intrinsics, which need no declaration.
+func stubConcept(id string) *memoryNodes.Concept {
+	return &memoryNodes.Concept{Name: id, NodeType: "object", Schemas: map[string]json.RawMessage{
+		"definition": json.RawMessage(`{"type":"object","properties":{}}`),
+	}}
 }
 
 const nestedForeignOrigin = "agents/tools/probe.memql"
