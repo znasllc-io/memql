@@ -160,14 +160,16 @@ func LanguageLineRootIsDomain(paths []string) bool {
 //   - it is not a core domain: every mount skips a directory named after
 //     one, and a core domain speaks the embedded line;
 //   - it is not a sub-namespace: its parent neither directly holds a .memql
-//     file nor is a core domain. Either makes the parent the domain, and this
-//     directory a namespace inside it, which the parent's line governs.
+//     file, nor carries a memql.toml, nor is a core domain. Each makes the
+//     parent the domain, and this directory a namespace inside it, which the
+//     parent's line governs.
 //
 // It judges a directory seen alone, so a tree laid out otherwise can make it
-// wrong in either direction; linting the directory that holds the domain
-// checks it exactly as boot does. The one rule memqllint and memqlmigrate
-// both ask, so the lint warns about a missing line exactly where the
-// migrator would write one.
+// wrong in either direction -- a memql.toml left at the root of a bundle,
+// which no mount reads, still makes its domains read as sub-namespaces here.
+// Linting the directory that holds the domain checks it exactly as boot does.
+// The one rule memqllint and memqlmigrate both ask, so the lint warns about a
+// missing line exactly where the migrator would write one.
 func MountableDomainRoot(parent fs.FS, parentName, name string, core CoreTree) bool {
 	if !LanguageLineDomainName(name) || isCoreDomain(core, name) {
 		return false
@@ -176,7 +178,13 @@ func MountableDomainRoot(parent fs.FS, parentName, name string, core CoreTree) b
 	if err != nil || !holdsMemqlFile(dir) {
 		return false
 	}
-	return !holdsMemqlFile(parent) && !isCoreDomain(core, parentName)
+	return !holdsMemqlFile(parent) && !holdsManifest(parent) && !isCoreDomain(core, parentName)
+}
+
+// holdsManifest reports whether the root of fsys carries a memql.toml.
+func holdsManifest(fsys fs.FS) bool {
+	info, err := fs.Stat(fsys, dslfs.ManifestFile)
+	return err == nil && !info.IsDir()
 }
 
 // holdsMemqlFile reports whether the root of fsys directly holds a .memql

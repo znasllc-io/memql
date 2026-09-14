@@ -248,16 +248,19 @@ func TestLanguageLineWritesNoLineForACoreDomain(t *testing.T) {
 // read it as a domain -- parser.MountableDomainRoot, the rule memqllint asks
 // too. Each of these got a memql.toml no mount reads: a soft-disabled
 // directory, a hidden one, a sub-namespace of a domain holding .memql files,
-// and the engine's own sub-namespace of a core domain. The product domain
-// beside them is the positive control.
+// a sub-namespace of a domain carrying the memql.toml, and the engine's own
+// sub-namespace of a core domain. The product domain beside them is the
+// positive control.
 func TestLanguageLineWritesNoLineWhereNoMountReadsOne(t *testing.T) {
 	bundle := t.TempDir()
 	for rel, content := range map[string]string{
-		"_draft/concepts.memql":  "// soft-disabled\n",
-		".hidden/concepts.memql": "// hidden\n",
-		"team/concepts.memql":    "// a domain\n",
-		"team/roles/civic.memql": "// a sub-namespace of team\n",
-		"shop/queries.memql":     "// a product domain\n",
+		"_draft/concepts.memql":   "// soft-disabled\n",
+		".hidden/concepts.memql":  "// hidden\n",
+		"team/concepts.memql":     "// a domain\n",
+		"team/roles/civic.memql":  "// a sub-namespace of team\n",
+		"beta/memql.toml":         "memql = \"1.0\"\nedition = \"2026\"\n",
+		"beta/sub/concepts.memql": "// a sub-namespace of beta, the domain carrying the line\n",
+		"shop/queries.memql":      "// a product domain\n",
 	} {
 		full := filepath.Join(bundle, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -271,6 +274,7 @@ func TestLanguageLineWritesNoLineWhereNoMountReadsOne(t *testing.T) {
 		filepath.Join(bundle, "_draft"),
 		filepath.Join(bundle, ".hidden"),
 		filepath.Join(bundle, "team", "roles"),
+		filepath.Join(bundle, "beta", "sub"),
 		filepath.Join("..", "..", "dsl", "shopify", "generated"),
 		filepath.Join("..", "..", "dsl", "agents", "roles"),
 	} {
