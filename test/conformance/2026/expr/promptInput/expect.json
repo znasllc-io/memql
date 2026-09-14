@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "file": "declared-inputs.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "an-undeclared-input.memql",
+      "verdict": "refuse_load",
+      "message": "template reads 1 undeclared input(s): priority",
+      "note": "A prompt's input is bound into its template (E6 of the record: prose with holes, kept as a template language), and the template's load gate is that every variable it reads is declared. The input schema refuses anything undeclared before the template renders, so the hole could never be filled."
+    }
+  ]
+}

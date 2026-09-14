@@ -1,0 +1,13 @@
+{
+  "cases": [
+    {
+      "file": "an-args-reference.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "a-reserved-name.memql",
+      "verdict": "refuse_parse",
+      "message": "\"now\" is a reserved engine name (now / actor / partition / config / trace) and cannot be an argument name"
+    }
+  ]
+}

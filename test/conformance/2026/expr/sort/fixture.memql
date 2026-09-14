@@ -1,0 +1,6 @@
+/// A support ticket, the row the sort cases here read.
+concept ticket {
+  title     string
+  status    string
+  priority  int
+}

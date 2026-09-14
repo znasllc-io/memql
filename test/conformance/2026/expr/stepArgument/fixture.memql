@@ -1,0 +1,16 @@
+/// A support ticket, the row the automation here raises.
+concept ticket {
+  title   string
+  status  string
+}
+
+/// Raise a ticket with a title.
+mutate ticket raiseTicketFromStep {
+  args {
+    title  string!
+  }
+  insert {
+    title: args.title
+    status: "open"
+  }
+}
