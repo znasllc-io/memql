@@ -297,6 +297,59 @@ func TestCompileBodyRefusesABodyWithProblems(t *testing.T) {
 	}
 }
 
+// TestCompileSourceTakesAStatementBody runs the whole pipeline a loader runs --
+// the rewriter, the parser, the compiler -- over an automation in statement
+// form: its steps come from CompileBody, in source order, and it is marked as
+// edition-2026 expressions.
+func TestCompileSourceTakesAStatementBody(t *testing.T) {
+	res, err := CompileSource(`@trigger(event="node.created")
+automation routeRequest {
+  args {
+    id any
+  }
+  decide := logic routeStatus(id: args.id)
+  if decide == "queued" {
+    mutation advance(id: args.id)
+  }
+}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Automations) != 1 {
+		t.Fatalf("automations = %d", len(res.Automations))
+	}
+	out := res.Automations[0].JSON
+	if out["expressions"] != "v1" {
+		t.Errorf("expressions = %v, want v1", out["expressions"])
+	}
+	if _, ok := out["_return"]; ok {
+		t.Errorf("a statement body writes no _return: its return is a step")
+	}
+	b, _ := json.Marshal(out["steps"])
+	sameJSON(t, string(b), `[
+		{"id":"decide","type":"function","binds":"decide","function":{"name":"routeStatus","kind":"logic","args":{"id":{"$expr":"args.id"}}}},
+		{"id":"advance","type":"function","condition":"decide == \"queued\"","function":{"name":"advance","kind":"mutation","args":{"id":{"$expr":"args.id"}}}}]`)
+	trig, _ := out["trigger"].(map[string]any)
+	if trig["event"] != "node.created" {
+		t.Errorf("trigger = %v", out["trigger"])
+	}
+}
+
+func TestCompileSourceRefusesAStatementBodyWithProblems(t *testing.T) {
+	_, err := CompileSource(`automation early {
+  x := y
+  y := 1
+}`)
+	if err == nil {
+		t.Fatal("a body reading a later name compiled")
+	}
+	for _, want := range []string{"automation early, line 2:8", "move line 3 above line 2", "[body_forward_reference]"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
+	}
+}
+
 // TestCompileBodyCoversEveryStatementKind lowers one statement of every kind
 // and requires a step type other than the kind-name fallback, so a statement
 // kind added without teaching the compiler fails here.

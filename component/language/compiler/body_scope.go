@@ -100,6 +100,18 @@ func (p BodyProblem) Error() string {
 	return fmt.Sprintf("%s, line %d:%d: %s [%s]", p.Construct, p.Line, p.Col, p.Message, p.Code)
 }
 
+// BodyProblems is every problem of one body, as one error: each on its own
+// line, in source order.
+type BodyProblems []BodyProblem
+
+func (ps BodyProblems) Error() string {
+	lines := make([]string, len(ps))
+	for i, p := range ps {
+		lines[i] = p.Error()
+	}
+	return strings.Join(lines, "\n")
+}
+
 // bodyReservedNames may not name a statement or a loop variable. Every one but
 // steps is readable as a root somewhere; steps is the retired step-result
 // namespace, which the parser refuses to read.

@@ -6,10 +6,10 @@ import (
 )
 
 // Story 6 / memql#2327 -- enforcement of the body rule (construct-invocation
-// ADR Decision 5): `body { }` is the procedural marker, MANDATORY on `logic`
-// and FORBIDDEN on every other construct. These tests pin the parser half of
-// that enforcement (the whole-tree gate half lives in
-// component/memql/callgraph).
+// ADR Decision 5): `body { }` is FORBIDDEN on every construct but `logic`, and
+// on `logic` it is the wrapper epic memql#5370 retires (a logic without it is
+// the statement form). These tests pin the parser half of that enforcement
+// (the whole-tree gate half lives in component/memql/callgraph).
 
 // rewriteAndParse runs the struct-form rewriter (NormaliseAll) and then parses
 // the result, mirroring the real loader pipeline. Logic/query/mutation/
@@ -24,21 +24,38 @@ func rewriteAndParse(t *testing.T, src string) (*File, error) {
 	return ParseFile(rewritten)
 }
 
-// A logic WITHOUT a `body { }` block is rejected -- body is mandatory on logic.
-func TestBodyRule_LogicWithoutBody_Rejected(t *testing.T) {
-	src := `@description("missing body")
+// A logic WITHOUT a `body { }` block is the edition-2026 statement form (epic
+// memql#5370; the owner's answer of 2026-09-13 retired the wrapper, and with it
+// the logic half of ADR Decision 5). The rewriter leaves it as written and the
+// parser reads its statements natively. `body { }` stays forbidden on every
+// other construct; on a logic it is the retired form, refused once the tree
+// is migrated (body_block_retired).
+func TestBodyRule_LogicWithoutBodyIsTheStatementForm(t *testing.T) {
+	src := `/// no wrapper
 logic decideThing {
   args {
-    x string @required
+    x string!
   }
-  return x
+  return args.x
 }`
-	_, err := NormaliseLogicSource(src)
-	if err == nil {
-		t.Fatal("expected a parse error for a logic without a `body { }` block, got nil")
+	rewritten, err := NormaliseLogicSource(src)
+	if err != nil {
+		t.Fatalf("the rewriter refused a statement-form logic: %v", err)
 	}
-	if !strings.Contains(err.Error(), "body") || !strings.Contains(err.Error(), "Decision 5") {
-		t.Errorf("error %q should name the missing `body` block and ADR Decision 5", err.Error())
+	if rewritten != src {
+		t.Fatalf("the rewriter changed a statement-form logic:\n%s", rewritten)
+	}
+	file, err := rewriteAndParse(t, src)
+	if err != nil {
+		t.Fatalf("a statement-form logic should parse cleanly, got: %v", err)
+	}
+	fn, ok := file.Definitions[0].(*FunctionDef)
+	if !ok || fn.Type != FunctionTypeLogic {
+		t.Fatalf("definition = %#v, want a logic FunctionDef", file.Definitions[0])
+	}
+	auto, ok := fn.Body.(*AutomationDef)
+	if !ok || auto.Body == nil || len(auto.Body.Statements) != 1 {
+		t.Fatalf("the logic's body was not read as statements: %#v", fn.Body)
 	}
 }
 

@@ -332,14 +332,15 @@ func (p *Parser) parseV1LogicOrAutomation(kind string, attrs []*Attribute) (*Fun
 // messages.
 func (p *Parser) parseV1Statements(kind, construct string) ([]ast.BodyStatement, error)
 
-// BodyRefusal is a parse-time refusal with its stable code.
+// BodyRefusal is a parse-time refusal with its stable code. It wraps the
+// positioned *ParseError (as epic 2's RetiredFormError does), so every consumer
+// that reads a parse error's position reads this one's; the native parser also
+// prefixes every error with the construct (`logic l: ...`, D24).
 type BodyRefusal struct {
-	Code    string
-	Message string
-	Line    int
-	Col     int
+	Code  string
+	Parse *ParseError
 }
-func (r *BodyRefusal) Error() string // "<line>:<col>: <Message> [<Code>]"
+func (e *BodyRefusal) Error() string // Parse.Error() + " [<Code>]"
 
 // BodyStatementForms lists every statement form and trailing clause the
 // parser accepts, in the words the corpus directories use: assign, call, if,
@@ -369,6 +370,8 @@ The refusals this task pins (the message prefixes are the contract):
 | `body_retry_placement` | `retry(n)` on a non-call | `` `retry(n)` applies to a construct call statement `` |
 | `body_on_error_placement` | `on error` on if/switch/assign-expression/publish/return | `` `on error continue` applies to a call, a `for` or a `parallel` statement `` |
 | `body_surface_placement` | `on surface(...)` not on an `action` call | `` `on surface(...)` applies to an `action` call `` |
+| `body_clause_order` | trailing clauses out of the canonical order, or one written twice; `wait` after `on error` | `` trailing clauses are written once each, in the order `on surface(...)`, `retry(n)`, `on error continue` `` |
+| `body_default_clause` | `on error stop` or `wait all` written (D24: one form per operation) | `` `on error stop` is the default: delete it `` |
 | `body_case_label` | a non-literal or repeated case label | `` a case label is a literal written once: `<label>` `` |
 | `body_wait_value` | `wait` other than all/any | `` `wait` takes `all` or `any` `` |
 | `body_empty` | an automation with no statement | `` an automation has at least one statement `` |
@@ -378,7 +381,7 @@ The refusals this task pins (the message prefixes are the contract):
 
 `mutate_keyword_retired` and the `mutation` declaration keyword land in Task 13 with the tree migration, because every `.memql` file with a mutation changes in that commit; this task only defines the refusal.
 
-- [ ] **Step 1: Write the failing parse tests** (`v1_body_test.go`), each parsing a whole file through `ParseFile` and asserting the `*ast.Body` shape (statement types, names, `ast.FormatExpr` of each expression, spans): a logic with `args` and three statements; an automation with `@trigger`, `args`, one `precondition` block and statements; every row of the statement table; `else if` chains; a `for` with and without `if`; `switch` with a two-label case and `default`; `parallel` with two branches and `wait any`; every trailing-clause combination in canonical order and in any other order; `publish "t" { a: 1, b: args.x }`; bare `return` followed by `}`; a multi-line call whose arguments carry `//` comments; an expression continued by a trailing `&&` and by a leading `||`; a doc comment and `@actor` on a logic.
+- [ ] **Step 1: Write the failing parse tests** (`v1_body_test.go`), each parsing a whole file through `ParseFile` and asserting the `*ast.Body` shape (statement types, names, `ast.FormatExpr` of each expression, spans): a logic with `args` and three statements; an automation with `@trigger`, `args`, one `precondition` block and statements; every row of the statement table; `else if` chains; a `for` with and without `if`; `switch` with a two-label case and `default`; `parallel` with two branches and `wait any`; every trailing-clause combination in canonical order (any other order is a `body_clause_order` refusal); `publish "t" { a: 1, b: args.x }`; bare `return` followed by `}`; a multi-line call whose arguments carry `//` comments; an expression continued by a trailing `&&` and by a leading `||`; a doc comment and `@actor` on a logic.
 - [ ] **Step 2: Write the failing refusal tests** (`v1_body_refusals_test.go`): one case per table row, asserting code, message prefix and line:col; plus `TestBodyStatementFormsMatchTheParser` (every form the table lists is accepted by at least one case in `v1_body_test.go`, read from a table the test file exports -- adding a form without a parse test fails).
 - [ ] **Step 3: Run** `go test github.com/znasllc-io/memql/component/language/parser/ -run 'TestV1Body'` -- expect failures.
 - [ ] **Step 4: Implement.** `parseDefinition` routes `logic` / `automation` keywords to `parseV1LogicOrAutomation`; the `args { }` block reuses `parseArgsBlock`; `precondition NAME { ... }` blocks before the first statement are skipped by brace matching (the automations loader still extracts them from source, unchanged). The native path is reached before the struct-form rewriter's logic/automation stages run.

@@ -3,20 +3,21 @@ package callgraph
 import "testing"
 
 // Story 6 / memql#2327 -- the whole-tree gate's half of the body rule
-// (construct-invocation ADR Decision 5): `body { }` is MANDATORY on logic and
-// FORBIDDEN on every other (procedural) construct. ConstructFindings mirrors
-// the parser's enforcement so the conformance gate + authoring-sandbox cross-
-// reference pass flag the same violation.
+// (construct-invocation ADR Decision 5): `body { }` is FORBIDDEN on every
+// (procedural) construct but logic. ConstructFindings mirrors the parser's
+// enforcement so the conformance gate + authoring-sandbox cross-reference pass
+// flag the same violation.
 
-// A logic WITHOUT a `body { }` block produces a body-rule finding.
-func TestBodyRule_LogicWithoutBodyFlagged(t *testing.T) {
+// A logic WITHOUT a `body { }` block is the edition-2026 statement form (epic
+// memql#5370 retired the wrapper), and produces no body-rule finding.
+func TestBodyRule_LogicWithoutBodyIsTheStatementForm(t *testing.T) {
 	src := `logic decideThing {
-  args { x string @required }
-  return x
+  args { x string! }
+  return args.x
 }`
 	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
-	if !has(fs, "body-rule") {
-		t.Fatalf("expected body-rule finding (logic without a body block); got %v", rules(fs))
+	if has(fs, "body-rule") {
+		t.Fatalf("a statement-form logic must not be flagged; got %v", rules(fs))
 	}
 }
 

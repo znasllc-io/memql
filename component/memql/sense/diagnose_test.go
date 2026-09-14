@@ -224,16 +224,18 @@ func TestDiagnose_InjectedErrors(t *testing.T) {
 			wantCode: "parse-error",
 		},
 		{
-			// Logic missing its mandatory body { } block -> a LOWERING error
+			// A logic `body { }` with no trailing return -> a LOWERING error
 			// (no line/col of its own); the diagnostic anchors on the named
-			// construct's authored header line.
-			name: "missing-logic-body",
-			src: "@description(\"no body\")\n" + //  1
-				"logic doThing {\n" + //            2  <- construct header
-				"  args {\n" + //                   3
-				"    x string @required\n" + //     4
-				"  }\n" + //                         5
-				"}\n", //                            6
+			// construct's authored header line. (A logic WITHOUT the wrapper
+			// is no longer an error: it is the edition-2026 statement form,
+			// epic memql#5370.)
+			name: "logic-body-without-return",
+			src: "@description(\"no return\")\n" + //  1
+				"logic doThing {\n" + //              2  <- construct header
+				"  body {\n" + //                     3
+				"    x := 1\n" + //                   4
+				"  }\n" + //                           5
+				"}\n", //                              6
 			wantLine: 2,
 			wantCode: "rewrite-error",
 		},

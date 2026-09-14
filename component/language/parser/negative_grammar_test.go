@@ -107,16 +107,12 @@ func TestNegative_MalformedDeclBody(t *testing.T) {
 // 2. Structural violations.
 // ---------------------------------------------------------------------------
 
-// 2a. Body rule (ADR Decision 5): `body { }` is MANDATORY on logic, FORBIDDEN
-// on every other construct. Cross-ref: body_rule_test.go covers the direct
-// decl-parser sites; here we cover the rewriter-family sites (query / mutate /
-// automation) via NormaliseAll plus the logic-missing-body half.
+// 2a. Body rule (ADR Decision 5): `body { }` is FORBIDDEN on every construct
+// but logic, where it is the wrapper epic memql#5370 retires (a logic without
+// it is the statement form, pinned in body_rule_test.go). Cross-ref:
+// body_rule_test.go covers the direct decl-parser sites; here we cover the
+// rewriter-family sites (query / mutate / automation) via NormaliseAll.
 func TestNegative_BodyRule(t *testing.T) {
-	t.Run("logic-missing-body", func(t *testing.T) {
-		_, err := NormaliseAll("logic l {\n  args { event object @required }\n  return 1\n}\n")
-		assertParseErr(t, "logic without body{}", err,
-			"logic", "must wrap its procedural code in a `body { }` block")
-	})
 	t.Run("query-with-body", func(t *testing.T) {
 		_, err := NormaliseAll("use cognition.concepts.{ space }\nquery space q {\n  filter active == true\n  body { return 1 }\n}\n")
 		assertParseErr(t, "query with body{}", err,

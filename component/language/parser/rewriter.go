@@ -437,6 +437,9 @@ func rewriteEachBlock(
 		body := out[openIdx+1 : closeIdx]
 		preamble := precedingAnnotationBlock(out, h[0])
 		rewritten, err := emit(name, conceptId, body, preamble)
+		if errors.Is(err, errNativeBody) {
+			continue
+		}
 		if err != nil {
 			start, end := nameExtent()
 			var r *refusal
@@ -1553,12 +1556,20 @@ func NormaliseLogicSource(source string) (string, error) {
 
 var logicBodyBlockHeader = regexp.MustCompile(`(^|[\n\r])[ \t]*body[ \t]*\{`)
 
-func emitLogic(name, _conceptId, body, _preamble string) (string, error) {
-	argsText, err := extractArgsBlock(body)
-	if err != nil {
-		return "", err
-	}
+// errNativeBody is what a struct-form emitter returns for a construct in the
+// edition-2026 statement form (epic memql#5370): rewriteEachBlock leaves the
+// block as written, and the parser reads it natively (v1_body.go).
+//
+// TRANSITIONAL. Until the tree is migrated a construct in a retired form must
+// keep loading, so the choice is made per construct: a logic whose braces
+// open `body {` and an automation holding a `step <name> {` block are the
+// retired forms and are expanded below; every other logic and automation is
+// native. The detector is exact for the tree as it stands
+// (TestTransitionalDispatchIsExact). The flip deletes the logic, terse and
+// automation stages, and with them this sentinel.
+var errNativeBody = errors.New("native statement body")
 
+func emitLogic(name, _conceptId, body, _preamble string) (string, error) {
 	// Locate on the COMMENT-BLANKED view, slice from the original (memql#2948)
 	// -- same reasoning as parseStructQueryBody: this regexp ran on raw source
 	// while matchBraceInBody matches on the blanked view, so a `body {` inside
@@ -1568,9 +1579,14 @@ func emitLogic(name, _conceptId, body, _preamble string) (string, error) {
 
 	loc := logicBodyBlockHeader.FindStringIndex(scan)
 	if loc == nil {
-		// ADR Decision 5: `body { }` is mandatory on logic (always, even
-		// one-liners). Its absence is a hard parse error.
-		return "", fmt.Errorf("logic %q must wrap its procedural code in a `body { }` block (mandatory on logic; ADR Decision 5)", name)
+		// No `body { }` block: an edition-2026 statement body, which the
+		// parser reads as written.
+		return "", errNativeBody
+	}
+
+	argsText, err := extractArgsBlock(body)
+	if err != nil {
+		return "", err
 	}
 	openOffset := strings.LastIndex(scan[loc[0]:loc[1]], "{")
 	open := loc[0] + openOffset
@@ -2060,6 +2076,11 @@ type automationStep struct {
 }
 
 func emitAutomation(name, _conceptId, body, _preamble string) (string, error) {
+	// No `step <name> {` block: an edition-2026 statement body, which the
+	// parser reads as written (errNativeBody).
+	if !stepBlockHeader.MatchString(BlankComments(body)) {
+		return "", errNativeBody
+	}
 	// ADR Decision 5: `body { }` is reserved for logic; an automation is a
 	// sequence of `step ...` blocks, never a procedural body block. Catch a
 	// wrapping `body { ... }` before parseAutomationSteps silently reaches

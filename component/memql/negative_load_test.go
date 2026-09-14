@@ -55,7 +55,7 @@ func TestNegativeLoad_MalformedBodyPerKind(t *testing.T) {
 		{"trait", "x/traits.memql", "@enabled\ntrait t {\n  return active ==== true\n}\n"},
 		{"mutation", "x/mutations.memql", "use cognition.concepts.{ space }\nmutate space m {\n  ?? !! garbage\n}\n"},
 		{"query", "x/queries.memql", "use cognition.concepts.{ space }\nquery space q {\n  filter @@@ !!! broken\n  shape spaceFull\n}\n"},
-		{"logic", "x/logic.memql", "logic l {\n  args { event object @required }\n  return 1\n}\n"}, // missing body{}
+		{"logic", "x/logic.memql", "logic l {\n  args { event object @required }\n  x :=\n  return 1\n}\n"}, // a binding with no value
 		{"automation", "x/automations.memql", "@trigger(event=)\nautomation a {\n  step run { logic doThing { event: event } }\n}\n"},
 		{"policy", "x/policies.memql", "@primary(\"x\")\npolicy p {\n"}, // unterminated brace
 		{"provider", "x/providers.memql", "@extends(\"openai\")\n@model(\"m\")\nprovider pr {\n  params {\n    contextWindow @@@ broken\n  }\n}\n"},

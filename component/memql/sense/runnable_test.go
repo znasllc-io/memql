@@ -410,11 +410,13 @@ query participant healthyQuery {
   shape   participantFull
 }
 
-@description("Broken -- logic without its mandatory body block")
+@description("Broken -- a binding with no value")
 logic brokenLogic {
   args {
     event object @required
   }
+  x :=
+  return 1
 }
 
 @description("Also healthy")

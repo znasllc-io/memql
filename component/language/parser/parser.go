@@ -191,6 +191,14 @@ func (p *Parser) Parse() (Node, error) {
 		return p.parseFile()
 	}
 
+	// `logic NAME` / `automation NAME` open a statement-body declaration
+	// (v1_body.go), whose parser refuses the retired shapes by name -- the
+	// terse `automation NAME @trigger(...)` among them -- so the lookahead is
+	// only the name, not the brace.
+	if p.check(TokenIdentifier) && isV1BodyKeyword(p.current.Literal) && isSimpleName(p.peekAhead(1)) {
+		return p.parseFile()
+	}
+
 	// Otherwise, parse as an expression (for direct query execution)
 	expr, err := p.parseExpression()
 	if err != nil {
@@ -670,13 +678,16 @@ func (p *Parser) parseDefinition() (Node, error) {
 
 	// Parse any leading attributes (@name, @name(value), @name(key=value), @name({...}))
 	var attributes []*Attribute
+	var attributeToks []Token
 	for p.check(TokenAt) {
+		atTok := p.current
 		attr, err := p.parseAttribute()
 		if err != nil {
 			return nil, err
 		}
 		if attr != nil {
 			attributes = append(attributes, attr)
+			attributeToks = append(attributeToks, atTok)
 		}
 	}
 
@@ -700,6 +711,11 @@ func (p *Parser) parseDefinition() (Node, error) {
 	case p.check(TokenKeywordFunc):
 		// Go-style: func (Type) name(args) (returns) { }
 		def, err = p.parseGoStyleFunction()
+	case p.check(TokenIdentifier) && isV1BodyKeyword(p.current.Literal):
+		// An edition-2026 statement body (v1_body.go). A logic or automation
+		// in a retired form reaches here as `func (...)`, expanded by the
+		// struct-form rewriter, until the tree is migrated.
+		def, err = p.parseV1LogicOrAutomation(attributes, attributeToks)
 	case p.check(TokenIdentifier) && topLevelDeclParsers[p.current.Literal] != nil:
 		// Contextual top-level construct keyword (concept / shape /
 		// provider / builtin / tool / prompt / policy / spec / trait /

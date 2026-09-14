@@ -1289,6 +1289,12 @@ type AutomationDef struct {
 	OnComplete  *StepDef
 	OnError     *StepDef
 
+	// Body is the edition-2026 statement body (memql#5371, body.go), set by
+	// the native statement parser; Steps is then empty. Until the tree is
+	// migrated a construct in a retired form still parses to Steps, and the
+	// compiler takes the path its body was parsed into.
+	Body *Body
+
 	// Parsed attribute values. @deprecated / @version / @timeout / @retry /
 	// @audit / @async / @rateLimit were folded here but never read by the
 	// automation runtime (audited in #2712) and are load-rejected on

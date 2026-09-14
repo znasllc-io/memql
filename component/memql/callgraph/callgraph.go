@@ -318,19 +318,17 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 	}
 
 	// Rule: body { } (construct-invocation ADR Decision 5). The procedural
-	// `body { }` marker is MANDATORY on logic and FORBIDDEN on every other
-	// construct. Mirrors the parser's enforcement so the whole-tree CI gate
-	// + the authoring-sandbox cross-reference pass flag the same violation.
+	// `body { }` marker is FORBIDDEN on every construct but logic. Mirrors the
+	// parser's enforcement so the whole-tree CI gate + the authoring-sandbox
+	// cross-reference pass flag the same violation. On logic it was
+	// mandatory until epic memql#5370 retired the wrapper: a logic without
+	// it is the edition-2026 statement form, and the parser refuses the
+	// wrapper itself once the tree is migrated.
 	// The forbidden arm is scoped to the procedural/behavioral kinds whose
 	// `body {` opener is unambiguously the marker; a *declarative* construct
 	// (concept/shape/...) may legitimately carry a nested object field named
 	// `body`, so those are not flagged here.
-	hasBody := bodyBlockRE.MatchString(text)
-	if kind == "logic" {
-		if !hasBody {
-			add("body-rule", "must wrap its procedural code in a `body { }` block (mandatory on logic; ADR Decision 5)")
-		}
-	} else if bodyRuleProceduralKinds[kind] && hasBody {
+	if kind != "logic" && bodyRuleProceduralKinds[kind] && bodyBlockRE.MatchString(text) {
 		add("body-rule", fmt.Sprintf("declares a `body { }` block -- forbidden on %s; `body { }` is the procedural marker reserved for logic (ADR Decision 5)", kind))
 	}
 

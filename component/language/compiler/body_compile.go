@@ -57,6 +57,29 @@ func CompileBody(kind, name string, args []string, body *ast.Body) ([]map[string
 	return compileStatementList(body.Statements), nil
 }
 
+// compileStatementSteps lowers a definition's statement body -- the native
+// parse, AutomationDef.Body -- for the automation compile. Problems refuse the
+// definition, all of them at once.
+func compileStatementSteps(def *ast.FunctionDef, automation *ast.AutomationDef) ([]map[string]any, error) {
+	kind := "automation"
+	if def.Type == ast.FunctionTypeLogic {
+		kind = "logic"
+	}
+	var args []string
+	if def.ArgsSchema != nil {
+		for _, f := range def.ArgsSchema.Fields {
+			if f != nil {
+				args = append(args, f.Name)
+			}
+		}
+	}
+	steps, problems := CompileBody(kind, def.Name, args, automation.Body)
+	if len(problems) > 0 {
+		return nil, BodyProblems(problems)
+	}
+	return steps, nil
+}
+
 // flatStatement is a statement with the conditions of the once-blocks around
 // it, which the flattening turns into the step's own condition.
 type flatStatement struct {
