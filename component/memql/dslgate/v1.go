@@ -1,23 +1,22 @@
 package dslgate
 
-// v1.go -- the contract gates reading edition-2026 clauses (epic memql#5363,
-// task memql#5368).
+// v1.go -- how the contract gates read an edition-2026 clause (epic
+// memql#5363, task memql#5368).
 //
-// Until the tree is migrated both editions reach these gates, so each gate
-// asks dslclause.OpensLambda first and reads a v1 clause as a TREE: the v1
-// parser (ParseV1Lambda) builds it, and the questions -- which fields does it
-// read, does every row it admits satisfy a property -- are answered on the
-// tree (component/language/ast v1_predicates.go). The legacy half keeps its
-// text machinery until the flip retires it.
+// A filter is a lambda, and each gate reads it as a TREE: the v1 parser
+// (ParseV1Lambda) builds it, and the questions -- which fields does it read,
+// does every row it admits satisfy a property -- are answered on the tree
+// (component/language/ast v1_predicates.go).
 //
 // Two rules hold across every gate here, and both are the fail-CLOSED choice:
 //
-//   - A v1 clause that does not parse guarantees nothing. The parse failure
+//   - A clause that does not parse guarantees nothing. The parse failure
 //     itself is reported by the loader; what a gate must never do is read an
 //     unparseable clause as an unguarded one that happens to be clean.
-//   - A v1 leaf reaches a legacy TEXT leaf predicate as its canonical source
-//     with string contents blanked, so a quoted word is never read as a
-//     reference (`row.note == "actor.userId"` is not an ownership check).
+//   - A leaf reaches a TEXT leaf predicate (AdminGateLeaf, OwnerScopeLeaf) as
+//     its canonical source with string contents blanked, so a quoted word is
+//     never read as a reference (`row.note == "actor.userId"` is not an
+//     ownership check).
 
 import (
 	"errors"
@@ -41,7 +40,7 @@ func v1Clause(clause string) (lam *ast.LambdaExpr, isV1 bool, err error) {
 	return lam, true, err
 }
 
-// v1LeafText is the text a legacy leaf predicate is asked about for a v1 leaf.
+// v1LeafText is the text a leaf predicate is asked about for a tree leaf.
 func v1LeafText(n ast.ExpressionNode) string {
 	return StructureOf(ast.FormatExpr(n))
 }
@@ -62,22 +61,19 @@ func isReservedRoot(name string) bool {
 }
 
 // UserScopeFields are the payload fields whose comparison against a caller-
-// supplied value SELECTS rows by user. UserScopeFieldRe is the legacy text
-// form of the same list; the v1 half reads it as a set.
+// supplied value SELECTS rows by user. UserScopeFieldRe is the same list for
+// the `id:` lines of an update block.
 var UserScopeFields = []string{"ownerUserId", "userId", "actorUserId", "targetId", "createdBy", "requestedBy"}
 
 // v1ReadsUserScopeField reports whether a v1 filter reads a user-scope field
 // of its row: a member chain rooted at the lambda parameter whose first field
 // is one of UserScopeFields.
 //
-// A ROW INTRINSIC IS EXCLUDED, for parity with the legacy half: that half
-// deliberately skips a dotted reference (UserScopeFieldRe's leading group), so
-// `row.createdBy` -- the canonical spelling of the createdBy intrinsic since
-// memql#2779 -- was never flagged, and the migrated form must classify every
-// construct exactly as its legacy form did. A dotted payload path
-// (`row.credentials.userId`) is likewise not the row's own column. Everything
-// else the legacy regex matched bare, this matches as `row.<field>` -- which is
-// the fail-open it closes: the regex cannot see `row.ownerUserId` at all.
+// A ROW INTRINSIC IS EXCLUDED: `row.createdBy` reads the createdBy intrinsic
+// (memql#2779), which this gate never counted as a user-scope selection, and
+// the migration classified every construct exactly as it was classified before.
+// A dotted payload path (`row.credentials.userId`) is likewise not the row's
+// own column.
 func v1ReadsUserScopeField(lam *ast.LambdaExpr) bool {
 	if lam == nil || len(lam.Params) != 1 {
 		return false
@@ -136,14 +132,14 @@ func v1TextReadsUserScopeField(clause string) bool {
 	return false
 }
 
-// v1RetiredFormViolation reports the retired form a v1 filter clause spells,
-// if its parse fails on one. The v1 grammar cannot express any of the retired
+// v1RetiredFormViolation reports the retired form a filter clause spells, if
+// its parse fails on one. The v1 grammar cannot express any of the retired
 // connectives, so a clause that parses carries none -- the parser, not a
-// second list of spellings, is the authority on what a v1 clause may say, and
-// that is what lets `(a, b) => ...` and a ternary `?` through where the text
-// checks of the legacy half would read a comma and a `?.`. A clause that fails
-// to parse for any OTHER reason is not this gate's finding: the loader refuses
-// it with the parser's own message.
+// second list of spellings, is the authority on what a clause may say, and
+// that is what lets `(a, b) => ...` and a ternary `?` through where a text
+// check would read a comma and a `?.`. A clause that fails to parse for any
+// OTHER reason is not this gate's finding: the loader refuses it with the
+// parser's own message.
 //
 // clause is the clause text with its physical lines joined by newlines, the
 // first holding what followed the `filter` keyword on clauseLine, so a line
