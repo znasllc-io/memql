@@ -76,23 +76,34 @@ Negative controls were run on each new check and restored.
     `TestLogicBodyStepsRunInSourceOrder` (30 logic bodies), asserts source
     order. After it, the V1 arm matches legacy apart from the documented
     defects.
-  - Their open note for this epic: in forge's `routeRequest`,
-    `step advance { switch ... }` compiles with the generated id
-    `switch_steps.decide.result` and drops the author's name `advance`, in both
-    grammars. Check what id and name a switch statement's compiled step carries
-    (`component/language/compiler/body_*.go`), and whether `bodymigrate` keeps
-    `advance`. Journal rows carry the step name, so if the statement model has
-    a name for it, keep the author's.
+  - Their note on `step advance { switch ... }` in forge's `routeRequest` (the
+    legacy compile gives it the generated id `switch_steps.decide.result`) is
+    answered and moot. A switch binds nothing and flattens into one step per
+    call, with an unnamed call's id being its callee: `decide`,
+    `advanceRequest`, `advanceRequest#2`, `persistRouted`. The rewrite drops a
+    switch step's label, as for `for` and `parallel` (`bodymigrate/read.go`).
 
 ## Next, in order
 
-1. **The switch-step name** (memql-10's note, above).
-2. **Rebase** when memql-10's flip SHA arrives (command above). Expect conflicts
-   where their flip deletes legacy halves this branch also touched: the logic
-   runner, the automation generator, the rewriter's dispatch, the logic corpus
-   test and Sense completion. Take their deletion, then re-apply this branch's
-   additions. Then run the build, the DB-free tree and the db-gated trees.
-3. **Task 13, the flip.** Steps 1-9 are in the plan, with the "As built, before
+1. **Take memql-10's flip** when its SHA arrives. Measured on 2026-09-14
+   against `dslv1/flip` at `0fe1bfcdb`: 102 commits past `f03fc3fc3`, 33 files
+   changed on both sides. `git merge-tree --write-tree dslv1/flip epic/dsl-v1-bodies`
+   finds textual conflicts in only 7:
+   - `component/automations/{args_resolution,evaluator,types}.go`
+   - `component/automations/steps/sandbox_registry.go`
+   - `component/emailrules/generate_v1_test.go`
+   - `component/memql/negative_load_test.go`
+   - `test/conformance/2026/README.md`
+
+   Re-measure when the SHA arrives. The peers merge rather than rebase
+   (`Merge branch 'dslv1/eval' into dslv1/flip`), and a merge resolves those
+   conflicts once where a rebase of this branch's commits could meet them
+   several times. Use the rebase command above only if the program wants linear
+   history. Where their flip deletes a legacy half this branch touched, take
+   the deletion. A clean textual merge still needs the build, the DB-free tree
+   and the db-gated trees: a symbol their flip deletes can be one this branch
+   still calls.
+2. **Task 13, the flip.** Steps 1-9 are in the plan, with the "As built, before
    the flip" bullets. This session adds:
    - Automation corpus: delete the legacy arm, `automationLegacyDefects` and
      the legacy half of `compareAutomationRuns`, and keep the goldens as the
@@ -107,10 +118,10 @@ Negative controls were run on each new check and restored.
      anything once the parser refuses the retired forms. Replace it with the
      parser's refusal, or delete it. The comments in `statement_bodies.go` and
      Sense's `diagnose_body_scope.go` that say "until the flip" change with it.
-4. **Task 12 step 4:** the scenario suites, after the flip. Include the two
+3. **Task 12 step 4:** the scenario suites, after the flip. Include the two
    deletion reminders and `onDelegationCreated`, which the flip moves into
    automations.
-5. **Tasks 14, 15 and 16:** the gates port, the docs, then ship. Open the PR
+4. **Tasks 14, 15 and 16:** the gates port, the docs, then ship. Open the PR
    only after epics 1 and 2 merge, with one `Closes #n` line per issue.
 
 ## Facts not in the code
