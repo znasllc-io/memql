@@ -17,7 +17,6 @@ import (
 	"strings"
 	"testing"
 
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 	"github.com/znasllc-io/memql/component/memql/sense"
 )
@@ -106,39 +105,27 @@ func TestConstructHashParityOnBraceLessPredicates(t *testing.T) {
 }
 
 // TestConstructHashParityOnTheMigratedCorpus is the corpus parity gate over
-// the embedded tree as the expressions codemod leaves it, migrated in memory
-// with the codemod's own engine: every construct, in every file, cut at the
-// same bytes by both sides.
+// the embedded tree: every construct, in every file, cut at the same bytes by
+// both sides. Before the flip the tree was migrated in memory with the
+// expressions codemod first; since the flip the tree IS edition 2026, so the
+// gate reads its files as they are, and the codemod has nothing left to
+// rewrite in them.
 func TestConstructHashParityOnTheMigratedCorpus(t *testing.T) {
 	files := baseloader.ReadAll(nil)
-	in := make(map[string][]byte, len(files))
+	predicates := 0
 	for _, f := range files {
-		in[f.Path] = []byte(f.Content)
-	}
-	preds, err := languageParser.CollectPredicates(in)
-	if err != nil {
-		t.Fatalf("CollectPredicates: %v", err)
-	}
-	predicates, migrated := 0, 0
-	for _, f := range files {
-		next, err := languageParser.RewriteExpressions([]byte(f.Content), preds)
-		if err != nil {
-			t.Fatalf("%s: RewriteExpressions: %v", f.Path, err)
-		}
-		if string(next) != f.Content {
-			migrated++
-		}
-		mismatches, n := constructHashParityOf(string(next))
+		mismatches, n := constructHashParityOf(f.Content)
 		predicates += n
 		for _, m := range mismatches {
-			t.Errorf("%s: %s: the engine and the language server cut this construct differently once migrated", f.Path, m)
+			t.Errorf("%s: %s: the engine and the language server cut this construct differently", f.Path, m)
 		}
 	}
 	// Measured when the floor was set: 39 specs and traits over 126 migrated
-	// files. Without the brace-less arms both sides see zero of them and
-	// agree -- which is why the count, not the agreement, is the floor.
-	if predicates < 30 || migrated < 100 {
-		t.Errorf("compared %d spec/trait declarations over %d migrated files -- the migration or the scan has stopped reaching them", predicates, migrated)
+	// files; after the flip, 39 over the tree's 308 files. Without the
+	// brace-less arms both sides see zero of them and agree -- which is why
+	// the count, not the agreement, is the floor.
+	if predicates < 30 || len(files) < 100 {
+		t.Errorf("compared %d spec/trait declarations over %d files -- the scan has stopped reaching them", predicates, len(files))
 	}
-	t.Logf("%d spec/trait declarations cut identically by both sides over %d migrated files", predicates, migrated)
+	t.Logf("%d spec/trait declarations cut identically by both sides over %d files", predicates, len(files))
 }

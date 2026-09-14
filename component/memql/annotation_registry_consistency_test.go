@@ -77,7 +77,7 @@ func receiverFixture(r annotations.Receiver, name, ann string) string {
 		if name == "minimum" || name == "maximum" {
 			typ = "int"
 		}
-		return "query thing probe {\n  args {\n    x " + typ + " " + ann + "\n  }\n  filter row.id != \"\"\n}\n"
+		return "query thing probe {\n  args {\n    x " + typ + " " + ann + "\n  }\n  filter row => row.id != \"\"\n}\n"
 	case annotations.ToolField:
 		return "tool probe {\n  x string " + ann + "\n}\n"
 	case annotations.PromptField:
