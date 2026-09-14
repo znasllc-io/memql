@@ -17,6 +17,7 @@ package dslconformance
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -67,10 +68,18 @@ func TestDeployDataModelLivesInThePack(t *testing.T) {
 			t.Errorf("deployment/concepts.memql must declare %q (I11 centralization)", want)
 		}
 	}
-	// ID-preserving: the namespace annotation keeps the canonical id
-	// v1:cluster:deployment / v1:cluster:deploymentNodeSpec stable.
-	if strings.Count(concepts, `@namespace("cluster")`) < 2 {
-		t.Error("deployment concepts must keep @namespace(\"cluster\") so the ids stay v1:cluster:deployment / v1:cluster:deploymentNodeSpec (id-preserving move)")
+	// ID-preserving: the NAMESPACE PIN keeps the canonical id
+	// v1:cluster:deployment / v1:cluster:deploymentNodeSpec stable. It was a
+	// per-concept @namespace("cluster") until epic memql#5375 retired the
+	// annotation and made dsl/deployment/namespace.pin the derivation -- the
+	// same divergence, expressed once for the directory instead of once per
+	// concept, and the reason the ids did not move.
+	pin := strings.TrimSpace(read(t, "deployment/namespace.pin"))
+	if pin != "cluster" {
+		t.Errorf("dsl/deployment/namespace.pin = %q, want \"cluster\" -- without it these concepts assemble as v1:deployment:* and every stored row becomes unreachable", pin)
+	}
+	if regexp.MustCompile(`(?m)^@namespace\(`).MatchString(concepts) {
+		t.Error("deployment/concepts.memql still carries @namespace, which is retired (epic memql#5375) and refuses at load; the pin above is what carries the divergence")
 	}
 
 	mutations := read(t, "deployment/mutations.memql")

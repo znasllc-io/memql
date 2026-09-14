@@ -147,7 +147,12 @@ var declKeywordPrefixes = func() map[string][]string {
 	for _, kw := range rewriterLoweredKeywords {
 		m[kw] = []string{kw}
 	}
-	m["mutation"] = []string{"mutation"}
+	// BOTH words. `mutation` is the keyword (so `mutationArchiveUser` restates
+	// it) and `mutate` is the keyword it replaced in epic memql#5375 -- a name
+	// carrying the OLD keyword as a prefix is the same defect wearing last
+	// release's spelling, and the gate's own note two entries up records that
+	// `mutation` -> `mutate` actually happened once already.
+	m["mutation"] = []string{"mutation", "mutate"}
 	return m
 }()
 
