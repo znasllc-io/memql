@@ -1443,6 +1443,16 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		}
 		// Keep full payload for reference (nested access still works)
 		eventPayload["payload"] = payloadMap
+		// firstVersion: did THIS write materialise the row's first version?
+		// Every write publishes graph.node.created (append-only), so the
+		// topic cannot say "a row was created" -- this can, and costs nothing:
+		// it is the prior-version read above (loadPriorPayload), and a write
+		// with no explicit id is a new row by construction. Set after the
+		// flatten, like oldStatus on .updated, so a payload field of the same
+		// name cannot shadow it. Two writes RACING on a new id both read "no
+		// prior" and both say true; a consumer that must act once per row
+		// closes that with a claim (the email-rule fire path does).
+		eventPayload["firstVersion"] = !meta.priorExisted
 
 		e.publishEventWithActor(
 			events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptMeta.Name),
