@@ -1,0 +1,5 @@
+/// Tickets sorted by a map.
+query ticket soMap {
+  sort {key: "row.createdAt"}
+  paginate 20
+}

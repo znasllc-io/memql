@@ -36,9 +36,7 @@ use common.shapes.{ actorEnvelope }
 
 /// Caller must hold the owner role. The owner-only gate (#1876): rollback -- not even admin may
 /// roll back a deployment.
-spec actorEnvelope requiresOwner {
-  return role == "owner"
-}
+spec actorEnvelope requiresOwner = actor => actor.role == "owner"
 
 // requiresDeveloperOrAbove now lives in dsl/common/specs.memql -- see the
 // header above.

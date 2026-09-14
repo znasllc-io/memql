@@ -1,6 +1,6 @@
-/// A support ticket, readable by the user who owns it.
+/// A note its owner reads.
 @rowAuthz(owner="ownerUserId")
-concept ticket {
+concept raNote {
   ownerUserId  string
-  title        string
+  body         string
 }

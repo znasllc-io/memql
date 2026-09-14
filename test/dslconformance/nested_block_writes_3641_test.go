@@ -211,7 +211,7 @@ func collectNestedBlockWrites(t *testing.T, block, declarationFile string) []nes
 //	                   writes them
 func parseBlockWriteKeys(file string, line int, text string) []nestedBlockWrite {
 	var out []nestedBlockWrite
-	for _, seg := range splitTopLevelSingle(text, ',') {
+	for _, seg := range splitTopLevelCommas(text) {
 		seg = strings.TrimSpace(strings.Trim(strings.TrimSpace(seg), "{}"))
 		if seg == "" {
 			continue
@@ -323,4 +323,28 @@ func TestNestedBlockEnumWritesAreInRange(t *testing.T) {
 			}
 		}
 	}
+}
+
+// splitTopLevelCommas splits a block-write line on the commas that separate
+// its entries: those outside string literals and outside any bracket.
+func splitTopLevelCommas(s string) []string {
+	var out []string
+	depth, start, inStr := 0, 0, false
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case inStr && c == '\\' && i+1 < len(s):
+			i++
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+		case c == '(' || c == '{' || c == '[':
+			depth++
+		case c == ')' || c == '}' || c == ']':
+			depth--
+		case c == ',' && depth == 0:
+			out = append(out, s[start:i])
+			start = i + 1
+		}
+	}
+	return append(out, s[start:])
 }

@@ -10,7 +10,7 @@ owner: znas
 # MemQL Function Language Specification
 
 > **Status:** Stable
-> **Last Updated:** June 11, 2026
+> **Last Updated:** September 13, 2026
 > **Purpose:** Specification for the function-like DSL constructs in MemQL
 
 ---
@@ -110,7 +110,9 @@ builtin authCheckPermission {
 At runtime, parser resolution and executor dispatch are registry-driven
 from these declarations -- builtins resolve through the same function
 registry as user-defined functions, so they look like regular DSL
-calls (`authCheckPermission({ role: "admin" })`).
+calls with named arguments (`authCheckPermission(role: "admin")`). The
+object-literal call form (`authCheckPermission({ role: "admin" })`) is
+refused (memql#2335).
 
 ---
 
@@ -119,17 +121,21 @@ calls (`authCheckPermission({ role: "admin" })`).
 ### Consistent Accessor Pattern
 
 Inputs are declared in an `args { ... }` block and read as `args.X`.
-Engine-provided values are bare top-level names:
+Engine-provided values are bare top-level names, and a row is read through
+the lambda parameter that names it:
 
-```memql fragment
+```text
 args.fieldName       -- Caller-passed argument
 actor.userId         -- Resolved auth context (role, identityId, isClusterOwner, ...)
 now                  -- RFC3339 timestamp captured at evaluation start
 partition            -- Active partition for this call
 config.X             -- Allow-listed config entry
-fieldName            -- Row payload field (query filter / shape contexts)
-row.id, row.createdAt, ...  -- Row intrinsics, via the `row.` namespace
+row.fieldName        -- Row payload field, through the parameter (filter row => ...)
+row.id, row.createdAt, ...  -- Row intrinsics, through the same parameter
 ```
+
+A shape body is a path list rather than an expression, so there a bare
+`fieldName` is the payload field.
 
 > **Retired: the `ctx` envelope.** `ctx.input.X` and `ctx.X` are gone
 > from the author surface; authors write `args.X`. The `node("...")`
@@ -137,55 +143,30 @@ row.id, row.createdAt, ...  -- Row intrinsics, via the `row.` namespace
 
 ### Operators
 
-One Go-style boolean grammar applies in every filter and expression
-context:
+One expression language applies in every filter, spec, condition and value:
+[memql.md](memql.md#expressions) is the reference, with the full operator table,
+the [precedence](memql.md#operator-precedence) and the table of
+[absent values](memql.md#absent-values).
 
 | Operator | Meaning | Example |
 |----------|---------|---------|
-| `==` | Equal | `role=="admin"` |
-| `!=` | Not equal | `status!="archived"` |
-| `>` `>=` `<` `<=` | Comparisons | `count>=10` |
-| `in` | Membership | `kind in ["a", "b"]`, `args.x in list` |
-| `startsWith` | String prefix (ANY of a list); an empty list and a blank prefix match nothing ([authoring rules §32](authoring-rules.md)) | `codeReference startsWith "integration."`, `codeReference startsWith args.prefixes` |
-| `&&` | Logical AND | `folderId==args.folderId && isActiveRecord` |
-| `\|\|` | Logical OR | `actor.role=="admin" \|\| actor.role=="owner"` |
-| `( )` | Grouping (Go precedence: comparisons > `&&` > `\|\|`) | `(a \|\| b) && c` |
-| `when(args.x) { ... }` | Arg-conditional predicate: when `args.x` is absent, the guarded block and its connective are dropped | `when(args.role) { role==args.role }` |
+| `==` / `!=` | Typed equality; `!=` is true on an unset field | `row.status != "archived"` |
+| `>` `>=` `<` `<=` | Comparisons | `row.count >= 10` |
+| `in` | Membership | `row.kind in ["a", "b"]`, `args.tag in row.tags` |
+| `startsWith` | String prefix (ANY of a list); an empty list and a blank prefix match nothing ([authoring rules](authoring-rules.md)) | `row.codeReference startsWith args.prefixes` |
+| `&&` / `\|\|` / `!` | Boolean connectives and negation | `row.folderId == args.folderId && isActiveRecord(row)` |
+| `??` | Blank-coalescing | `args.kind ?? "walkthrough"` |
+| `c ? a : b` | Conditional value | `args.flag ? "yes" : "no"` |
+| `+` | Adds numbers, joins strings | `"si-" + hash(args.agentId)` |
+| `( )` | Grouping | `(a \|\| b) && c` |
 
-> **`!` (NOT) is not in this grammar** (memql#3630). The row that used
-> to sit in the table above, and the precedence that named `!` as the
-> tightest binder, described an operator the language has never
-> accepted. `!` lexes and parses; the AST converter then refuses it on
-> every surface it serves — with the `#2542` expression-led scope error
-> in filters and specs, and with `NOT/! does not convert; write the !=
-> comparison form` in logic bodies and collection lambdas. Write the
-> `!=` form, or a trait that states the negative. (A bare `!` *does*
-> work on the two surfaces a separate runtime STRING evaluator handles:
-> an automation cond-step **condition**, and a trigger **`@filter`** --
-> `evaluateTriggerFilter` builds the same
-> `component/automations.Evaluator`, so both accept `!`.)
-
-> **Retired operator forms.** These are retired **from authoring**, and
-> that is a convention a **text scan** enforces — not a parse error
-> (memql#3630). `TestNoRetiredOperatorForms`
-> (`test/dslconformance/no_retired_operators_test.go`) walks the
-> embedded `dsl/` tree line by line and refuses the spelling in authored
-> files; the parser and the loader still accept all four, and the engine
-> still computes `;` as AND and `,` as OR. Prefer:
-> - `;` AND separator → use `&&`
-> - `,` OR separator → use `||`
-> - `has` membership → use `in`
-> - `?.` optional-chain prefix → use `when(args.x) { ... }`
->
-> The distinction matters because a `,` inside parentheses still means
-> OR, which turns an authorization conjunction into a disjunction —
-> memql#3612 closed that in the **scanner**, where both gates had missed
-> the parenthesised form. It also means a product DSL bundle mounted at
-> `MEMQL_DSL_PATH` is never scanned at all (memql#3629). And `has` is
-> retired only at the authoring surface: the parser desugars
-> `<scalar> in payload.<arrayField>` **to**
-> `payload.<arrayField> has <scalar>`, so the operator is load-bearing
-> inside the engine and cannot be removed.
+A condition is boolean: there is no truthiness, and `!` negates exactly. An
+optional argument is a plain predicate, `args.x == nil || row.f == args.x`,
+which the engine folds before the query runs. The retired spellings (`when(...)`,
+`;` and `,` as connectives, `has`, `?.`, `cond(...)`, `coalesce(...)`,
+`concat(...)`, ...) are refused at parse wherever a `.memql` file writes them;
+the full list is [memql.md](memql.md#retired-spellings), and
+`memqlmigrate --rewrite=expressions` rewrites them.
 
 ---
 
@@ -205,34 +186,37 @@ query artifact activeDocumentArtifacts {
   args {
     folderId  string  @required
   }
-  filter  folderId==args.folderId && kind=="document" && statusIsActive && isActiveRecord
+  filter  row => row.folderId == args.folderId
+              && row.kind == "document"
+              && statusIsActive(row)
+              && isActiveRecord(row)
   shape   artifactFull
 }
 ```
 
-Filter rules (enforced by `test/dslconformance/conformance_test.go`):
+Filter rules:
 
-- Payload fields are `<field>` -- bare, never `payload.<field>` or
-  `<conceptName>.<field>`.
-- Row intrinsics go through the `row.` namespace: `row.id`,
+- The filter is a lambda, and every field is read through its parameter:
+  a payload field is `row.status`, never a bare `status`,
+  `payload.status` or `<conceptName>.status`.
+- A row intrinsic is read through the same parameter: `row.id`,
   `row.concept`, `row.type`, `row.createdAt`, `row.createdBy`,
-  `row.provenance.<leaf>`. The bare spelling is retired (memql#2779) --
-  it left a row intrinsic indistinguishable from a payload property even
-  though the two compile to entirely different SQL:
+  `row.provenance.<leaf>`. Intrinsics are reserved field names, so
+  `row.id` (a table column) and `row.status` (a JSONB path) never collide.
+- A trait or spec is applied to the row: `isActiveRecord(row)`. Where a
+  trait covers the predicate it is **mandatory** -- the inline
+  `row.active == true` is rejected when `isActiveRecord` exists
+  (`test/dslconformance/conformance_test.go`).
+- A long filter continues on lines that open with `&&`, `||` or `??`.
 
-  ```memql fragment
-  filter  row.id == args.folderId  // the row envelope (a table column)
-  filter  status == args.status    // a payload property (a JSONB path)
-  ```
-- Named trait / spec predicates are called bare
-  (`isActiveRecord`), and are **mandatory** where a trait covers
-  the predicate -- inline `active==true` is rejected when
-  `isActiveRecord` exists.
+### Optional filters
 
-### Optional Filters with `when()`
-
-A `when(args.x) { ... }` guard applies its predicate only when the
-argument is provided:
+An optional argument is a plain predicate: `args.x == nil || <predicate>`.
+Nothing in it reads the row until the second half, so the engine computes
+`args.x == nil` once before the query runs: the clause becomes true when the
+argument is unset (left out, null or `""`) and the predicate alone when it is
+set. It replaces the retired `when(args.x) { ... }` guard, and under `||` the
+form is `args.x != nil && <predicate>`:
 
 ```memql
 @description("Active folders, optionally narrowed to a creator")
@@ -240,13 +224,15 @@ query folder activeFolders {
   args {
     userId  string
   }
-  filter  isActiveRecord && statusIsActive && when(args.userId) { row.createdBy==args.userId }
+  filter  row => isActiveRecord(row)
+              && statusIsActive(row)
+              && (args.userId == nil || row.createdBy == args.userId)
   shape   folderFull
 }
 ```
 
-**Calling patterns:**
-```memql fragment
+**Calling patterns** (the internal query form a client sends):
+```text
 activeFolders()                     -- No optional filter applied
 activeFolders(userId: "u-1")        -- Creator filter applied
 ```
@@ -258,7 +244,7 @@ query run latestRunForGoal {
   args {
     goalId  string  @required
   }
-  filter  goalId==args.goalId
+  filter  row => row.goalId == args.goalId
   sort    "row.createdAt", "desc"
   paginate 1
   shape   workRunFull
@@ -280,7 +266,7 @@ server-side, instead of the rows themselves:
 
 ```memql
 query user userCount {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   count
 }
 ```
@@ -290,7 +276,7 @@ query user userCount {
 the deduped, latest-version, post-filtered set -- the same row
 pipeline a normal query uses -- so it is correct under the
 time-series versioning model. Callers read `count` off the returned
-object rather than taking `len()` on a row array.
+object rather than counting a row array.
 
 ---
 
@@ -303,8 +289,10 @@ Mutations write exactly one row of their signature-bound concept.
 - Exactly **one** bare `insert { ... }` OR `update { ... }` block per
   mutation body. `update` is the partial-update counterpart for
   read-merge-write flows.
-- Mutation functions can only be invoked as a **top-level** expression:
-  `myMutation({ ... })`.
+- Mutation functions can only be invoked as a **top-level** call, with
+  named arguments: `createFolder(folderId: "f-1", name: "Inbox")` from a
+  client, `mutation createFolder(folderId: args.folderId, name: args.name)`
+  from a body.
 - Mutation functions cannot be wrapped with directives like `shape()`,
   `paginate()`, `sort()`, `select()`, `asOf()`, or `withDepth()`.
 - Queries and specs cannot call mutations (compile-time CQS check).
@@ -356,10 +344,9 @@ insert {
 }
 ```
 
-`a ?? b ?? c` folds to exactly what `coalesce(a, b, c)` produces, so the
-two spellings are interchangeable to the engine. The shorthand is the
-authored form -- `test/dslconformance/no_coalesce_longhand_test.go` gates the corpus on
-it, and `memqlmigrate --rewrite=null-coalesce` converts the call form.
+`a ?? b ?? c` takes the first operand that is set, and the last one
+otherwise. `??` is the one spelling: the `coalesce(a, b, c)` call is retired,
+and `memqlmigrate --rewrite=expressions` rewrites it.
 
 `??` binds **tighter than comparison** and **looser than arithmetic**, so
 `args.stage ?? "" == "active"` means `(args.stage ?? "") == "active"`,
@@ -399,17 +386,17 @@ only fires when the condition holds:
 
 ```memql fragment
 body {
-  getUser := userById(userId: args.event.payload.ownerUserId)
-  activeAssistantId := coalesce(getUser.first().payload.preferences.activeAssistantId, "")
+  getUser := query userById(userId: args.event.payload.ownerUserId)
+  activeAssistantId := getUser.first().payload.preferences.activeAssistantId ?? ""
 
   getActiveGA := if activeAssistantId != "" {
-    agentById(agentId: activeAssistantId)
+    query agentById(agentId: activeAssistantId)
   }
   getFallbackGA := if activeAssistantId == "" {
-    assistantAgentForUser(ownerUserId: args.event.payload.ownerUserId)
+    query assistantAgentForUser(ownerUserId: args.event.payload.ownerUserId)
   }
 
-  return coalesce(getActiveGA, getFallbackGA)
+  return getActiveGA ?? getFallbackGA
 }
 ```
 
@@ -439,7 +426,7 @@ use library.logic.{ indexArtifact }
 @description("On file creation, index it into the Library.")
 automation indexArtifact {
   step decide {
-    logic indexArtifact ( event )
+    logic indexArtifact(event: event)
   }
 }
 ```
@@ -463,7 +450,7 @@ empty rather than erroring.
 @description("Every 10 min: mark departed cluster nodes as health='stopped'.")
 automation pruneStaleClusterNodes {
   step run {
-    logic pruneStaleClusterNodes { event: event }
+    logic pruneStaleClusterNodes(event: event)
   }
 }
 ```
@@ -478,26 +465,27 @@ fires and the input query (if any) loads, but **before any step executes**.
 ```memql
 automation deployStaging {
   precondition envIsStaging {
-    check: $config.MEMQL_ENV == "staging"
+    check: config.MEMQL_ENV == "staging"
     literal: MEMQL_ENV
     description: "Only drive the staging deploy spine in staging."
   }
   precondition digestPinned {
-    check: exists(args.imageDigest)
+    check: args.imageDigest != nil
     literal: imageDigest
   }
   step run {
-    logic driveDeploy ( event )
+    logic driveDeploy(event: event)
   }
 }
 ```
 
-The `check` expression uses the same grammar as `Step.Condition` and
-trigger `@filter` (`$event.*`, `$config.*`, `$var.*`, `exists(...)`,
-comparisons, `&&` / `||` / `!`). Prefer `exists(args.X)` (the G5 typed
-contract binds the payload to the automation's args) over
-`X != ""` — the condition evaluator treats a present-but-empty value as
-"not exists", so `exists(...)` is the reliable presence check.
+The `check` expression is an automation condition, written in the same
+expression language as every other: `event.payload.<field>`,
+`config.<key>`, `var("NAME")`, `args.<field>` (the G5 typed contract binds
+the payload to the automation's args), comparisons, `&&` / `||` / `!`. It
+must be boolean. `args.X != nil` is the presence check: an absent field, a
+null and an empty string are one unset value, so it is false for all three
+(the retired `exists(...)` read a blank the same way).
 
 A precondition that evaluates false is a **miss**:
 
@@ -532,84 +520,99 @@ which gives its keys (the `@trigger` keys among them) and what it does.
 
 ---
 
-## Helper Functions Reference
+## Catalog
 
-Verified author-surface helpers (see `component/language/parser`):
+Every function and method an expression can call is one entry of the catalog
+in `component/language/functions`, and the table below is that catalog. Operators
+are not here (`p ? a : b`, `a + b`, `a ?? b`): see [memql.md](memql.md#operators).
+Neither are the reserved roots, spec and trait applications, or construct calls
+(`query activeUsers(...)`).
 
-### Data Access
+- *Pushed down* entries compile to SQL. A relationship traversal selects rows,
+  so it lives in a query filter or spec body.
+- *Pushed down on a row field* entries compile to SQL when their input is a
+  field of the row (`row.title.includes(args.q)`, `row.tags.any(t => ...)`)
+  and run in process on any other value.
+- *In process* entries run in the engine. In a filter or spec body they take
+  only values that do not read the row, which are computed once before the query
+  ([plan constants](memql.md#plan-constants)): `row.expiresAt < addDuration(now, "P1D")`
+  pushes down, `lower(row.email) == args.email` is refused.
 
-| Function | Description | Example |
-|----------|-------------|---------|
-| `args.name` | Caller-passed argument | `args.folderId` |
+A method is listed as `list.<name>` or `string.<name>` and called on its receiver:
+`row.tags.any(t => t == "urgent")`, `args.title.count()`. An absent receiver or
+argument does what each entry says.
+
+<!-- BEGIN GENERATED: function catalog. Do not edit: go test github.com/znasllc-io/memql/component/language/functions -run Published -update-docs -->
+
+| Signature | Runs | What it does | Replaces |
+|---|---|---|---|
+| `addDuration(ts datetime, dur duration) datetime` | In process | Returns ts moved by the ISO 8601 duration dur, as an RFC 3339 timestamp; a leading minus sign moves it back. An absent or unparseable argument is an error. |  |
+| `aliasOf(label? string, match lambda) rows` | Pushed down | Returns the rows sharing an alias group with the rows selected by match; a leading label follows only the edges whose `as` label it names. A traversal that finds nothing returns no rows, and a pointer that is absent or blank is skipped. |  |
+| `canonicalId(value string, concept string) string` | In process | Returns value as a canonical id of the named concept, whether it arrives as a bare short id or already canonical. An absent or blank value yields the empty string, and a value canonical for a different concept is an error. |  |
+| `childOf(label? string, match lambda) rows` | Pushed down | Returns the children of the rows selected by match, the rows whose parent edge points at one of them; a leading label follows only the edges whose `as` label it names. A traversal that finds nothing returns no rows, and a pointer that is absent or blank is skipped. |  |
+| `contains(label? string, match lambda) rows` | Pushed down | Returns the members of the collection rows selected by match, following their contains edges (the graph traversal: the substring test is string.includes); a leading label follows only the edges whose `as` label it names. A traversal that finds nothing returns no rows, and a pointer that is absent or blank is skipped. |  |
+| `createdBy(label? string, match lambda) rows` | Pushed down | Returns the creators of the rows selected by match, following their createdBy edges; a leading label follows only the edges whose `as` label it names. A traversal that finds nothing returns no rows, and a pointer that is absent or blank is skipped. |  |
+| `daysBetween(a datetime, b datetime) number` | In process | Returns the number of whole days from a to b, truncated toward zero and negative when b is earlier. An absent or unparseable argument is an error. |  |
+| `equals(label? string, match lambda) rows` | Pushed down | Returns the rows joined to the rows selected by match by an equals edge; a leading label follows only the edges whose `as` label it names. A traversal that finds nothing returns no rows, and a pointer that is absent or blank is skipped. |  |
+| `error(message string) any` | In process | Raises an error carrying message and ends the evaluation, so it never returns a value. |  |
+| `hash(value string) string` | In process | Returns the SHA-256 digest of value as 64 lowercase hexadecimal characters. An absent value hashes as the empty string, so the result is always 64 characters wide. |  |
+| `ids(match lambda) rows` | Pushed down | Returns the rows selected by match as id-only rows, without payload or schema. It follows no edge, so it takes no label. |  |
+| `lower(value string) string` | In process | Returns value with its letters lowercased. An absent value yields the empty string. |  |
+| `owns(label? string, match lambda) rows` | Pushed down | Returns the rows joined to the rows selected by match by an owns edge, in either direction; a leading label follows only the edges whose `as` label it names. A traversal that finds nothing returns no rows, and a pointer that is absent or blank is skipped. |  |
+| `parentOf(label? string, match lambda) rows` | Pushed down | Returns the parents of the rows selected by match, following their parent edges; a leading label follows only the edges whose `as` label it names. A traversal that finds nothing returns no rows, and a pointer that is absent or blank is skipped. |  |
+| `references(label? string, match lambda) rows` | Pushed down | Returns the rows joined to the rows selected by match by a references edge; a leading label follows only the edges whose `as` label it names. A traversal that finds nothing returns no rows, and a pointer that is absent or blank is skipped. |  |
+| `secret(name string) string` | In process | Returns the decrypted value of the secret named name, looked up among the partition secrets and then the global ones. A name that matches no secret is an error, and the value must never be logged. |  |
+| `shortId(value string) string` | In process | Returns the bare short id of value by stripping one canonical concept prefix; a value that is already bare comes back unchanged. An absent or blank value yields the empty string. |  |
+| `systemSecret(name string) string` | In process | Returns the decrypted value of the global secret named name, with no partition lookup. A name that matches no secret is an error, and the value must never be logged. |  |
+| `systemVar(name string) string` | In process | Returns the plaintext value of the global configuration variable named name, with no partition lookup. A name that matches no variable is an error. |  |
+| `toString(value any) string` | In process | Returns value as text; a string comes back unchanged. An absent value yields the empty string. |  |
+| `trim(value string) string` | In process | Returns value without its leading and trailing whitespace. An absent value yields the empty string. |  |
+| `upper(value string) string` | In process | Returns value with its letters uppercased. An absent value yields the empty string. |  |
+| `var(name string) string` | In process | Returns the plaintext value of the configuration variable named name, looked up among the partition variables and then the global ones. A name that matches no variable is an error. |  |
+| `list.all(pred lambda) bool` | Pushed down on a row field, in process otherwise | Reports whether pred holds for every element of the list. An empty or absent list answers true. |  |
+| `list.any(pred lambda) bool` | Pushed down on a row field, in process otherwise | Reports whether pred holds for at least one element of the list. An empty or absent list answers false. |  |
+| `list.avg(fn lambda) number` | In process | Returns the mean of fn over the elements of the list. An empty or absent list yields an absent value, and fn returning a non-number is an error. |  |
+| `list.count() number` | Pushed down on a row field, in process otherwise | Returns the number of elements in the list. An absent list counts as zero. Over a row field it counts what is stored: an array's elements, a string's characters, and zero for anything else. | `len(x)`, `count(x)` |
+| `list.distinct(key? lambda) list` | In process | Returns the list with repeated elements dropped, keeping the first of each; with key, two elements repeat when key gives both the same value. An absent list yields an empty list. |  |
+| `list.empty() bool` | In process | Reports whether the list has no elements. An absent list is empty. |  |
+| `list.first() any` | In process | Returns the first element of the list. An empty or absent list yields an absent value; to take the first match, filter first: `xs.where(x => p).first()`. | `first(x)` |
+| `list.groupBy(key lambda) list` | In process | Returns one group per distinct value of key, in first-seen order, each a map holding key and items. An absent list yields an empty list. |  |
+| `list.last() any` | In process | Returns the last element of the list. An empty or absent list yields an absent value. | `last(x)` |
+| `list.max(fn lambda) number` | In process | Returns the largest value of fn over the elements of the list. An empty or absent list yields an absent value, and fn returning a non-number is an error. |  |
+| `list.min(fn lambda) number` | In process | Returns the smallest value of fn over the elements of the list. An empty or absent list yields an absent value, and fn returning a non-number is an error. |  |
+| `list.nodes() list` | In process | Returns the rows of a query result as a list; a list comes back unchanged. An absent value yields an empty list. |  |
+| `list.orderBy(key lambda) list` | In process | Returns the list sorted ascending by key, elements with equal keys keeping their order. An absent list yields an empty list. |  |
+| `list.orderByDesc(key lambda) list` | In process | Returns the list sorted descending by key, elements with equal keys keeping their order. An absent list yields an empty list. |  |
+| `list.reduce(seed any, fn lambda) any` | In process | Returns seed folded through the list, calling fn with the accumulator and each element in turn. An empty or absent list returns seed unchanged. |  |
+| `list.select(fn lambda) list` | In process | Returns fn applied to each element of the list, in order. An absent list yields an empty list. |  |
+| `list.single() any` | In process | Returns the one element of the list. Any other number of elements, none included, is an error; to take the one match, filter first: `xs.where(x => p).single()`. |  |
+| `list.skip(n number) list` | In process | Returns the list without its first n elements; a negative n skips none. An absent list yields an empty list. |  |
+| `list.sum(fn lambda) number` | In process | Returns the sum of fn over the elements of the list. An empty or absent list sums to zero, and fn returning a non-number is an error. |  |
+| `list.take(n number) list` | In process | Returns the first n elements of the list, or all of them when there are fewer; a negative n takes none. An absent list yields an empty list. |  |
+| `list.where(pred lambda) list` | In process | Returns the elements of the list that pred holds for, in order. An absent list yields an empty list. |  |
+| `string.count() number` | In process | Returns the number of characters in the string, counting Unicode code points rather than bytes. An absent string counts as zero. |  |
+| `string.includes(sub string) bool` | Pushed down on a row field, in process otherwise | Reports whether sub occurs in the string. A blank sub matches nothing, as a blank prefix does for startsWith, and an absent string or sub answers false. | `contains(s, sub)` |
+
+<!-- END GENERATED: function catalog -->
+
+The spellings the catalog replaces with an operator (`cond`, `concat`,
+`coalesce`, `exists`, ...) are listed with every other retired form in
+[memql.md](memql.md#retired-spellings).
+
+### Roots
+
+These are names, not calls:
+
+| Name | Description | Example |
+|------|-------------|---------|
+| `args.name` | Caller-passed argument, as declared in `args { }` | `args.folderId` |
 | `actor.X` | Auth context (`userId`, `role`, `identityId`, `isClusterOwner`) | `actor.userId` |
 | `now` | Eval-start timestamp (bare name) | `createdAt: now` |
 | `config.X` | Allow-listed config entry | `config.someKey` |
-| `var("NAME")` | Named configuration variable (`v1:platform:variable` / `v1:platform:partitionVariable`) | `var("LOG_LEVEL")` |
+| `event` | The triggering event, in an automation | `event.payload.status` |
 
-### Logic
-
-| Function | Description | Example |
-|----------|-------------|---------|
-| `coalesce(a, b, ...)` | First non-null | `coalesce(args.name, "default")` |
-| `cond(pred, then, else)` | Conditional value | `cond(args.flag, "yes", "no")` |
-
-**What counts as true.** One rule, everywhere a value is used as a condition — `cond`, `&&`, `||`, `!`, `.any()`, `.all()` (memql#2963):
-
-| falsy | truthy |
-|---|---|
-| `null` / absent, `false`, `0`, `""` | `true`, any non-zero number, any other non-empty string |
-| the strings `"false"` and `"0"` | a non-empty list or object |
-
-The two string cases are called out because they are the ones that bite: a JSON, HTTP or MCP caller sends `"false"` for a boolean it stringified, and a gate written `cond(args.allowed, true, false)` has to read that as false. It does.
-
-**Anything the table does not name is true.** That is a deliberate fail-open on
-values the language has no opinion about, and three consequences are worth
-knowing before you lean on truthiness as a gate:
-
-- The string comparison is **exact**. `"FALSE"`, `"False"`, `" false"` and
-  `"0.0"` are all **true** — only `"false"` and `"0"` are falsy. Normalise a
-  stringified boolean before it reaches a condition rather than expecting this
-  rule to catch every spelling of it.
-- `0` and "a non-empty list or object" mean the shapes a decoded JSON document
-  actually produces. A number or collection that reached the engine as some
-  other Go kind falls into the catch-all and is read as **true even when it is
-  zero or empty**.
-- Anything else — a struct, a timestamp, a decoder-specific wrapper — is true.
-
-Where a condition is a **security** gate, prefer an explicit comparison —
-`cond(args.allowed == true, ...)`, `cond(role == "admin", ...)` — over relying
-on truthiness. Every `cond` in the shipped DSL uses an explicit comparison
-except two id-derivation branches, which are not gates.
-
-### Strings and Ids
-
-| Function | Description | Example |
-|----------|-------------|---------|
-| `concat(a, b, ...)` | Concatenate | `concat("si-", hash(args.agentId))` |
-| `lower(str)` / `upper(str)` | Case conversion | `lower(args.email)` |
-| `trim(str)` | Remove whitespace | `trim(args.input)` |
-| `contains(str, sub)` | Substring check | `contains(args.email, "@company.com")` |
-| `hash(str)` | SHA256 hash | `hash(args.email)` |
-| `canonicalId(shortId, concept)` | Expand a short id to the canonical row id of an imported concept | `canonicalId(args.folderId, folder)` |
-| `toString(x)` | Stringify | `toString(args.count)` |
-
-### Time
-
-| Function | Description |
-|----------|-------------|
-| `now` | Current ISO timestamp — the bare reserved primitive (no call parens; `now()` / `timestamp()` are retired). See Data Access above. |
-| `addDuration(ts, dur)` | Timestamp arithmetic (a leading-sign negative duration subtracts, e.g. `addDuration(ts, "-PT2H")`) |
-| `daysBetween(a, b)` | Whole-day difference |
-
-The calendar extractors and predicates that once sat alongside these
-(`year` / `quarter` / `month` / `dayOfMonth` / `isAnniversary` /
-`isFirstDayOfQuarter` / `subtractTimestamps` / `memqlVersion`) were
-hard-retired with zero corpus uses under the 2026.08 grammar epoch
-(#2620 ruling / #2707); the parser rejects them with a migration hint.
-`subtractTimestamps`'s replacement is `addDuration` with a negative
-duration (leading sign: `"-P1D"`, `"-PT2H"`). `memqlVersion()` survives as a client meta-command (the
-registry builtin `serviceVersion`, alias `memqlVersion`), not as an
-expression builtin.
+`var("NAME")` reads a named configuration variable (`v1:platform:variable` /
+`v1:platform:partitionVariable`); it is in the catalog above.
 
 ### AI
 
@@ -727,7 +730,7 @@ builtins, declared in `dsl/<namespace>/tools.memql`. The body is the
 tool's input schema; `@handler` binds it to the operation it runs:
 
 ```memql
-@handler(type="query", query="query findEvents(title: \"$args.title\")")
+@handler(type="query", query="query findEvents(title: args.title)")
 @executionTime("fast")
 @description("Find the caller's calendar events by exact title.")
 tool calendarFind {
@@ -739,7 +742,9 @@ Tool body fields take `@required`, `@default("...")`, `@enum`, and
 `@description`. (Tool fields are the one place `@default` is valid --
 it is rejected on query / mutation `args` fields.) The legacy
 `func (Tool)` form is retired; the parser rejects it with a migration
-hint.
+hint. What a query handler's call and a webhook's url may be written
+as, and the retired `$args.` placeholder, are in
+[the language reference](memql.md#tools).
 
 ---
 
@@ -825,7 +830,7 @@ query artifact folderArtifacts {
   args {
     folderId  string  @required
   }
-  filter  folderId==args.folderId && isActiveRecord
+  filter  row => row.folderId == args.folderId && isActiveRecord(row)
   shape   artifactFull
 }
 ```

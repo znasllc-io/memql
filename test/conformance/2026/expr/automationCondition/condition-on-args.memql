@@ -1,0 +1,26 @@
+/// Write a note about a goal.
+mutate goalNote acNoteGoal {
+  args {
+    goalId  string  @required
+    note    string
+  }
+  insert {
+    id:      args.goalId
+    goalId:  args.goalId
+    note:    args.note ?? ""
+  }
+}
+
+/// Note a goal when it closes.
+@trigger(event="node.updated", concept="v1:work:goal")
+automation acNoteClosedGoal {
+  args {
+    id      string
+    status  string
+  }
+  step note {
+    if args.status == "closed" {
+      mutation acNoteGoal(goalId: args.id, note: "closed")
+    }
+  }
+}

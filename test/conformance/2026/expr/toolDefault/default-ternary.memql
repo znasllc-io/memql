@@ -1,0 +1,5 @@
+/// List the tickets, with a conditional default.
+@handler(type="query", query="paginate(query tdTickets(), args.limit)")
+tool tdTernary {
+  limit  integer  @default(true ? 10 : 20) @description("How many tickets to return.")
+}

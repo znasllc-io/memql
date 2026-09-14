@@ -11,21 +11,23 @@ import (
 
 // dot_access_logic_test.go pins #2542 item 4 END-TO-END through the
 // LogicRunner: a multi-step logic body that plucks a scalar field off a
-// step result via `.first().field` must load (the `_return` expression
-// carries a *ast.DotAccessExpr, previously rejected by the AST converter
-// with "unsupported parser expression type") AND evaluate (the `_return`
-// step string resolves against the local Evaluator instead of leaking
-// into engine.Execute as an unknown function name).
+// step result via `.first().field` must load AND evaluate in process, never
+// leaking into engine.Execute as an unknown function name.
 
-// bundleStepRegistry is a step-registry stub that serves every dispatched
+// bundleStepRegistry is a step-registry stub that serves every engine-bound
 // step a canned query-result Bundle, so a logic's query step binds a node
-// list without a live engine / DB. It records dispatched step IDs.
+// list without a live engine / DB. An in-process expression step evaluates
+// as the real query executor evaluates it (inProcessStep). It records the
+// engine-bound step IDs.
 type bundleStepRegistry struct {
 	dispatched []string
 	nodes      []any
 }
 
-func (r *bundleStepRegistry) Execute(_ context.Context, step *Step, _ *StepContext) (*StepResult, error) {
+func (r *bundleStepRegistry) Execute(ctx context.Context, step *Step, sc *StepContext) (*StepResult, error) {
+	if res, handled, err := inProcessStep(ctx, step, sc); handled {
+		return res, err
+	}
 	r.dispatched = append(r.dispatched, step.ID)
 	now := time.Now()
 	return &StepResult{
@@ -168,11 +170,11 @@ logic logicPluckArgField {
 	}
 }
 
-// TestTryEvaluateReturnLocally_DotAccessAfterAccessor pins the local
-// resolver branch directly, table-driven across the accessor + field
-// shapes and the guards (unknown step, genuine chain) that must keep
-// falling through to their existing routes.
-func TestTryEvaluateReturnLocally_DotAccessAfterAccessor(t *testing.T) {
+// TestReturnDotAccessAfterAccessor pins the return shapes directly,
+// table-driven across the accessor + field shapes over a bound step and over
+// a caller-arg collection. An accessor over an empty collection is ABSENT; an
+// unknown step is an unknown name, refused.
+func TestReturnDotAccessAfterAccessor(t *testing.T) {
 	newEval := func() *Evaluator {
 		e := NewEvaluator()
 		e.SetStepResult("rows", &StepResult{
@@ -196,57 +198,41 @@ func TestTryEvaluateReturnLocally_DotAccessAfterAccessor(t *testing.T) {
 		return e
 	}
 
-	handledCases := []struct {
+	cases := []struct {
 		name string
 		expr string
-		want any
+		want any // absentWant: memql.Absent
 	}{
 		{"first then field", "rows.first().createdAt", "2026-01-01T00:00:00Z"},
 		{"last then field", "rows.last().id", "b"},
 		{"first then nested field", "rows.first().payload.name", "alice"},
-		{"empty result first then field", "none.first().createdAt", nil},
-		// Args-rooted siblings: the object is a caller-arg collection, not a
-		// bound step, so resolution routes through the chain evaluator with
-		// the base resolved via the $-path. The compiler emits args-rooted
-		// returns in the $-prefixed spelling, so both spellings must resolve.
+		{"empty result first then field", "none.first().createdAt", memql.Absent},
 		{"args root first then field", "args.members.first().joinedAt", "2025-05-05T00:00:00Z"},
 		{"args root last then field", "args.members.last().id", "m2"},
 		{"args root first then nested field", "args.members.first().payload.name", "mia"},
-		{"args root compiled $-spelling", "$args.members.first().joinedAt", "2025-05-05T00:00:00Z"},
-		{"args root empty then field", "args.empty.first().joinedAt", nil},
+		{"args root empty then field", "args.empty.first().joinedAt", memql.Absent},
+		{"chain then field", `rows.where(r => r.id == "b").first().createdAt`, "2026-02-02T00:00:00Z"},
+		{"?? over an accessor", `rows.first().id ?? "fallback"`, "a"},
 	}
-	for _, tc := range handledCases {
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			val, handled, err := tryEvaluateReturnLocally(tc.expr, newEval())
+			val, err := evalV1(newEval(), tc.expr)
 			if err != nil {
-				t.Fatalf("tryEvaluateReturnLocally(%q): %v", tc.expr, err)
+				t.Fatalf("%s: %v", tc.expr, err)
 			}
-			if !handled {
-				t.Fatalf("tryEvaluateReturnLocally(%q) handled=false, want local resolution", tc.expr)
+			if tc.want == memql.Absent {
+				if !memql.IsAbsent(val) {
+					t.Errorf("%s = %#v, want absent", tc.expr, val)
+				}
+				return
 			}
 			if val != tc.want {
-				t.Errorf("tryEvaluateReturnLocally(%q) = %#v, want %#v", tc.expr, val, tc.want)
+				t.Errorf("%s = %#v, want %#v", tc.expr, val, tc.want)
 			}
 		})
 	}
 
-	fallThroughCases := []struct {
-		name string
-		expr string
-	}{
-		{"unknown step", "notAStep.first().createdAt"},
-		{"genuine chain keeps the chain route", "rows.where(r => r.active).first().createdAt"},
-		{"compound expression", `coalesce(rows.first().id, "fallback")`},
-	}
-	for _, tc := range fallThroughCases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, handled, err := tryEvaluateReturnLocally(tc.expr, newEval())
-			if err != nil {
-				t.Fatalf("tryEvaluateReturnLocally(%q): %v", tc.expr, err)
-			}
-			if handled {
-				t.Errorf("tryEvaluateReturnLocally(%q) handled=true, want fall-through to the existing route", tc.expr)
-			}
-		})
+	if val, err := evalV1(newEval(), "notAStep.first().createdAt"); err == nil {
+		t.Errorf("an unknown step read = %#v, want an unknown-name refusal", val)
 	}
 }

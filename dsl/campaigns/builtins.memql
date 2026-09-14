@@ -26,7 +26,7 @@
 //   scheduleSend Same preflight, same two writes -- and one more reason
 //                (memql#3459). "Which campaigns are due?" cannot be asked of
 //                v1:campaigns:campaign at all: the owned tier injects
-//                ownerUserId==actor.userId into every read and has no
+//                `row.ownerUserId == actor.userId` into every read and has no
 //                cluster-owner bypass, so no clock-driven scan over an
 //                operator's rows is expressible. The schedule therefore has
 //                to be recorded on the engine's own clusterOwner-tier job

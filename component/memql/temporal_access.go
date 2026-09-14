@@ -34,6 +34,8 @@ func findTemporalAccess(expr ExpressionNode) *TimestampExpression {
 		return findTemporalAccess(n.Target)
 	case *PaginateExpression:
 		return findTemporalAccess(n.Target)
+	case *RefineExpression:
+		return findTemporalAccess(n.Target)
 	case *SelectExpression:
 		return findTemporalAccess(n.Target)
 	case *DepthExpression:
@@ -49,6 +51,10 @@ func findTemporalAccess(expr ExpressionNode) *TimestampExpression {
 			return t
 		}
 		return findTemporalAccess(n.Right)
+	case *NotExpression:
+		return findTemporalAccess(n.Target)
+	case *ArrayPredicateExpression:
+		return findTemporalAccess(n.Pred)
 	case *FunctionCallExpression:
 		// coalesce / cond / concat / ... carry their (positionally
 		// indexed) argument expressions in the Args map; descend into

@@ -22,7 +22,7 @@ package parser
 // seed's assignments, the empty body of a policy or rule, a spec's return --
 // has no entry.
 var bodyClauseTable = map[string][]string{
-	"query":      {"args", "filter", "shape", "sort", "paginate", "asOf", "count"},
+	"query":      {"args", "filter", "refine", "shape", "sort", "paginate", "asOf", "count"},
 	"mutate":     {"args", "insert", "update", "accept", "stamp"},
 	"logic":      {"args", "body"},
 	"automation": {"args", "step", "precondition"},
@@ -34,7 +34,7 @@ var bodyClauseTable = map[string][]string{
 // lineClauses are the body clauses that take the rest of their line
 // (`filter <expr>`, `paginate 25`, `count`) rather than opening a block.
 var lineClauses = map[string]bool{
-	"filter": true, "shape": true, "sort": true, "paginate": true, "asOf": true, "count": true,
+	"filter": true, "refine": true, "shape": true, "sort": true, "paginate": true, "asOf": true, "count": true,
 }
 
 // namedBlocks are the body clauses whose block carries a name

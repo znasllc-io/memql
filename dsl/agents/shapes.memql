@@ -26,7 +26,7 @@ shape agentAuthorization agentAuthorizationFull {
 //
 // Owner fields:
 //
-//   - payload.ownerUserId -- explicit "who owns this agent" pointer
+//   - ownerUserId -- explicit "who owns this agent" pointer
 //     stamped on the create mutation. Required for auto-seeded
 //     agents (the GA, provisioned at engine startup whose actor is
 //     `system:seed:...`, not the user) so owner-keyed lookups

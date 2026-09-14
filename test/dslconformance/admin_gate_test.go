@@ -1,14 +1,11 @@
 package dslconformance
 
 import (
-	"github.com/znasllc-io/memql/dsl"
-	"io"
 	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/memql/dslgate"
-	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // TestAdminGateIsATopLevelConjunct hard-fails when an admin-gated filter
@@ -48,41 +45,30 @@ func TestAdminGateIsATopLevelConjunct(t *testing.T) {
 	// A corpus that stopped producing admin-gated filters, or an extractor
 	// that stopped finding them, would leave the check above green while
 	// protecting nothing. This counts what it had to reason about.
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
-	checked := 0
-	for _, p := range paths {
-		f, openErr := tree.Open(p)
-		if openErr != nil {
-			t.Fatalf("open %s: %v", p, openErr)
-		}
-		raw, readErr := io.ReadAll(f)
-		f.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", p, readErr)
-		}
-		src := string(raw)
-		for _, m := range constructHeaderRe.FindAllStringSubmatchIndex(src, -1) {
-			closeIdx := matchingClose(src, m[1]-1)
-			if closeIdx < 0 {
-				continue
-			}
-			// filterClauseOf strips comments, so the prose in
-			// dsl/authoring/queries.memql and dsl/identity/queries.memql that
-			// merely NAMES the gate is excluded, as is every `actor.` read in
-			// a logic body -- neither is a filter.
-			if clause := filterClauseOf(src[m[1]:closeIdx]); clause != "" && mentionsAdminGate(clause) {
-				checked++
+	onTree(t, func(t *testing.T, c corpus) {
+		checked := 0
+		for _, p := range c.paths {
+			src := c.files[p]
+			for _, m := range constructHeaderRe.FindAllStringSubmatchIndex(src, -1) {
+				closeIdx := matchingClose(src, m[1]-1)
+				if closeIdx < 0 {
+					continue
+				}
+				// filterClauseOf strips comments, so the prose in
+				// dsl/authoring/queries.memql and dsl/identity/queries.memql that
+				// merely NAMES the gate is excluded, as is every `actor.` read in
+				// a logic body -- neither is a filter.
+				if clause := filterClauseOf(src[m[1]:closeIdx]); clause != "" && mentionsAdminGate(clause) {
+					checked++
+				}
 			}
 		}
-	}
-	if checked == 0 {
-		t.Fatal("no admin-gated filter clauses found; the corpus shape or filterClauseOf changed and this gate has silently stopped protecting anything")
-	}
-	t.Logf("checked %d admin-gated filter clause(s)", checked)
+		// Measured when the floor was set: 264.
+		if checked < 200 {
+			t.Fatalf("%d admin-gated filter clauses found; the corpus shape or filterClauseOf changed and this gate has silently stopped protecting anything", checked)
+		}
+		t.Logf("checked %d admin-gated filter clause(s)", checked)
+	})
 }
 
 // TestAdminGateCompositionRules pins the rule itself, independently of the
@@ -94,33 +80,33 @@ func TestAdminGateCompositionRules(t *testing.T) {
 		clause string
 		want   bool
 	}{
-		{"bare gate", `actor.isClusterOwner==true`, true},
-		{"gate as a conjunct", `partitionId==args.partitionId && actor.isClusterOwner==true`, true},
-		{"gate first", `actor.isClusterOwner==true && statusIsActive`, true},
+		{"bare gate", `row => actor.isClusterOwner == true`, true},
+		{"gate as a conjunct", `row => row.partitionId == args.partitionId && actor.isClusterOwner == true`, true},
+		{"gate first", `row => actor.isClusterOwner == true && statusIsActive(row)`, true},
 		// The shipped telephony shape: a disjunction is fine as long as the
 		// gate sits OUTSIDE it.
-		{"disjunction inside, gate outside", `(fromE164==args.e164 || toE164==args.e164) && actor.isClusterOwner==true`, true},
-		{"spec form", `requiresClusterOwner && statusIsActive`, true},
+		{"disjunction inside, gate outside", `row => (row.fromE164 == args.e164 || row.toE164 == args.e164) && actor.isClusterOwner == true`, true},
+		{"spec form", `row => requiresClusterOwner(actor) && statusIsActive(row)`, true},
 
 		// The defect: the gate is switched off by the other arm.
-		{"gate as a disjunct", `fromE164==args.e164 || actor.isClusterOwner==true`, false},
-		{"gate as a disjunct, first", `actor.isClusterOwner==true || fromE164==args.e164`, false},
-		{"parens dropped", `fromE164==args.e164 || toE164==args.e164 && actor.isClusterOwner==true`, false},
-		{"spec form as a disjunct", `requiresClusterOwner || statusIsActive`, false},
-		{"negated gate", `!(actor.isClusterOwner==true)`, false},
-		{"gate behind a when guard", `when(args.adminMode) { actor.isClusterOwner==true }`, false},
+		{"gate as a disjunct", `row => row.fromE164 == args.e164 || actor.isClusterOwner == true`, false},
+		{"gate as a disjunct, first", `row => actor.isClusterOwner == true || row.fromE164 == args.e164`, false},
+		{"parens dropped", `row => row.fromE164 == args.e164 || row.toE164 == args.e164 && actor.isClusterOwner == true`, false},
+		{"spec form as a disjunct", `row => requiresClusterOwner(actor) || statusIsActive(row)`, false},
+		{"negated gate", `row => !(actor.isClusterOwner == true)`, false},
+		{"gate behind an optional-argument guard", `row => (args.adminMode == nil || actor.isClusterOwner == true)`, false},
 
 		// Review round 1: POLARITY. These contain the gate identifier and a
 		// top-level `&&`, so a substring leaf accepted them -- while inverting
-		// the meaning. Under `!=true` a non-owner satisfying the other conjunct
+		// the meaning. Under `!= true` a non-owner satisfying the other conjunct
 		// gets rows and the cluster owner gets none.
-		{"inverted with !=", `fromE164==args.e164 && actor.isClusterOwner!=true`, false},
-		{"inverted with ==false", `fromE164==args.e164 && actor.isClusterOwner==false`, false},
-		{"bare inverted", `actor.isClusterOwner!=true`, false},
+		{"inverted with !=", `row => row.fromE164 == args.e164 && actor.isClusterOwner != true`, false},
+		{"inverted with == false", `row => row.fromE164 == args.e164 && actor.isClusterOwner == false`, false},
+		{"bare inverted", `row => actor.isClusterOwner != true`, false},
 
 		// Word boundaries: a different identifier is not the gate.
-		{"identifier containing the spec name", `x==args.x && requiresClusterOwnerXyz`, false},
-		{"identifier prefixed by the spec name", `x==args.x && myRequiresOwner`, false},
+		{"identifier containing the spec name", `row => row.x == args.x && requiresClusterOwnerXyz(actor)`, false},
+		{"identifier prefixed by the spec name", `row => row.x == args.x && myRequiresOwner(actor)`, false},
 
 		// The live context-spec gates. Which of them the corpus uses is
 		// computed by TestAdminGateNamesAreDeclaredOrRecorded rather than
@@ -135,12 +121,13 @@ func TestAdminGateCompositionRules(t *testing.T) {
 		// neither is a filter leaf. `requiresClusterOwner` is the surviving
 		// name and stands in here -- it asks about the ACTOR rather than about
 		// a rung, which is what a context-spec is still for.
-		{"requiresClusterOwner as a conjunct", `statusIsActive && requiresClusterOwner`, true},
-		{"requiresClusterOwner is not requiresOwner", `statusIsActive && requiresClusterOwner`, true},
-		{"requiresClusterOwner as a disjunct", `statusIsActive || requiresClusterOwner`, false},
+		{"requiresClusterOwner as a conjunct", `row => statusIsActive(row) && requiresClusterOwner(actor)`, true},
+		{"requiresClusterOwner is not requiresOwner", `row => statusIsActive(row) && requiresClusterOwner(actor)`, true},
+		{"requiresClusterOwner as a disjunct", `row => statusIsActive(row) || requiresClusterOwner(actor)`, false},
 
-		// Whitespace around the comparison is legal.
-		{"spaced comparison", `x==args.x && actor.isClusterOwner == true`, true},
+		// Whitespace around the comparison is the author's: the leaf is read
+		// in its canonical spelling.
+		{"unspaced comparison", `row => row.x == args.x && actor.isClusterOwner==true`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -206,22 +193,19 @@ func adminGateSpecNames(t *testing.T) []string {
 // a test edit -- the failure this guards against is a name nothing declares,
 // not a name nothing uses yet.
 func TestAdminGateNamesAreDeclaredOrRecorded(t *testing.T) {
-	declared := map[string]bool{}
-	specDecl := regexp.MustCompile(`(?m)^spec\s+\S+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{`)
+	onTree(t, checkAdminGateNamesAreDeclaredOrRecorded)
+}
 
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
+func checkAdminGateNamesAreDeclaredOrRecorded(t *testing.T, c corpus) {
+	declared := map[string]bool{}
 	var specFiles int
-	for _, path := range paths {
+	for _, path := range c.paths {
 		if !strings.HasSuffix(path, "specs.memql") {
 			continue
 		}
 		specFiles++
-		for _, m := range specDecl.FindAllStringSubmatch(readTreeFile(t, path), -1) {
-			declared[m[1]] = true
+		for _, m := range specDeclRe.FindAllStringSubmatch(c.files[path], -1) {
+			declared[m[2]] = true
 		}
 	}
 	if specFiles == 0 {
@@ -290,27 +274,17 @@ func TestNamedQueriesKeepTheirAdminGate(t *testing.T) {
 		},
 	}
 
+	onTree(t, func(t *testing.T, c corpus) { checkNamedQueriesKeepTheirAdminGate(t, c, want) })
+}
+
+func checkNamedQueriesKeepTheirAdminGate(t *testing.T, c corpus, want map[string]map[string]bool) {
 	found := map[string]map[string]bool{}
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
-	for _, p := range paths {
+	for _, p := range c.paths {
 		names, ok := want[p]
 		if !ok {
 			continue
 		}
-		f, openErr := tree.Open(p)
-		if openErr != nil {
-			t.Fatalf("open %s: %v", p, openErr)
-		}
-		raw, readErr := io.ReadAll(f)
-		f.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", p, readErr)
-		}
-		src := string(raw)
+		src := c.files[p]
 
 		for _, m := range constructHeaderRe.FindAllStringSubmatchIndex(src, -1) {
 			name := src[m[4]:m[5]]
@@ -382,31 +356,30 @@ func TestNamedQueriesKeepTheirAdminGate(t *testing.T) {
 // only ones that can serve as an admin gate. A row-spec is a SQL predicate over
 // payload fields and belongs in no gate vocabulary.
 func TestEveryDeclaredActorGateIsRecognised(t *testing.T) {
+	onTree(t, checkEveryDeclaredActorGateIsRecognised)
+}
+
+func checkEveryDeclaredActorGateIsRecognised(t *testing.T, c corpus) {
 	// Names that are @actor-bound but deliberately NOT gate vocabulary. Empty
 	// today, and an entry here is a claim that a caller-scope spec is not a
 	// caller-scope GATE -- which wants a reason beside it.
 	notGateVocabulary := map[string]string{}
 
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
-
-	// `spec actorEnvelope <name> {` -- the @actor binding is the signature's
-	// first identifier, so the declaration alone says whether it is a
-	// context-spec. No AST needed and none available here.
-	actorSpec := regexp.MustCompile(`(?m)^spec[ \t]+actorEnvelope[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
-
+	// `spec actorEnvelope <name> {` (or `= actor => ...`, edition 2026) -- the
+	// @actor binding is the signature's first identifier, so the declaration
+	// alone says whether it is a context-spec. No AST needed and none
+	// available here.
 	declared := map[string]string{}
 	var specFiles int
-	for _, p := range paths {
+	for _, p := range c.paths {
 		if !strings.HasSuffix(p, "specs.memql") {
 			continue
 		}
 		specFiles++
-		for _, m := range actorSpec.FindAllStringSubmatch(readTreeFile(t, p), -1) {
-			declared[m[1]] = p
+		for _, m := range specDeclRe.FindAllStringSubmatch(c.files[p], -1) {
+			if m[1] == "actorEnvelope" {
+				declared[m[2]] = p
+			}
 		}
 	}
 

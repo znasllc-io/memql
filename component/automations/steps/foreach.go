@@ -39,10 +39,14 @@ func (e *ForEachExecutor) Execute(ctx context.Context, step *automations.Step, s
 
 	forEachCfg := step.ForEach
 
-	// Resolve the source collection
-	// Use EvaluateStepReference to auto-resolve bare step names like "stepName.result"
-	// to "$steps.stepName.result" for cleaner .memql syntax
-	sourceValue, err := stepCtx.Evaluator.EvaluateStepReference(forEachCfg.Source)
+	// Resolve the source collection: an expression parsed at load
+	// (memql#5367). A step name stands for its rows, so `rows` and
+	// `rows.where(r => r.active)` both iterate node maps.
+	x, err := preparedExprs(step)
+	var sourceValue any
+	if err == nil {
+		sourceValue, err = v1Value(ctx, stepCtx.Evaluator, x.Source)
+	}
 	if err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("failed to evaluate source: %v", err)
@@ -97,19 +101,16 @@ func (e *ForEachExecutor) Execute(ctx context.Context, step *automations.Step, s
 		)
 	}
 
-	// Filter items if filter expression is provided
+	// Filter items if filter expression is provided: a condition parsed at
+	// load, evaluated over a run scoped to the item (memql#5367). An item
+	// whose filter errors is skipped with a warning.
 	var filteredItems []any
-	if forEachCfg.Filter != "" {
+	if x.Filter != nil {
 		for _, item := range items {
-			// Create a scoped evaluator for filter evaluation
 			filterEval := stepCtx.Evaluator.Clone()
 			filterEval.SetItem(item, itemName)
 
-			// EvaluateForEachFilter (#2318) routes a genuine collection /
-			// lambda chain filter (`item.tags.any(t => t == "vip")`) through
-			// the in-memory collection surface and keeps the legacy
-			// string-condition path for everything else.
-			matches, err := filterEval.EvaluateForEachFilter(forEachCfg.Filter)
+			matches, err := filterEval.EvalV1Condition(ctx, x.Filter)
 			if err != nil {
 				// Log warning but continue
 				if stepCtx.Logger != nil {
@@ -353,7 +354,9 @@ func (e *ForEachExecutor) executeForItem(
 					"condition", iteratedStep.Condition,
 				)
 			}
-			shouldRun, err := itemEval.EvaluateCondition(iteratedStep.Condition)
+			// StepCondition evaluates the condition parsed at load
+			// (iteratedStep is a copy, so it carries the parsed Exprs).
+			shouldRun, err := itemEval.StepCondition(ctx, &iteratedStep)
 			if err != nil {
 				if stepCtx.Logger != nil {
 					stepCtx.Logger.Warn("step condition evaluation failed",

@@ -42,7 +42,7 @@ query widget consumerWidgets {
   args {
     v  string  @required
   }
-  filter  ` + consumerField + ` == args.v
+  filter  row => row.` + consumerField + ` == args.v
 }`),
 	}
 }
@@ -129,7 +129,7 @@ query widget consumerWidgets {
   args {
     v  string  @required
   }
-  filter  a == args.v
+  filter  row => row.a == args.v
 }`),
 	})
 

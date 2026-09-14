@@ -50,6 +50,23 @@ func ensureBooleanExpression(expr ExpressionNode) error {
 		return nil
 	case *AIExpression:
 		return nil
+	case *NotExpression:
+		// The negation of a boolean is boolean; its operand must be.
+		return ensureBooleanExpression(node.Target)
+	case *ArrayPredicateExpression:
+		// any / all are boolean when their element predicate is; count
+		// carries its own comparison and no predicate.
+		if node.Method == ArrayMethodCount {
+			return nil
+		}
+		return ensureBooleanExpression(node.Pred)
+	case *PlanConstExpression:
+		// Its type is only known once it is evaluated, per call -- so the
+		// check happens then (planConstantPredicate refuses a non-boolean
+		// in a condition), not here.
+		return nil
+	case *constantBoolExpression:
+		return nil
 	default:
 		return fmt.Errorf("expression node %T is not allowed inside a spec", expr)
 	}
@@ -159,6 +176,15 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 			clone.Limit = &limit
 		}
 		return clone
+	case *RefineExpression:
+		// The lambda is a parsed v1 AST, never mutated, so clones share it;
+		// the bindings are replaced wholesale by expansion, never written
+		// into, so the map is shared too.
+		return &RefineExpression{
+			Target:   cloneExpressionNode(node.Target),
+			Lambda:   node.Lambda,
+			Bindings: node.Bindings,
+		}
 	case *SelectExpression:
 		return &SelectExpression{
 			Target: cloneExpressionNode(node.Target),
@@ -195,7 +221,25 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 		// filter" / "unsupported expression node" failures.
 		return &LiteralValueNode{Value: node.Value}
 	case *constantBoolExpression:
-		return &constantBoolExpression{value: node.value}
+		return &constantBoolExpression{value: node.value, planConstant: node.planConstant}
+	case *NotExpression:
+		return &NotExpression{Target: cloneExpressionNode(node.Target)}
+	case *ArrayPredicateExpression:
+		clone := *node
+		clone.Field = FieldReference{
+			Raw:      node.Field.Raw,
+			Parts:    append([]string(nil), node.Field.Parts...),
+			Wildcard: node.Field.Wildcard,
+		}
+		clone.Pred = cloneExpressionNode(node.Pred)
+		if pc, ok := node.CountValue.(*PlanConstExpression); ok {
+			clone.CountValue = cloneExpressionNode(pc)
+		}
+		return &clone
+	case *PlanConstExpression:
+		// The v1 AST is never mutated after parsing, so the clone shares it;
+		// what must not be shared is the node, which expansion replaces.
+		return &PlanConstExpression{Expr: node.Expr}
 	case *CollectionMethodExpression:
 		// Story 4 (#2302 / ADR §2.2): clone the receiver and each argument
 		// (lambdas included) so a registered logic body's stored tree is

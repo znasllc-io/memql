@@ -1,0 +1,2 @@
+/// Urgent tickets.
+spec ticket sbIsUrgent = row => row.urgent == true

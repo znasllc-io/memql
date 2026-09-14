@@ -267,10 +267,10 @@ func TestLoad_NonProceduralFileParsesNatively(t *testing.T) {
 	cases := map[string]string{
 		// annotation-led (the dominant authoring shape)
 		"shapes.memql": "@row\n@description(\"ok\")\nshape spaceCard {\n  row.id\n}\n",
-		"specs.memql":  "@enabled\n@description(\"ok\")\nspec activeRowTrait specIsActive {\n  return active==true\n}\n",
-		"traits.memql": "@enabled\n@description(\"ok\")\ntrait isActiveRecord {\n  return active==true\n}\n",
+		"specs.memql":  "@enabled\n@description(\"ok\")\nspec activeRowTrait specIsActive = row => row.active == true\n",
+		"traits.memql": "@enabled\n@description(\"ok\")\ntrait isActiveRecord = row => row.active == true\n",
 		// import-led, annotation-free construct
-		"traitsCB.memql": "use common.traits.{ activeRowTrait }\n\ntrait isActiveRecord {\n  return active==true\n}\n",
+		"traitsCB.memql": "use common.traits.{ activeRowTrait }\n\ntrait isActiveRecord = row => row.active == true\n",
 	}
 	for filename, body := range cases {
 		t.Run(filename, func(t *testing.T) {
@@ -321,7 +321,7 @@ func TestLoad_ReportsARefusedLanguageLine(t *testing.T) {
 	root := fstest.MapFS{
 		"shop/concepts.memql": {Data: []byte("@description(\"an order\")\nconcept order {\n  total int\n}\n")},
 		"shop/queries.memql": {Data: []byte("use shop.concepts.{ order }\n\n@description(\"orders\")\n" +
-			"query order ordersOver {\n  args {\n    min int @required\n  }\n  filter total > args.min\n  paginate\n}\n")},
+			"query order ordersOver {\n  args {\n    min int @required\n  }\n  filter row => row.total > args.min\n  paginate\n}\n")},
 	}
 	tree, err := Load(root)
 	if err == nil {
@@ -367,8 +367,8 @@ func TestLoad_ReportsARefusedLanguageLine(t *testing.T) {
 func TestLoad_ReportsAStatementNoConstructKeywordOpens(t *testing.T) {
 	const concepts = "@description(\"an order\")\nconcept order {\n  total int\n}\n"
 	const queries = "use shop.concepts.{ order }\n\n" +
-		"@description(\"orders over\")\nquery order ordersOver {\n  args {\n    min int @required\n  }\n  filter total > args.min\n}\n\n" +
-		"@description(\"orders under\")\nquery order ordersUnder {\n  args {\n    max int @required\n  }\n  filter total < args.max\n}\n"
+		"@description(\"orders over\")\nquery order ordersOver {\n  args {\n    min int @required\n  }\n  filter row => row.total > args.min\n}\n\n" +
+		"@description(\"orders under\")\nquery order ordersUnder {\n  args {\n    max int @required\n  }\n  filter row => row.total < args.max\n}\n"
 	cases := []struct {
 		name, queries, keyword string
 		line                   int

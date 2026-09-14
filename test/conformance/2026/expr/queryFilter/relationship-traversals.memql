@@ -1,0 +1,77 @@
+/// The tickets whose parent is the named ticket.
+query ticket qfChildTickets {
+  args {
+    parentId  string  @required
+  }
+  filter row => childOf(p => p.id == args.parentId)
+  paginate 20
+}
+
+/// The parents of the named ticket.
+query ticket qfParentTickets {
+  args {
+    childId  string  @required
+  }
+  filter row => parentOf(c => c.id == args.childId)
+  paginate 20
+}
+
+/// The tickets sharing an alias group with the named ticket.
+query ticket qfAliasTickets {
+  args {
+    ticketId  string  @required
+  }
+  filter row => aliasOf(t => t.id == args.ticketId)
+  paginate 20
+}
+
+/// The tickets joined to the named ticket by an equals edge.
+query ticket qfEqualTickets {
+  args {
+    ticketId  string  @required
+  }
+  filter row => equals(t => t.id == args.ticketId)
+  paginate 20
+}
+
+/// The tickets the named ticket references under the respondsTo label.
+query ticket qfReferencedTickets {
+  args {
+    ticketId  string  @required
+  }
+  filter row => references("respondsTo", t => t.id == args.ticketId)
+  paginate 20
+}
+
+/// The members of the named collection.
+query ticket qfContainedTickets {
+  args {
+    collectionId  string  @required
+  }
+  filter row => contains(c => c.id == args.collectionId)
+  paginate 20
+}
+
+/// The tickets joined to the named ticket by an owns edge.
+query ticket qfOwnedTickets {
+  args {
+    ownerId  string  @required
+  }
+  filter row => owns(o => o.id == args.ownerId)
+  paginate 20
+}
+
+/// The creators of the named ticket.
+query ticket qfTicketCreators {
+  args {
+    ticketId  string  @required
+  }
+  filter row => createdBy(t => t.id == args.ticketId)
+  paginate 20
+}
+
+/// The open tickets, as id-only rows.
+query ticket qfOpenTicketIds {
+  filter row => ids(t => t.status == "open")
+  paginate 20
+}

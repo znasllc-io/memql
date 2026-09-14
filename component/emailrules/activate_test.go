@@ -2,6 +2,7 @@ package emailrules
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -250,6 +251,48 @@ func TestArmingSomebodyElsesRuleIsRefused(t *testing.T) {
 	})
 	if _, err := NewActivator(e, deps()).Activate(ctx, "v1:identity:user:someone-else", "v1:campaigns:emailRule:ab12cd34"); err == nil {
 		t.Fatal("a rule owned by somebody else was armed")
+	}
+}
+
+// bundleOwnerGate is the real gate's comparison: the id it is handed must equal
+// the bundle's ownerUserId, which writeBundle stamps from the caller and the
+// store keeps canonical. The other fakes accept any owner, which is how a
+// gate handed the BARE rule owner refused every activation in a real engine
+// while every test here passed.
+func bundleOwnerGate(verb string) func(owner, bundleID string) error {
+	const stamped = "v1:identity:user:owner1"
+	return func(owner, _ string) error {
+		if owner != stamped {
+			return fmt.Errorf("authoring: actor %q cannot %s bundle owned by %q", owner, verb, stamped)
+		}
+		return nil
+	}
+}
+
+// The rule row reads back with its owner bare-ified (ruleFromRow), so the
+// gate has to be handed the authenticated caller, not the rule's owner field.
+func TestActivationHandsTheGateTheCallerAsTheBundleWasStamped(t *testing.T) {
+	e := &fakeEngine{rule: ruleRow(), activate: bundleOwnerGate("activate")}
+	res, err := NewActivator(e, deps()).Activate(ownerCtx(auth.RoleOwner), "v1:identity:user:owner1", "v1:campaigns:emailRule:ab12cd34")
+	if err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+	if res.Status != "active" {
+		t.Errorf("status = %q, want active", res.Status)
+	}
+}
+
+func TestRetireHandsTheGateTheCallerAsTheBundleWasStamped(t *testing.T) {
+	armed := ruleRow()
+	armed["status"] = "active"
+	armed["bundleId"] = "v1:authoring:bundle:emrab12cd34v1"
+	e := &fakeEngine{rule: armed, retire: bundleOwnerGate("retire")}
+	res, err := NewActivator(e, deps()).Retire(ownerCtx(auth.RoleOwner), "v1:identity:user:owner1", "v1:campaigns:emailRule:ab12cd34")
+	if err != nil {
+		t.Fatalf("Retire: %v", err)
+	}
+	if res.Status != "paused" {
+		t.Errorf("status = %q, want paused", res.Status)
 	}
 }
 

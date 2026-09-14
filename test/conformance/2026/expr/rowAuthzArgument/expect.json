@@ -2,6 +2,32 @@
   "cases": [
     {
       "file": "owner-field.memql",
+      "verdict": "load_ok",
+      "note": "An @rowAuthz argument is a literal naming a field; edition 2026 does not change it."
+    },
+    {
+      "file": "owner-or-cluster-owner.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "owner-from-args.memql",
+      "verdict": "refuse_load",
+      "message": "@rowAuthz(owner=...) requires a quoted field name -- write @rowAuthz(owner=\"ownerUserId\")",
+      "note": "member: the argument is not an expression."
+    },
+    {
+      "file": "owner-names-no-field.memql",
+      "verdict": "refuse_load",
+      "message": "references a field the concept does not declare (declared: body, ownerUserId)"
+    },
+    {
+      "file": "owner-concatenated.memql",
+      "verdict": "refuse_parse",
+      "message": "expected ')'",
+      "note": "arithmetic"
+    },
+    {
+      "file": "owner-field-on-a-ticket.memql",
       "verdict": "load_ok"
     },
     {

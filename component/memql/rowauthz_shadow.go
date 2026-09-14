@@ -37,6 +37,7 @@ import (
 	"sync"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/ast"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -305,6 +306,11 @@ func unwrapToFilter(expr ExpressionNode) ExpressionNode {
 			expr = n.Target
 		case *PaginateExpression:
 			expr = n.Target
+		case *RefineExpression:
+			// A refine only NARROWS the page the filter selected, in
+			// process; which rows the query can reach is the filter's
+			// answer, so the filter is what is classified.
+			expr = n.Target
 		case *SortExpression:
 			expr = n.Target
 		case *SelectExpression:
@@ -453,7 +459,17 @@ func isRowIdName(f FieldReference) bool {
 
 // isClusterOwnerLeaf reports whether a conjunct is the cluster-owner gate,
 // written either as `actor.isClusterOwner` or `actor.isClusterOwner==true`.
+//
+// An edition-2026 filter lowers the gate -- a comparison that reads no row
+// field -- to a plan constant carrying its expression (Lower's planConstPred),
+// which argument expansion evaluates per call; the pre-2026 converter produced
+// a comparison on the actor path. Both are the gate, and a matcher that knew
+// only one would report every composite read undecidable the day the tree
+// changed spelling.
 func isClusterOwnerLeaf(node ExpressionNode) bool {
+	if pc, ok := node.(*PlanConstExpression); ok {
+		return pc != nil && isClusterOwnerGateAST(pc.Expr)
+	}
 	cmp, ok := node.(*ComparisonExpression)
 	if !ok {
 		return false
@@ -475,6 +491,50 @@ func isClusterOwnerLeaf(node ExpressionNode) bool {
 	default:
 		return false
 	}
+}
+
+// isClusterOwnerGateAST reads the edition-2026 spelling of the cluster-owner
+// gate: `actor.isClusterOwner` alone, compared `== true` from either side, or
+// `!= false` -- the same forms the comparison arm above accepts.
+func isClusterOwnerGateAST(n ast.ExpressionNode) bool {
+	switch e := ast.Unparen(n).(type) {
+	case *ast.MemberExpr:
+		return isActorClusterOwnerMember(e)
+	case *ast.BinaryExpr:
+		if e == nil {
+			return false
+		}
+		other := e.Right
+		if !isActorClusterOwnerMember(e.Left) {
+			if !isActorClusterOwnerMember(e.Right) {
+				return false
+			}
+			other = e.Left
+		}
+		lit, ok := ast.Unparen(other).(*ast.LiteralExpr)
+		if !ok || lit == nil {
+			return false
+		}
+		b, isBool := lit.Value.(bool)
+		switch e.Op {
+		case "==":
+			return isBool && b
+		case "!=":
+			return isBool && !b
+		}
+	}
+	return false
+}
+
+// isActorClusterOwnerMember reports whether n is the member
+// `actor.isClusterOwner`.
+func isActorClusterOwnerMember(n ast.ExpressionNode) bool {
+	m, ok := ast.Unparen(n).(*ast.MemberExpr)
+	if !ok || m == nil || m.Field != "isClusterOwner" {
+		return false
+	}
+	root, ok := ast.Unparen(m.Object).(*ast.IdentExpr)
+	return ok && root != nil && root.Name == "actor"
 }
 
 func isFalseLiteral(v any) bool {
@@ -569,6 +629,23 @@ func firstOpaqueConjunct(conjuncts []ExpressionNode) string {
 				return "a disjunction"
 			}
 			return "a nested conjunction the flattener did not reach"
+		// The edition-2026 nodes (memql#5366). None of them is a leaf the
+		// matchers above can read -- a negation excludes rather than scopes,
+		// a collection predicate tests an array, and a plan constant has no
+		// value until a call evaluates it -- so they are opaque, and they
+		// are named so the undecidable verdict says what it could not see.
+		case *NotExpression:
+			return "a negation"
+		case *ArrayPredicateExpression:
+			return fmt.Sprintf("the collection predicate %s", canonicalExpression(n))
+		case *PlanConstExpression:
+			// The cluster-owner gate lowers to one, and it is as transparent
+			// as the comparison it used to be: its value is the caller's
+			// flag, not something expansion could make scope the read.
+			if isClusterOwnerGateAST(n.Expr) {
+				continue
+			}
+			return "an unevaluated plan constant"
 		default:
 			return fmt.Sprintf("a %T the analyzer does not understand", c)
 		}

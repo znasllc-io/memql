@@ -66,7 +66,7 @@ query reverseFulfillmentOrder shopifyReverseFulfillmentOrderByGid {
     storeId  string!
     gid      string!
   }
-  filter  storeId==args.storeId && gid==args.gid && actor.isClusterOwner==true
+  filter  row => row.storeId == args.storeId && row.gid == args.gid && actor.isClusterOwner == true
   shape   reverseFulfillmentOrderMirror
 }
 
@@ -79,7 +79,10 @@ query reverseFulfillmentOrder shopifyReverseFulfillmentOrderForStore {
     storeId  string!
     since    datetime
   }
-  filter    storeId==args.storeId && isNotDeleted && actor.isClusterOwner==true && when(args.since) { updatedAt>=args.since }
+  filter    row => row.storeId == args.storeId
+                && isNotDeleted(row)
+                && actor.isClusterOwner == true
+                && (args.since == nil || row.updatedAt >= args.since)
   sort      "updatedAt", "desc"
   paginate  100
   shape     reverseFulfillmentOrderMirror

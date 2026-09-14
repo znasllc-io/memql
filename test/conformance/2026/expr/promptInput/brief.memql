@@ -1,0 +1,1 @@
+(args.words * 2 > 100 || args.title startsWith "RFC") && args.draft != true

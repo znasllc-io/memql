@@ -1,0 +1,5 @@
+/// Tickets sorted by a list.
+query ticket soList {
+  sort ["row.createdAt"]
+  paginate 20
+}

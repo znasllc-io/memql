@@ -60,7 +60,7 @@ func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conce
 						"kind", slice.Kind,
 						"error", parseErr)
 				}
-				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedFunctionLoader", Keyword: string(slice.Kind), Name: slice.Name, File: raw.Path, Phase: "parse", Err: parseErr.Error()})
+				rep.AddSkip(baseloader.SkipFor("memql.unifiedFunctionLoader", string(slice.Kind), slice.Name, raw.Path, "parse", parseErr))
 				continue
 			}
 			if fn == nil {
@@ -95,7 +95,7 @@ func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conce
 						"function", slice.Name,
 						"error", upsertErr)
 				}
-				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedFunctionLoader", Keyword: string(slice.Kind), Name: slice.Name, File: raw.Path, Phase: "register", Err: upsertErr.Error()})
+				rep.AddSkip(baseloader.SkipFor("memql.unifiedFunctionLoader", string(slice.Kind), slice.Name, raw.Path, "register", upsertErr))
 				continue
 			}
 
@@ -122,5 +122,5 @@ func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conce
 // registry (memql#5359) -- the load-time text scan that used to run here
 // first read the slice a second time and could only see names.
 func dispatchPerConstructParser(slice FunctionSlice, origin string, conceptRegistry memoryNodes.Registry) (*Function, error) {
-	return tryParseNewFunctionSyntax(slice.Name, string(slice.Kind), slice.Source, origin, conceptRegistry)
+	return tryParseFunctionSlice(slice.Name, string(slice.Kind), slice.Source, origin, conceptRegistry, slice.Line, slice.BodyOffset)
 }

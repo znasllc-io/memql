@@ -79,7 +79,7 @@ var scaffoldAnnotations = map[string]string{
 	"Logic/description":        `@description("The headline a ticket shows: its title, or a placeholder when it has none.")`,
 	"Automation/description":   `@description("When a node joins the cluster, open a ticket to welcome it.")`,
 	"Automation/trigger":       `@trigger(event="node.created", concept="v1:cluster:node", partition="*")`,
-	"Automation/filter":        `@filter(payload.nodeType == "agent")`,
+	"Automation/filter":        `@filter(row => row.nodeType == "agent")`,
 	"Action/description":       `@description("Read a ticket's attachment from the runner's workspace.")`,
 	"Capability/description":   `@description("List the entries of a directory on the runner's workspace.")`,
 	"Spec/description":         `@description("Matches the tickets that are still open.")`,
@@ -270,10 +270,10 @@ func scaffoldSkeleton(p annotations.Placement, ann string) (fixture, src string,
 	line := ann + "\n"
 	switch p.Receiver {
 	case annotations.Query:
-		filter, tail := `status == "open"`, "  sort \"row.createdAt\", \"desc\"\n  paginate 20\n"
+		filter, tail := `row => row.status == "open"`, "  sort \"row.createdAt\", \"desc\"\n  paginate 20\n"
 		switch p.Name {
 		case "actor":
-			filter = `ownerUserId == actor.userId && status == "open"`
+			filter = `row => row.ownerUserId == actor.userId && row.status == "open"`
 		case "unbounded":
 			tail = ""
 		case "latestMode":
@@ -318,7 +318,7 @@ func scaffoldSkeleton(p annotations.Placement, ann string) (fixture, src string,
 
 	case annotations.Spec:
 		return scaffoldTicket, scaffoldDoc(p, "Matches the tickets that are still open.") + line +
-			"spec ticket isOpenTicket" + s + " {\n  return status == \"open\"\n}\n", nil
+			"spec ticket isOpenTicket" + s + " = row => row.status == \"open\"\n", nil
 
 	case annotations.Tool:
 		if p.Name == "destructive" || p.Name == "requiresConfirmation" {
@@ -426,7 +426,7 @@ func scaffoldSkeleton(p annotations.Placement, ann string) (fixture, src string,
 		src := scaffoldDoc(p, "A support ticket raised by a customer.") + line + strings.TrimPrefix(scaffoldTicket, "/// A support ticket: the row this cell's cases read and write.\n")
 		switch p.Name {
 		case "composable":
-			src += "\n/// The tickets a composed file is made from.\nquery ticket ticketsToCompose {\n  filter status == \"open\"\n  sort \"row.createdAt\", \"desc\"\n  paginate 20\n}\n"
+			src += "\n/// The tickets a composed file is made from.\nquery ticket ticketsToCompose {\n  filter row => row.status == \"open\"\n  sort \"row.createdAt\", \"desc\"\n  paginate 20\n}\n"
 		case "namespace":
 			// A namespace that is not the directory's needs the directory's
 			// pin to agree (#2614); the pin sits beside the case.
@@ -446,38 +446,39 @@ func scaffoldSkeleton(p annotations.Placement, ann string) (fixture, src string,
 		return "", "/// " + doc + "\nconcept ticket {\n" + scaffoldColumns("  ", fields) + "}\n", nil
 
 	case annotations.ArgsField:
-		arg, filter := [2]string{"status", "string  " + ann}, "status == args.status"
+		arg, filter := [2]string{"status", "string  " + ann}, "row => row.status == args.status"
 		switch p.Name {
 		case "maxLength":
-			arg, filter = [2]string{"title", "string  " + ann}, "title == args.title"
+			arg, filter = [2]string{"title", "string  " + ann}, "row => row.title == args.title"
 		case "maximum":
-			arg, filter = [2]string{"priority", "int  " + ann}, "priority <= args.priority"
+			arg, filter = [2]string{"priority", "int  " + ann}, "row => row.priority <= args.priority"
 		case "minimum":
-			arg, filter = [2]string{"priority", "int  " + ann}, "priority >= args.priority"
+			arg, filter = [2]string{"priority", "int  " + ann}, "row => row.priority >= args.priority"
 		case "pattern":
-			arg, filter = [2]string{"region", "string  " + ann}, "region == args.region"
+			arg, filter = [2]string{"region", "string  " + ann}, "row => row.region == args.region"
 		}
 		return scaffoldTicketWith([2]string{"priority", "int"}, [2]string{"region", "string"}),
 			"/// The tickets that match, newest first.\nquery ticket matchingTickets" + s + " {\n" + scaffoldArgs(arg) + "  filter " + filter +
 				"\n  sort \"row.createdAt\", \"desc\"\n  paginate 20\n}\n", nil
 
 	case annotations.ToolField:
-		// A query handler reads a tool field only through a $args.<field>
-		// placeholder, and a function handler receives every field as an
-		// argument, so each skeleton forwards every field its tool declares.
+		// A query handler reads a tool field as args.<field> (the edition-2026
+		// spelling of the retired $args.<field> placeholder), and a function
+		// handler receives every field as an argument, so each skeleton
+		// forwards every field its tool declares.
 		// The list handler is the shipped form: an outer paginate() driven
 		// by the caller, over a query that sorts and does not paginate itself
 		// (dsl/memql/tools.memql, searchUsers).
 		fixture := scaffoldTicket + "\n/// The tickets in one status, newest first; every status when none is named.\nquery ticket ticketsToList" + s + " {\n" +
-			scaffoldArgs([2]string{"status", "string"}) + "  filter when(args.status) { status == args.status }\n  sort \"row.createdAt\", \"desc\"\n}\n"
+			scaffoldArgs([2]string{"status", "string"}) + "  filter row => args.status == nil || row.status == args.status\n  sort \"row.createdAt\", \"desc\"\n}\n"
 		field := [2]string{"limit", "integer  " + ann + `  @description("The most tickets to return.")`}
-		handler := "paginate(query ticketsToList" + s + "(), $args.limit)"
+		handler := "paginate(query ticketsToList" + s + "(), args.limit)"
 		switch p.Name {
 		case "description":
 			field = [2]string{"limit", "integer  " + ann}
 		case "enum", "required":
 			field = [2]string{"status", "string  " + ann + `  @description("Which tickets to list.")`}
-			handler = "paginate(query ticketsToList" + s + "(status: $args.status), 20)"
+			handler = "paginate(query ticketsToList" + s + "(status: args.status), 20)"
 		case "autoInjected":
 			// The runtime stamps agentId (with ownerUserId and partitionId)
 			// over whatever the model sent; the function handler receives it

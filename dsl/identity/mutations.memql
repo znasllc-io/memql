@@ -117,7 +117,7 @@ mutate account archiveAccount {
 //     unchecked HERE (the handler checks it by reading accountById as
 //     the caller, where @rowAuthz decides); a raw call naming someone
 //     else's account produces an inert row in the CALLER's own list,
-//     because both reads gate on userId==actor.userId.
+//     because both reads gate on `row.userId == actor.userId`.
 //
 //   revoke -- a caller-supplied identityId with no actor check, which
 //     is exactly the shape revokePATIdentity and
@@ -742,7 +742,7 @@ mutate authCode createAuthCode {
 // column. redirectURIsJSON is a JSON array string (the engine doesn't
 // support nested arrays of objects in concept fields, mirroring
 // clusterSettings.registeredClientsJSON). The optional grant /
-// response / auth-method strings default to "" via coalesce.
+// response / auth-method strings default to "" via `??`.
 //
 // Arguments:
 //   clientId                 (string)            - Public client_id (id of the row)
@@ -949,33 +949,33 @@ mutate clusterSettings createClusterSettings {
     authoredAutomationsEnabled bool
   }
   insert {
-    args.id
-    clusterDomain: args.clusterDomain ?? ""
-    brandName: args.brandName ?? ""
-    brandPrimaryColor: args.brandPrimaryColor ?? ""
-    brandLogoDataURI: args.brandLogoDataURI ?? ""
-    brandIconDataURI: args.brandIconDataURI ?? ""
-    args.registrationMode
-    registrationDomains: args.registrationDomains ?? ""
-    internalDomains: args.internalDomains ?? ""
-    args.internalDefaultRole
-    registeredClientsJSON: args.registeredClientsJSON ?? ""
-    accessRequestNotifyEmails: args.accessRequestNotifyEmails ?? ""
-    accessRequestNotifyThrottleMins: 5
-    bootstrapEmail: args.bootstrapEmail ?? ""
-    bootstrapFirstName: args.bootstrapFirstName ?? ""
-    bootstrapLastName: args.bootstrapLastName ?? ""
-    bootstrapPhone: args.bootstrapPhone ?? ""
-    bootstrapPrimaryRole: args.bootstrapPrimaryRole ?? ""
-    bootstrapGender: args.bootstrapGender ?? ""
-    bootstrapBirthdate: args.bootstrapBirthdate ?? ""
-    bootstrappedAt: args.bootstrappedAt ?? ""
-    accessTokenTTLSeconds: args.accessTokenTTLSeconds ?? 0
-    refreshTokenTTLSeconds: args.refreshTokenTTLSeconds ?? 0
-    magicLinkTTLSeconds: args.magicLinkTTLSeconds ?? 0
-    invitationTTLDays: args.invitationTTLDays ?? 0
-    refreshCookieSameSite: args.refreshCookieSameSite ?? ""
-    authoredAutomationsEnabled: args.authoredAutomationsEnabled ?? true
+    accept { id, registrationMode, internalDefaultRole }
+    stamp {
+      clusterDomain: args.clusterDomain ?? ""
+      brandName: args.brandName ?? ""
+      brandPrimaryColor: args.brandPrimaryColor ?? ""
+      brandLogoDataURI: args.brandLogoDataURI ?? ""
+      brandIconDataURI: args.brandIconDataURI ?? ""
+      registrationDomains: args.registrationDomains ?? ""
+      internalDomains: args.internalDomains ?? ""
+      registeredClientsJSON: args.registeredClientsJSON ?? ""
+      accessRequestNotifyEmails: args.accessRequestNotifyEmails ?? ""
+      accessRequestNotifyThrottleMins: 5
+      bootstrapEmail: args.bootstrapEmail ?? ""
+      bootstrapFirstName: args.bootstrapFirstName ?? ""
+      bootstrapLastName: args.bootstrapLastName ?? ""
+      bootstrapPhone: args.bootstrapPhone ?? ""
+      bootstrapPrimaryRole: args.bootstrapPrimaryRole ?? ""
+      bootstrapGender: args.bootstrapGender ?? ""
+      bootstrapBirthdate: args.bootstrapBirthdate ?? ""
+      bootstrappedAt: args.bootstrappedAt ?? ""
+      accessTokenTTLSeconds: args.accessTokenTTLSeconds ?? 0
+      refreshTokenTTLSeconds: args.refreshTokenTTLSeconds ?? 0
+      magicLinkTTLSeconds: args.magicLinkTTLSeconds ?? 0
+      invitationTTLDays: args.invitationTTLDays ?? 0
+      refreshCookieSameSite: args.refreshCookieSameSite ?? ""
+      authoredAutomationsEnabled: args.authoredAutomationsEnabled ?? true
+    }
   }
 }
 
@@ -2680,7 +2680,7 @@ mutate accountEntitlement setAccountEntitlement {
   insert {
     accept { accountId, tier }
     stamp {
-      id: concat("accountEntitlement-", hash(args.accountId))
+      id: "accountEntitlement-" + hash(args.accountId)
       accountKind: args.accountKind ?? "user"
       maxConcurrentTasks: args.maxConcurrentTasks ?? 0
       note: args.note ?? ""
@@ -3301,7 +3301,7 @@ mutate githubConnectState consumeGithubConnectState {
 /// concept deliberately does not have. v1:identity:group is UNOWNED (epic
 /// memql#5165, D2): ownerUserId is always empty because the row is the
 /// deployment's record, not a person's. So there is no field for
-/// `ownerUserId==actor.userId` to compare against, and stamping the caller in
+/// `row.ownerUserId == actor.userId` to compare against, and stamping the caller in
 /// would make the group readable by them alone and by no other admin -- the
 /// opposite of what a shared registry is. Authorization is the caller's
 /// capability and rank, checked in Go by integrations/groups before this runs.

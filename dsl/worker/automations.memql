@@ -41,7 +41,7 @@ use work.builtins.{ cancelComputerUseRuns }
 /// INTERNAL ORIGIN, which this automation carries because it is tree-loaded AND its payload is the
 /// engine's own -- the pair memql#2888 requires, and the one its predecessor was attacked through.
 @trigger(event="node.updated", concept="v1:identity:user", partition="*")
-@filter(payload.preferences.computerUseEnabled == false)
+@filter(row => row.preferences.computerUseEnabled == false)
 automation killSwitchCancelsComputerUseRuns {
   // The trigger payload binds INTO this contract at fire time, and the field
   // is then read BARE. Its predecessor reached for `args.event.payload.id ??

@@ -43,7 +43,7 @@ func dependencyFixture() (*PlannerAgentLoop, *workDependencyEngine, authoringBun
 	row := func(id, bundle, kind, name, source string) map[string]any {
 		return map[string]any{"id": id, "ownerUserId": "v1:identity:user:alice", "bundleId": bundle, "kind": kind, "name": name, "source": source, "status": "active", "catalogued": true, "targetNamespace": "authored"}
 	}
-	query := row("q", "b", "query", "reused", "use identity.concepts.{ user }\n@actor\nquery user reused { filter row.id==actor.userId shape reusedShape }")
+	query := row("q", "b", "query", "reused", "use identity.concepts.{ user }\n@actor\nquery user reused {\n  filter row => row.id == actor.userId\n  shape reusedShape\n}")
 	shape := row("s", "b", "shape", "reusedShape", "use identity.concepts.{ user }\n@row\nshape user reusedShape { row.id }")
 	logic := row("l", "c", "logic", "transitive", "logic transitive { body { return 42 } }")
 	e := &workDependencyEngine{

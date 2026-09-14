@@ -8,7 +8,7 @@
       "file": "with-empty-parentheses.memql",
       "verdict": "refuse_parse",
       "code": "annotation_form",
-      "message": "@filter on an automation takes one string or an expression"
+      "message": "@filter on an automation takes an expression"
     }
   ]
 }

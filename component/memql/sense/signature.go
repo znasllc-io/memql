@@ -1,40 +1,44 @@
 package sense
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/znasllc-io/memql/component/language/functions"
+)
 
 // SignatureHelp returns function signature help at a cursor position.
 func (s *Service) SignatureHelp(source string, line, col int) *SignatureResult {
 	ctx := analyzeCursorContext(source, line, col)
 
 	if ctx.Kind != ContextFuncCallArgs || ctx.ParentFunc == "" {
-		return nil
+		// Inside a call, the completion context can be something else -- the
+		// member access in `references(r => r.` is a field-access context -- and
+		// the call is still the one being typed. Find it by its bracket.
+		callee, argIndex, ok := enclosingCall(source, line, col)
+		if !ok {
+			return nil
+		}
+		ctx.ParentFunc, ctx.ArgIndex = callee, argIndex
 	}
 
-	// 0. Relationship traversal wrappers. They are modelled HERE rather than in
-	// dslspec.Builtins because they are the only callables with two arities and
-	// nothing in that model can express one: Builtin carries a single Signature
-	// string and a single flat Params list, and a CategoryBuiltinExpr entry for
-	// a name the parser handles as a wrapper fails the dslspec drift pin
-	// outright. Sense's own SignatureResult already has the LSP overload shape
-	// (a Signatures slice plus ActiveSignature), so two entries fit here
-	// natively (memql#3661).
-	if sigs, ok := relationshipWrapperSignatures(ctx.ParentFunc); ok {
+	// 1. The v1 function catalog (memql#5365): a function, or a method called
+	// on a value (`row.tags.any(`). One signature per entry, straight from the
+	// catalog -- including the relationship traversals, whose optional leading
+	// `as` label the catalog states with Param.Optional. Before the catalog the
+	// traversals were modelled here as two hand-kept readings each, because the
+	// builtin table had no way to say "optional"; one signature with an
+	// optional first parameter says the same thing, and the active parameter
+	// below skips the label when the call leaves it out.
+	if f, ok := s.catalogCallee(ctx, line); ok {
 		return &SignatureResult{
-			Signatures:      sigs,
-			ActiveSignature: activeRelationshipSignature(sigs, ctx),
-			ActiveParameter: ctx.ArgIndex,
+			Signatures:      []Signature{catalogSignature(f)},
+			ActiveSignature: 0,
+			ActiveParameter: activeCatalogParam(f, ctx.ArgIndex, firstArgText(source, line, col)),
 		}
 	}
 
-	// 1. Builtin functions. Reached only for a name the wrapper table above does
-	// not own -- a name in BOTH is served there, with this reading appended as
-	// its second overload (see builtinSignature).
-	//
-	// This comment used to read "1. Check builtin functions first", which
-	// stopped being true when memql#3661 inserted step 0 above it. The stale
-	// word was load-bearing in the wrong direction: it is exactly what a reader
-	// checks when signature help returns something other than the builtin's
-	// own reading, and it told them to look somewhere else (memql#3779).
+	// 2. Builtins the catalog does not describe: the parser's context accessors
+	// and the runtime-registry builtins (dslspec.Builtins).
 	if def, ok := BuiltinFunctions[ctx.ParentFunc]; ok {
 		return &SignatureResult{
 			Signatures:      []Signature{builtinSignature(def)},
@@ -43,7 +47,7 @@ func (s *Service) SignatureHelp(source string, line, col int) *SignatureResult {
 		}
 	}
 
-	// 2. Check user-defined functions from registry. Build the signature from
+	// 3. Check user-defined functions from registry. Build the signature from
 	// the function's declared `args { ... }` schema (projected onto fn.Args),
 	// so each parameter is highlightable as the caller types.
 	if s.registries != nil {
@@ -61,6 +65,136 @@ func (s *Service) SignatureHelp(source string, line, col int) *SignatureResult {
 	}
 
 	return nil
+}
+
+// catalogCallee resolves the call the cursor sits in to a catalog entry: a
+// function by its name, or -- for a dotted path -- the method its last segment
+// names.
+func (s *Service) catalogCallee(ctx CursorContext, line int) (functions.Function, bool) {
+	name := ctx.ParentFunc
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		return s.resolveMethod(ctx, name[:i], name[i+1:], line)
+	}
+	return functions.Lookup(name)
+}
+
+// catalogSignature projects a catalog entry onto a Signature. Each parameter's
+// label is its spelling inside the signature label (Param.String), which is
+// how the client finds the text to highlight.
+func catalogSignature(f functions.Function) Signature {
+	params := make([]Parameter, len(f.Params))
+	for i, p := range f.Params {
+		params[i] = Parameter{Label: p.String(), Documentation: catalogParamDoc(f, p)}
+	}
+	return Signature{Label: f.Signature(), Documentation: f.Doc, Parameters: params}
+}
+
+// catalogParamDoc documents the parameters whose meaning is not in their type:
+// a traversal's label and match. The label's vocabulary is OPEN -- any
+// lowerCamelCase `as` label an author chose -- so it names no set to pick
+// from (memql#3652).
+func catalogParamDoc(f functions.Function, p functions.Param) string {
+	if f.Returns != functions.TypeRows {
+		return ""
+	}
+	switch p.Name {
+	case "label":
+		return "Optional. The `as` domain label to follow, such as \"assignedTo\": only the edges declared with that label are followed. The vocabulary is open -- any lowerCamelCase label the author chose -- so there is no list to pick from."
+	case "match":
+		return "A predicate over the rows the traversal starts from."
+	}
+	return ""
+}
+
+// activeCatalogParam picks the parameter to highlight. For an entry whose FIRST
+// parameter is optional -- a traversal's `as` label -- the call's first
+// argument decides: a string literal is the label, so the arguments line up
+// with the parameters; anything else means the label was left out, and every
+// argument is one parameter further along. An empty first argument has not
+// decided yet and highlights the label, which the signature marks optional.
+func activeCatalogParam(f functions.Function, argIndex int, firstArg string) int {
+	active := argIndex
+	if len(f.Params) > 0 && f.Params[0].Optional {
+		first := strings.TrimSpace(firstArg)
+		if first != "" && !strings.HasPrefix(first, `"`) {
+			active = argIndex + 1
+		}
+	}
+	if n := len(f.Params); n > 0 && active >= n {
+		active = n - 1
+	}
+	return active
+}
+
+// enclosingCall finds the innermost call whose argument list the cursor sits
+// in, by its open bracket: the called name and the argument the cursor is in.
+// A grouping parenthesis (`(a || b`) is looked through; an annotation's
+// parentheses end the search, since an annotation is not a call.
+func enclosingCall(source string, line, col int) (callee string, argIndex int, ok bool) {
+	before := textBeforeCursor(source, line, col)
+	scan := scanText(before)
+	for i := len(scan.opens) - 1; i >= 0; i-- {
+		ob := scan.opens[i]
+		switch {
+		case ob.ch != '(' || (ob.callee == "" && ob.annotation == ""):
+			continue
+		case ob.annotation != "":
+			return "", 0, false
+		}
+		return ob.callee, topLevelCommas(before[ob.offset+1:]), true
+	}
+	return "", 0, false
+}
+
+// topLevelCommas counts the commas in args that are not inside a nested
+// bracket or a string.
+func topLevelCommas(args string) int {
+	n, depth, inStr := 0, 0, false
+	for j := 0; j < len(args); j++ {
+		c := args[j]
+		switch {
+		case inStr && c == '\\':
+			j++
+		case c == '"':
+			inStr = !inStr
+		case inStr:
+		case c == '(' || c == '[' || c == '{':
+			depth++
+		case c == ')' || c == ']' || c == '}':
+			depth--
+		case c == ',' && depth == 0:
+			n++
+		}
+	}
+	return n
+}
+
+// firstArgText returns the text of the first argument of the call the cursor
+// sits in, up to its first top-level comma or the cursor.
+func firstArgText(source string, line, col int) string {
+	before := textBeforeCursor(source, line, col)
+	scan := scanText(before)
+	for i := len(scan.opens) - 1; i >= 0; i-- {
+		if scan.opens[i].ch != '(' {
+			continue
+		}
+		args := before[scan.opens[i].offset+1:]
+		depth := 0
+		for j := 0; j < len(args); j++ {
+			switch args[j] {
+			case '(', '[', '{':
+				depth++
+			case ')', ']', '}':
+				depth--
+			case ',':
+				if depth == 0 {
+					return args[:j]
+				}
+			}
+		}
+		return args
+	}
+	return ""
 }
 
 // formatArgList renders declared args as "name type[, ...]" for a signature label.
@@ -98,104 +232,11 @@ func argLabel(a ArgInfo) string {
 	return label
 }
 
-// relationshipWrapperArities names the traversal functions and how many
-// readings each has (memql#3656).
-//
-// Sourced deliberately as its own table rather than from
-// parser.CallableRelationshipWrappers: that list is name-only and arity-blind,
-// so it cannot say which functions took the label form. `contains` is absent
-// because its two-argument slot is the substring search, and `ids` is
-// single-arity because it follows no edge and refuses a label outright.
-var relationshipWrapperArities = map[string]struct {
-	labelled bool
-	doc      string
-}{
-	"parentOf":   {labelled: true, doc: "Follow `parent` relationships upward, to the rows this one points at."},
-	"childOf":    {labelled: true, doc: "Follow `parent` relationships downward, to the rows that point at this one."},
-	"aliasOf":    {labelled: true, doc: "Follow `alias` relationships to the rows this one aliases."},
-	"equals":     {labelled: true, doc: "Follow `equals` relationships -- identity equivalence, the sibling of alias."},
-	"references": {labelled: true, doc: "Follow `references` relationships -- the plain foreign-key edge."},
-	"owns":       {labelled: true, doc: "Follow `owns` relationships, in whichever direction they are declared."},
-	"createdBy":  {labelled: true, doc: "Follow `createdBy` relationships to the creator row."},
-	"contains":   {labelled: false, doc: "Expand a `contains` collection membership array.\n\nTakes no `as` label: the two-argument form is already the substring search contains(text, substr)."},
-	"ids":        {labelled: false, doc: "Project rows to id-only nodes (no payload, no schema).\n\nTakes no `as` label: ids() follows no relationship, so a label on it is refused rather than ignored."},
-}
-
-// relationshipWrapperSignatures returns the readings of a traversal function:
-// the unscoped form, and -- for the seven that take it -- the label-scoped one.
-func relationshipWrapperSignatures(name string) ([]Signature, bool) {
-	entry, ok := relationshipWrapperArities[name]
-	if !ok {
-		return nil, false
-	}
-
-	unscoped := Signature{
-		Label:         name + "(expr)",
-		Documentation: entry.doc,
-		Parameters: []Parameter{
-			{Label: "expr", Documentation: "The rows to traverse FROM."},
-		},
-	}
-	if !entry.labelled {
-		// An unlabelled wrapper whose name is ALSO a builtin has a second real
-		// reading, and it is the builtin's. `contains` is the case and the
-		// reason the entry is unlabelled at all -- its own doc says so: "the
-		// two-argument form is already the substring search contains(text,
-		// substr)". Returning only the traversal reading dropped a grammar-
-		// backed arity that BuiltinFunctions already carries, with parameter
-		// docs, on the one name where the table itself records that the other
-		// arity means something else (memql#3779).
-		//
-		// Second rather than first: activeRelationshipSignature highlights
-		// index 1 past the first comma, and past a comma `contains` can ONLY be
-		// the two-argument form -- the traversal takes no label and no second
-		// argument. So the existing rule already picks the right reading with
-		// no change.
-		//
-		// DERIVED from the two tables rather than hand-listed, because a name
-		// in both always has both readings and offering one would be the same
-		// bug under a different name. Which names those are is pinned by
-		// TestWrapperBuiltinOverlapIsPinned, so a new collision arrives as a
-		// test diff to confirm rather than as a surprise.
-		if def, isBuiltin := BuiltinFunctions[name]; isBuiltin {
-			return []Signature{unscoped, builtinSignature(def)}, true
-		}
-		return []Signature{unscoped}, true
-	}
-
-	labelled := Signature{
-		Label: name + "(as, expr)",
-		Documentation: entry.doc + "\n\nScoped to one `as` domain label: only the edges whose " +
-			"declaration carries that label are followed. The label vocabulary is OPEN -- any " +
-			"lowerCamelCase identifier the DSL author chose -- so there is no list to pick from.",
-		Parameters: []Parameter{
-			{Label: "as", Documentation: "The `as` domain label to follow, e.g. \"assignedTo\". Edges declaring no label, or a different one, are skipped."},
-			{Label: "expr", Documentation: "The rows to traverse FROM."},
-		},
-	}
-	// Unscoped first: it is the form every traversal predating memql#3656
-	// uses, and the one a reader should see by default.
-	return []Signature{unscoped, labelled}, true
-}
-
-// builtinSignature projects a BuiltinDef onto a Signature. Factored out
-// because two call sites build it -- the builtin branch of SignatureHelp and
-// the second overload of an unlabelled wrapper that is also a builtin -- and a
-// reader comparing the two should not have to check whether they agree.
+// builtinSignature projects a BuiltinDef onto a Signature.
 func builtinSignature(def BuiltinDef) Signature {
 	return Signature{
 		Label:         def.Signature,
 		Documentation: def.Doc,
 		Parameters:    def.Parameters,
 	}
-}
-
-// activeRelationshipSignature picks which reading to highlight. Past the first
-// comma the call can only be the label-scoped form, so highlight that one;
-// before it, show the unscoped reading.
-func activeRelationshipSignature(sigs []Signature, ctx CursorContext) int {
-	if len(sigs) > 1 && ctx.ArgIndex > 0 {
-		return 1
-	}
-	return 0
 }

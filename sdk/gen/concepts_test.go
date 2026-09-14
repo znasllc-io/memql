@@ -37,14 +37,14 @@ concept state {
 @description("Same-namespace bind")
 query space querySpaceLocal {
   args { ownerId string @required }
-  filter ownerUserId==args.ownerId
+  filter row => row.ownerUserId == args.ownerId
   shape spaceCard
 }
 
 @description("Sub-namespace bind")
 query state queryTurnState {
   args { turnId string @required }
-  filter turnId==args.turnId
+  filter row => row.turnId == args.turnId
   shape stateCard
 }
 `)
@@ -56,7 +56,7 @@ use cognition.concepts.{ space }
 @description("Cross-namespace bind")
 query space querySpaceCrossNs {
   args { ownerId string @required }
-  filter ownerUserId==args.ownerId
+  filter row => row.ownerUserId == args.ownerId
   shape spaceCard
 }
 `)
@@ -97,7 +97,7 @@ query widget queryWidgetByCanonical {
   args {
     widgetId string @required @pattern("^v1:[a-z0-9]+:[a-z0-9_]+:[a-zA-Z0-9_-]{1,128}$")
   }
-  filter id==args.widgetId
+  filter row => row.id == args.widgetId
   shape widgetCard
 }
 `)
@@ -115,7 +115,7 @@ query widget queryWidgetBare {
   args {
     widgetId string @required @pattern("^[a-zA-Z0-9_-]{1,128}$")
   }
-  filter id==args.widgetId
+  filter row => row.id == args.widgetId
   shape widgetCard
 }
 `)
@@ -142,7 +142,7 @@ concept participant {
 @description("List participants")
 query participant spaceParticipants {
   args { spaceId string @required }
-  filter spaceId==args.spaceId
+  filter row => row.spaceId == args.spaceId
   shape participantCard
 }
 `)
@@ -262,7 +262,7 @@ concept participant { spaceId string @required }
 @description("List participants for a space.")
 query participant spaceParticipants {
   args { spaceId string @required }
-  filter spaceId==args.spaceId
+  filter row => row.spaceId == args.spaceId
   shape participantCard
 }
 `)

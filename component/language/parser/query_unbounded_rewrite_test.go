@@ -15,14 +15,14 @@ func TestQueryUnboundedInjectsExplicitPaginate(t *testing.T) {
 	source := `@unbounded("small bounded catalog -- never more than a handful of rows")
 @description("All providers.")
 query provider queryAllProviders {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   providerFull
 }`
 	out, err := NormaliseQuerySource(source)
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := "paginate(concept==provider;isActiveRecord, " + strconv.Itoa(UnboundedPaginateWindow) + ")"
+	want := "paginate(concept==provider && (row => isActiveRecord(row)), " + strconv.Itoa(UnboundedPaginateWindow) + ")"
 	if !strings.Contains(out, want) {
 		t.Errorf("expected injected paginate %q, got:\n%s", want, out)
 	}
@@ -40,7 +40,7 @@ func TestQueryUnboundedRequiresReason(t *testing.T) {
 	source := `@unbounded
 @description("missing reason")
 query provider queryAllProviders {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   providerFull
 }`
 	lowered, err := NormaliseQuerySource(source)
@@ -58,7 +58,7 @@ query provider queryAllProviders {
 func TestQueryUnboundedEmptyReasonRejected(t *testing.T) {
 	source := `@unbounded("")
 query provider queryAllProviders {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   providerFull
 }`
 	if _, err := NormaliseQuerySource(source); err == nil {
@@ -69,7 +69,7 @@ query provider queryAllProviders {
 func TestQueryUnboundedRejectsPaginateCombo(t *testing.T) {
 	source := `@unbounded("conflicts with paginate")
 query provider queryAllProviders {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   paginate 10
   shape   providerFull
 }`
@@ -81,7 +81,7 @@ query provider queryAllProviders {
 func TestQueryUnboundedRejectsSortCombo(t *testing.T) {
 	source := `@unbounded("conflicts with sort")
 query provider queryAllProviders {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   sort    "createdAt", "desc"
   shape   providerFull
 }`
@@ -95,14 +95,14 @@ query provider queryAllProviders {
 func TestQueryWithoutUnboundedUnchanged(t *testing.T) {
 	source := `@description("plain list query")
 query space queryActiveSpaces {
-  filter  payload.active==true
+  filter  row => row.active == true
   shape   spaceFull
 }`
 	out, err := NormaliseQuerySource(source)
 	if err != nil {
 		t.Fatalf("NormaliseQuerySource: %v", err)
 	}
-	want := `shape(concept==space;payload.active==true, "spaceFull")`
+	want := `shape(concept==space && (row => row.active == true), "spaceFull")`
 	if !strings.Contains(out, want) {
 		t.Errorf("plain query rewrite perturbed, got:\n%s", out)
 	}

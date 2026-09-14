@@ -1,5 +1,5 @@
 /// List the tickets, newest first.
-@handler(type="query", query="paginate(query ticketsToListRequired(status: $args.status), 20)")
+@handler(type="query", query="paginate(query ticketsToListRequired(status: args.status), 20)")
 tool listTicketsRequired {
   status  string  @required  @description("Which tickets to list.")
 }

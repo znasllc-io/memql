@@ -40,6 +40,7 @@ import (
 	"strings"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // resolveSpecBindings finalizes every registered spec + trait. Per-spec
@@ -103,24 +104,34 @@ func resolveOneSpecBinding(spec *Spec, shapes *ShapeRegistry, concepts memoryNod
 		// shapes vs concepts at authoring time; here a name lookup against
 		// the shape registry first, then concepts, is sufficient for the
 		// functional rewrite).
-		if shape, ok := shapeLookup(shapes, spec.BoundName); ok {
+		if shape, ok := specBindingShape(shapes, spec); ok {
 			kind = shapeSpecKind(shape)
 			mapper, bindErr = shapeFieldMapper(spec.BoundName, shape)
 			if bindErr != nil {
 				return bindErr
 			}
-		} else if concept, err := resolveConceptByTrailingSegment(concepts, spec.BoundName); err == nil && concept != nil {
+		} else if concept, err := specBindingConcept(concepts, spec); err == nil && concept != nil {
 			kind = SpecKindRow
 			mapper = conceptFieldMapper(concept)
 		} else {
-			return fmt.Errorf("binding %q resolves to neither an imported shape nor a concept -- check the file-top `use` import (use ...shapes.{ %s } for a shape, use ...concepts.{ %s } for a concept)", spec.BoundName, spec.BoundName, spec.BoundName)
+			return specBindingRefusal(spec, shapes, concepts)
 		}
 	}
 
+	// An edition-2026 body (memql#5366) is NOT rewritten here: it has no Expr
+	// yet, and when it does it will not need one -- Lower emits the final
+	// access forms (`payload.<f>`, the canonical intrinsic, the shape's stored
+	// path) directly, and its fields are read through the lambda parameter,
+	// never bare, so there is no bare field for a mapper to find. Its binding
+	// is resolved (the mapper above refuses a binding that does not resolve)
+	// and its kind is set, which is what the Init pass lowers it against.
+	spec.Kind = kind
+	if spec.Lambda != nil {
+		return nil
+	}
 	if err := rewriteSpecFields(spec.Expr, mapper); err != nil {
 		return err
 	}
-	spec.Kind = kind
 	spec.ExprSource = canonicalExpression(spec.Expr)
 	return nil
 }
@@ -141,6 +152,173 @@ func shapeLookup(shapes *ShapeRegistry, name string) (*ShapeDefinition, bool) {
 		return nil, false
 	}
 	return shapes.Get(name)
+}
+
+// specBindingShape and specBindingConcept resolve a spec's bound name the way
+// a query's signature concept resolves (memql#5366):
+//
+//  1. through the spec's file-top `use` imports -- an import that names the
+//     bound name decides what it is and where, as it does for a query
+//     (resolveUseDeclarations: the import's first segment is the namespace
+//     hint). This is the only step an AUTHORED spec's stored row can repeat at
+//     re-hydration, because its source is all that is stored: a bundle's spec
+//     slice carries the bundle's import preamble, so the row does too, and the
+//     boot recompile binds exactly as the author's define did;
+//  2. in the spec's OWN domain -- a shape the domain declares, a concept of
+//     the domain's namespace, the way a query's signature concept resolves
+//     ambiently (resolveBareConceptNameWithNamespace). Without it a bound name
+//     two domains both declare resolved to neither (memql#5369, found by the
+//     conformance corpus). An authored spec has no own domain -- its origin
+//     names no directory -- so it never depends on this step to bind;
+//  3. across the whole tree, by a unique name.
+//
+// A name several domains declare, with no import to choose, is refused naming
+// the imports that would (specBindingRefusal) -- at define and at promote,
+// never passed there to be quarantined at the next boot.
+func specBindingShape(shapes *ShapeRegistry, spec *Spec) (*ShapeDefinition, bool) {
+	if shapes == nil || spec == nil {
+		return nil, false
+	}
+	if use, source, ok := specBindingImport(spec); ok {
+		if importKind(use) != "shapes" {
+			// Imported as something else -- a concept: not a shape, whatever
+			// shape happens to share the name.
+			return nil, false
+		}
+		if shape, ok := shapes.Get(QualifyConstruct(importNamespace(use), source)); ok {
+			return shape, true
+		}
+		return shapeLookup(shapes, source)
+	}
+	if ns := ConstructNamespaceForOrigin(spec.Origin); ns != "" {
+		if shape, ok := shapes.Get(QualifyConstruct(ns, spec.BoundName)); ok {
+			return shape, true
+		}
+	}
+	return shapeLookup(shapes, spec.BoundName)
+}
+
+// specBindingConcept is specBindingShape's concept half.
+func specBindingConcept(concepts memoryNodes.Registry, spec *Spec) (*memoryNodes.Concept, error) {
+	if spec == nil {
+		return nil, fmt.Errorf("no spec to resolve a binding for")
+	}
+	if concepts == nil {
+		return nil, fmt.Errorf("no concept registry to resolve binding %q in", spec.BoundName)
+	}
+	if use, source, ok := specBindingImport(spec); ok {
+		if importKind(use) != "concepts" {
+			return nil, fmt.Errorf("binding %q is imported from %s, which is not a concepts module", spec.BoundName, use.Path)
+		}
+		nsHint := ""
+		if len(use.Parts) > 0 {
+			nsHint = use.Parts[0]
+		}
+		id, err := NewConceptResolver(concepts).resolveBareConceptNameWithNamespace(source, nsHint)
+		if err != nil {
+			return nil, fmt.Errorf("binding %q imported from %s: %w", spec.BoundName, use.Path, err)
+		}
+		return concepts.Get(id)
+	}
+	if ns := strings.ReplaceAll(ConstructNamespaceForOrigin(spec.Origin), "/", ":"); ns != "" {
+		var own *memoryNodes.Concept
+		found := 0
+		for _, c := range concepts.List() {
+			if c == nil || idNamespace(c.Name) != ns {
+				continue
+			}
+			if i := strings.LastIndex(c.Name, ":"); i >= 0 && c.Name[i+1:] == spec.BoundName {
+				own = c
+				found++
+			}
+		}
+		if found == 1 {
+			return own, nil
+		}
+	}
+	return resolveConceptByTrailingSegment(concepts, spec.BoundName)
+}
+
+// specBindingImport finds the file-top import that brings a spec's bound name
+// into scope -- `use lowertwin.concepts.{ ticket }` for `spec ticket ...`, or
+// `{ card as ticket }` -- returning the import and the name it imports under
+// (the SOURCE name, for an aliased one). ok is false when no import names it.
+func specBindingImport(spec *Spec) (*languageParser.UseDeclaration, string, bool) {
+	if spec == nil || strings.TrimSpace(spec.BoundName) == "" {
+		return nil, "", false
+	}
+	for _, use := range spec.Uses {
+		if use == nil {
+			continue
+		}
+		for _, source := range use.Names {
+			if use.LocalNameFor(source) == spec.BoundName {
+				return use, source, true
+			}
+		}
+	}
+	return nil, "", false
+}
+
+// importKind is the construct kind a Form B import names -- the last segment
+// of its path: "concepts", "shapes", ...
+func importKind(use *languageParser.UseDeclaration) string {
+	if use == nil || len(use.Parts) == 0 {
+		return ""
+	}
+	return use.Parts[len(use.Parts)-1]
+}
+
+// importNamespace is the namespace a Form B import names its constructs in:
+// the path before the kind segment, as a namespace ("agents.tools.shapes" ->
+// "agents/tools").
+func importNamespace(use *languageParser.UseDeclaration) string {
+	if use == nil || len(use.Parts) < 2 {
+		return ""
+	}
+	return strings.Join(use.Parts[:len(use.Parts)-1], "/")
+}
+
+// specBindingRefusal explains a binding that resolved to nothing. When no
+// import names the bound name and more than one domain declares it -- a
+// concept of that name in several namespaces, or a shape -- the refusal says so
+// and names the imports that would choose, rather than claiming the name
+// resolves to nothing: it resolves to too much.
+func specBindingRefusal(spec *Spec, shapes *ShapeRegistry, concepts memoryNodes.Registry) error {
+	name := spec.BoundName
+	if _, _, imported := specBindingImport(spec); !imported {
+		seen := map[string]bool{}
+		var imports []string
+		add := func(path, kind string) {
+			line := "`use " + path + "." + kind + ".{ " + name + " }`"
+			if path != "" && !seen[line] {
+				seen[line] = true
+				imports = append(imports, line)
+			}
+		}
+		if concepts != nil {
+			for _, c := range concepts.List() {
+				if c == nil {
+					continue
+				}
+				if i := strings.LastIndex(c.Name, ":"); i >= 0 && c.Name[i+1:] == name {
+					add(strings.ReplaceAll(idNamespace(c.Name), ":", "."), "concepts")
+				}
+			}
+		}
+		if shapes != nil {
+			for _, sh := range shapes.List() {
+				if sh != nil && sh.Name == name {
+					add(strings.ReplaceAll(ConstructNamespaceForOrigin(sh.Origin), "/", "."), "shapes")
+				}
+			}
+		}
+		if len(imports) > 1 {
+			sort.Strings(imports)
+			return fmt.Errorf("binding %q is declared by more than one domain, and no file-top `use` import says which -- import the one you mean: %s", name, strings.Join(imports, " or "))
+		}
+	}
+	return fmt.Errorf("binding %q resolves to neither an imported shape nor a concept -- check the file-top `use` import (use ...shapes.{ %s } for a shape, use ...concepts.{ %s } for a concept)", name, name, name)
 }
 
 // shapeFieldMapper builds the bare-field -> underlying-path rewriter for
@@ -205,6 +383,13 @@ func rewriteSpecFields(expr ExpressionNode, mapper func(FieldReference) (FieldRe
 	}
 	switch node := expr.(type) {
 	case *ComparisonExpression:
+		// A comparison on a collection ELEMENT reads the element, not the
+		// bound surface: `$elem.qty` is not a field of the bound concept or
+		// shape, and mapping it would either refuse a valid body or prefix it
+		// into a payload path no row has.
+		if isArrayElementField(node.Field) {
+			return nil
+		}
 		newRef, err := mapper(node.Field)
 		if err != nil {
 			return err
@@ -223,6 +408,20 @@ func rewriteSpecFields(expr ExpressionNode, mapper func(FieldReference) (FieldRe
 			return err
 		}
 		return rewriteSpecFields(node.Right, mapper)
+	case *NotExpression:
+		return rewriteSpecFields(node.Target, mapper)
+	case *ArrayPredicateExpression:
+		// The ARRAY is a field of the bound surface and maps like any other;
+		// a nested predicate's array is under the enclosing element and does
+		// not.
+		if !isArrayElementField(node.Field) {
+			newRef, err := mapper(node.Field)
+			if err != nil {
+				return err
+			}
+			node.Field = newRef
+		}
+		return rewriteSpecFields(node.Pred, mapper)
 	case *RelationshipExpression:
 		return rewriteSpecFields(node.Target, mapper)
 	default:

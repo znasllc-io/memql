@@ -128,7 +128,7 @@ func TestPositionalCacheTTL(t *testing.T) {
 		"positional": "@cache(300)",
 		"keyword":    "@cache(ttl=\"300\")",
 	} {
-		normalised, err := NormaliseQuerySource(src + "\nquery widget listWidgets {\n  filter widget.kind == args.kind\n}")
+		normalised, err := NormaliseQuerySource(src + "\nquery widget listWidgets {\n  filter row => row.kind == args.kind\n}")
 		if err != nil {
 			t.Fatalf("%s: normalise: %v", name, err)
 		}

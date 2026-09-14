@@ -213,7 +213,7 @@ query agent labelScopedRespondsAsAgents {
   args {
     hubOwner string!
   }
-  filter references("respondsAs", row.concept == "v1:rel3656:hub" && row.createdBy == args.hubOwner)
+  filter row => references("respondsAs", p => p.concept == "v1:rel3656:hub" && p.createdBy == args.hubOwner)
 }
 
 /// Every agent a fixture hub interacts with -- the unscoped form, authored.
@@ -221,23 +221,22 @@ query agent labelUnscopedInteractsAgents {
   args {
     hubOwner string!
   }
-  filter references(row.concept == "v1:rel3656:hub" && row.createdBy == args.hubOwner)
+  filter row => references(p => p.concept == "v1:rel3656:hub" && p.createdBy == args.hubOwner)
 }
 `
 
 // labelFixtureSpecs hosts a label-scoped traversal inside a SPEC body -- the
 // third construction path, through specValidator.expandExpression.
 //
-// The body cannot scope itself to one test's rows: a spec takes no args and
-// may not read `row.*` (epic #2281, enforced at load). It matches the fixture
-// marker instead, and the caller ANDs its own owner filter on top.
+// The body cannot scope itself to one test's rows: a spec takes no args. It
+// matches the fixture marker instead, and the caller ANDs its own owner filter
+// on top. The traversal's lambda reads the TRAVERSED row -- the hub -- through
+// its own parameter, exactly as the query filters above do.
 const labelFixtureSpecs = `use rel3656.concepts.{ agent }
 
 /// True for an agent some fixture hub responds AS -- and NOT for one it merely
 /// collaborates with, which is the whole assertion (memql#3656).
-spec agent labelScopedIsRespondsAsAgent {
-  return references("respondsAs", marker == "rel3656-hub")
-}
+spec agent labelScopedIsRespondsAsAgent = row => references("respondsAs", p => p.marker == "rel3656-hub")
 `
 
 // mountLabelFixture registers the fixture domain and restores the global

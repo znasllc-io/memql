@@ -1,8 +1,19 @@
-/// A support ticket, the row the automation here raises.
+/// A support ticket: the row the conditions here are written about.
 concept ticket {
-  title   string
-  status  string
+  title     string
+  status    string
+  priority  int
+  urgent    bool
 }
+
+/// A note about a goal, written when the goal changes.
+concept goalNote {
+  goalId  string
+  note    string
+}
+
+/// High-priority tickets.
+trait acIsHigh = row => row.priority > 3
 
 /// Raise a ticket with a title.
 mutate ticket raiseAgentTicket {

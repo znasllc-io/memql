@@ -8,50 +8,73 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
-// memql#2801: an UNBOUND actor root is fail-open, so every evaluator
-// that can reach an `actor.*` read must bind the denying envelope.
-//
-// The evaluator renders an unresolved dotted path as its own path TEXT,
-// so with `actor` unbound `actor.isClusterOwner` evaluates to the
-// non-empty string "actor.isClusterOwner" -- truthy. A negated gate
-// (`actor.isClusterOwner != false`) therefore read TRUE on a request
-// with no auth context, which is the same fail-open the envelope's nil
-// default was fixed for.
-//
-// This is the coverage the first attempt at that fix shipped without:
-// reverting the binding left the whole suite green.
-func TestBindActorEnvelope_UnboundActorIsFailOpen(t *testing.T) {
-	// Baseline: what an UNBOUND actor root does. This is not asserting
-	// desired behaviour -- it documents why binding is mandatory.
-	bare := NewEvaluator()
-	got, err := bare.EvaluateCondition("actor.isClusterOwner != false")
+// evalActorCond parses a v1 condition and evaluates it over e.
+func evalActorCond(t *testing.T, e *Evaluator, src string) bool {
+	t.Helper()
+	n, err := languageParser.ParseV1Expression(src)
 	if err != nil {
-		t.Fatalf("unbound evaluate: %v", err)
+		t.Fatalf("parse %s: %v", src, err)
 	}
-	if !got {
-		t.Skip("unbound path no longer renders as literal text; the fail-open premise changed -- revisit memql#2801")
+	got, err := e.EvalV1Condition(context.Background(), n)
+	if err != nil {
+		t.Fatalf("%s: %v", src, err)
+	}
+	return got
+}
+
+// memql#2801: an actor gate must DENY when there is no actor.
+//
+// The string evaluator rendered an unresolved dotted path as its own path
+// TEXT, so with `actor` unbound `actor.isClusterOwner != false` read TRUE;
+// under the v1 absence table an ABSENT actor would read the same. Both are
+// the fail-open the envelope's nil default was fixed for.
+//
+// An UNSEEDED RunScope therefore binds the DENYING actor -- the envelope a
+// request with no auth context gets (auth.ActorEnvelopeMap(nil)) -- never an
+// absent or empty one. No production path reaches an unseeded RunScope:
+// every evaluator the runtime builds (the executor's run and onError
+// evaluators, resume, the scheduler's trigger filter, the LogicRunner)
+// binds the actor through bindActorEnvelope / bindNoCallerActorEnvelope,
+// and Clone carries it. The guard is kept anyway, as the second line: an
+// evaluator built by hand, or a new site that forgets the binder, denies
+// rather than opening the admin gate.
+func TestRunScope_UnseededActorDenies(t *testing.T) {
+	bare := NewEvaluator()
+	for _, cond := range []string{
+		"actor.isClusterOwner != false",
+		"actor.isClusterOwner == true",
+	} {
+		if evalActorCond(t, bare, cond) {
+			t.Errorf("%s is TRUE over an unseeded run -- the admin gate is fail-open (memql#2801)", cond)
+		}
 	}
 
-	// Bound: the denying envelope closes it.
+	// The event envelope carries an `actor` of its own (`{id}`, the
+	// emitter's stamp, buildEventEnvelope). It is not the actor: reading it
+	// as one leaves isClusterOwner absent, and `!= false` true.
+	stamped := NewEvaluator()
+	stamped.SetCustom("event", buildEventEnvelope(&events.Event{
+		Topic: "node.created", Kind: events.KindNodeCreated,
+		Payload:  map[string]any{"id": "x"},
+		Metadata: map[string]string{"actor": "user-9"},
+	}, "", ""))
+	if evalActorCond(t, stamped, "actor.isClusterOwner != false") {
+		t.Error("an unseeded run read the event envelope's `actor` stamp as the actor -- fail-open (memql#2801)")
+	}
+
+	// Seeded, the binder's envelope is what answers.
 	bound := NewEvaluator()
 	bindActorEnvelope(context.Background(), bound)
-	got, err = bound.EvaluateCondition("actor.isClusterOwner != false")
-	if err != nil {
-		t.Fatalf("bound evaluate: %v", err)
-	}
-	if got {
-		t.Error("`actor.isClusterOwner != false` is TRUE with no auth context -- the admin gate is fail-open (memql#2801)")
-	}
-
-	// The positive form must deny too.
-	got, err = bound.EvaluateCondition("actor.isClusterOwner == true")
-	if err != nil {
-		t.Fatalf("bound evaluate ==: %v", err)
-	}
-	if got {
-		t.Error("`actor.isClusterOwner == true` must be false with no auth context")
+	for _, cond := range []string{
+		"actor.isClusterOwner != false",
+		"actor.isClusterOwner == true",
+	} {
+		if evalActorCond(t, bound, cond) {
+			t.Errorf("%s must be false with no auth context", cond)
+		}
 	}
 }
 
@@ -64,11 +87,7 @@ func TestBindActorEnvelope_RealOwnerStillPasses(t *testing.T) {
 	ev := NewEvaluator()
 	bindActorEnvelope(ctx, ev)
 
-	got, err := ev.EvaluateCondition("actor.isClusterOwner == true")
-	if err != nil {
-		t.Fatalf("evaluate: %v", err)
-	}
-	if !got {
+	if !evalActorCond(t, ev, "actor.isClusterOwner == true") {
 		t.Error("a real cluster owner must pass the gate")
 	}
 }
@@ -82,11 +101,7 @@ func TestBindNoCallerActorEnvelope_Denies(t *testing.T) {
 		"actor.isClusterOwner != false",
 		"actor.isClusterOwner == true",
 	} {
-		got, err := ev.EvaluateCondition(cond)
-		if err != nil {
-			t.Fatalf("%s: %v", cond, err)
-		}
-		if got {
+		if evalActorCond(t, ev, cond) {
 			t.Errorf("%s must be false for a trigger with no caller (memql#2801)", cond)
 		}
 	}
@@ -98,9 +113,9 @@ func TestBindNoCallerActorEnvelope_Denies(t *testing.T) {
 // EFFECT on the path that matters most, because a `@filter` gating on an
 // actor field decides whether the automation fires at all.
 //
-// `@filter(actor.isClusterOwner != false)` loads green (with or without
-// @actor) and the compiler does not rewrite the actor root away, so an
-// unbound root made this fire on every event.
+// `@filter(row => actor.isClusterOwner != false)` loads green and the
+// compiler does not rewrite the actor root away, so an unbound root made
+// this fire on every event.
 func TestScheduler_EventFilterOnActor_DoesNotFireWithoutAuth(t *testing.T) {
 	bus := events.NewBus()
 	defer bus.Close()
@@ -111,13 +126,13 @@ func TestScheduler_EventFilterOnActor_DoesNotFireWithoutAuth(t *testing.T) {
 	// assertion is on whether the filter admitted the event at all.
 	gated := &Automation{
 		Name:    "adminOnlySweep",
-		Trigger: &TriggerConfig{Event: "node.created", Filter: `actor.isClusterOwner != false`},
+		Trigger: &TriggerConfig{Event: "node.created", Filter: `row => actor.isClusterOwner != false`},
 	}
 	// Control: a filter that does NOT mention actor and is true. Without it
 	// this test could pass because the harness never fires anything.
 	control := &Automation{
 		Name:    "ungatedSweep",
-		Trigger: &TriggerConfig{Event: "node.created", Filter: `event.topic != ""`},
+		Trigger: &TriggerConfig{Event: "node.created", Filter: `row => event.topic != ""`},
 	}
 	for _, a := range []*Automation{gated, control} {
 		s.automations[a.Name] = a
@@ -131,8 +146,9 @@ func TestScheduler_EventFilterOnActor_DoesNotFireWithoutAuth(t *testing.T) {
 
 	// The bus carries no caller, so the denying envelope must make the
 	// actor-gated filter false. Before the binding, the unbound
-	// `actor.isClusterOwner` rendered as its own path text -- non-empty,
-	// therefore truthy -- and this admitted every event.
+	// `actor.isClusterOwner` rendered as its own path text in the string
+	// evaluator -- non-empty, therefore truthy -- and this admitted every
+	// event.
 	if !schedulerLogged(log, "filter not satisfied", gated.Name) {
 		t.Errorf("the actor-gated @filter did NOT deny an event with no caller -- the actor root is "+
 			"unbound or resolving truthy (memql#2801). Scheduler log:\n%s", log)

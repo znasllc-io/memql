@@ -29,6 +29,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/dslclause"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -47,17 +49,50 @@ var constructHeaderRe = regexp.MustCompile(`(?m)^[ \t]*(query|mutate)[ \t]+([\p{
 // list.
 var useConceptsRe = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+([\p{L}_][\p{L}\p{Nd}_:]*)\.concepts\.\{([^}]*)\}`)
 
-// filterClauseRe captures a struct-form `filter` clause. The parser
-// rejects a multi-line clause, so one line is the whole clause.
+// filterClauseRe finds the line a struct-form `filter` clause opens on.
+// The clause is that line plus every continuation line the struct-query
+// normaliser folds into it (dslclause.ClauseExtent): memql#4123 made a
+// clause able to wrap, and the edition-2026 codemod wraps every long one
+// at its top-level `&&`, so the opening line alone is one conjunct of
+// several -- and a first-line read of a wrapped owner-scoped filter
+// found no owner term and BLOCKED the concept's tier.
 //
 // It is only ever run over the comment- and string-blanked view. On
-// raw source a trailing `// && ownerUserId==actor.userId` would be
-// captured as part of the clause and split into a conjunct by
-// topLevelConjuncts, so a COMMENT could manufacture a tier the query
-// does not have -- the #2875 "silenced by a sentence" class, running
-// in the direction that fabricates a claim rather than suppressing
-// one.
+// raw source a trailing `// && row.ownerUserId == actor.userId` would
+// be captured as part of the clause and parsed as a conjunct, so a
+// COMMENT could manufacture a tier the query does not have -- the #2875
+// "silenced by a sentence" class, running in the direction that
+// fabricates a claim rather than suppressing one.
 var filterClauseRe = regexp.MustCompile(`(?m)^[ \t]*filter[ \t]+(.*)$`)
+
+// filterClauseSpan returns the clause text of the first filter in body,
+// continuation lines included, from both the blanked view and the raw
+// one (byte-aligned with it), or "" when there is none.
+func filterClauseSpan(body, rawBody string) (clause, rawClause string) {
+	m := filterClauseRe.FindStringSubmatchIndex(body)
+	if m == nil {
+		return "", ""
+	}
+	lines := strings.Split(body[m[0]:], "\n")
+	last := dslclause.ClauseExtent(lines, 0)
+	end := m[0]
+	for i := 0; i <= last; i++ {
+		end += len(lines[i]) + 1
+	}
+	if end > len(body) {
+		end = len(body)
+	}
+	join := func(s string) string {
+		var parts []string
+		for _, l := range strings.Split(s, "\n") {
+			if t := strings.TrimSpace(l); t != "" {
+				parts = append(parts, t)
+			}
+		}
+		return strings.Join(parts, " ")
+	}
+	return join(body[m[2]:end]), join(rawBody[m[2]:end])
+}
 
 // Line-anchored, not substring: a comment merely mentioning
 // `@public` is prose, and treating it as the annotation is how a gate
@@ -66,15 +101,6 @@ var (
 	publicAnnotationRe     = regexp.MustCompile(`(?m)^[ \t]*@public\b`)
 	serverOnlyAnnotationRe = regexp.MustCompile(`(?m)^[ \t]*@serverOnly\b`)
 )
-
-// ownerLeafRe matches a conjunct that scopes rows to the caller:
-// `<field>==actor.userId` in either order. The field must be a bare
-// payload property (#2292), so a dotted left-hand side is excluded.
-var ownerLeafRe = regexp.MustCompile(`^(?:([\p{L}_][\p{L}\p{Nd}_]*)[ \t]*==[ \t]*actor\.userId|actor\.userId[ \t]*==[ \t]*([\p{L}_][\p{L}\p{Nd}_]*))$`)
-
-// adminLeafRe matches a conjunct that gates on the cluster owner,
-// either directly or through the shared spec.
-var adminLeafRe = regexp.MustCompile(`^(?:actor\.isClusterOwner([ \t]*==[ \t]*true)?|requiresClusterOwner|spec\("requiresClusterOwner"\))$`)
 
 // conceptKey identifies a concept by the domain that declares it plus
 // its short name, which is what the rewrite needs in order to edit the
@@ -390,97 +416,83 @@ func classifyConstruct(kind, preamble, body, rawBody string) vote {
 		return vote{Kind: verdictExempt}
 	}
 
-	clause := ""
-	rawClause := ""
-	if m := filterClauseRe.FindStringSubmatchIndex(body); m != nil {
-		clause = strings.TrimSpace(body[m[2]:m[3]])
-		rawClause = strings.TrimSpace(rawBody[m[2]:m[3]])
-	}
+	clause, rawClause := filterClauseSpan(body, rawBody)
 	if clause == "" {
 		return vote{Kind: verdictBlocks, Reason: "has no filter, so it reads every row of the concept"}
 	}
 
-	// Only a TOP-LEVEL CONJUNCT establishes anything. A term inside a
-	// parenthesised `||` group does not narrow the result set -- the
-	// other arm still returns rows the term would exclude, which is
-	// the memql#2832 defect where one permissive disjunct made a gate
-	// read as scoped.
-	conjuncts := topLevelConjuncts(clause)
-	for _, conjunct := range conjuncts {
-		if m := ownerLeafRe.FindStringSubmatch(conjunct); m != nil {
-			field := m[1]
-			if field == "" {
-				field = m[2]
-			}
-			return vote{Kind: verdictVote, Decl: langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: field}}
-		}
+	// A filter is an edition-2026 lambda (`row => ...`), read as a tree
+	// (v1ClauseVote). A clause in the pre-2026 spelling is refused by the
+	// engine's parser, so it evidences nothing -- and a query whose filter
+	// cannot be read is not one known to be scoped, so it blocks.
+	if !dslclause.OpensLambda(clause) {
+		return vote{Kind: verdictBlocks, Reason: fmt.Sprintf("filters on %q, a pre-2026 clause the engine refuses (memqlmigrate --rewrite=expressions rewrites it)", rawClause)}
 	}
-	for _, conjunct := range conjuncts {
-		if adminLeafRe.MatchString(conjunct) {
-			return vote{Kind: verdictVote, Decl: langparser.RowAuthzDecl{Tier: langparser.RowAuthzClusterOwner}}
-		}
+	if v, ok := v1ClauseVote(clause); ok {
+		return v
 	}
 	return vote{Kind: verdictBlocks, Reason: fmt.Sprintf("filters on %q, which does not gate on the caller", rawClause)}
 }
 
-// topLevelConjuncts splits a filter clause on `&&` at paren depth 0 and
-// returns each conjunct trimmed of surrounding whitespace and of one
-// layer of redundant parentheses.
+// v1ClauseVote reads an edition-2026 filter (epic memql#5363) for the two
+// votes a filter can cast: a top-level conjunct comparing one of the
+// parameter's fields with `actor.userId` (either operand order) votes owned
+// on that field, and one gating on the cluster owner -- `actor.isClusterOwner`,
+// `== true` or bare, or `requiresClusterOwner(actor)` -- votes clusterOwner.
+// ok is false when the clause votes for neither, or does not parse.
 //
-// A clause containing a top-level `||` yields NO conjuncts: the whole
-// expression is a disjunction, so nothing in it is guaranteed.
-func topLevelConjuncts(clause string) []string {
-	depth := 0
-	var parts []string
-	start := 0
-	for i := 0; i < len(clause); i++ {
-		switch clause[i] {
-		case '(':
-			depth++
-		case ')':
-			depth--
-		case '&':
-			if depth == 0 && i+1 < len(clause) && clause[i+1] == '&' {
-				parts = append(parts, clause[start:i])
-				i++
-				start = i + 1
-			}
-		case '|':
-			if depth == 0 && i+1 < len(clause) && clause[i+1] == '|' {
-				return nil
-			}
-		}
+// Only a TOP-LEVEL CONJUNCT establishes anything. A term inside an `||` does
+// not narrow the result set -- the other arm still returns rows the term
+// would exclude, which is the memql#2832 defect where one permissive disjunct
+// made a gate read as scoped. ast.Conjuncts returns a top-level `||` whole, as
+// one conjunct no leaf matches, so a disjunction establishes nothing.
+func v1ClauseVote(clause string) (vote, bool) {
+	lam, err := langparser.ParseV1Lambda(clause)
+	if err != nil || len(lam.Params) != 1 {
+		return vote{}, false
 	}
-	parts = append(parts, clause[start:])
-
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		for strings.HasPrefix(p, "(") && strings.HasSuffix(p, ")") && balanced(p[1:len(p)-1]) {
-			p = strings.TrimSpace(p[1 : len(p)-1])
-		}
-		if p != "" {
-			out = append(out, p)
-		}
+	param := lam.Params[0]
+	path := func(n ast.ExpressionNode) (string, []string, bool) {
+		return ast.MemberPath(ast.Unparen(n))
 	}
-	return out
-}
-
-// balanced reports whether every paren in s closes inside s.
-func balanced(s string) bool {
-	depth := 0
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '(':
-			depth++
-		case ')':
-			depth--
-			if depth < 0 {
-				return false
+	isActor := func(n ast.ExpressionNode, field string) bool {
+		root, fields, ok := path(n)
+		return ok && root == "actor" && len(fields) == 1 && fields[0] == field
+	}
+	rowField := func(n ast.ExpressionNode) string {
+		if root, fields, ok := path(n); ok && root == param && len(fields) == 1 {
+			return fields[0]
+		}
+		return ""
+	}
+	conjuncts := ast.Conjuncts(lam.Body)
+	for _, c := range conjuncts {
+		if b, ok := c.(*ast.BinaryExpr); ok && b.Op == "==" {
+			if f := rowField(b.Left); f != "" && isActor(b.Right, "userId") {
+				return vote{Kind: verdictVote, Decl: langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: f}}, true
+			}
+			if f := rowField(b.Right); f != "" && isActor(b.Left, "userId") {
+				return vote{Kind: verdictVote, Decl: langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: f}}, true
 			}
 		}
 	}
-	return depth == 0
+	for _, c := range conjuncts {
+		switch e := c.(type) {
+		case *ast.BinaryExpr:
+			if lit, ok := ast.Unparen(e.Right).(*ast.LiteralExpr); ok && e.Op == "==" && isActor(e.Left, "isClusterOwner") && lit.Value == true {
+				return vote{Kind: verdictVote, Decl: langparser.RowAuthzDecl{Tier: langparser.RowAuthzClusterOwner}}, true
+			}
+		case *ast.MemberExpr:
+			if isActor(e, "isClusterOwner") {
+				return vote{Kind: verdictVote, Decl: langparser.RowAuthzDecl{Tier: langparser.RowAuthzClusterOwner}}, true
+			}
+		case *ast.CallExpr:
+			if e.Receiver == nil && e.Kind == "" && e.Name == "requiresClusterOwner" {
+				return vote{Kind: verdictVote, Decl: langparser.RowAuthzDecl{Tier: langparser.RowAuthzClusterOwner}}, true
+			}
+		}
+	}
+	return vote{}, false
 }
 
 // conceptImports maps each concept short-name a file imports to the

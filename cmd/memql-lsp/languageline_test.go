@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -35,7 +36,7 @@ concept gadget {
 
 // probeTrait is a construct that loads clean in any domain, for fixtures that
 // only resolve language lines.
-const probeTrait = "@enabled\ntrait languageLineProbe {\n  return active == true\n}\n"
+const probeTrait = "@enabled\ntrait languageLineProbe = row => row.active == true\n"
 
 // vscodeInitialize is the part of VS Code's initialize request this server
 // reads: it applies versioned document changes, and it creates files.
@@ -865,8 +866,12 @@ func TestServer_InitializeAdvertisesQuickFixes(t *testing.T) {
 	}
 	ir := res.(protocol.InitializeResult)
 	opts, ok := ir.Capabilities.CodeActionProvider.(protocol.CodeActionOptions)
-	if !ok || len(opts.CodeActionKinds) != 1 || opts.CodeActionKinds[0] != protocol.CodeActionKindQuickFix {
-		t.Errorf("CodeActionProvider = %#v; want CodeActionOptions advertising the quickfix kind", ir.Capabilities.CodeActionProvider)
+	// quickfix carries the language line's "Create memql.toml" and the
+	// retired-form "Rewrite to edition 2026"; source.fixAll carries the
+	// whole-file rewrite (codeaction.go).
+	if !ok || !slices.Contains(opts.CodeActionKinds, protocol.CodeActionKindQuickFix) ||
+		!slices.Contains(opts.CodeActionKinds, codeActionKindSourceFixAll) {
+		t.Errorf("CodeActionProvider = %#v; want CodeActionOptions advertising the quickfix and source.fixAll kinds", ir.Capabilities.CodeActionProvider)
 	}
 	if s.handler().TextDocumentCodeAction == nil {
 		t.Error("TextDocumentCodeAction handler not registered")

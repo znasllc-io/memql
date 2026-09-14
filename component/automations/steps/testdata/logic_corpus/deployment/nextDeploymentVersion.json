@@ -1,0 +1,917 @@
+{
+  "construct": "deployment/logic.memql nextDeploymentVersion",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "bump": "s-bump",
+          "current": "s-current"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "s-bump",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "s-bump",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "bump": "s-bump",
+          "current": "s-current"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "s-bump",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "s-bump",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "bump": "s-bump",
+          "current": "s-current"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "s-bump",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "s-bump",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "bump": "s-bump",
+          "current": "s-current"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "s-bump",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "s-bump",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "bump": "s-bump",
+          "current": "s-current"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "s-bump",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "s-bump",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "bump": "s-bump",
+          "current": "s-current"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "s-bump",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "s-bump",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "bump": "s-bump",
+          "current": "s-current"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "s-bump",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "s-bump",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "bump": "s-bump",
+          "current": "s-current"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "s-bump",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "s-bump",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "current": "s-current"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "current": "s-current"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "current": "s-current"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "current": "s-current"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "current": "s-current"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "current": "s-current"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "current": "s-current"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "current": "s-current"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "s-current"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "s-current"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "current": "1.2.3"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "current": "1.2.3"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "current": "1.2.3"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "current": "1.2.3"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "current": "1.2.3"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "current": "1.2.3"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "current": "1.2.3"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "current": "1.2.3"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "patch",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "patch",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "bump": "minor",
+          "current": "1.2.3"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "minor",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "minor",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "bump": "minor",
+          "current": "1.2.3"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "minor",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "minor",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "bump": "minor",
+          "current": "1.2.3"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "minor",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "minor",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "bump": "minor",
+          "current": "1.2.3"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "minor",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "minor",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "bump": "minor",
+          "current": "1.2.3"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "minor",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "minor",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "bump": "minor",
+          "current": "1.2.3"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "minor",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "minor",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "bump": "minor",
+          "current": "1.2.3"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "minor",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "minor",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    },
+    "variant 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "bump": "minor",
+          "current": "1.2.3"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "bump": "minor",
+              "current": "1.2.3"
+            },
+            "kind": "builtin",
+            "name": "suggestNextVersion"
+          }
+        ],
+        "result": {
+          "args": {
+            "bump": "minor",
+            "current": "1.2.3"
+          },
+          "builtin": "suggestNextVersion"
+        }
+      }
+    }
+  }
+}

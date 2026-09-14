@@ -1,1 +1,1 @@
-status == "open" && priority > 3
+row => row.status == "open" && row.priority > 3

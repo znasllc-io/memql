@@ -1,6 +1,143 @@
 {
   "cases": [
     {
+      "file": "named-arguments.memql",
+      "verdict": "load_ok",
+      "note": "A step's call names each argument, and each argument is an expression."
+    },
+    {
+      "file": "object-literal-call-args.memql",
+      "verdict": "refuse_parse",
+      "message": "object-literal call args are removed; pass named args directly",
+      "note": "A construct call's arguments are named: `saNoteGoal(goalId: args.id)`."
+    },
+    {
+      "file": "note-text.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "id": "g1"
+      },
+      "expect": "goal g1 changed"
+    },
+    {
+      "file": "ticket-count.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "calls": {
+        "query saTickets": [
+          {
+            "id": "t1"
+          }
+        ]
+      },
+      "expect": 1,
+      "note": "The corpus boots no database: the case gives the call's answer."
+    },
+    {
+      "file": "labels.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "labels": [
+          "team-a",
+          "ops",
+          "team-b"
+        ]
+      },
+      "expect": [
+        "TEAM-A",
+        "TEAM-B"
+      ]
+    },
+    {
+      "file": "priority-band.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "priority": 3
+      },
+      "expect": "high"
+    },
+    {
+      "file": "note-map.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "id": "g1",
+        "priority": 4
+      },
+      "expect": {
+        "goalId": "g1",
+        "urgent": true,
+        "weight": -8
+      }
+    },
+    {
+      "file": "optional-owner.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {},
+      "actor": {
+        "userId": "u1"
+      },
+      "expect": "u1"
+    },
+    {
+      "file": "optional-owner.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "goal": {
+          "ownerUserId": "u2"
+        }
+      },
+      "actor": {
+        "userId": "u1"
+      },
+      "expect": "u2"
+    },
+    {
+      "file": "open-or-listed.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "ticket": {
+          "status": "closed"
+        },
+        "status": "held"
+      },
+      "expect": true
+    },
+    {
+      "file": "nil-when-unset.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {},
+      "expect": null,
+      "note": "An absent note equals the empty string, so the value is nil."
+    },
+    {
+      "file": "nil-when-unset.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "note": "done"
+      },
+      "expect": "done"
+    },
+    {
+      "file": "grouped.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "a": 2,
+        "b": 0,
+        "c": true
+      },
+      "expect": true
+    },
+    {
       "file": "an-args-reference.memql",
       "verdict": "load_ok"
     },
@@ -8,13 +145,12 @@
       "file": "a-retired-function.memql",
       "verdict": "refuse_parse",
       "message": "year() is retired under the 2026.08 grammar epoch",
-      "note": "A malformed expression in a step argument: a retired function is refused where the parser reads the argument. What does not refuse there today: an args.x the automation's args block does not declare, and a steps.<id> no step defines, both load (E5, the step-argument string resolver, reads them when the step runs)."
+      "note": "A retired function is refused where the parser reads a step argument."
     },
     {
       "file": "a-comparison.memql",
-      "verdict": "refuse_parse",
-      "message": "expected ')', got \"==\"",
-      "note": "A step argument's value is a literal, a reference or a call today, not a comparison: the parser stops at the operator. D7 makes step arguments expressions parsed once."
+      "verdict": "load_ok",
+      "note": "A step argument is an expression, so a comparison is a boolean value there. Before edition 2026 the parser stopped at the operator."
     },
     {
       "file": "a-reserved-name.memql",

@@ -2,7 +2,10 @@ package parser
 
 import (
 	"regexp"
+	"sort"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/language/dslclause"
 )
 
 // declaration_slices.go -- the ONE comment-safe declaration slicer (memql#2896).
@@ -130,7 +133,7 @@ func ExtractDeclarationSlices(source string, headerRe *regexp.Regexp) []Declarat
 // comments survive into the slice, and walk the preamble on the original.
 func ExtractTerseAutomationSlices(source string) []DeclarationSlice {
 	scan := BlankComments(source)
-	matches := terseAutomationHeader.FindAllStringSubmatchIndex(scan, -1)
+	matches := terseAutomationMatches(scan)
 	if len(matches) == 0 {
 		return nil
 	}
@@ -151,6 +154,72 @@ func ExtractTerseAutomationSlices(source string) []DeclarationSlice {
 			Name:   source[m[4]:m[5]],
 			Start:  preambleStart,
 			End:    lineEnd,
+		})
+	}
+	return out
+}
+
+// predicateDeclHeaderRe matches the header of an edition-2026 BRACE-LESS
+// predicate declaration, up to and including its `=`: `spec <Bound> <Name> =`
+// or `trait <Name> =` (memql#5364). Group 1 is the keyword, group 2 the name.
+var predicateDeclHeaderRe = regexp.MustCompile(`(?m)^[ \t]*(spec|trait)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_-]*)[ \t]*=`)
+
+// ExtractPredicateDeclarationSlices returns every top-level edition-2026
+// brace-less `spec` or `trait` declaration of the given keyword in source:
+//
+//	spec agent isAssistant = row => row.role == "assistant"
+//	trait isActiveRecord = row => row.active == true
+//
+// It is a separate entry point from ExtractDeclarationSlices for the reason
+// ExtractTerseAutomationSlices is: that function's extent rule is "match a
+// header ending in `{`, then find the matching `}`", and this form has no
+// braces. Its extent is its EXPRESSION -- the header line plus every
+// continuation line dslclause.ClauseExtent folds into it, which is how a spec
+// the codemod wrapped at its top-level `&&` stays one declaration -- and the
+// slice ends at the expression's last character, trailing comment excluded,
+// which is where MemQL Sense's token scan ends the same declaration (the two
+// must agree byte for byte, or the construct source hash reads as drifted).
+//
+// A slicer that required the `{` saw none of these: every spec and trait of a
+// migrated tree was silently absent from the loader, the duplicate detector,
+// the construct catalog and the authoring bundle splitter at once.
+//
+// Comment safety and the preamble walk follow ExtractDeclarationSlices' three
+// rules. Only top-level headers are emitted, and `==` is never a header's `=`.
+func ExtractPredicateDeclarationSlices(source, keyword string) []DeclarationSlice {
+	scan := BlankComments(source)
+	matches := predicateDeclHeaderRe.FindAllStringSubmatchIndex(scan, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	lines := strings.Split(scan, "\n")
+	lineStarts := make([]int, len(lines))
+	for i, off := 0, 0; i < len(lines); i++ {
+		lineStarts[i] = off
+		off += len(lines[i]) + 1
+	}
+
+	var out []DeclarationSlice
+	for _, m := range matches {
+		headerStart, headerEnd := m[0], m[1]
+		if scan[m[2]:m[3]] != keyword {
+			continue
+		}
+		if headerEnd < len(scan) && scan[headerEnd] == '=' {
+			continue // `==`: a comparison, not a declaration
+		}
+		if BraceDepthBefore(scan, headerStart) != 0 {
+			continue
+		}
+		first := sort.SearchInts(lineStarts, headerStart+1) - 1
+		last := dslclause.ClauseExtent(lines, first)
+		end := lineStarts[last] + len(strings.TrimRight(lines[last], " \t\r"))
+		preambleStart := PreambleStartOf(source, headerStart)
+		out = append(out, DeclarationSlice{
+			Source: source[preambleStart:end],
+			Name:   source[m[4]:m[5]],
+			Start:  preambleStart,
+			End:    end,
 		})
 	}
 	return out

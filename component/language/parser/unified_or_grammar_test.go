@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
 // renderExpr renders a boolean expression tree to a fully-parenthesized
@@ -104,9 +106,7 @@ func TestOrPrecedenceAndParens(t *testing.T) {
 func TestSpecWithOrLoads(t *testing.T) {
 	src := `@enabled
 @description("Caller must hold owner or admin role to use the Deployment Console.")
-spec actorEnvelope requiresOwnerOrAdmin {
-  return role == "admin" || role == "owner"
-}`
+spec actorEnvelope requiresOwnerOrAdmin = actor => actor.role == "admin" || actor.role == "owner"`
 
 	decl, err := ParseSpecDecl(src)
 	if err != nil {
@@ -115,11 +115,16 @@ spec actorEnvelope requiresOwnerOrAdmin {
 	if decl.BoundName != "actorEnvelope" {
 		t.Fatalf("expected signature binding actorEnvelope, got %q", decl.BoundName)
 	}
-	got := renderExpr(decl.Body)
-	if got != "(role || role)" {
-		t.Fatalf("spec body did not parse as an OR over the role comparisons, got: %s", got)
+	if decl.Lambda == nil {
+		t.Fatalf("spec has no lambda body: %+v", decl)
 	}
-	if !strings.Contains(got, "||") {
-		t.Fatalf("expected the spec body to contain an OR, got: %s", got)
+	or, ok := decl.Lambda.Body.(*ast.BinaryExpr)
+	if !ok || or.Op != "||" {
+		t.Fatalf("spec body did not parse as an OR, got: %T %v", decl.Lambda.Body, decl.Lambda.Body)
+	}
+	for _, side := range []ast.ExpressionNode{or.Left, or.Right} {
+		if cmp, ok := side.(*ast.BinaryExpr); !ok || cmp.Op != "==" || !strings.HasPrefix(ast.FormatExpr(cmp), "actor.role == ") {
+			t.Fatalf("an OR side is not a role comparison: %T %v", side, side)
+		}
 	}
 }

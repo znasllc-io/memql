@@ -1,0 +1,11 @@
+/// Announce a new delegation, with one entry of the payload written without
+/// its key.
+logic lbKeylessMapEntry {
+  args {
+    event  object  @required
+  }
+  body {
+    emitted := publishEvent(topic: "delegation.created", payload: { delegationId: args.event.payload.id, args.event.payload.identityId, timestamp: now })
+    return emitted
+  }
+}

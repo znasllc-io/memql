@@ -24,6 +24,8 @@ verify anything here.
 | `tiers/` | The tier manifest of D11, seeded with the expression positions only (`Positions()`). A position's value is also the name of its conformance-corpus directory (`test/conformance/2026/expr/<position>/`), which the corpus's second completeness gate reads; the expressions epic adds the node kinds and functions each position allows. | ~3 files |
 | `dslclause/` | One answer to "which keywords terminate a filter clause", shared by the text-scanning gates so they cannot drift about it (memql#2815). Owns clause EXTRACTION only, not predicate decomposition -- the package comment says why that split is deliberate. | ~5 files |
 | `pagination/` | The pure classifier behind the pagination authoring rule: a list-returning query must carry `paginate`, `sort`, `count`, or `@unbounded("reason")` (memql#1965). Operates on raw source text using line structure only. | ~3 files |
+| `functions/` | The function catalog (D10): every function and method an edition-2026 expression can call, one entry and one spelling each, with its signature, its tier and the retired spellings it replaces, plus the operator table (`Operators()`). The two evaluators, Sense and the generated docs read it. | ~6 files |
+| `tiers/` | The tier manifest (D11): every expression position, whether it pushes down to SQL (P) or runs in process (M), and the node kinds, catalog functions and predicate applications it admits (`Rules()`), plus the M tier's cost limits. | ~6 files |
 | `language.go` | The `Language` component: bundles the parser and compiler submodules under one lifecycle with their own env-configured loggers. Note that the *root* package is thin -- almost every consumer imports a sub-package directly, not this. | 2 files |
 
 ---
@@ -36,23 +38,51 @@ The author surface (`query NAME { args, filter, shape }`, `mutate`, `logic`,
 construct into the older procedural form, and only then does the lexer run.
 Each stage is a no-op when its detector does not match.
 
-Two consequences that bite:
+Three consequences that bite:
 
-- **The rewriter is a line-oriented text pass, not a parse.** It scans
-  `filter` / `return` bodies line by line, so a multi-line boolean
-  expression it would accept on one line fails (memql#4123). Nothing in the
-  shipped corpus hits this today; a future formatting-convention change
-  would hit it immediately.
-- **A parse error can come from the rewriter, not the parser**, and will
-  point at rewritten source rather than what the author wrote. When an error
-  message does not match the file you are looking at, check
-  `parser/rewriter.go` first.
+- **The rewriter is a line-oriented text pass, not a parse.** A struct
+  query's `filter` may continue onto lines that open with a binary operator,
+  or after a line that ends on one (`joinStructQueryContinuations`,
+  memql#4123); any other line starts a new field.
+- **A parse error can come from the rewriter, not the parser.** Its message
+  leads with `rewrite error at line L, column C:` rather than `parse error`:
+  a rewriter refusal names the authored text it refuses (a `*RewriteError`,
+  `parser/rewrite_errors.go`), and a site that reports it places it with
+  `parser.PositionRewriteError(authored, err)`. A new refusal in the rewriter
+  should say which text it refuses (`refuseAtBody`, `refuseClause`, ...);
+  one that does not falls back to the construct's name.
+- **The author's line and column survive the rewrite only because every
+  parse site marks the lowering** (memql#5364): `parser.PositionLowering(
+  authored, lowered)` writes position markers -- block comments the lexer
+  reads like `#line` -- so tokens, `ParseError`s and v1 `Span`s carry the
+  author's position (`Token.Authored*`, `ParseError.Position`). A new site
+  that lexes a lowering and reports a position must call it, as the LAST
+  step before `NewLexer`: text transforms that read the lowering (the engine
+  loader's payload translation) run before it, never after. A slice parsed
+  on its own is placed in its file with `parser.AnchorSource`.
+
+In edition 2026 a struct query's filter is a lambda over the row, and the
+rewriter emits it as `concept==<id> && (<lambda>)`. The lambda's body is read
+by the v1 expression grammar in `parser/v1_expr.go` (`ParseV1Expression`,
+`ParseV1Lambda`, and `V1PrecedenceTable`, the precedence the language
+reference publishes); the spellings it retires, and the refusal that names
+each one's replacement, are the table in `parser/v1_refusals.go`
+(`V1RetiredForms`). What each position admits is the tier manifest in
+`tiers/`, and what each function means is the catalog in `functions/`. The
+string the rewriter emits is the engine's internal query form -- also what an
+SDK sends to `Execute` -- and its grammar (`ParseExpression`) does not change.
 
 The retired author-side forms (`func (Query) NAME(ctx any)`, the `@use*`
 annotation family, `@concepts(...)`, `@input { ... }`, `include` in a shape
-body, `;`/`,` filter separators, `has`, `?.`) are refused at parse time with
-a migration hint. They survive only in `dsl/_reference/*.memql` as
-don't-do-this skeletons. Do not restore them when you see one in an old diff.
+body) are refused at parse time with a migration hint. They survive only in
+`dsl/_reference/*.memql` as don't-do-this skeletons. Do not restore them when
+you see one in an old diff. The retired expression spellings (`;`/`,` as
+connectives, `has`, `?.`, `when(...)`, `cond(`, `null`, a filter with no
+lambda header, ...) are refused at parse wherever a `.memql` file writes them:
+edition 2026 is the only grammar a file is read in. The refusal names
+`memqlmigrate --rewrite=expressions` as the
+fix, and the language server offers the same rewrite as a quick fix
+(`cmd/memql-lsp/codeaction.go`).
 
 ---
 
@@ -89,6 +119,13 @@ mistake this layout exists to prevent:
   and `memqlmigrate` and `memqllint` key on the same domain rule
   (`LanguageLineDomainOf`).
 - **Filter-clause terminators** live in `dslclause/`.
+- **The expression vocabulary** lives in `functions/` (the catalog and the
+  operator table) and `tiers/` (the manifest); **precedence and the retired
+  spellings** live in `parser/` (`V1PrecedenceTable`, `V1RetiredForms`).
+  `dslspec` projects its builtins and operators from `functions/`; Sense reads
+  the catalog, the manifest and `V1RetiredForms`; and
+  `TestOperatorLevelsAreTheParsersPrecedence` holds the operator table's levels
+  to the parser's table.
 
 ---
 
@@ -101,8 +138,8 @@ sub-packages -- `annotations/`, `ast/`, and `dslclause/` each carry a
 packages are separate modules precisely so a consumer can depend on the
 annotation registry or the AST types without dragging in the parser.
 
-`compiler/`, `dslspec/`, `pagination/`, `parser/` and `tiers/` are **not**
-separate modules -- they are packages inside `component/language`.
+`compiler/`, `dslspec/`, `functions/`, `pagination/`, `parser/` and `tiers/`
+are **not** separate modules -- they are packages inside `component/language`.
 
 ---
 

@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
 // startswith_test.go -- the `<field> startsWith <prefix>` comparison
@@ -138,46 +140,50 @@ func TestStartsWith_ComposesWithWhenGuardAndOr(t *testing.T) {
 }
 
 // The struct-form rewriter passes a filter line through to the grammar; the
-// predicate must survive that rewrite inside a real query construct.
+// predicate must survive that rewrite inside a real query construct. In
+// edition 2026 the filter is a lambda, and its body the v1 startsWith.
 func TestStartsWith_StructQueryFilter(t *testing.T) {
 	src := `query codeMetric byPrefix {
   args {
     prefixes []string!
   }
-  filter codeReference startsWith args.prefixes
+  filter row => row.codeReference startsWith args.prefixes
 }`
 	file, err := rewriteAndParse(t, src)
 	if err != nil {
 		t.Fatalf("rewrite+parse: %v", err)
 	}
-	var found *ComparisonExpr
+	var found *ast.BinaryExpr
 	walkExpressions(file, func(n ExpressionNode) {
-		if cmp, ok := n.(*ComparisonExpr); ok && cmp.Operator == OpStartsWith {
-			found = cmp
+		if lam, ok := n.(*ast.LambdaExpr); ok {
+			if cmp, ok := lam.Body.(*ast.BinaryExpr); ok && cmp.Op == "startsWith" {
+				found = cmp
+			}
 		}
 	})
 	if found == nil {
-		t.Fatalf("no OpStartsWith comparison in the parsed query")
+		t.Fatalf("no startsWith filter lambda in the parsed query")
 	}
-	if ref, ok := found.Value.(*ArgRefExpr); !ok || ref.Path != "prefixes" {
-		t.Fatalf("value = %#v, want the prefixes arg reference", found.Value)
+	if got := ast.FormatExpr(found); got != "row.codeReference startsWith args.prefixes" {
+		t.Fatalf("the filter reads %q, want row.codeReference startsWith args.prefixes", got)
 	}
 }
 
-// A spec body reads its bound fields bare; the predicate is a boolean over a
-// string field, so it belongs there too.
+// A spec body reads its bound row; the predicate is a boolean over a string
+// field, so it belongs there too.
 func TestStartsWith_SpecBody(t *testing.T) {
 	decl, err := ParseSpecDecl(`@enabled
 @description("Matches integration-owned code references.")
-spec codeMetric isIntegrationMetric {
-  return codeReference startsWith "integration."
-}`)
+spec codeMetric isIntegrationMetric = row => row.codeReference startsWith "integration."`)
 	if err != nil {
 		t.Fatalf("ParseSpecDecl: %v", err)
 	}
-	cmp, ok := decl.Body.(*ComparisonExpr)
-	if !ok || cmp.Operator != OpStartsWith || cmp.Value != "integration." {
-		t.Fatalf("spec body = %#v, want codeReference startsWith \"integration.\"", decl.Body)
+	if decl.Lambda == nil {
+		t.Fatalf("spec has no lambda body: %+v", decl)
+	}
+	cmp, ok := decl.Lambda.Body.(*ast.BinaryExpr)
+	if !ok || cmp.Op != "startsWith" || ast.FormatExpr(cmp) != `row.codeReference startsWith "integration."` {
+		t.Fatalf("spec body = %#v, want row.codeReference startsWith \"integration.\"", decl.Lambda.Body)
 	}
 }
 

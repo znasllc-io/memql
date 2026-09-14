@@ -26,6 +26,7 @@ func (f *fakeRegistry) ConceptGet(name string) (*ConceptInfo, bool) {
 	return nil, false
 }
 func (f *fakeRegistry) SpecNames() []string                      { return nil }
+func (f *fakeRegistry) SpecGet(string) (*SpecInfo, bool)         { return nil, false }
 func (f *fakeRegistry) ToolNames() []string                      { return nil }
 func (f *fakeRegistry) ToolGet(string) (*ToolInfo, bool)         { return nil, false }
 func (f *fakeRegistry) PromptNames() []string                    { return nil }

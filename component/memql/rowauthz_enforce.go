@@ -201,6 +201,11 @@ func cloneRowAuthzPredicate(expr ExpressionNode) ExpressionNode {
 		copied.Left = cloneRowAuthzPredicate(n.Left)
 		copied.Right = cloneRowAuthzPredicate(n.Right)
 		return &copied
+	case *NotExpression:
+		// No tier renders a negation today. If one ever does, a one-level
+		// copy would share the operand with the cache -- the composite
+		// tier's lesson above, one node over -- so the copy recurses.
+		return &NotExpression{Target: cloneRowAuthzPredicate(n.Target)}
 	default:
 		// A SpecReferenceExpression (the granted tier) carries a name and
 		// nothing mutable; anything else is a node this renderer does not
@@ -223,6 +228,8 @@ func stampRowAuthzConcept(expr ExpressionNode, conceptName string) {
 	case *LogicalExpression:
 		stampRowAuthzConcept(n.Left, conceptName)
 		stampRowAuthzConcept(n.Right, conceptName)
+	case *NotExpression:
+		stampRowAuthzConcept(n.Target, conceptName)
 	}
 }
 

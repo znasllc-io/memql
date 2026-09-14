@@ -29,6 +29,10 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/dslclause"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Finding is one violation of the §2 call-graph contract.
@@ -50,8 +54,8 @@ type SideEffectClassifier func(builtinName string) bool
 var (
 	// A call site: an identifier immediately followed by `(`. Intersected
 	// with the file's use-map so only cross-file construct calls count --
-	// pure helpers (coalesce/concat/if) and method calls (.first()) are
-	// never imported, so they fall out.
+	// ambient functions (canonicalId, addDuration) and method calls
+	// (.first()) are never imported, so they fall out.
 	callRE = regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
 	// A graph write: an `insert {` or `update {` block opener at statement
 	// position.
@@ -216,8 +220,8 @@ func isCallgraphIdentByte(b byte) bool {
 // requires -- keyed to their kind. A call written `<kind> name(` is correctly
 // prefixed and never reported; a dotted/method call `x.name(` is not a construct
 // invocation and is skipped. Only names whose useKinds kind is in
-// kindPrefixedInvocationKinds are checked, so ambient language builtins
-// (coalesce / concat / where / ...), bare predicate refs in a filter, and
+// kindPrefixedInvocationKinds are checked, so ambient language functions
+// (canonicalId / addDuration / ...), predicate applications in a filter, and
 // capability calls never produce a finding.
 // stripLiteralsAndComments blanks the CONTENTS of double-quoted string literals
 // and `//` line comments (replacing each interior byte with a space, preserving
@@ -423,14 +427,14 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 		// Conditions (if gates, forEach where clauses, @filter) may gate on
 		// step results, presence, and single-value fan-out equality -- but
 		// POLICY in a condition is a finding: a same-field string-literal
-		// ||-vocabulary (role/status sets), date-math or default-injecting
-		// builtins (addDuration / coalesce / concat), each of which belongs
-		// in a pure decide logic (or a query pushdown / @filter relevance
-		// check). This is the rule whose ABSENCE let 13 policy sites
-		// accumulate invisibly after the #2235 burn-down.
+		// ||-vocabulary (role/status sets), date math (addDuration), or a
+		// default injected into the compared value (`??` coalesce, `+`
+		// concat), each of which belongs in a pure decide logic (or a query
+		// pushdown / @filter relevance check). This is the rule whose ABSENCE
+		// let 13 policy sites accumulate invisibly after the #2235 burn-down.
 		for _, cond := range automationConditions(text) {
-			if m := conditionBuiltinRE.FindStringSubmatch(cond); m != nil {
-				add("automation-condition-builtin", fmt.Sprintf("condition %q calls %s() -- date math / defaults are POLICY; compute the decision in a pure logic (or push a cutoff into the query) and gate on steps.<decide>.result (P4, #2371)", snippet(cond), m[1]))
+			if what, ok := conditionPolicyOp(cond); ok {
+				add("automation-condition-builtin", fmt.Sprintf("condition %q %s -- date math / defaults are POLICY; compute the decision in a pure logic (or push a cutoff into the query) and gate on steps.<decide>.result (P4, #2371)", snippet(cond), what))
 			}
 			if field, ok := literalVocabularyField(cond); ok {
 				add("automation-condition-vocabulary", fmt.Sprintf("condition %q compares %q against multiple string literals -- a value VOCABULARY is policy; own it in one pure decide logic and switch on its result (P4, #2371)", snippet(cond), field))
@@ -450,12 +454,14 @@ var (
 	automationIfRE = regexp.MustCompile(`(?m)^\s*if\s+(.+?)\s*\{\s*$`)
 	// forEach where clauses: `forEach x in <src> where <cond> {`.
 	automationWhereRE = regexp.MustCompile(`(?m)forEach\s+\w+\s+in\s+.+?\s+where\s+(.+?)\s*\{\s*$`)
-	// trigger relevance filters: `@filter(<cond>)`.
-	automationFilterRE = regexp.MustCompile(`@filter\(([^)]*)\)`)
+	// trigger relevance filters: `@filter(<cond>)`. Only the OPENING is
+	// matched; the argument runs to its balanced `)` (annotationArgs). A
+	// `[^)]*` capture stopped at the first `)` inside the condition, so
+	// everything after a group or a call was never examined -- and a
+	// trigger filter (`@filter(row => (row.kind ?? "x") == "y")`) can open a
+	// group at once.
+	automationFilterRE = regexp.MustCompile(`@filter\s*\(`)
 
-	// Policy smells inside a condition. exists() is the sanctioned presence
-	// guard and is deliberately NOT in this list.
-	conditionBuiltinRE = regexp.MustCompile(`\b(addDuration|coalesce|concat)\s*\(`)
 	// Every `<ident> == "<literal>"` atom in a condition; two on the SAME
 	// identifier joined by || form a vocabulary (checked in Go -- RE2 has no
 	// backreferences).
@@ -492,10 +498,84 @@ func automationConditions(text string) []string {
 	for _, m := range automationWhereRE.FindAllStringSubmatch(text, -1) {
 		out = append(out, m[1])
 	}
-	for _, m := range automationFilterRE.FindAllStringSubmatch(text, -1) {
-		out = append(out, m[1])
+	out = append(out, annotationArgs(text, automationFilterRE)...)
+	return out
+}
+
+// annotationArgs returns the argument text of every annotation whose opening
+// (`@name(`) re matches, up to its BALANCED closing paren; parentheses inside
+// string literals do not count. An annotation left unclosed is skipped: it
+// does not load, so there is no condition to judge.
+func annotationArgs(text string, re *regexp.Regexp) []string {
+	var out []string
+	for _, loc := range re.FindAllStringIndex(text, -1) {
+		depth, inStr := 1, false
+	scan:
+		for i := loc[1]; i < len(text); i++ {
+			switch c := text[i]; {
+			case inStr && c == '\\':
+				i++
+			case c == '"':
+				inStr = !inStr
+			case inStr:
+			case c == '(':
+				depth++
+			case c == ')':
+				depth--
+				if depth == 0 {
+					out = append(out, text[loc[1]:i])
+					break scan
+				}
+			}
+		}
 	}
 	return out
+}
+
+// conditionPolicyOp reports the policy operation a condition performs, as the
+// words the finding uses: date math, or a default injected into the value
+// being compared.
+//
+// The condition is PARSED (a trigger filter as a lambda, `row => ...`; a step
+// gate as an expression) and the operation is found on the tree: a call to
+// addDuration, a `??` (coalesce), or a `+` (concat). A presence check --
+// `x != nil`, the sanctioned guard -- is not policy and is not in this list.
+// A condition that does not parse is not judged: the loader refuses it with
+// the parser's own message.
+func conditionPolicyOp(cond string) (string, bool) {
+	src := strings.TrimSpace(cond)
+	var body ast.ExpressionNode
+	if dslclause.OpensLambda(src) {
+		if lam, err := parser.ParseV1Lambda(src); err == nil {
+			body = lam.Body
+		}
+	} else if n, err := parser.ParseV1Expression(src); err == nil {
+		body = n
+	}
+	if body == nil {
+		return "", false
+	}
+	what := ""
+	ast.WalkV1(body, func(n ast.ExpressionNode) bool {
+		if what != "" {
+			return false
+		}
+		switch e := n.(type) {
+		case *ast.BinaryExpr:
+			switch e.Op {
+			case "??":
+				what = "coalesces with `??`"
+			case "+":
+				what = "concatenates with `+`"
+			}
+		case *ast.CallExpr:
+			if e.Receiver == nil && e.Kind == "" && e.Name == "addDuration" {
+				what = "calls addDuration()"
+			}
+		}
+		return what == ""
+	})
+	return what, what != ""
 }
 
 // snippet truncates a condition for the finding message.
@@ -506,4 +586,3 @@ func snippet(s string) string {
 	}
 	return s
 }
-

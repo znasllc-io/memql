@@ -1,6 +1,6 @@
 /// When an agent node joins the cluster, open a ticket to welcome it.
 @trigger(event="node.created", concept="v1:cluster:node", partition="*")
-@filter(payload.nodeType == "agent")
+@filter(row => row.nodeType == "agent")
 automation welcomeNodeFilter {
   step raise {
     mutation raiseTicketFilter (title: "A node joined the cluster")

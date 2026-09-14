@@ -4,7 +4,7 @@
 // a named owned query or mutation. The assistant invokes these to
 // manage the user's standalone notes on their behalf; per-row authz
 // on the underlying query / mutation gates every call to the caller's
-// own rows (ownerUserId==actor.userId), so the tool surface carries
+// own rows (`row.ownerUserId == actor.userId`), so the tool surface carries
 // no ownerUserId arg for the LLM to forge -- ownership is
 // server-stamped from the auth context.
 
@@ -32,7 +32,7 @@ tool notesCreate {
 /// Update a note's fields (title / body / tags). Pass the full merged payload built from the
 /// current note (via notesList or notesSearch) plus the changed fields. Owned: ownership is
 /// re-enforced server-side and updatedAt is re-stamped.
-@handler(type="query", query="mutation updateNote(noteId: \"$args.noteId\", payload: $args.payload)")
+@handler(type="query", query="mutation updateNote(noteId: args.noteId, payload: args.payload)")
 @executionTime("fast")
 @mcp
 tool notesUpdate {
@@ -43,7 +43,7 @@ tool notesUpdate {
 /// Search the caller's notes by tag -- returns every note carrying the given tag. Owned: only the
 /// caller's own notes are searched. Read-only. To find notes by body text, list / tag-search first
 /// and substring-match the bodies in your reasoning.
-@handler(type="query", query="query notesByTag(tag: \"$args.tag\")")
+@handler(type="query", query="query notesByTag(tag: args.tag)")
 @executionTime("fast")
 @mcp
 tool notesSearch {

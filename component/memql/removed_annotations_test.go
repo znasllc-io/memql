@@ -82,7 +82,7 @@ func TestKeptAnnotationsStillAccepted(t *testing.T) {
 		{"@public", annotations.Query},
 		{"@actor", annotations.Mutation},
 		{`@trigger(event="x")`, annotations.Automation},
-		{"@filter(a == 1)", annotations.Automation},
+		{"@filter(row => row.a == 1)", annotations.Automation},
 		// @schedule reinstated on automations (#2712): LIVE (folds to the
 		// honored AutomationDef.Schedule / cron scheduler).
 		{`@schedule(cron="0 5 9 * * *")`, annotations.Automation},

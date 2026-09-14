@@ -5,12 +5,12 @@ package steps
 // `x - 10` won't parse inside a lambda".
 //
 // The item names two suspects on the serialize->re-parse boundary owned by
-// this file's production code (function.go): renderMemQLValue's numeric
-// rendering, and literal type inference on re-parse of object literals.
-// The round-trip tests here PIN both clean: an int counter rendered by
-// renderFunctionArgs re-parses as int64 -- standalone, nested in an object
-// literal, and inside a row collection -- and stays comparable as a number
-// through the full logic path (never bool).
+// this package's production code: renderMemQLData's numeric rendering, and
+// literal type inference on re-parse of object literals. The round-trip
+// tests here PIN both clean: an int counter rendered by renderV1CallArgs
+// re-parses as int64 -- standalone, nested in an object literal, and inside
+// a row collection -- and stays comparable as a number through the full
+// logic path (never bool).
 //
 // The remaining facet was a GRAMMAR gap, now CLOSED (#2542 item 5 residual):
 // the langparser used to parse comparisons only identifier-led
@@ -32,7 +32,7 @@ import (
 )
 
 // TestLogicArgIntCounterRoundTrip_TypesPreserved drives the exact
-// FunctionExecutor serialize path (resolveArgsRefs + renderFunctionArgs)
+// FunctionExecutor serialize path (ResolveV1Map + renderV1CallArgs)
 // and the engine's re-parse (langparser.ParseExpression, the sole runtime
 // parser) for int counters in every arg position, asserting the values
 // come back typed int64 -- ruling out the two #2542-item-5 suspects that
@@ -90,7 +90,7 @@ func TestLogicArgIntCounterRoundTrip_TypesPreserved(t *testing.T) {
 		{
 			name: "float64-decoded counter narrows to int64",
 			// JSON-decoded automation configs carry numbers as float64;
-			// renderMemQLValue prints 3 and the re-parse types the bare
+			// renderMemQLData prints 3 and the re-parse types the bare
 			// integer int64 (the documented int-first literal dance).
 			args: map[string]any{"count": float64(3)},
 			verify: func(t *testing.T, got map[string]any) {
@@ -103,11 +103,11 @@ func TestLogicArgIntCounterRoundTrip_TypesPreserved(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			resolved, err := resolveArgsRefs(tc.args, automations.NewEvaluator())
+			resolved, err := automations.NewEvaluator().ResolveV1Map(context.Background(), tc.args)
 			if err != nil {
-				t.Fatalf("resolveArgsRefs: %v", err)
+				t.Fatalf("resolve: %v", err)
 			}
-			query := "logicBumpProbe(" + renderFunctionArgs(resolved) + ")"
+			query := "logicBumpProbe(" + renderV1CallArgs(resolved) + ")"
 			parsed, err := langparser.ParseExpression(query)
 			if err != nil {
 				t.Fatalf("re-parse failed: %v\nquery: %s", err, query)
@@ -147,14 +147,14 @@ logic logicCounterProbe {
 	body := parseLogicBodyForSteps(t, logicSrc)
 
 	// Serialize + re-parse the arg exactly as the function step does.
-	resolved, err := resolveArgsRefs(map[string]any{"rows": []any{
+	resolved, err := automations.NewEvaluator().ResolveV1Map(context.Background(), map[string]any{"rows": []any{
 		map[string]any{"count": 3},
 		map[string]any{"count": 30},
-	}}, automations.NewEvaluator())
+	}})
 	if err != nil {
-		t.Fatalf("resolveArgsRefs: %v", err)
+		t.Fatalf("resolve: %v", err)
 	}
-	query := "logicCounterProbe(" + renderFunctionArgs(resolved) + ")"
+	query := "logicCounterProbe(" + renderV1CallArgs(resolved) + ")"
 	parsed, err := langparser.ParseExpression(query)
 	if err != nil {
 		t.Fatalf("re-parse failed: %v\nquery: %s", err, query)

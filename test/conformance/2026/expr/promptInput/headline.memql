@@ -1,0 +1,1 @@
+upper(args.title) + " (" + toString(args.tags.count()) + " tags)"

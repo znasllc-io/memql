@@ -1,0 +1,14 @@
+/// A support ticket: the row the logic here reads.
+concept ticket {
+  title     string
+  status    string
+  priority  int
+}
+
+/// Every ticket, a page at a time.
+query ticket lbTickets {
+  paginate 20
+}
+
+/// Tickets that are open.
+trait lbIsOpen = row => row.status == "open"

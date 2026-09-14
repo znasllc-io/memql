@@ -3,7 +3,7 @@ query ticket matchingTicketsMaximum {
   args {
     priority  int  @maximum("5")
   }
-  filter priority <= args.priority
+  filter row => row.priority <= args.priority
   sort "row.createdAt", "desc"
   paginate 20
 }

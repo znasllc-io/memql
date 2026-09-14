@@ -1,0 +1,5 @@
+/// Tickets in this deployment's configured region, or carrying its configured incident prefix.
+query ticket qfConfiguredTickets {
+  filter row => row.region == var("region") || row.region == systemVar("defaultRegion") || row.code == secret("incidentPrefix") || row.code == systemSecret("globalIncidentPrefix")
+  paginate 20
+}

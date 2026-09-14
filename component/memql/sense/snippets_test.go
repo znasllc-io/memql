@@ -58,8 +58,8 @@ func TestBlockAndSkeletonSnippets(t *testing.T) {
 			filterItem = &c
 		}
 	}
-	if filterItem == nil || filterItem.InsertText != "filter " {
-		t.Errorf("query body must offer the filter line clause inserted as `filter `, got %+v", filterItem)
+	if filterItem == nil || filterItem.InsertText != "filter row => " {
+		t.Errorf("query body must offer the filter line clause inserted as `filter row => `, got %+v", filterItem)
 	}
 	if blockSnip == nil {
 		t.Fatal("query body must offer an args block snippet")

@@ -24,22 +24,17 @@ func TestBlockSpecificCompletion(t *testing.T) {
 			t.Errorf("args block must offer field type %q, got %v", want, args)
 		}
 	}
-	for _, never := range []string{"coalesce", "cond", "filter", "accept", "payload"} {
+	for _, never := range []string{"lower", "hash", "filter", "accept", "payload"} {
 		if args[never] {
 			t.Errorf("args block must not offer %q", never)
 		}
 	}
 
-	filter := blockLabels(t, rp, "@actor\nquery todo todos {\n  filter {\n    ")
-	for _, want := range []string{"payload", "actor", "args", "now", "title"} {
-		if !filter[want] {
-			t.Errorf("filter clause must offer %q, got %v", want, filter)
-		}
-	}
-	for _, never := range []string{"string", "bool", "accept", "stamp"} {
-		if filter[never] {
-			t.Errorf("filter clause must not offer %q", never)
-		}
+	// The pre-v1 `filter { }` block is refused at parse in edition 2026, so it
+	// offers nothing: every name it used to offer -- the reserved heads, the
+	// bound concept's bare fields -- is a spelling the parser refuses there.
+	if filter := blockLabels(t, rp, "@actor\nquery todo todos {\n  filter {\n    "); len(filter) != 0 {
+		t.Errorf("a filter block must offer nothing, got %v", filter)
 	}
 
 	write := blockLabels(t, rp, "mutate todo createTodo {\n  insert {\n    ")
@@ -117,28 +112,6 @@ func TestEveryNextRuleLabelIsClassifiedOrDeclaredUndetected(t *testing.T) {
 	for label := range specUndetectedContextLabels {
 		if !declared[label] {
 			t.Errorf("undetected list names %q, which no NextRule declares", label)
-		}
-	}
-}
-
-// The filter heads mirror the engine plan parser's reserved set.
-func TestReservedFilterHeadsMirrorEngine(t *testing.T) {
-	want := map[string]bool{
-		"payload": true, "actor": true, "args": true, "now": true, "config": true,
-		"trace": true, "meta": true, "schema": true, "partition": true, "provenance": true,
-	}
-	got := map[string]bool{}
-	for _, h := range reservedFilterHeads {
-		got[h] = true
-	}
-	for h := range want {
-		if !got[h] {
-			t.Errorf("filter completion is missing the engine's reserved head %q", h)
-		}
-	}
-	for h := range got {
-		if !want[h] {
-			t.Errorf("filter completion offers %q, which the engine does not reserve", h)
 		}
 	}
 }

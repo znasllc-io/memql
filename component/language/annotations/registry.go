@@ -165,7 +165,7 @@ var (
 		{Name: "concept", Type: "string", Doc: "Concept id the triggering event targets; required by the structured node.* event kinds."},
 		{Name: "partition", Type: "string", Doc: "Partition selector, e.g. \"*\" for all partitions. Required while the event topic carries a partition segment (#56 phase 8)."},
 		{Name: "schedule", Type: "string", Doc: "Cron schedule with a leading seconds field, e.g. \"0 0 * * * *\"."},
-		{Name: "filter", Type: "string", Doc: "The trigger filter as a keyword; the standalone @filter(...) annotation is the usual spelling and sets the same filter."},
+		{Name: "filter", Type: "expression", Doc: "The trigger filter as a keyword: a lambda of one parameter over the triggering row, filter=row => <predicate>. The standalone @filter(...) annotation is the usual spelling and sets the same filter."},
 		{Name: "on", Type: "string", Doc: "A synonym for event=: on=<concept>.<created|updated|deleted>, with the concept named through the file's `use` import, folds to the same graph.node.<action>.<concept> pattern event= names (resolved by the automation loader and the concept resolver). A later epic retires the synonyms (D15/D17)."},
 	}
 	scheduleKeys = []ArgSpec{
@@ -285,7 +285,7 @@ var placementTable = concat(
 	lifecycle(Automation, "On a new ticket, notify its owner."),
 	[]Placement{
 		{Receiver: Automation, Name: "actor", Forms: FormFlag, Example: "@actor", Doc: docActorOnFunction},
-		{Receiver: Automation, Name: "filter", Forms: FormExpression | FormString, Example: `@filter(payload.status == "open")`},
+		{Receiver: Automation, Name: "filter", Forms: FormExpression, Example: `@filter(row => row.status == "open")`},
 		{Receiver: Automation, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
 		{Receiver: Automation, Name: "schedule", Forms: FormKeywords | FormString, Keys: scheduleKeys, Example: `@schedule(cron="0 0 * * * *")`},
 		{Receiver: Automation, Name: "template", Forms: FormFlag, Example: "@template"},
@@ -483,7 +483,7 @@ var Docs = map[string]string{
 	"scrubPii":           "On an update mutation (the hard-delete / data-deletion path): after the partial payload merges, zero EVERY field the bound concept marks @pii. The field set is derived from the schema, so a newly-annotated PII field is scrubbed automatically with no change to the mutation. Bare flag, no arguments. See memql#1711.",
 	// Automation.
 	"trigger":  "Event trigger for automations. Format: @trigger(event=\"graph.node.created.*.v1:ns:concept\") or @trigger(schedule=\"0 0 * * * *\").",
-	"filter":   "Filter expression for automation triggers.",
+	"filter":   "Filter for automation triggers: a lambda of one parameter over the triggering row, as in @filter(row => row.status == \"open\").",
 	"template": "On an automation: this is a work-spine TEMPLATE, invoked by a v1:work:run that named it rather than fired by the graph (memql#5048). It is the third way an automation can be reachable, alongside an event trigger and a schedule. A @template automation must carry NEITHER @trigger nor @schedule -- the load-time gate refuses both combinations, so \"called\" and \"triggered\" stay distinct.",
 	"schedule": "Cron schedule for a scheduled automation. Format: @schedule(cron=\"0 0 * * * *\"). Synonym for @trigger(schedule=...); folds to the same scheduler field (#2712).",
 	// Capability (memql#2218, behavioral-constructs ADR §2.3).

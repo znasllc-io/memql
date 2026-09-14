@@ -3,7 +3,7 @@ query ticket matchingTicketsEnum {
   args {
     status  string  @enum("open", "closed")
   }
-  filter status == args.status
+  filter row => row.status == args.status
   sort "row.createdAt", "desc"
   paginate 20
 }

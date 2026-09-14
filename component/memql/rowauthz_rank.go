@@ -559,6 +559,16 @@ func (e *MemQLEngine) lowerRankScope(ctx context.Context, expr ExpressionNode) E
 		copied := *n
 		copied.Left, copied.Right = left, right
 		return &copied
+	case *NotExpression:
+		// The injection ANDs the rank term at the ROOT, so none sits under
+		// a negation today; walked anyway, because a placeholder this walk
+		// misses reaches the SQL compiler unlowered. treeHasRankScope below
+		// answers for the same node, as the pair's contract requires.
+		target := e.lowerRankScope(ctx, n.Target)
+		if target == n.Target {
+			return n
+		}
+		return &NotExpression{Target: target}
 	default:
 		return expr
 	}
@@ -581,6 +591,8 @@ func treeHasRankScope(expr ExpressionNode) bool {
 		return true
 	case *LogicalExpression:
 		return treeHasRankScope(n.Left) || treeHasRankScope(n.Right)
+	case *NotExpression:
+		return treeHasRankScope(n.Target)
 	default:
 		return false
 	}

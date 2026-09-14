@@ -1,0 +1,2 @@
+go test fuzz v1
+string("row => args.strict == true ? row.status == \"open\" : row.status != \"closed\"")

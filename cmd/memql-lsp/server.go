@@ -60,6 +60,10 @@ type server struct {
 	// a workspace compile it has nothing to do with.
 	catalogMu sync.RWMutex
 	catalog   clusterCatalog
+
+	// rewrite is the workspace state behind the "Rewrite to edition 2026"
+	// code actions -- see codeaction.go, which owns it.
+	rewrite rewriteState
 }
 
 func newServer(root string, log commonlog.Logger) *server {
@@ -133,6 +137,9 @@ func (s *server) buildSense(notify glsp.NotifyFunc) {
 		svc = sense.New(nil)
 	}
 	s.setBuild(svc, lines)
+	// The predicate sources the rewrite code actions resolve against change
+	// with the workspace, on the same schedule.
+	s.rewrite.load(s.root)
 	s.announceBuild(notify, err, lines)
 }
 
@@ -200,11 +207,13 @@ func (s *server) initialize(ctx *glsp.Context, params *protocol.InitializeParams
 		SignatureHelpProvider: &protocol.SignatureHelpOptions{
 			TriggerCharacters: signatureHelpTriggerChars,
 		},
-		// The quick fix that writes a domain's missing memql.toml
-		// (languageline.go). Advertised to every client; offered only to one
-		// that can create a file through a workspace edit.
+		// Code actions: the quick fix that writes a domain's missing
+		// memql.toml (languageline.go), offered only to a client that can
+		// create a file through a workspace edit; and "Rewrite to edition
+		// 2026", a quickfix on a retired form plus source.fixAll.memql for
+		// the whole file (codeaction.go).
 		CodeActionProvider: protocol.CodeActionOptions{
-			CodeActionKinds: []protocol.CodeActionKind{protocol.CodeActionKindQuickFix},
+			CodeActionKinds: codeActionKinds,
 		},
 		// Custom (non-LSP) requests this server answers, advertised so a client
 		// can feature-detect rather than call blind and handle MethodNotFound.
@@ -288,6 +297,7 @@ func (s *server) didClose(ctx *glsp.Context, params *protocol.DidCloseTextDocume
 	s.publishMu.Lock()
 	defer s.publishMu.Unlock()
 	s.docs.closeDoc(uri)
+	s.rewrite.forget(uri)
 	ctx.Notify(protocol.ServerTextDocumentPublishDiagnostics, protocol.PublishDiagnosticsParams{
 		URI:         uri,
 		Diagnostics: []protocol.Diagnostic{},

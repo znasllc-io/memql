@@ -1,0 +1,1 @@
+row => sbIsOpen(row) && row.tags.any(t => t == "urgent")

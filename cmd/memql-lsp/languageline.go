@@ -177,28 +177,28 @@ func clientCreatesFiles(caps protocol.ClientCapabilities) bool {
 // is still absent on disk, and only to a client that can create a file. A
 // refusal for any other reason gets no action: the fix for a newer line or an
 // edition this engine does not read is a decision, not a file.
-func (s *server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) (any, error) {
+func (s *server) languageLineCodeActions(params *protocol.CodeActionParams) []protocol.CodeAction {
 	if !s.createsFiles.Load() || !wantsQuickFix(params.Context.Only) {
-		return nil, nil
+		return nil
 	}
 	text, ok := s.docs.get(params.TextDocument.URI)
 	if !ok {
-		return nil, nil
+		return nil
 	}
 	_, lines := s.getBuild()
 	problems, ok := s.documentRefusal(params.TextDocument.URI, lines)
 	if !ok {
-		return nil, nil
+		return nil
 	}
 	i := slices.IndexFunc(problems, func(p memql.LanguageLineProblem) bool {
 		return p.Code == langparser.CodeLanguageLineMissing
 	})
 	if i < 0 {
-		return nil, nil
+		return nil
 	}
 	missing := problems[i]
 	if !mentionsRefusal(params.Context.Diagnostics, missing) || s.manifestOnDisk(lines.Root, missing.Domain) {
-		return nil, nil
+		return nil
 	}
 
 	// The diagnostic the actions resolve is rebuilt from the refusal rather
@@ -222,7 +222,7 @@ func (s *server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) 
 			Edit:        s.createManifests(lines.Root, all),
 		})
 	}
-	return actions, nil
+	return actions
 }
 
 // allDomainsTitle names the action that writes every missing memql.toml.

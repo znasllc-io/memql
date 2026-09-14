@@ -36,7 +36,7 @@ concept scanEvent {
 @enabled
 query order listOrders {
   args { id  string  @required }
-  filter  id == args.id
+  filter  row => row.id == args.id
 }`),
 		"other/concepts.memql": file(`@version("1.0.0")
 @namespace("other")

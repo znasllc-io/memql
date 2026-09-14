@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
 // ShapeExecutor transforms data using shape templates.
@@ -39,11 +41,14 @@ func (e *ShapeExecutor) Execute(ctx context.Context, step *automations.Step, ste
 
 	shapeCfg := step.Shape
 
-	// Resolve the source data
-	// IMPORTANT: .memql automations use bare step references like "stepId.result.X"
-	// (not "$steps.stepId.result.X"). EvaluateStepReference supports resolving
-	// these friendly references.
-	sourceValue, err := stepCtx.Evaluator.EvaluateStepReference(shapeCfg.Source)
+	// Resolve the source data: an expression parsed at load (memql#5367).
+	// The TEMPLATE is not an expression position: it is the shape helpers'
+	// own template language (node(), ai()), applied per item below.
+	x, err := preparedExprs(step)
+	var sourceValue any
+	if err == nil {
+		sourceValue, err = v1Value(ctx, stepCtx.Evaluator, x.Source)
+	}
 	if err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("failed to evaluate source: %v", err)
@@ -165,9 +170,8 @@ func (e *ShapeExecutor) applyTemplate(ctx context.Context, template map[string]a
 func (e *ShapeExecutor) evaluateTemplateValue(ctx context.Context, value any, eval *automations.Evaluator, stepCtx *Context) (any, error) {
 	switch v := value.(type) {
 	case string:
-		// $ expressions
-		if len(v) > 0 && v[0] == '$' {
-			return eval.EvaluateValue(v)
+		if err := refuseDollarReference(v); err != nil {
+			return nil, err
 		}
 		// String-form shape functions like node("..."), ai("...", {...})
 		if isShapeFunction(v) {
@@ -263,7 +267,7 @@ func (e *ShapeExecutor) evaluateFunctionObject(ctx context.Context, name string,
 		if !ok || path == "" {
 			return nil, fmt.Errorf("node() argument must be a non-empty string")
 		}
-		return eval.EvaluateValue("$node." + path)
+		return readNodePath(ctx, eval, path)
 
 	case "ai":
 		if stepCtx.Engine == nil {
@@ -279,8 +283,8 @@ func (e *ShapeExecutor) evaluateFunctionObject(ctx context.Context, name string,
 
 		var resolvedData map[string]any
 		if len(args) >= 2 && args[1] != nil {
-			// The data arg is already a parsed object. Evaluate it as a template-like value
-			// so nested node() calls and $ expressions resolve.
+			// The data arg is already a parsed object. Evaluate it as a
+			// template-like value so nested node() calls resolve.
 			resolvedAny, err := e.evaluateTemplateValue(ctx, args[1], eval, stepCtx)
 			if err != nil {
 				return nil, err
@@ -297,6 +301,34 @@ func (e *ShapeExecutor) evaluateFunctionObject(ctx context.Context, name string,
 
 	// Unknown function object: return as-is (debuggable)
 	return map[string]any{"Name": name, "Args": args}, nil
+}
+
+// readNodePath is the template language's node("a.b") read: `node.a.b`,
+// evaluated over the run with the current item bound as `node` -- so a
+// template reads the item exactly as an expression reads a member, absence
+// included (an absent member is nil). The member chain is built from the
+// path's segments, never parsed: a template path is not expression text.
+func readNodePath(ctx context.Context, eval *automations.Evaluator, path string) (any, error) {
+	var n ast.ExpressionNode = &ast.IdentExpr{Name: "node"}
+	for _, seg := range strings.Split(path, ".") {
+		if seg == "" {
+			return nil, fmt.Errorf("node(%q): the path has an empty segment", path)
+		}
+		n = &ast.MemberExpr{Object: n, Field: seg}
+	}
+	return v1Value(ctx, eval, n)
+}
+
+// refuseDollarReference refuses a `$`-reference in a shape template. The
+// template language reads its node through node("path"); the `$` form it
+// used to accept (`$node.x`, `$steps.s.result`) was read by the string
+// evaluator, which went with the legacy grammar (memql#5367). Reading it as
+// a literal would write the reference text as data, so it fails the step.
+func refuseDollarReference(s string) error {
+	if strings.HasPrefix(s, "$") {
+		return fmt.Errorf("shape template value %q: a `$` reference is the retired grammar -- a template reads its node through node(\"path\")", s)
+	}
+	return nil
 }
 
 // isShapeFunction checks if a string looks like a shape function call.
@@ -322,7 +354,7 @@ func (e *ShapeExecutor) evaluateShapeFunction(ctx context.Context, funcCall stri
 			return nil, fmt.Errorf("invalid node() call: %s", funcCall)
 		}
 		// Resolve from the current item
-		return eval.EvaluateValue("$node." + path)
+		return readNodePath(ctx, eval, path)
 	}
 
 	if len(funcCall) >= 3 && funcCall[:3] == "ai(" {
@@ -337,10 +369,10 @@ func (e *ShapeExecutor) evaluateShapeFunction(ctx context.Context, funcCall stri
 			return nil, fmt.Errorf("failed to parse ai()call: %w", err)
 		}
 
-		// Parse and resolve the data object (handles node() and $ expressions)
+		// Parse and resolve the data object (handles node() calls)
 		var resolvedData map[string]any
 		if dataStr != "" {
-			resolvedData, err = parseShapeDataObject(dataStr, eval)
+			resolvedData, err = parseShapeDataObject(ctx, dataStr, eval)
 			if err != nil {
 				return nil, fmt.Errorf("failed to parse ai()data: %w", err)
 			}
@@ -432,7 +464,7 @@ func parseAIFunctionCall(funcCall string) (string, string, error) {
 // parseShapeDataObject parses a shape-style data object that may contain function calls.
 // Format: { "key": value, "key2": node("field"), ... }
 // Values can be: quoted strings, numbers, booleans, null, or function calls like node("x")
-func parseShapeDataObject(dataStr string, eval *automations.Evaluator) (map[string]any, error) {
+func parseShapeDataObject(ctx context.Context, dataStr string, eval *automations.Evaluator) (map[string]any, error) {
 	dataStr = trimWhitespace(dataStr)
 	if dataStr == "" {
 		return nil, nil
@@ -479,7 +511,7 @@ func parseShapeDataObject(dataStr string, eval *automations.Evaluator) (map[stri
 		inner = trimWhitespace(inner[1:])
 
 		// Parse value
-		value, remaining, err := parseShapeValue(inner, eval)
+		value, remaining, err := parseShapeValue(ctx, inner, eval)
 		if err != nil {
 			return nil, fmt.Errorf("parsing value for key %q: %w", key, err)
 		}
@@ -497,7 +529,7 @@ func parseShapeDataObject(dataStr string, eval *automations.Evaluator) (map[stri
 
 // parseShapeValue parses a single value from a shape data object.
 // Returns the parsed value and the remaining unparsed string.
-func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error) {
+func parseShapeValue(ctx context.Context, s string, eval *automations.Evaluator) (any, string, error) {
 	s = trimWhitespace(s)
 	if s == "" {
 		return nil, "", fmt.Errorf("unexpected end of input")
@@ -511,13 +543,8 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 			return nil, "", fmt.Errorf("unterminated string")
 		}
 		value := s[1:end]
-		// Check if it's a $ expression
-		if len(value) > 0 && value[0] == '$' {
-			resolved, err := eval.EvaluateValue(value)
-			if err != nil {
-				return nil, "", fmt.Errorf("evaluating expression %q: %w", value, err)
-			}
-			return resolved, s[end+1:], nil
+		if err := refuseDollarReference(value); err != nil {
+			return nil, "", err
 		}
 		return value, s[end+1:], nil
 	}
@@ -547,19 +574,8 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 		return nil, s[4:], nil
 	}
 
-	// Function call like node("field") or $expression
 	if s[0] == '$' {
-		// Find end of $ expression
-		end := 1
-		for end < len(s) && (isAlphaNum(s[end]) || s[end] == '.' || s[end] == '_') {
-			end++
-		}
-		expr := s[:end]
-		resolved, err := eval.EvaluateValue(expr)
-		if err != nil {
-			return nil, "", fmt.Errorf("evaluating expression %q: %w", expr, err)
-		}
-		return resolved, s[end:], nil
+		return nil, "", refuseDollarReference(s)
 	}
 
 	// Function call like node("field")
@@ -591,8 +607,7 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 			if path == "" {
 				return nil, "", fmt.Errorf("invalid node() call: %s", funcCall)
 			}
-			// Resolve from current item using $node prefix
-			resolved, err := eval.EvaluateValue("$node." + path)
+			resolved, err := readNodePath(ctx, eval, path)
 			if err != nil {
 				return nil, "", fmt.Errorf("evaluating node(%q): %w", path, err)
 			}
@@ -610,7 +625,7 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 			return nil, "", fmt.Errorf("unmatched brace in nested object")
 		}
 
-		nested, err := parseShapeDataObject(s[:end], eval)
+		nested, err := parseShapeDataObject(ctx, s[:end], eval)
 		if err != nil {
 			return nil, "", err
 		}
@@ -625,7 +640,7 @@ func parseShapeValue(s string, eval *automations.Evaluator) (any, string, error)
 			return nil, "", fmt.Errorf("unmatched bracket in array")
 		}
 
-		arr, err := parseShapeArray(s[:end], eval)
+		arr, err := parseShapeArray(ctx, s[:end], eval)
 		if err != nil {
 			return nil, "", err
 		}
@@ -732,7 +747,7 @@ func scanBalancedSpanEnd(s string, open, closer byte) int {
 }
 
 // parseShapeArray parses a shape-style array.
-func parseShapeArray(s string, eval *automations.Evaluator) ([]any, error) {
+func parseShapeArray(ctx context.Context, s string, eval *automations.Evaluator) ([]any, error) {
 	s = trimWhitespace(s)
 	if len(s) < 2 || s[0] != '[' || s[len(s)-1] != ']' {
 		return nil, fmt.Errorf("array must be enclosed in brackets")
@@ -745,7 +760,7 @@ func parseShapeArray(s string, eval *automations.Evaluator) ([]any, error) {
 
 	var result []any
 	for len(inner) > 0 {
-		value, remaining, err := parseShapeValue(inner, eval)
+		value, remaining, err := parseShapeValue(ctx, inner, eval)
 		if err != nil {
 			return nil, err
 		}

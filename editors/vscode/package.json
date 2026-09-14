@@ -15,7 +15,7 @@
   },
   "memql": {
     "edition": "2026",
-    "grammarVersion": "2026.09-dsl-v1-foundations-7c878a05"
+    "grammarVersion": "2026.09-dsl-v1-expressions-52d9aeb1"
   },
   "categories": [
     "Programming Languages"

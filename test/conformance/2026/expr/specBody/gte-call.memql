@@ -1,0 +1,2 @@
+/// Tickets at or above priority three.
+spec ticket sbGte = row => gte(row.priority, 3)

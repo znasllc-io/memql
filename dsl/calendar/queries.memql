@@ -9,7 +9,7 @@
 
 use common.traits.{ isNotDeleted }
 
-/// Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate
+/// Get a single calendar event by node id. Self-scoped: the `row.ownerUserId == actor.userId` predicate
 /// guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete
 /// pre-read and the event detail view.
 @mcp
@@ -18,7 +18,7 @@ query calendarEvent calendarEventById {
   args {
     eventId  string!
   }
-  filter  row.id==args.eventId && ownerUserId==actor.userId && isNotDeleted
+  filter  row => row.id == args.eventId && row.ownerUserId == actor.userId && isNotDeleted(row)
   shape   calendarEventFull
 }
 
@@ -33,7 +33,10 @@ query calendarEvent upcomingEvents {
     windowStart  datetime!
     windowEnd    datetime!
   }
-  filter  ownerUserId==actor.userId && startsAt>=args.windowStart && startsAt<=args.windowEnd && isNotDeleted
+  filter  row => row.ownerUserId == actor.userId
+              && row.startsAt >= args.windowStart
+              && row.startsAt <= args.windowEnd
+              && isNotDeleted(row)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -52,7 +55,10 @@ query calendarEvent eventsByDay {
     dayStart  datetime!
     dayEnd    datetime!
   }
-  filter  ownerUserId==actor.userId && startsAt>=args.dayStart && startsAt<args.dayEnd && isNotDeleted
+  filter  row => row.ownerUserId == actor.userId
+              && row.startsAt >= args.dayStart
+              && row.startsAt < args.dayEnd
+              && isNotDeleted(row)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -70,7 +76,7 @@ query calendarEvent findEvents {
   args {
     title  string!
   }
-  filter  ownerUserId==actor.userId && title==args.title && isNotDeleted
+  filter  row => row.ownerUserId == actor.userId && row.title == args.title && isNotDeleted(row)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -85,7 +91,7 @@ query bookingHours bookingHours {
   args {
     published  bool
   }
-  filter    ownerUserId==actor.userId && when(args.published) { published==args.published }
+  filter    row => row.ownerUserId == actor.userId && (args.published == nil || row.published == args.published)
   sort      "row.createdAt", "desc"
   paginate  50
   shape     bookingHoursFull
@@ -98,7 +104,7 @@ query booking hostedBookings {
   args {
     status  string
   }
-  filter    ownerUserId==actor.userId && when(args.status) { status==args.status }
+  filter    row => row.ownerUserId == actor.userId && (args.status == nil || row.status == args.status)
   sort      "row.createdAt", "desc"
   paginate  50
   shape     bookingFull
@@ -110,6 +116,6 @@ query booking bookingById {
   args {
     bookingId  string!
   }
-  filter  row.id==args.bookingId && ownerUserId==actor.userId
+  filter  row => row.id == args.bookingId && row.ownerUserId == actor.userId
   shape   bookingFull
 }

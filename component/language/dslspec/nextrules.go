@@ -77,7 +77,7 @@ func nextRules() []NextRule {
 		{
 			Context: "inFilterClause",
 			Expect:  []string{"specRef", "operator", "payloadPath", "intrinsic"},
-			Doc:     "Inside a query filter: spec references, trait references, payload.<field> / intrinsic comparisons joined by && / || with Go precedence (the `!` negation is refused in a filter -- write the != comparison form); membership via `in`; arg-guards via when(args.x){ }. `filter` takes the rest of its line; it opens no block.",
+			Doc:     "Inside a query filter: `filter row => <predicate>` -- comparisons over row.<field> and row intrinsics, predicates applied as `isX(row)`, joined by && / || / ! with Go precedence; membership via `in`; an optional arg is guarded as `args.x == nil || row.f == args.x`. `filter` takes the rest of its line, and the lines after it that open with an operator; it opens no block.",
 		},
 		{
 			Context: "inShapeBody",

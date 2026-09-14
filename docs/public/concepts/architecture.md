@@ -308,6 +308,19 @@ The parser uses recursive descent with the following grammar productions:
 └──────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
+The expression nodes above are what the engine's internal query form parses
+to: the string an SDK sends to `Execute`, and the wrapper the struct-form
+rewriter generates. An expression an author writes -- a filter, a spec body,
+a condition, a logic statement -- parses to the smaller edition-2026 set in
+`component/language/ast/v1.go`: `IdentExpr`, `MemberExpr`, `CallExpr`,
+`UnaryExpr`, `BinaryExpr`, `ListExpr`, `MapExpr` and `ParenExpr`, plus the
+`LambdaExpr`, `TernaryExpr`, `LiteralExpr` and `NilExpr` shared with the set
+above. A payload field is a `MemberExpr` on the lambda parameter and applying
+a spec is a `CallExpr`, so `ConditionalFilterExpr` (the retired
+`when(args.x) { ... }` guard) has no edition-2026 counterpart: the guard is
+written `args.x == nil || row.f == args.x`. See
+[the internal query form](../language/memql.md#the-internal-query-form).
+
 ---
 
 ## Compiler Engine
@@ -327,7 +340,7 @@ The Compiler Engine (`component/language/compiler/`) transforms AST nodes into t
 │   │  @trigger(schedule="0 */30 * * * *")                                         │   │
 │   │  @description("Process active leads every 30 minutes")                       │   │
 │   │  automation leadProcessor {                                                  │   │
-│   │      fetchLeads := queryActiveLeads({})                                      │   │
+│   │      fetchLeads := queryActiveLeads()                                        │   │
 │   │  }                                                                           │   │
 │   └─────────────────────────────────────────────────────────────────────────────┘   │
 │                                         │                                            │

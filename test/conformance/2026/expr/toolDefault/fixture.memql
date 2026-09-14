@@ -6,6 +6,6 @@ concept ticket {
 
 /// The open tickets, newest first. It sorts and does not paginate: the tool's handler pages it.
 query ticket openTicketsForTool {
-  filter status == "open"
+  filter row => row.status == "open"
   sort "row.createdAt", "desc"
 }

@@ -1,0 +1,1 @@
+row => qfIsOpen(row) && row.urgent == true

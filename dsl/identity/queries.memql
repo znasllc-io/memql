@@ -9,7 +9,7 @@ use common.traits.{ identityIsApiKey, identityIsBadge, identityIsMagicLink, iden
 // ==========================================
 //
 // Both reads are OWNED, and owned twice over: the filters name
-// ownerUserId==actor.userId as a top-level conjunct, and the concept's
+// `row.ownerUserId == actor.userId` as a top-level conjunct, and the concept's
 // @rowAuthz(owner="ownerUserId") declaration makes the engine AND the
 // same term in whether the author wrote it or not (memql#3172). The
 // authored conjunct is kept rather than leaned off, for two reasons --
@@ -27,29 +27,29 @@ use common.traits.{ identityIsApiKey, identityIsBadge, identityIsMagicLink, iden
 // not compose".
 
 /// List the caller's accounts, newest first, optionally narrowed to one lifecycle status. Owned:
-/// ownerUserId==actor.userId gates the row set server-side, so an operator can never see another
-/// operator's customers. Omit status to get every account including archived ones.
+/// `row.ownerUserId == actor.userId` gates the row set server-side, so an operator can never see
+/// another operator's customers. Omit status to get every account including archived ones.
 @actor
 query account accounts {
   args {
     status  enum("active", "suspended", "archived")
   }
-  filter  ownerUserId==actor.userId && when(args.status) { status==args.status }
+  filter  row => row.ownerUserId == actor.userId && (args.status == nil || row.status == args.status)
   sort     "row.createdAt", "desc"
   paginate 50
   shape    accountFull
 }
 
-/// Fetch a single account by id, gated to the caller. Owned: ownerUserId==actor.userId is the
-/// load-bearing guard, so an operator can never read another operator's customer even holding its
-/// id. Backs the account detail read and the pre-write existence check.
+/// Fetch a single account by id, gated to the caller. Owned: `row.ownerUserId == actor.userId` is
+/// the load-bearing guard, so an operator can never read another operator's customer even holding
+/// its id. Backs the account detail read and the pre-write existence check.
 @unbounded("account by id (guarded) gated to the owning operator -- bounded to a single row")
 @actor
 query account accountById {
   args {
     accountId  string!
   }
-  filter  when(args.accountId) { row.id==args.accountId } && ownerUserId==actor.userId
+  filter  row => (args.accountId == nil || row.id == args.accountId) && row.ownerUserId == actor.userId
   shape   accountFull
 }
 
@@ -62,11 +62,11 @@ query account accountById {
 // attribution and grouped revocation. Nothing authenticates AS an
 // account (docs/internal/design/account-isolation-model.md 3.3, 3.4).
 //
-// Both reads below are therefore gated on `userId==actor.userId`, the
+// Both reads below are therefore gated on `row.userId == actor.userId`, the
 // SUBJECT relation, and NOT on the account binding. That distinction is
 // the point: gating on accountId alone would be authorization by
 // honour system (5.2 -- the caller names the tenant whose rows they
-// would like), whereas userId==actor.userId is the same owned predicate
+// would like), whereas `row.userId == actor.userId` is the same owned predicate
 // every other credential listing in this file uses. The accountId
 // conjunct is a NARROWING of an already-authorized set, not the gate.
 //
@@ -78,31 +78,35 @@ query account accountById {
 // accident. The digest is a custody record, not an index.
 
 /// List the account tokens the CALLING user has issued for one account, newest first. Owned:
-/// userId==actor.userId is the gate (the credential's subject is the operator, never the account);
-/// the accountId conjunct narrows an already-authorized set rather than deciding access. Includes
-/// revoked rows so a revocation can be seen to have taken effect. Carries no keyHash -- the shape
-/// names the credential's non-secret leaves by path.
+/// `row.userId == actor.userId` is the gate (the credential's subject is the operator, never the
+/// account); the accountId conjunct narrows an already-authorized set rather than deciding access.
+/// Includes revoked rows so a revocation can be seen to have taken effect. Carries no keyHash --
+/// the shape names the credential's non-secret leaves by path.
 @actor
 query identity accountTokensForAccount {
   args {
     accountId  string!
   }
-  filter  identityType=="account_token" && userId==actor.userId && credentials.accountId==args.accountId
+  filter  row => row.identityType == "account_token"
+              && row.userId == actor.userId
+              && row.credentials.accountId == args.accountId
   sort     "row.createdAt", "desc"
   paginate 50
   shape    accountTokenSummary
 }
 
-/// Fetch one account-token identity by id, gated to the calling user. Owned: userId==actor.userId,
-/// so an operator can never read (or, via the revoke handler that calls this, revoke) a credential
-/// another operator issued. Backs the pre-revoke ownership check.
+/// Fetch one account-token identity by id, gated to the calling user. Owned:
+/// `row.userId == actor.userId`, so an operator can never read (or, via the revoke handler that
+/// calls this, revoke) a credential another operator issued. Backs the pre-revoke ownership check.
 @unbounded("account token by id (guarded) gated to the issuing operator -- bounded to a single row")
 @actor
 query identity accountTokenById {
   args {
     identityId  string!
   }
-  filter  when(args.identityId) { row.id==args.identityId } && identityType=="account_token" && userId==actor.userId
+  filter  row => (args.identityId == nil || row.id == args.identityId)
+              && row.identityType == "account_token"
+              && row.userId == actor.userId
   shape   accountTokenSummary
 }
 
@@ -137,7 +141,7 @@ query accountEntitlement accountEntitlement {
   args {
     accountId  string!
   }
-  filter  accountId==args.accountId
+  filter  row => row.accountId == args.accountId
   shape   accountEntitlementFull
 }
 
@@ -164,7 +168,7 @@ query accessRequest accessRequestById {
   args {
     requestId  string!
   }
-  filter  when(args.requestId) { row.id==args.requestId }
+  filter  row => args.requestId == nil || row.id == args.requestId
   shape   accessRequestFull
 }
 
@@ -182,8 +186,8 @@ query accessRequest accessRequestById {
 // Returns:
 //   Array of delegation records in delegationFull shape
 //
-// Usage:
-//   activeDelegationsForAgent({agentId: "agent-sofia"})
+// Usage, as the string a client sends to Execute:
+//   activeDelegationsForAgent(agentId: "agent-sofia")
 //
 
 /// Get all active delegations for a given agent ID
@@ -192,7 +196,7 @@ query delegation activeDelegationsForAgent {
   args {
     agentId  string!
   }
-  filter  agentId==args.agentId && isActiveRecord
+  filter  row => row.agentId == args.agentId && isActiveRecord(row)
   shape   delegationFull
 }
 
@@ -227,7 +231,7 @@ query delegation activeDelegationsByIdentitySubject {
   args {
     identitySubject  string!
   }
-  filter  identitySubject==args.identitySubject && isActiveRecord
+  filter  row => row.identitySubject == args.identitySubject && isActiveRecord(row)
   shape   delegationFull
 }
 
@@ -256,7 +260,7 @@ query user activeUsers {
   args {
     role     string
   }
-  filter  isActiveRecord && when(args.role) { role==args.role }
+  filter  row => isActiveRecord(row) && (args.role == nil || row.role == args.role)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -293,7 +297,7 @@ query user activeUsers {
 @serverOnly
 @unbounded("the startup seed sweep must see EVERY active user -- a truncated page silently leaves a user's perUser seeds unmaterialized forever, and newest-first pagination drops exactly the older users the sweep exists to backfill")
 query user usersForSeedSweep {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   userIdRef
 }
 
@@ -307,7 +311,7 @@ query user usersForSeedSweep {
 // Pagination (epic #1964 / memql#1975): this query declares ONLY `sort`
 // (deterministic, keyset-eligible createdAt-desc order) and NO inner
 // `paginate`. The dynamic page window is applied by the searchUsers tool
-// handler's OUTER paginate($args.limit) wrapper (dsl/memql/tools.memql). The
+// handler's OUTER paginate(..., args.limit) wrapper (dsl/memql/tools.memql). The
 // inner query must NOT also declare `paginate` -- two nested paginate()
 // directives are rejected by the engine ("multiple paginate() directives are
 // not supported"), which broke the searchUsers tool for every call after the
@@ -319,11 +323,11 @@ query user usersForSeedSweep {
 /// users alike; pass true to return only active users or false for only deactivated ones.
 /// Developer-or-above only. Backs the searchUsers tool.
 ///
-/// memql#2883: `when(args.active)` is DROPPED when the arg is absent (authoring rules), so before
-/// this gate `searchUsers()` with no arguments applied no predicate at all and returned every user
-/// in the cluster in userFull -- every @pii field plus the cluster-wide auth role. It is also on the
-/// agent tool surface (dsl/memql/tools.memql), so a prompt-injected or over-eager agent could pull
-/// the whole user table.
+/// memql#2883: the `args.active == nil || ...` guard folds away when the arg is unset (authoring
+/// rules), so before this gate `searchUsers()` with no arguments applied no predicate at all and
+/// returned every user in the cluster in userFull -- every @pii field plus the cluster-wide auth
+/// role. It is also on the agent tool surface (dsl/memql/tools.memql), so a prompt-injected or
+/// over-eager agent could pull the whole user table.
 ///
 /// A ROLE GATE rather than @serverOnly, because unlike its three siblings this one has a genuine
 /// client caller: the MCP tool. Gating by origin would delete the tool; gating by role keeps it
@@ -342,8 +346,8 @@ query user usersForSeedSweep {
 /// because what excludes a developer from those is a GRANT it does not hold.
 ///
 /// It replaced the `requiresDeveloperOrAbove` spec, which could not see a custom role at all --
-/// `role == "developer" || role == "admin" || role == "owner"` is false for a rank-350 role a
-/// cluster authored for itself, whatever that role holds.
+/// `actor.role == "developer" || actor.role == "admin" || actor.role == "owner"` is false for a
+/// rank-350 role a cluster authored for itself, whatever that role holds.
 ///
 /// The MANAGEMENT verbs are untouched: a developer reading this list still cannot edit, re-role,
 /// suspend or delete anybody on it.
@@ -352,7 +356,7 @@ query user searchUsers {
   args {
     active  boolean
   }
-  filter  when(args.active) { active==args.active }
+  filter  row => args.active == nil || row.active == args.active
   sort    "row.createdAt", "desc"
   shape   userFull
 }
@@ -367,7 +371,7 @@ query user searchUsers {
 // Alice did").
 //
 // To answer the general "audit events for a user" question -- which
-// logically means actorUserId==X OR targetId==X -- callers run BOTH
+// logically means `row.actorUserId == X || row.targetId == X` -- callers run BOTH
 // this query and auditEventsByTarget and merge the results on the
 // client. The frontend dedupes on auditEvent.id when the same
 // row would be returned by both (e.g. self-action events).
@@ -427,7 +431,7 @@ query auditEvent auditEventsByActor {
   args {
     userId  string!
   }
-  filter  actorUserId==args.userId && actor.isClusterOwner==true
+  filter  row => row.actorUserId == args.userId && actor.isClusterOwner == true
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -473,7 +477,7 @@ query auditEvent auditEventsByTarget {
   args {
     targetId  string!
   }
-  filter  targetId==args.targetId && actor.isClusterOwner==true
+  filter  row => row.targetId == args.targetId && actor.isClusterOwner == true
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -513,7 +517,7 @@ query authCode authCodeByCodeHash {
   args {
     codeHash  string!
   }
-  filter  codeHash==args.codeHash
+  filter  row => row.codeHash == args.codeHash
   shape   authCodeFull
 }
 
@@ -561,7 +565,7 @@ query oauthClient oAuthClientByClientId {
   args {
     clientId  string!
   }
-  filter  row.id==args.clientId
+  filter  row => row.id == args.clientId
   shape   oauthClientFull
 }
 
@@ -585,7 +589,7 @@ query oauthClient oAuthClientByClientId {
 // 2-replica mesh. The middleware bounds the read rate with a short in-process
 // TTL window instead; correctness does not depend on it.
 //
-// `corsOriginsJSON != ""` is the canonical is-set idiom and EXCLUDES rows where
+// `row.corsOriginsJSON != ""` is the canonical is-set idiom and EXCLUDES rows where
 // the field is absent (authoring rule 27), which is every client registered
 // before this field existed and every client registered since -- /register
 // writes no allowance.
@@ -619,7 +623,7 @@ query oauthClient oAuthClientByClientId {
 /// Returns every registered OAuth client carrying a non-empty granted CORS origin list.
 @unbounded("the admin-granted CORS allowlist -- bounded by owner/admin action, and truncating it would silently un-allow a granted origin")
 query oauthClient oAuthClientCORSGrants {
-  filter  corsOriginsJSON != ""
+  filter  row => row.corsOriginsJSON != ""
   shape   oauthClientCORSGrant
 }
 
@@ -657,7 +661,7 @@ query authSession authSessionByPreviousRefreshTokenHash {
   args {
     previousRefreshTokenHash  string!
   }
-  filter  previousRefreshTokenHash==args.previousRefreshTokenHash
+  filter  row => row.previousRefreshTokenHash == args.previousRefreshTokenHash
   shape   authSessionFull
 }
 
@@ -696,7 +700,7 @@ query authSession authSessionByRefreshTokenHash {
   args {
     refreshTokenHash  string!
   }
-  filter  refreshTokenHash==args.refreshTokenHash
+  filter  row => row.refreshTokenHash == args.refreshTokenHash
   shape   authSessionFull
 }
 
@@ -728,7 +732,7 @@ query authSession authSessionByTokenHash {
   args {
     tokenHash  string!
   }
-  filter  tokenHash==args.tokenHash
+  filter  row => row.tokenHash == args.tokenHash
   shape   authSessionFull
 }
 
@@ -797,7 +801,7 @@ query authSession authSessionByTokenHash {
 /// expired ones. No argument: the caller is the scope. No token hashes.
 @actor
 query authSession authSessionsForSelfIncludingRevoked {
-  filter  subject==actor.userId
+  filter  row => row.subject == actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -852,7 +856,7 @@ query authSession sessionsForSubjectAdmin {
   args {
     subject  string!
   }
-  filter   subject==args.subject
+  filter   row => row.subject == args.subject
   sort     "row.createdAt", "desc"
   paginate 50
   shape    authSessionAdminSummary
@@ -869,7 +873,7 @@ query authSession sessionsForSubjectAdmin {
 // the revoke fan-out. This one is a PERSON read, and it is shaped and
 // filtered differently for that reason.
 //
-// OWNED TIER. userId==actor.userId, so the query answers about the caller
+// OWNED TIER. `row.userId == actor.userId`, so the query answers about the caller
 // and nobody else -- there is no argument to point it at another person,
 // which is what makes it safe to reach from a browser at all.
 //
@@ -899,7 +903,7 @@ query authSession sessionsForSubjectAdmin {
 /// Returns the caller's own live auth-session rows. No token hashes; revoked and expired excluded.
 @actor
 query authSession authSessionsForSelf {
-  filter  userId==actor.userId && revokedAt=="" && expiresAt>now
+  filter  row => row.userId == actor.userId && row.revokedAt == "" && row.expiresAt > now
   sort     "row.createdAt", "desc"
   paginate 50
   shape   authSessionSelf
@@ -923,16 +927,16 @@ query authSession authSessionsForSelf {
 //   Empty when the first-run wizard hasn't completed yet -- callers
 //   fall back to env-derived defaults.
 //
-// Filter: pin to id=="cluster" (the canonical singleton key). Without
+// Filter: pin to `row.id == "cluster"` (the canonical singleton key). Without
 // the id filter the query scans ALL v1:identity:clusterSettings rows
 // and returns one per distinct id; if a stale or miskeyed row exists
 // alongside the canonical one, Nodes[0] can be either row depending
 // on scan order -- non-deterministic across replicas (#1807).
 //
-// id=="cluster" is a short-slug filter. The engine's resolveFullId
+// `row.id == "cluster"` is a short-slug filter. The engine's resolveFullId
 // expands it to the full storage id "v1:identity:clusterSettings:cluster"
 // before the SQL WHERE clause is built, so it correctly matches the
-// row the writer inserted via createClusterSettings({id:"cluster",...}).
+// row the writer inserted via createClusterSettings(id: "cluster", ...).
 // The comment that led to this filter being removed previously mentioned
 // `_system:v1:identity:clusterSettings:cluster` -- that prefix was
 // retired when partition-scoping was removed; the current canonical form
@@ -940,7 +944,7 @@ query authSession authSessionsForSelf {
 
 /// Latest singleton cluster-settings row, pinned to id=cluster.
 query clusterSettings clusterSettingsCurrent {
-  filter  row.id=="cluster"
+  filter  row => row.id == "cluster"
   shape   clusterSettingsFull
 }
 
@@ -958,8 +962,8 @@ query clusterSettings clusterSettingsCurrent {
 // Returns:
 //   Array of delegation records in delegationFull shape
 //
-// Usage:
-//   delegationsByIdentity({identityId: "id-user-alice"})
+// Usage, as the string a client sends to Execute:
+//   delegationsByIdentity(identityId: "id-user-alice")
 //
 
 /// Get all delegations (active and revoked) for a given identity ID
@@ -968,7 +972,7 @@ query delegation delegationsByIdentity {
   args {
     identityId  string!
   }
-  filter  identityId==args.identityId
+  filter  row => row.identityId == args.identityId
   shape   delegationFull
 }
 
@@ -981,19 +985,19 @@ query delegation delegationsByIdentity {
 // time. Used by the expireDelegations automation to find delegations
 // to deactivate.
 //
-// The cutoff is passed in as the `now` arg (rather than referencing the
-// clock inline) because the MemQL query planner rejects the timestamp
-// call-form AST node in filter comparisons ("unsupported literal type
-// *ast.TimestampExprFunc"). The automation supplies the arg from the bare
-// reserved `now` identifier at the call site so the resulting value is a
-// plain datetime. Matches the expireGuestInvitations /
-// expiredPendingGuestInvitations pattern.
+// The cutoff is the `asOf` argument rather than the clock read inline. It
+// began that way because the query planner of the time refused the
+// timestamp() call form in a filter comparison ("unsupported literal type
+// *ast.TimestampExprFunc"). Edition 2026 reads `now` directly in a filter,
+// but the argument stays: the identity logic that calls this passes
+// `asOf: args.asOf`. The expireGuestInvitations /
+// expiredPendingGuestInvitations pair used the same shape.
 //
 // Returns:
 //   Array of expired delegation records in delegationFull shape
 //
-// Usage:
-//   expiredActiveDelegations({ now: now })
+// Usage, from a logic body:
+//   query expiredActiveDelegations(asOf: args.asOf)
 //
 
 /// Active delegations whose expiresAt is before the supplied cutoff.
@@ -1002,7 +1006,7 @@ query delegation expiredActiveDelegations {
   args {
     asOf  string!
   }
-  filter  isActiveRecord && expiresAt<args.asOf
+  filter  row => isActiveRecord(row) && row.expiresAt < args.asOf
   shape   delegationFull
 }
 
@@ -1020,8 +1024,9 @@ query delegation expiredActiveDelegations {
 // FALSE -- the filter restriction is on function calls, not arg-cutoff
 // comparisons, and addDuration takes negative ISO durations (the
 // cluster stale-node prune has shipped that shape since #1642). The
-// clean pattern is cutoff-in-logic + a when(args.cutoff) filter here,
-// as expiredPendingAccessRequests now does.
+// clean pattern is cutoff-in-logic + an optional cutoff guard in the
+// filter here, `(args.cutoff == nil || ...)`, as
+// expiredPendingAccessRequests now does.
 //
 // Note: as of writing, MemQL has no row-removal mutation -- the AST
 // defines only Insert and Update. The retention sweep can soft-mark
@@ -1046,7 +1051,7 @@ query delegation expiredActiveDelegations {
 @actor
 @unbounded("expired audit-event retention purge sweep -- an internal sweep that must see all")
 query auditEvent expiredAuditEvents {
-  filter  actor.isClusterOwner==true && action!=""
+  filter  row => actor.isClusterOwner == true && row.action != ""
   shape   auditEventFull
 }
 
@@ -1059,7 +1064,7 @@ query auditEvent expiredAuditEvents {
 // supplied `now` cutoff. RFC 6749 mandates a ~60s TTL for auth codes,
 // so rows churn quickly; a sweep keeps the table compact.
 //
-// memql#1714: the filter gates on consumedAt!="" so behaviour matches
+// memql#1714: the filter gates on `row.consumedAt != ""` so behaviour matches
 // the name. An unspent-but-expired code is intentionally NOT returned
 // here -- the consume handler may still be racing to redeem it, and a
 // sweep keyed only on expiry could delete a row out from under an
@@ -1085,7 +1090,7 @@ query authCode expiredConsumedAuthCodes {
   args {
     asOf  string!
   }
-  filter  expiresAt<args.asOf && consumedAt!=""
+  filter  row => row.expiresAt < args.asOf && row.consumedAt != ""
   shape   authCodeFull
 }
 
@@ -1119,7 +1124,7 @@ query magicLinkRequest expiredMagicLinkRequests {
   args {
     asOf  string!
   }
-  filter  expiresAt<args.asOf
+  filter  row => row.expiresAt < args.asOf
   shape   magicLinkRequestFull
 }
 
@@ -1157,7 +1162,7 @@ query accessRequest expiredPendingAccessRequests {
   args {
     createdBefore  string
   }
-  filter  statusIsPending && when(args.createdBefore) { row.createdAt<args.createdBefore }
+  filter  row => statusIsPending(row) && (args.createdBefore == nil || row.createdAt < args.createdBefore)
   shape   accessRequestFull
 }
 
@@ -1182,7 +1187,7 @@ query invitation invitationById {
   args {
     invitationId  string!
   }
-  filter  when(args.invitationId) { row.id==args.invitationId }
+  filter  row => args.invitationId == nil || row.id == args.invitationId
   shape   invitationFull
 }
 
@@ -1214,7 +1219,7 @@ query invitation userInvitationByTokenHash {
   args {
     tokenHash  string!
   }
-  filter  kind=="user" && tokenHash==args.tokenHash
+  filter  row => row.kind == "user" && row.tokenHash == args.tokenHash
   shape   invitationFull
 }
 
@@ -1248,7 +1253,7 @@ query magicLinkRequest magicLinkRequestByTokenHash {
   args {
     tokenHash  string!
   }
-  filter  tokenHash==args.tokenHash
+  filter  row => row.tokenHash == args.tokenHash
   shape   magicLinkRequestFull
 }
 
@@ -1301,7 +1306,7 @@ query magicLinkRequest magicLinkRequestById {
   args {
     requestId  string!
   }
-  filter  row.id==args.requestId
+  filter  row => row.id == args.requestId
   shape   magicLinkRequestFull
 }
 
@@ -1342,7 +1347,7 @@ query magicLinkRequest magicLinkRequestById {
 //
 //   - /me/tokens (component/identity/web/me_tokens.go) -- the owner, themselves.
 //   - `memql pat list --user-id X` (subcommand_pat.go) -- an OPERATOR listing
-//     somebody else's, which a bare `userId==actor.userId` would empty.
+//     somebody else's, which a bare `row.userId == actor.userId` would empty.
 //   - /admin/tokens (component/identity/adminops/adminops.go, via pat.Store.ListAll)
 //     -- the same, cluster-wide.
 //
@@ -1350,10 +1355,10 @@ query magicLinkRequest magicLinkRequestById {
 // caller-supplied userId for the two operator surfaces, and
 // patIdentitiesForSelf below serves /me/tokens with no userId at all. The
 // self-OR-admin single-query form (`... && (userId==actor.userId ||
-// requiresOwnerOrAdmin)`) is deliberately NOT used: it parses and loads, but
-// test/dslconformance/admin_gate_test.go's TestAdminGateIsATopLevelConjunct refuses a gate
-// inside a disjunction, correctly -- the other arm switches it off, so a false
-// gate would not zero the row set.
+// requiresOwnerOrAdmin)`) was deliberately NOT used: it parsed and loaded, but
+// test/dslconformance/admin_gate_test.go's TestAdminGateIsATopLevelConjunct refused a gate
+// inside a disjunction, correctly -- the other arm switched it off, so a false
+// gate would not have zeroed the row set.
 //
 // THE GATE IS AN ANNOTATION NOW (epic memql#5166), not a conjunct. It was
 // `requiresOwnerOrAdmin` as a top-level conjunct, which is what made a false
@@ -1379,7 +1384,7 @@ query identity patIdentitiesForUser {
   args {
     userId  string!
   }
-  filter  userId==args.userId && identityIsApiKey
+  filter  row => row.userId == args.userId && identityIsApiKey(row)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -1411,7 +1416,7 @@ query identity patIdentitiesForUser {
 /// List the CALLING user's own PAT (api_key) identities, in patSummary shape (no credentials).
 @actor
 query identity patIdentitiesForSelf {
-  filter  userId==actor.userId && identityIsApiKey
+  filter  row => row.userId == actor.userId && identityIsApiKey(row)
   sort     "row.createdAt", "desc"
   paginate 50
   shape   patSummary
@@ -1445,7 +1450,7 @@ query identity patIdentityById {
   args {
     identityId  string!
   }
-  filter  identityIsApiKey && row.id==args.identityId
+  filter  row => identityIsApiKey(row) && row.id == args.identityId
   shape   identityFull
 }
 
@@ -1480,7 +1485,7 @@ query identity patIdentityByKeyHash {
   args {
     keyHash  string!
   }
-  filter  identityIsApiKey && credentials.keyHash==args.keyHash
+  filter  row => identityIsApiKey(row) && row.credentials.keyHash == args.keyHash
   shape   identityFull
 }
 
@@ -1500,7 +1505,7 @@ query identity patIdentityByKeyHash {
 
 /// Access requests with status=pending; backs the admin review queue.
 query accessRequest pendingAccessRequests {
-  filter  statusIsPending
+  filter  row => statusIsPending(row)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -1521,7 +1526,8 @@ query accessRequest pendingAccessRequests {
 //
 // The concept declares @rowAuthz(owner="actorUserId", clusterOwner), so
 // the engine ANDs `(actorUserId==actor.userId)||(actor.isClusterOwner==true)`
-// into every read below whether the author wrote it or not.
+// (the injected predicate, in the internal query form's spelling) into every
+// read below whether the author wrote it or not.
 //
 // WHY THE ROLL-UP IS CLUSTER-OWNER-GATED AND NOT requiresOwnerOrAdmin.
 // The composite tier's escape is `isClusterOwner`, which is the `owner`
@@ -1544,7 +1550,9 @@ query authActivity recentAuthActivity {
     sessionId    string
     actorUserId  string
   }
-  filter  actor.isClusterOwner==true && when(args.sessionId) { sessionId==args.sessionId } && when(args.actorUserId) { actorUserId==args.actorUserId }
+  filter  row => actor.isClusterOwner == true
+              && (args.sessionId == nil || row.sessionId == args.sessionId)
+              && (args.actorUserId == nil || row.actorUserId == args.actorUserId)
   sort     "occurredAt", "desc"
   paginate 50
   shape   authActivityFull
@@ -1559,7 +1567,7 @@ query authActivity authActivityForSelf {
   args {
     sessionId  string
   }
-  filter  actorUserId==actor.userId && when(args.sessionId) { sessionId==args.sessionId }
+  filter  row => row.actorUserId == actor.userId && (args.sessionId == nil || row.sessionId == args.sessionId)
   sort     "occurredAt", "desc"
   paginate 50
   shape   authActivityFull
@@ -1593,7 +1601,7 @@ query authActivity authActivityByRetiredHash {
   args {
     retiredTokenHash  string!
   }
-  filter  actor.isClusterOwner==true && retiredTokenHash==args.retiredTokenHash
+  filter  row => actor.isClusterOwner == true && row.retiredTokenHash == args.retiredTokenHash
   sort     "occurredAt", "desc"
   paginate 10
   shape   authActivityFull
@@ -1609,7 +1617,7 @@ query auditEvent recentAuditEvents {
   args {
     category  string
   }
-  filter  actor.isClusterOwner==true && when(args.category) { category==args.category }
+  filter  row => actor.isClusterOwner == true && (args.category == nil || row.category == args.category)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -1643,29 +1651,30 @@ query auditEvent recentAuditEvents {
 /// decide whether an address already belongs to a user, and the /login
 /// email-first flow calls it to branch between magic-link and registration --
 /// the lookup is part of working out WHO the caller is, so
-/// `primaryEmail==actor.primaryEmail` is circular in exactly the way
-/// `id==actor.userId` was on userById (memql#2800).
+/// `row.primaryEmail == actor.primaryEmail` is circular in exactly the way
+/// `row.id == actor.userId` was on userById (memql#2800).
 ///
 /// Left open it projected userFull -- every @pii field, plus the cluster-wide
 /// auth role -- keyed on the one identifier an attacker is most likely to
 /// already have, so no id enumeration was needed. userByIdSystem returns the
 /// identical shape and was gated by #2860; this one was missed (memql#2881).
 ///
-/// It is NOT the worst reader of this shape, and saying so here because the
-/// next person to gate one should start from the right end: searchUsers,
+/// It was NOT the worst reader of this shape, and this note said so because
+/// the next person to gate one should start from the right end: searchUsers,
 /// activeUsers, usersScheduledForDeletion and usersInDeletionCooldown all
-/// return userFull and are all reachable from the wire today. searchUsers is
-/// the extreme -- its only predicate is `when(args.active) { ... }`, which is
-/// DROPPED when the arg is absent, so calling it with no arguments returns
+/// returned userFull and were all reachable from the wire. searchUsers was
+/// the extreme -- its only predicate was `when(args.active) { ... }`, which
+/// dropped when the arg was absent, so calling it with no arguments returned
 /// every user in the cluster, and it is exposed to agents as an MCP tool.
-/// Tracked in memql#2883.
+/// Tracked in memql#2883. All four are gated now: searchUsers by
+/// `@requiresRank("developer")`, the other three by @serverOnly.
 @serverOnly
 @unbounded("user by unique primaryEmail -- bounded to a single row")
 query user userByEmail {
   args {
     primaryEmail  string!
   }
-  filter  primaryEmail==args.primaryEmail && isActiveRecord
+  filter  row => row.primaryEmail == args.primaryEmail && isActiveRecord(row)
   shape   userFull
 }
 
@@ -1710,7 +1719,7 @@ query user userById {
   args {
     userId  string!
   }
-  filter  row.id==args.userId && isActiveRecord
+  filter  row => row.id == args.userId && isActiveRecord(row)
   shape   userFull
 }
 
@@ -1735,7 +1744,7 @@ query user userByIdSystem {
   args {
     userId  string!
   }
-  filter  row.id==args.userId && isActiveRecord
+  filter  row => row.id == args.userId && isActiveRecord(row)
   shape   userFull
 }
 
@@ -1755,7 +1764,7 @@ query user userDisplayById {
   args {
     userId  string!
   }
-  filter  row.id==args.userId && isActiveRecord
+  filter  row => row.id == args.userId && isActiveRecord(row)
   shape   userDisplayCard
 }
 
@@ -1781,7 +1790,7 @@ query user userDisplayById {
 @mcp
 @actor
 query user currentUser {
-  filter  row.id==actor.userId && isActiveRecord
+  filter  row => row.id == actor.userId && isActiveRecord(row)
   shape   userFull
 }
 
@@ -1801,7 +1810,7 @@ query user currentUser {
 
 /// Count of active v1:identity:user rows. Returns a {count: N} aggregate.
 query user userCount {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   count
 }
 
@@ -1847,7 +1856,7 @@ query user userCount {
 @serverOnly
 @unbounded("deletion-cooldown sweep -- an internal sweep that must see all")
 query user usersInDeletionCooldown {
-  filter  isActiveRecord && isDeletionScheduled
+  filter  row => isActiveRecord(row) && isDeletionScheduled(row)
   shape   userFull
 }
 
@@ -1898,7 +1907,9 @@ query user usersScheduledForDeletion {
   args {
     scheduledBefore  string
   }
-  filter  isActiveRecord && isDeletionScheduled && when(args.scheduledBefore) { deletionScheduledAt<args.scheduledBefore }
+  filter  row => isActiveRecord(row)
+              && isDeletionScheduled(row)
+              && (args.scheduledBefore == nil || row.deletionScheduledAt < args.scheduledBefore)
   shape   userFull
 }
 
@@ -1932,7 +1943,7 @@ query deviceCode deviceCodeByDeviceCodeHash {
   args {
     deviceCodeHash  string!
   }
-  filter  deviceCodeHash==args.deviceCodeHash
+  filter  row => row.deviceCodeHash == args.deviceCodeHash
   shape   deviceCodeFull
 }
 
@@ -1943,7 +1954,7 @@ query deviceCode deviceCodeByUserCodeHash {
   args {
     userCodeHash  string!
   }
-  filter  userCodeHash==args.userCodeHash
+  filter  row => row.userCodeHash == args.userCodeHash
   shape   deviceCodeFull
 }
 
@@ -1969,7 +1980,7 @@ query workerPairingCode workerPairingCodeByHash {
   args {
     codeHash  string!
   }
-  filter  codeHash==args.codeHash
+  filter  row => row.codeHash == args.codeHash
   shape   workerPairingCodeFull
 }
 
@@ -1998,7 +2009,7 @@ query identity workerTokenByKeyHash {
   args {
     keyHash  string!
   }
-  filter  identityIsWorkerToken && credentials.keyHash==args.keyHash
+  filter  row => identityIsWorkerToken(row) && row.credentials.keyHash == args.keyHash
   shape   identityFull
 }
 
@@ -2050,7 +2061,7 @@ query identity workerTokenByKeyHash {
 ///
 /// Why actor.userId scoping is not the fix: the one caller that matters is the
 /// revoke ownership check in component/grpc/worker_token_handlers.go, and it
-/// runs under contextWithSystemActor -- so `userId==actor.userId` would compare
+/// runs under contextWithSystemActor -- so `row.userId == actor.userId` would compare
 /// against the SYSTEM actor and return zero rows for every real request. It
 /// already passes the caller's own id as the argument; the problem was never
 /// that the Go path was unscoped, it was that the query was reachable from the
@@ -2070,7 +2081,7 @@ query identity workerTokensForUser {
   args {
     userId  string!
   }
-  filter  identityIsWorkerToken && userId==args.userId
+  filter  row => identityIsWorkerToken(row) && row.userId == args.userId
   // Pagination (5.2 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table token pull. The engine emits a
   // nextCursor on a full page; an inbound cursor (ExecuteQueryMsg.cursor)
@@ -2107,7 +2118,7 @@ query identity badgeByKeyHash {
   args {
     keyHash  string!
   }
-  filter  identityIsBadge && credentials.keyHash==args.keyHash
+  filter  row => identityIsBadge(row) && row.credentials.keyHash == args.keyHash
   shape   identityFull
 }
 
@@ -2145,7 +2156,7 @@ query identity badgeByKeyHash {
 // than a userId argument being added back here.
 @actor
 query identity badgesForSelf {
-  filter  identityIsBadge && userId==actor.userId
+  filter  row => identityIsBadge(row) && row.userId == actor.userId
   sort     "row.createdAt", "desc"
   paginate 50
   shape    identitySummary
@@ -2190,7 +2201,7 @@ query identity passkeyByCredentialId {
   args {
     credentialId  string!
   }
-  filter  identityIsPasskey && credentials.credentialId==args.credentialId
+  filter  row => identityIsPasskey(row) && row.credentials.credentialId == args.credentialId
   shape   identityFull
 }
 
@@ -2224,7 +2235,9 @@ query identity oidcIdentityBySubject {
     issuer   string!
     subject  string!
   }
-  filter  identityIsOidc && credentials.issuer==args.issuer && credentials.subject==args.subject
+  filter  row => identityIsOidc(row)
+              && row.credentials.issuer == args.issuer
+              && row.credentials.subject == args.subject
   shape   identityFull
 }
 
@@ -2247,14 +2260,14 @@ query identity oidcIdentityBySubject {
 //
 // There is no userId argument BY DESIGN, following patIdentitiesForSelf
 // and badgesForSelf (memql#3178): the row set comes from
-// userId==actor.userId, so it cannot be pointed at a stranger's
+// `row.userId == actor.userId`, so it cannot be pointed at a stranger's
 // authenticators.
 
 /// List the CALLING user's own enrolled passkeys, newest first. Projects passkeySummary -- the
 /// recognisable fields plus the backup flags, never the COSE public key or the signature counter.
 @actor
 query identity passkeysForSelf {
-  filter  identityIsPasskey && userId==actor.userId
+  filter  row => identityIsPasskey(row) && row.userId == actor.userId
   sort     "row.createdAt", "desc"
   paginate 50
   shape    passkeySummary
@@ -2293,7 +2306,7 @@ query identity passkeysForSelf {
 //
 // SELF-SCOPED with no userId argument, following patIdentitiesForSelf /
 // badgesForSelf / passkeysForSelf (memql#3178): the row set comes from
-// userId==actor.userId, so a caller cannot ask how recoverable somebody
+// `row.userId == actor.userId`, so a caller cannot ask how recoverable somebody
 // else's account is.
 
 /// List the CALLING user's own ACTIVE sign-in routes -- magic-link and passkey credentials only.
@@ -2301,7 +2314,9 @@ query identity passkeysForSelf {
 /// which carries the type and the label and no credential material at all.
 @actor
 query identity signInIdentitiesForSelf {
-  filter   (identityIsMagicLink || identityIsPasskey) && userId==actor.userId && isActiveRecord
+  filter   row => (identityIsMagicLink(row) || identityIsPasskey(row))
+               && row.userId == actor.userId
+               && isActiveRecord(row)
   sort     "row.createdAt", "desc"
   paginate 50
   shape    identitySummary
@@ -2317,7 +2332,7 @@ query identity signInIdentitiesForSelf {
 // `Store.HasClaimedOwner`, which answers "has the cluster's owner ever
 // authenticated" during identity boot -- the same first-run window as
 // `activeUsers` and `CountActiveUsers`, where there is no actor at all.
-// `userId==actor.userId` would evaluate against an empty actor, return zero rows,
+// `row.userId == actor.userId` would evaluate against an empty actor, return zero rows,
 // and report every claimed cluster as unclaimed.
 //
 // WHY THE QUESTION EXISTS. The install writes the owner user row when it
@@ -2345,7 +2360,7 @@ query identity signInIdentitiesForSelf {
 ///
 /// Why actor.userId scoping is not the fix: the caller runs BEFORE any actor exists. This
 /// answers "has this cluster's owner ever signed in" during identity boot -- the same
-/// first-run window as activeUsers and CountActiveUsers -- so `userId==actor.userId` would
+/// first-run window as activeUsers and CountActiveUsers -- so `row.userId == actor.userId` would
 /// evaluate against an empty actor, match zero rows, and report every claimed cluster as
 /// unclaimed. That is the same circularity that kept activeUsers and userByEmail
 /// server-only (memql#2881), and the reason the self-scoped twin
@@ -2355,7 +2370,9 @@ query identity signInIdentitiesForUser {
   args {
     userId  string!
   }
-  filter   (identityIsMagicLink || identityIsPasskey) && userId==args.userId && isActiveRecord
+  filter   row => (identityIsMagicLink(row) || identityIsPasskey(row))
+               && row.userId == args.userId
+               && isActiveRecord(row)
   sort     "row.createdAt", "desc"
   paginate 50
   shape    identitySummary
@@ -2406,7 +2423,7 @@ query identity signInIdentitiesForUser {
 /// Why actor.userId scoping is not the fix: a node_token row belongs to a
 /// cluster NODE, not to a person. Its `userId` is the synthetic bootstrap user
 /// the mint ran as (component/identity/http/node_bootstrap.go), never the id of
-/// anyone who reads it -- so `userId==actor.userId` would match zero rows for
+/// anyone who reads it -- so `row.userId == actor.userId` would match zero rows for
 /// every real caller: the admin listing tokens is a human, and the bootstrap
 /// handler resolving a binding has no resolved actor at all, since this runs
 /// BEFORE the node has an identity. There is no caller to scope to, which is
@@ -2418,7 +2435,9 @@ query identity nodeTokenIdentityByBinding {
     nodeType  string!
     nodeId    string!
   }
-  filter  identityIsNodeToken && credentials.nodeType==args.nodeType && credentials.nodeId==args.nodeId
+  filter  row => identityIsNodeToken(row)
+              && row.credentials.nodeType == args.nodeType
+              && row.credentials.nodeId == args.nodeId
   shape   identityFull
 }
 
@@ -2451,14 +2470,14 @@ query identity nodeTokenIdentityByBinding {
 ///
 /// Why actor.userId scoping is not the fix: same as nodeTokenIdentityByBinding
 /// above -- a node_token row's `userId` is the synthetic bootstrap user, not
-/// any reader, so `userId==actor.userId` returns nothing for the admin who
+/// any reader, so `row.userId == actor.userId` returns nothing for the admin who
 /// consumes this. It is also a deliberate cluster-wide SWEEP: the /admin/tokens
 /// section exists precisely to show every node's credential row, so a
 /// per-caller filter would empty the surface it backs.
 @serverOnly
 @unbounded("all node-token identities -- a bounded cluster-node credential set consumed whole for verification")
 query identity nodeTokenIdentities {
-  filter  identityIsNodeToken
+  filter  row => identityIsNodeToken(row)
   shape   identityFull
 }
 
@@ -2503,12 +2522,12 @@ query identity nodeTokenIdentities {
 /// the portal's Tokens surface until epic memql#4984).
 ///
 /// Why actor.userId scoping is not the alternative: a node_token row's `userId` is the synthetic
-/// bootstrap user rather than any reader, so `userId==actor.userId` returns nothing for the admin
-/// who consumes this. The gate that fits is the role, and it is stated here rather than left to a
-/// route.
+/// bootstrap user rather than any reader, so `row.userId == actor.userId` returns nothing for the
+/// admin who consumes this. The gate that fits is the role, and it is stated here rather than
+/// left to a route.
 @requiresCapability("update", "principal")
 query identity nodeTokenIdentitiesAdmin {
-  filter   identityIsNodeToken
+  filter   row => identityIsNodeToken(row)
   sort     "row.createdAt", "desc"
   paginate 200
   shape    nodeTokenSummary
@@ -2538,7 +2557,7 @@ query identity nodeTokenIdentitiesAdmin {
 ///
 /// Why actor.userId scoping is not the fix: same as its two siblings -- a
 /// node_token row's `userId` is the synthetic bootstrap user rather than any
-/// reader, so `userId==actor.userId` matches nothing for the admin driving the
+/// reader, so `row.userId == actor.userId` matches nothing for the admin driving the
 /// revoke flow. The authorization that does apply is the admin gate on the
 /// route (component/identity/admin/route_gate_test.go, memql#2934); origin
 /// gating puts the DSL-side boundary where that authorization already lives.
@@ -2547,7 +2566,7 @@ query identity nodeTokenIdentityById {
   args {
     identityId  string!
   }
-  filter  identityIsNodeToken && row.id==args.identityId
+  filter  row => identityIsNodeToken(row) && row.id == args.identityId
   shape   identityFull
 }
 
@@ -2557,7 +2576,7 @@ query enrolmentToken enrolmentTokenByHash {
   args {
     tokenHash  string!
   }
-  filter  tokenHash==args.tokenHash
+  filter  row => row.tokenHash == args.tokenHash
   shape   enrolmentTokenFull
 }
 
@@ -2606,7 +2625,7 @@ query identity recoveryKeyByHash {
   args {
     keyHash  string!
   }
-  filter  identityIsRecoveryKey && credentials.keyHash==args.keyHash
+  filter  row => identityIsRecoveryKey(row) && row.credentials.keyHash == args.keyHash
   shape   identityFull
 }
 
@@ -2641,7 +2660,7 @@ query identity activeRecoveryKeys {
   args {
     userId  string!
   }
-  filter   identityIsRecoveryKey && userId==args.userId && isActiveRecord
+  filter   row => identityIsRecoveryKey(row) && row.userId == args.userId && isActiveRecord(row)
   sort     "row.createdAt", "desc"
   paginate 50
   shape    identityFull
@@ -2661,12 +2680,12 @@ query identity activeRecoveryKeys {
 /// the outstanding ones cannot revoke a link sent to the wrong address, which
 /// is the one repair this list exists for.
 ///
-/// kind=="user" is load-bearing rather than decorative: guest invitations live
+/// `row.kind == "user"` is load-bearing rather than decorative: guest invitations live
 /// in the same concept, belong to a space rather than to the cluster, and have
 /// their own product-side surface.
 @requiresRank("developer")
 query invitation pendingUserInvitations {
-  filter  kind=="user" && statusIsPending && isActiveRecord
+  filter  row => row.kind == "user" && statusIsPending(row) && isActiveRecord(row)
   sort    "row.createdAt", "desc"
   // AN EXPLICIT SHAPE, ADDED LATE (memql#4735). This query declared none, and a query with no
   // shape projects the bound concept's EVERY field -- so it handed `tokenHash`,
@@ -2728,7 +2747,7 @@ query githubConnectState githubConnectStateByHash {
   args {
     stateHash  string!
   }
-  filter  stateHash==args.stateHash
+  filter  row => row.stateHash == args.stateHash
   shape   githubConnectStateFull
 }
 
@@ -2766,7 +2785,7 @@ query group groupsAll {
   args {
     includeArchived  boolean
   }
-  filter  statusIsActive || args.includeArchived==true
+  filter  row => statusIsActive(row) || args.includeArchived == true
   shape   groupFull
   sort    "name", "asc"
 }
@@ -2777,7 +2796,7 @@ query group groupById {
   args {
     groupId  string!
   }
-  filter  row.id==args.groupId
+  filter  row => row.id == args.groupId
   shape   groupFull
 }
 
@@ -2787,7 +2806,7 @@ query group groupsForAccount {
   args {
     accountId  string!
   }
-  filter  accountId==args.accountId && statusIsActive
+  filter  row => row.accountId == args.accountId && statusIsActive(row)
   shape   groupFull
   sort    "name", "asc"
 }
@@ -2800,7 +2819,7 @@ query groupMembership membersOfGroup {
     groupId         string!
     includeRemoved  boolean
   }
-  filter  groupId==args.groupId && (statusIsActive || args.includeRemoved==true)
+  filter  row => row.groupId == args.groupId && (statusIsActive(row) || args.includeRemoved == true)
   shape   groupMembershipFull
   sort    "row.createdAt", "desc"
 }
@@ -2812,7 +2831,7 @@ query groupMembership groupsForUser {
     userId          string!
     includeRemoved  boolean
   }
-  filter  userId==args.userId && (statusIsActive || args.includeRemoved==true)
+  filter  row => row.userId == args.userId && (statusIsActive(row) || args.includeRemoved == true)
   shape   groupMembershipFull
   sort    "row.createdAt", "desc"
 }

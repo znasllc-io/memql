@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,37 +16,9 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
 
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/safety"
 	"github.com/znasllc-io/memql/core/common"
-	"github.com/znasllc-io/memql/core/num"
 )
-
-// argPlaceholderPattern is the shape of a `$args.<key>` reference in a tool
-// handler's template. An arg key is an identifier, and the identifier class is
-// greedy, so at any given position this matches the WHOLE name --
-// `$args.idempotencyKey`, never the `$args.id` that prefixes it (memql#3609).
-//
-// String substitution is defensive only -- typed dispatch (handler
-// type=function) is the right architecture for tools authored with nested
-// args. The type=query path stays for legacy / simple cases where string
-// substitution is fine.
-const argPlaceholderPattern = `\$args\.[a-zA-Z_][a-zA-Z0-9_]*`
-
-// memqlArgPlaceholderRegex matches a placeholder in a MemQL handler template
-// in either of its two surrounding contexts: the PRE-QUOTED token
-// `"$args.key"` (the whole string-literal slot) or the bare `$args.key`. The
-// two alternatives can never both match at one position -- one needs a `"`
-// there, the other a `$` -- and the quoted form starts one byte earlier than
-// the bare form nested inside it, so leftmost matching alone picks the quoted
-// token whenever the quotes are actually there.
-var memqlArgPlaceholderRegex = regexp.MustCompile(`"` + argPlaceholderPattern + `"|` + argPlaceholderPattern)
-
-// rawArgPlaceholderRegex matches the bare form only. The webhook URL /
-// body-template path substitutes the raw stringified value INTO the host
-// language's existing string slot, so any surrounding quotes are the host's
-// and must survive.
-var rawArgPlaceholderRegex = regexp.MustCompile(argPlaceholderPattern)
 
 // toolSchemaCache stores compiled JSON-Schema validators keyed by
 // tool name. The InputSchema on a Tool is small (a few KB of JSON);
@@ -698,12 +669,14 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 
 	switch strings.ToLower(strings.TrimSpace(handler.Type)) {
 	case "query":
-		query := strings.TrimSpace(handler.Query)
-		if query == "" {
+		if strings.TrimSpace(handler.Query) == "" {
 			return nil, fmt.Errorf("query handler has no query defined")
 		}
-		if args != nil {
-			query = substituteArgsInMemqlQuery(query, args)
+		// The handler evaluates its arguments and renders the call from
+		// their values (renderToolQuery, tool_handler_v1.go).
+		query, err := handler.renderToolQuery(ctx, args)
+		if err != nil {
+			return nil, fmt.Errorf("tool %q: %w", tool.Name, err)
 		}
 		result, err := e.Execute(ctx, query)
 		if err != nil {
@@ -745,14 +718,16 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 
 // executeWebhook performs an HTTP request for a webhook-type tool handler.
 func (e *MemQLEngine) executeWebhook(ctx context.Context, toolName string, handler *ToolHandler, args map[string]any) (*ToolCallResult, error) {
-	resolvedURL := strings.TrimSpace(handler.URL)
-	if resolvedURL == "" {
+	if strings.TrimSpace(handler.URL) == "" {
 		return nil, fmt.Errorf("webhook handler for tool %q has no URL", toolName)
 	}
 
-	// Substitute $args.key placeholders in URL.
-	if args != nil {
-		resolvedURL = substituteArgsInQuery(resolvedURL, args)
+	// The url is an expression over args (webhookURL, tool_handler_v1.go):
+	// a caller's value is a value joined into the address, never text
+	// spliced into it. The host is validated on what it rendered.
+	resolvedURL, err := handler.webhookURL(ctx, args)
+	if err != nil {
+		return nil, fmt.Errorf("webhook tool %q: %w", toolName, err)
 	}
 
 	// Validate host against allowlist.
@@ -770,8 +745,13 @@ func (e *MemQLEngine) executeWebhook(ctx context.Context, toolName string, handl
 	if method == "POST" || method == "PUT" || method == "PATCH" {
 		var bodyData any
 		if handler.Body != nil {
-			// Use explicit body template with $args substitution.
-			bodyData = substituteArgsInBody(handler.Body, args)
+			// An explicit body template: its string leaves are expressions
+			// over args (webhookBody, tool_handler_v1.go).
+			rendered, err := webhookBody(ctx, handler.Body, args)
+			if err != nil {
+				return nil, fmt.Errorf("webhook tool %q: %w", toolName, err)
+			}
+			bodyData = rendered
 		} else if args != nil {
 			// No explicit body template: send all args as the request body.
 			bodyData = args
@@ -878,36 +858,6 @@ func (e *MemQLEngine) validateWebhookHost(rawURL string) error {
 	return fmt.Errorf("host %q not in allowed webhook hosts", host)
 }
 
-// substituteArgsInBody recursively substitutes $args.key references in a body template map.
-func substituteArgsInBody(body map[string]any, args map[string]any) map[string]any {
-	if body == nil {
-		return nil
-	}
-	result := make(map[string]any, len(body))
-	for k, v := range body {
-		result[k] = substituteArgValue(v, args)
-	}
-	return result
-}
-
-// substituteArgValue recursively substitutes $args references in a value.
-func substituteArgValue(v any, args map[string]any) any {
-	switch val := v.(type) {
-	case string:
-		return substituteArgsInQuery(val, args)
-	case map[string]any:
-		return substituteArgsInBody(val, args)
-	case []any:
-		out := make([]any, len(val))
-		for i, item := range val {
-			out[i] = substituteArgValue(item, args)
-		}
-		return out
-	default:
-		return v
-	}
-}
-
 // webhookHTTPClient is a shared HTTP client for webhook tool calls.
 // The per-request timeout is applied via context, not the client.
 var webhookHTTPClient = &http.Client{
@@ -950,203 +900,6 @@ func buildFunctionCallQuery(name string, args map[string]any) (string, error) {
 	}
 	b.WriteByte(')')
 	return b.String(), nil
-}
-
-// argPlaceholder is one `$args.<key>` reference found in a template.
-type argPlaceholder struct {
-	// text is the matched source text exactly as it appeared:
-	// `"$args.title"` or `$args.title`.
-	text string
-	// key is the arg name the reference resolves against (`title`).
-	key string
-	// quoted reports whether the match consumed the surrounding double
-	// quotes -- i.e. whether it owns the whole string-literal slot.
-	quoted bool
-}
-
-// substituteArgPlaceholders resolves every `$args.<key>` reference in template
-// in ONE left-to-right pass and hands each one to resolve.
-//
-// The pass is the fix for memql#3609. What it replaces was a loop over the
-// args MAP doing sequential strings.ReplaceAll over an accumulating buffer,
-// which was wrong twice:
-//
-//   - **Order-dependent.** Go randomizes map iteration and `$args.id` is a
-//     prefix of `$args.idempotencyKey`, so the same call rendered differently
-//     from run to run. Matching the template positionally with a greedy
-//     identifier class makes the longest name at each position the only
-//     candidate, so order stops existing as a variable.
-//   - **Values were re-read as template.** Substituted text went into the
-//     buffer that later keys -- and the unfilled-placeholder cleanup -- kept
-//     scanning, so a caller's own `$args.` text was rewritten and one arg's
-//     value could be aliased into another arg's slot. ReplaceAllStringFunc
-//     finds every match in the SOURCE string and appends replacements to a
-//     separate buffer, so nothing this pass writes is ever read back.
-//
-// The cleanup for placeholders the caller left unfilled belongs to resolve,
-// inside this same walk: as a separate sweep afterwards it ran over
-// already-substituted text, which is the second defect above.
-func substituteArgPlaceholders(template string, re *regexp.Regexp, resolve func(argPlaceholder) string) string {
-	return re.ReplaceAllStringFunc(template, func(match string) string {
-		ref := argPlaceholder{text: match, key: match}
-		if strings.HasPrefix(ref.key, `"`) {
-			ref.quoted = true
-			ref.key = strings.TrimSuffix(strings.TrimPrefix(ref.key, `"`), `"`)
-		}
-		ref.key = strings.TrimPrefix(ref.key, "$args.")
-		return resolve(ref)
-	})
-}
-
-// substituteArgsInQuery replaces $args.<key> references with raw
-// string values inside a templated string. Used for the WEBHOOK URL
-// + body-template paths where the placeholder is already inside a
-// host-language string (URL path segment, JSON field value), so we
-// substitute the raw stringified value with NO extra quoting.
-//
-// A key the caller did not supply is left standing as the literal
-// `$args.<key>` -- this path has no null-collapse, because there is no
-// downstream parser here to choke on it.
-//
-// For MemQL query-handler text -- where the placeholder is inside
-// MemQL source that gets re-parsed -- use substituteArgsInMemqlQuery
-// instead; that path JSON-encodes string values so quotes / newlines
-// in the value don't break the downstream parser. See the doc on
-// substituteArgsInMemqlQuery for the per-context rationale.
-func substituteArgsInQuery(query string, args map[string]any) string {
-	if args == nil {
-		return query
-	}
-	return substituteArgPlaceholders(query, rawArgPlaceholderRegex, func(ref argPlaceholder) string {
-		value, ok := args[ref.key]
-		if !ok {
-			return ref.text
-		}
-		return encodeForRawSubstitution(value)
-	})
-}
-
-// encodeForRawSubstitution renders a tool-arg value as the bare stringified
-// form the webhook URL / body-template path wants: no MemQL quoting, because
-// the placeholder already sits inside the host language's own string slot.
-func encodeForRawSubstitution(value any) string {
-	switch v := value.(type) {
-	case string:
-		return v
-	case float64:
-		// narrowing: GUARDED -- num.WholeInt64 IS the guard, replacing
-		// `v == float64(int64(v))`, whose result is undefined for a v outside
-		// int64 (memql#4779). A whole float too large renders through %v, which
-		// carries an exponent and therefore re-parses as a float.
-		if whole, ok := num.WholeInt64(v); ok {
-			return fmt.Sprintf("%d", whole)
-		}
-		return fmt.Sprintf("%v", v)
-	case bool:
-		return fmt.Sprintf("%t", v)
-	default:
-		if jsonBytes, err := json.Marshal(v); err == nil {
-			return string(jsonBytes)
-		}
-		return fmt.Sprintf("%v", v)
-	}
-}
-
-// substituteArgsInMemqlQuery replaces $args.<key> placeholders inside
-// a MemQL query-handler template with values that the engine's MemQL
-// parser will re-parse. Three cases have to be handled:
-//
-//  1. **Pre-quoted form** -- `"$args.key"`. Tool handlers wrap string
-//     placeholders this way (e.g. `summary: "$args.summary"`). The
-//     intent is "substitute this string into a MemQL string-literal
-//     position." We REPLACE THE WHOLE QUOTED TOKEN with a
-//     JSON-encoded value -- json.Marshal already adds the outer
-//     quotes AND escapes inner quotes, backslashes, control chars,
-//     etc. The previous implementation just dropped the raw value
-//     between the existing surrounding quotes, so a value containing
-//     a `"` or a backslash broke the lexer downstream
-//     ("expected ',' between arguments at position 378"). The
-//     scope-elevation `summary` field surfaced this because it's the
-//     first long natural-language string the LLM generates as a tool
-//     arg.
-//
-//  2. **Bare form** -- `$args.key` without surrounding quotes. Used
-//     when the placeholder is in a non-string position (e.g.
-//     `args: $args.args` where `args` is a nested object). Substitute
-//     the JSON-encoded value directly; for objects / arrays the
-//     produced JSON is valid MemQL too.
-//
-//  3. **Unfilled** -- a key the caller never supplied (an omitted
-//     optional arg: planId / taskId / correlationId on workerHost, and
-//     any tool with optional fields really). Left standing, the literal
-//     `$args.foo` fails the MemQL parser on the bare `$` token
-//     ("unexpected token \"$\" at position 48"), so it degrades to
-//     `null` rather than crashing the dispatch. Bare and embedded
-//     (`"prefix-$args.foo"`) forms take an unquoted `null`; the
-//     pre-quoted form is a whole string-literal slot, so it takes the
-//     four-char string `"null"` -- what the engine has always seen for a
-//     missing string arg.
-//
-// All three are decided in ONE left-to-right pass over the template
-// (substituteArgPlaceholders), including the unfilled case: as a separate
-// cleanup sweep it ran over already-substituted text and rewrote the caller's
-// own `$args.` text to null (memql#3609). One pass also removes the map-order
-// dependence that made `$args.id` collide with `$args.idempotencyKey`.
-//
-// Webhook URL / body templating uses substituteArgsInQuery instead --
-// those callers want the raw stringified value (no extra JSON
-// quoting) because the placeholder is already inside the host
-// language's string slot.
-func substituteArgsInMemqlQuery(query string, args map[string]any) string {
-	return substituteArgPlaceholders(query, memqlArgPlaceholderRegex, func(ref argPlaceholder) string {
-		value, ok := args[ref.key]
-		if !ok {
-			if ref.quoted {
-				return `"null"`
-			}
-			return "null"
-		}
-		return encodeForMemqlSubstitution(value)
-	})
-}
-
-// encodeForMemqlSubstitution renders a tool-arg value as a MemQL-safe
-// literal (strings through the one MemQL quoter; numbers / bools / objects /
-// arrays in their canonical JSON form).
-//
-// The string arm delegates to languageParser.QuoteString. It was json.Marshal
-// with a fmt.Sprintf("%q") fallback, which was never a live defect on two
-// counts -- json.Marshal emits exactly the escapes the lexer implements, and
-// it cannot fail for a string, so the %q arm was unreachable -- but it was a
-// separate DEFINITION of the escape set feeding a query that is then parsed,
-// with an incorrect fallback sitting inside it. memql#3192.
-//
-// Quoted faithfully, never substituted: these are a tool call's args on the
-// way into a handler query, and the storage question belongs to whatever
-// mutation the handler runs, not to the encoder.
-func encodeForMemqlSubstitution(value any) string {
-	switch v := value.(type) {
-	case nil:
-		return `""`
-	case string:
-		return languageParser.QuoteString(v)
-	case float64:
-		// narrowing: GUARDED -- num.WholeInt64 IS the guard, replacing
-		// `v == float64(int64(v))`, whose result is undefined for a v outside
-		// int64 (memql#4779). A whole float too large renders through %v, which
-		// carries an exponent and therefore re-parses as a float.
-		if whole, ok := num.WholeInt64(v); ok {
-			return fmt.Sprintf("%d", whole)
-		}
-		return fmt.Sprintf("%v", v)
-	case bool:
-		return fmt.Sprintf("%t", v)
-	default:
-		if jsonBytes, err := json.Marshal(v); err == nil {
-			return string(jsonBytes)
-		}
-		return fmt.Sprintf("%v", v)
-	}
 }
 
 func executeResultToToolJSON(result *ExecuteResult) (string, error) {

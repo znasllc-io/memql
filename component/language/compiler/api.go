@@ -32,9 +32,11 @@ func CompileSource(source string) (*CompileResult, error) {
 	// stage is a no-op when its detector doesn't match.
 	rewritten, err := parser.NormaliseAll(source)
 	if err != nil {
-		return nil, err
+		// A refusal of an authored clause names its line and column.
+		return nil, parser.PositionRewriteError(source, err)
 	}
-	source = rewritten
+	// Positions are the author's (ParseFileSource).
+	source = parser.PositionLowering(source, rewritten)
 
 	// Tokenize
 	lexer := parser.NewLexer(source)
@@ -60,11 +62,7 @@ func CompileSource(source string) (*CompileResult, error) {
 
 	case *parser.FunctionDef:
 		// Single function definition
-		result := &CompileResult{
-			Warnings: LintFile(&parser.File{
-				Definitions: []parser.Node{node},
-			}),
-		}
+		result := &CompileResult{}
 		switch node.Type {
 		case parser.FunctionTypeAutomation:
 			automation, err := compiler.compileAutomation(node)
@@ -216,8 +214,14 @@ func (t FileType) String() string {
 func ParseFileSource(source string) (*parser.File, error) {
 	rewritten, err := applyFullRewriteChain(source)
 	if err != nil {
-		return nil, err
+		// A refusal of an authored clause names its line and column, placed
+		// through the stripping and the stages before it.
+		return nil, parser.PositionRewriteError(source, err)
 	}
+	// Every position the lexer and parser report -- a refusal inside a v1
+	// filter above all -- is the author's line and column, not the lowered
+	// text's (memql#5364).
+	rewritten = parser.PositionLowering(source, rewritten)
 
 	lexer := parser.NewLexer(rewritten)
 	tokens, err := lexer.Tokenize()
@@ -268,7 +272,8 @@ func applyFullRewriteChain(source string) (string, error) {
 // errors are swallowed (the eventual parse failure is the signal).
 func ParseMemQL(source string) (parser.Node, error) {
 	if rewritten, err := parser.NormaliseAll(source); err == nil {
-		source = rewritten
+		// Positions are the author's (ParseFileSource).
+		source = parser.PositionLowering(source, rewritten)
 	}
 
 	lexer := parser.NewLexer(source)
@@ -337,9 +342,10 @@ func GetAutomationName(source string) (string, error) {
 func ValidateMemQL(source string) error {
 	rewritten, err := parser.NormaliseAll(source)
 	if err != nil {
-		return err
+		return parser.PositionRewriteError(source, err)
 	}
-	source = rewritten
+	// Positions are the author's (ParseFileSource).
+	source = parser.PositionLowering(source, rewritten)
 
 	lexer := parser.NewLexer(source)
 	tokens, err := lexer.Tokenize()

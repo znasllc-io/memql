@@ -29,7 +29,7 @@ query widget queryAllWidgetsUnmarked {
   args {
     ownerUserId  string  @required
   }
-  filter  payload.ownerUserId==args.ownerUserId
+  filter  row => row.ownerUserId == args.ownerUserId
   shape   widgetFull
 }`
 	findings := ScanSource("cognition/queries.memql", src)
@@ -43,11 +43,11 @@ query widget queryAllWidgetsUnmarked {
 }
 
 // TestSingleRowReadIsExempt: a query filtered by the unique-key
-// equality `id == args.x` reads at most one row and is NOT a list.
+// equality `row.id == args.x` reads at most one row and is NOT a list.
 func TestSingleRowReadIsExempt(t *testing.T) {
 	src := `query space querySpaceMeta {
   args { partitionId string @required }
-  filter  row.id==args.partitionId
+  filter  row => row.id == args.partitionId
   shape   spaceFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "querySpaceMeta")
@@ -56,11 +56,11 @@ func TestSingleRowReadIsExempt(t *testing.T) {
 	}
 }
 
-// TestSingleRowReadWithSpacedEquality: `id == x` with surrounding
-// whitespace also reads as single-row.
+// TestSingleRowReadWithSpacedEquality: the id equality beside another
+// conjunct still reads as single-row -- a conjunct only narrows.
 func TestSingleRowReadWithSpacedEquality(t *testing.T) {
 	src := `query space querySpaceMetaSpaced {
-  filter  row.id == args.partitionId && isActiveRecord
+  filter  row => row.id == args.partitionId && isActiveRecord(row)
   shape   spaceFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "querySpaceMetaSpaced")
@@ -69,18 +69,18 @@ func TestSingleRowReadWithSpacedEquality(t *testing.T) {
 	}
 }
 
-// TestPayloadIdSubfieldIsNotSingleRow: a filter on `payload.threadId`
-// (or any payload sub-field whose name ends in "id") is NOT the
+// TestPayloadIdSubfieldIsNotSingleRow: a filter on `row.threadId`
+// (or any payload field whose name ends in "id") is NOT the
 // primary-intrinsic id equality, so the query stays a list.
 func TestPayloadIdSubfieldIsNotSingleRow(t *testing.T) {
 	src := `query message queryThreadMessages {
   args { threadId string @required }
-  filter  payload.threadId==args.threadId
+  filter  row => row.threadId == args.threadId
   shape   messageFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "queryThreadMessages")
 	if f.Class != UnmarkedList {
-		t.Fatalf("classified as %s, want unmarked-list (payload.threadId is not the primary id)", f.Class)
+		t.Fatalf("classified as %s, want unmarked-list (row.threadId is not the primary id)", f.Class)
 	}
 }
 
@@ -88,7 +88,7 @@ func TestPayloadIdSubfieldIsNotSingleRow(t *testing.T) {
 // bounded / compliant.
 func TestPaginatedListIsBounded(t *testing.T) {
 	src := `query space queryFirstTenSpaces {
-  filter  payload.active==true
+  filter  row => row.active == true
   paginate 10
   shape   spaceFull
 }`
@@ -101,7 +101,7 @@ func TestPaginatedListIsBounded(t *testing.T) {
 // TestSortedListIsBounded: a sort directive marks the list as bounded.
 func TestSortedListIsBounded(t *testing.T) {
 	src := `query space queryLatestSpaces {
-  filter  payload.active==true
+  filter  row => row.active == true
   sort    "createdAt", "desc"
   shape   spaceFull
 }`
@@ -114,7 +114,7 @@ func TestSortedListIsBounded(t *testing.T) {
 // TestCountIsAggregate: a count clause returns an aggregate, exempt.
 func TestCountIsAggregate(t *testing.T) {
 	src := `query user userCount {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   count
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "userCount")
@@ -130,7 +130,7 @@ func TestUnboundedMarkedListCapturesReason(t *testing.T) {
 @unbounded("small bounded catalog -- providers never exceed a handful of rows")
 @description("All providers.")
 query provider queryAllProviders {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   providerFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "queryAllProviders")
@@ -142,17 +142,59 @@ query provider queryAllProviders {
 	}
 }
 
-// TestGuardedIdFilterStaysList: a `when(args.x) { id==... }` guard is
-// conditional, so the query can still return the full set when the arg
-// is omitted -- it must NOT be treated as a single-row read.
+// TestGuardedIdFilterStaysList: a `(args.x == nil || row.id == ...)`
+// guard is conditional, so the query can still return the full set when
+// the arg is omitted -- it must NOT be treated as a single-row read.
 func TestGuardedIdFilterStaysList(t *testing.T) {
 	src := `query space queryMaybeOneSpace {
   args { partitionId string }
-  filter  when(args.partitionId) { row.id==args.partitionId } && payload.ownerUserId==actor.userId
+  filter  row => (args.partitionId == nil || row.id == args.partitionId) && row.ownerUserId == actor.userId
   shape   spaceFull
 }`
 	f := findingFor(t, ScanSource("f.memql", src), "queryMaybeOneSpace")
 	if f.Class == SingleRow {
 		t.Fatalf("guarded id filter classified as single-row; a conditional id filter is not guaranteed single-row")
+	}
+}
+
+// TestV1Filters: the filter is read as a tree (epic memql#5363). The
+// optional-argument guard is `(args.x == nil || row.id == args.x)`, which a
+// text match for `row.id ==` would read as an unconditional equality --
+// exempting a query that returns the full set when the argument is omitted.
+func TestV1Filters(t *testing.T) {
+	for _, tc := range []struct {
+		name, filter string
+		want         Classification
+	}{
+		// CATCH: conditional on the argument, so a list that must declare a bound.
+		{"guarded id", "row => args.x == nil || row.id == args.x", UnmarkedList},
+		{"guarded id beside a conjunct", "row => row.status == \"open\"\n          && (args.x == nil || row.id == args.x)", UnmarkedList},
+		{"id in one arm of a disjunction", "row => row.id == args.x || row.status == \"open\"", UnmarkedList},
+		// PASS: an unconditional equality, in either operand order, on any line.
+		{"id equality", "row => row.id == args.x", SingleRow},
+		{"reversed operands", "row => args.x == row.id", SingleRow},
+		{"id equality on a wrapped line", "row => row.status == \"open\"\n\n          && row.id == args.x", SingleRow},
+		{"id equality beside a guard", "row => row.id == args.x && (args.y == nil || row.status == args.y)", SingleRow},
+		// A payload field ending in `id` is not the intrinsic.
+		{"payload threadId", "row => row.threadId == args.x", UnmarkedList},
+		// A pre-2026 clause is not read at all: the loader refuses it, and
+		// this rule's conservative direction demands a bound.
+		{"pre-2026 clause", "id == args.x", UnmarkedList},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "query thing q {\n  args { x string }\n  filter  " + tc.filter + "\n  shape   thingFull\n}\n"
+			if f := findingFor(t, ScanSource("f.memql", src), "q"); f.Class != tc.want {
+				t.Errorf("classified %s, want %s", f.Class, tc.want)
+			}
+		})
+	}
+}
+
+// TestFilterClauseSpansABlankLine: the clause is the normaliser's fold, which
+// skips a blank line inside a wrapped clause rather than ending it there.
+func TestFilterClauseSpansABlankLine(t *testing.T) {
+	src := "query thing q {\n  filter  row => row.status == \"open\"\n\n              && row.id == args.x\n  shape   thingFull\n}\n"
+	if f := findingFor(t, ScanSource("f.memql", src), "q"); f.Class != SingleRow {
+		t.Errorf("classified %s, want single-row: the id equality after the blank line is part of the clause", f.Class)
 	}
 }

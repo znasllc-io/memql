@@ -1,7 +1,7 @@
 /// The open tickets, newest first, for a verb no role can hold.
 @requiresCapability("inspect", "principal")
 query ticket openTicketsUnknownVerb {
-  filter status == "open"
+  filter row => row.status == "open"
   sort "row.createdAt", "desc"
   paginate 20
 }

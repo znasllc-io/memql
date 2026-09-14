@@ -26,7 +26,10 @@ query invocation expiredWorkerInvocations {
   args {
     createdBefore  string
   }
-  filter  actor.isClusterOwner==true && action!="" && isNotDeleted && when(args.createdBefore) { row.createdAt<args.createdBefore }
+  filter  row => actor.isClusterOwner == true
+              && row.action != ""
+              && isNotDeleted(row)
+              && (args.createdBefore == nil || row.createdAt < args.createdBefore)
   shape   workerInvocationFull
 }
 
@@ -44,7 +47,7 @@ query invocation expiredWorkerInvocations {
 
 /// List the CALLER'S worker invocations belonging to a Plan.
 ///
-/// The `ownerUserId==actor.userId` conjunct is the caller scope v1:worker:invocation's composite
+/// The `row.ownerUserId == actor.userId` conjunct is the caller scope v1:worker:invocation's composite
 /// tier now injects anyway (memql#4406); stating it is what makes the read's scope checkable
 /// (TestRowAuthzEnforcementLandGate) instead of implicit. There is deliberately no operator
 /// counterpart: the pair shape exists where an operator surface needs it
@@ -55,7 +58,7 @@ query invocation invocationsForRun {
   args {
     runId   string!
   }
-  filter  runId==args.runId && ownerUserId==actor.userId && isNotDeleted
+  filter  row => row.runId == args.runId && row.ownerUserId == actor.userId && isNotDeleted(row)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -88,7 +91,7 @@ query invocation invocationsForRun {
 /// List the caller's worker invocations, across every machine they own.
 @actor
 query invocation invocationsForUser {
-  filter  ownerUserId==actor.userId && isNotDeleted
+  filter  row => row.ownerUserId == actor.userId && isNotDeleted(row)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -122,7 +125,7 @@ query invocation invocationsForUser {
 
 /// Look up the worker registration owned by an identity row.
 ///
-/// The `ownerUserId==actor.userId` conjunct is not redundant with the concept's tier -- it is
+/// The `row.ownerUserId == actor.userId` conjunct is not redundant with the concept's tier -- it is
 /// what makes this read's result set the SAME before and after enforcement, which
 /// TestRowAuthzEnforcementLandGate is the gate for. It is satisfied at runtime because the only
 /// caller, component/worker's register handshake, runs under auth.ContextWithUserActor for the
@@ -135,7 +138,7 @@ query registration workerByIdentityId {
   args {
     identityId  string!
   }
-  filter  identityId==args.identityId && ownerUserId==actor.userId
+  filter  row => row.identityId == args.identityId && row.ownerUserId == actor.userId
   shape   workerRegistrationFull
 }
 
@@ -174,7 +177,7 @@ query registration workersForUser {
   args {
     ownerUserId  string!
   }
-  filter  ownerUserId==args.ownerUserId && ownerUserId==actor.userId
+  filter  row => row.ownerUserId == args.ownerUserId && row.ownerUserId == actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -197,7 +200,7 @@ query appSession appSessionById {
   args {
     sessionId  string!
   }
-  // Caller-scoped. `ownerUserId==actor.userId` implies the composite tier's
+  // Caller-scoped. `row.ownerUserId == actor.userId` implies the composite tier's
   // floor (`owner || clusterOwner`) -- A implies A||B -- so this satisfies
   // the land gate as a plain top-level conjunct. Writing the disjunction
   // here instead would be UNDECIDABLE to the enforcement analyzer, which
@@ -207,7 +210,7 @@ query appSession appSessionById {
   // query: it lives in the tier's injected row admission, which is what an
   // operator's generic concept read goes through. That split is deliberate
   // -- a named read is somebody asking for their own sessions.
-  filter  ownerUserId==actor.userId && row.id==args.sessionId
+  filter  row => row.ownerUserId == actor.userId && row.id == args.sessionId
   shape   workerAppSessionFull
 }
 
@@ -226,7 +229,7 @@ query appSession appSessionsForStep {
   args {
     stepId  string!
   }
-  filter   ownerUserId==actor.userId && stepId==args.stepId
+  filter   row => row.ownerUserId == actor.userId && row.stepId == args.stepId
   sort     "row.createdAt", "desc"
   paginate 20
   shape    workerAppSessionFull
@@ -249,12 +252,15 @@ query appSession appSessionsForUser {
   // (auth.ContextWithUserActor), the same borrowed-authority pattern the
   // campaign sender uses, so the engine never out-ranks the user whose
   // rows it is reading.
-  // No when() guard here on purpose: a ConditionalFilterExpression makes
-  // the whole filter undecidable to the row-authz analyzer, so it cannot
-  // prove the ownership floor holds. A decidable filter that always
-  // enforces the floor is worth more than an optional app narrowing the
-  // one consumer does not use.
-  filter   ownerUserId==actor.userId
+  // No optional app narrowing. It was a when(args.app) guard, dropped
+  // because the row-authz analyzer of the time read that guard as making
+  // the whole filter undecidable, so it could not prove the ownership floor
+  // held -- and a decidable filter that always enforces the floor was worth
+  // more than a narrowing the one consumer does not use. The edition-2026
+  // guard, `(args.app == nil || row.app == args.app)`, is one more conjunct
+  // beside the owner comparison, which the analyzer still reads, so the
+  // narrowing can come back when a consumer needs it.
+  filter   row => row.ownerUserId == actor.userId
   sort     "row.createdAt", "desc"
   paginate 50
   shape    workerAppSessionCard
@@ -274,7 +280,7 @@ query appSession appSessionsForUser {
 @unbounded("the concurrency-cap read -- it must see EVERY live session the user has, and a paginated read would undercount and let maxConcurrentSessions be exceeded. Bounded in practice by that same cap.")
 /// List the caller's app sessions that are still live.
 query appSession liveAppSessionsForUser {
-  filter  ownerUserId==actor.userId && status in ["starting", "running"]
+  filter  row => row.ownerUserId == actor.userId && row.status in ["starting", "running"]
   shape   workerAppSessionCard
 }
 
@@ -292,7 +298,7 @@ query appSession liveAppSessionsForUser {
 @unbounded("one row per user by construction -- the id is derived from the user id, so setDelegationPolicy updates rather than forking. The full set for one caller is at most one row.")
 /// Read the caller's app-delegation policy.
 query delegationPolicy delegationPolicyForUser {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   workerDelegationPolicyFull
 }
 
@@ -301,7 +307,7 @@ query delegationPolicy delegationPolicyForUser {
 // THREE READS OF ONE CONCEPT, and the split is the identity/authActivity
 // precedent (dsl/identity/queries.memql), not duplication. v1:worker:registration
 // declares the composite tier `@rowAuthz(owner="ownerUserId", clusterOwner)`, so
-// the ENGINE already ANDs `(ownerUserId==actor.userId)||(actor.isClusterOwner)`
+// the ENGINE already ANDs `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)`
 // onto every row. What differs between the three is WHO ASKS and with what:
 //
 //   workersForOwnerWithStatus  the ROUTER, server-side, for a user who is not
@@ -336,7 +342,7 @@ query delegationPolicy delegationPolicyForUser {
 @cache(0)
 @actor
 query registration myWorkersWithStatus {
-  filter   ownerUserId==actor.userId
+  filter   row => row.ownerUserId == actor.userId
   sort     "row.createdAt", "asc"
   paginate 200
   shape    workerRegistrationFull
@@ -351,7 +357,8 @@ query registration allWorkersWithStatus {
   args {
     ownerUserId  string
   }
-  filter   actor.isClusterOwner==true && when(args.ownerUserId) { ownerUserId==args.ownerUserId }
+  filter   row => actor.isClusterOwner == true
+               && (args.ownerUserId == nil || row.ownerUserId == args.ownerUserId)
   sort     "row.createdAt", "asc"
   paginate 200
   shape    workerRegistrationFull
@@ -365,7 +372,7 @@ query registration allWorkersWithStatus {
 /// caller check it already has.
 @actor
 query routingPolicy routingPolicyForOwner {
-  filter   ownerUserId==actor.userId && isActiveRecord
+  filter   row => row.ownerUserId == actor.userId && isActiveRecord(row)
   // NEWEST FIRST, and the router takes the first row. One active policy per
   // user is the model, but the DSL cannot enforce it (@unique is declared
   // metadata with no check, memql#2960), so the READ is what makes two active
@@ -380,7 +387,7 @@ query routingPolicy routingPolicyForOwner {
 /// invocation's routing.policyId points at whichever row made the choice.
 @actor
 query routingPolicy myRoutingPolicies {
-  filter   ownerUserId==actor.userId
+  filter   row => row.ownerUserId == actor.userId
   sort     "row.createdAt", "desc"
   paginate 20
   shape    workerRoutingPolicyFull
@@ -394,7 +401,7 @@ query invocation invocationsForWorker {
   args {
     workerId  string!
   }
-  filter  workerId==args.workerId && ownerUserId==actor.userId && isNotDeleted
+  filter  row => row.workerId == args.workerId && row.ownerUserId == actor.userId && isNotDeleted(row)
   sort     "row.createdAt", "desc"
   paginate 25
   shape   workerInvocationFull
@@ -412,7 +419,7 @@ query invocation invocationsForWorkerAsOperator {
   args {
     workerId  string!
   }
-  filter  actor.isClusterOwner==true && workerId==args.workerId && isNotDeleted
+  filter  row => actor.isClusterOwner == true && row.workerId == args.workerId && isNotDeleted(row)
   sort     "row.createdAt", "desc"
   paginate 25
   shape   workerInvocationFull
@@ -425,7 +432,7 @@ query modelPull modelPullsForWorker {
   args {
     workerId  string!
   }
-  filter  workerId==args.workerId && ownerUserId==actor.userId && isNotDeleted
+  filter  row => row.workerId == args.workerId && row.ownerUserId == actor.userId && isNotDeleted(row)
   sort    "requestedAt", "desc"
   // Literal page size -- the struct-query paginate directive only accepts an
   // integer literal. Small on purpose: the group renders a live pull and the
@@ -466,7 +473,9 @@ query modelPull openModelPulls {
     /// A `running` row that has not reported since this has stopped moving.
     updatedBefore    string!
   }
-  filter  actor.isClusterOwner==true && isNotDeleted && ((status=="requested" && requestedAt<args.requestedBefore) || (statusIsRunning && updatedAt<args.updatedBefore))
+  filter  row => actor.isClusterOwner == true
+              && isNotDeleted(row)
+              && (row.status == "requested" && row.requestedAt < args.requestedBefore || statusIsRunning(row) && row.updatedAt < args.updatedBefore)
   shape   workerModelPullFull
 }
 
@@ -478,7 +487,7 @@ query modelProbe modelProbesForWorker {
   args {
     workerId  string!
   }
-  filter  workerId==args.workerId && ownerUserId==actor.userId && isNotDeleted
+  filter  row => row.workerId == args.workerId && row.ownerUserId == actor.userId && isNotDeleted(row)
   sort    "requestedAt", "desc"
   paginate 20
   shape   workerModelProbeFull
@@ -508,6 +517,8 @@ query modelProbe openModelProbes {
     /// A `running` row that has not reported since this has stopped moving.
     updatedBefore    string!
   }
-  filter  actor.isClusterOwner==true && isNotDeleted && ((status=="requested" && requestedAt<args.requestedBefore) || (statusIsRunning && updatedAt<args.updatedBefore))
+  filter  row => actor.isClusterOwner == true
+              && isNotDeleted(row)
+              && (row.status == "requested" && row.requestedAt < args.requestedBefore || statusIsRunning(row) && row.updatedAt < args.updatedBefore)
   shape   workerModelProbeFull
 }

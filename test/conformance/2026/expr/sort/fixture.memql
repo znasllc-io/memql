@@ -1,4 +1,4 @@
-/// A support ticket, the row the sort cases here read.
+/// A support ticket: the row a sorted query here reads.
 concept ticket {
   title     string
   status    string

@@ -41,6 +41,10 @@ import (
 type LintDiagnostic struct {
 	File    string
 	Message string
+	// Code is the refusal's stable rule id when it carries one (a lowering
+	// refusal's `lower_*`, an annotation's `annotation_*`), and empty
+	// otherwise. Message carries it too, in brackets at the end.
+	Code string
 }
 
 // LintUnifiedTree mounts every product-domain directory found in root as an
@@ -122,7 +126,7 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 	// parse-phase skip).
 	if eng.loadReport != nil {
 		for _, s := range eng.loadReport.Skipped {
-			diags = append(diags, LintDiagnostic{File: s.File, Message: skipDiagnostic(s)})
+			diags = append(diags, LintDiagnostic{File: s.File, Message: skipDiagnostic(s), Code: s.Code})
 		}
 		for _, d := range eng.loadReport.Duplicates {
 			diags = append(diags, LintDiagnostic{Message: "duplicate construct: " + d.String()})

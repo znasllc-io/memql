@@ -304,11 +304,11 @@ automation welcomeOnInstanceRunning {
     switch status {
       case "running" {
         stageOutboundRequest {
-          requestId:   concat("fleet-welcome-", id),
+          requestId:   "fleet-welcome-" + id,
           medium:      "email",
           target:      notifyEmail,
           subject:     "Your MemQL instance is ready",
-          body:        concat("Your MemQL instance is running at https://", domain, " -- sign in there to get started."),
+          body:        "Your MemQL instance is running at https://" + domain + " -- sign in there to get started.",
           requestedBy: "fleet.welcomeOnInstanceRunning"
         }
       }

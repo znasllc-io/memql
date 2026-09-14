@@ -1,0 +1,5 @@
+/// Tickets tagged urgent.
+query ticket qfHas {
+  filter row => row.tags has "urgent"
+  paginate 20
+}

@@ -1,0 +1,5 @@
+/// Tickets sorted by a negation.
+query ticket soNot {
+  sort !urgent
+  paginate 20
+}

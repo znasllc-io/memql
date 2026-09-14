@@ -15,9 +15,9 @@ import (
 //
 // The three facts that compose into the defect are each individually correct:
 //
-//  1. An absent optional arg resolves to missingValue{}, and evalValue's map
-//     branch OMITS that key rather than writing a null. Right on its own -- a
-//     null would be a value the caller never sent.
+//  1. An absent optional arg is Absent, and the renderer's container rule
+//     OMITS that key rather than writing a null. Right on its own -- a null
+//     would be a value the caller never sent.
 //  2. The read-merge inherits fields the delta OMITS, per top-level payload
 //     field. Right on its own -- that is what makes a partial write partial.
 //  3. A top-level object field is therefore replaced WHOLESALE, because the
@@ -66,28 +66,19 @@ func nestedObjectLeafRefs(tmpl map[string]any) (argNames []string, leafCount int
 	return argNames, leafCount
 }
 
-// bareArgReference reports whether a template value is exactly `args.<name>` or
-// `ctx.<name>` for a single-segment name, and returns that name. Anything with
-// a dot in the path, a call wrapper, or a non-string template is not one.
+// bareArgReference reports whether a template value is exactly `args.<name>`
+// for a single-segment name, and returns that name. A deeper path, a call, an
+// operator or any other value is not one.
 func bareArgReference(v any) (string, bool) {
-	s, ok := v.(string)
+	n, ok := v.(ast.ExpressionNode)
 	if !ok {
 		return "", false
 	}
-	trimmed := strings.TrimSpace(s)
-	var path string
-	switch {
-	case strings.HasPrefix(trimmed, "args."):
-		path = strings.TrimPrefix(trimmed, "args.")
-	case strings.HasPrefix(trimmed, "ctx."):
-		path = strings.TrimPrefix(trimmed, "ctx.")
-	default:
+	path, isArg := v1CallerArgPath(n)
+	if !isArg || len(path) != 1 {
 		return "", false
 	}
-	if path == "" || strings.ContainsAny(path, ". ()[]{}\",") {
-		return "", false
-	}
-	return path, true
+	return path[0], true
 }
 
 // optionalArgNames collects the declared args a function marks optional.

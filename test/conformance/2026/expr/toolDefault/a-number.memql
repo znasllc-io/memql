@@ -1,5 +1,5 @@
 /// List the open tickets, the default limit written as a number.
-@handler(type="query", query="paginate(query openTicketsForTool(), $args.limit)")
+@handler(type="query", query="paginate(query openTicketsForTool(), args.limit)")
 tool listOpenTicketsWithNumericLimit {
   limit  integer  @default(20)  @description("The most tickets to return.")
 }

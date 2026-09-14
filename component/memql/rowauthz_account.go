@@ -555,6 +555,15 @@ func (e *MemQLEngine) lowerAccountScope(ctx context.Context, expr ExpressionNode
 			return n
 		}
 		return &LogicalExpression{Op: n.Op, Left: left, Right: right}
+	case *NotExpression:
+		// Walked for the reason lowerRankScope walks it: no account node is
+		// injected under a negation today, and a missed one would reach the
+		// SQL compiler symbolic. treeHasAccountScope answers for it too.
+		target := e.lowerAccountScope(ctx, n.Target)
+		if target == n.Target {
+			return n
+		}
+		return &NotExpression{Target: target}
 	default:
 		return expr
 	}
@@ -569,6 +578,8 @@ func treeHasAccountScope(expr ExpressionNode) bool {
 		return true
 	case *LogicalExpression:
 		return treeHasAccountScope(n.Left) || treeHasAccountScope(n.Right)
+	case *NotExpression:
+		return treeHasAccountScope(n.Target)
 	default:
 		return false
 	}

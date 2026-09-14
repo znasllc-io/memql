@@ -414,15 +414,16 @@ func TestAuthoredBindUserInvitationWritesOnlyTheBinding(t *testing.T) {
 	if stmt.Kind != languageAst.MutationKindUpdate || stmt.Concept != "invitation" {
 		t.Errorf("bindUserInvitation is a %q on %q, want an update on invitation", stmt.Kind, stmt.Concept)
 	}
-	if ref, ok := stmt.IDTemplate.(*languageAst.ArgRefExpr); !ok || ref.Path != "invitationId" {
-		t.Errorf("the update selects %#v, want args.invitationId", stmt.IDTemplate)
+	if got := writeSlotSource(stmt.IDTemplate); got != "args.invitationId" {
+		t.Errorf("the update selects %s, want args.invitationId", got)
 	}
-	if !strings.Contains(stmt.PayloadRaw, "bindingHash:args.bindingHash") {
-		t.Errorf("the write does not carry bindingHash (payload: %s), so the binding is never "+
-			"recorded and the accept path admits every browser", stmt.PayloadRaw)
+	fields := writeFieldSources(t, stmt)
+	if fields["bindingHash"] != "args.bindingHash" {
+		t.Errorf("the write does not carry bindingHash: args.bindingHash (payload: %s), so the "+
+			"binding is never recorded and the accept path admits every browser", stmt.PayloadRaw)
 	}
 	for _, forbidden := range []string{"status", "active", "respondedAt", "inviteeId"} {
-		if strings.Contains(stmt.PayloadRaw, forbidden) {
+		if _, touched := fields[forbidden]; touched {
 			t.Errorf("the write touches %q (payload: %s). Opening a link is not responding to an "+
 				"invitation: a bind that moved the lifecycle would spend the invitation for a "+
 				"person who has not accepted anything yet", forbidden, stmt.PayloadRaw)

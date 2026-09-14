@@ -1,0 +1,2 @@
+/// Matches the open tickets that are urgent.
+spec ticket isUrgentOpenTicket = row => row.status == "open" && row.priority > 3

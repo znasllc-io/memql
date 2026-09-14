@@ -71,8 +71,13 @@ button:not(:disabled):active {
   color: var(--os-muted);
 }
 
+/* The data voice is read character by character -- the brand's own words for
+ * it -- so it shows the characters. JetBrains Mono's contextual ligatures draw
+ * `!=` as one not-equal sign and `==` as one long bar, and somebody copying a
+ * condition, a command or an id off the screen would type what they saw. */
 .os-mono {
   font-family: var(--os-font-mono);
+  font-variant-ligatures: none;
 }
 
 .os-link {
@@ -1393,6 +1398,12 @@ button:not(:disabled):active {
   margin: 0;
   padding: 0;
   display: grid;
+  /* One column exactly as wide as the list. The implicit `auto` column
+   * sizes to its widest row's min-content, and a row that carries a
+   * one-line sentence (`white-space: nowrap`, ellipsized) has the whole
+   * sentence as its min-content: at a narrow window the column grew past
+   * the window and carried every row's status chip off its right edge. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
 }
 
@@ -1509,6 +1520,11 @@ button:not(:disabled):active {
 .os-machine-name {
   font-weight: 600;
   font-size: var(--os-text-base);
+}
+/* The icon keeps its size when a long name wraps beside it: as a plain flex
+ * item it was the first thing squeezed. */
+.os-row > svg {
+  flex: none;
 }
 .os-row-state,
 .os-machine-state {
@@ -1946,6 +1962,14 @@ button:not(:disabled):active {
 .os-select:focus-visible {
   outline: 2px solid var(--os-accent);
   outline-offset: 1px;
+}
+/* An input holding code (kit `Input` with `code`, `CopyField` with `mono`).
+ * A compound selector, because `.os-input`'s `font: inherit` comes later in
+ * this file than `.os-mono` and on its own would put the prose face back --
+ * and the ligatures with it. */
+.os-input.os-mono {
+  font-family: var(--os-font-mono);
+  font-variant-ligatures: none;
 }
 .os-select-label {
   display: inline-flex;
@@ -7006,6 +7030,19 @@ a.os-button {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* The rule's condition: a full-width field with its reference right under it
+ * (see RuleBuilder). The caption keeps a reading measure while the field
+ * takes the width a real condition needs. */
+.os-campaign-condition {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+.os-campaign-condition > .os-caption {
+  max-width: 72ch;
 }
 
 .os-campaign-more {

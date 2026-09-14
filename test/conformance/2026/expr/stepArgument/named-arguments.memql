@@ -1,0 +1,11 @@
+/// Note a goal whenever it changes, with its close reason when it has one.
+@trigger(event="node.updated", concept="v1:work:goal")
+automation saNoteChangedGoal {
+  args {
+    id           string
+    closeReason  string
+  }
+  step note {
+    mutation saNoteGoal(goalId: args.id, note: args.closeReason ?? "changed")
+  }
+}

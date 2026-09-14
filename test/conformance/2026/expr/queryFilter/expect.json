@@ -4,8 +4,8 @@
       "file": "status-is-open.memql",
       "verdict": "lower",
       "concept": "ticket",
-      "sql": "payload #>> '{status}' = ?",
-      "note": "A comparison with a string literal pushes down as one JSONB path read with a bound parameter."
+      "sql": "jsonb_typeof(payload->'status') = 'string' AND payload #>> '{status}' = ?",
+      "note": "A comparison with a string literal pushes down as one typed JSONB read with a bound parameter: a stored number is never equal to a string."
     },
     {
       "file": "status-is-open.memql",
@@ -26,11 +26,19 @@
       "expect": false
     },
     {
+      "file": "status-is-open.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false,
+      "note": "An absent field equals nothing but nil and the empty string."
+    },
+    {
       "file": "open-or-high-priority.memql",
       "verdict": "lower",
       "concept": "ticket",
-      "sql": " OR ",
-      "note": "A disjunction of two row predicates lowers to one SQL OR rather than two reads."
+      "sql": ") OR (CASE WHEN jsonb_typeof(payload->'priority') = 'number' THEN (payload #>> '{priority}')::numeric > ? ELSE FALSE END)",
+      "note": "A disjunction of two row predicates lowers to one SQL OR rather than two reads; a number is compared only where the stored value is one, so a malformed value is not ordered rather than a cast error."
     },
     {
       "file": "open-or-high-priority.memql",
@@ -44,13 +52,700 @@
     },
     {
       "file": "filter-in-a-query.memql",
-      "verdict": "load_ok"
+      "verdict": "load_ok",
+      "note": "A query filter is a lambda naming the row it reads."
     },
     {
       "file": "filter-with-bang.memql",
+      "verdict": "load_ok",
+      "note": "D9 makes `!` work at every position; before edition 2026 the filter grammar refused it."
+    },
+    {
+      "file": "not-open.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "(NOT COALESCE(((jsonb_typeof(payload->'status') = 'string' AND payload #>> '{status}' = ?)), FALSE))",
+      "note": "`!` is two-valued: the negation collapses the SQL unknown to false first, so an absent status is NOT open."
+    },
+    {
+      "file": "not-open.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true,
+      "note": "`!(x == v)` is exactly `x != v`, true on an absent field."
+    },
+    {
+      "file": "not-open.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open"
+      },
+      "expect": false
+    },
+    {
+      "file": "closed-at-is-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true
+    },
+    {
+      "file": "closed-at-is-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "closedAt": null
+      },
+      "expect": true,
+      "note": "JSON null is unset, as an absent key is."
+    },
+    {
+      "file": "closed-at-is-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "closedAt": "2026-01-01T00:00:00Z"
+      },
+      "expect": false
+    },
+    {
+      "file": "optional-arg-guard.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "args": {
+        "status": "open"
+      },
+      "sql": "(jsonb_typeof(payload->'status') = 'string' AND payload #>> '{status}' = ?)",
+      "note": "The guard folds before SQL: with the argument given, the left operand is the plan constant FALSE and the filter is the one comparison."
+    },
+    {
+      "file": "optional-arg-guard.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "closed"
+      },
+      "args": {},
+      "expect": true,
+      "note": "With the argument left out the guard is TRUE for every row."
+    },
+    {
+      "file": "optional-arg-guard.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "closed"
+      },
+      "args": {
+        "status": "open"
+      },
+      "expect": false
+    },
+    {
+      "file": "lineage-plan.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "lineage": {
+          "planId": "p1"
+        }
+      },
+      "args": {
+        "planId": "p1"
+      },
+      "expect": true
+    },
+    {
+      "file": "lineage-plan.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "args": {
+        "planId": "p1"
+      },
+      "expect": false,
+      "note": "`.?` reads through an absent object as absent."
+    },
+    {
+      "file": "status-in-list.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "jsonb_typeof(payload->'status') = 'string' AND payload #>> '{status}' IN ("
+    },
+    {
+      "file": "status-in-list.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "held"
+      },
+      "expect": true
+    },
+    {
+      "file": "arg-in-tags.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": [
+          "urgent",
+          "billing"
+        ]
+      },
+      "args": {
+        "tag": "urgent"
+      },
+      "expect": true
+    },
+    {
+      "file": "arg-in-tags.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "args": {
+        "tag": "urgent"
+      },
+      "expect": false
+    },
+    {
+      "file": "code-starts-with.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "(payload #>> '{code}') ^@ ANY(?::text[])",
+      "note": "A prefix test is one parameterised ^@ ANY over the prefixes (rule 32)."
+    },
+    {
+      "file": "code-starts-with.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "code": "INC-42"
+      },
+      "expect": true
+    },
+    {
+      "file": "title-includes.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "strpos(payload #>> '{title}', ?) > 0"
+    },
+    {
+      "file": "title-includes.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "title": "a disk is full"
+      },
+      "expect": true
+    },
+    {
+      "file": "tags-any.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "CASE WHEN jsonb_typeof(payload->'tags') = 'array' THEN EXISTS (SELECT 1 FROM jsonb_array_elements(payload->'tags')",
+      "note": "A collection method over a row array field lowers to SQL over its elements, guarded by a CASE so a row holding a scalar there answers false instead of failing the read."
+    },
+    {
+      "file": "tags-any.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": [
+          "billing",
+          "urgent"
+        ]
+      },
+      "expect": true
+    },
+    {
+      "file": "tags-all.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": [
+          "team-a",
+          "team-b"
+        ]
+      },
+      "expect": true
+    },
+    {
+      "file": "tags-all.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true,
+      "note": "all() over an absent list is true: there is no element it fails for."
+    },
+    {
+      "file": "tags-count.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "(CASE jsonb_typeof(payload->'tags') WHEN 'array' THEN jsonb_array_length(payload->'tags') WHEN 'string' THEN char_length(payload #>> '{tags}') ELSE 0 END) > ?",
+      "note": "count() dispatches on what is stored: an array's length, a string's characters, zero for anything else."
+    },
+    {
+      "file": "tags-count.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": [
+          "a",
+          "b"
+        ]
+      },
+      "expect": true
+    },
+    {
+      "file": "tags-count.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": "abc"
+      },
+      "expect": true,
+      "note": "count() counts what is stored, whatever the field declares: a list field holding a corrupt string counts its characters, in SQL and in process alike."
+    },
+    {
+      "file": "tags-count.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": {
+          "k": "a"
+        }
+      },
+      "expect": false
+    },
+    {
+      "file": "parenthesised-or.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "held",
+        "urgent": true
+      },
+      "expect": true
+    },
+    {
+      "file": "ternary-over-the-row.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": true,
+        "priority": 2
+      },
+      "expect": true,
+      "note": "A boolean ternary over the row lowers to (c && p) || (!c && q)."
+    },
+    {
+      "file": "ternary-over-the-row.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": false,
+        "priority": 2
+      },
+      "expect": false
+    },
+    {
+      "file": "ternary-plan-constant-condition.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "held"
+      },
+      "args": {
+        "strict": true
+      },
+      "expect": false,
+      "note": "A condition that reads no row folds before the query runs, choosing one branch."
+    },
+    {
+      "file": "ternary-plan-constant-condition.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "held"
+      },
+      "args": {
+        "strict": false
+      },
+      "expect": true
+    },
+    {
+      "file": "predicate-and-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open",
+        "urgent": true
+      },
+      "expect": true
+    },
+    {
+      "file": "plan-constant-function.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "args": {
+        "code": "inc-42"
+      },
+      "sql": "(jsonb_typeof(payload->'code') = 'string' AND payload #>> '{code}' = ?)",
+      "note": "An in-process function on a plan-constant input is evaluated once and bound, so the SQL holds only the comparison."
+    },
+    {
+      "file": "plan-constant-function.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "code": "INC-42"
+      },
+      "args": {
+        "code": "inc-42"
+      },
+      "expect": true
+    },
+    {
+      "file": "arithmetic-plan-constant.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "priority": 4
+      },
+      "args": {
+        "floor": 2
+      },
+      "expect": true
+    },
+    {
+      "file": "negated-arg.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "priority": -2
+      },
+      "args": {
+        "ceiling": 3
+      },
+      "expect": true
+    },
+    {
+      "file": "coalesce-plan-constant.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open"
+      },
+      "args": {},
+      "expect": true
+    },
+    {
+      "file": "map-plan-constant.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "held"
+      },
+      "expect": true,
+      "note": "A map literal has no SQL value, and none is needed: the whole right side is a plan constant."
+    },
+    {
+      "file": "expires-within-a-day.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "expiresAt": "2026-01-02T12:00:00Z"
+      },
+      "expect": true,
+      "note": "`now` is 2026-01-02T03:04:05Z in every corpus case."
+    },
+    {
+      "file": "owned-by-the-caller.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "ownerUserId": "u1"
+      },
+      "actor": {
+        "userId": "u1"
+      },
+      "expect": true
+    },
+    {
+      "file": "status-not-closed.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "(NOT COALESCE(((jsonb_typeof(payload->'status') = 'string' AND payload #>> '{status}' = ?)), FALSE))",
+      "note": "`x != v` is the exact negation of `==`, two-valued: true on an absent field, the answer IS DISTINCT FROM gives, and true on a stored value of another type."
+    },
+    {
+      "file": "status-not-closed.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true
+    },
+    {
+      "file": "status-is-blank.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "(COALESCE(payload #>> '{status}', '') = '')",
+      "note": "`x == \"\"` compares the one notion of unset: absent, JSON null and the empty string."
+    },
+    {
+      "file": "status-is-blank.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true
+    },
+    {
+      "file": "closed-at-is-nil.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "(COALESCE(payload #>> '{closedAt}', '') = '')",
+      "note": "`x == nil` lowers exactly as `x == \"\"`: one notion of unset."
+    },
+    {
+      "file": "closed-at-is-set.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "(COALESCE(payload #>> '{closedAt}', '') <> '')"
+    },
+    {
+      "file": "closed-at-is-set.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "closedAt": ""
+      },
+      "expect": false
+    },
+    {
+      "file": "code-before.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "(payload #>> '{code}') COLLATE \"C\" < ?",
+      "note": "Strings order by byte, COLLATE \"C\", so RFC 3339 timestamps order as instants and no locale folds case."
+    },
+    {
+      "file": "code-before.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "code": "INC-10"
+      },
+      "expect": true
+    },
+    {
+      "file": "configuration-plan-constants.memql",
+      "verdict": "load_ok",
+      "note": "An in-process function whose input reads no row is a plan constant, so var(), systemVar(), secret() and systemSecret() are legal in a filter."
+    },
+    {
+      "file": "relationship-traversals.memql",
+      "verdict": "load_ok",
+      "note": "Every relationship traversal of the catalog, each as the filter of its own query."
+    },
+    {
+      "file": "expires-within-a-day-query.memql",
+      "verdict": "load_ok",
+      "note": "`addDuration(now, ...)` reads no row, so it is a plan constant: evaluated once per call and bound."
+    },
+    {
+      "file": "when-guard.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_when_guard",
+      "message": "when(args.x) { ... } is retired in edition 2026: write (args.x == nil || <predicate>)"
+    },
+    {
+      "file": "conditional-prefix.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_conditional_prefix",
+      "message": "?.<predicate> is retired in edition 2026: write (args.x == nil || <predicate>)"
+    },
+    {
+      "file": "semicolon-connective.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_semicolon_connective",
+      "message": "; as a connective is retired in edition 2026: write &&"
+    },
+    {
+      "file": "comma-connective.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_comma_connective",
+      "message": ", as a connective is retired in edition 2026: write ||"
+    },
+    {
+      "file": "has-membership.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_has",
+      "message": "has is retired in edition 2026: write <value> in <list>"
+    },
+    {
+      "file": "not-in.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_not_in",
+      "message": "not in is retired in edition 2026: write !(<value> in <list>)"
+    },
+    {
+      "file": "and-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_and_call",
+      "message": "and(a, b) is retired in edition 2026: write a && b"
+    },
+    {
+      "file": "or-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_or_call",
+      "message": "or(a, b) is retired in edition 2026: write a || b"
+    },
+    {
+      "file": "not-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_not_call",
+      "message": "not(a) is retired in edition 2026: write !a"
+    },
+    {
+      "file": "dollar-args.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_dollar_args",
+      "message": "$args.x is retired in edition 2026: write args.x"
+    },
+    {
+      "file": "spec-reference.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_spec_reference",
+      "message": "spec <name> is retired in edition 2026: write <name>(row)"
+    },
+    {
+      "file": "trait-reference.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_trait_reference",
+      "message": "trait <name> is retired in edition 2026: write <name>(row)"
+    },
+    {
+      "file": "null-literal.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_null",
+      "message": "null is retired in edition 2026: write nil",
+      "note": "The one absent value is nil; null is its retired second spelling."
+    },
+    {
+      "file": "filter-without-lambda.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_filter_without_lambda",
+      "message": "filter <predicate> is retired in edition 2026: write filter row => <predicate>",
+      "note": "Refused by the edition's grammar, the only one the loaders read."
+    },
+    {
+      "file": "unquoted-canonical-id.memql",
+      "verdict": "refuse_parse",
+      "message": "a canonical id in an expression is written as a string: \"v1:crm:lead\"",
+      "note": "A literal has one spelling: an id is a string."
+    },
+    {
+      "file": "bare-payload-field.memql",
       "verdict": "refuse_load",
-      "message": "are only available in logic / collection lambdas (in-memory), not in specs or query filters",
-      "note": "Today a query filter refuses the unary `!`: the filter grammar reads `!(...)` as an expression-led comparison. D9 makes `!` work at every position; dsl-v1-expressions flips this case."
+      "code": "lower_unknown_name",
+      "message": "`status` is not defined here. A payload field is read through the parameter: write `row.status`",
+      "note": "A payload field is never a bare name: it is always the parameter's member, and the refusal writes the fix."
+    },
+    {
+      "file": "function-over-the-row.memql",
+      "verdict": "refuse_load",
+      "code": "lower_refused",
+      "message": "`lower` runs in process and reads the row. Compare against a computed value instead: `row.title == lower(args.title)`",
+      "note": "lower() runs in process, so over the row it does not lower; the refusal names the pushdown spelling, which moves the function onto the plan constant."
+    },
+    {
+      "file": "arithmetic-over-the-row.memql",
+      "verdict": "refuse_load",
+      "code": "lower_refused",
+      "message": "arithmetic over the row runs in process. Move the arithmetic to the other side: `row.priority > 1`",
+      "note": "Arithmetic over the row has no SQL both evaluators agree on; the refusal names the comparison that says the same thing."
+    },
+    {
+      "file": "non-boolean-filter.memql",
+      "verdict": "refuse_load",
+      "code": "lower_not_boolean",
+      "message": "`row.title` is a string, and a condition must be boolean",
+      "note": "There is no truthiness: a declared string is never a condition, and the load says so."
+    },
+    {
+      "file": "member-of-an-optional-object.memql",
+      "verdict": "refuse_load",
+      "code": "lower_optional_hop",
+      "message": "`row.lineage` is an optional object, so it may be absent. Read through it with `.?`: `row.?lineage.planId`",
+      "note": "`.?` is required where the object may be absent; the refusal names the spelling."
+    },
+    {
+      "file": "construct-call-in-a-filter.memql",
+      "verdict": "refuse_load",
+      "code": "lower_refused",
+      "message": "does not lower in a query filter: a query result is an unbounded source",
+      "note": "A construct call has no place in a predicate: over the row it would run a query for every row, and its result is an unbounded source a pushdown position cannot scan."
+    },
+    {
+      "file": "urgent-flag.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "CASE WHEN jsonb_typeof(payload->'urgent') = 'boolean' THEN (payload #>> '{urgent}')::boolean = ? ELSE FALSE END",
+      "note": "A bare boolean field is `== true`, guarded by the stored type: anything but a stored boolean is not true."
+    },
+    {
+      "file": "urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": true
+      },
+      "expect": true,
+      "note": "A boolean field used as a condition is true exactly when it holds true."
+    },
+    {
+      "file": "urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": "true"
+      },
+      "expect": false,
+      "note": "A stored value that is not a boolean is not true: the row is not selected, and the read goes on."
+    },
+    {
+      "file": "urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false
+    },
+    {
+      "file": "not-urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": "true"
+      },
+      "expect": true,
+      "note": "A stored value that is not a boolean is not true, so its negation is."
+    },
+    {
+      "file": "not-urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": true
+      },
+      "expect": false
+    },
+    {
+      "file": "not-urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true
     }
   ]
 }

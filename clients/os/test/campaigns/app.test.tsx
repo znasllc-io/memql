@@ -593,6 +593,83 @@ describe("the rules builder", () => {
     expect(await screen.findByText(/A name, something to fire on/)).toBeTruthy();
   });
 
+  // THE ONE PLACE A PERSON WRITES AN EXPRESSION. The whole caption is asserted,
+  // not a substring: a copy defect is a sentence that reads wrong, and a
+  // substring passes either way.
+  const conditionHelp = (rowIs: string) =>
+    `Leave the condition empty and the rule fires every time. row is ${rowIs}. ` +
+    'For example, row.status in ["active", "trial"] && row.plan != "free" means the status is ' +
+    "active or trial and the plan is not free. Use == (is), != (is not), in (is one of), " +
+    "&& (and), || (or) and ! (not). A condition with a mistake in it is refused when you turn " +
+    "the rule on, not later when it fires.";
+
+  it("teaches the condition under its field: what row is, one example, the operators", async () => {
+    const conn = fakeConnection({
+      emailRules: [],
+      templates: [],
+      concepts: [{ id: "v1:identity:user", domain: "identity", entity: "user" }],
+    });
+    mount(conn, "rules");
+    fireEvent.click(await screen.findByText("New rule"));
+    fireEvent.click(screen.getByText("Only sometimes, and other details"));
+
+    const field = screen.getByLabelText("Condition that must hold for the rule to fire");
+    expect(field.getAttribute("placeholder")).toBe('row.role == "admin"');
+    // A phone that capitalises `row` into `Row` turns a working condition into
+    // a refused one the person never typed.
+    expect(field.getAttribute("spellcheck")).toBe("false");
+    expect(field.getAttribute("autocapitalize")).toBe("off");
+    expect(field.getAttribute("autocorrect")).toBe("off");
+
+    // Directly under the field it explains, not three fields further down.
+    const help = field.closest(".os-campaign-condition")?.querySelector(".os-caption");
+    expect(help?.textContent).toBe(conditionHelp("the record that was created"));
+    // What the person would type is set as code: `row`, the example, and the
+    // six operators, in a sentence rather than a table.
+    expect([...(help?.querySelectorAll("code") ?? [])].map((code) => code.textContent)).toEqual([
+      "row",
+      'row.status in ["active", "trial"] && row.plan != "free"',
+      "==",
+      "!=",
+      "in",
+      "&&",
+      "||",
+      "!",
+    ]);
+
+    // `row` is named in the words of the sentence above it.
+    chooseOption(screen.getByLabelText("The kind of thing that fires this rule"), "user (identity)");
+    chooseOption(screen.getByLabelText("Which event fires this rule"), "changes");
+    expect(help?.textContent).toBe(conditionHelp("the user that changed"));
+  });
+
+  it("shows a rule's condition as it was typed, in the code face, wherever it is shown", async () => {
+    const conn = fakeConnection({
+      emailRules: [ruleRow({ id: "v1:campaigns:emailRule:r1", condition: 'row.role == "admin"' })],
+      templates: [templateRow({ id: "v1:campaigns:template:t1", name: "Welcome" })],
+      concepts: [],
+    });
+    mount(conn, "rules");
+
+    const sentence =
+      'When a user is created, email Welcome to the cluster owner, but only when row.role == "admin".';
+    const line = await screen.findByTitle(sentence);
+    expect(line.textContent).toBe(sentence);
+    expect(within(line).getByText('row.role == "admin"').tagName).toBe("CODE");
+
+    fireEvent.click(screen.getByText("Tell the owner about new admins"));
+    // The list line and the detail's headline quote it as code; the Only when
+    // fact carries it in the data voice. Nowhere is it reworded.
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByText('row.role == "admin"')
+          .map((node) => node.tagName)
+          .sort(),
+      ).toEqual(["CODE", "CODE", "DD"]),
+    );
+  });
+
   it("renders the ENGINE'S OWN SENTENCE when a rule failed to arm", async () => {
     const conn = fakeConnection({
       emailRules: [
@@ -650,6 +727,108 @@ describe("the rules builder", () => {
         emailRuleId: "v1:campaigns:emailRule:r1",
       }),
     );
+  });
+});
+
+// ===========================================================================
+// A REFUSAL, SAID ONCE
+// ===========================================================================
+// A refused activation reaches the page twice: the engine records its
+// sentence on the rule (`lastError`, the rule's notice) and the call fails
+// with the same sentence inside two transport frames -- the SDK's call name
+// and the server's "MemQL engine failed to execute query. Details:". Measured
+// in a browser against a real engine, the page showed both. The two orders the
+// record and the error can arrive in are both pinned, because neither is
+// guaranteed.
+
+describe("a refused activation", () => {
+  const RULE_CONCEPT = "v1:campaigns:emailRule";
+  const RULE = ruleRow({
+    id: "v1:campaigns:emailRule:r1",
+    condition: "row.primaryEmail.includes(@acme.com)",
+  });
+  const REFUSED =
+    'Braces, @ and semicolons can only appear inside quotes, like row.email == "boss@acme.com".';
+  const CALL_ERROR = `campaignActivateEmailRule: MemQL engine failed to execute query. Details: ${REFUSED}`;
+
+  /** Once, and without the frames. Counted over the page's text rather than
+   *  matched as a node, so a copy inside its wrapping counts too. */
+  function expectSaidOnce() {
+    const text = document.body.textContent ?? "";
+    expect(text.split(REFUSED).length - 1).toBe(1);
+    expect(text).not.toContain("MemQL engine failed to execute query");
+    expect(text).not.toContain("campaignActivateEmailRule");
+  }
+
+  async function turnOn(conn: Conn) {
+    mount(conn, "rules");
+    fireEvent.click(await screen.findByText("Tell the owner about new admins"));
+    fireEvent.click(await screen.findByText("Turn it on"));
+    await act(async () => {
+      fireEvent.click(screen.getByText("Turn it on", { selector: ".os-button" }));
+    });
+  }
+
+  it("is said once, in the rule's notice, when the engine has recorded it", async () => {
+    const conn = fakeConnection({ emailRules: [RULE], templates: [], concepts: [] });
+    conn.query.campaignActivateEmailRule.mockImplementation(async () => {
+      // What the engine does: record the refusal on the rule, then refuse.
+      conn.subscriptions.emit(RULE_CONCEPT, { ...RULE, status: "failed", lastError: REFUSED });
+      throw new Error(CALL_ERROR);
+    });
+    await turnOn(conn);
+
+    expect(await screen.findByText("This rule is not running. The cluster refused it.")).toBeTruthy();
+    expectSaidOnce();
+    // The panel the person clicked in says where the reason is, not what it is.
+    expect(screen.getByText("Not running -- the cluster refused it. The reason is above.")).toBeTruthy();
+  });
+
+  it("is said once, unframed, where it was asked -- and steps aside when the record lands", async () => {
+    const conn = fakeConnection({ emailRules: [RULE], templates: [], concepts: [] });
+    conn.query.campaignActivateEmailRule.mockImplementation(async () => {
+      throw new Error(CALL_ERROR);
+    });
+    await turnOn(conn);
+
+    // The rule does not carry it yet, so the panel says it -- once, plainly.
+    await waitFor(() => expect(document.body.textContent).toContain(REFUSED));
+    expectSaidOnce();
+    expect(screen.getByText("The cluster refused that.")).toBeTruthy();
+
+    // The record arrives: the rule's notice says it, and the panel's copy goes.
+    await act(async () => {
+      conn.subscriptions.emit(RULE_CONCEPT, { ...RULE, status: "failed", lastError: REFUSED });
+    });
+    expectSaidOnce();
+    expect(screen.getByText("This rule is not running. The cluster refused it.")).toBeTruthy();
+    expect(screen.queryByText("The cluster refused that.")).toBeNull();
+  });
+
+  it("frames nothing on a refused save either", async () => {
+    const conn = fakeConnection({
+      emailRules: [],
+      templates: [templateRow({ id: "v1:campaigns:template:t1", name: "Welcome" })],
+      concepts: [{ id: "v1:identity:user", domain: "identity", entity: "user" }],
+    });
+    const said = "recipientRoles must be a list of role slugs";
+    conn.query.createEmailRule.mockImplementation(async () => {
+      throw new Error(`createEmailRule: MemQL engine failed to execute query. Details: ${said}`);
+    });
+    mount(conn, "rules");
+    fireEvent.click(await screen.findByText("New rule"));
+    fireEvent.change(screen.getByLabelText("Rule name"), { target: { value: "Welcome new users" } });
+    chooseOption(screen.getByLabelText("The kind of thing that fires this rule"), "user (identity)");
+    chooseOption(screen.getByLabelText("Template to send"), "Welcome");
+    await act(async () => {
+      fireEvent.click(screen.getByText("Create rule"));
+    });
+
+    expect(await screen.findByText(said)).toBeTruthy();
+    expect(screen.getByText("This rule was not created.")).toBeTruthy();
+    const text = document.body.textContent ?? "";
+    expect(text).not.toContain("MemQL engine failed to execute query");
+    expect(text).not.toContain("createEmailRule");
   });
 });
 

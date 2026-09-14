@@ -4,7 +4,7 @@
 // there is no `use compose.*` line here (#2617).
 //
 // Public record reads spell the composite tier out as a top-level conjunct,
-// `(ownerUserId==actor.userId || actor.isClusterOwner==true)`.
+// `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)`.
 // TestRowAuthzEnforcementLandGate (component/memql) refuses a read over a
 // tiered concept that no top-level conjunct narrows, and it has no
 // exemption list -- so the filter says out loud what the concept's tier
@@ -13,7 +13,7 @@
 // THE ARCHIVE CONJUNCT IS ABSENT FROM THE LIST READS, deliberately, and
 // it is the Files app's lesson (clients/os/README.md, "the seed is picked
 // for the filter that cannot be server-side"): a read carrying
-// `archived != true` can only ever back a show-archived toggle that
+// `row.archived != true` can only ever back a show-archived toggle that
 // reveals rows which flipped while the window was open. The list reads
 // carry no archive term, so ONE paged seed holds the complete truth and
 // the archived / not-archived split stays a client-side fold over it.
@@ -28,7 +28,9 @@ query composition compositions {
     status  string
     format  string
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && when(args.status) { status==args.status } && when(args.format) { format==args.format }
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && (args.status == nil || row.status == args.status)
+                && (args.format == nil || row.format == args.format)
   sort      "row.createdAt", "desc"
   paginate  50
   // The retained feed also supplies the open Composer. Provenance must
@@ -43,7 +45,8 @@ query composition compositionById {
   args {
     compositionId  string!
   }
-  filter  row.id==args.compositionId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.id == args.compositionId
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   compositionFull
 }
 
@@ -55,7 +58,8 @@ query composition compositionsForRecipe {
   args {
     recipeId  string!
   }
-  filter    recipeId==args.recipeId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter    row => row.recipeId == args.recipeId
+                && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   sort      "row.createdAt", "desc"
   paginate  50
   shape     compositionCard
@@ -69,7 +73,8 @@ query composition compositionForOutputFile {
   args {
     fileId  string!
   }
-  filter  outputFileId==args.fileId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.outputFileId == args.fileId
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   sort    "row.createdAt", "desc"
   shape   compositionCard
 }
@@ -80,7 +85,8 @@ query composeTemplate composeTemplates {
   args {
     format  string
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && when(args.format) { format==args.format }
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && (args.format == nil || row.format == args.format)
   sort      "row.createdAt", "desc"
   paginate  50
   shape     composeTemplateFull
@@ -94,7 +100,7 @@ query composeTemplate composeTemplateById {
   args {
     templateId  string!
   }
-  filter  row.id==args.templateId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.id == args.templateId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   composeTemplateFull
 }
 
@@ -102,7 +108,7 @@ query composeTemplate composeTemplateById {
 /// "run one again" affordance.
 @actor
 query recipe composeRecipes {
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter    row => row.ownerUserId == actor.userId || actor.isClusterOwner == true
   sort      "row.createdAt", "desc"
   paginate  50
   shape     composeRecipeFull
@@ -115,7 +121,7 @@ query recipe composeRecipeById {
   args {
     recipeId  string!
   }
-  filter  row.id==args.recipeId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.id == args.recipeId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   composeRecipeFull
 }
 
@@ -126,7 +132,8 @@ query composition compositionExecutionById {
   args {
     compositionId string!
   }
-  filter row.id==args.compositionId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter row => row.id == args.compositionId
+             && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape compositionExecution
 }
 
@@ -137,6 +144,6 @@ query compositionInput compositionInputById {
   args {
     compositionId string!
   }
-  filter row.id==args.compositionId && ownerUserId==actor.userId
+  filter row => row.id == args.compositionId && row.ownerUserId == actor.userId
   shape compositionInputFull
 }

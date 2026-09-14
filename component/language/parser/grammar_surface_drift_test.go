@@ -71,6 +71,11 @@ import (
 // flip reports WHICH authored form changed rather than only that a hash moved.
 // Every retired form listed in memql#3089's narrowing table has an entry, so the
 // six moves that went unrecorded cannot happen silently a seventh time.
+//
+// memqlmigrate:keep-file -- a retired spelling here is a corpus entry whose
+// refusal is the recorded fact; the fixture codemod rewriting it in place
+// would turn a narrowing into an unchanged digest, which is how a grammar move
+// lands unrecorded.
 var grammarSurfaceCorpus = []struct {
 	name   string
 	accept bool
@@ -84,23 +89,23 @@ var grammarSurfaceCorpus = []struct {
   args {
     id string @required
   }
-  filter row.id==args.id
+  filter row => row.id == args.id
   shape probeCard
 }`},
 	{"struct query: sort + paginate", true, `query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
   sort "row.createdAt", "desc"
   paginate 25
 }`},
 	{"struct query: count", true, `query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
   count
 }`},
 	{"struct query: asOf with the ?? latest fallback", true, `query thing probe {
   args {
     at string
   }
-  filter row.id!=""
+  filter row => row.id != ""
   asOf args.at ?? latest
 }`},
 	{"struct mutation: insert", true, `mutate thing probe {
@@ -136,9 +141,6 @@ var grammarSurfaceCorpus = []struct {
     return x
   }
 }`},
-	{"spec: bare return", true, `spec thing probe {
-  return active == true
-}`},
 	{"shape: @row path list", true, `@row
 shape probe {
   row.id
@@ -147,6 +149,77 @@ shape probe {
 	{"doc comment above a declaration", true, `/// A probe concept.
 concept probe {
   a string
+}`},
+	// Edition-2026 predicate positions (memql#5364): since the flip, the only
+	// spellings of a filter, a spec or trait body, and an @filter.
+	{"struct query: v1 lambda filter", true, `query thing probe {
+  args {
+    id string @required
+  }
+  filter row => row.id == args.id && isX(row)
+}`},
+	{"struct query: refine over paginate", true, `query thing probe {
+  filter row => row.id != ""
+  paginate 25
+  refine row => row.title.includes("x")
+}`},
+	{"spec: = lambda form", true, `spec thing isProbe = row => row.a == 1`},
+	{"trait: = lambda form", true, `trait isProbe = row => row.active == true`},
+	{"automation: @filter lambda", true, `@filter(row => row.status == "x")
+@trigger(event="node.created", concept="v1:probe:thing")
+automation probe {
+  step run {
+    logic probe(x: 1)
+  }
+}`},
+	{"terse automation: inline @filter lambda", true, `automation probe @trigger(event="node.created", concept="v1:probe:thing") @filter(row => row.a != nil) => logic probe`},
+	{"struct query: refine without paginate", false, `query thing probe {
+  filter row => row.id != ""
+  refine row => row.title.includes("x")
+}`},
+	// Edition-2026 in-process positions (memql#5364, the flip): a logic
+	// statement, a mutation value, and a step's arguments and condition parse
+	// the v1 grammar -- `+` joins strings, `??` and `p ? a : b` choose, a
+	// method reads a collection, a named argument is `name: value`, and a
+	// step's right-hand side may be any expression, a literal included.
+	{"logic: edition-2026 statements", true, `logic probe {
+  args {
+    items []object @required
+    name string
+  }
+  body {
+    head := args.items.first()
+    label := args.name ?? "none"
+    note := head != nil ? "has " + label : label
+    return query probeQuery(label: note)
+  }
+}`},
+	{"logic: a literal step right-hand side", true, `logic probe {
+  args {
+    x string @required
+  }
+  body {
+    n := 5
+    return args.x + n
+  }
+}`},
+	{"struct mutation: edition-2026 values", true, `mutate thing probe {
+  args {
+    id string @required
+    name string
+  }
+  insert {
+    id: "thing-" + args.id
+    name: args.name ?? "unnamed"
+  }
+}`},
+	{"automation: conditional step with named arguments", true, `@trigger(event="node.created", concept="v1:probe:thing")
+automation probe {
+  step run {
+    if event.payload.x != nil && !(event.payload.kind in ["a", "b"]) {
+      logic probe(x: event.payload.x)
+    }
+  }
 }`},
 
 	// ---- the narrowings memql#3089 records --------------------------------
@@ -159,7 +232,7 @@ concept probe {
   args {
     at string
   }
-  filter row.id!=""
+  filter row => row.id != ""
   asOf args.at
 }`},
 	{"retired expression builtin `year()` (93b365ed, memql#2707)", false, `logic probe {
@@ -172,10 +245,10 @@ concept probe {
 }`},
 	{"inline `concept` line in a struct query", false, `query thing probe {
   concept v1:probe:thing
-  filter row.id!=""
+  filter row => row.id != ""
 }`},
 	{"unknown struct-query clause", false, `query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
   project name
 }`},
 	{"named write block `insert <Concept> { }` (memql#988)", false, `mutate thing probe {
@@ -211,11 +284,11 @@ concept probe {
 }`},
 	{"a flag annotation given an argument (memql#5359)", false, `@serverOnly("yes")
 query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
 }`},
 	{"unknown annotation on a query, refused at parse (memql#5359)", false, `@bogusAnnotation
 query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
 }`},
 	{"unknown annotation on an action (memql#5359)", false, `@bogusAnnotation
 action probe {
@@ -230,7 +303,7 @@ automation probe {
 	{"a non-repeatable annotation written twice (memql#5359)", false, `@description("one")
 @description("two")
 query thing probe {
-  filter row.id!=""
+  filter row => row.id != ""
 }`},
 	{"@when() with empty parentheses on a rule", true, `@when()
 @policy("localFirst")
@@ -291,6 +364,110 @@ automation probe {
   }
   body {
     return args.x
+  }
+}`},
+
+	// ---- the edition-2026 flip (memql#5364, memql#5368) --------------------
+	// Legal until the tree's migration made edition 2026 the only authoring
+	// grammar; each is now refused naming its replacement and
+	// memqlmigrate --rewrite=expressions, and V1RetiredForms is the full list.
+	// The first five were this corpus's own legal entries, in the spellings
+	// the entries of the same name above replaced.
+	{"struct query: args + filter + shape, legacy filter (retired_filter_without_lambda)", false, `query thing probe {
+  args {
+    id string @required
+  }
+  filter row.id==args.id
+  shape probeCard
+}`},
+	{"struct query: sort + paginate, legacy filter (retired_filter_without_lambda)", false, `query thing probe {
+  filter row.id!=""
+  sort "row.createdAt", "desc"
+  paginate 25
+}`},
+	{"struct query: count, legacy filter (retired_filter_without_lambda)", false, `query thing probe {
+  filter row.id!=""
+  count
+}`},
+	{"struct query: asOf ?? latest, legacy filter (retired_filter_without_lambda)", false, `query thing probe {
+  args {
+    at string
+  }
+  filter row.id!=""
+  asOf args.at ?? latest
+}`},
+	{"spec: bare return", false, `spec thing probe {
+  return active == true
+}`},
+	{"trait: `{ return ... }` body (retired_trait_return_body)", false, `trait probe {
+  return active == true
+}`},
+	{"automation: raw-text @filter (retired_filter_annotation)", false, `@filter(payload.status == "x")
+@trigger(event="node.created", concept="v1:probe:thing")
+automation probe {
+  step run {
+    logic probe(x: 1)
+  }
+}`},
+	{"automation: @trigger filter= string (retired_filter_annotation)", false, `@trigger(event="node.created", concept="v1:probe:thing", filter="payload.status == 1")
+automation probe {
+  step run {
+    logic probe(x: 1)
+  }
+}`},
+	{"logic: cond(p, a, b) (retired_cond_call)", false, `logic probe {
+  args {
+    x string @required
+  }
+  body {
+    return cond(args.x == "a", 1, 2)
+  }
+}`},
+	{"logic: coalesce(a, b) (retired_coalesce_call)", false, `logic probe {
+  args {
+    x string
+  }
+  body {
+    return coalesce(args.x, "none")
+  }
+}`},
+	{"logic: first(x) (retired_first_call)", false, `logic probe {
+  args {
+    items []object @required
+  }
+  body {
+    return first(args.items)
+  }
+}`},
+	{"logic: null (retired_null)", false, `logic probe {
+  args {
+    x string
+  }
+  body {
+    return args.x == null
+  }
+}`},
+	{"struct mutation: concat(a, b) value (retired_concat_call)", false, `mutate thing probe {
+  args {
+    id string @required
+  }
+  insert {
+    id: concat("thing-", args.id)
+  }
+}`},
+	{"struct mutation: a quoted map key", false, `mutate thing probe {
+  args {
+    id string @required
+  }
+  insert {
+    id: args.id
+    meta: {"source": "probe"}
+  }
+}`},
+	{"automation: a name=value step argument", false, `@trigger(event="node.created", concept="v1:probe:thing")
+automation probe {
+  step run {
+    logic probe(x=event.payload.x)
   }
 }`},
 

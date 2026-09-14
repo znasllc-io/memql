@@ -145,6 +145,16 @@ func TestAgentRoleTierIsPromptAdvisoryOnly(t *testing.T) {
 		// dsl/agents/concepts.memql's "advisory, nothing branches on it"
 		// description stays true.
 		"rowauthz_read_floor.go": true,
+		// The two Sense files below joined with the DSL v1 expression
+		// language (epic memql#5363). Their reads are `tiers.TierOf(position)`
+		// and `functions.Function.Tier` -- whether an EXPRESSION position or
+		// function pushes down to SQL (P) or runs in process (M), from the
+		// tier manifest in component/language/tiers. That is a property of
+		// the language, not of any concept, and they never read
+		// agentRole.tier. File-level because the completion and hover code is
+		// still growing, and a line list here would rot on every edit.
+		"complete_expr.go": true,
+		"hover_expr.go":    true,
 	}
 
 	var unknown []string

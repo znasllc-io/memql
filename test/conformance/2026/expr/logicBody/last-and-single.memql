@@ -1,0 +1,1 @@
+[args.items.last().name, args.one.single()]

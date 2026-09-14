@@ -1,0 +1,1 @@
+args.tags.where(t => t != "").count()

@@ -1,0 +1,5 @@
+/// Tickets that are not open.
+query ticket qfNotCall {
+  filter row => not(row.status == "open")
+  paginate 20
+}

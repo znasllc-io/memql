@@ -73,9 +73,12 @@ logic decideThing {
 	}
 }
 
-// A spec carrying a `body { }` block is rejected: a spec is a bare
-// `return <expr>`, never a procedural body.
+// A spec carrying a `body { }` block is refused. Edition 2026 has no braced
+// spec at all -- a spec is `spec <bound> <name> = row => <predicate>` -- so the
+// refusal is the retired braced form's, at the `{` the author wrote, naming
+// the spelling that replaces it and the migrator that writes it.
 func TestBodyRule_SpecWithBody_Rejected(t *testing.T) {
+	// memqlmigrate:keep -- the braced body is the case.
 	src := `use cognition.concepts.{ participant }
 @description("bad spec")
 spec participant specIsHuman {
@@ -84,16 +87,12 @@ spec participant specIsHuman {
   }
 }`
 	_, err := ParseFile(src)
-	if err == nil {
-		t.Fatal("expected a parse error for a spec with a `body { }` block, got nil")
-	}
-	if !strings.Contains(err.Error(), "body") {
-		t.Errorf("error %q should mention the rejected `body` block", err.Error())
-	}
+	wantRetiredAt(t, err, ruleSpecReturnBody, src, "{\n  body", 1)
 }
 
-// A trait carrying a `body { }` block is rejected for the same reason.
+// A trait carrying a `body { }` block is refused for the same reason.
 func TestBodyRule_TraitWithBody_Rejected(t *testing.T) {
+	// memqlmigrate:keep -- the braced body is the case.
 	src := `@description("bad trait")
 trait isActiveRecord {
   body {
@@ -101,12 +100,7 @@ trait isActiveRecord {
   }
 }`
 	_, err := ParseFile(src)
-	if err == nil {
-		t.Fatal("expected a parse error for a trait with a `body { }` block, got nil")
-	}
-	if !strings.Contains(err.Error(), "body") {
-		t.Errorf("error %q should mention the rejected `body` block", err.Error())
-	}
+	wantRetiredAt(t, err, ruleTraitReturnBody, src, "{\n  body", 1)
 }
 
 // A query carrying a `body { }` block is rejected: a query is declarative

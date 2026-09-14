@@ -115,7 +115,7 @@ func RecordStepExecution(ctx context.Context, engine *memql.MemQLEngine, data St
 // second implementation. The body was json.Marshal with HTML escaping left on
 // -- never a live parse defect, since json.Marshal emits exactly the escapes
 // the lexer implements, but a second definition of the escape set sitting in
-// the same package as renderMemQLValue, which DID carry the %q bug. Two
+// the same package as the step renderer, which DID carry the %q bug. Two
 // definitions is the cost memql#3035 demonstrated; this collapses one of them.
 // memql#3192.
 //

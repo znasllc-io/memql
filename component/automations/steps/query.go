@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -27,17 +28,57 @@ func (e *QueryExecutor) Execute(ctx context.Context, step *automations.Step, ste
 		return result, fmt.Errorf("query configuration is required")
 	}
 
-	if stepCtx.Engine == nil {
+	fail := func(err error) (*automations.StepResult, error) {
 		result.Status = "failed"
-		result.Error = "MemQL engine not configured"
+		result.Error = err.Error()
 		result.CompletedAt = time.Now()
 		result.Duration = result.CompletedAt.Sub(result.StartedAt)
-		return result, fmt.Errorf("MemQL engine not configured")
+		return result, err
 	}
 
-	// Evaluate $ expressions in the query, using query-aware formatting
-	// that properly quotes strings containing operator characters (like UUIDs)
-	query, err := stepCtx.Evaluator.EvaluateStringForQuery(step.Query.Query)
+	// The query is an expression parsed at load (memql#5367). A construct
+	// call runs on the engine below, with its arguments evaluated; any other
+	// expression -- a logic body's `total := a + b`, `rows.where(r => ...)`,
+	// `return {ok: true}` -- is evaluated in process, and its value is the
+	// step's result. No engine round trip, so nothing to record.
+	x, err := preparedExprs(step)
+	if err != nil {
+		return fail(err)
+	}
+	if x.Query == nil {
+		return fail(fmt.Errorf("step %q: its query was never prepared (automations.PrepareExpressions)", step.ID))
+	}
+	if val, inProcess, err := stepCtx.Evaluator.InProcessQuery(ctx, step); inProcess {
+		if err != nil {
+			result.Status = "failed"
+			result.Error = fmt.Sprintf("failed to evaluate %s: %v", ast.FormatExpr(x.Query), err)
+			result.CompletedAt = time.Now()
+			result.Duration = result.CompletedAt.Sub(result.StartedAt)
+			return result, fmt.Errorf("failed to evaluate %s: %w", ast.FormatExpr(x.Query), err)
+		}
+		// Absent is nil: one notion of unset, which every later read takes
+		// as absent.
+		result.Status = "success"
+		result.Result = val
+		result.CompletedAt = time.Now()
+		result.Duration = result.CompletedAt.Sub(result.StartedAt)
+		return result, nil
+	}
+	call := ast.Unparen(x.Query).(*ast.CallExpr)
+	switch call.Kind {
+	case "query", "mutation", "logic", "builtin":
+	default:
+		// automation / action / capability calls have their own step
+		// types; the compiler never emits one as a query.
+		return fail(fmt.Errorf("a %s call cannot run as a query step (%s)", call.Kind, ast.FormatExpr(call)))
+	}
+
+	if stepCtx.Engine == nil {
+		return fail(fmt.Errorf("MemQL engine not configured"))
+	}
+
+	// The call text: the construct's name and its evaluated arguments.
+	query, err := v1ConstructCallText(ctx, stepCtx.Evaluator, call)
 	if err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("failed to evaluate query: %v", err)

@@ -1,5 +1,5 @@
 /// List the tickets, newest first.
-@handler(type="query", query="paginate(query ticketsToListDescription(), $args.limit)")
+@handler(type="query", query="paginate(query ticketsToListDescription(), args.limit)")
 tool listTicketsDescription {
   limit  integer  @description
 }

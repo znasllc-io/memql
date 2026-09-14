@@ -308,6 +308,11 @@ func flattenRuntimeFunctionArgs(node ExpressionNode) ExpressionNode {
 			n.Right = flattenRuntimeFunctionArgs(n.Right)
 		}
 		return n
+	case *NotExpression:
+		if n != nil {
+			n.Target = flattenRuntimeFunctionArgs(n.Target)
+		}
+		return n
 	}
 	return node
 }

@@ -3,7 +3,7 @@ query ticket matchingTicketsBadPattern {
   args {
     region  string  @pattern("^[A-Z")
   }
-  filter region == args.region
+  filter row => row.region == args.region
   sort "row.createdAt", "desc"
   paginate 20
 }

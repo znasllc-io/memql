@@ -20,28 +20,15 @@ package memql
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 )
 
-// toolQueryConstructCall matches a kind-prefixed construct invocation inside a
-// `@handler(type="query", query=...)` string: `query todos(...)`,
-// `mutation updateNote(...)`, `builtin help(...)`.
-//
-// A query handler is a MemQL query, not a bare name, and it takes several
-// shapes in the corpus -- a plain construct call, a construct call nested in a
-// directive (`paginate(query searchUsers(...), $args.limit)`), or a raw filter
-// expression naming no construct at all (`concept==v1:...`). Only the names
-// this finds are resolvable; a handler naming no construct is left alone
-// rather than guessed at.
-var toolQueryConstructCall = regexp.MustCompile(`\b(query|mutation|mutate|logic|builtin|automation)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(`)
-
 // toolHandlerTargets returns every registry name a tool's handler depends on,
 // in declaration order, or nil when the handler resolves against nothing (a
-// webhook URL, a delegate, a raw-filter query).
+// webhook URL, a delegate).
 func toolHandlerTargets(tool *Tool) []string {
 	if tool == nil || tool.Handler == nil {
 		return nil
@@ -54,15 +41,18 @@ func toolHandlerTargets(tool *Tool) []string {
 		}
 		return []string{name}
 	case "query":
-		var out []string
-		seen := map[string]bool{}
-		for _, m := range toolQueryConstructCall.FindAllStringSubmatch(tool.Handler.Query, -1) {
-			if name := m[2]; !seen[name] {
-				seen[name] = true
-				out = append(out, name)
+		// A handler names its one target in its AST: parsed at load for a
+		// tool declared in `.memql`, parsed here for one built in Go. A Go
+		// handler that is not a handler names nothing -- its call refuses.
+		plan := tool.Handler.queryV1
+		if plan == nil {
+			parsed, err := prepareToolQueryV1(strings.TrimSpace(tool.Handler.Query))
+			if err != nil {
+				return nil
 			}
+			plan = parsed
 		}
-		return out
+		return []string{plan.target()}
 	default:
 		// webhook / delegate resolve against no registry.
 		return nil

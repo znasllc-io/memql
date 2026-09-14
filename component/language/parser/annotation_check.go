@@ -29,9 +29,6 @@ func AnnotationUse(attr *ast.Attribute) annotations.Use {
 	case ast.ArgsEmptyParens:
 		u.Form = annotations.FormEmpty
 		return u
-	case ast.ArgsRawExpression:
-		u.Form = annotations.FormExpression
-		return u
 	case ast.ArgsExclusion:
 		u.Form = annotations.FormExclude
 		return u
@@ -50,6 +47,11 @@ func AnnotationUse(attr *ast.Attribute) annotations.Use {
 			u.Form = annotations.FormNumber
 		case bool:
 			u.Form = annotations.FormBool
+		case *ast.LambdaExpr:
+			// @filter(row => ...), the edition-2026 trigger filter
+			// (memql#5364): an expression, parsed as one rather than captured
+			// as text.
+			u.Form = annotations.FormExpression
 		default:
 			u.Form = annotations.FormObject
 		}

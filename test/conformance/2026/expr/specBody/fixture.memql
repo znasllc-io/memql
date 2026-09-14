@@ -1,7 +1,24 @@
-/// A support ticket, the row the spec cases here decide.
+/// A support ticket: the row every spec and trait here reads.
 concept ticket {
   ownerUserId  string
   title        string
   status       string
+  code         string
   priority     int
+  urgent       bool
+  closedAt     datetime
+  tags         []string
+  lineage {
+    planId  string
+  }
 }
+
+/// The caller, as a spec over the actor reads it.
+@actor
+shape sbCaller {
+  actor.userId
+  actor.role
+}
+
+/// Tickets that are open.
+trait sbIsOpen = row => row.status == "open"

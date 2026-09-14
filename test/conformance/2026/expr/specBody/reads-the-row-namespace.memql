@@ -1,4 +1,0 @@
-/// Matches the tickets raised since the start of 2026, reading the intrinsic through row.
-spec ticket isRaisedThisYear {
-  return row.createdAt >= "2026-01-01T00:00:00Z"
-}

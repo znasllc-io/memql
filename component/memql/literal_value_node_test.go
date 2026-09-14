@@ -2,18 +2,25 @@ package memql
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
 // literal_value_node_test.go is the reproduction + fix guard for memql#1705:
 // a Logic body whose return resolves to a scalar/arg value (the dry-run
 // failure was `consolidateMemory` -> `return args.event.topic`) failed
 // at runtime with `unsupported expression node *memql.LiteralValueNode`.
+//
+// Since edition 2026 such a body no longer reaches the literal root at all: a
+// logic that returns an expression runs on the LogicRunner, which evaluates
+// it with EvalExpr (logic_body_v1.go). The engine-side handling below stays,
+// because a bare literal query still folds to one
+// (TestExecute_BareLiteralReturnsScalar); the end-to-end logic reproduction
+// went with the path it reproduced.
 //
 // Root cause: after function-call arg substitution folds the ArgRefExpression
 // into a concrete value, plan.Root is a *LiteralValueNode, but the DSL
@@ -117,6 +124,16 @@ func allExpressionNodeImplementers() map[string]ExpressionNode {
 		"ConditionalFilterExpression": &ConditionalFilterExpression{ArgPath: "x"},
 		"LiteralValueNode":            &LiteralValueNode{Value: 1},
 		"DotAccessExpression":         &DotAccessExpression{Object: &LiteralValueNode{Value: map[string]any{"x": 1}}, Field: "x"},
+		// The edition-2026 IR (memql#5366). expr_ir_walkers_test.go carries
+		// the full per-walker checklist for them; this map only asserts the
+		// clone half, like every other entry.
+		"NotExpression": &NotExpression{Target: &ComparisonExpression{Field: FieldReference{Parts: []string{"payload", "x"}}, Operator: OpEq, Value: "v"}},
+		"ArrayPredicateExpression": &ArrayPredicateExpression{
+			Field:  FieldReference{Raw: "payload.tags", Parts: []string{"payload", "tags"}},
+			Method: ArrayMethodAny,
+			Pred:   &ComparisonExpression{Field: FieldReference{Parts: []string{arrayElementRoot}}, Operator: OpEq, Value: "a"},
+		},
+		"PlanConstExpression": &PlanConstExpression{Expr: &ast.IdentExpr{Name: "now"}},
 	}
 }
 
@@ -146,47 +163,6 @@ func TestEvaluateExpressionSet_LiteralIsDescriptiveError(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "cannot be used as a row filter")
 	require.NotContains(t, err.Error(), "unsupported expression node", "must be a descriptive error, not the generic default (memql#1705)")
-}
-
-// TestExecute_LogicConsolidateMemoryShape_RunsToCompletion is the
-// Postgres-gated end-to-end reproduction + fix guard. It registers the
-// memql#1705 logic shape (`logic consolidateMemory { body { return
-// args.event.topic } }`), invokes it through engine.Execute exactly as an
-// automation function step would, and asserts the call runs to completion
-// returning the bound topic value.
-//
-// Before the fix this failed with `unsupported expression node
-// *memql.LiteralValueNode` (the arg path folds to a *LiteralValueNode at
-// plan.Root, which the node-set evaluator had no case for). After the fix
-// Execute() intercepts the literal root and returns the scalar.
-//
-// Postgres-gated: skips when no DB is reachable, like
-// executor_mutation_readmerge_db_test.go (whose engine helper this reuses).
-func TestExecute_LogicConsolidateMemoryShape_RunsToCompletion(t *testing.T) {
-	eng, _, ctx := sharedReadMergeEngine(t)
-
-	const src = `@enabled
-@description("repro of the memql#1705 consolidateMemory return shape")
-logic consolidateMemory {
-  args {
-    event object @required
-  }
-  body {
-    return args.event.topic
-  }
-}
-`
-	fn, err := tryParseNewFunctionSyntax("consolidateMemory", "logic", src, "memql#1705-test", memorynodes.DefaultRegistry())
-	require.NoError(t, err, "the logic shape must parse")
-	require.NoError(t, eng.Functions().Upsert(fn))
-
-	event, err := json.Marshal(map[string]any{"topic": "node.created"})
-	require.NoError(t, err)
-
-	res, err := eng.Execute(ctx, "logic consolidateMemory(event: "+string(event)+")")
-	require.NoError(t, err, "consolidateMemory must run to completion (memql#1705 regression -- was 'unsupported expression node *memql.LiteralValueNode')")
-	require.NotNil(t, res)
-	require.Equal(t, "node.created", res.OutputPayload(), "the logic must return the bound args.event.topic value")
 }
 
 // TestExecute_BareLiteralReturnsScalar is the DB-free companion: a bare

@@ -40,9 +40,14 @@ error. Defined in `component/memql/keyword_slices.go` and enforced
 during args parsing.
 
 These names, plus `row`, `meta`, and `payload`, are also the
-**reserved filter heads**: the path roots a query `filter` resolves to
-an engine namespace instead of the bound concept's payload. That makes
-them reserved on a concept's payload schema too -- see section 2.
+**reserved filter heads**: in the engine's internal query form (the
+string an SDK sends to `Execute`), a bare path rooted at one of them
+reads an engine namespace instead of the bound concept's payload. That
+makes them reserved on a concept's payload schema too -- see section 2.
+An authored expression never reads a payload field bare: a filter reads
+`row.status` through its lambda parameter, and a bare name is a lambda
+parameter, a reserved root, a local, or a function or predicate being
+called (see [Expressions](memql.md#expressions)).
 
 ---
 
@@ -108,28 +113,31 @@ so `Provenance` and `ACTOR` are refused as well. Only whole names are
 reserved: `arguments`, `metadata`, `configuration`, and `rowCount` are
 ordinary properties.
 
-### Naming an intrinsic in a filter: the `row.` namespace
+### Naming an intrinsic in a filter
 
-In a query `filter` clause an intrinsic is addressed through the `row.`
-namespace -- `row.id`, `row.createdAt`, `row.provenance.kind` -- never
-bare (memql#2779, `TestFilterIntrinsicsUseRowNamespace`). Payload
-properties in the same clause are bare, so the namespace is what keeps
-the two surfaces apart:
+A filter, spec or trait reads every field through its lambda parameter.
+`row.id`, `row.createdAt` and `row.provenance.kind` are intrinsics, and
+`row.status` is a payload property: the intrinsic names are reserved on
+every payload schema, so `row.<name>` reads the intrinsic when the name
+is one and the payload property otherwise, and the two can never
+collide.
 
 ```memql fragment
-filter  row.id == args.folderId && status == "active"
-//      ^^^^^^ row envelope      ^^^^^^ payload property
+filter  row => row.id == args.folderId && row.status == "active"
+//             ^^^^^^ intrinsic           ^^^^^^^^^^ payload property
 ```
 
-`row.` accepts only the intrinsics the filter compiler pushes down:
-`id`, `concept`, `type`, `createdAt`, `createdBy`, and
-`provenance.<leaf>`. `row.<anything else>` is an error rather than a
-silent fall-through to a payload lookup -- that fall-through is the
-defect the namespace closed. `schema` is a real stamped column but is
-not filter-comparable, so it has no `row.` form either. `partition` is
-reserved on the payload schema (see section 1 above) but, post-#56, is
-not a row intrinsic at all -- there is no `partition` column to have a
-`row.` form.
+The intrinsics a filter pushes down are `id`, `concept`, `type`,
+`createdAt`, `createdBy` and `provenance.<leaf>`. `schema` is a real
+stamped column but is not filter-comparable. `partition` is reserved on
+the payload schema (see section 1 above) but, post-#56, is not a row
+intrinsic at all -- there is no `partition` column to compare.
+
+Before edition 2026 a filter named payload properties bare and
+intrinsics through a `row.` namespace (memql#2779), because a bare `id`
+could not be told apart from a payload property of the same name. The
+lambda parameter removed the bare form, and with it the second
+spelling.
 
 A **sort key** takes the same namespace -- `sort "row.createdAt", "desc"` --
 and rejects a non-sortable leaf rather than silently ordering on a JSONB path
@@ -151,10 +159,10 @@ Otherwise the bare spelling remains valid at RUNTIME, where callers pass sort
 keys in through the SDK and the query API; the `.memql` gate covers authored
 sort clauses only.
 
-Other surfaces are unchanged: a shape body already projects `row.id` /
-`row.createdAt`; a spec/trait body reads its signature-bound fields bare
-and rejects `row.*` (epic #2281); a mutation `insert`/`update` block
-writes `id:` / `createdAt:` as target keys rather than references.
+Other surfaces: a shape body projects `row.id` / `row.createdAt`; a spec
+or trait body reads through its lambda parameter exactly as a filter
+does; a mutation `insert`/`update` block writes `id:` / `createdAt:` as
+target keys rather than references.
 
 ---
 
@@ -193,10 +201,12 @@ mutation, logic, or automation whose body references `actor.*` must
 carry a bare `@actor` annotation in its preamble, or it fails load
 with a file-attributed error (used-requires-declared, the same shape
 as the logic event-binding rule). Declared-but-unused is legal. Spec
-and trait bodies keep the inverse rule -- direct `actor.*` reads are
-load-rejected there; bind an `@actor` shape instead. The seed-file
-`@actor("system")` (a seed-write identity) is a different construct
-and is unaffected.
+and trait bodies do not take `@actor`: a spec reads the envelope by
+binding an `@actor` shape, and its lambda parameter is then spelled
+`actor` and is the envelope --
+`spec actorEnvelope requiresOwner = actor => actor.role == "owner"`.
+The seed-file `@actor("system")` (a seed-write identity) is a different
+construct and is unaffected.
 
 ---
 
@@ -237,7 +247,7 @@ cannot be used as identifier names anywhere in the author surface:
 | `spec` | Atomic boolean predicate. |
 | `trait` | Concept-agnostic atomic predicate. |
 | `query` | Read function. |
-| `mutation` | Write function. |
+| `mutate` | Write function, called as `mutation <name>(...)`. |
 | `logic` | Imperative orchestration block. |
 | `automation` | Event-triggered workflow. |
 | `tool` | AI-callable surface. |
@@ -252,10 +262,13 @@ Plus body-level keywords inside specific constructs: `args`, `body`,
 `include`. Their reservation is scoped to the construct that defines
 them.
 
-The filter-expression keywords are reserved wherever an expression is
-parsed: `in`, `not` (only as `not in`), `when`, and `startsWith`
-(memql#4208). A payload property or an arg named `startsWith` cannot be
-referenced bare.
+The expression keywords `in` and `startsWith` (memql#4208) are reserved
+wherever an expression is parsed, so neither can name a lambda parameter
+or a local. `when`, `has` and `not` are still lexer keywords, and in an
+authored expression the parser refuses each by name with its
+replacement: `when(args.x) { ... }` is written
+`(args.x == nil || <predicate>)`, `x has v` is `v in x`, and
+`x not in list` is `!(x in list)`.
 
 ---
 

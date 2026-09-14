@@ -1,0 +1,5 @@
+/// Tickets sorted by a unary minus.
+query ticket soNegate {
+  sort -priority
+  paginate 20
+}

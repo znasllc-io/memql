@@ -1,0 +1,5 @@
+/// Open tickets, filtered the pre-v1 way, with no parameter naming the row.
+query ticket qfNoLambda {
+  filter status == "open"
+  paginate 20
+}

@@ -1,0 +1,5 @@
+/// Open tickets, through a spec named with the retired keyword.
+query ticket qfSpecReference {
+  filter row => spec qfIsOpen
+  paginate 20
+}

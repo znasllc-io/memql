@@ -1,0 +1,10 @@
+/// How many tickets there are, with the call's arguments wrapped in an object literal.
+logic lbObjectLiteralCall {
+  args {
+    status  string
+  }
+  body {
+    rows := query lbTickets({ status: args.status })
+    return rows.count()
+  }
+}

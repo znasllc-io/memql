@@ -1,0 +1,11 @@
+/// Note a goal the moment it closes.
+@trigger(event="node.updated", concept="v1:work:goal")
+@filter(row => row.status == "closed")
+automation tfNoteClosedGoal {
+  args {
+    id  string
+  }
+  step note {
+    mutation tfNoteGoal(goalId: args.id, note: "changed")
+  }
+}

@@ -72,7 +72,7 @@ query probeWidget queryBad {
   args {
     id 999 @required
   }
-  filter ownerUserId == args.id
+  filter row => row.ownerUserId == args.id
   shape whatever
 }`,
 		},
@@ -84,7 +84,7 @@ logic logicBad {
     x string @required
   }
   body {
-    return coalesce(args.x $ "y")
+    return args.x $ "y"
   }
 }`,
 		},
@@ -152,7 +152,7 @@ logic logicShift {
     x string @required
   }
   body {
-    return coalesce(args.x $ "y")
+    return args.x $ "y"
   }
 }`
 	base := priorConcept + "\n\n" + erroring
@@ -185,7 +185,7 @@ logic noAnchor {
     x string @required
   }
   body {
-    return coalesce(args.x $ "y")
+    return args.x $ "y"
   }
 }`,
 	}})
@@ -232,7 +232,7 @@ query doesNotExistConcept queryDangling {
   args {
     id string @required
   }
-  filter ownerUserId == args.id
+  filter row => row.ownerUserId == args.id
   shape whatever
 }`
 	d := diagFor(t, bundle, "queryDangling")

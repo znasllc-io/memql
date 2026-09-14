@@ -5,20 +5,20 @@ import (
 	"testing"
 )
 
-// TestRenderMemQLValue_TypedSliceAndMap is the memql#344 Regression A
+// TestRenderMemQLData_TypedSliceAndMap is the memql#344 Regression A
 // regression guard. The cluster `system.startup` automations
 // (bootstrapCluster / registerNode) fail at runtime with
 // `parse error at line 1, column 394: expected '}', got "["` when
 // the event payload carries typed slices / maps that aren't `[]any`
 // or `map[string]any`. The Go fmt default-case rendering produces
 // strings like `[a b]` / `map[k:v]` that the langparser rejects;
-// renderMemQLValue must produce valid MemQL text for every value
+// renderMemQLData must produce valid MemQL text for every value
 // type the runtime arg-bag could carry.
 //
 // Pins both the immediate `[]string` / `map[string]string` cases
 // (the actual triggers from the production logs in #344) and the
 // reflection-fallback path for less common typed slice / map shapes.
-func TestRenderMemQLValue_TypedSliceAndMap(t *testing.T) {
+func TestRenderMemQLData_TypedSliceAndMap(t *testing.T) {
 	cases := []struct {
 		name     string
 		value    any
@@ -74,28 +74,28 @@ func TestRenderMemQLValue_TypedSliceAndMap(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := renderMemQLValue(tc.value)
+			got := renderMemQLData(tc.value)
 			if got != tc.want {
-				t.Errorf("renderMemQLValue:\n  got:  %s\n  want: %s", got, tc.want)
+				t.Errorf("renderMemQLData:\n  got:  %s\n  want: %s", got, tc.want)
 			}
 			// Don't allow Go's default %v markers to leak into the
 			// rendered output -- the load-bearing invariant the bug
 			// violated.
 			for _, bad := range []string{"map[", "[a "} {
 				if strings.Contains(got, bad) {
-					t.Errorf("renderMemQLValue produced Go-format leakage %q in output: %s", bad, got)
+					t.Errorf("renderMemQLData produced Go-format leakage %q in output: %s", bad, got)
 				}
 			}
 		})
 	}
 }
 
-// TestRenderMemQLValue_BugReproductionFromIssue344 reproduces the
+// TestRenderMemQLData_BugReproductionFromIssue344 reproduces the
 // exact shape from the #344 issue body: an arg-map value containing
 // a `[]string` (acceptedAudiences) that the renderer mis-formatted
 // as `[mql]` -- which the langparser then rejected with the column-
 // 394 error. After the fix, the rendered output parses cleanly.
-func TestRenderMemQLValue_BugReproductionFromIssue344(t *testing.T) {
+func TestRenderMemQLData_BugReproductionFromIssue344(t *testing.T) {
 	// Shape the cluster bootstrapCluster automation hits when
 	// EmitSystemStartup includes identity-provider info: an
 	// `identityProvider` map carrying acceptedAudiences as []string.
@@ -107,11 +107,11 @@ func TestRenderMemQLValue_BugReproductionFromIssue344(t *testing.T) {
 			"acceptedAudiences": []string{"mql"},
 		},
 	}
-	got := renderFunctionArgs(args)
+	got := renderV1CallArgs(args)
 	if strings.Contains(got, "[mql]") {
-		t.Fatalf("renderFunctionArgs leaked Go-format `[mql]` (the #344 bug); got: %s", got)
+		t.Fatalf("renderV1CallArgs leaked Go-format `[mql]` (the #344 bug); got: %s", got)
 	}
 	if !strings.Contains(got, `["mql"]`) {
-		t.Errorf("renderFunctionArgs should produce quoted-string array `[\"mql\"]`; got: %s", got)
+		t.Errorf("renderV1CallArgs should produce quoted-string array `[\"mql\"]`; got: %s", got)
 	}
 }

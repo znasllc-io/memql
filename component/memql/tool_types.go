@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/core/baseregistry"
 )
 
@@ -82,7 +83,9 @@ type ToolHandler struct {
 	// Name is the function name to call (for type "function").
 	FunctionName string `json:"name,omitempty"`
 
-	// URL is the webhook endpoint (for type "webhook").
+	// URL is the webhook endpoint (for type "webhook"): an edition-2026
+	// expression rendering the address over the tool's args, a fixed address
+	// being a quoted string (tool_handler_v1.go, webhookURL).
 	URL string `json:"url,omitempty"`
 
 	// Method is the HTTP method (for type "webhook", defaults to POST).
@@ -91,8 +94,22 @@ type ToolHandler struct {
 	// Headers are HTTP headers to send (for type "webhook").
 	Headers map[string]string `json:"headers,omitempty"`
 
-	// Body is the request body template (for type "webhook").
+	// Body is the request body template (for type "webhook"): a map whose
+	// string leaves are edition-2026 expressions over the tool's args
+	// (tool_handler_v1.go, webhookBody). Built in Go only -- a `.memql`
+	// @handler declares no body.
 	Body map[string]any `json:"body,omitempty"`
+
+	// queryV1 is Query parsed as an edition-2026 handler, set when the tool
+	// loads from `.memql` (toolDeclToTool); nil for a tool built in Go, whose
+	// handler is parsed on each call instead (tool_handler_v1.go). Immutable
+	// once set, so clone shares it.
+	queryV1 *toolQueryV1
+
+	// urlV1 is URL parsed, set when a webhook tool loads from `.memql`; nil
+	// for one built in Go, whose url is parsed on each call. Immutable once
+	// set, so clone shares it.
+	urlV1 ast.ExpressionNode
 }
 
 // ToolAnnotations provides hints about tool behavior for AI models.
@@ -153,10 +170,10 @@ func (t *Tool) clone() *Tool {
 	}
 
 	cloned := &Tool{
-		Name:            t.Name,
-		Description:     t.Description,
-		MCPExposed:      t.MCPExposed,
-		Origin:          t.Origin,
+		Name:        t.Name,
+		Description: t.Description,
+		MCPExposed:  t.MCPExposed,
+		Origin:      t.Origin,
 	}
 
 	if t.InputSchema != nil {
@@ -220,6 +237,11 @@ func (h *ToolHandler) clone() *ToolHandler {
 		FunctionName: h.FunctionName,
 		URL:          h.URL,
 		Method:       h.Method,
+		// The parsed handler and url are immutable, so the clone shares
+		// them; leaving them out would silently re-parse a registry clone
+		// on every call.
+		queryV1: h.queryV1,
+		urlV1:   h.urlV1,
 	}
 
 	if h.Shape != nil {

@@ -202,7 +202,15 @@ func (a *Activator) Activate(ctx context.Context, owner, ruleID string) (Result,
 	}
 
 	// 4. Arm it. THIS is the call that had no production caller.
-	if _, err := a.engine.ActivateApprovedBundle(ctx, rule.OwnerUserID, bundleID, a.deps()); err != nil {
+	//
+	// The gate is handed the AUTHENTICATED caller, never rule.OwnerUserID.
+	// The two name one person -- the check above established that -- but not
+	// in one spelling: ruleFromRow bare-ifies the owner ("owner1"), while the
+	// gate compares against the bundle's ownerUserId, stamped from this same
+	// caller in writeBundle and stored canonical ("v1:identity:user:owner1").
+	// Handing it the bare form refused every activation, for every person,
+	// once the generated construct first compiled.
+	if _, err := a.engine.ActivateApprovedBundle(ctx, owner, bundleID, a.deps()); err != nil {
 		return a.fail(ctx, rule.ID, res, err)
 	}
 
@@ -241,7 +249,11 @@ func (a *Activator) Retire(ctx context.Context, owner, ruleID string) (Result, e
 		res.Status = "draft"
 		return res, a.record(ctx, rule.ID, "draft", "", "", "")
 	}
-	if err := a.engine.RetireActiveBundle(ctx, rule.OwnerUserID, state.BundleID, a.deps()); err != nil {
+	// The caller, for the reason Activate hands the gate the caller: the gate
+	// compares against the bundle's canonical ownerUserId, and rule.OwnerUserID
+	// is the bare spelling. It is also this call's only ownership check -- the
+	// gate refuses anyone but the bundle's owner.
+	if err := a.engine.RetireActiveBundle(ctx, strings.TrimSpace(owner), state.BundleID, a.deps()); err != nil {
 		return a.fail(ctx, rule.ID, res, err)
 	}
 	res.Status = "paused"

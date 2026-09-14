@@ -27,26 +27,26 @@ func labels(items []CompletionItem) map[string]bool {
 
 func TestFieldAccess_ActorMembers(t *testing.T) {
 	// Trailing-dot shape.
-	got := labels(completeAt(t, &fakeRegistry{}, "@actor\nquery todo todos {\n  filter todo.ownerUserId == actor."))
+	got := labels(completeAt(t, &fakeRegistry{}, "@actor\nquery todo todos {\n  filter row => row.ownerUserId == actor."))
 	for _, want := range []string{"userId", "role", "identityId", "isClusterOwner", "primaryEmail", "now", "isOwner"} {
 		if !got[want] {
 			t.Errorf("actor. must offer %q, got %v", want, got)
 		}
 	}
-	for _, never := range []string{"query", "coalesce", "cond", "concept", "filter"} {
+	for _, never := range []string{"query", "lower", "hash", "concept", "filter"} {
 		if got[never] {
 			t.Errorf("dot context must not offer %q", never)
 		}
 	}
 
 	// Mid-member shape: prefix after the last dot filters.
-	items := completeAt(t, &fakeRegistry{}, "@actor\nquery todo todos {\n  filter todo.ownerUserId == actor.us")
+	items := completeAt(t, &fakeRegistry{}, "@actor\nquery todo todos {\n  filter row => row.ownerUserId == actor.us")
 	if len(items) != 1 || items[0].Label != "userId" {
 		t.Errorf("actor.us must offer exactly userId, got %v", labels(items))
 	}
 
 	// The alias sorts after canonical members.
-	for _, it := range completeAt(t, &fakeRegistry{}, "@actor\nquery todo todos {\n  filter todo.done == actor.") {
+	for _, it := range completeAt(t, &fakeRegistry{}, "@actor\nquery todo todos {\n  filter row => row.done == actor.") {
 		if it.Label == "isOwner" && it.SortPriority <= 1 {
 			t.Errorf("alias must sort after canonical members: %+v", it)
 		}
@@ -79,18 +79,29 @@ func TestFieldAccess_ArgsMembers(t *testing.T) {
 	}
 
 	// Non-automation constructs get the args. member path too.
-	q := "query todo todos {\n  args {\n    done bool\n  }\n  filter todo.done == args."
+	q := "query todo todos {\n  args {\n    done bool\n  }\n  filter row => row.done == args."
 	got = labels(completeAt(t, &fakeRegistry{}, q))
 	if !got["done"] || len(got) != 1 {
 		t.Errorf("query args. must offer declared fields, got %v", got)
 	}
 }
 
+// A filter reads the bound concept's fields through its lambda parameter.
+// `payload.` was the pre-v1 spelling, which edition 2026 refuses, so it offers
+// nothing -- with a header or without one.
 func TestFieldAccess_PayloadMembers(t *testing.T) {
 	rp := &fakeRegistry{concepts: []string{"v1:todos:todo"}}
-	got := labels(completeAt(t, rp, "@actor\nquery todo todoById {\n  filter payload."))
+	got := labels(completeAt(t, rp, "@actor\nquery todo todoById {\n  filter row => row."))
 	if !got["title"] {
-		t.Errorf("payload. must offer the bound concept's fields, got %v", got)
+		t.Errorf("row. must offer the bound concept's fields, got %v", got)
+	}
+	for _, src := range []string{
+		"@actor\nquery todo todoById {\n  filter row => payload.",
+		"@actor\nquery todo todoById {\n  filter payload.",
+	} {
+		if got := labels(completeAt(t, rp, src)); len(got) != 0 {
+			t.Errorf("%q: payload. is the pre-v1 spelling and must offer nothing, got %v", src, got)
+		}
 	}
 }
 

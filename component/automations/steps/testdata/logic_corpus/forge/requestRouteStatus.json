@@ -1,0 +1,701 @@
+{
+  "construct": "forge/logic.memql requestRouteStatus",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "submitterRole": "s-submitterRole"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "submitterRole": "s-submitterRole"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "submitterRole": "s-submitterRole"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "submitterRole": "s-submitterRole"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "submitterRole": "s-submitterRole"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "submitterRole": "s-submitterRole"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "submitterRole": "s-submitterRole"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "submitterRole": "s-submitterRole"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "submitterRole": "owner"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "queued"
+      }
+    },
+    "variant 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "submitterRole": "owner"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "queued"
+      }
+    },
+    "variant 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "submitterRole": "owner"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "queued"
+      }
+    },
+    "variant 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "submitterRole": "owner"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "queued"
+      }
+    },
+    "variant 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "submitterRole": "owner"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "queued"
+      }
+    },
+    "variant 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "submitterRole": "owner"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "queued"
+      }
+    },
+    "variant 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "submitterRole": "owner"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "queued"
+      }
+    },
+    "variant 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "submitterRole": "owner"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "queued"
+      }
+    },
+    "variant 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "submitterRole": "admin"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "submitterRole": "admin"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "submitterRole": "admin"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "submitterRole": "admin"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "submitterRole": "admin"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "submitterRole": "admin"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "submitterRole": "admin"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "submitterRole": "admin"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 2 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "submitterRole": "writer"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 2 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "submitterRole": "writer"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 2 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "submitterRole": "writer"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 2 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "submitterRole": "writer"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 2 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "submitterRole": "writer"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 2 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "submitterRole": "writer"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 2 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "submitterRole": "writer"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 2 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "submitterRole": "writer"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_approval"
+      }
+    },
+    "variant 3 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "submitterRole": "reader"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 3 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "submitterRole": "reader"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 3 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "submitterRole": "reader"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 3 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "submitterRole": "reader"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 3 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "submitterRole": "reader"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 3 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "submitterRole": "reader"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 3 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "submitterRole": "reader"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 3 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "submitterRole": "reader"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 4 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 4 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 4 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 4 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 4 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 4 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 4 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {},
+        "rows": 0
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    },
+    "variant 4 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {},
+        "rows": 2
+      },
+      "outcome": {
+        "calls": null,
+        "result": "needs_validation"
+      }
+    }
+  }
+}

@@ -21,7 +21,10 @@ query modelProfile modelProfiles {
     /// the machine's class and filters.
     minMachineClass  enum("16", "24", "32", "64", "128")
   }
-  filter  isActiveRecord && when(args.category) { category==args.category } && when(args.runtime) { runtime==args.runtime } && when(args.minMachineClass) { minMachineClass==args.minMachineClass }
+  filter  row => isActiveRecord(row)
+              && (args.category == nil || row.category == args.category)
+              && (args.runtime == nil || row.runtime == args.runtime)
+              && (args.minMachineClass == nil || row.minMachineClass == args.minMachineClass)
   shape   modelProfileFull
 }
 
@@ -34,6 +37,6 @@ query modelProfile modelProfileById {
   args {
     modelId  string!
   }
-  filter  modelId==args.modelId && isActiveRecord
+  filter  row => row.modelId == args.modelId && isActiveRecord(row)
   shape   modelProfileFull
 }

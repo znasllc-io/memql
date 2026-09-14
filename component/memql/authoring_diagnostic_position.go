@@ -69,6 +69,10 @@ func bundleAnchorFor(bundle, src, usePreamble string) (bundleLine, preambleLines
 // or the failing token maps into the shared import preamble rather than the
 // construct body.
 func resolveAuthoredPosition(c SandboxConstruct, err error) authoredPosition {
+	var le *LowerError
+	if errors.As(err, &le) && !le.Span.IsZero() {
+		return resolveLowerErrorPosition(c, le)
+	}
 	var pe *languageParser.ParseError
 	if !errors.As(err, &pe) || pe.Line <= 0 {
 		return authoredPosition{}
@@ -76,6 +80,13 @@ func resolveAuthoredPosition(c SandboxConstruct, err error) authoredPosition {
 	// Without a verbatim bundle anchor there is nothing to offset into.
 	if c.BundleLine <= 0 {
 		return authoredPosition{}
+	}
+
+	// A parse of the positioned lowering (languageParser.PositionLowering)
+	// already names the failing token's extent in c.Source, column included:
+	// hop A is done, exactly, so only hop B remains.
+	if pe.AuthoredLine > 0 {
+		return c.bundleExtent(pe.AuthoredLine, pe.AuthoredColumn, pe.AuthoredEndLine, pe.AuthoredEndColumn)
 	}
 
 	lm := newAuthoredLineMap(c.Source, rewrittenForKind(c))
@@ -91,6 +102,28 @@ func resolveAuthoredPosition(c SandboxConstruct, err error) authoredPosition {
 		if eLine, eCol, eok := c.bundlePos(lm, pe.Token.EndLine, pe.Token.EndCol); eok {
 			out.EndLine, out.EndColumn = eLine, eCol
 		}
+	}
+	return out
+}
+
+// bundleExtent runs hop B alone for a token whose extent is already known in
+// c.Source's coordinates: off the prepended import preamble, onto the bundle
+// line. A token inside that preamble has no authored-body position.
+func (c SandboxConstruct) bundleExtent(line, col, endLine, endCol int) authoredPosition {
+	toBundle := func(sliceLine int) (int, bool) {
+		bodyLine := sliceLine - c.BundlePreambleLines
+		if bodyLine < 1 {
+			return 0, false
+		}
+		return c.BundleLine + bodyLine - 1, true
+	}
+	start, ok := toBundle(line)
+	if !ok {
+		return authoredPosition{}
+	}
+	out := authoredPosition{Line: start, Column: col}
+	if end, ok := toBundle(endLine); ok {
+		out.EndLine, out.EndColumn = end, endCol
 	}
 	return out
 }
@@ -374,4 +407,43 @@ func signatureKeywords(kind string) []string {
 	default:
 		return nil
 	}
+}
+
+// resolveLowerErrorPosition maps a lowering refusal (memql#5366) to the
+// authored bundle position of the node it refuses.
+//
+// A query, mutation or logic construct is parsed from a POSITIONED lowering
+// (parser.PositionLowering, memql#5364): every v1 node's Span is already the
+// author's extent in c.Source, even for a filter the struct rewriter folded
+// into its generated `return`, so only hop B -- off the import preamble, onto
+// the bundle line -- remains (bundleExtent). A spec or trait body is parsed
+// from c.Source with its file-top imports stripped and nothing lowered, so its
+// Span is in the stripped text; the line map pairs those lines with c.Source's
+// exactly. A position that cannot be established is omitted, never guessed:
+// attachPos then anchors the diagnostic to the construct's signature.
+func resolveLowerErrorPosition(c SandboxConstruct, le *LowerError) authoredPosition {
+	if c.BundleLine <= 0 || le.Span.IsZero() {
+		return authoredPosition{}
+	}
+	switch c.Kind {
+	case "query", "mutation", "logic", "automation":
+		return c.bundleExtent(le.Span.Line, le.Span.Col, le.Span.EndLine, le.Span.EndCol)
+	}
+	lm := newAuthoredLineMap(c.Source, rewrittenForKind(c))
+	if _, exact := lm.authoredLine(le.Span.Line); !exact {
+		return authoredPosition{}
+	}
+	line, col, ok := c.bundlePos(lm, le.Span.Line, le.Span.Col)
+	if !ok {
+		return authoredPosition{}
+	}
+	out := authoredPosition{Line: line, Column: col}
+	if le.Span.EndLine > 0 {
+		if _, exact := lm.authoredLine(le.Span.EndLine); exact {
+			if eLine, eCol, eok := c.bundlePos(lm, le.Span.EndLine, le.Span.EndCol); eok {
+				out.EndLine, out.EndColumn = eLine, eCol
+			}
+		}
+	}
+	return out
 }

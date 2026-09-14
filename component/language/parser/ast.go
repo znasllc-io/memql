@@ -38,6 +38,7 @@ type (
 	TimestampExpr         = ast.TimestampExpr
 	DepthExpr             = ast.DepthExpr
 	CountExpr             = ast.CountExpr
+	RefineExpr            = ast.RefineExpr
 	ShapeExpr             = ast.ShapeExpr
 	FunctionCallExpr      = ast.FunctionCallExpr
 	MethodCallExpr        = ast.MethodCallExpr

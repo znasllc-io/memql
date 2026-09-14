@@ -1,4 +1,2 @@
 @description
-spec ticket isOpenTicketDescription {
-  return status == "open"
-}
+spec ticket isOpenTicketDescription = row => row.status == "open"

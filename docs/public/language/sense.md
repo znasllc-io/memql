@@ -49,10 +49,10 @@ This document covers two things and how they relate:
 truth for the MemQL DSL authoring surface:
 
 - the **top-level constructs** an author may write (`concept`, `query`,
-  `mutation`, `logic`, `automation`, `spec`, `trait`, `shape`, `tool`,
-  `prompt`, `provider`, `builtin`, `policy`, `seed`, `use`), each tagged
-  with its category, its body sub-blocks, and whether its signature
-  names a bound concept;
+  `mutate`, `logic`, `automation`, `action`, `capability`, `spec`,
+  `trait`, `shape`, `tool`, `prompt`, `provider`, `builtin`, `policy`,
+  `rule`, `seed`, `use`), each tagged with its category, its body
+  sub-blocks, and whether its signature names a bound concept;
 - the **keywords**, **operators**, and **field types** the grammar
   accepts;
 - the **annotations** each construct allows;
@@ -80,16 +80,22 @@ The spec is deliberately split on where each fact already lives:
   that registry into a per-annotation view (name to doc plus the
   construct keywords it is legal on), so the spec cannot disagree with
   the engine's own enforcement.
-- **Constructs, keywords, operators, field types, and legal-next
-  rules** have no pre-existing registry -- the truth was split across
-  the parser's top-level dispatch and the struct-form rewriter.
-  `dslspec` is the source of truth for those, and a drift test
-  introspects the parser and rewriter to assert the spec stays in
-  lockstep.
+- **Operators and the expression functions are projected** from the
+  function catalog (`component/language/functions`): each operator row
+  of `functions.Operators()` -- its form, what it does, its absence rule
+  and its precedence level -- and each function and method of
+  `functions.Catalog()`, with its signature and tier. Sense's hover
+  cards and the generated docs read the same two tables, so an operator
+  or a function is described once.
+- **Constructs, keywords, field types, and legal-next rules** have no
+  pre-existing registry -- the truth was split across the parser's
+  top-level dispatch and the struct-form rewriter. `dslspec` is the
+  source of truth for those, and a drift test introspects the parser and
+  rewriter to assert the spec stays in lockstep.
 
-The package is a near-leaf: it imports only the annotations registry,
-so both Sense and the gRPC/SDK export layer can consume it without an
-import cycle.
+The package is a near-leaf: it imports only the annotations registry
+and the function catalog, so both Sense and the gRPC/SDK export layer
+can consume it without an import cycle.
 
 ### The workspace graph (cross-reference resolution)
 
@@ -126,11 +132,11 @@ live in `component/grpc/sense_handlers.go`.
 
 | Operation | What it returns |
 |---|---|
-| **Tokenize** | Semantic tokens for syntax highlighting -- keywords, identifiers, strings, annotations, concept ids |
-| **Complete** | Context-aware autocompletion -- constructs, annotations, concepts, builtins, keywords |
-| **Diagnose** | Errors and warnings from the lexer, parser, and semantic validation |
-| **Hover** | Symbol info at the cursor -- function docs, concept schemas, annotation docs, tool and prompt docs. Resolves a BARE concept short name too (#2753): `candidate` in `shape candidate candidateFull` is ambient under rule 25, so it is matched by trailing segment against the registry. A collision across namespaces (`invocation` is both `v1:worker:invocation` and `v1:observability:invocation`) is broken by the document's own domain; where that cannot decide, hover returns nothing rather than the wrong concept. The domain comes from the document path, carried by `SenseHoverMsg.file_path` on the gRPC surface (#2760) and by the document URI over LSP |
-| **SignatureHelp** | Parameter help inside call arguments |
+| **Tokenize** | Semantic tokens for syntax highlighting -- keywords, identifiers, strings, annotations, concept ids, and the operators (`\|\|`, `.?` and `=>` each one token) |
+| **Complete** | Context-aware autocompletion -- constructs, annotations, concepts, builtins, keywords; at an expression position, exactly what the tier manifest admits there (see [Expressions](#expressions-position-aware-completion-and-hover)) |
+| **Diagnose** | Errors and warnings from the lexer, parser, and semantic validation. A retired spelling is a parser error whose code is the parser's rule id (`retired_cond_call`), which the language server's [rewrite quick fix](#the-rewrite-quick-fix) keys on |
+| **Hover** | Symbol info at the cursor -- function docs, concept schemas, annotation docs, tool and prompt docs, and cards for operators, catalog functions and retired spellings that say where the item runs at the cursor's position. Resolves a BARE concept short name too (#2753): `candidate` in `shape candidate candidateFull` is ambient under rule 25, so it is matched by trailing segment against the registry. A collision across namespaces (`invocation` is both `v1:worker:invocation` and `v1:observability:invocation`) is broken by the document's own domain; where that cannot decide, hover returns nothing rather than the wrong concept. The domain comes from the document path, carried by `SenseHoverMsg.file_path` on the gRPC surface (#2760) and by the document URI over LSP |
+| **SignatureHelp** | Parameter help inside call arguments, from the function catalog first, then the builtins and the registry's declared args |
 | **Definition** | Go-to-definition (F12) -- resolves the construct reference under the cursor to the file and position that declares it (#2754). Backed by `dslimports.Index.DeclarationSites`, which finds the declaring file from the declaration index and recovers the line/column by re-lexing that file's raw source (the AST carries no positions). Colliding names are narrowed by the referencing file's own domain, and where that cannot decide it returns nothing rather than jumping to the wrong file. Exposed on both surfaces: `textDocument/definition` over LSP and `SenseDefinitionMsg` / `SenseDefinitionResult` over gRPC (#2760). The result carries a WORKSPACE-RELATIVE path, never a URI -- the LSP maps it to `file://` while the Cockpit addresses pack files as `(domain, path)`, so the wire stays neutral between them |
 
 ### Driven from the spec
@@ -140,7 +146,7 @@ the spec once (`dslspec.Build()`) and projects it into the lookup
 shapes completion needs:
 
 - **Top-level construct completion** is the spec's construct list. Typing
-  `mut` at the file top now offers `mutation`; the full struct-form set
+  `mut` at the file top now offers `mutate`; the full struct-form set
   (`logic` / `trait` / `policy` / `seed`) is present because the spec
   carries it. This replaced the stale hand-coded `func / use / concept`
   set.
@@ -197,6 +203,201 @@ legal-next rule:
 
 ---
 
+## Expressions: position-aware completion and hover
+
+Every expression in a `.memql` file sits in one of the twelve positions the
+tier manifest names (`component/language/tiers`), and the position decides
+what the expression may contain: a query filter is pushed down to SQL, a logic
+body runs in process (see [Where each expression
+runs](memql.md#where-each-expression-runs)). Sense works out the position
+under the cursor, then completes and hovers from the manifest and the function
+catalog (`component/language/functions`), so the editor offers what the load
+accepts there and nothing it refuses.
+
+### Finding the position
+
+Sense reads the position from the source text, not from a parse
+(`component/memql/sense/exprpos.go`): a buffer is mid-edit and unparseable
+most of the time, and a detector that needed a parse would go quiet exactly
+while an author types.
+
+| Position | The cursor is in |
+|---|---|
+| `queryFilter` | a query's `filter row => ...` clause and its continuation lines, or the query of a tool's `@handler(query="...")` |
+| `queryRefine` | a query's `refine row => ...` clause |
+| `sort` | a query's `sort` clause |
+| `specBody` | the body of `spec <bound> <name> = row => ...` or `trait <name> = row => ...` |
+| `triggerFilter` | an automation's `@filter(row => ...)` |
+| `rowAuthzArgument` | an argument of `@rowAuthz(...)` |
+| `toolDefault` | a tool field's `@default(...)` |
+| `promptInput` | a prompt field's `@default(...)` |
+| `automationCondition` | an `if`, `else if`, `for`, `forEach ... where` or `switch` head, or a precondition's `check:` |
+| `stepArgument` | the arguments of a kind-prefixed call in an automation (`mutation createTodo(title: ...)`), or a `name := ...` statement there |
+| `logicBody` | a statement in a logic's `body { }` |
+| `mutationValue` | a `key: <value>` line in a mutation's `insert`, `update` or `stamp` block |
+
+A line continues a clause when a bracket opened above is still open, when it
+opens with a binary operator (`&&`, `||`, `==`, `?`, `:`, ...), or when the
+line above ended on one.
+
+With the position come the lambda parameters in scope and the concept the
+position's parameter reads. `filter row =>` and `refine row =>` bind `row` to
+the query's concept; a spec binds the concept or shape in its signature, and
+over an @actor shape its parameter is spelled `actor` and is the envelope;
+`@filter(row =>` binds `row` to the concept named by the automation's
+`@trigger(concept="...")` or by its `graph.node.*` event topic. The parameter
+is whatever name the author wrote. A lambda opened inside the expression --
+`row.tags.any(t => ...` -- puts its parameter in scope until the bracket it
+sits in closes. The pre-v1 spellings of the pushdown positions (a filter with
+no lambda header, a `filter { }` block, a `spec ... { return ... }` body) are
+detected too. The parser refuses each of them: completion offers a filter with
+no header its header and nothing else, and hover shows the construct as the
+rewrite writes it.
+
+### Completion
+
+At an expression position completion offers what the manifest admits there,
+and nothing else. The three literal positions -- a sort key, a row-authz
+argument, a tool default -- keep the annotation's or clause's own completion,
+since each takes a literal. Everywhere else the list is:
+
+- The lambda parameters in scope, innermost first, then the names that
+  statements above the cursor bound in the same body
+  (`rows := query activeUsers(status: "active")`), whose detail is `local`.
+- The reserved roots the position evaluates with: `args`, `actor`, `now` and
+  `config` in a query filter, a refine clause, a logic body and a mutation
+  value; `now` in a spec body; the run's `event`, `steps`, `item`, `index`
+  and `input` as well in an automation condition and a step argument. In a
+  trigger filter `args` is the automation's declared args, bound from the
+  triggering event's payload before the filter runs, and `args.` completes the
+  args of the automation the annotation decorates -- declared below the
+  cursor.
+- The catalog functions the position admits. In a query filter or a spec body
+  an in-process function is still offered, because
+  `row.expiresAt < addDuration(now, "P1D")` is legal, but its detail reads
+  "Computes before the query; cannot read the row" and it sorts last.
+- Specs and traits, applied to the receiver they read: `isActiveRecord(row)`,
+  `requiresOwner(actor)`. A row spec bound to a different concept than the
+  position's is not offered.
+- `nil`, `true` and `false`; the construct-call verbs (`query`, `mutation`,
+  `logic`) only in a logic body and a step argument; the statement keywords
+  (`if`, `for`, `return`, ...) only at the start of a statement in a logic
+  body.
+
+After a dot, completion offers members. `row.` offers the bound concept's
+fields, each with its type, then the row intrinsics (`id`, `createdAt`, ...);
+`actor.` in an actor spec offers the envelope. `row.tags.` offers the methods
+of the field's type -- in a query filter or a spec body only the ones that
+push down (`any`, `all`, `count` on a list), because an in-process method over
+the row is a load refusal. `args.tags.` offers every method the position
+admits, since an arg does not read the row.
+
+A clause whose value is a lambda -- a query's filter and refine, a trigger
+`@filter` -- offers its header, `row => ...`, and nothing else until the header
+is written: the parser refuses every other spelling of the clause, so no bare
+field name, `payload.` member or bare `row.` intrinsic is offered in its place.
+Past where the header goes, such a clause offers nothing (`filter status == |`).
+Once the header is written, the list above applies.
+
+No retired spelling is ever offered: `cond`, `concat` and `coalesce` do not
+reach the list anywhere, and neither does `payload.`, which offers nothing.
+
+### Hover
+
+Hover over an operator, a catalog function or method, a spec or trait applied
+in an expression, or a retired spelling shows a card with one shape, plain text
+in sentence case:
+
+1. A `memql` code block with the signature (`lower(value string) string`), the
+   operator in use (`a ?? b`), the application (`isActiveRecord(row) bool`,
+   `requiresOwner(actor) bool`), or -- for a retired spelling -- its
+   replacement.
+2. One sentence saying what it does: the first sentence of the catalog entry
+   or of the spec's description, or the operator's description followed by
+   its absence rule.
+3. Where it runs at the cursor's position: "Pushed down to SQL.", "Runs in
+   process.", "Runs in process before the query, on values that do not read
+   the row.", or, in a refine clause, "Runs in process, over the rows of the
+   page the query read."
+4. A legality line, only when the position refuses or restricts the item,
+   naming the fix in one sentence: "Not allowed on the row in a query filter:
+   `lower` runs in process. Compare the row against a computed value:
+   `row.email == lower(args.email)`." A call whose arguments demonstrably do
+   not read the row is a plan constant, legal where it stands, and gets no
+   legality line.
+5. For an entry that replaces retired spellings, the ones it replaces:
+   "Replaces `len(x)` and `count(x)`." A spec or trait replaces its bare name
+   and its `spec <name>` / `trait <name>` reference.
+
+A spec or trait's card says where the application runs: a row predicate in a
+filter or spec body is compiled into the SQL, a spec over the actor is decided
+in process from the caller before the query, and every in-process position runs
+both in process. The catalog is consulted before the registry, as the
+evaluator does, so a spec never takes a function's card.
+
+Operator cards come from the one operator table, `functions.Operators()`. The
+same glyphs outside an expression keep their own meaning and get no operator
+card: `in` in a `forEach` head is the loop keyword, the terse automation's `=>`
+is not a lambda, and a map key's `:` is not the conditional's.
+
+A retired spelling's card reads the parser's own refusal table,
+`parser.V1RetiredForms()`, by its stable rule ids, so the hover and the load
+refusal cannot say different things: "`cond(p, a, b)` is retired in edition
+2026. Write `p ? a : b` instead; `memqlmigrate --rewrite=expressions` rewrites
+it." `when(`, `?.`, `;` as a connective, `has`, `not in`, `null`, `$args.x`,
+`spec <name>` inside an expression, `.contains(...)` and every retired
+function called by name are hovered this way. `contains` with one argument is
+the live traversal and `count` alone on a line is the query's count clause, so
+neither is flagged. `TestRetiredHoverIsTheParsersTable` fails when the parser retires a
+form Sense neither hovers nor names as unhoverable; the comma connective is the
+one it names, because a comma also separates arguments.
+
+The predicate positions' legacy spellings -- a filter with no lambda header, a
+spec or trait with a `{ return ... }` body, an `@filter` whose argument is not a
+lambda -- are hovered on the `filter` keyword, the body's `return` or the
+`spec` / `trait` keyword of its header, and `@filter`. Their card shows the
+author's own construct as `memqlmigrate --rewrite=expressions` would write it,
+because Sense runs that rewrite over the construct under the cursor:
+`filter status == args.owner && isActiveRecord` shows
+`filter row => row.status == args.owner && isActiveRecord(row)`. Where the
+rewrite refuses the construct, the card shows the table's form.
+
+Every retired spelling is also a parse error, which Diagnose reports with the
+parser's rule id as its code, so the hover explains the squiggle and the quick
+fix below removes it.
+
+### The rewrite quick fix
+
+The language server (`cmd/memql-lsp/codeaction.go`) turns
+`memqlmigrate --rewrite=expressions` into two code actions:
+
+- **Rewrite to edition 2026**, a quick fix on a diagnostic the rewrite clears:
+  a retired spelling, or another parse error that rewriting its construct
+  removes.
+- **Rewrite the file to edition 2026** (`source.fixAll.memql`), the same for
+  every construct in the file. VS Code runs it on save when `source.fixAll`
+  is in `editor.codeActionsOnSave`.
+
+The edit is the one the codemod makes, against the specs and traits the
+workspace and the engine's core domains declare, with open buffers as they
+are rather than as saved. The unit is one construct with the annotations above
+it: a construct holding a clause the rewrite refuses, such as a relationship
+traversal, is offered nothing and keeps its diagnostic, and so is a construct
+whose rewrite would not parse. The edit replaces only the lines that change, so
+undo and the cursor behave as they do after a hand-made edit. The gRPC surface
+has no code action; a client there runs the codemod.
+
+### Signature help
+
+Inside a call's arguments signature help reads the catalog first: one
+signature per function or method, including the relationship traversals, whose
+optional leading `as` label is marked optional. The highlighted parameter
+skips the label when the call leaves it out. Builtins the catalog does not
+describe come next, then the registry's queries, mutations and logic, each
+signature built from its declared `args { }`.
+
+---
+
 ## Edit-time diagnostics
 
 Diagnose runs parse errors plus a set of authoring rules over the
@@ -211,8 +412,8 @@ editors and agents can key on them:
 | `unknown-import-symbol` | Warning | An imported id that the resolved module does not declare (`use fylo.concepts.{ oder }`). |
 | `signature-binds-wrong-kind` | Error | A `query`/`mutate`/`shape`/`seed` signature binds a name that IS declared, just not as a concept -- `shape todos ...` where `todos` is a query (#2762). The sibling rule below only asks whether the name exists at all, so a wrong-kind binding sailed through and surfaced as a boot failure instead. An explicit import does NOT suppress it: importing the query is exactly how the author got here. A name the workspace has never seen is left to `unknown-signature-concept`, since it may arrive at runtime via `MEMQL_DSL_PATH`. `spec` is out of scope by construction -- it binds a shape XOR concept, and the extractor covers only the four concept-binding keywords. Measured over `dsl/`: 680 signature bindings, zero flagged |
 | `unknown-signature-concept` | Error | A `query`/`mutate`/`shape`/`seed <Concept> <name>` whose bound concept exists nowhere and is not imported (`mutate full ...` with no concept `full`). Error, because boot itself CrashLoops on an unresolvable signature concept. Extracted with the boot-pinned regex (`dslimports.SignatureConceptRefs`) and resolved with the load side's own `missingIsProvable` conservatism, so an external or unimported-but-global concept is never flagged (#2731). |
-| `bare-row-intrinsic` | Warning | A filter predicate names a row intrinsic bare (`filter id == args.x`) instead of through the `row.` namespace (#2779). Warning, not Error: the engine still resolves bare intrinsics correctly -- only the authoring gates retired the spelling -- so this never CrashLoops boot, though `test/dslconformance/conformance_test.go` does fail CI on it. Detection is the same `sense.ScanBareRowIntrinsics` the tree-wide gate calls, so squiggle and CI cannot disagree; it reads clause TEXT rather than parsed predicate structure, so `\|\|`-joined and parenthesized predicates are covered, and string-literal contents are excluded. |
-| `bare-row-intrinsic-sort-key` | Warning | A sort key names a row intrinsic bare (`sort "createdAt", "desc"`) instead of through the `row.` namespace (#2786) -- the ordering half of the rule above, with the same ambiguity (`sort "id"` can name the row id or a payload property called `id`) and the same Warning rationale. Detection is the same `sense.ScanBareRowIntrinsicSortKeys` the tree-wide `TestSortKeysUseRowNamespace` calls. It is a SIBLING of the filter scanner, not a branch inside it: a filter names fields as code (so that scanner blanks string literals) while a sort names them as string literals, so this one reads literal contents. It opens a clause only on `sort` followed by a string literal, which keeps a construct field of the form `sort string @enum("createdAt", ...)` from being read as a sort clause; the whitespace skip is unicode-aware so it agrees with the rewriter's `TrimSpace`. It does NOT separate a provider `params` entry spelled `sort "createdAt"` from a directionless sort clause -- the two are byte-identical, and telling them apart needs enclosing-construct state the scanner does not carry. |
+| `bare-row-intrinsic` | Warning | A filter names a row intrinsic bare instead of through its parameter -- `id` on a continuation line of `filter row => row.a == 1`, where `row.id` was meant (#2779). The engine refuses the load for it (`id` is not defined here), and `test/dslconformance/conformance_test.go` fails CI on it; this rule is the edit-time half, which lands on the token and names `row.id`. A filter with no lambda header never reaches it: the parser refuses that first, and the rule runs only on a file that parses. Detection is the same `sense.ScanBareRowIntrinsics` the tree-wide gate calls, so squiggle and CI cannot disagree; it reads clause TEXT rather than parsed predicate structure, so `\|\|`-joined and parenthesized predicates are covered, and string-literal contents are excluded. |
+| `bare-row-intrinsic-sort-key` | Warning | A sort key names a row intrinsic bare (`sort "createdAt", "desc"`) instead of through the `row.` namespace (#2786) -- the ordering half of the rule above, with the same ambiguity (`sort "id"` can name the row id or a payload property called `id`). The engine refuses it in an authored file at load, where both `row.` namespace gates run (memql#3629); the runtime and SDK sort surfaces still accept a bare key from a caller. Detection is the same `sense.ScanBareRowIntrinsicSortKeys` the tree-wide `TestSortKeysUseRowNamespace` calls. It is a SIBLING of the filter scanner, not a branch inside it: a filter names fields as code (so that scanner blanks string literals) while a sort names them as string literals, so this one reads literal contents. It opens a clause only on `sort` followed by a string literal, which keeps a construct field of the form `sort string @enum("createdAt", ...)` from being read as a sort clause; the whitespace skip is unicode-aware so it agrees with the rewriter's `TrimSpace`. It does NOT separate a provider `params` entry spelled `sort "createdAt"` from a directionless sort clause -- the two are byte-identical, and telling them apart needs enclosing-construct state the scanner does not carry. |
 | `redundant-enabled` | Hint | `@enabled` restates the default (#2610). |
 | `redundant-version` | Hint | `@version("1.0.0")` restates the default (#2613). |
 
@@ -233,8 +434,10 @@ What ships as a snippet:
 
 | Snippet | Where |
 |---|---|
-| `args { ... }`, `filter { ... }`, `insert { ... }`, ... | Inside a construct body -- opens the block with the cursor inside, offered beside the plain block keyword. |
-| `query` / `mutate` / `logic` / `automation` / `concept` skeletons | Top level -- full declarations with tabstops at the names, sorted BELOW the bare construct keyword so they never displace it. |
+| `args { ... }`, `insert { ... }`, ... | Inside a construct body -- opens the block with the cursor inside, offered beside the plain block keyword. |
+| `filter row => row.field == "value"` | Inside a query body. A v1 filter is a clause whose value is a lambda over the row, not a block, so its snippet writes the header. |
+| `query` / `spec` / `trait` / `mutate` / `logic` / `automation` / `concept` skeletons | Top level -- full declarations with tabstops at the names, sorted BELOW the bare construct keyword so they never displace it. The `spec` and `trait` skeletons are `spec <Concept> <name> = row => ...` and `trait <name> = row => ...`. |
+| `@filter(...)` | Where the construct takes `@filter` -- inserts `@filter(row => row.field == "value")`, a lambda over the triggering row. |
 | The `use <domain>.concepts.{ X }` import | Now places the cursor after the bound name (it was multi-line plain text before -- correct, just cursor-less). |
 
 Consumers without snippet support (the Cockpit gRPC path) call
@@ -254,7 +457,7 @@ until the classifier computes its label, which is what this closes:
 | Block | Offers |
 |---|---|
 | `args { }` | Field types (`string`, `bool`, `enum(...)`, ...). `enum` completes to the TYPE form (#2618); the `!` required sigil is documented on the item rather than offered as one. |
-| `filter { }` | The engine's reserved filter heads (`payload`, `actor`, `args`, `now`, `config`, `trace`, `meta`, `schema`, `partition`, `provenance`) plus the bound concept's fields. |
+| `filter { }` (pre-v1, refused at parse) | Nothing. The parser reads the braces as a map literal and refuses a filter that is not a lambda, so every name the block once offered -- the reserved heads, the bound concept's bare fields -- is a spelling it refuses. A v1 filter is a clause, and completes as an expression position (see [Expressions](#expressions-position-aware-completion-and-hover)). |
 | `insert { }` / `update { }` | `accept` / `stamp` in the post-#2616 short form, plus the bound concept's fields. |
 | `shape { }` | The bound concept's fields. |
 
@@ -321,8 +524,9 @@ or concepts, and an unknown root offers nothing:
 | `actor.` | The canonical auth envelope from the dslspec property table (#2623), aliases sorted after canonical members. |
 | `event.` | The event envelope: `topic`, `kind`, `payload`, `actor`, `timestamp`. |
 | `event.actor.` | `id` only -- the emitter's identity stamp (G4), a different object from the auth envelope. |
-| `args.` | The enclosing construct's declared args fields (any function kind; the automation BARE-name completion shares the same declared-field scanner, so the two can never disagree). |
-| `payload.` | The enclosing construct's bound-concept fields (via the registry's concept projection). |
+| `args.` | The enclosing construct's declared args fields (any function kind; the automation BARE-name completion shares the same declared-field scanner, so the two can never disagree). In a trigger filter, which is written above its automation, the fields are the args of the automation the annotation decorates. |
+| `row.` (the position's lambda parameter) | The bound concept's fields, each with its declared type, then the row intrinsics. `actor.` in a spec over an @actor shape offers the envelope. |
+| `payload.` | Nothing at an expression position: it was the pre-v1 spelling of a payload field, and edition 2026 refuses a bare `payload`. A v1 expression reads `row.<field>`. |
 
 Both lexer shapes are detected: a trailing dot (`actor.`) and a
 mid-member position (`actor.us`, where the prefix filters).

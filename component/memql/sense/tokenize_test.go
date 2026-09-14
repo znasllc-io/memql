@@ -279,7 +279,7 @@ func TestTokenize_ConstructKeywordPositionAware(t *testing.T) {
 // two-identifier signature forms and `concept <Name>` bind one.
 func TestTokenize_SingleIdentifierHeaderNamesItself(t *testing.T) {
 	svc := &Service{}
-	tokens := svc.Tokenize("trait isActiveRecord {\n  return active == true\n}")
+	tokens := svc.Tokenize("trait isActiveRecord = row => row.active == true")
 	if got := firstTokenType(tokens, "trait"); got != "keyword" {
 		t.Errorf("trait rendered as %q, want keyword", got)
 	}

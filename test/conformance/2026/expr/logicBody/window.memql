@@ -1,0 +1,1 @@
+args.scores.skip(1).take(2)

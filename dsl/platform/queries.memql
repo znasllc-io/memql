@@ -23,8 +23,8 @@ use common.traits.{ isActiveRecord, isNotArchived, isNotDeleted, statusIsActive,
 //   - name: Variable name
 //   - value: Variable value (typically string or boolean)
 //
-// Usage:
-//   globalVariable({name: "MEMQL_AUTO_PROVISION_USERS"})
+// Usage, as the string a client sends to Execute:
+//   globalVariable(name: "MEMQL_AUTO_PROVISION_USERS")
 //
 
 /// Get a single instance-wide configuration variable by name (v1:platform:globalVariable)
@@ -33,7 +33,7 @@ query globalVariable globalVariable {
   args {
     name  string!
   }
-  filter  name==args.name && isActiveRecord
+  filter  row => row.name == args.name && isActiveRecord(row)
   shape   variableFull
 }
 
@@ -55,8 +55,8 @@ query globalVariable globalVariable {
 //   - name: Variable name
 //   - value: Variable value
 //
-// Usage:
-//   globalVariables({names: ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME"]})
+// Usage, as the string a client sends to Execute:
+//   globalVariables(names: ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME"])
 //
 
 /// Get multiple instance-wide configuration variables by name list (v1:platform:globalVariable)
@@ -65,7 +65,7 @@ query globalVariable globalVariables {
   args {
     names  array!
   }
-  filter  name in args.names && isActiveRecord
+  filter  row => row.name in args.names && isActiveRecord(row)
   shape   variableFull
 }
 
@@ -105,14 +105,15 @@ query globalVariable globalVariables {
 //   clients. (It formerly carried @internal, retired under 2026.08 --
 //   #2620 ruling / #2708; the annotation only hid it from discovery.)
 //
-// Usage:
+// Usage, as the string a client sends to Execute:
 //   userDefaults()  // Returns all user provisioning variables
 //
 
 /// Returns default configuration variables for user provisioning. Used by bootstrapUser automation.
 @unbounded("user-default variables -- a fixed bounded allow-list of names consumed whole")
 query globalVariable userDefaults {
-  filter  isActiveRecord && name in ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME", "MEMQL_DEFAULT_USER_LANGUAGE", "MEMQL_AUTO_PROVISION_USERS", "MEMQL_UPDATE_LAST_SEEN"]
+  filter  row => isActiveRecord(row)
+              && row.name in ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME", "MEMQL_DEFAULT_USER_LANGUAGE", "MEMQL_AUTO_PROVISION_USERS", "MEMQL_UPDATE_LAST_SEEN"]
 }
 
 /// Per Q7: list missingCapability rows by status, sorted by sightingCount desc. Backs the
@@ -123,7 +124,7 @@ query missingCapability missingCapabilitiesByStatus {
   args {
     status  string!
   }
-  filter  status==args.status
+  filter  row => row.status == args.status
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -141,7 +142,7 @@ query missingCapability missingCapabilityByKindAndName {
     kind        string!
     capability  string!
   }
-  filter  kind==args.kind && capability==args.capability
+  filter  row => row.kind == args.kind && row.capability == args.capability
   shape   missingCapabilityFull
 }
 
@@ -155,7 +156,7 @@ query outboundRequest outboundRequestsByStatus {
   args {
     status  string!
   }
-  filter  status==args.status
+  filter  row => row.status == args.status
   sort     "row.createdAt", "asc"
   paginate 50
   shape   outboundRequestFull
@@ -170,7 +171,7 @@ query inboundRequest inboundRequestsByStatus {
   args {
     status  string!
   }
-  filter  status==args.status
+  filter  row => row.status == args.status
   sort     "row.createdAt", "asc"
   paginate 50
   shape   inboundRequestFull
@@ -187,7 +188,7 @@ query inboundRequest inboundRequestById {
   args {
     requestId  string!
   }
-  filter  row.id==args.requestId
+  filter  row => row.id == args.requestId
   shape   inboundRequestFull
 }
 
@@ -201,7 +202,7 @@ query inboundRequest inboundRequestByDedupeKey {
     source     string!
     dedupeKey  string!
   }
-  filter  source==args.source && dedupeKey==args.dedupeKey
+  filter  row => row.source == args.source && row.dedupeKey == args.dedupeKey
   shape   inboundRequestFull
 }
 
@@ -236,7 +237,9 @@ query site siteByHostname {
   args {
     hostname  string!
   }
-  filter  hostname==args.hostname && isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.hostname == args.hostname
+              && isNotDeleted(row)
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   siteFull
 }
 
@@ -246,7 +249,7 @@ query site siteByHostname {
 /// ARCHIVED ROWS ARE EXCLUDED HERE and listed by sitesArchived instead (epic memql#4794, D10). The
 /// exclusion is written out rather than folded into a trait, because it is the one conjunct whose
 /// counterpart query deliberately inverts it -- and a reader comparing the two needs to see the same
-/// term in both -- here `isNotArchived`, there `statusIsArchived`. The trait is `status != "archived"`
+/// term in both -- here `isNotArchived`, there `statusIsArchived`. The trait is `row.status != "archived"`
 /// rather than an allow-list of the other three: status is required, so every row carries one, and
 /// != is null-safe against a non-empty literal (memql#1685) -- while an allow-list would silently
 /// drop a row the day a fifth value is added.
@@ -258,7 +261,7 @@ query site siteByHostname {
 /// tier `@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")` is the whole answer for
 /// every caller -- their own rows, every row for a cluster owner, and the rows tied to an account
 /// whose group they are in. This read used to restate the tier's first two arms as
-/// `(ownerUserId==actor.userId || actor.isClusterOwner==true)`, and an AND with that conjunct can
+/// `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)`, and an AND with that conjunct can
 /// never be widened by the third: a member of Acme's group was admitted to Acme's sites by the tier
 /// and then filtered back out by the query, so the list showed the tie to nobody. The engine ANDs
 /// the tier in from the declaration; tierDecidesTheRead (component/memql) records this construct as
@@ -266,7 +269,7 @@ query site siteByHostname {
 /// it against a real database for a member, a developer and a stranger.
 @actor
 query site sitesAll {
-  filter  isNotDeleted && isNotArchived
+  filter  row => isNotDeleted(row) && isNotArchived(row)
   shape   siteFull
   sort    "hostname", "asc"
 }
@@ -286,7 +289,7 @@ query site siteById {
   args {
     siteId  string!
   }
-  filter  row.id==args.siteId && isNotDeleted
+  filter  row => row.id == args.siteId && isNotDeleted(row)
   shape   siteFull
 }
 
@@ -300,7 +303,7 @@ query site siteById {
 //
 // THE EDGE READ IS THE ONE TO BE CAREFUL WITH. `liveCustomDomainByHostname` is
 // what turns a client's own Host header into one of this cluster's sites, so it
-// filters on `status=="live"` and nothing looser: a `pending_dns` row is a
+// filters on `row.status == "live"` and nothing looser: a `pending_dns` row is a
 // hostname somebody typed into a form, and resolving it would let anyone serve
 // a site at any name they could spell. The removal path is covered by the same
 // conjunct -- `removing` and `removed` both stop resolving the moment the
@@ -309,7 +312,7 @@ query site siteById {
 /// Resolve a request Host to the site a LIVE custom domain binds it to (design D8). The edge's one
 /// extra resolution step, asked only after siteByHostname misses.
 ///
-/// `status=="live"` is the whole security property of this read. A row reaches `live` only after
+/// `row.status == "live"` is the whole security property of this read. A row reaches `live` only after
 /// both DNS checks passed AND the certificate came back Ready, so a hostname answering here is one
 /// whose owner proved control of the name and whose traffic this cluster can actually terminate
 /// TLS for. Every other status resolves to nothing, which is why a removal takes effect at the
@@ -321,7 +324,7 @@ query customDomain liveCustomDomainByHostname {
   args {
     hostname  string!
   }
-  filter  hostname==args.hostname && status=="live" && actor.isClusterOwner==true
+  filter  row => row.hostname == args.hostname && row.status == "live" && actor.isClusterOwner == true
   shape   customDomainFull
 }
 
@@ -337,7 +340,7 @@ query customDomain customDomainsForSite {
   args {
     siteId  string!
   }
-  filter    siteId==args.siteId && actor.isClusterOwner==true
+  filter    row => row.siteId == args.siteId && actor.isClusterOwner == true
   sort      "hostname", "asc"
   paginate  100
   shape     customDomainFull
@@ -352,7 +355,7 @@ query customDomain customDomainsForSite {
 /// row per bound hostname, not per request.
 @actor
 query customDomain customDomainsAll {
-  filter    actor.isClusterOwner==true
+  filter    row => actor.isClusterOwner == true
   sort      "hostname", "asc"
   paginate  200
   shape     customDomainFull
@@ -375,7 +378,8 @@ query customDomain customDomainsAll {
 @unbounded("custom domains awaiting reconciliation -- an internal sweep that must see all of them, bounded by how many are in flight rather than by how many exist")
 @actor
 query customDomain customDomainsToReconcile {
-  filter  status in ["pending_dns", "verifying", "issuing", "removing"] && actor.isClusterOwner==true
+  filter  row => row.status in ["pending_dns", "verifying", "issuing", "removing"]
+              && actor.isClusterOwner == true
   shape   customDomainFull
 }
 
@@ -387,7 +391,7 @@ query customDomain customDomainById {
   args {
     domainId  string!
   }
-  filter  row.id==args.domainId && actor.isClusterOwner==true
+  filter  row => row.id == args.domainId && actor.isClusterOwner == true
   shape   customDomainFull
 }
 
@@ -402,7 +406,7 @@ query customDomain customDomainById {
 /// label spelled once. A denormalized appHost column would be a second spelling that drifts the
 /// first time the label changes, and the symptom would be every client's door resolving to nothing.
 ///
-/// `status=="live"` carries the whole security property, liveCustomDomainByHostname's reasoning one
+/// `row.status == "live"` carries the whole security property, liveCustomDomainByHostname's reasoning one
 /// domain over: a door reaches `live` only after all three of its hosts pointed at this cluster AND
 /// its certificate came back Ready. Every other status resolves to nothing, so a teardown takes
 /// effect at the speed of a row write rather than at the speed of an Ingress deletion.
@@ -413,7 +417,7 @@ query accountFrontDoor liveAccountFrontDoorByReservedName {
   args {
     reservedName  string!
   }
-  filter  reservedName==args.reservedName && status=="live" && actor.isClusterOwner==true
+  filter  row => row.reservedName == args.reservedName && row.status == "live" && actor.isClusterOwner == true
   shape   accountFrontDoorFull
 }
 
@@ -435,7 +439,8 @@ query accountFrontDoor liveAccountFrontDoorByReservedName {
 @unbounded("account front doors awaiting reconciliation -- an internal sweep that must see all of them, bounded by how many are in flight rather than by how many exist")
 @actor
 query accountFrontDoor accountFrontDoorsToReconcile {
-  filter  status in ["pending_dns", "verifying", "issuing", "removing"] && actor.isClusterOwner==true
+  filter  row => row.status in ["pending_dns", "verifying", "issuing", "removing"]
+              && actor.isClusterOwner == true
   shape   accountFrontDoorFull
 }
 
@@ -451,7 +456,7 @@ query accountFrontDoor accountFrontDoorsForAccount {
   args {
     accountId  string!
   }
-  filter    accountId==args.accountId && actor.isClusterOwner==true
+  filter    row => row.accountId == args.accountId && actor.isClusterOwner == true
   sort      "row.createdAt", "desc"
   paginate  50
   shape     accountFrontDoorFull
@@ -465,7 +470,7 @@ query accountFrontDoor accountFrontDoorsForAccount {
 /// `live` row the first time one is touched and never has one on load.
 @actor
 query accountFrontDoor accountFrontDoorsAll {
-  filter    actor.isClusterOwner==true
+  filter    row => actor.isClusterOwner == true
   sort      "reservedName", "asc"
   paginate  200
   shape     accountFrontDoorFull
@@ -478,7 +483,7 @@ query accountFrontDoor accountFrontDoorById {
   args {
     doorId  string!
   }
-  filter  row.id==args.doorId && actor.isClusterOwner==true
+  filter  row => row.id == args.doorId && actor.isClusterOwner == true
   shape   accountFrontDoorFull
 }
 
@@ -502,7 +507,8 @@ query accountFrontDoor accountFrontDoorById {
 @unbounded("open account front doors -- an internal sweep that must see all of them, bounded by how many accounts hold a reserved name")
 @actor
 query accountFrontDoor accountFrontDoorsOpen {
-  filter  status in ["pending_dns", "verifying", "issuing", "live", "removing"] && actor.isClusterOwner==true
+  filter  row => row.status in ["pending_dns", "verifying", "issuing", "live", "removing"]
+              && actor.isClusterOwner == true
   shape   accountFrontDoorFull
 }
 
@@ -523,7 +529,9 @@ query outboxEntry outboxPending {
   args {
     target  string!
   }
-  filter    target==args.target && status in ["pending", "failed"] && actor.isClusterOwner==true
+  filter    row => row.target == args.target
+                && row.status in ["pending", "failed"]
+                && actor.isClusterOwner == true
   sort      "row.createdAt", "asc"
   paginate  100
   shape     outboxEntryFull
@@ -537,7 +545,7 @@ query outboxEntry outboxDeadLetters {
   args {
     target  string!
   }
-  filter    target==args.target && status=="dead" && actor.isClusterOwner==true
+  filter    row => row.target == args.target && row.status == "dead" && actor.isClusterOwner == true
   sort      "row.createdAt", "desc"
   paginate  100
   shape     outboxEntryFull
@@ -550,7 +558,7 @@ query outboxEntry outboxEntryById {
   args {
     entryId  string!
   }
-  filter  row.id==args.entryId && actor.isClusterOwner==true
+  filter  row => row.id == args.entryId && actor.isClusterOwner == true
   shape   outboxEntryFull
 }
 
@@ -564,7 +572,10 @@ query syncState syncStateFor {
     connector  string!
     direction  string!
   }
-  filter  conceptId==args.conceptId && connector==args.connector && direction==args.direction && actor.isClusterOwner==true
+  filter  row => row.conceptId == args.conceptId
+              && row.connector == args.connector
+              && row.direction == args.direction
+              && actor.isClusterOwner == true
   sort    "row.createdAt", "desc"
   shape   syncStateFull
 }
@@ -575,7 +586,7 @@ query syncState syncStatesAll {
   args {
     connector  string
   }
-  filter    actor.isClusterOwner==true && when(args.connector) { connector==args.connector }
+  filter    row => actor.isClusterOwner == true && (args.connector == nil || row.connector == args.connector)
   sort      "row.createdAt", "desc"
   paginate  100
   shape     syncStateFull
@@ -598,7 +609,7 @@ query syncState syncStatesAll {
 // that tier is the whole answer for every caller: own rows, every row for a
 // cluster owner, and the rows tied to an account whose group the caller is in.
 // These reads used to restate the first two arms as
-// `(ownerUserId==actor.userId || actor.isClusterOwner==true)`, exactly as
+// `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)`, exactly as
 // v1:platform:site's did (memql#4344) -- and an AND with that conjunct cannot
 // be widened by the third arm, so a package tied to the cluster's own account
 // was admitted by the tier and filtered out by the query, for everyone but its
@@ -614,7 +625,7 @@ query syncState syncStatesAll {
 /// The packages this caller may see, active only. The OS packages list.
 @actor
 query package packagesAll {
-  filter  statusIsActive
+  filter  row => statusIsActive(row)
   sort    "name", "asc"
   shape   packageFull
 }
@@ -623,7 +634,7 @@ query package packagesAll {
 /// rows instead of inheriting a filter that would hide them; see the note above.
 @actor
 query package packagesArchived {
-  filter  statusIsArchived
+  filter  row => statusIsArchived(row)
   sort    "name", "asc"
   shape   packageFull
 }
@@ -635,7 +646,7 @@ query package packageById {
   args {
     packageId  string!
   }
-  filter  row.id==args.packageId
+  filter  row => row.id == args.packageId
   shape   packageFull
 }
 
@@ -653,7 +664,9 @@ query package packagesByRepoUrl {
   args {
     repoUrl  string!
   }
-  filter  repoUrl==args.repoUrl && statusIsActive && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.repoUrl == args.repoUrl
+              && statusIsActive(row)
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   sort    "name", "asc"
   shape   packageFull
 }
@@ -663,7 +676,9 @@ query package packagesByRepoUrl {
 /// calling it reads exactly their own, which is harmless and correct.
 @actor
 query package packagesTrackingRepos {
-  filter    sourceKind=="repo" && statusIsActive && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter    row => row.sourceKind == "repo"
+                && statusIsActive(row)
+                && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   sort      "name", "asc"
   paginate  200
   shape     packageFull
@@ -676,7 +691,7 @@ query packageDeployment packageDeployments {
   args {
     packageId  string!
   }
-  filter    packageId==args.packageId
+  filter    row => row.packageId == args.packageId
   sort      "row.createdAt", "desc"
   paginate  50
   shape     packageDeploymentFull
@@ -695,7 +710,7 @@ query packageDeployment packageDeployments {
 /// somebody has half-composed. The sort is what keeps the read a bounded one for the parser.
 @actor
 query packageDeployment packageDeploymentsAwaitingConfirm {
-  filter  status=="awaiting_confirm"
+  filter  row => row.status == "awaiting_confirm"
   sort    "row.createdAt", "desc"
   shape   packageDeploymentFull
 }
@@ -707,7 +722,7 @@ query packageDeployment packageDeploymentById {
   args {
     deploymentId  string!
   }
-  filter  row.id==args.deploymentId
+  filter  row => row.id == args.deploymentId
   shape   packageDeploymentFull
 }
 
@@ -742,7 +757,12 @@ query packageDeployment packageDeploymentById {
 /// bounded page keeps ONE answer to "how old is too old" rather than two that can disagree.
 @actor
 query packageDeployment packageDeploymentsInFlight {
-  filter    status!="succeeded" && status!="refused" && status!="failed" && status!="abandoned" && status!="cancelled" && status!="awaiting_confirm"
+  filter    row => row.status != "succeeded"
+                && row.status != "refused"
+                && row.status != "failed"
+                && row.status != "abandoned"
+                && row.status != "cancelled"
+                && row.status != "awaiting_confirm"
   sort      "row.createdAt", "asc"
   paginate  500
   shape     packageDeploymentFull
@@ -757,7 +777,7 @@ query site sitesForPackage {
   args {
     packageId  string!
   }
-  filter  packageId==args.packageId && isNotDeleted
+  filter  row => row.packageId == args.packageId && isNotDeleted(row)
   sort    "hostname", "asc"
   shape   siteFull
 }
@@ -767,7 +787,7 @@ query site sitesForPackage {
 /// together are the whole population.
 @actor
 query site sitesArchived {
-  filter  statusIsArchived && isNotDeleted
+  filter  row => statusIsArchived(row) && isNotDeleted(row)
   sort    "hostname", "asc"
   shape   siteFull
 }
@@ -794,7 +814,7 @@ query site sitesArchived {
 /// the way every composite-tier sibling writes the term, it is recognised as the tier's own.
 @actor
 query sourceCredential sourceCredentialsMine {
-  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.ownerUserId == actor.userId || actor.isClusterOwner == true
   sort    "label", "asc"
   shape   sourceCredentialCard
 }
@@ -806,7 +826,8 @@ query sourceCredential sourceCredentialById {
   args {
     credentialId  string!
   }
-  filter  row.id==args.credentialId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.id == args.credentialId
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   sourceCredentialCard
 }
 
@@ -832,7 +853,7 @@ query sourceCredential sourceCredentialSealedById {
   args {
     credentialId  string!
   }
-  filter  row.id==args.credentialId && ownerUserId==actor.userId
+  filter  row => row.id == args.credentialId && row.ownerUserId == actor.userId
   shape   sourceCredentialSealed
 }
 
@@ -878,7 +899,9 @@ query sourceCredential githubAppGrantByExternalId {
   args {
     externalId  string!
   }
-  filter  kind=="github_app" && externalId==args.externalId && ownerUserId==actor.userId
+  filter  row => row.kind == "github_app"
+              && row.externalId == args.externalId
+              && row.ownerUserId == actor.userId
   shape   sourceCredentialSealed
 }
 
@@ -886,7 +909,7 @@ query sourceCredential githubAppGrantByExternalId {
 /// credential was named -- a person who has connected GitHub should not have to say which grant,
 /// because there is one.
 ///
-/// Revoked grants are excluded by the trait rather than by a bare `status=="active"`, and the
+/// Revoked grants are excluded by the trait rather than by a bare `row.status == "active"`, and the
 /// exclusion is the point: a disconnected grant must read as ABSENT here, so the surface offers
 /// Connect rather than a picker that would refuse every repository in it.
 ///
@@ -897,7 +920,7 @@ query sourceCredential githubAppGrantByExternalId {
 @serverOnly
 @actor
 query sourceCredential githubAppGrantForCaller {
-  filter  kind=="github_app" && statusIsActive && ownerUserId==actor.userId
+  filter  row => row.kind == "github_app" && statusIsActive(row) && row.ownerUserId == actor.userId
   sort    "row.createdAt", "desc"
   shape   sourceCredentialSealed
 }
@@ -919,7 +942,7 @@ query moduleReadiness moduleReadinessAll {
 @unbounded("the active embedder binding -- one row at a literal id")
 @cache(60)
 query embedderBinding activeEmbedderBinding {
-  filter  row.id=="active"
+  filter  row => row.id == "active"
   shape   embedderBindingFull
 }
 
@@ -945,7 +968,8 @@ query modelMeasurement measurementsForMachine {
   // tier narrows every read over the concept, and the enforcement gate requires
   // the filter to IMPLY the tier rather than merely not contradict it -- a read
   // that leaves it implicit is one whose narrowing nobody can check.
-  filter   machineId==args.machineId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter   row => row.machineId == args.machineId
+               && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   sort     "measuredAt", "desc"
   paginate 200
   shape    modelMeasurementFull
@@ -960,7 +984,8 @@ query modelMeasurement measurementsForModel {
   args {
     modelId  string!
   }
-  filter   modelId==args.modelId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter   row => row.modelId == args.modelId
+               && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   sort     "measuredAt", "desc"
   paginate 200
   shape    modelMeasurementFull
@@ -975,12 +1000,15 @@ query modelEvidence recentModelEvidence {
   args {
     week  string
   }
-  // The cluster-owner conjunct comes FIRST and outside the guard. A `when()`
-  // block is invisible to the implication analyzer, so a filter that opened
-  // with one would be undecidable rather than merely strict -- and an
-  // undecidable read is one the enforcement gate cannot pass whatever it
-  // actually does.
-  filter   actor.isClusterOwner==true && when(args.week) { week==args.week }
+  // The cluster-owner conjunct stays outside the guard, as a top-level
+  // conjunct: that is the term the implication analyzer reads. It used to
+  // have to come FIRST as well, when the guard was a `when()` block the
+  // analyzer could not see past, so a filter that opened with one was
+  // undecidable rather than merely strict -- and an undecidable read is one
+  // the enforcement gate cannot pass whatever it actually does. The
+  // `(args.week == nil || ...)` guard is an ordinary conjunct, and order no
+  // longer matters.
+  filter   row => actor.isClusterOwner == true && (args.week == nil || row.week == args.week)
   sort     "foldedAt", "desc"
   paginate 200
   shape    modelEvidenceFull
@@ -998,7 +1026,10 @@ query modelEvidence modelEvidenceForKey {
     level    string!
     week     string!
   }
-  filter   actor.isClusterOwner==true && modelId==args.modelId && level==args.level && week==args.week
+  filter   row => actor.isClusterOwner == true
+               && row.modelId == args.modelId
+               && row.level == args.level
+               && row.week == args.week
   sort     "foldedAt", "desc"
   paginate 5
   shape    modelEvidenceFull
@@ -1020,7 +1051,7 @@ query modelMeasurement measurementsForCaller {
   // enforcement gate reports the read as undecidable rather than as safe or
   // unsafe. The parentheses make it a single composite conjunct the analyzer
   // can match against the tier.
-  filter   (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter   row => row.ownerUserId == actor.userId || actor.isClusterOwner == true
   sort     "measuredAt", "desc"
   paginate 500
   shape    modelMeasurementFull

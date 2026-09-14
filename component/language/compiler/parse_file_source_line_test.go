@@ -21,7 +21,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }
 
 @bogus
@@ -31,7 +31,7 @@ query item queryOthers {
   args {
     status  string  @required
   }
-  filter  status == args.status
+  filter  row => row.status == args.status
 }
 `
 	if got := strings.Split(src, "\n")[11]; got != "@bogus" {

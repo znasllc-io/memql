@@ -2,11 +2,11 @@ package compiler
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/num"
 )
@@ -95,80 +95,6 @@ func isSimpleIdentifier(s string) bool {
 	return true
 }
 
-// convertEventReferences converts event.xxx references to $event.xxx for evaluator resolution.
-// For example: event.payload.subject becomes $event.payload.subject
-func convertEventReferences(query string) string {
-	// Simple string replacement approach:
-	// Replace "event." with "$event." but not when already prefixed with $
-	result := query
-
-	// Handle patterns where event. appears after operators or delimiters
-	patterns := []struct {
-		old string
-		new string
-	}{
-		{"==event.", "==$event."},
-		{"!=event.", "!=$event."},
-		{";event.", ";$event."},
-		{",event.", ",$event."},
-		{"(event.", "($event."},
-		{" event.", " $event."},
-		{"\tevent.", "\t$event."},
-		{":event.", ":$event."}, // Object property values
-		{"{event.", "{$event."}, // Object start
-		{"[event.", "[$event."}, // Array element
-	}
-
-	for _, p := range patterns {
-		result = strings.ReplaceAll(result, p.old, p.new)
-	}
-
-	// Handle case where event. is at the start of the string
-	if strings.HasPrefix(result, "event.") {
-		result = "$" + result
-	}
-
-	return result
-}
-
-// compileStepHelperValue converts function-call args to evaluator format.
-// Handles ExpressionNode (stringify), map (recursive), string (event/args/item refs).
-func (c *Compiler) compileStepHelperValue(v any) any {
-	if v == nil {
-		return nil
-	}
-	if expr, ok := v.(parser.ExpressionNode); ok {
-		return convertArgReferences(convertEventReferences(c.expressionToString(expr)))
-	}
-	if m, ok := v.(map[string]any); ok {
-		out := make(map[string]any, len(m))
-		for k, val := range m {
-			out[k] = c.compileStepHelperValue(val)
-		}
-		return out
-	}
-	if s, ok := v.(string); ok {
-		if strings.HasPrefix(s, "event.") && !strings.HasPrefix(s, "$") {
-			return "$" + s
-		}
-		if strings.HasPrefix(s, "item.") && !strings.HasPrefix(s, "$") {
-			return "$" + s
-		}
-		// Shorthand `args.X.Y` paths land here as raw strings (the parser
-		// stores the literal source text for shorthand-key entries in
-		// object literals -- see parser.go's parseObject loop). Lift to
-		// the `$args.X.Y` form so the evaluator's resolvePath finds
-		// `args` in the custom map LogicRunner seeds.
-		if strings.HasPrefix(s, "args.") && !strings.HasPrefix(s, "$") {
-			return "$" + s
-		}
-		if (strings.Contains(s, ".result.") || strings.Contains(s, ".metadata.")) && !strings.HasPrefix(s, "$") {
-			return "$" + s
-		}
-	}
-	return v
-}
-
 // positionalArgValues reports whether args is a pure positional arg map
 // (exactly the keys "0".."len-1") and, if so, returns the values in index
 // order. A positional builtin call (`append(arr, item)`, `coalesce(a, b)`)
@@ -188,44 +114,6 @@ func positionalArgValues(args map[string]any) ([]any, bool) {
 		out[i] = v
 	}
 	return out, true
-}
-
-// argRefPattern matches the `arg("path")` stringification ArgRefExpr emits
-// from expressionToString. The path is captured for rewrite. Anchored on
-// `arg(` not just `arg` so identifiers ending in `arg` don't match.
-var argRefPattern = regexp.MustCompile(`arg\("([^"]+)"\)`)
-
-// convertArgReferences rewrites the `arg("path")` shape that
-// expressionToString emits for ArgRefExpr nodes back into the
-// `$args.path` form the runtime evaluator resolves through the
-// custom map. Skip paths starting with `actor.`: the parser also
-// represents `actor.userId` as ArgRefExpr (path "actor.userId") so
-// the actor accessor and the args accessor share the AST node, and
-// the actor accessor goes through a different resolution path
-// (resolveActorReferences) at filter time. The `actor.` prefix is
-// the disambiguator; leave those serializations alone.
-//
-// Without this rewrite, mutation step payloads stamped from a logic
-// body like `mutation({nodeType: args.event.payload.node.type})`
-// land as the literal string `arg("event.payload.node.type")` (the
-// MutationExecutor's evaluateValue has no handler for the `arg(`
-// prefix and treats the whole expression as a string literal).
-// memql#367.
-func convertArgReferences(s string) string {
-	if !strings.Contains(s, `arg("`) {
-		return s
-	}
-	return argRefPattern.ReplaceAllStringFunc(s, func(match string) string {
-		m := argRefPattern.FindStringSubmatch(match)
-		if len(m) != 2 {
-			return match
-		}
-		path := m[1]
-		if strings.HasPrefix(path, "actor.") || path == "actor" {
-			return match
-		}
-		return "$args." + path
-	})
 }
 
 // isRuntimeReference checks if a string value is a runtime reference that should not be quoted.
@@ -364,6 +252,10 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 
 	output := make(map[string]any)
 
+	// Every expression compiles through automation_generator_v1.go: it is
+	// carried as canonical v1 source or a `{"$expr": ...}` value leaf, and
+	// the runtime evaluates it with EvalExpr (memql#5367).
+
 	// Basic metadata
 	output["name"] = def.Name
 	if desc := parser.EffectiveDescription(automation.DocComment, automation.Description); desc != "" {
@@ -418,8 +310,16 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	// compile-time error.
 	//
 	// Unknown references (typos) still surface as compile-time errors.
+	// Two steps with one id are refused before anything is keyed by id: an
+	// id names a step's result and its journal record, so the second step
+	// would overwrite the first in both, and every map below would hold one
+	// of them (memql#5367).
+	if err := refuseDuplicateStepIDs(def.Name, automation.Steps); err != nil {
+		return nil, err
+	}
+
 	stepIds := make(map[string]struct{}, len(automation.Steps))
-	stepsById := make(map[string]*parser.StepDef, len(automation.Steps))
+	var ordered []*parser.StepDef
 	var orderedIds []string
 	var returnStep *parser.StepDef
 
@@ -430,29 +330,30 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 			continue
 		}
 		stepIds[step.ID] = struct{}{}
-		stepsById[step.ID] = step
+		ordered = append(ordered, step)
 		orderedIds = append(orderedIds, step.ID)
 	}
 
-	// Build dependency graph: step -> set of step IDs it depends on.
-	deps := make(map[string]map[string]struct{}, len(orderedIds))
-	for _, id := range orderedIds {
-		step := stepsById[id]
-		refs := collectAllStepReferences(c, step, stepIds)
-		deps[id] = refs
+	// Build dependency graph: per step, in source order, the step ids its
+	// expressions read (their free names that are step ids).
+	deps := make([]map[string]struct{}, len(ordered))
+	for i, step := range ordered {
+		refs, err := collectStepReferencesV1(step, stepIds)
+		if err != nil {
+			return nil, fmt.Errorf("automation %q: %w", def.Name, err)
+		}
+		deps[i] = refs
 	}
 
-	// Topological sort (Kahn's algorithm). Preserves source order among
-	// steps with equal depth so the output is deterministic.
+	// Stable topological sort: dependency order, and source order otherwise.
 	sorted, err := topoSortSteps(def.Name, orderedIds, deps)
 	if err != nil {
 		return nil, err
 	}
 
 	steps := make([]map[string]any, 0, len(sorted))
-	for _, id := range sorted {
-		step := stepsById[id]
-		compiledStep, err := c.compileStep(step)
+	for _, i := range sorted {
+		compiledStep, err := c.compileStepV1(ordered[i])
 		if err != nil {
 			return nil, err
 		}
@@ -463,7 +364,7 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 
 	// OnComplete hook (using return if defined)
 	if automation.OnComplete != nil {
-		onComplete, err := c.compileStep(automation.OnComplete)
+		onComplete, err := c.compileStepV1(automation.OnComplete)
 		if err != nil {
 			return nil, err
 		}
@@ -472,7 +373,7 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 
 	// OnError hook
 	if automation.OnError != nil {
-		onError, err := c.compileStep(automation.OnError)
+		onError, err := c.compileStepV1(automation.OnError)
 		if err != nil {
 			return nil, err
 		}
@@ -493,19 +394,14 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	// triggered.
 	output["template"] = attributeFlagPresent(def.Attributes, "template") || attributeFlagPresent(automation.Attributes, "template")
 
-	// If there's a return statement, add it as final computation metadata.
-	// The return expression must go through the SAME reference rewrites as
-	// every other step value (compileStepHelperValue, line ~99): without
-	// convertArgReferences a `return args.X` body stringifies to the raw
-	// `arg("X")` shape, which the runtime evaluator has no handler for -- it
-	// reaches engine.Execute as a bare query and fails with `function "arg"
-	// not found`. That is the multi-step half of the #1840 forge outage
-	// (attachToRequest `return args.requestId`, routeRequest
-	// `return args.event.payload.id`); the single-return half is fixed in
-	// substituteArgRefValue. convertEventReferences is applied for symmetry
-	// (a `return event.X` body in an automation logic resolves the same way).
+	// A return statement is the final computation: canonical v1 source, like
+	// every other expression.
 	if returnStep != nil {
-		output["_return"] = convertArgReferences(convertEventReferences(c.expressionToString(returnStep.Config.(*parser.QueryStepConfig).Query)))
+		src, err := v1ReturnSource(returnStep)
+		if err != nil {
+			return nil, fmt.Errorf("automation %q: %w", def.Name, err)
+		}
+		output["_return"] = src
 	}
 
 	return &AutomationOutput{
@@ -515,330 +411,176 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	}, nil
 }
 
-// collectAllStepReferences extracts step-name dependencies from every
-// part of a step: its condition string, its query/function expression,
-// and its mutation payloads. Returns a set of step IDs from allSteps
-// that this step depends on. Reserved names (event, item, etc.) and
-// self-references are excluded.
-func collectAllStepReferences(c *Compiler, step *parser.StepDef, allSteps map[string]struct{}) map[string]struct{} {
-	raw := make(map[string]struct{})
-
-	// 1. Condition string.
-	if step.Condition != "" {
-		for name := range extractStepReferences(step.Condition) {
-			raw[name] = struct{}{}
-		}
+// topoSortSteps orders an automation's steps so every step runs after the
+// steps it depends on, and is otherwise in SOURCE order: of the steps ready to
+// run, the one written first runs first -- a stable topological sort. ids are
+// the steps' ids in source order and deps[i] the ids step i reads; the result
+// is positions into ids. When the source is already in dependency order the
+// result is the source order exactly, which is what the statement form of a
+// body means (D12) and what the legacy runtime did. A step that reads a step
+// written after it is the one thing that moves: its provider is pulled ahead
+// of it, and nothing else changes place.
+//
+// The earlier sort was breadth-first (Kahn's algorithm with a FIFO queue), so
+// "ready" meant "ready in the same round": a step with no dependencies ran
+// ahead of an EARLIER step that depended on the first one, and two steps
+// released by the same provider came out in map-iteration order. In
+// forge's routeRequest that put `persistRouted` (independent) ahead of
+// `advance` (reads `steps.decide`), the reverse of source order (memql#5367).
+//
+// It tracks steps by POSITION, never by id, so it cannot depend on the ids
+// being unique. Keyed by id, emitting the first of two steps with one id
+// marked both done: the second was never emitted, and the sort reported a
+// dependency cycle among no steps. The compiler refuses two steps with one id
+// before it sorts (refuseDuplicateStepIDs); a read of an id two steps carry
+// waits for both.
+//
+// Returns an error if a cycle is detected or if a step references an unknown
+// step ID (typo detection).
+func topoSortSteps(automationName string, ids []string, deps []map[string]struct{}) ([]int, error) {
+	at := make(map[string][]int, len(ids))
+	for i, id := range ids {
+		at[id] = append(at[id], i)
 	}
 
-	// 2. Step expression content (query string, function args, mutation
-	//    payloads). Serialise to the same string form the evaluator sees
-	//    and scan for step references.
-	for _, s := range stepExpressionStrings(c, step) {
-		for name := range extractStepReferences(s) {
-			raw[name] = struct{}{}
-		}
-	}
-
-	// Filter to actual step IDs (exclude reserved names, self, unknowns).
-	out := make(map[string]struct{}, len(raw))
-	for name := range raw {
-		if name == step.ID {
-			continue
-		}
-		if isReservedReferenceName(name) {
-			continue
-		}
-		if _, ok := allSteps[name]; !ok {
-			continue // unknown -- will be caught by the topoSort unknown-ref check
-		}
-		out[name] = struct{}{}
-	}
-	return out
-}
-
-// stepExpressionStrings serialises a step's config expressions into the
-// string form the evaluator would see, so extractStepReferences can
-// pull references from function arguments, query strings, and mutation
-// payloads.
-func stepExpressionStrings(c *Compiler, step *parser.StepDef) []string {
-	var out []string
-	switch cfg := step.Config.(type) {
-	case *parser.QueryStepConfig:
-		if cfg.Query != nil {
-			out = append(out, c.expressionToString(cfg.Query))
-		}
-	case *parser.FunctionStepConfig:
-		for _, v := range cfg.Args {
-			collectStringsFromValue(c, v, &out)
-		}
-	case *parser.MutationStepConfig:
-		if cfg.Mutation != nil {
-			if cfg.Mutation.PayloadRaw != "" {
-				out = append(out, cfg.Mutation.PayloadRaw)
-			}
-			collectStringsFromValue(c, cfg.Mutation.IDTemplate, &out)
-			collectStringsFromValue(c, cfg.Mutation.ParentTemplate, &out)
-			collectStringsFromValue(c, cfg.Mutation.AliasOfTemplate, &out)
-		}
-	case *parser.ActionStepConfig:
-		// Action-step args carry inter-step references (e.g.
-		// `digests: build.result`), so the topo sort must see them to order
-		// an action after the step it consumes (epic #2212, I10 #2224).
-		for _, v := range cfg.Args {
-			collectStringsFromValue(c, v, &out)
-		}
-	case *parser.ForEachStepConfig:
-		if cfg.Source != "" {
-			out = append(out, cfg.Source)
-		}
-		for i := range cfg.Do {
-			out = append(out, stepExpressionStrings(c, &cfg.Do[i])...)
-		}
-	case *parser.ParallelStepConfig:
-		for i := range cfg.Branches {
-			out = append(out, stepExpressionStrings(c, &cfg.Branches[i])...)
-		}
-	case *parser.SwitchStepConfig:
-		// The switch SELECTOR expression (e.g. `outcome.result`) is a
-		// first-class inter-step reference -- without it the finish/finalize
-		// branch sorts ahead of the step that produces the value it switches
-		// on. The per-case step bodies carry their own references too (e.g. a
-		// case action consuming `build.result`). Both must feed the topo sort
-		// (epic #2212, I10 #2224).
-		if cfg.Expression != "" {
-			out = append(out, cfg.Expression)
-		}
-		for _, cs := range cfg.Cases {
-			if cs == nil {
-				continue
-			}
-			for i := range cs.Steps {
-				out = append(out, stepExpressionStrings(c, &cs.Steps[i])...)
+	// Resolve each step's reads to the positions of the steps it reads, in
+	// source order so an unknown reference is reported the same every time.
+	providers := make([][]int, len(ids))
+	for i, id := range ids {
+		var names []string
+		if i < len(deps) {
+			names = make([]string, 0, len(deps[i]))
+			for dep := range deps[i] {
+				names = append(names, dep)
 			}
 		}
-		if cfg.Default != nil {
-			for i := range cfg.Default.Steps {
-				out = append(out, stepExpressionStrings(c, &cfg.Default.Steps[i])...)
-			}
-		}
-	}
-	return out
-}
-
-// collectStringsFromValue recursively serialises an argument value to
-// its string form for step-reference extraction.
-func collectStringsFromValue(c *Compiler, v any, out *[]string) {
-	switch val := v.(type) {
-	case parser.ExpressionNode:
-		*out = append(*out, c.expressionToString(val))
-	case string:
-		*out = append(*out, val)
-	case map[string]any:
-		for _, inner := range val {
-			collectStringsFromValue(c, inner, out)
-		}
-	case []any:
-		for _, inner := range val {
-			collectStringsFromValue(c, inner, out)
-		}
-	}
-}
-
-// topoSortSteps sorts step IDs by their dependency graph using Kahn's
-// algorithm. Among steps with equal depth (no ordering constraint),
-// the original source order is preserved so the output is deterministic.
-// Returns an error if a cycle is detected or if a step references an
-// unknown step ID (typo detection).
-func topoSortSteps(automationName string, sourceOrder []string, deps map[string]map[string]struct{}) ([]string, error) {
-	allSteps := make(map[string]struct{}, len(sourceOrder))
-	for _, id := range sourceOrder {
-		allSteps[id] = struct{}{}
-	}
-
-	// Check for unknown references (typos).
-	for id, depSet := range deps {
-		for dep := range depSet {
-			if _, ok := allSteps[dep]; !ok {
+		sort.Strings(names)
+		for _, dep := range names {
+			pos, ok := at[dep]
+			if !ok {
 				return nil, fmt.Errorf(
 					"automation %q: step %q references unknown step %q -- check for a typo, or add the step",
 					automationName, id, dep)
 			}
+			providers[i] = append(providers[i], pos...)
 		}
 	}
 
-	// Kahn's algorithm.
-	inDegree := make(map[string]int, len(sourceOrder))
-	for _, id := range sourceOrder {
-		inDegree[id] = 0
-	}
-	for _, depSet := range deps {
-		for dep := range depSet {
-			inDegree[dep] += 0 // ensure key exists
-		}
-	}
-	// Reverse: for each step, count how many OTHER steps depend on IT.
-	// Actually Kahn's uses in-degree of the CONSUMER, not the provider.
-	// Let me re-think: deps[A] = {B, C} means "A depends on B and C".
-	// In the DAG, edges go from B->A and C->A (B must run before A).
-	// In-degree of A = number of dependencies it has = len(deps[A]).
-	for _, id := range sourceOrder {
-		inDegree[id] = len(deps[id])
-	}
-
-	// Queue: steps with no dependencies, in source order.
-	queue := make([]string, 0)
-	for _, id := range sourceOrder {
-		if inDegree[id] == 0 {
-			queue = append(queue, id)
-		}
-	}
-
-	// Reverse adjacency: provider -> list of consumers (steps that
-	// depend on it). We need this to decrement in-degree when a
-	// provider is emitted.
-	consumers := make(map[string][]string)
-	for id, depSet := range deps {
-		for dep := range depSet {
-			consumers[dep] = append(consumers[dep], id)
-		}
-	}
-
-	sorted := make([]string, 0, len(sourceOrder))
-	for len(queue) > 0 {
-		// Pop first (preserves source order among equal-depth steps).
-		id := queue[0]
-		queue = queue[1:]
-		sorted = append(sorted, id)
-
-		// Every step that depends on `id` loses one dependency.
-		for _, consumer := range consumers[id] {
-			inDegree[consumer]--
-			if inDegree[consumer] == 0 {
-				queue = append(queue, consumer)
+	emitted := make([]bool, len(ids))
+	ready := func(i int) bool {
+		for _, p := range providers[i] {
+			if !emitted[p] {
+				return false
 			}
 		}
+		return true
 	}
-
-	if len(sorted) != len(sourceOrder) {
-		// Cycle detected -- find the participating steps.
-		var cycle []string
-		for _, id := range sourceOrder {
-			if inDegree[id] > 0 {
-				cycle = append(cycle, id)
+	sorted := make([]int, 0, len(ids))
+	for len(sorted) < len(ids) {
+		// The first step in source order whose dependencies have all run.
+		next := -1
+		for i := range ids {
+			if !emitted[i] && ready(i) {
+				next = i
+				break
 			}
 		}
-		return nil, fmt.Errorf(
-			"automation %q: dependency cycle among steps %v -- each step references one or more of the others",
-			automationName, cycle)
+		if next < 0 {
+			// Cycle detected -- name the participating steps.
+			var cycle []string
+			for i, id := range ids {
+				if !emitted[i] {
+					cycle = append(cycle, id)
+				}
+			}
+			return nil, fmt.Errorf(
+				"automation %q: dependency cycle among steps %v -- each step references one or more of the others",
+				automationName, cycle)
+		}
+		emitted[next] = true
+		sorted = append(sorted, next)
 	}
-
 	return sorted, nil
 }
 
-// extractStepReferences pulls every identifier that appears in a
-// position where the runtime would resolve it as a step-name reference.
-// Returns a set of candidate names; the caller filters against the
-// actual step symbol table and a reserved-name list.
-//
-// Implementation walks the shared-lexer token stream rather than
-// regex-matching the condition source. Two reference forms surface:
-//
-//   - first(name) / last(name) -- consumed as (ident "first"|"last",
-//     paren-open, ident name, paren-close) sequences.
-//   - bare dotted identifiers -- the shared lexer emits `foo.bar.baz`
-//     as a single identifier because `.` is part of the identifier
-//     character class, so recognising them is a single token test.
-//     Hand-written whitespace (`foo . bar`) splits into three tokens;
-//     we join consecutive ident-dot-ident runs before checking.
-func extractStepReferences(condition string) map[string]struct{} {
-	out := make(map[string]struct{})
-	if condition == "" {
-		return out
-	}
-	tokens, err := parser.NewLexer(condition).Tokenize()
-	if err != nil {
-		return out
-	}
-	for i := 0; i < len(tokens); i++ {
-		tok := tokens[i]
-		if tok.Type != parser.TokenIdentifier {
-			continue
+// refuseDuplicateStepIDs refuses an automation in which two steps carry one
+// id, naming both and the lines they are written on. The steps a switch case,
+// a forEach body or a parallel branch runs are counted with the top-level
+// ones: a step's result is recorded under its id wherever it runs, so a
+// nested step with a top-level step's id overwrites it too.
+func refuseDuplicateStepIDs(automationName string, steps []parser.StepDef) error {
+	seen := map[string]*parser.StepDef{}
+	var walk func(steps []parser.StepDef) error
+	visit := func(s *parser.StepDef) error {
+		if s.ID == "" || s.ID == "_return" {
+			return nil
 		}
-		literal := tok.Literal
-		// first(name) / last(name) -- consume the call sequence.
-		if literal == "first" || literal == "last" {
-			if i+3 < len(tokens) &&
-				tokens[i+1].Type == parser.TokenParenOpen &&
-				tokens[i+2].Type == parser.TokenIdentifier &&
-				tokens[i+3].Type == parser.TokenParenClose {
-				out[tokens[i+2].Literal] = struct{}{}
-				i += 3
-				continue
+		if first, ok := seen[s.ID]; ok {
+			return fmt.Errorf(
+				"automation %q: two steps have the id %q -- %s and %s. A step's id names its result and its journal record, so the second would overwrite the first: give each step its own name",
+				automationName, s.ID, describeStepAt(first), describeStepAt(s))
+		}
+		seen[s.ID] = s
+		return nil
+	}
+	walk = func(steps []parser.StepDef) error {
+		for i := range steps {
+			s := &steps[i]
+			if err := visit(s); err != nil {
+				return err
+			}
+			for _, nested := range nestedStepLists(s) {
+				if err := walk(nested); err != nil {
+					return err
+				}
 			}
 		}
-		// Join `ident . ident . ident` runs produced by hand-written
-		// whitespace, then apply the same bareDottedIdentifier test
-		// as the single-token case.
-		combined, consumed := joinDottedIdentifierRun(tokens, i)
-		if bareDottedIdentifier(combined) {
-			if dot := strings.Index(combined, "."); dot > 0 {
-				out[combined[:dot]] = struct{}{}
+		return nil
+	}
+	return walk(steps)
+}
+
+// nestedStepLists is the steps a step runs as part of itself: a forEach body,
+// parallel branches, and a switch's cases, in source order.
+func nestedStepLists(s *parser.StepDef) [][]parser.StepDef {
+	switch cfg := s.Config.(type) {
+	case *parser.ForEachStepConfig:
+		return [][]parser.StepDef{cfg.Do}
+	case *parser.ParallelStepConfig:
+		return [][]parser.StepDef{cfg.Branches}
+	case *parser.SwitchStepConfig:
+		var out [][]parser.StepDef
+		keys := make([]string, 0, len(cfg.Cases))
+		for k := range cfg.Cases {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if c := cfg.Cases[k]; c != nil {
+				out = append(out, c.Steps)
 			}
-			i += consumed - 1
 		}
+		if cfg.Default != nil {
+			out = append(out, cfg.Default.Steps)
+		}
+		return out
 	}
-	return out
+	return nil
 }
 
-// joinDottedIdentifierRun collapses a sequence of [ident (.ident)*]
-// tokens into the concatenated identifier string. Returns the combined
-// literal and the number of tokens it consumed. When the starting
-// token is not an identifier, returns ("", 0).
-func joinDottedIdentifierRun(tokens []parser.Token, start int) (string, int) {
-	if start >= len(tokens) || tokens[start].Type != parser.TokenIdentifier {
-		return "", 0
+// describeStepAt names a step for a refusal: its kind, and the line it is
+// written on when the parser recorded one.
+func describeStepAt(s *parser.StepDef) string {
+	kind := string(s.Type)
+	if kind == "" {
+		kind = "step"
+	} else {
+		kind += " step"
 	}
-	var sb strings.Builder
-	sb.WriteString(tokens[start].Literal)
-	consumed := 1
-	for i := start + 1; i+1 < len(tokens); {
-		a, b := tokens[i], tokens[i+1]
-		// Accept either an explicit `.` colon-like connector (won't
-		// appear with the shared lexer's `.`-in-identifier rule) or
-		// a trailing-dot identifier followed by another identifier
-		// (arises when the first chunk ended cleanly and the next
-		// starts with `.`, e.g. `foo` + `.bar.baz`).
-		if a.Type == parser.TokenIdentifier && strings.HasPrefix(a.Literal, ".") {
-			sb.WriteString(a.Literal)
-			i++
-			consumed++
-			continue
-		}
-		if a.Type == parser.TokenIdentifier && b.Type == parser.TokenIdentifier &&
-			strings.HasPrefix(b.Literal, ".") {
-			// Shouldn't normally happen because consecutive idents
-			// would have merged, but defensively join them.
-			sb.WriteString(a.Literal)
-			sb.WriteString(b.Literal)
-			i += 2
-			consumed += 2
-			continue
-		}
-		break
+	if s.Line > 0 {
+		return fmt.Sprintf("the %s at line %d", kind, s.Line)
 	}
-	return sb.String(), consumed
-}
-
-// isReservedReferenceName returns true for identifiers that appear in
-// condition strings but are never step names -- event helpers, runtime
-// accessors, literal keywords.
-func isReservedReferenceName(name string) bool {
-	switch name {
-	case "event", "item", "index", "arg", "var", "input", "error",
-		"step", "field", "timestamp", "now", "true", "false", "nil", "null":
-		return true
-	}
-	return false
+	return "the " + kind + " (no source line)"
 }
 
 // compileInputExpression converts an input expression to JSON format.
@@ -857,294 +599,6 @@ func (c *Compiler) compileInputExpression(expr parser.ExpressionNode) (map[strin
 	}
 
 	return input, nil
-}
-
-// compileStep converts a StepDef to JSON format.
-func (c *Compiler) compileStep(step *parser.StepDef) (map[string]any, error) {
-	output := map[string]any{
-		"id":   step.ID,
-		"type": string(step.Type),
-	}
-
-	if step.Name != "" {
-		output["name"] = step.Name
-	}
-
-	if step.Condition != "" {
-		output["condition"] = c.translateCondition(step.Condition)
-	}
-
-	if step.OnError != "" {
-		output["onError"] = step.OnError
-	}
-
-	if step.RetryCount > 0 {
-		output["retryCount"] = step.RetryCount
-	}
-
-	// Type-specific configuration
-	switch step.Type {
-	case parser.StepTypeQuery:
-		if cfg, ok := step.Config.(*parser.QueryStepConfig); ok {
-			query := c.expressionToString(cfg.Query)
-			// Convert event.xxx references to $event.xxx for evaluator, and
-			// the `arg("path")` shape expressionToString emits for ArgRefExpr
-			// back to $args.path. The latter matters for an arithmetic step
-			// RHS (#2542 GAP 2) whose operand is an `args.X` reference: the
-			// LogicRunner re-parses this string (normalizeReparseSource strips
-			// the `$`), so `net := args.gross - args.fee` resolves its operands
-			// exactly as the terminal-return path (line ~501) already does.
-			// It is a no-op for a verbatim collection-chain Raw source, which
-			// carries no `arg("...")` token.
-			query = convertArgReferences(convertEventReferences(query))
-			output["query"] = map[string]any{
-				"query": query,
-			}
-		}
-
-	case parser.StepTypeMutation:
-		if cfg, ok := step.Config.(*parser.MutationStepConfig); ok {
-			// Output mutation as structured config, not as a query string
-			// The mutation executor will evaluate expressions and build proper JSON
-			mutationConfig, err := c.compileMutationConfig(cfg.Mutation)
-			if err != nil {
-				return nil, err
-			}
-			output["mutation"] = mutationConfig
-		}
-
-	case parser.StepTypeFunction:
-		if cfg, ok := step.Config.(*parser.FunctionStepConfig); ok {
-			helperArgs := cfg.Args
-			if len(helperArgs) == 1 {
-				if obj, ok := helperArgs["0"].(map[string]any); ok {
-					helperArgs = obj
-				}
-			}
-			handled := false
-			switch cfg.Name {
-			case "query":
-				if q, ok := helperArgs["query"]; ok {
-					qs := fmt.Sprintf("%v", q)
-					output["type"] = "query"
-					output["query"] = map[string]any{"query": convertEventReferences(qs)}
-					handled = true
-				}
-			case "mutation":
-				if _, ok := helperArgs["concept"]; ok {
-					mutCfg := map[string]any{}
-					if v, ok := helperArgs["concept"]; ok {
-						mutCfg["concept"] = fmt.Sprintf("%v", v)
-					}
-					if v, ok := helperArgs["id"]; ok {
-						mutCfg["id"] = c.compileStepHelperValue(v)
-					}
-					if v, ok := helperArgs["payload"]; ok {
-						mutCfg["payload"] = c.compileStepHelperValue(v)
-					}
-					if v, ok := helperArgs["parent"]; ok {
-						mutCfg["parent"] = c.compileStepHelperValue(v)
-					}
-					if v, ok := helperArgs["aliasOf"]; ok {
-						mutCfg["aliasOf"] = c.compileStepHelperValue(v)
-					}
-					output["type"] = "mutation"
-					output["mutation"] = mutCfg
-					handled = true
-				}
-			case "shape":
-				if src, ok := helperArgs["source"]; ok {
-					output["type"] = "shape"
-					shapeCfg := map[string]any{"source": fmt.Sprintf("%v", src)}
-					if tpl, ok := helperArgs["template"]; ok {
-						shapeCfg["template"] = tpl
-					}
-					output["shape"] = shapeCfg
-					handled = true
-				}
-			case "event", "publishEvent":
-				if topic, ok := helperArgs["topic"]; ok {
-					output["type"] = "event"
-					eventCfg := map[string]any{"topic": c.compileStepHelperValue(topic)}
-					if kind, ok := helperArgs["kind"]; ok {
-						eventCfg["kind"] = fmt.Sprintf("%v", kind)
-					}
-					if payload, ok := helperArgs["payload"]; ok {
-						eventCfg["payload"] = c.compileStepHelperValue(payload)
-					}
-					output["event"] = eventCfg
-					handled = true
-				}
-			case "webhook":
-				if url, ok := helperArgs["url"]; ok {
-					output["type"] = "webhook"
-					whCfg := map[string]any{
-						"url":    c.compileStepHelperValue(url),
-						"method": "POST",
-					}
-					if m, ok := helperArgs["method"]; ok {
-						whCfg["method"] = fmt.Sprintf("%v", m)
-					}
-					if h, ok := helperArgs["headers"]; ok {
-						whCfg["headers"] = c.compileStepHelperValue(h)
-					}
-					if b, ok := helperArgs["body"]; ok {
-						whCfg["body"] = c.compileStepHelperValue(b)
-					}
-					if t, ok := helperArgs["timeout"]; ok {
-						whCfg["timeout"] = fmt.Sprintf("%v", t)
-					}
-					output["webhook"] = whCfg
-					handled = true
-				}
-			}
-			if !handled {
-				// Sub-automation dispatch: a function-call step whose name
-				// starts with the `automation` prefix is an
-				// automation-within-automation invocation. The kindPrefix
-				// rewriter at the parser side turns
-				// `automation seedWelcomeCurriculum { ... }` into
-				// `automationSeedWelcomeCurriculum({ ... })`; here we
-				// recognise that shape and emit a StepTypeAutomation step
-				// so the runtime AutomationExecutor handles it (rather
-				// than the function executor trying to find a function
-				// named "automationSeedWelcomeCurriculum" in the registry,
-				// which doesn't exist).
-				if strings.HasPrefix(cfg.Name, "automation") && len(cfg.Name) > len("automation") {
-					subName := cfg.Name[len("automation"):]
-					subName = strings.ToLower(subName[:1]) + subName[1:]
-					compiledArgs := make(map[string]any, len(cfg.Args))
-					for k, v := range cfg.Args {
-						compiledArgs[k] = c.compileStepHelperValue(v)
-					}
-					autoCfg := map[string]any{"name": subName}
-					if len(compiledArgs) > 0 {
-						autoCfg["args"] = compiledArgs
-					}
-					output["type"] = "automation"
-					output["automation"] = autoCfg
-					handled = true
-				}
-			}
-			if !handled {
-				function := map[string]any{"name": cfg.Name}
-				if len(cfg.Args) > 0 {
-					compiled := make(map[string]any, len(cfg.Args))
-					for k, v := range cfg.Args {
-						compiled[k] = c.compileStepHelperValue(v)
-					}
-					function["args"] = compiled
-				}
-				output["function"] = function
-			}
-		}
-
-	case parser.StepTypeAction:
-		if cfg, ok := step.Config.(*parser.ActionStepConfig); ok {
-			action := map[string]any{"ref": cfg.Ref}
-			if cfg.Surface != "" {
-				action["surface"] = cfg.Surface
-			}
-			if len(cfg.Args) > 0 {
-				compiled := make(map[string]any, len(cfg.Args))
-				for k, v := range cfg.Args {
-					compiled[k] = c.compileStepHelperValue(v)
-				}
-				action["args"] = compiled
-			}
-			output["action"] = action
-		}
-
-	case parser.StepTypeForEach:
-		if cfg, ok := step.Config.(*parser.ForEachStepConfig); ok {
-			forEach := map[string]any{
-				"source": cfg.Source,
-			}
-			if cfg.Filter != "" {
-				forEach["filter"] = cfg.Filter
-			}
-			if cfg.As != "" {
-				forEach["as"] = cfg.As
-			}
-			if cfg.Concurrency > 0 {
-				forEach["concurrency"] = cfg.Concurrency
-			}
-
-			// Compile nested steps
-			doSteps := []map[string]any{}
-			for _, doStep := range cfg.Do {
-				compiled, err := c.compileStep(&doStep)
-				if err != nil {
-					return nil, err
-				}
-				doSteps = append(doSteps, compiled)
-			}
-			forEach["do"] = doSteps
-
-			output["forEach"] = forEach
-		}
-
-	case parser.StepTypeParallel:
-		if cfg, ok := step.Config.(*parser.ParallelStepConfig); ok {
-			parallel := map[string]any{}
-			if cfg.Wait != "" {
-				parallel["wait"] = cfg.Wait
-			}
-			parallel["failFast"] = cfg.FailFast
-
-			// Compile branches
-			branches := []map[string]any{}
-			for _, branch := range cfg.Branches {
-				compiled, err := c.compileStep(&branch)
-				if err != nil {
-					return nil, err
-				}
-				branches = append(branches, compiled)
-			}
-			parallel["branches"] = branches
-
-			output["parallel"] = parallel
-		}
-
-	case parser.StepTypeSwitch:
-		if cfg, ok := step.Config.(*parser.SwitchStepConfig); ok {
-			switchCfg := map[string]any{
-				"expression": cfg.Expression,
-			}
-
-			// Compile cases
-			cases := make(map[string]any)
-			for caseVal, caseBody := range cfg.Cases {
-				caseSteps := []map[string]any{}
-				for _, caseStep := range caseBody.Steps {
-					compiled, err := c.compileStep(&caseStep)
-					if err != nil {
-						return nil, err
-					}
-					caseSteps = append(caseSteps, compiled)
-				}
-				cases[caseVal] = map[string]any{"steps": caseSteps}
-			}
-			switchCfg["cases"] = cases
-
-			// Default case
-			if cfg.Default != nil {
-				defaultSteps := []map[string]any{}
-				for _, defStep := range cfg.Default.Steps {
-					compiled, err := c.compileStep(&defStep)
-					if err != nil {
-						return nil, err
-					}
-					defaultSteps = append(defaultSteps, compiled)
-				}
-				switchCfg["default"] = map[string]any{"steps": defaultSteps}
-			}
-
-			output["switch"] = switchCfg
-		}
-	}
-
-	return output, nil
 }
 
 // expressionToString converts an expression node back to MemQL string format.
@@ -1226,8 +680,8 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		}
 
 	case *parser.LogicalExpr:
-		left := c.expressionToString(e.Left)
-		right := c.expressionToString(e.Right)
+		left := c.logicalOperandString(e.Left)
+		right := c.logicalOperandString(e.Right)
 		sep := ";"
 		if e.Op == parser.LogicalOr {
 			sep = ","
@@ -1492,6 +946,15 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		}
 		return fmt.Sprintf("(%s) => %s", strings.Join(e.Params, ", "), body)
 
+	case *ast.IdentExpr, *ast.MemberExpr, *ast.CallExpr, *ast.UnaryExpr, *ast.BinaryExpr, *ast.ListExpr, *ast.MapExpr, *ast.ParenExpr:
+		// An edition-2026 node: a query's filter lambda body (the struct-form
+		// rewriter joins it as `concept==<id> && (row => ...)`), or a
+		// mutation value. Its canonical source is its serialisation -- the
+		// internal form reads a v1 lambda where it meets an operand
+		// (parser.tryParseV1LambdaOperand), and a mutation value parses
+		// with the v1 grammar.
+		return ast.FormatExpr(e)
+
 	default:
 		// SAFETY: emitting `%T` here puts the Go type name (e.g.
 		// `*parser.CanonicalIdExpr`) into the generated code as a
@@ -1502,6 +965,17 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		// id strings.
 		return fmt.Sprintf("<<unsupported expression %T>>", expr)
 	}
+}
+
+// logicalOperandString is expressionToString for an operand of `;` / `,`. A
+// lambda operand is parenthesised, as the struct-form rewriter writes a v1
+// filter's join (`concept==<id> && (row => ...)`): a lambda's body extends as
+// far right as it can, so a bare one would take in whatever follows it.
+func (c *Compiler) logicalOperandString(n parser.ExpressionNode) string {
+	if _, ok := n.(*ast.LambdaExpr); ok {
+		return "(" + c.expressionToString(n) + ")"
+	}
+	return c.expressionToString(n)
 }
 
 // mutationToString converts a mutation statement to MemQL string format.
@@ -1568,616 +1042,6 @@ func (c *Compiler) mutationToString(m *parser.MutationStmt) string {
 	return fmt.Sprintf("insert(%s)", strings.Join(parts, ", "))
 }
 
-// compileMutationConfig converts a MutationStmt to a structured config map.
-// This parses the mutation into a format that can be evaluated at runtime
-// by the mutation executor.
-func (c *Compiler) compileMutationConfig(m *parser.MutationStmt) (map[string]any, error) {
-	if m == nil {
-		return nil, nil
-	}
-
-	config := map[string]any{
-		"concept": m.Concept,
-	}
-
-	// Handle ID - can be a literal or expression
-	if m.IDTemplate != nil {
-		switch id := m.IDTemplate.(type) {
-		case string:
-			if strings.TrimSpace(id) != "" {
-				config["id"] = convertEventReferences(id)
-			}
-		case parser.ExpressionNode:
-			config["id"] = convertEventReferences(c.expressionToString(id))
-		default:
-			config["id"] = convertEventReferences(fmt.Sprintf("%v", id))
-		}
-	}
-
-	// Parse the PayloadRaw into a structured payload map
-	if m.PayloadRaw != "" {
-		parsed, err := c.parsePayloadRaw(m.PayloadRaw)
-		if err != nil {
-			return nil, fmt.Errorf("mutation %s: %w", m.Concept, err)
-		}
-		if parsed != nil {
-			// Check if this is object literal syntax with id and payload inside
-			// e.g., {id: ..., payload: {...}}
-			if idVal, hasId := parsed["id"]; hasId {
-				config["id"] = idVal
-				delete(parsed, "id")
-			}
-			if payloadVal, hasPayload := parsed["payload"]; hasPayload {
-				// The payload is nested inside
-				if payloadMap, ok := payloadVal.(map[string]any); ok {
-					config["payload"] = payloadMap
-				} else {
-					config["payload"] = payloadVal
-				}
-			} else {
-				// The entire parsed object is the payload (named argument style)
-				config["payload"] = parsed
-			}
-		}
-	}
-
-	if m.ParentTemplate != nil {
-		switch v := m.ParentTemplate.(type) {
-		case string:
-			if strings.TrimSpace(v) != "" {
-				config["parent"] = convertEventReferences(v)
-			}
-		case parser.ExpressionNode:
-			config["parent"] = convertEventReferences(c.expressionToString(v))
-		default:
-			config["parent"] = convertEventReferences(fmt.Sprintf("%v", v))
-		}
-	}
-
-	if m.AliasOfTemplate != nil {
-		switch v := m.AliasOfTemplate.(type) {
-		case string:
-			if strings.TrimSpace(v) != "" {
-				config["aliasOf"] = convertEventReferences(v)
-			}
-		case parser.ExpressionNode:
-			config["aliasOf"] = convertEventReferences(c.expressionToString(v))
-		default:
-			config["aliasOf"] = convertEventReferences(fmt.Sprintf("%v", v))
-		}
-	}
-
-	return config, nil
-}
-
-// parsePayloadRaw parses the raw payload string into a structured map.
-// It handles MemQL object syntax and converts expressions to evaluatable format.
-//
-// A malformed literal is an ERROR, not a nil map. Returning a bare nil was the
-// second half of memql#2785 (and the whole of memql#2816): the array parser's
-// no-progress guard stopped the hang by returning nil, but parseValue wrapped
-// that nil in a non-nil `any` and parseObjectLiteral stored it as the key's
-// value, so `{ k: [}{] }` compiled to `{"k": null}` with no error anywhere --
-// a silent wrong value, which is worse than the hang it replaced.
-//
-// HOW FAR THE ERROR ACTUALLY TRAVELS, precisely -- it IS a refused boot, as
-// of memql#2830. It reaches compileStep -> compileAutomation -> CompileFile ->
-// Loader.compileMemQL -> LoadFromUnifiedTree, and THAT frame now records the
-// failure and returns it (component/automations/unified_loader.go); app/engine.go
-// gates on it synchronously, so the node refuses to start rather than running
-// with the automation silently absent. MEMQL_DSL_ALLOW_SKIPS is the operator
-// break-glass that restores the old drop-and-continue behaviour.
-//
-// So the progression for a malformed payload literal is: "silently wrong"
-// (pre-#2785) -> "absent, with a WARN" (#2785/#2816) -> "red boot naming the
-// automation" (#2830).
-//
-// The two sibling copies (component/memql/mutation_templates.go at load,
-// component/automations/steps/mutation.go at dispatch) both surface the
-// failure; this one now matches them on accept/reject for every case in the
-// cross-copy parity table.
-func (c *Compiler) parsePayloadRaw(raw string) (map[string]any, error) {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		// Not malformed -- there is simply no payload to compile.
-		return nil, nil
-	}
-
-	result, ok := c.parseObjectLiteral(trimmed)
-	if !ok {
-		return nil, fmt.Errorf("malformed payload literal: %q", raw)
-	}
-	return result, nil
-}
-
-// parseObjectLiteral parses a MemQL object literal like {key: value, key2: value2}
-// into a Go map, preserving expressions as strings for runtime evaluation.
-//
-// The bool reports whether the literal was well-formed. It is distinct from a
-// nil/empty map: `{}` is a legitimate empty payload, a stray `[}{]` inside is
-// not. See parsePayloadRaw for why that distinction is load-bearing.
-func (c *Compiler) parseObjectLiteral(s string) (map[string]any, bool) {
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "{") || !strings.HasSuffix(s, "}") {
-		return nil, false
-	}
-
-	// Remove outer braces
-	inner := strings.TrimSpace(s[1 : len(s)-1])
-	if inner == "" {
-		return map[string]any{}, true
-	}
-
-	result := make(map[string]any)
-
-	// Parse key-value pairs
-	// This is a simplified parser that handles nested objects and common expressions
-	pos := 0
-	for pos < len(inner) {
-		// Skip whitespace
-		for pos < len(inner) && (inner[pos] == ' ' || inner[pos] == '\t' || inner[pos] == '\n' || inner[pos] == '\r') {
-			pos++
-		}
-		if pos >= len(inner) {
-			break
-		}
-
-		// Shorthand: a bare dotted path like `event.payload.partitionId` or
-		// `registerNode.result.node.id` with no `key:` prefix infers
-		// the key from the path's terminal segment. Only multi-segment
-		// paths whose segments are all simple identifiers are eligible;
-		// anything with parens, brackets, or method calls falls through
-		// to the verbose key:value parser below.
-		if key, rawPath, next, ok := tryParseBarePathShorthand(inner, pos); ok {
-			result[key] = rawPath
-			pos = next
-			// Skip trailing whitespace/comma.
-			for pos < len(inner) && (inner[pos] == ' ' || inner[pos] == '\t' || inner[pos] == '\n' || inner[pos] == '\r' || inner[pos] == ',') {
-				pos++
-			}
-			continue
-		}
-
-		// Parse key
-		keyStart := pos
-		for pos < len(inner) && inner[pos] != ':' && inner[pos] != ' ' && inner[pos] != '\t' {
-			pos++
-		}
-		key := strings.TrimSpace(inner[keyStart:pos])
-
-		// Skip to colon
-		for pos < len(inner) && inner[pos] != ':' {
-			pos++
-		}
-		if pos >= len(inner) {
-			break
-		}
-		pos++ // skip colon
-
-		// Skip whitespace after colon
-		for pos < len(inner) && (inner[pos] == ' ' || inner[pos] == '\t' || inner[pos] == '\n' || inner[pos] == '\r') {
-			pos++
-		}
-
-		// Parse value
-		// No progress check here: this loop advances past a `:` before every
-		// value scan, so it cannot spin, and c.parseValue never returns a
-		// position below its input. The array loop below is the one that needs
-		// the guard (memql#2785).
-		//
-		// The !ok check is a different concern from spinning: it catches a
-		// malformed value the array guard cannot see because the value is not
-		// an array (an unterminated string, a `{` that never closes), and it
-		// is what stops a malformed literal from being stored as a silent nil
-		// (memql#2816).
-		value, newPos, ok := c.parseValue(inner, pos)
-		if !ok {
-			return nil, false
-		}
-		result[key] = value
-		pos = newPos
-
-		// Skip comma if present
-		for pos < len(inner) && (inner[pos] == ' ' || inner[pos] == '\t' || inner[pos] == '\n' || inner[pos] == '\r' || inner[pos] == ',') {
-			pos++
-		}
-	}
-
-	return result, true
-}
-
-// tryParseBarePathShorthand parses a bare dotted path like
-// `event.payload.partitionId` or `registerNode.result.node.id` that appears
-// inside an object literal without a `key:` prefix. On match it returns
-// the inferred key (terminal path segment), the raw path string to stash
-// as the value, and the new position past the path.
-//
-// Rules:
-//   - The path must have at least two dotted segments (single-identifier
-//     expressions are not eligible -- they'd collide with step references
-//     like `allAgents` which are meant to resolve to the step's result).
-//   - Every segment must be a simple identifier `[A-Za-z_][A-Za-z0-9_]*`.
-//   - The character immediately following the path must be whitespace,
-//     `,`, or `}`. Anything else (`(`, `[`, `.`, `:`) means the expression
-//     has more structure and we route back to the verbose parser.
-func tryParseBarePathShorthand(s string, pos int) (string, string, int, bool) {
-	// Skip leading whitespace without permanently advancing on no-match.
-	start := pos
-	for start < len(s) && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n' || s[start] == '\r') {
-		start++
-	}
-	if start >= len(s) {
-		return "", "", pos, false
-	}
-
-	// First segment must start with a letter or underscore.
-	if !isIdentStart(s[start]) {
-		return "", "", pos, false
-	}
-
-	scan := start
-	// Read the dotted path. Track segment boundaries so we can extract
-	// the terminal segment without re-scanning.
-	lastSegmentStart := start
-	segmentCount := 0
-	for scan < len(s) {
-		c := s[scan]
-		if isIdentChar(c) {
-			scan++
-			continue
-		}
-		if c == '.' {
-			segmentCount++
-			scan++
-			if scan >= len(s) || !isIdentStart(s[scan]) {
-				return "", "", pos, false
-			}
-			lastSegmentStart = scan
-			continue
-		}
-		break
-	}
-	// Account for the final segment.
-	if lastSegmentStart < scan {
-		segmentCount++
-	}
-
-	// Require at least 2 segments (i.e. at least one dot).
-	if segmentCount < 2 {
-		return "", "", pos, false
-	}
-
-	// Terminal character must not continue the expression.
-	if scan < len(s) {
-		c := s[scan]
-		if c != ' ' && c != '\t' && c != '\n' && c != '\r' && c != ',' && c != '}' {
-			return "", "", pos, false
-		}
-	}
-
-	path := s[start:scan]
-	key := s[lastSegmentStart:scan]
-	return key, path, scan, true
-}
-
-func isIdentStart(c byte) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'
-}
-
-func isIdentChar(c byte) bool {
-	return isIdentStart(c) || (c >= '0' && c <= '9')
-}
-
-// parseValue parses a value starting at position pos and returns the value and new position.
-// parseValue scans one value. The bool reports whether it was well-formed;
-// an EMPTY value is well-formed (it is a null), a malformed one is not. That
-// distinction is why this returns an explicit ok rather than leaning on a nil
-// value or an unadvanced position -- see parsePayloadRaw (memql#2816).
-func (c *Compiler) parseValue(s string, pos int) (any, int, bool) {
-	if pos >= len(s) {
-		return nil, pos, true
-	}
-
-	// Skip whitespace
-	for pos < len(s) && (s[pos] == ' ' || s[pos] == '\t' || s[pos] == '\n' || s[pos] == '\r') {
-		pos++
-	}
-
-	if pos >= len(s) {
-		return nil, pos, true
-	}
-
-	ch := s[pos]
-
-	// Array literal
-	if ch == '[' {
-		depth := 0
-		start := pos
-		inString := false
-		escaped := false
-		for pos < len(s) {
-			cur := s[pos]
-			if escaped {
-				escaped = false
-				pos++
-				continue
-			}
-			if inString && cur == '\\' {
-				escaped = true
-				pos++
-				continue
-			}
-			if cur == '"' {
-				inString = !inString
-				pos++
-				continue
-			}
-			if !inString {
-				switch cur {
-				case '[':
-					depth++
-				case ']':
-					depth--
-					if depth == 0 {
-						pos++
-						arrStr := s[start:pos]
-						arr, ok := c.parseArrayLiteral(arrStr)
-						if !ok {
-							return nil, pos, false
-						}
-						return arr, pos, true
-					}
-				}
-			}
-			pos++
-		}
-		return nil, pos, false
-	}
-
-	// Nested object
-	//
-	// The brace scan MUST be string-aware. Without it a brace inside a quoted
-	// value closes the object early: `{ a: { b: "}" } }` matched the `}` in
-	// the string, handed parseObjectLiteral the truncated `{ b: "}` and got
-	// back `{"b":""}` -- a silent wrong value. Once malformation became an
-	// error (memql#2816) the same input turned into a hard rejection of a
-	// PERFECTLY VALID payload, which is worse still.
-	//
-	// The array arm in this same function always tracked inString/escaped, and both
-	// sibling parsers do too (component/memql's scanBalanced,
-	// component/automations/steps' parseValueFromString). This arm was the odd
-	// one out; all three now agree on the cases below.
-	if ch == '{' {
-		depth := 0
-		start := pos
-		inString := false
-		escaped := false
-		for pos < len(s) {
-			cur := s[pos]
-			if escaped {
-				escaped = false
-				pos++
-				continue
-			}
-			if inString && cur == '\\' {
-				escaped = true
-				pos++
-				continue
-			}
-			if cur == '"' {
-				inString = !inString
-				pos++
-				continue
-			}
-			if !inString {
-				switch cur {
-				case '{':
-					depth++
-				case '}':
-					depth--
-					if depth == 0 {
-						pos++
-						objStr := s[start:pos]
-						obj, ok := c.parseObjectLiteral(objStr)
-						if !ok {
-							return nil, pos, false
-						}
-						return obj, pos, true
-					}
-				}
-			}
-			pos++
-		}
-		return nil, pos, false
-	}
-
-	// String literal
-	if ch == '"' {
-		pos++
-		start := pos
-		for pos < len(s) && s[pos] != '"' {
-			if s[pos] == '\\' && pos+1 < len(s) {
-				pos += 2
-			} else {
-				pos++
-			}
-		}
-		value := s[start:pos]
-		if pos >= len(s) {
-			// Unterminated string: the scan ran off the end without a closing
-			// quote. Matches the sibling parsers in component/memql and
-			// component/automations/steps, which both reject this.
-			return nil, pos, false
-		}
-		pos++ // skip closing quote
-		return value, pos, true
-	}
-
-	// Boolean true
-	if strings.HasPrefix(s[pos:], "true") {
-		return true, pos + 4, true
-	}
-
-	// Boolean false
-	if strings.HasPrefix(s[pos:], "false") {
-		return false, pos + 5, true
-	}
-
-	// Number
-	if ch >= '0' && ch <= '9' || ch == '-' {
-		start := pos
-		pos++
-		for pos < len(s) && ((s[pos] >= '0' && s[pos] <= '9') || s[pos] == '.') {
-			pos++
-		}
-		numStr := s[start:pos]
-		if strings.Contains(numStr, ".") {
-			// Float
-			if f, err := strconv.ParseFloat(numStr, 64); err == nil {
-				return f, pos, true
-			}
-			return numStr, pos, true
-		}
-		// Int
-		if i, err := strconv.ParseInt(numStr, 10, 64); err == nil {
-			return i, pos, true
-		}
-		return numStr, pos, true
-	}
-
-	// Expression (identifier, function call, etc.)
-	// This includes: event.payload.xxx, concat(...), var(...), if(...), etc.
-	// We track both parentheses depth AND brace depth to handle:
-	// - Function calls: if(lt(...), "a", "b")
-	// - Block-style if: if cond { then } else { else }
-	start := pos
-	parenDepth := 0
-	braceDepth := 0
-	inString := false
-	escaped := false
-	for pos < len(s) {
-		ch := s[pos]
-		if escaped {
-			escaped = false
-			pos++
-			continue
-		}
-		if ch == '\\' && inString {
-			escaped = true
-			pos++
-			continue
-		}
-		if ch == '"' {
-			inString = !inString
-			pos++
-			continue
-		}
-		if !inString {
-			switch ch {
-			case '(':
-				parenDepth++
-			case ')':
-				parenDepth--
-				if parenDepth < 0 {
-					// Unbalanced closing paren - stop here
-					goto done
-				}
-			case '{':
-				braceDepth++
-			case '}':
-				braceDepth--
-				if braceDepth < 0 {
-					// Unbalanced closing brace - this is the end of the object
-					goto done
-				}
-			case ',':
-				if parenDepth == 0 && braceDepth == 0 {
-					// Comma at top level - end of this value
-					goto done
-				}
-			case ']':
-				if parenDepth == 0 && braceDepth == 0 {
-					// End of array - stop here
-					goto done
-				}
-			}
-		}
-		pos++
-	}
-done:
-
-	expr := strings.TrimSpace(s[start:pos])
-	// Convert event references to $event format
-	expr = convertEventReferences(expr)
-	// Ensure expression starts with $ if it's a reference
-	if strings.HasPrefix(expr, "event.") {
-		expr = "$" + expr
-	}
-	return expr, pos, true
-}
-
-// parseArrayLiteral parses a JSON-like array literal like [a, b, {x: 1}, []]
-// into a Go []any, preserving expressions as strings for runtime evaluation.
-//
-// The bool reports well-formedness. A separator-only array like `[,]` is an
-// EMPTY array, not a malformed one, so the slice is built non-nil up front --
-// the sibling copy in component/memql regressed exactly that case by using
-// `var out []any` and then reading the resulting nil as a parse failure.
-func (c *Compiler) parseArrayLiteral(s string) ([]any, bool) {
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "[") || !strings.HasSuffix(s, "]") {
-		return nil, false
-	}
-	inner := strings.TrimSpace(s[1 : len(s)-1])
-	if inner == "" {
-		return []any{}, true
-	}
-
-	items := make([]any, 0)
-	pos := 0
-	for pos < len(inner) {
-		// Skip whitespace and commas
-		for pos < len(inner) && (inner[pos] == ' ' || inner[pos] == '\t' || inner[pos] == '\n' || inner[pos] == '\r' || inner[pos] == ',') {
-			pos++
-		}
-		if pos >= len(inner) {
-			break
-		}
-
-		val, newPos, ok := c.parseValue(inner, pos)
-		if !ok || newPos <= pos {
-			// No progress: parseValue returns its input pos unchanged on an
-			// unbalanced literal and on a stray depth-0 closer, so the loop
-			// would append nil forever -- an unbounded memory grow and a hang
-			// (memql#2785). This parser is a duplicate of the one in
-			// component/memql/mutation_templates.go and carried the same
-			// defect; it sits on the automation LOAD path
-			// (loader -> CompileFile -> compileMutationConfig -> parsePayloadRaw),
-			// so `{ k: [}{] }` in an authored automation hung the node at boot.
-			//
-			// The leading skip has already consumed commas and whitespace, so
-			// a non-advancing return here cannot be a legitimately-empty
-			// element.
-			//
-			// Reporting !ok is the half a bare `return nil` got WRONG
-			// (memql#2816): parseValue wraps a nil []any in a non-nil `any`
-			// and parseObjectLiteral stores it, so the nil never reached
-			// parsePayloadRaw's own nil check and `{ k: [}{] }` compiled to
-			// `{"k": null}` with no error -- a silent wrong value at load.
-			return nil, false
-		}
-		items = append(items, val)
-		pos = newPos
-
-		// Skip trailing whitespace/commas
-		for pos < len(inner) && (inner[pos] == ' ' || inner[pos] == '\t' || inner[pos] == '\n' || inner[pos] == '\r' || inner[pos] == ',') {
-			pos++
-		}
-	}
-
-	return items, true
-}
-
 // valueToString converts a value to its string representation.
 func (c *Compiler) valueToString(v any) string {
 	switch val := v.(type) {
@@ -2228,343 +1092,5 @@ func (c *Compiler) valueToString(v any) string {
 		return c.expressionToString(val)
 	default:
 		return fmt.Sprintf("%v", v)
-	}
-}
-
-// translateCondition converts MemQL condition syntax to automation JSON
-// syntax by walking the shared-lexer token stream instead of pattern-
-// matching the raw string with regex. Supported rewrites:
-//
-//   - first(stepName) / first(stepName).path
-//     → $steps.stepName.result.Bundle.nodes.0[.path]
-//   - last(stepName) / last(stepName).path
-//     → $steps.stepName.result.Bundle.nodes.-1[.path]
-//   - stepName.metadata.field (bare ident-token containing dots)
-//     → $steps.stepName.metadata.field
-//   - step("name"), step("name").metadata, step("name").result etc.
-//     → $steps.name.metadata / $steps.name.result (legacy sugar)
-//
-// Everything that doesn't match one of these shapes passes through
-// verbatim in the canonical spacing parseConditionExpression produces.
-func (c *Compiler) translateCondition(cond string) string {
-	if cond == "" {
-		return cond
-	}
-	tokens, err := parser.NewLexer(cond).Tokenize()
-	if err != nil {
-		// Fall back to the raw string on lex error; the runtime
-		// evaluator will surface a richer message than the compiler
-		// can here.
-		return cond
-	}
-	return rewriteConditionTokens(tokens)
-}
-
-func rewriteConditionTokens(tokens []parser.Token) string {
-	var out strings.Builder
-	lastWasOperator := true
-	for i := 0; i < len(tokens); i++ {
-		tok := tokens[i]
-		if tok.Type == parser.TokenEOF {
-			break
-		}
-
-		// first(name)[.path] / last(name)[.path]
-		if tok.Type == parser.TokenIdentifier && (tok.Literal == "first" || tok.Literal == "last") {
-			rendered, consumed, ok := rewriteFirstLastCall(tokens, i, tok.Literal)
-			if ok {
-				writeConditionToken(&out, rendered, &lastWasOperator, false)
-				i += consumed - 1
-				continue
-			}
-		}
-
-		// step("name")[.metadata|.result|...] -- legacy accessor.
-		if tok.Type == parser.TokenIdentifier && tok.Literal == "step" {
-			rendered, consumed, ok := rewriteLegacyStepCall(tokens, i)
-			if ok {
-				writeConditionToken(&out, rendered, &lastWasOperator, false)
-				i += consumed - 1
-				continue
-			}
-		}
-
-		// Bare dotted identifier (shared lexer emits `a.b.c` as a
-		// single token). Rewrite `stepName.metadata.x` → `$steps.stepName.metadata.x`.
-		if tok.Type == parser.TokenIdentifier && bareDottedIdentifier(tok.Literal) {
-			if rewritten, ok := rewriteBareStepReference(tok.Literal); ok {
-				writeConditionToken(&out, rewritten, &lastWasOperator, false)
-				continue
-			}
-		}
-
-		writeConditionToken(&out, renderConditionToken(tok), &lastWasOperator,
-			tok.Type == parser.TokenParenOpen || tok.Type == parser.TokenParenClose ||
-				tok.Literal == ".")
-	}
-	return out.String()
-}
-
-// rewriteFirstLastCall consumes the tokens for `first(name)[.path]` or
-// `last(name)[.path]` starting at index i. Returns the rewritten
-// string, the number of tokens consumed, and whether the match was
-// valid.
-func rewriteFirstLastCall(tokens []parser.Token, i int, kind string) (string, int, bool) {
-	if i+3 >= len(tokens) {
-		return "", 0, false
-	}
-	if tokens[i+1].Type != parser.TokenParenOpen ||
-		tokens[i+2].Type != parser.TokenIdentifier ||
-		tokens[i+3].Type != parser.TokenParenClose {
-		return "", 0, false
-	}
-	stepName := tokens[i+2].Literal
-	index := "0"
-	if kind == "last" {
-		index = "-1"
-	}
-	base := fmt.Sprintf("$steps.%s.result.Bundle.nodes.%s", stepName, index)
-	// Consume any trailing `.path` that the lexer either attached to
-	// the next token (leading-dot identifier) or split via whitespace.
-	path, extra := consumeTrailingDottedPath(tokens, i+4)
-	return base + path, 4 + extra, true
-}
-
-// rewriteLegacyStepCall handles `step("name")[.segment ...]` → $steps.name[.segment ...].
-// Supports both `step("x").result` and the pre-existing sugar where
-// `step("x")` alone implies `.result`.
-func rewriteLegacyStepCall(tokens []parser.Token, i int) (string, int, bool) {
-	if i+3 >= len(tokens) {
-		return "", 0, false
-	}
-	if tokens[i+1].Type != parser.TokenParenOpen ||
-		tokens[i+2].Type != parser.TokenString ||
-		tokens[i+3].Type != parser.TokenParenClose {
-		return "", 0, false
-	}
-	name := tokens[i+2].Literal
-	path, extra := consumeTrailingDottedPath(tokens, i+4)
-	if path == "" {
-		// Historical behaviour: `step("x")` with no accessor expands
-		// to `$steps.x.result`.
-		path = ".result"
-	}
-	return fmt.Sprintf("$steps.%s%s", name, path), 4 + extra, true
-}
-
-// rewriteBareStepReference rewrites `stepName.metadata.x` →
-// `$steps.stepName.metadata.x` and `stepName.result.x` →
-// `$steps.stepName.result.x`. Returns the rewritten form and true on
-// match; otherwise returns the original and false.
-//
-// Only segments that begin with `.metadata` or `.result` (the two
-// runtime-accessor paths) are rewritten here; forEach iteration vars
-// and other dotted identifiers pass through untouched.
-func rewriteBareStepReference(literal string) (string, bool) {
-	dot := strings.Index(literal, ".")
-	if dot <= 0 {
-		return literal, false
-	}
-	rest := literal[dot:]
-	if strings.HasPrefix(rest, ".metadata") {
-		return "$steps." + literal, true
-	}
-	return literal, false
-}
-
-// consumeTrailingDottedPath gathers a `.a.b.c` suffix that follows a
-// parenthesised call. The shared lexer collapses `).payload.value`
-// into (paren-close, ident ".payload.value"), so typically a single
-// identifier token captures the whole tail; hand-written whitespace
-// (`).payload . value`) fans out into multiple idents each starting
-// with `.` (or with whitespace-trimmed segments). We accept either.
-func consumeTrailingDottedPath(tokens []parser.Token, start int) (string, int) {
-	var sb strings.Builder
-	consumed := 0
-	for i := start; i < len(tokens); i++ {
-		tok := tokens[i]
-		if tok.Type != parser.TokenIdentifier {
-			break
-		}
-		literal := tok.Literal
-		if !strings.HasPrefix(literal, ".") {
-			if sb.Len() == 0 {
-				break
-			}
-			// Whitespace-split continuation (e.g. `... . value` →
-			// ident ".", ident "value") -- join with a dot.
-			sb.WriteRune('.')
-			sb.WriteString(literal)
-		} else {
-			sb.WriteString(literal)
-		}
-		consumed++
-	}
-	return sb.String(), consumed
-}
-
-// renderConditionToken returns the canonical spelling of a token.
-// String literals are re-wrapped in quotes to round-trip through the
-// runtime evaluator's condition parser.
-func renderConditionToken(tok parser.Token) string {
-	if tok.Type == parser.TokenString {
-		return `"` + tok.Literal + `"`
-	}
-	return tok.Literal
-}
-
-// writeConditionToken emits a token's text, inserting a single space
-// separator between non-adjacency-sensitive runs of tokens. It mirrors
-// the spacing rules parseConditionExpression uses so the round-trip
-// through translateCondition remains byte-stable for legacy fixtures.
-func writeConditionToken(out *strings.Builder, text string, lastWasOperator *bool, noSpaceAfter bool) {
-	if text == "" {
-		return
-	}
-	needsSpace := !*lastWasOperator
-	first := text[0]
-	if first == '(' || first == ')' || first == '.' || first == ',' {
-		needsSpace = false
-	}
-	if out.Len() > 0 {
-		last := out.String()[out.Len()-1]
-		if last == '(' || last == '.' || last == ',' {
-			needsSpace = false
-		}
-	}
-	if needsSpace && out.Len() > 0 {
-		out.WriteByte(' ')
-	}
-	out.WriteString(text)
-	*lastWasOperator = noSpaceAfter || text == "." || text == "(" || text == ","
-}
-
-// expressionToJSONExpr converts an expression to JSON $ expression format.
-// This is used for values in automation step configurations.
-func (c *Compiler) expressionToJSONExpr(expr parser.ExpressionNode) string {
-	if expr == nil {
-		return ""
-	}
-
-	switch e := expr.(type) {
-	case *parser.LiteralExpr:
-		switch v := e.Value.(type) {
-		case string:
-			return v // No quotes for JSON expression values
-		default:
-			return fmt.Sprintf("%v", v)
-		}
-
-	case *parser.ArgRefExpr:
-		return fmt.Sprintf("$args.%s", e.Path)
-
-	case *parser.VarRefExpr:
-		return fmt.Sprintf("$var.%s", e.Name)
-
-	case *parser.StepRefExpr:
-		return fmt.Sprintf("$steps.%s.result", e.StepId)
-
-	case *parser.InputRefExpr:
-		return "$input"
-
-	case *parser.ItemRefExpr:
-		return "$item"
-
-	case *parser.IndexRefExpr:
-		return "$index"
-
-	case *parser.EventRefExpr:
-		return "$event"
-
-	case *parser.ErrorRefExpr:
-		return "$error"
-
-	case *parser.TimestampExprFunc:
-		return "$timestamp"
-
-	case *parser.FieldRefExpr:
-		obj := c.expressionToJSONExpr(e.Object)
-		return fmt.Sprintf("%s.%s", obj, e.Key)
-
-	case *parser.ConcatExpr:
-		args := make([]string, len(e.Args))
-		for i, arg := range e.Args {
-			args[i] = c.expressionToJSONExpr(arg)
-		}
-		return fmt.Sprintf("concat(%s)", strings.Join(args, ", "))
-
-	case *parser.CoalesceExpr:
-		args := make([]string, len(e.Args))
-		for i, arg := range e.Args {
-			args[i] = c.expressionToJSONExpr(arg)
-		}
-		return fmt.Sprintf("coalesce(%s)", strings.Join(args, ", "))
-
-	case *parser.CondExpr:
-		return fmt.Sprintf("cond(%s, %s, %s)",
-			c.expressionToJSONExpr(e.Condition),
-			c.expressionToJSONExpr(e.Then),
-			c.expressionToJSONExpr(e.Else))
-
-	case *parser.TernaryExpr:
-		return fmt.Sprintf("cond(%s, %s, %s)",
-			c.expressionToJSONExpr(e.Condition),
-			c.expressionToJSONExpr(e.Then),
-			c.expressionToJSONExpr(e.Else))
-
-	case *parser.FirstExpr:
-		return fmt.Sprintf("first(%s)", c.expressionToJSONExpr(e.Target))
-
-	case *parser.LastExpr:
-		return fmt.Sprintf("last(%s)", c.expressionToJSONExpr(e.Target))
-
-	case *parser.LowerExpr:
-		return fmt.Sprintf("lower(%s)", c.expressionToJSONExpr(e.Target))
-
-	case *parser.UpperExpr:
-		return fmt.Sprintf("upper(%s)", c.expressionToJSONExpr(e.Target))
-
-	case *parser.TrimExpr:
-		return fmt.Sprintf("trim(%s)", c.expressionToJSONExpr(e.Target))
-
-	case *parser.HashExpr:
-		return fmt.Sprintf("hash(%s)", c.expressionToJSONExpr(e.Target))
-
-	case *parser.ShortIdExpr:
-		return fmt.Sprintf("shortId(%s)", c.expressionToJSONExpr(e.Target))
-
-	case *parser.ContainsExpr:
-		return fmt.Sprintf("contains(%s, %s)",
-			c.expressionToJSONExpr(e.Target),
-			c.expressionToJSONExpr(e.Substring))
-
-	case *parser.ComparisonExpr:
-		// Unary operators (== nil, != nil) have no right-hand value
-		if e.Operator == parser.OpMissing || e.Operator == parser.OpNotMissing {
-			if e.Operator == parser.OpMissing {
-				return fmt.Sprintf("%s==nil", e.Field.Raw)
-			}
-			return fmt.Sprintf("%s!=nil", e.Field.Raw)
-		}
-		opStr := string(e.Operator)
-		switch e.Operator {
-		case parser.OpIn, parser.OpOut, parser.OpHas, parser.OpStartsWith:
-			return fmt.Sprintf("%s %s %v", e.Field.Raw, opStr, c.valueToString(e.Value))
-		default:
-			return fmt.Sprintf("%s%s%v", e.Field.Raw, opStr, c.valueToString(e.Value))
-		}
-
-	case *parser.LogicalExpr:
-		left := c.expressionToJSONExpr(e.Left)
-		right := c.expressionToJSONExpr(e.Right)
-		op := " && "
-		if e.Op == parser.LogicalOr {
-			op = " || "
-		}
-		return fmt.Sprintf("%s%s%s", left, op, right)
-
-	default:
-		// Fall back to string format
-		return c.expressionToString(expr)
 	}
 }

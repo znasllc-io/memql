@@ -38,8 +38,8 @@ userById { ... }` -- so a prefix restates in the name what the grammar
 states one token earlier. Call sites read better without it:
 
 ```memql fragment
-filter  folderId == args.folderId && isActiveRecord
-step decide { logic indexArtifact ( event: event ) }
+filter  row => row.folderId == args.folderId && isActiveRecord(row)
+step decide { logic indexArtifact(event: event) }
 ```
 
 This is also what the codebase has always done. Measured across the shipped
@@ -86,7 +86,7 @@ query user userById {
   args {
     userId  string  @required
   }
-  filter  row.id == args.userId
+  filter  row => row.id == args.userId
   shape   userFull
 }
 
@@ -100,13 +100,9 @@ mutate user archiveUser {
   }
 }
 
-spec folder folderIsShared {
-  return visibility == "shared"
-}
+spec folder folderIsShared = row => row.visibility == "shared"
 
-trait isActiveRecord {
-  return active == true
-}
+trait isActiveRecord = row => row.active == true
 ```
 
 Constructs live in one consolidated file per kind per namespace
@@ -114,9 +110,9 @@ Constructs live in one consolidated file per kind per namespace
 ...), so file names never carry an individual construct's name.
 
 An automation step references a logic construct by the same name the
-file-top import names -- `step decide { logic indexArtifact ( event )
-}` resolves through `use library.logic.{ indexArtifact }`. There is
-no prefixed/bare split between the two.
+file-top import names -- `step decide { logic indexArtifact(event:
+event) }` resolves through `use library.logic.{ indexArtifact }`. There
+is no prefixed/bare split between the two.
 
 
 ## Enforcement

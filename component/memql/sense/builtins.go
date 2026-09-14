@@ -77,14 +77,14 @@ var KeywordDocs = map[string]string{
 	"return":     "Return a value from a function.",
 	"nil":        "The nil value (absence of a value).",
 	"retry":      "Retry an expression N times: retry(3) expression",
-	"when":       "Arg-conditional guard: when(args.x) { <expr> } -- the guarded block is dropped when args.x is absent.",
+	"when":       "Retired in edition 2026: `when(args.x) { <predicate> }` is written `args.x == nil || <predicate>`. memqlmigrate --rewrite=expressions rewrites it.",
 	"as":         "Alias in forEach iteration: for item as alias",
 	"where":      "Filter in forEach: for item := range collection where condition",
 	"use":        "File-top import: use <domain>.<construct>.{ names } (e.g. use cognition.concepts.{ space }).",
 	"concept":    "Define a concept schema: concept Name { ... }",
 	"in":         "Membership test: value in collection (the single membership operator; `has` is retired, #971).",
 	"startsWith": "String-prefix test: <field> startsWith \"lit\" / [\"a\", \"b\"] / args.x -- true when the field begins with the prefix, or with ANY prefix in a list (memql#4208). Compiles to a parameterized ^@ ANY(text[]); an empty list and a blank prefix match nothing.",
-	"not":        "Negation (e.g. `not in`).",
+	"not":        "Retired in edition 2026: `x not in list` is written `!(x in list)`. memqlmigrate --rewrite=expressions rewrites it.",
 }
 
 // FieldTypes lists the field types the editor offers in concept / args /

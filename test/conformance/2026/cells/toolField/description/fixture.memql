@@ -10,6 +10,6 @@ query ticket ticketsToListDescription {
   args {
     status  string
   }
-  filter when(args.status) { status == args.status }
+  filter row => args.status == nil || row.status == args.status
   sort "row.createdAt", "desc"
 }

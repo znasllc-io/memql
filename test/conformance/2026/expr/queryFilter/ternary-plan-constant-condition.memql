@@ -1,0 +1,1 @@
+row => args.strict == true ? row.status == "open" : row.status != "closed"

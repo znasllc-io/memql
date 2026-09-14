@@ -1,0 +1,2 @@
+/// Tickets at or below priority two.
+spec ticket sbLte = row => lte(row.priority, 2)

@@ -33,8 +33,8 @@ const (
 	FormKeywords
 	// FormObject is one object literal: `@args({ ... })`.
 	FormObject
-	// FormExpression is an expression captured verbatim, which only
-	// `@filter(...)` produces: `@filter(payload.status == "open")`.
+	// FormExpression is an expression, which only `@filter(...)` takes: the
+	// lambda of `@filter(row => row.status == "open")`, parsed as a node.
 	FormExpression
 	// FormExclude is an exclusion list: `@name(!"a", !"b")`.
 	FormExclude

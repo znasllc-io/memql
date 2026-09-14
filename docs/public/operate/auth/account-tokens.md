@@ -119,7 +119,7 @@ Three things, all of them real:
 | Mint / hash | `component/identity/accounttoken` (`Mint`, `Hash`, `IsAccountToken`) |
 | Storage | `v1:identity:identity`, `identityType="account_token"`; `credentials = { accountId, keyHash, mintedBy, expiresAt }` |
 | Subject | the row's `userId` -- the operator |
-| Reads | `query accountTokensForAccount(accountId)` and `query accountTokenById(identityId)`, both gated on `userId==actor.userId`, both projecting `accountTokenSummary` (**no digest**) |
+| Reads | `accountTokensForAccount` (by `accountId`) and `accountTokenById` (by `identityId`), both gated on `row.userId == actor.userId`, both projecting `accountTokenSummary` (**no digest**) |
 | Writes | `mutation createAccountTokenIdentity` / `revokeAccountTokenIdentity` |
 | Wire | `CreateAccountTokenMsg` / `RevokeAccountTokenMsg` on `MemqlService.Stream` |
 | Handlers | `component/grpc/account_token_handlers.go` |
@@ -164,7 +164,7 @@ Consequences worth knowing:
   rows too. An override in the handler would mint a credential against a row the
   minting path cannot actually see.
 - **Revoking** resolves the credential through `accountTokenById` as the caller,
-  whose filter carries `userId==actor.userId`.
+  whose filter carries `row.userId == actor.userId`.
 
 ---
 

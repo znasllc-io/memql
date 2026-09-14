@@ -30,9 +30,9 @@ import (
 )
 
 // predicateHeader is the one spelling the synthetic edition 2099 knows and the
-// current edition does not: `predicate NAME {` for what 2026 writes as
-// `trait NAME {`.
-var predicateHeader = regexp.MustCompile(`(?m)^([ \t]*)predicate([ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{)`)
+// current edition does not: `predicate NAME = ...` for what 2026 writes as
+// `trait NAME = ...`.
+var predicateHeader = regexp.MustCompile(`(?m)^([ \t]*)predicate([ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*=)`)
 
 // registerPredicateEdition installs edition 2099 for one test and removes it
 // when the test ends, leaving the front-end table as it found it.
@@ -55,7 +55,7 @@ func editionLine(edition string) *fstest.MapFile {
 }
 
 func traitSource(keyword, name string) []byte {
-	return []byte(fmt.Sprintf("@enabled\n%s %s {\n  return active == true\n}\n", keyword, name))
+	return []byte(fmt.Sprintf("@enabled\n%s %s = row => row.active == true\n", keyword, name))
 }
 
 func registerEditionDomain(t *testing.T, domain, edition string, files fstest.MapFS) {
@@ -131,7 +131,7 @@ func TestTwoEditionsLoadInOneEngine(t *testing.T) {
 		t.Error("positive control: the 2026 trait beside the refused statement did not load, so the domain was never read")
 	}
 	if eng.specs.Has("alphaPredicateTrait") {
-		t.Error("a 2026 domain's predicate block registered a trait; only edition 2099 reads that spelling")
+		t.Error("a 2026 domain's predicate declaration registered a trait; only edition 2099 reads that spelling")
 	}
 }
 

@@ -1,6 +1,6 @@
 @description
 query ticket openTicketsDescription {
-  filter status == "open"
+  filter row => row.status == "open"
   sort "row.createdAt", "desc"
   paginate 20
 }

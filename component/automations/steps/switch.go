@@ -3,7 +3,6 @@ package steps
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
@@ -38,16 +37,13 @@ func (e *SwitchExecutor) Execute(ctx context.Context, step *automations.Step, st
 
 	switchCfg := step.Switch
 
-	// Evaluate the switch expression. A runtime-reference subject (the
-	// canonical `switch steps.<decide>.result` fan-out) must be $-prefixed
-	// for EvaluateValue to RESOLVE it -- un-prefixed it echoed back as its
-	// own literal text, so every steps.-rooted switch silently took the
-	// default branch (#2380; forge's "queued" case never fired).
-	subject := switchCfg.Expression
-	if isRuntimeReference(subject) && !strings.HasPrefix(subject, "$") {
-		subject = "$" + subject
+	// The subject is an expression parsed at load (memql#5367); its value
+	// is matched against the case labels by its text rendering.
+	x, err := preparedExprs(step)
+	var exprStr string
+	if err == nil {
+		exprStr, err = v1Text(ctx, stepCtx.Evaluator, x.Subject)
 	}
-	exprValue, err := stepCtx.Evaluator.EvaluateValue(subject)
 	if err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("failed to evaluate expression: %v", err)
@@ -55,9 +51,6 @@ func (e *SwitchExecutor) Execute(ctx context.Context, step *automations.Step, st
 		result.Duration = result.CompletedAt.Sub(result.StartedAt)
 		return result, fmt.Errorf("failed to evaluate expression: %w", err)
 	}
-
-	// Convert to string for case matching
-	exprStr := automations.FormatValue(exprValue)
 
 	if stepCtx.Logger != nil {
 		stepCtx.Logger.Debug("executing switch step",

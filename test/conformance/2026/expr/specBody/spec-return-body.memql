@@ -1,0 +1,4 @@
+/// Urgent tickets, with the pre-v1 body.
+spec ticket sbReturnBody {
+  return urgent == true
+}

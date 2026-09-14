@@ -801,7 +801,7 @@ query order ordersBySku%s {
   args {
     sku  string  @required
   }
-  filter  sku==args.sku && ownerUserId==actor.userId
+  filter  row => row.sku == args.sku && row.ownerUserId == actor.userId
 }`, ns, ns)
 
 	mutationSrc := fmt.Sprintf(`use %s.concepts.{ order }

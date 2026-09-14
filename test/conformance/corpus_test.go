@@ -12,14 +12,19 @@ package conformance
 //
 // FIVE VERDICTS, decided by the engine rather than by a copy of it:
 //
-//   - refuse_parse: the edition's front end plus the parser the loaders use
-//     (compiler.ParseFileSource) refuse the file.
-//   - load_ok / refuse_load: the file parses, and the engine's own boot-time
-//     validation -- MemQLEngine.Init over the embedded tree with the case
-//     mounted as an overlay domain, via memql.LintUnifiedTree, plus the
+//   - refuse_parse: the edition's front end plus the parser every loader uses
+//     refuse the file (corpusParse).
+//   - load_ok / refuse_load: the file parses (compiler.ParseFileSource, the
+//     loaders' own parse) and the engine's own boot-time validation -- MemQLEngine.Init over the embedded tree with the
+//     case mounted as an overlay domain, via memql.LintUnifiedTree, plus the
 //     automations loader for an automation and the capability catalog and
 //     action loader for a capability or an action (corpusActionProblems) --
 //     accepts it, or refuses it.
+//
+// ONE GRAMMAR. The loaders parse only the edition-2026 expression grammar, so
+// they read the corpus in the edition it is written in, and refuse the retired
+// spellings (a filter with no lambda header, a spec's `{ return }` body, a
+// raw-text @filter) as the edition does.
 //   - lower / evaluate: the expression lowers to SQL containing the expected
 //     text, or evaluates against a row to the expected value, through the
 //     adapter in engine_adapter_test.go.
@@ -53,6 +58,7 @@ package conformance
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -68,6 +74,7 @@ import (
 	"github.com/znasllc-io/memql/component/actions"
 	"github.com/znasllc-io/memql/component/automations"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/compiler"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/language/tiers"
@@ -112,6 +119,11 @@ type corpusCase struct {
 	Row   map[string]any `json:"row,omitempty"`
 	Args  map[string]any `json:"args,omitempty"`
 	Actor map[string]any `json:"actor,omitempty"`
+	// Calls answers the construct calls an evaluate expression makes, by
+	// "<kind> <name>" ("query openTickets"): the value the call returns. The
+	// corpus boots no database, so a call's answer is the case's to give;
+	// the construct must still be one the directory's fixture declares.
+	Calls map[string]json.RawMessage `json:"calls,omitempty"`
 	// SQL is text the lowered SQL must contain (lower).
 	SQL string `json:"sql,omitempty"`
 	// Expect is the value the expression must evaluate to (evaluate).
@@ -144,6 +156,7 @@ type corpusRun struct {
 	domain   string // the overlay domain the case loads in
 	line     dslfs.Manifest
 
+	file      *ast.File // the parsed case file, for a case that is a whole file
 	parseErr  error
 	loadDiags []string
 	loadRan   bool
@@ -164,13 +177,15 @@ func TestCorpusVerdicts(t *testing.T) {
 	if len(runs) == 0 {
 		t.Fatal("the corpus holds no cases -- the runner is reading nothing, so every gate over it would pass by matching nothing")
 	}
-
 	for _, r := range runs {
-		if r.c.Verdict == verdictLower || r.c.Verdict == verdictEvaluate {
-			continue
+		switch r.c.Verdict {
+		case verdictRefuseParse:
+			r.parseErr = corpusParse(r.line.Edition, r.src)
+		case verdictLoadOK, verdictRefuseLoad:
+			r.file, r.parseErr = corpusParseFile(r.line.Edition, r.src)
 		}
-		r.parseErr = corpusParse(r.line.Edition, r.src)
 	}
+	corpusCheckConstructNames(t, runs)
 	var loads, probes []*corpusRun
 	for _, r := range runs {
 		switch r.c.Verdict {
@@ -183,6 +198,7 @@ func TestCorpusVerdicts(t *testing.T) {
 		}
 	}
 	corpusLoad(t, loads)
+	corpusCheckRegistered(t, loads)
 	corpusProbe(t, probes)
 
 	for _, r := range runs {
@@ -202,7 +218,10 @@ func corpusJudge(r *corpusRun) string {
 		if r.parseErr == nil {
 			return "the file parsed; the case says the parser refuses it"
 		}
-		return corpusMatchRefusal(r.c, []string{r.parseErr.Error()})
+		if rule := corpusRefusalRule(r.parseErr); rule != "" && r.c.Code == "" {
+			return fmt.Sprintf("the refusal carries the rule id %q; name it in code -- the id is the part of the contract a reworded message keeps", rule)
+		}
+		return corpusMatchRefusal(r.c, []string{corpusRefusalText(r.parseErr)})
 	case verdictLoadOK:
 		if r.parseErr != nil {
 			return "the parser refused the file: " + r.parseErr.Error()
@@ -223,7 +242,14 @@ func corpusJudge(r *corpusRun) string {
 		if len(r.loadDiags) == 0 {
 			return "the engine loaded the file; the case says it is refused"
 		}
-		return corpusMatchRefusal(r.c, r.loadDiags)
+		if msg := corpusMatchRefusal(r.c, r.loadDiags); msg != "" {
+			return msg
+		}
+		// The rule a parse refusal answers to, at load (D24): a refusal that
+		// carries a rule id must have it named in code.
+		if rule := corpusLoadRule(r.c.Message, r.loadDiags); rule != "" && r.c.Code == "" {
+			return fmt.Sprintf("the refusal carries the rule id %q; name it in code -- the id is the part of the contract a reworded message keeps", rule)
+		}
 	case verdictLower:
 		if r.gotErr != nil {
 			return "did not lower: " + r.gotErr.Error()
@@ -262,19 +288,64 @@ func corpusMatchRefusal(c corpusCase, diags []string) string {
 	return fmt.Sprintf("refused, but no diagnostic carries %s; the diagnostics were:\n    %s", want, strings.Join(diags, "\n    "))
 }
 
+// corpusLoadRuleRe is a rule id as a load diagnostic prints it: last, in
+// brackets -- the convention the annotation registry's refusals and the
+// lowering's (LowerError) share, so a caller that prefixes context leaves the
+// code findable.
+var corpusLoadRuleRe = regexp.MustCompile(`\[([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\]\s*$`)
+
+// corpusLoadRule is the rule id the load diagnostic carrying message ends
+// with, or "" when it carries none.
+func corpusLoadRule(message string, diags []string) string {
+	for _, d := range diags {
+		if !strings.Contains(d, message) {
+			continue
+		}
+		if m := corpusLoadRuleRe.FindStringSubmatch(d); m != nil {
+			return m[1]
+		}
+	}
+	return ""
+}
+
+// corpusRefusalRule is the stable rule id a parse refusal carries -- today the
+// retired-form refusals of the edition-2026 expression grammar -- or "".
+func corpusRefusalRule(err error) string {
+	var rf *langparser.RetiredFormError
+	if errors.As(err, &rf) {
+		return rf.Form.Rule
+	}
+	return ""
+}
+
+// corpusRefusalText is a parse refusal as a case's code and message are
+// matched against it: the error's text, prefixed by its rule id when it has
+// one.
+func corpusRefusalText(err error) string {
+	if rule := corpusRefusalRule(err); rule != "" {
+		return "[" + rule + "] " + err.Error()
+	}
+	return err.Error()
+}
+
 // corpusParse is the parse half of a load: the edition's front end, then the
 // parser every loader uses.
 func corpusParse(edition, src string) error {
+	_, err := corpusParseFile(edition, src)
+	return err
+}
+
+// corpusParseFile is corpusParse returning the parsed file.
+func corpusParseFile(edition, src string) (*ast.File, error) {
 	fe, err := langparser.FrontEndFor(edition)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	prepared, err := fe.Prepare(src)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = compiler.ParseFileSource(prepared)
-	return err
+	return compiler.ParseFileSource(prepared)
 }
 
 // ---- discovery ----------------------------------------------------------------
@@ -435,6 +506,9 @@ func corpusValidateCase(dir string, c corpusCase) string {
 		}
 	default:
 		return fmt.Sprintf("verdict %q is not one of load_ok, refuse_parse, refuse_load, lower, evaluate", c.Verdict)
+	}
+	if len(c.Calls) > 0 && c.Verdict != verdictEvaluate {
+		return "calls answers the construct calls of an evaluate case; this case evaluates nothing"
 	}
 	if c.File == "" || c.File == "fixture.memql" || strings.Contains(c.File, "/") || !strings.HasSuffix(c.File, ".memql") {
 		return "file names a .memql case in this directory, other than fixture.memql"
@@ -770,8 +844,10 @@ func corpusNamesDomain(msg, domain string) bool {
 }
 
 // corpusConstructHeader matches a construct declaration and captures its name:
-// `query ticket openTickets {`, `capability fs.list {`, `seed skill a-b {`.
-var corpusConstructHeader = regexp.MustCompile(`(?m)^[ \t]*(?:query|mutate|logic|automation|action|capability|spec|trait|tool|builtin|prompt|provider|shape|policy|rule|seed|concept)[ \t]+(?:[A-Za-z_][\w]*[ \t]+)?([A-Za-z_][\w.-]*)[ \t]*\{`)
+// `query ticket openTickets {`, `capability fs.list {`, `seed skill a-b {`,
+// and the brace-less edition-2026 spec or trait, `spec ticket isOpen = row =>`
+// and `trait isOpen = row =>`.
+var corpusConstructHeader = regexp.MustCompile(`(?m)^[ \t]*(?:query|mutate|logic|automation|action|capability|spec|trait|tool|builtin|prompt|provider|shape|policy|rule|seed|concept)[ \t]+(?:[A-Za-z_][\w]*[ \t]+)?([A-Za-z_][\w.-]*)[ \t]*(?:\{|=)`)
 
 // corpusDeclaredNames maps every construct name the runs declare, in their
 // cases and fixtures, to the one run that declares it. A name more than one
@@ -858,36 +934,244 @@ func corpusAutomationProblems(t *testing.T, tree fs.FS) []string {
 	return lines
 }
 
+// ---- what a load proves -----------------------------------------------------------
+
+// A load_ok verdict is only evidence if the engine read the case. Two ways it
+// can pass having read nothing are ruled out here: a construct name another
+// file already took (two domains declaring one name make every bare lookup of
+// it ambiguous, and the load says nothing about which declaration a call
+// reaches), and a construct no loader picked up at all -- a declaration form
+// the loaders' slicers do not recognise raises no problem, because nothing
+// ever parsed it.
+
+// corpusDeclGroup names the registry a declaration lands in, "" for a
+// declaration this check does not track. Concepts are not tracked: their ids
+// carry the case's own overlay domain, so two cases never share one.
+func corpusDeclGroup(def ast.Node) (group, name string) {
+	switch d := def.(type) {
+	case *ast.FunctionDef:
+		if _, isAutomation := d.Body.(*ast.AutomationDef); isAutomation || d.Type == ast.FunctionTypeAutomation {
+			return "automation", d.Name
+		}
+		return "function", d.Name
+	case *ast.SpecDecl:
+		return "spec", d.Name
+	case *ast.ToolDecl:
+		return "tool", d.Name
+	case *ast.PromptDecl:
+		return "prompt", d.Name
+	case *ast.ShapeDecl:
+		return "shape", d.Name
+	}
+	return "", ""
+}
+
+// corpusCheckConstructNames fails every construct name two files of the
+// corpus declare where both can be in one boot. A directory's fixture counts
+// once, however many of its cases load it, because every copy is the same
+// declaration. Two CASE files of one directory may declare one name -- the
+// accepted form of a query beside a refused form of it -- because no two cases
+// of a directory share a boot (corpusRounds); a case may not repeat a name its
+// own fixture declares, since the two load in one domain.
+func corpusCheckConstructNames(t *testing.T, runs []*corpusRun) {
+	t.Helper()
+	type decl struct{ file, dir string }
+	owner := map[string]decl{}
+	record := func(file, dir string, fixture bool, parsed *ast.File) {
+		for _, def := range parsed.Definitions {
+			group, name := corpusDeclGroup(def)
+			if group == "" || name == "" {
+				continue
+			}
+			key := group + " " + name
+			if prev, taken := owner[key]; taken && prev.file != file {
+				sameDirCases := prev.dir == dir && !fixture && path.Base(prev.file) != "fixture.memql"
+				if !sameDirCases {
+					t.Errorf("%s %q is declared by both %s and %s: two domains declaring one name make every bare lookup of it ambiguous, so a case could pass without the engine reading the declaration it names -- rename one", group, name, prev.file, file)
+				}
+				continue
+			}
+			owner[key] = decl{file: file, dir: dir}
+		}
+	}
+	fixtures := map[string]bool{}
+	for _, r := range runs {
+		if r.fixture != "" && !fixtures[r.dir] {
+			fixtures[r.dir] = true
+			if f, err := corpusParseFile(r.line.Edition, r.fixture); err == nil && f != nil {
+				record(r.dir+"/fixture.memql", r.dir, true, f)
+			}
+		}
+		if r.file != nil {
+			record(r.rel, r.dir, false, r.file)
+		}
+	}
+}
+
+// corpusCheckRegistered holds each load_ok case that loaded with no problem to
+// having registered what it declares: its queries, mutations and logic, its
+// specs and traits, its tools and its concepts. It boots the cases again --
+// in the load's rounds, so no two cases of one directory share a boot
+// (corpusRounds) -- and looks each declaration up in the engine that booted.
+// A declaration the engine does not hold is a problem on the case: the
+// loaders never read it, so the load proved nothing about it.
+func corpusCheckRegistered(t *testing.T, runs []*corpusRun) {
+	t.Helper()
+	var oks []*corpusRun
+	for _, r := range runs {
+		if r.c.Verdict == verdictLoadOK && r.loadRan && len(r.loadDiags) == 0 && r.file != nil {
+			oks = append(oks, r)
+		}
+	}
+	for _, round := range corpusRounds(oks) {
+		corpusCheckRegisteredRound(round)
+	}
+}
+
+// corpusCheckRegisteredRound boots one round of loaded cases and checks each
+// declaration of each against the engine.
+func corpusCheckRegisteredRound(oks []*corpusRun) {
+	if len(oks) == 0 {
+		return
+	}
+	eng, stop, err := corpusProbeEngine(corpusTree(oks))
+	if err != nil {
+		for _, r := range oks {
+			r.loadDiags = append(r.loadDiags, "the cases that loaded did not boot again to be checked for what they registered: "+err.Error())
+		}
+		return
+	}
+	defer stop()
+	for _, r := range oks {
+		for _, def := range r.file.Definitions {
+			if missing := corpusUnregistered(eng, r.domain, def); missing != "" {
+				r.loadDiags = append(r.loadDiags, missing+": no loader read it, so loading the file proved nothing about it")
+			}
+		}
+	}
+}
+
+// corpusUnregistered names a declaration the booted engine does not hold, or
+// returns "". A @disabled declaration is skipped at load by design.
+func corpusUnregistered(eng *memql.MemQLEngine, domain string, def ast.Node) string {
+	switch d := def.(type) {
+	case *ast.FunctionDef:
+		if corpusDisabled(d.Attributes) {
+			return ""
+		}
+		switch d.Type {
+		case ast.FunctionTypeQuery, ast.FunctionTypeMutation, ast.FunctionTypeLogic:
+			if !eng.Functions().Has(d.Name) {
+				return fmt.Sprintf("the engine registered no %s %q", d.Type, d.Name)
+			}
+		}
+	case *ast.SpecDecl:
+		kind := "spec"
+		if d.IsTrait {
+			kind = "trait"
+		}
+		if !corpusDisabled(d.Attributes) && !eng.Specs().Has(d.Name) && !eng.Specs().IsDisabled(d.Name) {
+			return fmt.Sprintf("the engine registered no %s %q", kind, d.Name)
+		}
+	case *ast.ToolDecl:
+		if !d.Disabled && !eng.Tools().Has(d.Name) {
+			return fmt.Sprintf("the engine registered no tool %q", d.Name)
+		}
+	case *ast.ConceptDecl:
+		id := "v1:" + corpusConceptNamespace(domain, d.Attributes) + ":" + d.Name
+		if c, err := memoryNodes.DefaultRegistry().Get(id); err != nil || c == nil {
+			return fmt.Sprintf("the engine registered no concept %q", id)
+		}
+	}
+	return ""
+}
+
+// corpusConceptNamespace is the namespace a concept's canonical id carries:
+// its @namespace when it names one (a domain's namespace.pin admits it), else
+// the domain it loads in.
+func corpusConceptNamespace(domain string, attrs []*ast.Attribute) string {
+	for _, a := range attrs {
+		if a == nil || a.Name != "namespace" {
+			continue
+		}
+		if ns, ok := a.Value.(string); ok && strings.TrimSpace(ns) != "" {
+			return strings.TrimSpace(ns)
+		}
+	}
+	return domain
+}
+
+func corpusDisabled(attrs []*ast.Attribute) bool {
+	for _, a := range attrs {
+		if a != nil && a.Name == ast.AttrDisabled {
+			return true
+		}
+	}
+	return false
+}
+
 // ---- the expression batch -------------------------------------------------------
 
 // corpusProbe boots one engine with every expression directory's fixture
-// mounted and runs each lower / evaluate case through the adapter.
+// mounted and runs each lower / evaluate case through the adapter. When the
+// fixtures do not boot together it boots them one directory at a time, so a
+// fixture that does not load fails its own directory's cases and no other.
 func corpusProbe(t *testing.T, runs []*corpusRun) {
 	t.Helper()
 	if len(runs) == 0 {
 		return
 	}
+	byDir := map[string][]*corpusRun{}
+	var dirs []string
+	for _, r := range runs {
+		if _, seen := byDir[r.dir]; !seen {
+			dirs = append(dirs, r.dir)
+		}
+		byDir[r.dir] = append(byDir[r.dir], r)
+	}
+	if corpusProbeBatch(runs) == nil || len(dirs) == 1 {
+		return
+	}
+	for _, d := range dirs {
+		for _, r := range byDir[d] {
+			r.got, r.gotErr = nil, nil
+		}
+		_ = corpusProbeBatch(byDir[d])
+	}
+}
+
+// corpusProbeBatch boots one engine over the fixtures of runs' directories and
+// answers every run through the adapter. A boot that fails is every run's
+// answer, and is returned.
+func corpusProbeBatch(runs []*corpusRun) error {
 	tree := fstest.MapFS{}
 	fixtureDomain := map[string]string{}
+	predicates := map[string]func(string) (string, ast.ExpressionNode, bool){}
 	for _, r := range runs {
+		if _, seen := fixtureDomain[r.dir]; seen {
+			continue
+		}
 		d := corpusDomainName(strings.TrimPrefix(r.dir, r.edition+"/"))
 		fixtureDomain[r.dir] = d
+		predicates[r.dir] = adapterPredicates(r.line.Edition, r.fixture)
 		tree[d+"/"+dslfs.ManifestFile] = &fstest.MapFile{Data: []byte(r.line.Render())}
 		tree[d+"/fixture.memql"] = &fstest.MapFile{Data: []byte(r.fixture)}
 	}
 	eng, stop, err := corpusProbeEngine(tree)
 	if err != nil {
+		err = fmt.Errorf("the expression fixtures do not load: %w", err)
 		for _, r := range runs {
-			r.gotErr = fmt.Errorf("the expression fixtures do not load: %w", err)
+			r.gotErr = err
 		}
-		return
+		return err
 	}
 	defer stop()
 	for _, r := range runs {
 		env := ExprEnv{
-			Row: r.c.Row, Args: r.c.Args, Actor: r.c.Actor,
-			Concept: "v1:" + fixtureDomain[r.dir] + ":" + r.c.Concept,
-			Engine:  eng,
+			Row: r.c.Row, Args: r.c.Args, Actor: r.c.Actor, Calls: r.c.Calls,
+			Concept:    "v1:" + fixtureDomain[r.dir] + ":" + r.c.Concept,
+			Engine:     eng,
+			Predicates: predicates[r.dir],
 		}
 		expr := strings.TrimSpace(r.src)
 		pos := tiers.Position(r.c.Position)
@@ -897,6 +1181,7 @@ func corpusProbe(t *testing.T, runs []*corpusRun) {
 			r.got, r.gotErr = evaluate(pos, expr, env)
 		}
 	}
+	return nil
 }
 
 // corpusProbeEngine mounts the fixtures and boots an engine over them. The
@@ -954,9 +1239,13 @@ func TestCorpusAttributionNamesOneCase(t *testing.T) {
 	x := &corpusRun{src: "policy anyLocalModel { }", domain: "d1"}
 	y := &corpusRun{src: "prompt summariseA {\n}\n", domain: "d2"}
 	z := &corpusRun{src: "prompt summariseB {\n}\n", domain: "d3"}
-	byName := corpusDeclaredNames([]*corpusRun{x, y, z})
+	w := &corpusRun{src: "trait isOpenTicket = row => row.status == \"open\"\n", domain: "d4"}
+	byName := corpusDeclaredNames([]*corpusRun{x, y, z, w})
 	if r, ok := corpusRunNamed(`policy "anyLocalModel": policy entry "fleet:*" is retired`, byName); !ok || r != x {
 		t.Errorf("a refusal quoting one case's construct is that case's")
+	}
+	if r, ok := corpusRunNamed(`trait "isOpenTicket" (lower): does not lower`, byName); !ok || r != w {
+		t.Errorf("a brace-less edition-2026 trait is a construct its case declares")
 	}
 	if _, ok := corpusRunNamed(`2 prompt(s): prompt "summariseA": ...; prompt "summariseB": ...`, byName); ok {
 		t.Errorf("an aggregated refusal quoting two cases' constructs was claimed by one of them")

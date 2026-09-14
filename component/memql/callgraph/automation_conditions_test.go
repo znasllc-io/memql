@@ -27,7 +27,7 @@ func TestAutomationCondition_MigratedPatternsAreFindings(t *testing.T) {
 		{"retention date-math if", `automation probe {
   step apply {
     forEach item in decide.result {
-      if addDuration(item.createdAt, concat("P", coalesce(window.first().payload.value, "30"), "D")) < now {
+      if addDuration(item.createdAt, "P" + (window.first().payload.value ?? "30") + "D") < now {
         mutation expire ( id: item.id )
       }
     }
@@ -40,10 +40,21 @@ func TestAutomationCondition_MigratedPatternsAreFindings(t *testing.T) {
     }
   }
 }`, "automation-condition-vocabulary"},
-		{"coalesce default in @filter", `@filter(coalesce(payload.kind, "regular") == "daily")
+		{"`??` default in @filter", `@filter(row => (row.kind ?? "regular") == "daily")
 automation probe {
   step run { logic f ( event ) }
 }`, "automation-condition-builtin"},
+		{"`+` concat in an if", `automation probe {
+  step apply {
+    if "role:" + event.node.payload.role == "role:admin" {
+      mutation m ( id: id )
+    }
+  }
+}`, "automation-condition-builtin"},
+		{"vocabulary in a lambda @filter", `@filter(row => row.status == "running" || row.status == "compiling")
+automation probe {
+  step run { logic f ( event ) }
+}`, "automation-condition-vocabulary"},
 		{"vocabulary in forEach where", `automation probe {
   step fan {
     forEach nt in engineNodeTypes where nt == "voice" || nt == "bff" {
@@ -80,12 +91,12 @@ func TestAutomationCondition_SanctionedShapesPass(t *testing.T) {
     }
   }
   step teardown {
-    if steps.terminal.result == true && exists(event.node.id) {
+    if steps.terminal.result == true && event.node.id != nil {
       builtin teardown ( planId: event.node.id )
     }
   }
 }`},
-		{"relevance @filter equality", `@filter(event.node.payload.preferences.computerUseEnabled == false)
+		{"relevance @filter equality", `@filter(row => event.node.payload.preferences.computerUseEnabled == false)
 automation probe {
   step run { logic f ( event ) }
 }`},
@@ -105,6 +116,14 @@ automation probe {
     }
   }
 }`},
+		{"relevance lambda @filter on the row", `@filter(row => row.preferences.computerUseEnabled == false)
+automation probe {
+  step run { logic f ( event ) }
+}`},
+		{"a group inside a lambda @filter", `@filter(row => (row.kind == "file" && row.archived == true))
+automation probe {
+  step run { logic f ( event ) }
+}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,5 +131,14 @@ automation probe {
 				t.Fatalf("sanctioned shape must produce zero findings, got %v", fs)
 			}
 		})
+	}
+}
+
+// TestAnnotationArgsReadsToTheBalancedParen pins the extraction itself.
+func TestAnnotationArgsReadsToTheBalancedParen(t *testing.T) {
+	got := annotationArgs(`@filter(row => (row.a == ")") && f(row.b))
+automation x {}`, automationFilterRE)
+	if len(got) != 1 || got[0] != `row => (row.a == ")") && f(row.b)` {
+		t.Fatalf("annotationArgs = %q", got)
 	}
 }

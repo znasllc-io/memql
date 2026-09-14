@@ -1,0 +1,5 @@
+/// List the tickets, with a method call for a default.
+@handler(type="query", query="paginate(query tdTickets(), args.limit)")
+tool tdMethodCall {
+  limit  integer  @default("10".count()) @description("How many tickets to return.")
+}

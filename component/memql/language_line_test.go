@@ -59,9 +59,7 @@ func withLanguageLines(root fstest.MapFS) fstest.MapFS {
 // languageLineTrait is a construct that loads clean on its own, so the only
 // problem a fixture carrying it can have is its language line.
 const languageLineTrait = `@enabled
-trait langLineProbeTrait {
-  return active == true
-}
+trait langLineProbeTrait = row => row.active == true
 `
 
 // registerLanguageLineOverlay mounts a throwaway domain holding the probe
@@ -382,7 +380,7 @@ func TestLanguageLine_LintReportsARefusedLineOnce(t *testing.T) {
 	root := fstest.MapFS{
 		"langlinelint/concepts.memql": {Data: []byte("@description(\"A hub.\")\nconcept hub {\n  name  string  @description(\"Hub name.\")\n}\n")},
 		"langlinelint/shapes.memql":   {Data: []byte("use langlinelint.concepts.{ hub }\n\n@description(\"Hub card.\")\n@row\nshape hub hubCard {\n  row.id\n  name\n}\n")},
-		"langlinelint/queries.memql":  {Data: []byte("use langlinelint.concepts.{ hub }\nuse langlinelint.shapes.{ hubCard }\n\n@enabled\n@description(\"Hubs by name.\")\n@public\nquery hub hubsByName {\n  args {\n    name  string  @required\n  }\n  filter  name == args.name\n  shape   hubCard\n  paginate\n}\n")},
+		"langlinelint/queries.memql":  {Data: []byte("use langlinelint.concepts.{ hub }\nuse langlinelint.shapes.{ hubCard }\n\n@enabled\n@description(\"Hubs by name.\")\n@public\nquery hub hubsByName {\n  args {\n    name  string  @required\n  }\n  filter  row => row.name == args.name\n  shape   hubCard\n  paginate\n}\n")},
 		"langlinelint/traits.memql":   {Data: []byte(languageLineTrait)},
 	}
 	diags, _, err := LintUnifiedTree(nil, root)

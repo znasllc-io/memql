@@ -16,6 +16,12 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 	ctx := analyzeCursorContext(source, line, col)
 	ctx.FilePath = filePath
 
+	// An expression position (memql#5365) offers what the tier manifest admits
+	// there, and nothing it refuses.
+	if items, ok := s.completeAtExpression(ctx, source, line, col); ok {
+		return items
+	}
+
 	var items []CompletionItem
 
 	switch ctx.Kind {
@@ -110,6 +116,13 @@ func (s *Service) completeAnnotation(ctx CursorContext) []CompletionItem {
 				Documentation: doc, InsertText: insertText,
 				SortPriority: 1,
 			})
+		}
+	}
+	// The whole-form snippets (the trigger filter's lambda), beside the bare
+	// annotation names they complete.
+	for _, it := range annotationSnippets(ctx.Enclosing) {
+		if strings.HasPrefix(it.InsertText, ctx.Prefix) {
+			items = append(items, it)
 		}
 	}
 
@@ -208,9 +221,14 @@ func (s *Service) completeFuncBody(prefix string, enc EnclosingConstruct, source
 				continue
 			}
 			if parser.IsLineClause(blk) {
+				insert := blk + " "
+				// A filter and a refine are clauses over a lambda in v1.
+				if blk == "filter" || blk == "refine" {
+					insert = blk + " row => "
+				}
 				items = append(items, CompletionItem{
 					Label: blk, Kind: "keyword", Detail: enc.Keyword + " clause",
-					Documentation: specClauseDoc(blk), InsertText: blk + " ",
+					Documentation: specClauseDoc(blk), InsertText: insert,
 					SortPriority: 2,
 				})
 				continue
@@ -791,14 +809,34 @@ func receiverOfConstruct(enc EnclosingConstruct) string {
 	return ""
 }
 
-// enclosingConstructArgsFields returns the declared args-field names of
-// the construct enclosing the cursor line -- the unified source (#2624)
-// behind both the automation bare-name completion (G2, memql#2364 / ADR
-// Decision 3) and the `args.` member completion, so the two can never
-// disagree about what is declared. Pure source-level scan, no registry.
-func enclosingConstructArgsFields(source string, line int) []string {
-	return constructArgsFields(source, line, `^\s*(?:automation|query|mutate|logic)\s+[A-Za-z_]`)
+// argsFieldItems offers declared args fields, as `args.` member completion
+// does wherever it reads them: constructArgs is the one source-level scan
+// (#2624) behind the automation bare-name completion (G2, memql#2364 / ADR
+// Decision 3) and every `args.` completion, so the two can never disagree
+// about what is declared.
+func argsFieldItems(fields []string, types map[string]string, prefix, doc string) []CompletionItem {
+	var items []CompletionItem
+	for _, f := range fields {
+		if !strings.HasPrefix(f, prefix) {
+			continue
+		}
+		// The detail is the declared type, the one fact an author picking an
+		// arg needs.
+		detail := types[f]
+		if detail == "" {
+			detail = "args field"
+		}
+		items = append(items, CompletionItem{
+			Label: f, Kind: "variable", Detail: detail,
+			Documentation: doc, InsertText: f, SortPriority: 1,
+		})
+	}
+	return items
 }
+
+// enclosingConstructHeader matches the header of a construct that declares an
+// args block.
+const enclosingConstructHeader = `^\s*(?:automation|query|mutate|logic)\s+[A-Za-z_]`
 
 // automationArgsFieldCompletions keeps the G2 bare-name behavior:
 // inside an AUTOMATION body the declared args fields resolve bare, so
@@ -806,7 +844,8 @@ func enclosingConstructArgsFields(source string, line int) []string {
 // get the `args.` member path (bare args fields do not resolve there).
 func automationArgsFieldCompletions(source string, line int, prefix string) []CompletionItem {
 	var items []CompletionItem
-	for _, f := range constructArgsFields(source, line, `^\s*automation\s+[A-Za-z_]`) {
+	fields, _ := constructArgs(source, line, `^\s*automation\s+[A-Za-z_]`)
+	for _, f := range fields {
 		if strings.HasPrefix(f, prefix) {
 			items = append(items, CompletionItem{
 				Label: f, Kind: "variable", Detail: "args field",
@@ -818,31 +857,33 @@ func automationArgsFieldCompletions(source string, line int, prefix string) []Co
 	return items
 }
 
-// constructArgsFields scans for the construct (matching headerPattern)
-// enclosing the cursor line and returns its args-block field names.
-func constructArgsFields(source string, line int, headerPattern string) []string {
+// constructArgs scans for the construct (matching headerPattern) enclosing
+// the cursor line and returns its args-block field names, in order, and each
+// field's declared type.
+func constructArgs(source string, line int, headerPattern string) ([]string, map[string]string) {
 	lines := strings.Split(source, "\n")
 	if line < 1 || line > len(lines) {
-		return nil
+		return nil, nil
 	}
 	headerPat := regexp.MustCompile(headerPattern)
-	fieldPat := regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s+\S`)
 	argsPat := regexp.MustCompile(`^\s*args\s*\{`)
 
 	depth, inConstruct, inArgs, argsDepthAt, start := 0, false, false, 0, -1
 	var fields []string
+	types := map[string]string{}
 	for i, ln := range lines {
 		opens := strings.Count(ln, "{")
 		closes := strings.Count(ln, "}")
 		if !inConstruct && headerPat.MatchString(ln) {
 			inConstruct, start, depth = true, i+1, 0
-			fields = nil
+			fields, types = nil, map[string]string{}
 		}
 		if inConstruct {
 			if inArgs {
 				if trimmed := strings.TrimSpace(ln); trimmed != "" && !strings.HasPrefix(trimmed, "//") && !strings.Contains(ln, "args") {
-					if m := fieldPat.FindStringSubmatch(ln); m != nil {
+					if m := argsFieldTypePattern.FindStringSubmatch(ln); m != nil {
 						fields = append(fields, m[1])
+						types[m[1]] = strings.TrimSuffix(m[2], "!")
 					}
 				}
 				if depth+opens-closes < argsDepthAt {
@@ -855,7 +896,7 @@ func constructArgsFields(source string, line int, headerPattern string) []string
 			depth += opens - closes
 			if depth <= 0 && i+1 > start {
 				if line >= start && line <= i+1 {
-					return fields
+					return fields, types
 				}
 				inConstruct, inArgs = false, false
 			}
@@ -863,9 +904,9 @@ func constructArgsFields(source string, line int, headerPattern string) []string
 	}
 	// Cursor inside a still-open construct at EOF (mid-typing).
 	if inConstruct && line >= start {
-		return fields
+		return fields, types
 	}
-	return nil
+	return nil, nil
 }
 
 // fileDomain derives the ambient domain from a document path: the base
@@ -904,17 +945,8 @@ func (s *Service) completeFieldAccess(ctx CursorContext, source string, line int
 		}
 		return nil
 	case "args":
-		var items []CompletionItem
-		for _, f := range enclosingConstructArgsFields(source, line) {
-			if strings.HasPrefix(f, ctx.Prefix) {
-				items = append(items, CompletionItem{
-					Label: f, Kind: "variable", Detail: "args field",
-					Documentation: "Declared in the enclosing construct's args { } block.",
-					InsertText:    f, SortPriority: 1,
-				})
-			}
-		}
-		return items
+		fields, types := constructArgs(source, line, enclosingConstructHeader)
+		return argsFieldItems(fields, types, ctx.Prefix, "Declared in the enclosing construct's args { } block.")
 	case "row":
 		// `@row` puts the row envelope in scope: the intrinsics every
 		// stored row carries, independent of its concept's payload
@@ -1091,18 +1123,11 @@ func (s *Service) completeInBlock(prefix string, enc EnclosingConstruct, block s
 		return items, true
 
 	case "inFilterClause":
-		var items []CompletionItem
-		for _, head := range reservedFilterHeads {
-			if strings.HasPrefix(head, prefix) {
-				items = append(items, CompletionItem{
-					Label: head, Kind: "keyword", Detail: "filter head",
-					Documentation: KeywordDocs[head], InsertText: head,
-					SortPriority: 2,
-				})
-			}
-		}
-		items = append(items, s.boundConceptFieldItems(prefix, enc)...)
-		return items, true
+		// The pre-v1 `filter { }` block. Edition 2026 has no filter block: the
+		// parser reads the braces as a map literal and refuses a filter that is
+		// not a lambda, so nothing typed inside one can load and nothing is
+		// offered. A bare field name here is exactly the refused spelling.
+		return nil, true
 
 	case "inWriteBlock":
 		var items []CompletionItem
@@ -1157,14 +1182,6 @@ func (s *Service) boundConceptFieldItems(prefix string, enc EnclosingConstruct) 
 		break
 	}
 	return items
-}
-
-// reservedFilterHeads mirrors the engine plan parser's
-// reservedFilterHead set (component/memql/parser.go) -- the path roots
-// legal at the head of a filter predicate.
-var reservedFilterHeads = []string{
-	"payload", "actor", "args", "now", "config",
-	"trace", "meta", "schema", "partition", "provenance",
 }
 
 // rowIntrinsics is the row envelope every stored row carries regardless of
