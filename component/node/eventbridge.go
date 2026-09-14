@@ -245,13 +245,20 @@ func (eb *EventBridge) onLocalEvent(event events.Event) {
 //
 // There is no buffering and no skip-classification here -- both were ad-hoc
 // push-model patches (the #1232 per-peer outbox and the #1245 dead-peer skip)
-// that have been retired in epic memql#1259 Phase 2 (memql#1267). Now that
-// events / RPC / streaming all ride the durable delivery substrate
-// (memql#1264/#1265/#1266), the substrate -- not the mesh -- is the
-// cross-replica delivery guarantee, so the mesh fast-path is purely a latency
-// optimization. A hint that misses a not-yet-connected peer is harmless: the
-// durable pull catches that consumer up, and the receiver dedups by EventId
+// that have been retired in epic memql#1259 Phase 2 (memql#1267). For the
+// traffic that moved onto the durable delivery substrate (the chat-reply,
+// RPC and streaming keys of memql#1264/#1265/#1266) the substrate -- not the
+// mesh -- is the cross-replica guarantee: a hint that misses a
+// not-yet-connected peer is harmless there, because the durable pull catches
+// that consumer up, and the receiver dedups by EventId
 // (component/node/dedup.go) so the two paths never double-deliver.
+//
+// ORDINARY BUS EVENTS DID NOT MOVE, and for them there is no second path
+// (memql#5259). A graph.node.* forward that skips a peer is simply never
+// heard there -- nor on a node nobody dials, since this sends only along
+// OUTBOUND connections. A consumer that must be right on every replica needs
+// its own floor, as the readiness recompute loop has (component/memql/
+// readiness_recompute_subscriber.go, and readiness_mesh_hop_test.go here).
 func (eb *EventBridge) forwardToPeers(forward *nodev1.EventForward, decision routingDecision) {
 	msg := &nodev1.NodeClientMessage{
 		MessageId: id.NewShortId(),
@@ -328,10 +335,11 @@ func (eb *EventBridge) ForwardInboundToPeers(evt *nodev1.EventForward, excludeNo
 	}
 
 	// Best-effort fast-path relay: send to connected peers, skip the rest.
-	// Same as forwardToPeers, the durable substrate (memql#1264) is the
-	// delivery guarantee so a Connection==nil peer is harmlessly skipped (the
-	// relayed copy keeps the original EventId, so the receiver's dedup window
-	// suppresses any duplicate that also arrives via a direct hop).
+	// As in forwardToPeers, a Connection==nil peer is skipped -- harmlessly for
+	// traffic the durable substrate (memql#1264) also carries, and FOR GOOD for
+	// an ordinary bus event, which has no second path (memql#5259). The relayed
+	// copy keeps the original EventId, so the receiver's dedup window
+	// suppresses any duplicate that also arrives via a direct hop.
 	sent := 0
 	for _, peer := range targets {
 		if peer.Info.NodeId == excludeNodeId {
