@@ -319,8 +319,8 @@ automation routeRequest {
 		t.Fatalf("automations = %d", len(res.Automations))
 	}
 	out := res.Automations[0].JSON
-	if out["expressions"] != "v1" {
-		t.Errorf("expressions = %v, want v1", out["expressions"])
+	if out["body"] != "statements" {
+		t.Errorf("body = %v, want statements", out["body"])
 	}
 	if _, ok := out["_return"]; ok {
 		t.Errorf("a statement body writes no _return: its return is a step")
