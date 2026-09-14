@@ -103,7 +103,7 @@ func seedPromotedSpec(t *testing.T, e *MemQLEngine, owner string) *fakeDemoteSto
 // construct from the shared registry AND flips the persisted construct + bundle
 // rows to retired.
 func TestDemoteConstructDurable_UnregistersAndRetires(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	store := seedPromotedSpec(t, e, "owner-1")
 
 	// Promoted and callable before the demote.
@@ -131,7 +131,7 @@ func TestDemoteConstructDurable_UnregistersAndRetires(t *testing.T) {
 // TestDemoteBundleDurable_DemotesNamedConstruct: the bundle-level entry point
 // demotes every plain construct the source names, by name, without compiling.
 func TestDemoteBundleDurable_DemotesNamedConstruct(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	store := seedPromotedSpec(t, e, "owner-1")
 
 	res, err := e.demoteBundleDurableWithStore(context.Background(), store, "owner-1", sessionSpecSrc)
@@ -149,7 +149,7 @@ func TestDemoteBundleDurable_DemotesNamedConstruct(t *testing.T) {
 // TestDemoteConstructDurable_RejectsNonOwner: an empty owner cannot demote;
 // nothing is removed or retired.
 func TestDemoteConstructDurable_RejectsNonOwner(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	store := seedPromotedSpec(t, e, "owner-1")
 
 	if _, err := e.demoteConstructDurableWithStore(context.Background(), store, "  ", "spec", "mcpSessSpec"); err == nil {
@@ -193,7 +193,7 @@ func TestDemoteConstructDurable_RefusesNonPromotedName(t *testing.T) {
 // running the boot re-hydration on a FRESH engine against those retired rows.
 // The construct must NOT come back -- the demote survives the restart.
 func TestDemote_RehydrationSkipsRetiredAfterRestart(t *testing.T) {
-	old := &MemQLEngine{specs: newSpecRegistry()}
+	old := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	store := seedPromotedSpec(t, old, "owner-1")
 	if _, err := old.demoteConstructDurableWithStore(context.Background(), store, "owner-1", "spec", "mcpSessSpec"); err != nil {
 		t.Fatalf("durable demote: %v", err)
@@ -206,7 +206,7 @@ func TestDemote_RehydrationSkipsRetiredAfterRestart(t *testing.T) {
 		constructs: map[string][]AuthoringConstructRow{bundleId: store.constructs[bundleId]},
 	}
 
-	fresh := &MemQLEngine{specs: newSpecRegistry()}
+	fresh := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	res, err := fresh.rehydratePromotedNow(context.Background(), rehydrate)
 	if err != nil {
 		t.Fatalf("re-hydrate: %v", err)

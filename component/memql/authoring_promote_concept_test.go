@@ -119,6 +119,7 @@ func conceptEngineOver(t *testing.T, registry *memoryNodes.MemoryRegistry) *MemQ
 		schemaIdx:     schemaIdx,
 		functions:     newFunctionRegistry(),
 		specs:         newSpecRegistry(),
+		shapes:        coreShapesForTest(t),
 	}
 }
 

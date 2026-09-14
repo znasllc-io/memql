@@ -170,8 +170,13 @@ func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store p
 	// throwaway owner-scoped registry holds the compiled forms; nothing about it
 	// is durable -- it exists only to carry the *Function / *Spec into the
 	// per-construct PromoteConstructDurable.
+	//
+	// Validated with this engine's registries in the lowering scope and no
+	// owner layer: a promoted construct may depend only on what every session
+	// can resolve, so a construct that does not lower there is refused here,
+	// with its diagnostic, before anything is promoted.
 	reg := NewAuthoredRuntimeRegistry()
-	defineRes, err := AuthorSessionBundle(reg, owner, bundleSource, origin)
+	defineRes, err := authorSessionBundle(&authoringLowering{engine: e}, reg, owner, bundleSource, origin)
 	result := PromoteBundleResult{OK: defineRes.OK, Diagnostics: defineRes.Diagnostics}
 	if err != nil {
 		// Validation/compile failure: nothing registered, nothing to promote.
@@ -197,7 +202,11 @@ func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store p
 	// appears in result.Diagnostics with its OK/skip status -- a broken
 	// automation in the bundle fails the whole promote loudly rather than being
 	// ignored while the plain constructs promote (the pre-E1 silent-skip bug).
-	for _, c := range SplitBundleSource(bundleSource) {
+	//
+	// In dependency order (promoteOrder): each promote lowers its construct
+	// against the shared registries as they stand, so a spec a query applies
+	// is registered before the query is checked against it.
+	for _, c := range promoteOrder(SplitBundleSource(bundleSource)) {
 		if !isDurablePromotableKind(c.Kind) {
 			continue
 		}
@@ -1014,7 +1023,20 @@ func (s *enginePromoteRehydrateStore) LoadConstructsForBundle(ctx context.Contex
 // rehydratePromotedNow is the engine-bound invocation used at boot: it wires the
 // engine's recompileAndPromoteRow into the store-driven walk.
 func (e *MemQLEngine) rehydratePromotedNow(ctx context.Context, store promoteRehydrateStore) (RehydrateResult, error) {
-	return rehydratePromotedConstructsWithStore(ctx, store,
+	result, err := rehydratePromotedConstructsWithStore(ctx, store,
 		withRehydratePromote(e.recompileAndPromoteRow),
 		withRehydrateStage(e.recompileAndStageRow))
+	if err != nil {
+		return result, err
+	}
+	// The walk replayed each stored row with its predicate checks deferred
+	// (a row one of them applies may come back later); now that every row is
+	// back, they run against the full registries, as the Init pass runs them
+	// once every spec is loaded (memql#5366). A construct they refuse is
+	// quarantined and taken back out.
+	for _, refused := range e.checkRehydratedPushdown() {
+		result.Rehydrated--
+		result.Failed = append(result.Failed, refused)
+	}
+	return result, nil
 }

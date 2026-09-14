@@ -598,6 +598,13 @@ func (e *MemQLEngine) expandSpecReferences(expr ExpressionNode) (ExpressionNode,
 		if err != nil {
 			return nil, fmt.Errorf("spec reference %q: %w", node.Name, err)
 		}
+		if spec.Expr == nil {
+			// An edition-2026 body that did not lower at load (possible only
+			// under MEMQL_DSL_ALLOW_SKIPS, since strict boot refuses it). An
+			// absent body inlined as nothing would change what the filter
+			// selects, silently, so the reference is refused by name.
+			return nil, fmt.Errorf("spec reference %q: %s has no lowered body (it was refused at load)", node.Name, specKeyword(spec))
+		}
 		// Recursively expand in case the spec itself contains spec references
 		return e.expandSpecReferences(spec.Expr)
 	case *LogicalExpression:

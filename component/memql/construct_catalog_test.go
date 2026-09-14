@@ -377,7 +377,7 @@ func catalogViewOnlyKindsCarryNoArgs(t *testing.T) {
 // TestConstructCatalogPromotedAppearsAndDisappears is the case a file walk
 // cannot do: a construct that lives in the database and in no file.
 func TestConstructCatalogPromotedAppearsAndDisappears(t *testing.T) {
-	e := &MemQLEngine{specs: newSpecRegistry()}
+	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	reg := NewAuthoredRuntimeRegistry()
 	c := authorOneSpec(t, reg, "owner-1")
 
