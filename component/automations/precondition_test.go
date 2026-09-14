@@ -37,7 +37,7 @@ func TestExtractPreconditions_None(t *testing.T) {
 func TestExtractPreconditions_ParsesFieldsAndStrips(t *testing.T) {
 	src := `automation deployStaging {
   precondition envIsStaging {
-    check: $config.MEMQL_ENV == "staging"
+    check: config.MEMQL_ENV == "staging"
     literal: MEMQL_ENV
     description: "Only drive the staging deploy spine in staging."
   }
@@ -54,7 +54,7 @@ func TestExtractPreconditions_ParsesFieldsAndStrips(t *testing.T) {
 	if pc.ID != "envIsStaging" {
 		t.Errorf("id = %q, want envIsStaging", pc.ID)
 	}
-	if pc.Check != `$config.MEMQL_ENV == "staging"` {
+	if pc.Check != `config.MEMQL_ENV == "staging"` {
 		t.Errorf("check = %q (inner quotes must survive)", pc.Check)
 	}
 	if pc.Literal != "MEMQL_ENV" {
@@ -75,8 +75,8 @@ func TestExtractPreconditions_ParsesFieldsAndStrips(t *testing.T) {
 
 func TestExtractPreconditions_Multiple(t *testing.T) {
 	src := `automation multi {
-  precondition a { check: $event.payload.x != "" }
-  precondition b { check: $config.Y == "z" literal: Y }
+  precondition a { check: event.payload.x != "" }
+  precondition b { check: config.Y == "z" literal: Y }
   step run { logic doThing { event: event } }
 }`
 	pcs, stripped, err := extractPreconditions(src)
@@ -166,14 +166,37 @@ automation badGuard {
 
 // --- deterministic evaluation -------------------------------------------
 
+// prepared parses the checks the way a load does (PrepareExpressions), so
+// EvaluatePreconditions reads their nodes.
+func prepared(t *testing.T, pcs ...*Precondition) []*Precondition {
+	t.Helper()
+	if err := PrepareExpressions(&Automation{Name: "probe", Preconditions: pcs}); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	return pcs
+}
+
+// A check its automation never prepared is a MISS -- the conservative
+// reading an unevaluable check gets -- never a pass.
+func TestEvaluatePreconditions_UnpreparedIsAMiss(t *testing.T) {
+	eval := NewEvaluator()
+	eval.SetCustom("event", map[string]any{"payload": map[string]any{"imageDigest": "sha256:abc"}})
+	missed, isMiss := EvaluatePreconditions([]*Precondition{
+		{ID: "digestPinned", Check: `event.payload.imageDigest != nil`},
+	}, eval)
+	if !isMiss || missed.ID != "digestPinned" {
+		t.Fatalf("an unprepared check must miss; got miss=%v", isMiss)
+	}
+}
+
 func TestEvaluatePreconditions_HoldsAndMisses(t *testing.T) {
 	eval := NewEvaluator()
 	eval.SetCustom("event", map[string]any{"payload": map[string]any{"imageDigest": "sha256:abc"}})
 
 	// Holds: the literal is present.
-	missed, isMiss := EvaluatePreconditions([]*Precondition{
-		{ID: "digestPinned", Check: `exists(event.payload.imageDigest)`},
-	}, eval)
+	missed, isMiss := EvaluatePreconditions(prepared(t,
+		&Precondition{ID: "digestPinned", Check: `event.payload.imageDigest != nil`},
+	), eval)
 	if isMiss {
 		t.Fatalf("expected no miss when digest present, got miss on %q", missed.ID)
 	}
@@ -181,9 +204,9 @@ func TestEvaluatePreconditions_HoldsAndMisses(t *testing.T) {
 	// Misses: absent literal (the cross-machine drift case).
 	eval2 := NewEvaluator()
 	eval2.SetCustom("event", map[string]any{"payload": map[string]any{}})
-	missed2, isMiss2 := EvaluatePreconditions([]*Precondition{
-		{ID: "digestPinned", Check: `exists(event.payload.imageDigest)`},
-	}, eval2)
+	missed2, isMiss2 := EvaluatePreconditions(prepared(t,
+		&Precondition{ID: "digestPinned", Check: `event.payload.imageDigest != nil`},
+	), eval2)
 	if !isMiss2 {
 		t.Fatalf("expected a miss when digest absent")
 	}
@@ -195,11 +218,11 @@ func TestEvaluatePreconditions_HoldsAndMisses(t *testing.T) {
 func TestEvaluatePreconditions_FirstMissWins(t *testing.T) {
 	eval := NewEvaluator()
 	eval.SetCustom("event", map[string]any{"payload": map[string]any{"a": "set"}})
-	missed, isMiss := EvaluatePreconditions([]*Precondition{
-		{ID: "aSet", Check: `exists(event.payload.a)`}, // holds
-		{ID: "bSet", Check: `exists(event.payload.b)`}, // misses
-		{ID: "cSet", Check: `exists(event.payload.c)`}, // would also miss
-	}, eval)
+	missed, isMiss := EvaluatePreconditions(prepared(t,
+		&Precondition{ID: "aSet", Check: `event.payload.a != nil`}, // holds
+		&Precondition{ID: "bSet", Check: `event.payload.b != nil`}, // misses
+		&Precondition{ID: "cSet", Check: `event.payload.c != nil`}, // would also miss
+	), eval)
 	if !isMiss {
 		t.Fatalf("expected a miss")
 	}
@@ -242,7 +265,7 @@ func TestExecutor_PreconditionMiss_AbortsAndEmits(t *testing.T) {
 		Name:   "deployStaging",
 		Origin: "unified:deploypack/automations.memql:deployStaging",
 		Preconditions: []*Precondition{
-			{ID: "digestPinned", Check: `exists(event.payload.imageDigest)`, Literal: "imageDigest",
+			{ID: "digestPinned", Check: `event.payload.imageDigest != nil`, Literal: "imageDigest",
 				Description: "the deploy needs a pinned image digest"},
 		},
 		// A step that, if it ran, would be observable. We rely on status to
@@ -284,7 +307,7 @@ func TestExecutor_PreconditionMiss_AbortsAndEmits(t *testing.T) {
 	assertPayload(t, got.Payload, "automationName", "deployStaging")
 	assertPayload(t, got.Payload, "preconditionId", "digestPinned")
 	assertPayload(t, got.Payload, "literal", "imageDigest")
-	assertPayload(t, got.Payload, "check", `exists(event.payload.imageDigest)`)
+	assertPayload(t, got.Payload, "check", `event.payload.imageDigest != nil`)
 	if got.Payload["triggerPayload"] == nil {
 		t.Errorf("miss signal must carry the triggering event payload for the repair loop")
 	}
@@ -309,7 +332,7 @@ func TestExecutor_PreconditionHolds_Proceeds(t *testing.T) {
 	automation := &Automation{
 		Name: "deployStaging",
 		Preconditions: []*Precondition{
-			{ID: "digestPinned", Check: `exists(event.payload.imageDigest)`},
+			{ID: "digestPinned", Check: `event.payload.imageDigest != nil`},
 		},
 		Steps: []*Step{}, // no steps -> clean completion when preconditions hold
 	}

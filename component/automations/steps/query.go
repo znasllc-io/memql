@@ -28,66 +28,57 @@ func (e *QueryExecutor) Execute(ctx context.Context, step *automations.Step, ste
 		return result, fmt.Errorf("query configuration is required")
 	}
 
-	// A v1 step's query is a parsed expression (memql#5367). A construct
+	fail := func(err error) (*automations.StepResult, error) {
+		result.Status = "failed"
+		result.Error = err.Error()
+		result.CompletedAt = time.Now()
+		result.Duration = result.CompletedAt.Sub(result.StartedAt)
+		return result, err
+	}
+
+	// The query is an expression parsed at load (memql#5367). A construct
 	// call runs on the engine below, with its arguments evaluated; any other
 	// expression -- a logic body's `total := a + b`, `rows.where(r => ...)`,
 	// `return {ok: true}` -- is evaluated in process, and its value is the
 	// step's result. No engine round trip, so nothing to record.
-	var v1Call *ast.CallExpr
-	if x := step.Exprs; x != nil && x.Query != nil {
-		call, isCall := ast.Unparen(x.Query).(*ast.CallExpr)
-		if !isCall || call.Kind == "" {
-			val, err := stepCtx.Evaluator.EvalV1(ctx, x.Query)
-			if err != nil {
-				result.Status = "failed"
-				result.Error = fmt.Sprintf("failed to evaluate %s: %v", ast.FormatExpr(x.Query), err)
-				result.CompletedAt = time.Now()
-				result.Duration = result.CompletedAt.Sub(result.StartedAt)
-				return result, fmt.Errorf("failed to evaluate %s: %w", ast.FormatExpr(x.Query), err)
-			}
-			if val == memql.Absent {
-				// One notion of unset: the step's value is nil, which every
-				// later read takes as absent.
-				val = nil
-			}
-			result.Status = "success"
-			result.Result = val
-			result.CompletedAt = time.Now()
-			result.Duration = result.CompletedAt.Sub(result.StartedAt)
-			return result, nil
-		}
-		switch call.Kind {
-		case "query", "mutation", "logic", "builtin":
-		default:
-			// automation / action / capability calls have their own step
-			// types; the compiler never emits one as a query.
-			err := fmt.Errorf("a %s call cannot run as a query step (%s)", call.Kind, ast.FormatExpr(call))
+	x, err := preparedExprs(step)
+	if err != nil {
+		return fail(err)
+	}
+	if x.Query == nil {
+		return fail(fmt.Errorf("step %q: its query was never prepared (automations.PrepareExpressions)", step.ID))
+	}
+	if val, inProcess, err := stepCtx.Evaluator.InProcessQuery(ctx, step); inProcess {
+		if err != nil {
 			result.Status = "failed"
-			result.Error = err.Error()
+			result.Error = fmt.Sprintf("failed to evaluate %s: %v", ast.FormatExpr(x.Query), err)
 			result.CompletedAt = time.Now()
 			result.Duration = result.CompletedAt.Sub(result.StartedAt)
-			return result, err
+			return result, fmt.Errorf("failed to evaluate %s: %w", ast.FormatExpr(x.Query), err)
 		}
-		v1Call = call
+		// Absent is nil: one notion of unset, which every later read takes
+		// as absent.
+		result.Status = "success"
+		result.Result = val
+		result.CompletedAt = time.Now()
+		result.Duration = result.CompletedAt.Sub(result.StartedAt)
+		return result, nil
+	}
+	call := ast.Unparen(x.Query).(*ast.CallExpr)
+	switch call.Kind {
+	case "query", "mutation", "logic", "builtin":
+	default:
+		// automation / action / capability calls have their own step
+		// types; the compiler never emits one as a query.
+		return fail(fmt.Errorf("a %s call cannot run as a query step (%s)", call.Kind, ast.FormatExpr(call)))
 	}
 
 	if stepCtx.Engine == nil {
-		result.Status = "failed"
-		result.Error = "MemQL engine not configured"
-		result.CompletedAt = time.Now()
-		result.Duration = result.CompletedAt.Sub(result.StartedAt)
-		return result, fmt.Errorf("MemQL engine not configured")
+		return fail(fmt.Errorf("MemQL engine not configured"))
 	}
 
-	// Evaluate $ expressions in the query, using query-aware formatting
-	// that properly quotes strings containing operator characters (like UUIDs)
-	var query string
-	var err error
-	if v1Call != nil {
-		query, err = v1ConstructCallText(ctx, stepCtx.Evaluator, v1Call)
-	} else {
-		query, err = stepCtx.Evaluator.EvaluateStringForQuery(step.Query.Query)
-	}
+	// The call text: the construct's name and its evaluated arguments.
+	query, err := v1ConstructCallText(ctx, stepCtx.Evaluator, call)
 	if err != nil {
 		result.Status = "failed"
 		result.Error = fmt.Sprintf("failed to evaluate query: %v", err)

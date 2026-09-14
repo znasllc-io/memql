@@ -11,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/memql"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -36,13 +37,14 @@ import (
 //     leaks through (no dropped-to-nil / literal-passthrough).
 //
 // It is DB-free: the LogicRunner dispatches steps through the step registry,
-// so a capturing registry resolves the args exactly as the real
-// Function/Query executors do (resolveArgsRefs + renderFunctionArgs /
-// EvaluateStringForQuery) without ever calling engine.Execute.
+// so a capturing registry renders each engine call exactly as the real
+// Function/Query executors do (ResolveV1Map + renderV1CallArgs /
+// v1ConstructCallText) without ever calling engine.Execute. An in-process
+// expression step runs on the real query executor.
 
-// capturingRegistry resolves each step's outbound query/args exactly like the
-// real executors and records it, returning a canned two-row result so
-// result-dependent guards (`.Empty()`, `.Count() == 2`) let the downstream
+// capturingRegistry renders each step's outbound call exactly like the real
+// executors and records it, returning a canned two-row result so
+// result-dependent guards (`.empty()`, `.count() == 2`) let the downstream
 // event-referencing steps run and be captured too.
 type capturingRegistry struct{ resolved []string }
 
@@ -55,18 +57,22 @@ func twoRowResult() *memql.ExecuteResult {
 	return &memql.ExecuteResult{Bundle: &memqlv1.GraphBundle{Nodes: nodes}}
 }
 
-func (r *capturingRegistry) Execute(_ context.Context, step *automations.Step, sc *automations.StepContext) (*automations.StepResult, error) {
+func (r *capturingRegistry) Execute(ctx context.Context, step *automations.Step, sc *automations.StepContext) (*automations.StepResult, error) {
 	var q string
 	switch {
 	case step.Function != nil:
-		resolved, err := resolveArgsRefs(step.Function.Args, sc.Evaluator)
+		resolved, err := sc.Evaluator.ResolveV1Map(ctx, step.Function.Args)
 		if err != nil {
 			return nil, fmt.Errorf("resolve %s: %w", step.ID, err)
 		}
-		q = step.Function.Name + "(" + renderFunctionArgs(resolved) + ")"
-	case step.Query != nil:
+		q = step.Function.Name + "(" + renderV1CallArgs(resolved) + ")"
+	case step.Query != nil && step.Exprs != nil:
+		call, isCall := ast.Unparen(step.Exprs.Query).(*ast.CallExpr)
+		if !isCall || call.Kind == "" {
+			return (&QueryExecutor{}).Execute(ctx, step, sc) // evaluated in process
+		}
 		var err error
-		if q, err = sc.Evaluator.EvaluateStringForQuery(step.Query.Query); err != nil {
+		if q, err = v1ConstructCallText(ctx, sc.Evaluator, call); err != nil {
 			return nil, fmt.Errorf("resolve %s: %w", step.ID, err)
 		}
 	default:

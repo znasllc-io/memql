@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -58,7 +59,7 @@ func TestParseShapeValue_StringEndingInCompletedEscape(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, rest, err := parseShapeValue(tc.in, evalForShapeTest())
+			got, rest, err := parseShapeValue(context.Background(), tc.in, evalForShapeTest())
 			if err != nil {
 				t.Fatalf("parseShapeValue(%q): unexpected error %v", tc.in, err)
 			}
@@ -128,7 +129,7 @@ func TestParseShapeValue_DepthScannersSurviveCompletedEscape(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, rest, err := parseShapeValue(tc.in, evalForShapeTest())
+			got, rest, err := parseShapeValue(context.Background(), tc.in, evalForShapeTest())
 			if err != nil {
 				t.Fatalf("parseShapeValue(%q): unexpected error %v", tc.in, err)
 			}
@@ -149,7 +150,7 @@ func TestParseShapeValue_ParenScannerSurvivesCompletedEscape(t *testing.T) {
 		`node("path\\"), rest`,
 		`node('path\\'), rest`,
 	} {
-		_, _, err := parseShapeValue(in, evalForShapeTest())
+		_, _, err := parseShapeValue(context.Background(), in, evalForShapeTest())
 		if err != nil && strings.Contains(err.Error(), "unmatched parenthesis") {
 			t.Errorf("parseShapeValue(%q): %v -- the literal ending in `\\\\` swallowed the closing paren", in, err)
 		}
@@ -187,13 +188,13 @@ func TestScanBalancedSpanEnd(t *testing.T) {
 // The existing contract must survive the fix: an unterminated literal and an
 // unbalanced delimiter are still errors.
 func TestParseShapeValue_PreservesExistingContract(t *testing.T) {
-	if _, _, err := parseShapeValue(`"unterminated`, evalForShapeTest()); err == nil {
+	if _, _, err := parseShapeValue(context.Background(), `"unterminated`, evalForShapeTest()); err == nil {
 		t.Error("unterminated string must still be an error")
 	}
-	if _, _, err := parseShapeValue(`{"a": 1`, evalForShapeTest()); err == nil {
+	if _, _, err := parseShapeValue(context.Background(), `{"a": 1`, evalForShapeTest()); err == nil {
 		t.Error("unmatched brace must still be an error")
 	}
-	if _, _, err := parseShapeValue(`["a"`, evalForShapeTest()); err == nil {
+	if _, _, err := parseShapeValue(context.Background(), `["a"`, evalForShapeTest()); err == nil {
 		t.Error("unmatched bracket must still be an error")
 	}
 }

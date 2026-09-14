@@ -67,14 +67,11 @@ func (e *WebhookExecutor) Execute(ctx context.Context, step *automations.Step, s
 
 	webhook := step.Webhook
 
-	// Evaluate URL with $ expressions -- or, for a v1 step, the URL
-	// expression parsed at load (memql#5367).
+	// The URL: its expression, parsed at load (memql#5367).
+	x, err := preparedExprs(step)
 	var url string
-	var err error
-	if x := step.Exprs; x != nil {
+	if err == nil {
 		url, err = v1RequiredText(ctx, stepCtx.Evaluator, x.URL, "webhook url")
-	} else {
-		url, err = stepCtx.Evaluator.EvaluateString(webhook.URL)
 	}
 	if err != nil {
 		result.Status = "failed"
@@ -109,14 +106,8 @@ func (e *WebhookExecutor) Execute(ctx context.Context, step *automations.Step, s
 			}
 		}
 	} else if webhook.Body != nil {
-		// Evaluate $ expressions in body
-		var evaluatedBody map[string]any
-		var err error
-		if step.Exprs != nil {
-			evaluatedBody, err = stepCtx.Evaluator.ResolveV1Map(ctx, webhook.Body)
-		} else {
-			evaluatedBody, err = stepCtx.Evaluator.EvaluateMap(webhook.Body)
-		}
+		// The body: each leaf a literal or an expression parsed at load.
+		evaluatedBody, err := stepCtx.Evaluator.ResolveV1Map(ctx, webhook.Body)
 		if err != nil {
 			result.Status = "failed"
 			result.Error = fmt.Sprintf("failed to evaluate body: %v", err)
@@ -154,27 +145,11 @@ func (e *WebhookExecutor) Execute(ctx context.Context, step *automations.Step, s
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	// Set headers with $ expression evaluation. A v1 step's headers are its
-	// parsed value leaves (Exprs.Headers) -- a header whose value is an
-	// expression is not in the string map at all (value_leaves.go).
-	headers := make(map[string]string, len(webhook.Headers))
-	for key, value := range webhook.Headers {
-		headers[key] = value
-	}
-	if x := step.Exprs; x != nil {
-		headers = make(map[string]string, len(x.Headers))
-		for key := range x.Headers {
-			headers[key] = ""
-		}
-	}
-	for key, value := range headers {
-		var evaluatedValue string
-		var err error
-		if x := step.Exprs; x != nil {
-			evaluatedValue, err = v1Text(ctx, stepCtx.Evaluator, x.Headers[key])
-		} else {
-			evaluatedValue, err = stepCtx.Evaluator.EvaluateString(value)
-		}
+	// Set headers: the step's parsed value leaves (Exprs.Headers) -- a header
+	// whose value is an expression is not in the string map at all
+	// (value_leaves.go), so the parsed leaves are the whole header set.
+	for key, node := range x.Headers {
+		evaluatedValue, err := v1Text(ctx, stepCtx.Evaluator, node)
 		if err != nil {
 			result.Status = "failed"
 			result.Error = fmt.Sprintf("failed to evaluate header %s: %v", key, err)

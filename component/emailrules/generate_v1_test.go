@@ -169,8 +169,8 @@ func loadsThroughTheRealCompiler(t *testing.T, src string) {
 	if err := automations.PrepareExpressions(&a); err != nil {
 		t.Fatalf("the runtime refused the compiled construct: %v", err)
 	}
-	if !a.IsV1() || a.Trigger.FilterLambda == nil {
-		t.Fatal("the runtime did not load the construct as v1 with its lambda filter")
+	if a.Trigger == nil || a.Trigger.FilterLambda == nil {
+		t.Fatal("the runtime did not load the construct with its lambda filter")
 	}
 }
 
@@ -272,22 +272,20 @@ func TestGeneratedAutomationIsV1(t *testing.T) {
 	if err := automations.PrepareExpressions(&a); err != nil {
 		t.Fatalf("the runtime refused the compiled construct: %v", err)
 	}
-	if !a.IsV1() || a.Trigger.FilterLambda == nil {
-		t.Fatal("the runtime did not load the construct as v1 with its lambda filter")
+	if a.Trigger == nil || a.Trigger.FilterLambda == nil {
+		t.Fatal("the runtime did not load the construct with its lambda filter")
 	}
 }
 
-// TestGeneratedAutomationLoadsBeforeTheFlip: today the authoring pipeline
-// parses with the legacy grammar, which accepts the lambda filter (a pushdown
-// position). The construct loads as a legacy automation whose filter is still
-// evaluated as the lambda it is.
-func TestGeneratedAutomationLoadsBeforeTheFlip(t *testing.T) {
+// TestGeneratedAutomationLoads: the authoring pipeline's load path accepts
+// the generated construct, and its filter is the lambda it is, parsed at load.
+func TestGeneratedAutomationLoads(t *testing.T) {
 	src := generate(t, `row.role == "admin"`)
 	a, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(src, "authored:emailrules")
 	if err != nil {
-		t.Fatalf("the legacy load path refused the construct: %v\n%s", err, src)
+		t.Fatalf("the load path refused the construct: %v\n%s", err, src)
 	}
-	if a.IsV1() || a.Trigger == nil || a.Trigger.FilterLambda == nil {
-		t.Fatalf("v1=%v trigger=%+v: want a legacy automation whose lambda filter was parsed", a.IsV1(), a.Trigger)
+	if a.Trigger == nil || a.Trigger.FilterLambda == nil {
+		t.Fatalf("trigger=%+v: want the lambda filter parsed at load", a.Trigger)
 	}
 }

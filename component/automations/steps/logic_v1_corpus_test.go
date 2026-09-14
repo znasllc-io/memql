@@ -577,44 +577,24 @@ func (r *probeRegistry) Execute(ctx context.Context, step *automations.Step, ste
 		}
 		return res, err
 	case automations.StepTypeFunction:
-		if step.Function == nil || (step.Exprs == nil && isExpressionBuiltinName(step.Function.Name)) {
+		if step.Function == nil {
 			return r.real.Execute(ctx, step, stepCtx)
 		}
-		var text string
-		if step.Exprs != nil {
-			args, err := stepCtx.Evaluator.ResolveV1Map(ctx, step.Function.Args)
-			if err != nil {
-				return nil, err
-			}
-			text = step.Function.Name + "(" + renderV1CallArgs(args) + ")"
-		} else {
-			args := step.Function.Args
-			if len(args) > 0 {
-				resolved, err := resolveArgsRefs(args, stepCtx.Evaluator)
-				if err != nil {
-					return nil, err
-				}
-				args = resolved
-			}
-			text = step.Function.Name + "(" + renderFunctionArgs(args) + ")"
+		args, err := stepCtx.Evaluator.ResolveV1Map(ctx, step.Function.Args)
+		if err != nil {
+			return nil, err
 		}
-		return r.call(step, text)
+		return r.call(step, step.Function.Name+"("+renderV1CallArgs(args)+")")
 	case automations.StepTypeQuery:
-		if step.Query == nil {
-			return r.real.Execute(ctx, step, stepCtx)
+		x := step.Exprs
+		if step.Query == nil || x == nil || x.Query == nil {
+			return r.real.Execute(ctx, step, stepCtx) // the real executor refuses it
 		}
-		if x := step.Exprs; x != nil {
-			call, ok := ast.Unparen(x.Query).(*ast.CallExpr)
-			if !ok || call.Kind == "" {
-				return r.real.Execute(ctx, step, stepCtx) // evaluated in process
-			}
-			text, err := v1ConstructCallText(ctx, stepCtx.Evaluator, call)
-			if err != nil {
-				return nil, err
-			}
-			return r.call(step, text)
+		call, ok := ast.Unparen(x.Query).(*ast.CallExpr)
+		if !ok || call.Kind == "" {
+			return r.real.Execute(ctx, step, stepCtx) // evaluated in process
 		}
-		text, err := stepCtx.Evaluator.EvaluateStringForQuery(step.Query.Query)
+		text, err := v1ConstructCallText(ctx, stepCtx.Evaluator, call)
 		if err != nil {
 			return nil, err
 		}
@@ -1313,7 +1293,6 @@ func TestLogicCorpusRuns(t *testing.T) {
 	// the legacy arm's line: the tree then has no legacy source, and the v1
 	// arm against the goldens is the whole test.
 	arms := []logicArm{
-		todayArm(t, "legacy", false, sources),
 		todayArm(t, "v1", true, sources),
 	}
 	legacyRuns := false

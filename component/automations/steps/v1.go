@@ -1,25 +1,19 @@
 package steps
 
-// v1.go -- the step executors' half of a v1 automation (epic memql#5363,
-// memql#5367).
+// v1.go -- what the step executors share for reading a step's expressions
+// (epic memql#5363, memql#5367).
 //
-// A step of a v1 automation carries Step.Exprs: its expressions, parsed once
-// at load (automations.PrepareExpressions). Each executor branches on it at
-// the point where it used to hand a string to the legacy string evaluator,
-// and evaluates the parsed node over the run instead (Evaluator.EvalV1 /
-// ResolveV1Map). Nothing else about the executor changes: the value it gets
-// back is the value the string evaluator used to hand it, so the dispatch,
-// the result shape and the step record are the same for both grammars.
+// Every step carries Step.Exprs: its expressions, parsed once at load
+// (automations.PrepareExpressions). An executor evaluates the parsed node over
+// the run (Evaluator.EvalV1 / ResolveV1Map) and gets back a value.
 //
-// Two rules make the v1 half safe where the legacy half was not:
+// Two rules make that safe:
 //
 //   - a value is DATA. An evaluated argument is rendered into the engine
-//     call as a MemQL literal by renderMemQLData, which quotes every string.
-//     renderMemQLValue passes a string that LOOKS like a reference
-//     (`event.x`, `steps.y`, `$z`) through unquoted, so the engine re-reads
-//     it as a reference -- right for the legacy compiled form, whose leaves
-//     are reference text, and wrong for an evaluated value, where it would
-//     let a payload string become an expression.
+//     call as a MemQL literal by renderMemQLData, which quotes every string,
+//     including one that looks like a reference (`event.x`, `steps.y`, `$z`):
+//     an evaluated value is never re-read as an expression, so a payload
+//     string cannot become one.
 //   - a construct call's arguments are evaluated, never substituted: the
 //     call text the engine receives is built from the call's name and its
 //     evaluated arguments, not by replacing references inside source text.
@@ -39,6 +33,19 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
+
+// preparedExprs returns a step's expressions, parsed at load. A step that was
+// never prepared is refused: its expression positions are text nothing reads,
+// and running it would publish to no topic, request no URL or write no id
+// rather than fail (automations.PrepareExpressions prepares every loaded
+// automation, and the executor prepares one built in Go before its first
+// run).
+func preparedExprs(step *automations.Step) (*automations.StepExprs, error) {
+	if step.Exprs == nil {
+		return nil, fmt.Errorf("step %q was never prepared (automations.PrepareExpressions)", step.ID)
+	}
+	return step.Exprs, nil
+}
 
 // v1Value evaluates a v1 position that yields a value (a forEach or shape
 // source, a switch subject). The Absent sentinel comes back as nil -- one
@@ -147,20 +154,42 @@ func renderV1NamedArgs(args map[string]any) string {
 	return strings.Join(parts, ", ")
 }
 
-// renderMemQLData renders an evaluated value as a MemQL literal. It is
-// renderMemQLValue with one difference, and that difference is the point:
-// every string is QUOTED, including one that looks like a reference, because
-// an evaluated value is data (see the file comment). Scalars and the typed
-// time values render exactly as renderMemQLValue renders them.
+// renderMemQLData renders an evaluated value as a MemQL literal. Every string
+// is QUOTED (see the file comment), with langparser.QuoteString rather than
+// %q: Go's %q and the lexer that re-parses this text disagree on the escape
+// set, and a control byte in a value would make the whole call unparseable
+// (memql#3192). A typed time renders as a quoted RFC3339 string in UTC --
+// Go's default format and proto text are both refused by the parser
+// (memql#2543) -- and a duration as its quoted Go spelling, there being no
+// duration literal. A typed slice or string-keyed map renders as a list or
+// object literal (memql#344).
 func renderMemQLData(value any) string {
 	switch v := value.(type) {
 	case nil:
 		return "null"
 	case string:
 		return langparser.QuoteString(v)
-	case bool, float64, float32, int, int32, int64, uint, uint32, uint64,
-		time.Time, *time.Time, *timestamppb.Timestamp, time.Duration:
-		return renderMemQLValue(v)
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case float64, float32, int, int32, int64, uint, uint32, uint64:
+		return fmt.Sprintf("%v", v)
+	case time.Time:
+		return langparser.QuoteString(v.UTC().Format(time.RFC3339))
+	case *time.Time:
+		if v == nil {
+			return "null"
+		}
+		return langparser.QuoteString(v.UTC().Format(time.RFC3339))
+	case *timestamppb.Timestamp:
+		if v == nil {
+			return "null"
+		}
+		return langparser.QuoteString(v.AsTime().UTC().Format(time.RFC3339))
+	case time.Duration:
+		return langparser.QuoteString(v.String())
 	case []any:
 		items := make([]string, 0, len(v))
 		for _, item := range v {
@@ -209,7 +238,8 @@ func renderMemQLData(value any) string {
 	case reflect.String:
 		return langparser.QuoteString(rv.String())
 	}
-	// Anything else (a struct -- a query result envelope) renders the way
-	// renderMemQLValue renders it; it holds no reference text of its own.
-	return renderMemQLValue(value)
+	// Anything else (a struct -- a query result envelope -- or a map with
+	// non-string keys) has no MemQL literal; its Go spelling fails the parse
+	// rather than being mis-rendered.
+	return fmt.Sprintf("%v", value)
 }

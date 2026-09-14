@@ -147,7 +147,7 @@ func TestSandboxInterceptsWritesNestedInsideContainers(t *testing.T) {
 		{"forEach", &automations.Step{
 			ID: "loop", Type: automations.StepTypeForEach,
 			ForEach: &automations.ForEachStepConfig{
-				Source: "$input.items",
+				Source: "input.items",
 				As:     "item",
 				Do:     []*automations.Step{&child},
 			},
@@ -161,6 +161,9 @@ func TestSandboxInterceptsWritesNestedInsideContainers(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sandbox, rec := sandboxWithRecorder(t, automations.StepTypeMutation)
+			if err := automations.PrepareExpressions(&automations.Automation{Name: "probe", Steps: []*automations.Step{tc.step}}); err != nil {
+				t.Fatalf("prepare: %v", err)
+			}
 
 			stepCtx := newStepCtx()
 			stepCtx.Evaluator.SetInput(map[string]any{"items": []any{"a", "b"}})
@@ -199,19 +202,25 @@ func TestSandboxRefusesAnUnclassifiedStepType(t *testing.T) {
 }
 
 // TestSandboxInterceptsAQueryStepThatWrites covers the case the step TYPE
-// cannot settle. query.go runs its text through engine.Execute, which its own
-// doc comment says "executes MemQL queries and mutations" -- so a `query:` step
-// carrying an insert is a write wearing a read's label.
+// cannot settle. query.go runs a construct call through engine.Execute, which
+// runs mutations as well as reads -- so a `query:` step carrying a mutation
+// call is a write wearing a read's label.
 func TestSandboxInterceptsAQueryStepThatWrites(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		query     string
+		prepare   bool
 		wantReach bool // did it correctly reach the real (read) executor?
 	}{
-		{"a plain read is delegated", `concept=="v1:cognition:utterance"`, true},
-		{"an insert is intercepted", `insert("v1:cognition:utterance", id="x", payload={})`, false},
-		{"an update is intercepted", `update("v1:cognition:utterance", id="x", payload={})`, false},
-		{"a delete is intercepted", `delete("v1:cognition:utterance", id="x")`, false},
+		{"a plain read is delegated", `query utterancesForSpace(spaceId: "s")`, true, true},
+		{"an in-process expression is delegated", `1 + 1`, true, true},
+		{"a mutation call is intercepted", `mutation createUtterance(id: "x")`, true, false},
+		{"a logic call is intercepted", `logic recordUtterance(id: "x")`, true, false},
+		{"a builtin call is intercepted", `builtin writeSomething(id: "x")`, true, false},
+		// A step that was never prepared cannot be read, so it is assumed to
+		// write: the text below is the legacy insert form, which no v1 step
+		// carries.
+		{"an unprepared step is intercepted", `insert("v1:cognition:utterance", id="x", payload={})`, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sandbox, rec := sandboxWithRecorder(t, automations.StepTypeQuery)
@@ -219,6 +228,11 @@ func TestSandboxInterceptsAQueryStepThatWrites(t *testing.T) {
 				ID:    "q",
 				Type:  automations.StepTypeQuery,
 				Query: &automations.QueryStepConfig{Query: tc.query},
+			}
+			if tc.prepare {
+				if err := automations.PrepareExpressions(&automations.Automation{Name: "probe", Steps: []*automations.Step{step}}); err != nil {
+					t.Fatalf("prepare: %v", err)
+				}
 			}
 
 			if _, err := sandbox.Execute(context.Background(), step, newStepCtx()); err != nil {

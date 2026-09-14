@@ -180,48 +180,35 @@ func (s *sandboxStepRegistry) refuseUnclassified(step *automations.Step) (*autom
 		step.ID, step.Type)
 }
 
-// isWriteBearingQuery reports whether a `query:` step's text performs a write.
+// isWriteBearingQuery reports whether a `query:` step performs a write.
 //
-// query.go executes its text through engine.Execute, which runs mutations as
-// well as reads -- its own doc comment says "executes MemQL queries and
-// mutations". So the step TYPE does not settle whether it writes; the text
-// does. Deliberately conservative: anything that looks like a write, or that
-// cannot be evaluated to a string to be examined, counts as write-bearing.
-// Being wrong in that direction costs a metered read; being wrong the other
-// way puts a row in the live graph and leaves it out of the manifest.
+// query.go runs a construct call through engine.Execute, which runs mutations
+// as well as reads. So the step TYPE does not settle whether it writes; the
+// expression does. Deliberately conservative: anything that may write, or
+// that cannot be examined, counts as write-bearing. Being wrong in that
+// direction costs a metered read; being wrong the other way puts a row in the
+// live graph and leaves it out of the manifest.
 func (s *sandboxStepRegistry) isWriteBearingQuery(step *automations.Step, stepCtx *automations.StepContext) bool {
 	if step.Query == nil || strings.TrimSpace(step.Query.Query) == "" {
 		return false
 	}
-	// A v1 step's query is a parsed expression (memql#5367), so the answer is
-	// read off the node rather than sniffed from text. An in-process
-	// expression cannot write: EvalExpr refuses a construct call nested in it.
-	// A construct call writes unless it is a `query` -- a mutation does, and a
-	// logic or builtin may, so both count as write-bearing (the same
-	// conservative direction as the text sniff below).
-	if x := step.Exprs; x != nil && x.Query != nil {
-		call, isCall := ast.Unparen(x.Query).(*ast.CallExpr)
-		if !isCall || call.Kind == "" {
-			return false
-		}
-		return call.Kind != "query"
+	// The query is an expression parsed at load (memql#5367), so the answer
+	// is read off the node rather than sniffed from text. An in-process
+	// expression cannot write: EvalExpr refuses a construct call nested in
+	// it. A construct call writes unless it is a `query` -- a mutation does,
+	// and a logic or builtin may, so both count as write-bearing.
+	//
+	// A step that was never prepared has no node to read, so it cannot be
+	// shown to be a read: the dangerous case is assumed.
+	x := step.Exprs
+	if x == nil || x.Query == nil {
+		return true
 	}
-	text := step.Query.Query
-	if stepCtx != nil && stepCtx.Evaluator != nil {
-		evaluated, err := stepCtx.Evaluator.EvaluateString(step.Query.Query)
-		if err != nil {
-			// Cannot see what it will run -> assume the dangerous case.
-			return true
-		}
-		text = evaluated
+	call, isCall := ast.Unparen(x.Query).(*ast.CallExpr)
+	if !isCall || call.Kind == "" {
+		return false
 	}
-	lowered := strings.ToLower(text)
-	for _, verb := range []string{"insert(", "update(", "delete(", "upsert(", "mutate("} {
-		if strings.Contains(lowered, verb) {
-			return true
-		}
-	}
-	return false
+	return call.Kind != "query"
 }
 
 // sandboxConceptForStep is a best-effort label for the manifest entry.
@@ -275,7 +262,7 @@ func (s *sandboxStepRegistry) interceptLogicFunction(ctx context.Context, step *
 
 	started := time.Now()
 	s.note(step.ID, "logic "+name+" run in sandbox (nested side effects intercepted)")
-	args := s.stepCallArgs(step, stepCtx, s.resolveLogicCallArgs)
+	args := s.stepCallArgs(step, stepCtx)
 	runner := automations.NewLogicRunner(s.engine, s, nil)
 	out, err := runner.RunLogic(ctx, name, fn.LogicSteps, args)
 	now := time.Now()
@@ -304,27 +291,18 @@ func (s *sandboxStepRegistry) interceptLogicFunction(ctx context.Context, step *
 func (s *sandboxStepRegistry) interceptDirectMutation(step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
 	started := time.Now()
 	rec := memql.RecordedMutation{StepId: step.ID, Partition: s.partition}
-	if step.Mutation != nil && step.Exprs != nil {
-		// A v1 step: the same evaluation the real executor's v1 half runs
-		// (MutationExecutor.executeV1), so the recorded write is faithful.
+	if step.Mutation != nil {
+		// The same evaluation the real executor runs (MutationExecutor.execute),
+		// so the recorded write is faithful.
 		rec.Concept = step.Mutation.Concept
 		rec.Payload = step.Mutation.Payload
-		if id, err := v1Text(context.Background(), stepCtx.Evaluator, step.Exprs.ID); err == nil {
-			rec.Id = id
+		if x := step.Exprs; x != nil {
+			if id, err := v1Text(context.Background(), stepCtx.Evaluator, x.ID); err == nil {
+				rec.Id = id
+			}
 		}
 		if payload, err := stepCtx.Evaluator.ResolveV1Map(context.Background(), step.Mutation.Payload); err == nil {
 			rec.Payload = payload
-		}
-	} else if step.Mutation != nil {
-		rec.Concept = step.Mutation.Concept
-		rec.Id = step.Mutation.ID
-		// Evaluate the payload through the SAME evaluator path the real
-		// MutationExecutor uses, so the recorded write is faithful to what
-		// would have been stored.
-		if payload, err := (&MutationExecutor{}).evaluatePayload(stepCtx.Evaluator, step.Mutation.Payload); err == nil {
-			rec.Payload = payload
-		} else {
-			rec.Payload = step.Mutation.Payload
 		}
 	}
 	s.recordMutation(rec)
@@ -346,7 +324,7 @@ func (s *sandboxStepRegistry) interceptMutationFunction(step *automations.Step, 
 	// reflects the values the mutation would have written. A single positional
 	// object arg ({"0": {...}}) is the common authored shape; surface its fields
 	// directly so the manifest reads naturally.
-	resolved := s.stepCallArgs(step, stepCtx, s.resolveFunctionArgs)
+	resolved := s.stepCallArgs(step, stepCtx)
 	if len(resolved) == 1 {
 		if obj, ok := resolved["0"].(map[string]any); ok {
 			resolved = obj
@@ -359,85 +337,21 @@ func (s *sandboxStepRegistry) interceptMutationFunction(step *automations.Step, 
 	return s.syntheticSuccess(step.ID, started, rec.Payload), nil
 }
 
-// stepCallArgs resolves a function step's arguments for the sandbox: a v1
-// step's through the same evaluation the real FunctionExecutor's v1 half runs
-// (memql#5367) -- values, never reference text -- and a legacy step's
-// through the legacy resolver the call site names. An argument that fails to
-// evaluate leaves the v1 map unresolved rather than half-resolved, as the
-// legacy resolvers fall back to the raw args.
-func (s *sandboxStepRegistry) stepCallArgs(step *automations.Step, stepCtx *automations.StepContext, legacy func(*automations.FunctionStepConfig, *automations.StepContext) map[string]any) map[string]any {
+// stepCallArgs resolves a function step's arguments for the sandbox through
+// the same evaluation the real FunctionExecutor runs (memql#5367) -- values,
+// never reference text -- so a logic dispatched in the dry-run sandbox
+// receives the args it would on the live path, the triggering event's
+// envelope under its declared `event` input included (memql#1727). An
+// argument that fails to evaluate leaves the map unresolved rather than
+// half-resolved.
+func (s *sandboxStepRegistry) stepCallArgs(step *automations.Step, stepCtx *automations.StepContext) map[string]any {
 	fn := step.Function
-	if step.Exprs == nil || fn == nil || len(fn.Args) == 0 || stepCtx == nil || stepCtx.Evaluator == nil {
-		return legacy(fn, stepCtx)
+	if fn == nil || len(fn.Args) == 0 || stepCtx == nil || stepCtx.Evaluator == nil {
+		return map[string]any{}
 	}
 	resolved, err := stepCtx.Evaluator.ResolveV1Map(context.Background(), fn.Args)
 	if err != nil {
 		return fn.Args
-	}
-	return resolved
-}
-
-// resolveFunctionArgs resolves a function step's args to concrete values via the
-// MutationExecutor's value evaluator (which understands $refs, concat(), etc.).
-// The raw resolved map is returned (keyed as authored, commonly {"0": {...}} for
-// a single positional object arg); callers flatten the "0" object when they want
-// a payload-shaped map.
-func (s *sandboxStepRegistry) resolveFunctionArgs(fn *automations.FunctionStepConfig, stepCtx *automations.StepContext) map[string]any {
-	if fn == nil || len(fn.Args) == 0 || stepCtx == nil || stepCtx.Evaluator == nil {
-		return map[string]any{}
-	}
-	me := &MutationExecutor{}
-	resolved := map[string]any{}
-	for k, v := range fn.Args {
-		val, err := me.evaluateValue(stepCtx.Evaluator, v)
-		if err != nil {
-			val = v
-		}
-		resolved[k] = val
-	}
-	return resolved
-}
-
-// resolveLogicCallArgs resolves a forwarded LOGIC call's args through the SAME
-// resolver the live FunctionExecutor uses (resolveArgsRefs), so a logic
-// dispatched in the dry-run sandbox receives byte-for-byte the args it would on
-// the live path -- and, critically, the triggering-event envelope under its
-// declared `event` input.
-//
-// Why this differs from resolveFunctionArgs (memql#1727): an authored wrapper
-// step forwards the event as the BARE runtime-reference token `event`
-// (`logic autoJoinAI { event: event }`, the #418-pinned spelling). The live
-// FunctionExecutor's resolveArgsRefs special-cases that token (isRuntimeReference
-// recognises a bare `event`) and resolves it to the seeded event envelope
-// object. The mutation-style evaluateValue resolveFunctionArgs uses does NOT --
-// it treats bare `event` as a literal string, so RunLogic received
-// args["event"] = "event" and every nested `args.event.payload.X` navigated into
-// a string and resolved to null. That made the first nested step feeding such a
-// reference to a @required argument fail with "required argument <x> is missing"
-// for all five event-trigger logics on the dry-run / run_automation path, even
-// though the live path (fixed in #1706) bound the event correctly. Converging
-// the logic-forwarding arg resolution onto the live resolver makes the two
-// surfaces bind the event identically and cannot drift.
-func (s *sandboxStepRegistry) resolveLogicCallArgs(fn *automations.FunctionStepConfig, stepCtx *automations.StepContext) map[string]any {
-	if fn == nil || len(fn.Args) == 0 || stepCtx == nil || stepCtx.Evaluator == nil {
-		return map[string]any{}
-	}
-	resolved, err := resolveArgsRefs(fn.Args, stepCtx.Evaluator)
-	if err != nil {
-		resolved = fn.Args
-	}
-	// A logic call's named-arg block compiles to a SINGLE positional object arg
-	// ({"0": {event: ...}}). The live FunctionExecutor flattens that {"0": obj}
-	// shape (renderFunctionArgs) so the engine binds the inner object as the
-	// logic's named args; the LogicRunner likewise expects the flat
-	// {event: ...} map (newEvaluatorForLogic reads args["event"]). Unwrap the
-	// positional object here so the dry-run hands RunLogic the SAME flat shape --
-	// without this the event lands at args["0"]["event"], args["event"] is nil,
-	// and the event binding is lost (memql#1727).
-	if len(resolved) == 1 {
-		if obj, ok := resolved["0"].(map[string]any); ok {
-			return obj
-		}
 	}
 	return resolved
 }
@@ -450,12 +364,14 @@ func (s *sandboxStepRegistry) resolveLogicCallArgs(fn *automations.FunctionStepC
 func (s *sandboxStepRegistry) interceptWebhook(step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
 	started := time.Now()
 	captured := memql.BlockedWebhook{StepId: step.ID, Method: "POST"}
-	if step.Webhook != nil && step.Exprs != nil {
-		// A v1 step: URL and body evaluate as the real executor's v1 half
-		// evaluates them, so the captured request is the one it would send.
+	if step.Webhook != nil {
+		// URL and body evaluate as the real executor evaluates them, so the
+		// captured request is the one it would send.
 		captured.Url = step.Webhook.URL
-		if url, err := v1Text(context.Background(), stepCtx.Evaluator, step.Exprs.URL); err == nil {
-			captured.Url = url
+		if x := step.Exprs; x != nil {
+			if url, err := v1Text(context.Background(), stepCtx.Evaluator, x.URL); err == nil {
+				captured.Url = url
+			}
 		}
 		if m := strings.ToUpper(strings.TrimSpace(step.Webhook.Method)); m != "" {
 			captured.Method = m
@@ -464,22 +380,6 @@ func (s *sandboxStepRegistry) interceptWebhook(step *automations.Step, stepCtx *
 			captured.Body = step.Webhook.Body
 			if body, err := stepCtx.Evaluator.ResolveV1Map(context.Background(), step.Webhook.Body); err == nil {
 				captured.Body = body
-			}
-		}
-	} else if step.Webhook != nil {
-		if url, err := stepCtx.Evaluator.EvaluateString(step.Webhook.URL); err == nil {
-			captured.Url = url
-		} else {
-			captured.Url = step.Webhook.URL
-		}
-		if m := strings.ToUpper(strings.TrimSpace(step.Webhook.Method)); m != "" {
-			captured.Method = m
-		}
-		if step.Webhook.Body != nil {
-			if body, err := stepCtx.Evaluator.EvaluateMap(step.Webhook.Body); err == nil {
-				captured.Body = body
-			} else {
-				captured.Body = step.Webhook.Body
 			}
 		}
 	}
@@ -566,7 +466,7 @@ func (s *sandboxStepRegistry) meterRead(step *automations.Step, stepCtx *automat
 // documented heuristic the approver reads as an upper-bound order of magnitude,
 // not a billed figure.
 func (s *sandboxStepRegistry) meterAiCall(step *automations.Step, stepCtx *automations.StepContext) {
-	resolved := s.stepCallArgs(step, stepCtx, s.resolveFunctionArgs)
+	resolved := s.stepCallArgs(step, stepCtx)
 	promptTokens := estimateTokens(resolved)
 	outputTokens := defaultAiOutputTokens
 	cost := estimateAiCostUsd(promptTokens, outputTokens)
@@ -585,7 +485,7 @@ func (s *sandboxStepRegistry) meterAiCall(step *automations.Step, stepCtx *autom
 // meterWebCall records a web read (similarTo / webSearch / fetchUrl) with the
 // resolved target where one is discernible from the args (a url / query field).
 func (s *sandboxStepRegistry) meterWebCall(step *automations.Step, name string, stepCtx *automations.StepContext) {
-	resolved := s.stepCallArgs(step, stepCtx, s.resolveFunctionArgs)
+	resolved := s.stepCallArgs(step, stepCtx)
 	target := webCallTarget(resolved)
 	s.mu.Lock()
 	s.webCalls = append(s.webCalls, memql.RecordedWebCall{

@@ -1,22 +1,21 @@
 package automations
 
-// args_resolution_v1.go -- the load-time name rules for a v1 automation
-// (epic memql#5363, memql#5367).
+// args_resolution_v1.go -- the load-time name rules (epic memql#5363,
+// memql#5367).
 //
-// validateArgsResolution's legacy half scans expression TEXT with a token
-// regex, which cannot read the v1 grammar: a lambda parameter (`r` in
-// `rows.where(r => r.active)`) is a token that resolves to nothing it knows,
-// and a quoted string and a reference are told apart only by quote-stripping
-// heuristics. A v1 automation's expressions are already parsed
-// (PrepareExpressions runs first), so its rules are checked on the nodes:
+// An automation's expressions are already parsed (PrepareExpressions runs
+// first), so the rules are checked on the nodes, never on expression text:
 // the free names of every expression -- the IdentExprs no enclosing lambda
-// binds -- are exactly the names the run's scope must answer.
+// binds -- are exactly the names the run's scope must answer. A token scan
+// could not do this: a lambda parameter (`r` in `rows.where(r => r.active)`)
+// is a token that resolves to nothing it knows, and a quoted string and a
+// reference are told apart only by quote-stripping heuristics.
 //
-// The rules are the legacy ones, applied to every expression position (value
-// leaves included: in v1 a string value is a literal and a reference is a
-// node, so the ambiguity that exempted values from the legacy check is gone):
+// The rules apply to every expression position, value leaves included (a
+// string value is a literal and a reference is a node, so nothing is
+// ambiguous):
 //
-//   - for every v1 automation: a step id or a loop variable may not be a
+//   - for every automation: a step id or a loop variable may not be a
 //     reserved root (RunScope would answer the root, never the step);
 //   - for an args-block automation: an args field may not shadow a reserved
 //     root, a step id or loop variable may not shadow an args field, and a
@@ -25,8 +24,8 @@ package automations
 //
 // An automation without an args block keeps the runtime's implicit `event.`
 // retry for an unknown root (any key of the event envelope), which no load
-// check can see, so -- as for a legacy automation -- its free names are
-// resolved at run time, where an unknown one is an unknown_name error.
+// check can see, so its free names are resolved at run time, where an unknown
+// one is an unknown_name error.
 
 import (
 	"fmt"
@@ -35,7 +34,7 @@ import (
 	"github.com/znasllc-io/memql/component/language/ast"
 )
 
-// validateArgsResolutionV1 is validateArgsResolution for a v1 automation.
+// validateArgsResolutionV1 checks the name rules above.
 func validateArgsResolutionV1(a *Automation) error {
 	stepIDs := map[string]bool{}
 	collectStepIDs(a.Steps, stepIDs)

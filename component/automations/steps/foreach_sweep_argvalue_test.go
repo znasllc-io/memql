@@ -31,18 +31,18 @@ import (
 // and the REAL ForEachExecutor.
 
 // argRecorder is a function-step executor that records the fully-resolved
-// per-call args via the SAME resolveArgsRefs path the real FunctionExecutor
-// uses, so the captured values are exactly what would reach the engine -- no
-// live DB needed.
+// per-call args via the SAME evaluation the real FunctionExecutor runs
+// (Evaluator.ResolveV1Map), so the captured values are exactly what would
+// reach the engine -- no live DB needed.
 type argRecorder struct {
 	name string
 	args []map[string]any
 }
 
-func (r *argRecorder) Execute(_ context.Context, step *automations.Step, stepCtx *Context) (*automations.StepResult, error) {
+func (r *argRecorder) Execute(ctx context.Context, step *automations.Step, stepCtx *Context) (*automations.StepResult, error) {
 	if step.Function != nil {
 		r.name = step.Function.Name
-		resolved, err := resolveArgsRefs(step.Function.Args, stepCtx.Evaluator)
+		resolved, err := stepCtx.Evaluator.ResolveV1Map(ctx, step.Function.Args)
 		if err != nil {
 			return nil, err
 		}
@@ -362,7 +362,7 @@ automation rw {
 		for _, a := range rec.args {
 			released = append(released, a["workspaceId"].(string))
 		}
-		ok, _ := eval.EvaluateCondition(teardownStep.Condition)
+		ok, _ := eval.StepCondition(context.Background(), teardownStep)
 		return released, ok
 	}
 

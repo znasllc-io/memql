@@ -66,18 +66,14 @@ func (e *ActionExecutor) Execute(ctx context.Context, step *automations.Step, st
 		input[k] = v
 	}
 	if stepCtx.Evaluator != nil {
-		if step.Exprs != nil {
-			// A v1 step's arguments are evaluated expressions (memql#5367):
-			// an argument that fails to evaluate fails the step, rather than
-			// binding the action's parameter to unresolved text.
-			resolved, rerr := stepCtx.Evaluator.ResolveV1Map(ctx, input)
-			if rerr != nil {
-				return fail(fmt.Sprintf("action %q argument resolution failed: %v", step.Action.Ref, rerr))
-			}
-			input = resolved
-		} else if resolved, rerr := resolveArgsRefs(input, stepCtx.Evaluator); rerr == nil {
-			input = resolved
+		// The arguments are literals or expressions parsed at load
+		// (memql#5367): an argument that fails to evaluate fails the step,
+		// rather than binding the action's parameter to unresolved text.
+		resolved, rerr := stepCtx.Evaluator.ResolveV1Map(ctx, input)
+		if rerr != nil {
+			return fail(fmt.Sprintf("action %q argument resolution failed: %v", step.Action.Ref, rerr))
 		}
+		input = resolved
 	}
 
 	if stepCtx.Logger != nil {

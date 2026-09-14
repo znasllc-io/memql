@@ -42,9 +42,6 @@ func loadV1(t *testing.T, js string) *Automation {
 	if err != nil {
 		t.Fatalf("load v1 automation: %v", err)
 	}
-	if !a.IsV1() {
-		t.Fatalf("automation %q did not load as v1", a.Name)
-	}
 	if err := validateArgsResolution(a); err != nil {
 		t.Fatalf("v1 name rules: %v", err)
 	}
@@ -291,11 +288,12 @@ func TestStepArgumentIsAnExpression(t *testing.T) {
 	})
 }
 
-// TestPrepareExpressionsRefuses: a v1 automation is refused at LOAD for a
-// parse error, a trigger filter that is not a one-parameter lambda, and an
-// expression over the M tier's static cost limit -- and the executor refuses
-// one whose expressions were never prepared rather than running its v1 source
-// through the string evaluator.
+// TestPrepareExpressionsRefuses: an automation is refused at LOAD for a parse
+// error, a trigger filter that is not a one-parameter lambda, and an
+// expression over the M tier's static cost limit -- and one built in Go,
+// never loaded, is prepared by the executor before its first run: its
+// expressions gate the run exactly as a loaded automation's do, and one that
+// does not parse refuses the run before anything executes.
 func TestPrepareExpressionsRefuses(t *testing.T) {
 	scan := "args.a.any(x => args.b.any(y => args.c.any(z => z == y && y == x)))"
 	node, err := languageParser.ParseV1Expression(scan)
@@ -338,12 +336,31 @@ func TestPrepareExpressionsRefuses(t *testing.T) {
 
 	t.Run("never prepared", func(t *testing.T) {
 		var a Automation
-		if err := json.Unmarshal([]byte(`{"expressions":"v1","name":"raw","steps":[{"id":"s","type":"function","function":{"name":"f"}}]}`), &a); err != nil {
+		if err := json.Unmarshal([]byte(`{"name":"raw","steps":[
+			{"id":"skipped","type":"function","condition":"1 == 2","function":{"name":"f"}},
+			{"id":"ran","type":"function","condition":"1 == 1","function":{"name":"f"}}]}`), &a); err != nil {
 			t.Fatal(err)
 		}
-		_, err := NewExecutor(ExecutorOptions{StepRegistry: &v1ProbeRegistry{}}).Execute(context.Background(), &a, "test")
-		if err == nil || !strings.Contains(err.Error(), "never prepared") {
-			t.Fatalf("want the unprepared-v1 refusal, got %v", err)
+		reg := &v1ProbeRegistry{}
+		if _, err := NewExecutor(ExecutorOptions{StepRegistry: reg}).Execute(context.Background(), &a, "test"); err != nil {
+			t.Fatalf("an automation built in Go must be prepared on demand and run: %v", err)
+		}
+		reg.mu.Lock()
+		var ran []string
+		for _, c := range reg.calls {
+			ran = append(ran, c.stepID)
+		}
+		reg.mu.Unlock()
+		if strings.Join(ran, ",") != "ran" {
+			t.Fatalf("ran %v, want only the step whose condition holds", ran)
+		}
+
+		var bad Automation
+		if err := json.Unmarshal([]byte(`{"name":"rawBad","steps":[{"id":"s","type":"function","condition":"a ==","function":{"name":"f"}}]}`), &bad); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := NewExecutor(ExecutorOptions{StepRegistry: &v1ProbeRegistry{}}).Execute(context.Background(), &bad, "test"); err == nil || !strings.Contains(err.Error(), `step "s" condition`) {
+			t.Fatalf("want the on-demand preparation to refuse the parse error, got %v", err)
 		}
 	})
 }
@@ -798,52 +815,51 @@ func TestTriggerRow(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// the legacy path is untouched
+// the marker and the legacy spellings
 // ---------------------------------------------------------------------------
 
-// legacyRecordingRegistry records the raw args a legacy step reached the
-// registry with.
-type legacyRecordingRegistry struct{ ran []string }
-
-func (r *legacyRecordingRegistry) Execute(_ context.Context, step *Step, _ *StepContext) (*StepResult, error) {
-	r.ran = append(r.ran, step.ID)
-	now := time.Now()
-	return &StepResult{StepId: step.ID, Status: "success", StartedAt: now, CompletedAt: now, Result: "done"}, nil
-}
-
-// TestLegacyAutomationStillRunsThroughTheStringEvaluator: an automation
-// without `"expressions": "v1"` is prepared as nothing, keeps nil Exprs on
-// every step, and its conditions are decided by the string evaluator --
-// including the spellings only it reads (a bare word compared as its own
-// text, the `$`-prefixed reference).
-func TestLegacyAutomationStillRunsThroughTheStringEvaluator(t *testing.T) {
+// TestUnmarkedAutomationIsPreparedAsV1: every automation is edition 2026, so
+// one compiled without the retired `"expressions": "v1"` marker is prepared
+// exactly like one carrying it -- its conditions parse at load -- and a
+// spelling only the string evaluator read is refused at load rather than run:
+// a bare word is an unknown name (the string evaluator compared it as its
+// own text), and a `$`-prefixed reference does not parse.
+func TestUnmarkedAutomationIsPreparedAsV1(t *testing.T) {
 	a, err := NewLoader(LoaderOptions{}).parseJSON([]byte(`{
-		"name": "legacyGate",
+		"name": "unmarkedGate",
 		"steps": [
-			{"id": "bareWord", "type": "function", "condition": "event.payload.status == active", "function": {"name": "f"}},
-			{"id": "dollar", "type": "function", "condition": "$event.payload.status == \"active\"", "function": {"name": "f"}},
-			{"id": "skipped", "type": "function", "condition": "event.payload.status == archived", "function": {"name": "f"}}
+			{"id": "gate", "type": "function", "condition": "event.payload.status == \"active\"", "function": {"name": "f"}}
 		]
-	}`), "test:legacy")
+	}`), "test:unmarked")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if a.IsV1() {
-		t.Fatal("a legacy automation loaded as v1")
+	if a.Steps[0].Exprs == nil || a.Steps[0].Exprs.Condition == nil {
+		t.Fatal("an unmarked automation's condition was not parsed at load")
 	}
-	for _, s := range a.Steps {
-		if s.Exprs != nil {
-			t.Fatalf("legacy step %q carries parsed expressions", s.ID)
-		}
+
+	for name, cond := range map[string]string{
+		"bare word":        `event.payload.status == active`,
+		"dollar reference": `$event.payload.status == "active"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			js := `{"name": "legacyGate", "args": {"fields": [{"name": "x", "type": "string", "optional": true}]},
+				"steps": [{"id": "gate", "type": "function", "condition": ` + strconvQuote(cond) + `, "function": {"name": "f"}}]}`
+			a, err := NewLoader(LoaderOptions{}).parseJSON([]byte(js), "test:legacy")
+			if err == nil {
+				err = validateArgsResolution(a)
+			}
+			if err == nil {
+				t.Fatalf("the legacy spelling %s loaded; it must be refused at load, not decided at run time", cond)
+			}
+		})
 	}
-	reg := &legacyRecordingRegistry{}
-	ev := events.NewEvent("probe.fired", events.KindMessage, map[string]any{"status": "active"})
-	if _, err := NewExecutor(ExecutorOptions{StepRegistry: reg}).ExecuteWithEvent(context.Background(), a, "test", &ev); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if got := strings.Join(reg.ran, ","); got != "bareWord,dollar" {
-		t.Fatalf("ran %q, want bareWord,dollar: the string evaluator reads the bare word as its text", got)
-	}
+}
+
+// strconvQuote is a JSON string literal for s.
+func strconvQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 // TestV1StringFieldsAreValueLeaves: a string-typed field that holds a value
@@ -919,31 +935,32 @@ func TestV1StringFieldsAreValueLeaves(t *testing.T) {
 		t.Errorf("header = %#v, %v", v, err)
 	}
 
-	// A legacy automation cannot carry one.
-	legacy := `{"name":"legacyLeaf","steps":[{"id":"pub","type":"event","event":{"topic":{"$expr":"args.kind"}}}]}`
-	if _, err := NewLoader(LoaderOptions{}).parseJSON([]byte(legacy), "test:legacy"); err == nil || !strings.Contains(err.Error(), "not marked") {
-		t.Fatalf("want the legacy value-leaf refusal, got %v", err)
+	// Without the retired marker, the same leaves load the same way.
+	unmarked, err := NewLoader(LoaderOptions{}).parseJSON([]byte(`{"name":"unmarkedLeaf","steps":[{"id":"pub","type":"event","event":{"topic":{"$expr":"args.kind"}}}]}`), "test:unmarked")
+	if err != nil {
+		t.Fatalf("an unmarked automation's value leaf was refused: %v", err)
+	}
+	if got := ast.FormatExpr(unmarked.Steps[0].Exprs.Topic); got != "args.kind" {
+		t.Errorf("unmarked topic node = %s, want args.kind", got)
 	}
 }
 
-// TestLegacyAutomationWithALambdaTriggerFilter: the parser accepts the
-// edition-2026 trigger filter in either grammar (a pushdown position no
-// legacy spelling can be mistaken for), so a LEGACY automation can carry
-// `@filter(row => ...)`. It is parsed at load and decided over the triggering
-// row, exactly as in a v1 automation -- never handed to the string evaluator
-// as lambda text.
-func TestLegacyAutomationWithALambdaTriggerFilter(t *testing.T) {
+// TestTriggerFilterMustBeALambda: a trigger filter is a one-parameter lambda
+// over the triggering row, parsed at load and decided over that row. The
+// string evaluator's filter -- a bare condition over `payload` -- is refused
+// at load, rather than handed to anything as text.
+func TestTriggerFilterMustBeALambda(t *testing.T) {
 	const concept = "v1:probe:thing"
 	a, err := NewLoader(LoaderOptions{}).parseJSON([]byte(`{
-		"name": "legacyWithLambdaFilter",
+		"name": "lambdaFilter",
 		"trigger": {"event": "graph.node.created.`+concept+`", "filter": "row => row.status == \"archived\""},
 		"steps": [{"id": "fire", "type": "function", "function": {"name": "fire"}}]
-	}`), "test:legacy")
+	}`), "test:lambda")
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if a.IsV1() || a.Trigger.FilterLambda == nil {
-		t.Fatalf("v1=%v lambda=%v: want a legacy automation whose filter parsed as a lambda", a.IsV1(), a.Trigger.FilterLambda)
+	if a.Trigger.FilterLambda == nil {
+		t.Fatal("the filter was not parsed as a lambda")
 	}
 	for status, want := range map[string]bool{"archived": true, "active": false} {
 		ev := graphCreatedEvent(concept, "thing-"+status, map[string]any{"status": status})
@@ -952,16 +969,13 @@ func TestLegacyAutomationWithALambdaTriggerFilter(t *testing.T) {
 			t.Fatalf("filter over %q = %v, %v; want %v", status, got, err, want)
 		}
 	}
-	// A legacy filter that is not a lambda stays the string evaluator's.
-	plain, err := NewLoader(LoaderOptions{}).parseJSON([]byte(`{
-		"name": "legacyPlainFilter",
+	// A filter that is not a lambda is refused at load.
+	_, err = NewLoader(LoaderOptions{}).parseJSON([]byte(`{
+		"name": "plainFilter",
 		"trigger": {"event": "graph.node.created.`+concept+`", "filter": "payload.status == \"archived\""},
 		"steps": [{"id": "fire", "type": "function", "function": {"name": "fire"}}]
-	}`), "test:legacy")
-	if err != nil {
-		t.Fatalf("load: %v", err)
-	}
-	if plain.Trigger.FilterLambda != nil {
-		t.Fatal("a legacy string filter was parsed as a lambda")
+	}`), "test:plain")
+	if err == nil {
+		t.Fatal("a filter that is not a lambda loaded")
 	}
 }

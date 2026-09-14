@@ -1,34 +1,42 @@
 package automations_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/automations"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
 // Regression for memql#580 (the ghost AI / "two assistants" bug).
 //
-// The autoJoinAI logic body derives the GA participant id with:
+// The autoJoinAI logic body derived the GA participant id with:
 //
-//	getGA := coalesce(getActiveGA, getFallbackGA)   // logic-runner path
-//	... agentId: coalesce(getGA.first().id, "")     // arg-time path (memql#575)
+//	getGA := getActiveGA ?? getFallbackGA
+//	... agentId: getGA.first().id ?? ""
 //
-// memql#575 taught only the ARG-TIME evaluator to resolve a bare step
-// identifier to its result. The LOGIC-RUNNER path (which evaluates
-// `coalesce(getActiveGA, getFallbackGA)`) bottoms out in
-// Evaluator.EvaluateStepReference -> EvaluateValue, which still rendered a
-// bare step name as its OWN LITERAL STRING. So `getGA` held the string
-// "getActiveGA" instead of the query's *ExecuteResult, every downstream
-// getGA.first().id collapsed to nil, and the unevaluated
-// coalesce(getGA.first().id, "") literal flowed into the mutation as the
-// agentId -> ghost AI.
+// The string evaluator rendered a bare step name as its OWN LITERAL STRING,
+// so `getGA` held the string "getActiveGA" instead of the query's result,
+// every downstream getGA.first().id collapsed to nil, and the unevaluated
+// text flowed into the mutation as the agentId -> ghost AI.
 //
-// These tests pin the fix: a bare identifier that names a KNOWN step now
-// resolves to that step's result in the logic-runner evaluator too; a bare
-// identifier that is NOT a step still renders as a literal string.
+// These tests pin the edition-2026 truth: a bare identifier that names a
+// KNOWN step stands for that step's rows; a skipped step is unset, so `??`
+// falls through; and a bare identifier that names nothing is refused as an
+// unknown name -- never its own text.
+
+// evalOver parses src and evaluates it over e.
+func evalOver(t *testing.T, e *automations.Evaluator, src string) (any, error) {
+	t.Helper()
+	n, err := languageParser.ParseV1Expression(src)
+	if err != nil {
+		t.Fatalf("parse %s: %v", src, err)
+	}
+	return e.EvalV1(context.Background(), n)
+}
 
 func newAgentResult(id, name string) *memqlengine.ExecuteResult {
 	payload, err := structpb.NewStruct(map[string]any{"name": name})
@@ -42,64 +50,49 @@ func newAgentResult(id, name string) *memqlengine.ExecuteResult {
 	}
 }
 
-// Before the fix this returned the literal string "getActiveGA"; it must now
-// return the step's ExecuteResult so coalesce(getActiveGA, getFallbackGA)
-// selects a navigable bundle.
+// The step's rows, never the literal string "getActiveGA".
 func TestBareStepResolvesToResult_LogicRunnerEvaluator(t *testing.T) {
 	active := newAgentResult("v1:agents:agent:assistant-REAL", "Sofia")
 
 	eval := automations.NewEvaluator()
 	eval.SetStepResult("getActiveGA", &automations.StepResult{StepId: "getActiveGA", Status: "success", Result: active})
 
-	// EvaluateValue is the primitive the logic-runner coalesce-arg path bottoms
-	// out in (via EvaluateStepReference for a bare, dotless step name).
-	gotVal, err := eval.EvaluateValue("getActiveGA")
+	gotVal, err := evalOver(t, eval, "getActiveGA")
 	if err != nil {
-		t.Fatalf("EvaluateValue: %v", err)
+		t.Fatalf("getActiveGA: %v", err)
 	}
 	if _, isStr := gotVal.(string); isStr {
-		t.Fatalf("EvaluateValue(\"getActiveGA\") = %#v (a literal string) -- the memql#580 ghost-AI bug; want the step ExecuteResult", gotVal)
+		t.Fatalf("getActiveGA = %#v (a literal string) -- the memql#580 ghost-AI bug; want the step's rows", gotVal)
 	}
-	if gotVal != any(active) {
-		t.Fatalf("EvaluateValue(\"getActiveGA\") = %#v, want the getActiveGA ExecuteResult", gotVal)
+	if id, err := evalOver(t, eval, "getActiveGA.first().id"); err != nil || id != "v1:agents:agent:assistant-REAL" {
+		t.Fatalf("getActiveGA.first().id = %#v (err %v), want the GA's id", id, err)
 	}
-
-	gotRef, err := eval.EvaluateStepReference("getActiveGA")
-	if err != nil {
-		t.Fatalf("EvaluateStepReference: %v", err)
-	}
-	if gotRef != any(active) {
-		t.Fatalf("EvaluateStepReference(\"getActiveGA\") = %#v, want the getActiveGA ExecuteResult", gotRef)
+	if id, err := evalOver(t, eval, `(getActiveGA ?? getActiveGA).first().id ?? ""`); err != nil || id != "v1:agents:agent:assistant-REAL" {
+		t.Fatalf("the autoJoinAI shape = %#v (err %v), want the GA's id", id, err)
 	}
 }
 
-// A skipped step (nil Result) must resolve to nil so coalesce falls through to
-// the next branch -- mirrors getFallbackGA being skipped when activeAssistantId
-// is set.
+// A skipped step (nil Result) is unset, so `??` falls through to the next
+// branch -- mirrors getFallbackGA being skipped when activeAssistantId is
+// set.
 func TestBareStepSkipped_ResolvesNil(t *testing.T) {
 	eval := automations.NewEvaluator()
 	eval.SetStepResult("getFallbackGA", &automations.StepResult{StepId: "getFallbackGA", Status: "skipped"})
 
-	got, err := eval.EvaluateValue("getFallbackGA")
+	got, err := evalOver(t, eval, `getFallbackGA ?? "fallback"`)
 	if err != nil {
-		t.Fatalf("EvaluateValue: %v", err)
+		t.Fatalf("getFallbackGA ?? \"fallback\": %v", err)
 	}
-	if got != nil {
-		t.Fatalf("EvaluateValue(skipped step) = %#v, want nil", got)
+	if got != "fallback" {
+		t.Fatalf("getFallbackGA ?? \"fallback\" = %#v, want the fallback (a skipped step is unset)", got)
 	}
 }
 
-// Regression guard: a bare identifier that is NOT a known step keeps its prior
-// behaviour and renders as a literal string, so coalesce(field, "default") and
-// similar non-step usages are unaffected.
-func TestBareIdentifierNonStep_StaysLiteral(t *testing.T) {
+// A bare identifier that is NOT a known step is refused as an unknown name,
+// never rendered as its own text.
+func TestBareIdentifierNonStep_IsRefused(t *testing.T) {
 	eval := automations.NewEvaluator()
-
-	got, err := eval.EvaluateValue("writer")
-	if err != nil {
-		t.Fatalf("EvaluateValue: %v", err)
-	}
-	if got != "writer" {
-		t.Fatalf("EvaluateValue(\"writer\") = %#v, want literal %q", got, "writer")
+	if got, err := evalOver(t, eval, "writer"); err == nil {
+		t.Fatalf("writer = %#v, want an unknown-name refusal (never the literal)", got)
 	}
 }

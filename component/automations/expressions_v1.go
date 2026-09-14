@@ -1,11 +1,11 @@
 package automations
 
-// expressions_v1.go -- a v1 automation's expressions, parsed once at load
+// expressions_v1.go -- an automation's expressions, parsed once at load
 // (epic memql#5363, memql#5367).
 //
-// THE COMPILED SHAPE. An automation the compiler produced from the
-// edition-2026 grammar carries a top-level `"expressions": "v1"`. Within it,
-// two encodings, and every position uses exactly one:
+// THE COMPILED SHAPE. Every automation is compiled from the edition-2026
+// grammar, and within its JSON there are two encodings, every position using
+// exactly one:
 //
 //   - an EXPRESSION FIELD -- a position that is always an expression -- holds
 //     canonical v1 source (ast.FormatExpr) as a bare string: a step
@@ -32,17 +32,15 @@ package automations
 // a string-typed value field becomes a literal node there, so the executors
 // read one kind of thing), on TriggerConfig.FilterLambda, on
 // Precondition.checkExpr, and -- for a value-map leaf -- as an *ExprLeaf in
-// place of the `{"$expr": ...}` map. The executors therefore never re-parse,
-// and a non-nil Step.Exprs is what tells a step executor that its value
-// leaves are literals and expressions, not string-evaluator text.
+// place of the `{"$expr": ...}` map. The executors therefore never re-parse.
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/language/ast"
@@ -51,20 +49,10 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// ExpressionsV1 is the value of an automation's `"expressions"` key that marks
-// it as compiled from the edition-2026 expression grammar.
-const ExpressionsV1 = "v1"
-
 // exprLeafKey is the one key of a compiled value leaf that is an expression.
 const exprLeafKey = "$expr"
 
-// IsV1 reports whether the automation was compiled from the edition-2026
-// expression grammar.
-func (a *Automation) IsV1() bool {
-	return a != nil && a.Expressions == ExpressionsV1
-}
-
-// StepExprs is one v1 step's expressions, parsed at load. A nil field is a
+// StepExprs is one step's expressions, parsed at load. A nil field is a
 // position the step does not use.
 type StepExprs struct {
 	// Condition gates the step.
@@ -102,33 +90,16 @@ func (l *ExprLeaf) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]string{exprLeafKey: l.Src})
 }
 
-// PrepareExpressions parses every expression of a v1 automation once and
-// caches the nodes (see the file comment for where). A legacy automation is
-// left as it is, with two exceptions: a v1 value leaf in its JSON is refused,
-// and a trigger filter written as a lambda is parsed as one. Every path that turns compiled JSON into an executable
-// Automation calls it -- the tree loader, CompileSource and the LogicRunner's
-// body compile -- and the executor refuses a v1 automation that skipped it.
+// PrepareExpressions parses every expression of an automation once and
+// caches the nodes (see the file comment for where). Every path that turns
+// compiled JSON into an executable Automation calls it -- the tree loader,
+// CompileSource and the LogicRunner's body compile -- and the executor
+// prepares an automation built in Go before its first run (ensurePrepared).
 //
 // An error names the step and the position: a parse error, or an expression
 // whose static cost estimate exceeds tiers.MaxStaticCost.
 func PrepareExpressions(a *Automation) error {
 	p := &exprPreparer{automation: a.Name}
-	if !a.IsV1() {
-		if err := refuseLegacyLeaves(a); err != nil {
-			return err
-		}
-		// The trigger filter is a pushdown position: the parser accepts its
-		// edition-2026 spelling, `@filter(row => ...)`, beside the legacy one
-		// whatever the grammar of the body, because no legacy filter opens
-		// with a lambda header. So a LEGACY automation may carry a lambda
-		// filter, and it is evaluated as one -- parsed here, decided by
-		// EvalExpr over the triggering row -- rather than handed to the
-		// string evaluator as text it cannot read.
-		if a.Trigger != nil && lambdaFilterHead.MatchString(a.Trigger.Filter) {
-			return p.triggerFilter(a.Trigger)
-		}
-		return nil
-	}
 	if a.Trigger != nil && strings.TrimSpace(a.Trigger.Filter) != "" {
 		if err := p.triggerFilter(a.Trigger); err != nil {
 			return err
@@ -158,11 +129,6 @@ func PrepareExpressions(a *Automation) error {
 	return nil
 }
 
-// lambdaFilterHead recognises a trigger filter that opens with a lambda
-// header -- `row =>` or `(row) =>` -- which is what makes it edition 2026 in
-// either grammar.
-var lambdaFilterHead = regexp.MustCompile(`^\s*(?:[A-Za-z_][A-Za-z0-9_]*|\(\s*[A-Za-z_][A-Za-z0-9_]*\s*\))\s*=>`)
-
 // triggerFilter parses a trigger filter as the one-parameter lambda it must
 // be, checks its cost, and caches it on the trigger.
 func (p *exprPreparer) triggerFilter(t *TriggerConfig) error {
@@ -180,27 +146,31 @@ func (p *exprPreparer) triggerFilter(t *TriggerConfig) error {
 	return nil
 }
 
-// requirePreparedExpressions refuses a v1 automation whose expressions were
-// never parsed. Without the parsed nodes a v1 step has no Exprs, so its
-// executor would take the LEGACY path and read v1 source as string-evaluator
-// expressions -- wrong silently, which is the one outcome this refusal
-// exists to rule out.
-func requirePreparedExpressions(a *Automation) error {
-	if a.IsV1() && !a.exprsPrepared {
-		return fmt.Errorf("automation %q is compiled from the v1 expression grammar but its expressions were never prepared (automations.PrepareExpressions) -- it would run its v1 source through the legacy string evaluator", a.Name)
+// prepareOnDemand serialises ensurePrepared, so two first runs of one
+// automation built in Go do not prepare it at once.
+var prepareOnDemand sync.Mutex
+
+// ensurePrepared prepares an automation that was built in Go rather than
+// loaded, before its first run. A loaded automation was prepared at load and
+// is left as it is. Without its parsed nodes a step's expressions would be
+// text nothing reads -- a condition that never gates, an argument that is
+// never passed -- which is the outcome this rules out.
+func ensurePrepared(a *Automation) error {
+	prepareOnDemand.Lock()
+	defer prepareOnDemand.Unlock()
+	if a.exprsPrepared {
+		return nil
 	}
-	return nil
+	return PrepareExpressions(a)
 }
 
-// bindV1RunAmbient binds, for a v1 automation run, the ambient roots the
-// executor never seeded for the string evaluator: `config` (the allow-listed
+// bindRunAmbient binds the ambient roots of a run: `config` (the allow-listed
 // configuration envelope, component/config/policy_exposable.go) and
 // `partition`, from the engine's one canonical envelope -- the source the
-// LogicRunner already binds them from (bindEngineAmbientEnvelope). The run's
-// clock stays the seeded `timestamp`, so `now` is not rebound here. A legacy
-// run is left exactly as it was.
-func bindV1RunAmbient(ctx context.Context, engine *memql.MemQLEngine, evaluator *Evaluator, a *Automation) {
-	if evaluator == nil || !a.IsV1() {
+// LogicRunner binds them from (bindEngineAmbientEnvelope). The run's clock
+// stays the seeded `timestamp`, so `now` is not rebound here.
+func bindRunAmbient(ctx context.Context, engine *memql.MemQLEngine, evaluator *Evaluator) {
+	if evaluator == nil {
 		return
 	}
 	envelope := engine.AmbientEnvelope(ctx)
@@ -211,14 +181,11 @@ func bindV1RunAmbient(ctx context.Context, engine *memql.MemQLEngine, evaluator 
 	}
 }
 
-// bindV1OnErrorRun gives a v1 onError hook the run it is handling: the
+// bindOnErrorRun gives an onError hook the run it is handling: the
 // automation's bound `args` and the steps the run recorded, so `args.x`,
-// `steps.s.error` and `automation.errors` read the failed run. The legacy hook
-// evaluates over a fresh evaluator holding only the event, the error and the
-// clock -- there `automation.errors` is always empty -- and is left exactly as
-// it was.
-func bindV1OnErrorRun(evaluator *Evaluator, a *Automation, exec *AutomationExecution, triggeringEvent *events.Event) {
-	if evaluator == nil || !a.IsV1() {
+// `steps.s.error` and `automation.errors` read the failed run.
+func bindOnErrorRun(evaluator *Evaluator, a *Automation, exec *AutomationExecution, triggeringEvent *events.Event) {
+	if evaluator == nil {
 		return
 	}
 	if boundArgs, _, err := bindEventArgs(a, triggeringEvent); err == nil && boundArgs != nil {

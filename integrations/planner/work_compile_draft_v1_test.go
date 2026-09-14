@@ -109,8 +109,8 @@ func TestWorkDraftFollowsEdition2026(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load: %v\n%s", err, src)
 			}
-			if !auto.IsV1() {
-				t.Fatal("the draft did not load as an edition-2026 automation")
+			if len(auto.Steps) == 0 || auto.Steps[0].Exprs == nil {
+				t.Fatal("the draft did not load as an edition-2026 automation: its steps carry no parsed expressions")
 			}
 			if name != "turn" {
 				return
