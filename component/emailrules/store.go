@@ -347,8 +347,9 @@ func (s *Store) StageOutbound(ctx context.Context, requestID, target, subject, b
 //
 // A kind-prefixed `builtin <name>(...)` string IS executable through the
 // engine, and the precedent is shipped: dsl/memql/tools.memql declares
-// `@handler(type="query", query="builtin help(name: \"$args.name\")")`, and
-// tool_execution.go's query arm hands exactly that text to Execute.
+// `@handler(type="query", query="builtin help(name: args.name)")`, and a query
+// handler renders exactly such a call from its arguments' values and hands it
+// to Execute (component/memql/tool_handler_v1.go).
 func (s *Store) SendToRecipient(ctx context.Context, templateID, recipientID, senderIdentityID, ruleID string) error {
 	args := []arg{
 		{"templateId", memql.BareShortId(templateID)},

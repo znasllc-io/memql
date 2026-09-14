@@ -300,8 +300,9 @@ func TestActorUndeclaredRule(t *testing.T) {
 	if len(got) != 1 || got[0].Code != "actor-undeclared" || got[0].Severity != SeverityError {
 		t.Fatalf("want one actor-undeclared Error, got %+v", got)
 	}
-	if got[0].Range.Start.Line != 3 || got[0].Range.Start.Column != 30 {
-		t.Errorf("anchor = %d:%d, want 3:30", got[0].Range.Start.Line, got[0].Range.Start.Column)
+	// Column 36 is the `actor` of `actor.userId`, after the lambda header.
+	if got[0].Range.Start.Line != 3 || got[0].Range.Start.Column != 36 {
+		t.Errorf("anchor = %d:%d, want 3:36", got[0].Range.Start.Line, got[0].Range.Start.Column)
 	}
 
 	// The SAME actor.userId text repeats: the second occurrence must
@@ -319,7 +320,7 @@ func TestActorUndeclaredRule(t *testing.T) {
 		"declared":          "@actor\nquery todo todos {\n  filter row => row.ownerUserId == actor.userId\n}\n",
 		"declared-unused":   "@actor\nquery todo all {\n  filter row => row.done == false\n}\n",
 		"no-read":           "query todo all {\n  filter row => row.done == false\n}\n",
-		"spec-body":         "spec isOwned {\n  when { ownerUserId == actor.userId }\n}\n",
+		"spec-body":         "spec actorEnvelope isOwner = actor => actor.role == \"owner\"\n",
 		"shape-kind-marker": "@actor\nshape actorEnvelope {\n  actor.userId\n  actor.role\n}\n",
 		"prose-only":        "// gated by actor.rank\nquery todo all {\n  filter row => row.done == false\n}\n",
 		"event-envelope":    "@trigger(event=\"x.y\")\nautomation onThing {\n  step run {\n    logic handle ( event: event )\n  }\n}\n",

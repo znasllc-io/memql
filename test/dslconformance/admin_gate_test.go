@@ -44,10 +44,8 @@ func TestAdminGateIsATopLevelConjunct(t *testing.T) {
 
 	// A corpus that stopped producing admin-gated filters, or an extractor
 	// that stopped finding them, would leave the check above green while
-	// protecting nothing. This counts what it had to reason about -- in both
-	// editions, since the migrated corpus is the one the codemod leaves behind
-	// (TestContractGatesPassTheMigratedCorpus runs the gate itself over it).
-	bothCorpora(t, func(t *testing.T, c corpus) {
+	// protecting nothing. This counts what it had to reason about.
+	onTree(t, func(t *testing.T, c corpus) {
 		checked := 0
 		for _, p := range c.paths {
 			src := c.files[p]
@@ -65,7 +63,7 @@ func TestAdminGateIsATopLevelConjunct(t *testing.T) {
 				}
 			}
 		}
-		// Measured when the floor was set: 264 in each edition.
+		// Measured when the floor was set: 264.
 		if checked < 200 {
 			t.Fatalf("%d admin-gated filter clauses found; the corpus shape or filterClauseOf changed and this gate has silently stopped protecting anything", checked)
 		}
@@ -82,33 +80,33 @@ func TestAdminGateCompositionRules(t *testing.T) {
 		clause string
 		want   bool
 	}{
-		{"bare gate", `actor.isClusterOwner==true`, true},
-		{"gate as a conjunct", `partitionId==args.partitionId && actor.isClusterOwner==true`, true},
-		{"gate first", `actor.isClusterOwner==true && statusIsActive`, true},
+		{"bare gate", `row => actor.isClusterOwner == true`, true},
+		{"gate as a conjunct", `row => row.partitionId == args.partitionId && actor.isClusterOwner == true`, true},
+		{"gate first", `row => actor.isClusterOwner == true && statusIsActive(row)`, true},
 		// The shipped telephony shape: a disjunction is fine as long as the
 		// gate sits OUTSIDE it.
-		{"disjunction inside, gate outside", `(fromE164==args.e164 || toE164==args.e164) && actor.isClusterOwner==true`, true},
-		{"spec form", `requiresClusterOwner && statusIsActive`, true},
+		{"disjunction inside, gate outside", `row => (row.fromE164 == args.e164 || row.toE164 == args.e164) && actor.isClusterOwner == true`, true},
+		{"spec form", `row => requiresClusterOwner(actor) && statusIsActive(row)`, true},
 
 		// The defect: the gate is switched off by the other arm.
-		{"gate as a disjunct", `fromE164==args.e164 || actor.isClusterOwner==true`, false},
-		{"gate as a disjunct, first", `actor.isClusterOwner==true || fromE164==args.e164`, false},
-		{"parens dropped", `fromE164==args.e164 || toE164==args.e164 && actor.isClusterOwner==true`, false},
-		{"spec form as a disjunct", `requiresClusterOwner || statusIsActive`, false},
-		{"negated gate", `!(actor.isClusterOwner==true)`, false},
-		{"gate behind a when guard", `when(args.adminMode) { actor.isClusterOwner==true }`, false},
+		{"gate as a disjunct", `row => row.fromE164 == args.e164 || actor.isClusterOwner == true`, false},
+		{"gate as a disjunct, first", `row => actor.isClusterOwner == true || row.fromE164 == args.e164`, false},
+		{"parens dropped", `row => row.fromE164 == args.e164 || row.toE164 == args.e164 && actor.isClusterOwner == true`, false},
+		{"spec form as a disjunct", `row => requiresClusterOwner(actor) || statusIsActive(row)`, false},
+		{"negated gate", `row => !(actor.isClusterOwner == true)`, false},
+		{"gate behind an optional-argument guard", `row => (args.adminMode == nil || actor.isClusterOwner == true)`, false},
 
 		// Review round 1: POLARITY. These contain the gate identifier and a
 		// top-level `&&`, so a substring leaf accepted them -- while inverting
-		// the meaning. Under `!=true` a non-owner satisfying the other conjunct
+		// the meaning. Under `!= true` a non-owner satisfying the other conjunct
 		// gets rows and the cluster owner gets none.
-		{"inverted with !=", `fromE164==args.e164 && actor.isClusterOwner!=true`, false},
-		{"inverted with ==false", `fromE164==args.e164 && actor.isClusterOwner==false`, false},
-		{"bare inverted", `actor.isClusterOwner!=true`, false},
+		{"inverted with !=", `row => row.fromE164 == args.e164 && actor.isClusterOwner != true`, false},
+		{"inverted with == false", `row => row.fromE164 == args.e164 && actor.isClusterOwner == false`, false},
+		{"bare inverted", `row => actor.isClusterOwner != true`, false},
 
 		// Word boundaries: a different identifier is not the gate.
-		{"identifier containing the spec name", `x==args.x && requiresClusterOwnerXyz`, false},
-		{"identifier prefixed by the spec name", `x==args.x && myRequiresOwner`, false},
+		{"identifier containing the spec name", `row => row.x == args.x && requiresClusterOwnerXyz(actor)`, false},
+		{"identifier prefixed by the spec name", `row => row.x == args.x && myRequiresOwner(actor)`, false},
 
 		// The live context-spec gates. Which of them the corpus uses is
 		// computed by TestAdminGateNamesAreDeclaredOrRecorded rather than
@@ -123,12 +121,13 @@ func TestAdminGateCompositionRules(t *testing.T) {
 		// neither is a filter leaf. `requiresClusterOwner` is the surviving
 		// name and stands in here -- it asks about the ACTOR rather than about
 		// a rung, which is what a context-spec is still for.
-		{"requiresClusterOwner as a conjunct", `statusIsActive && requiresClusterOwner`, true},
-		{"requiresClusterOwner is not requiresOwner", `statusIsActive && requiresClusterOwner`, true},
-		{"requiresClusterOwner as a disjunct", `statusIsActive || requiresClusterOwner`, false},
+		{"requiresClusterOwner as a conjunct", `row => statusIsActive(row) && requiresClusterOwner(actor)`, true},
+		{"requiresClusterOwner is not requiresOwner", `row => statusIsActive(row) && requiresClusterOwner(actor)`, true},
+		{"requiresClusterOwner as a disjunct", `row => statusIsActive(row) || requiresClusterOwner(actor)`, false},
 
-		// Whitespace around the comparison is legal.
-		{"spaced comparison", `x==args.x && actor.isClusterOwner == true`, true},
+		// Whitespace around the comparison is the author's: the leaf is read
+		// in its canonical spelling.
+		{"unspaced comparison", `row => row.x == args.x && actor.isClusterOwner==true`, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -194,7 +193,7 @@ func adminGateSpecNames(t *testing.T) []string {
 // a test edit -- the failure this guards against is a name nothing declares,
 // not a name nothing uses yet.
 func TestAdminGateNamesAreDeclaredOrRecorded(t *testing.T) {
-	bothCorpora(t, checkAdminGateNamesAreDeclaredOrRecorded)
+	onTree(t, checkAdminGateNamesAreDeclaredOrRecorded)
 }
 
 func checkAdminGateNamesAreDeclaredOrRecorded(t *testing.T, c corpus) {
@@ -275,7 +274,7 @@ func TestNamedQueriesKeepTheirAdminGate(t *testing.T) {
 		},
 	}
 
-	bothCorpora(t, func(t *testing.T, c corpus) { checkNamedQueriesKeepTheirAdminGate(t, c, want) })
+	onTree(t, func(t *testing.T, c corpus) { checkNamedQueriesKeepTheirAdminGate(t, c, want) })
 }
 
 func checkNamedQueriesKeepTheirAdminGate(t *testing.T, c corpus, want map[string]map[string]bool) {
@@ -357,7 +356,7 @@ func checkNamedQueriesKeepTheirAdminGate(t *testing.T, c corpus, want map[string
 // only ones that can serve as an admin gate. A row-spec is a SQL predicate over
 // payload fields and belongs in no gate vocabulary.
 func TestEveryDeclaredActorGateIsRecognised(t *testing.T) {
-	bothCorpora(t, checkEveryDeclaredActorGateIsRecognised)
+	onTree(t, checkEveryDeclaredActorGateIsRecognised)
 }
 
 func checkEveryDeclaredActorGateIsRecognised(t *testing.T, c corpus) {

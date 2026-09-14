@@ -6965,20 +6965,35 @@ func (p *Parser) parseSelectFunction() (ExpressionNode, error) {
 	return &SelectExpr{Target: target, Fields: fields}, nil
 }
 
+// asOfOutsideQuery reports whether an `asOf` at the cursor is outside a
+// query. `asOf` is a query-only clause: it compiles to a time-travel read
+// against the graph and is rejected in logic / automation / mutation / spec
+// bodies (core-builtins ADR §2.3). The temporal dependency is declared
+// THROUGH the query a body imports, never inline. A zero currentFuncType (""
+// -- standalone expression / runtime query string) stays permissive; an
+// explicit non-query kind is rejected.
+//
+// Both grammars ask it: the legacy callable dispatch (parseAsOfFunction) and
+// the edition-2026 call parser (parseV1FunctionCall), which parses every
+// logic, automation and mutation position and would otherwise read
+// `asOf(...)` there as a call to a function nothing defines.
+func (p *Parser) asOfOutsideQuery() bool {
+	return p.currentFuncType != "" && p.currentFuncType != FunctionTypeQuery
+}
+
+// asOfQueryOnlyMessage refuses an `asOf` in a body of the given kind.
+func asOfQueryOnlyMessage(kind FunctionType) string {
+	return fmt.Sprintf("`asOf` is a query-only clause and cannot appear in a %s body; time-travel reads belong in a query the body imports (core-builtins ADR §2.3)", kind)
+}
+
 // parseAsOfFunction parses the modern single-paren form
 // `asOf(target, "RFC3339" | latest)` and produces a *TimestampExpr
 // matching parseAsOf (memql parser.go ~line 1278). The second arg is
 // either a string literal (parsed as RFC3339Nano) or the bare
 // identifier `latest`.
 func (p *Parser) parseAsOfFunction() (ExpressionNode, error) {
-	// `asOf` is a query-only clause: it compiles to a time-travel read
-	// against the graph and is rejected in logic / automation / mutation
-	// / spec bodies (core-builtins ADR §2.3). The temporal dependency is
-	// declared THROUGH the query a body imports, never inline. A zero
-	// currentFuncType ("" -- standalone expression / runtime query
-	// string) stays permissive; an explicit non-query kind is rejected.
-	if p.currentFuncType != "" && p.currentFuncType != FunctionTypeQuery {
-		return nil, newParseErrorf(&p.current, "`asOf` is a query-only clause and cannot appear in a %s body; time-travel reads belong in a query the body imports (core-builtins ADR §2.3)", p.currentFuncType)
+	if p.asOfOutsideQuery() {
+		return nil, newParseErrorf(&p.current, "%s", asOfQueryOnlyMessage(p.currentFuncType))
 	}
 	if p.check(TokenParenClose) {
 		return nil, newParseErrorf(&p.current, "asOf() requires an expression argument")

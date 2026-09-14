@@ -602,31 +602,27 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 				mutationConcept = boundConcept
 			}
 
-			// The values. Parsed with the edition-2026 grammar
-			// (Options.ExpressionsV1), the statement carries parsed nodes --
-			// PayloadExpr and the four slots -- and newMutationTemplateV1
-			// builds, checks and lays them out (mutation_values_v1.go);
-			// otherwise the string half reads PayloadRaw's text. Everything
-			// after this block is the same for both.
-			var tmpl *FunctionMutationTemplate
-			if funcDef.ExpressionsV1 {
-				v1, err := mutationTemplateFromStmtV1(stmt, mutationConcept)
-				if err != nil {
-					return nil, fmt.Errorf("function %q: %w", expectedName, err)
-				}
-				// C5 (below, for the string half) reads the block's
-				// fields; for a v1 template those are its laid-out payload
-				// and overlay, with parsed nodes at the leaves.
-				if err := validateMutationCallerArgs(registry, mutationConcept, expectedName, mutationBlockFieldsV1(v1)); err != nil {
-					return nil, err
-				}
-				tmpl = v1
-			} else {
-				legacy, err := mutationTemplateFromStmtLegacy(stmt, mutationConcept, registry, expectedName)
-				if err != nil {
-					return nil, err
-				}
-				tmpl = legacy
+			// The values: the statement's parsed nodes -- PayloadExpr and
+			// the four slots -- built, checked and laid out by
+			// newMutationTemplateV1 (mutation_values_v1.go). Every mutation
+			// builds from its edition-2026 parse; a statement that was not
+			// parsed that way is refused there.
+			tmpl, err := mutationTemplateFromStmtV1(stmt, mutationConcept)
+			if err != nil {
+				return nil, fmt.Errorf("function %q: %w", expectedName, err)
+			}
+
+			// C5 (memql#2035): a caller-supplied arg can never write a
+			// field the concept marks @internal or @serverSet -- those
+			// are server-only / server-stamped. This gate makes the
+			// accept/stamp sugar safe (an `accept { internalField }`
+			// desugars to `internalField: args.internalField`, which is
+			// rejected here) AND catches a hand-written `insert` that
+			// binds a sensitive field straight from caller args. It reads
+			// the block's fields: the laid-out payload and overlay, with
+			// parsed nodes at the leaves.
+			if err := validateMutationCallerArgs(registry, mutationConcept, expectedName, mutationBlockFieldsV1(tmpl)); err != nil {
+				return nil, err
 			}
 
 			mergeFields, err := mutationMergeFields(funcDef, stmt.Kind)
@@ -1776,100 +1772,17 @@ func convertArgsField(field *languageParser.ArgsField) (*FunctionArgsField, erro
 	return result, nil
 }
 
-// mutationTemplateFromStmtLegacy builds a mutation's template from the string
-// half's reading of its statement: PayloadRaw's object-literal text, laid out
-// by parsePayloadRawToTemplate and hoisted here, and the four slots as the
-// parser left them. C5 runs on the block's fields before the hoist, where it
-// always has. The annotation fields are the caller's to attach. The flip
-// deletes this with the string half; mutationTemplateFromStmtV1 is its
-// edition-2026 counterpart.
-func mutationTemplateFromStmtLegacy(stmt *languageParser.MutationStmt, concept string, registry memoryNodes.Registry, expectedName string) (*FunctionMutationTemplate, error) {
-	payloadObj, err := parsePayloadRawToTemplate(stmt.PayloadRaw)
-	if err != nil {
-		return nil, fmt.Errorf("function %q: parse payload: %w", expectedName, err)
-	}
-
-	// C5 (memql#2035): a caller-supplied arg can never write a
-	// field the concept marks @internal or @serverSet -- those
-	// are server-only / server-stamped. This gate makes the
-	// accept/stamp sugar safe (an `accept { internalField }`
-	// desugars to `internalField: args.internalField`, which is
-	// rejected here) AND catches a hand-written `insert` that
-	// binds a sensitive field straight from caller args. The
-	// concept is resolved from the signature/use binding; an
-	// unannotated concept (today's whole tree) has no sensitive
-	// fields, so this is a no-op until concepts adopt the
-	// annotations.
-	if err := validateMutationCallerArgs(registry, concept, expectedName, payloadObj); err != nil {
-		return nil, err
-	}
-
-	// Handle object-literal syntax: insert("concept", { id: ..., payload: {...} })
-	// If the payloadObj includes an id or payload key, normalize them.
-	var idTemplate any = stmt.IDTemplate
-	var createdAtTemplate any = stmt.CreatedAtTemplate
-	var payloadTemplate any = payloadObj
-	var payloadOverlay map[string]any
-	if payloadObj != nil {
-		if idVal, ok := payloadObj["id"]; ok && idTemplate == nil {
-			idTemplate = idVal
-		}
-		if createdAtVal, ok := payloadObj["createdAt"]; ok && createdAtTemplate == nil {
-			createdAtTemplate = createdAtVal
-		}
-		payloadVal, hasPayloadKey := payloadObj["payload"]
-		if hasPayloadKey {
-			// payload can itself be an expression (e.g., args.payload) that evaluates to an object at runtime.
-			payloadTemplate = payloadVal
-		}
-		// Remove id if it was embedded inside the object literal.
-		delete(payloadObj, "id")
-		delete(payloadObj, "createdAt")
-		delete(payloadObj, "payload")
-		// If we didn't have an explicit payload wrapper, payloadTemplate remains the entire object.
-		if payloadTemplate == nil {
-			payloadTemplate = payloadObj
-		} else if hasPayloadKey && len(payloadObj) > 0 {
-			// The insert block mixed `args.payload` (the splat) with
-			// explicit fields like `ownerUserId: actor.userId`. Keep
-			// the explicit fields as an overlay -- renderMutationTemplate
-			// evaluates the splat first, then overlays these, so an
-			// authz-relevant server-side stamp wins over any caller-
-			// supplied value in the splat payload (memql#401). Without
-			// this branch the explicit fields were silently dropped.
-			payloadOverlay = payloadObj
-		}
-	}
-
-	return &FunctionMutationTemplate{
-		Kind:                   stmt.Kind,
-		Concept:                concept,
-		IDTemplate:             idTemplate,
-		CreatedAtTemplate:      createdAtTemplate,
-		PayloadTemplate:        payloadTemplate,
-		PayloadOverlayTemplate: payloadOverlay,
-		ParentTemplate:         stmt.ParentTemplate,
-		AliasOfTemplate:        stmt.AliasOfTemplate,
-	}, nil
-}
-
-// valueReferencesCallerArg reports whether a parsed payload-template
-// value is bound to caller-supplied input. The struct-form rewriter
-// passes `args.X` references through verbatim; the object-literal
-// parser also recognises the legacy `ctx.X` shorthand for the same
-// thing. Non-string values (literals, nested objects) are never
-// caller-args. Backs the C5 (memql#2035) sensitive-field gate.
+// valueReferencesCallerArg reports whether a laid-out payload-template value
+// is exactly a read of caller-supplied input -- `args.<path>`
+// (v1CallerArgPath). A nested object or list is not one: C5 asks about the
+// field's own value. Backs the C5 (memql#2035) sensitive-field gate.
 func valueReferencesCallerArg(v any) bool {
-	// An edition-2026 leaf is a parsed node, not text (mutation_values_v1.go).
-	if isArg, isV1 := v1LeafIsCallerArg(v); isV1 {
-		return isArg
-	}
-	s, ok := v.(string)
+	n, ok := v.(languageParser.ExpressionNode)
 	if !ok {
 		return false
 	}
-	s = strings.TrimSpace(s)
-	return strings.HasPrefix(s, "args.") || strings.HasPrefix(s, "ctx.")
+	_, isArg := v1CallerArgPath(n)
+	return isArg
 }
 
 // validateMutationCallerArgs enforces the C5 (memql#2035) invariant

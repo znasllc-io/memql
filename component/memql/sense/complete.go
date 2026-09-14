@@ -1123,18 +1123,11 @@ func (s *Service) completeInBlock(prefix string, enc EnclosingConstruct, block s
 		return items, true
 
 	case "inFilterClause":
-		var items []CompletionItem
-		for _, head := range reservedFilterHeads {
-			if strings.HasPrefix(head, prefix) {
-				items = append(items, CompletionItem{
-					Label: head, Kind: "keyword", Detail: "filter head",
-					Documentation: KeywordDocs[head], InsertText: head,
-					SortPriority: 2,
-				})
-			}
-		}
-		items = append(items, s.boundConceptFieldItems(prefix, enc)...)
-		return items, true
+		// The pre-v1 `filter { }` block. Edition 2026 has no filter block: the
+		// parser reads the braces as a map literal and refuses a filter that is
+		// not a lambda, so nothing typed inside one can load and nothing is
+		// offered. A bare field name here is exactly the refused spelling.
+		return nil, true
 
 	case "inWriteBlock":
 		var items []CompletionItem
@@ -1189,14 +1182,6 @@ func (s *Service) boundConceptFieldItems(prefix string, enc EnclosingConstruct) 
 		break
 	}
 	return items
-}
-
-// reservedFilterHeads mirrors the engine plan parser's
-// reservedFilterHead set (component/memql/parser.go) -- the path roots
-// legal at the head of a filter predicate.
-var reservedFilterHeads = []string{
-	"payload", "actor", "args", "now", "config",
-	"trace", "meta", "schema", "partition", "provenance",
 }
 
 // rowIntrinsics is the row envelope every stored row carries regardless of

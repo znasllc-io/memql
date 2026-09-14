@@ -11,9 +11,7 @@ var (
 	bareWriteRe  = regexp.MustCompile(`\b(insert|update)\s*\{`)
 	cidStringRe  = regexp.MustCompile(`canonicalId\([^,]+,\s*"v1:`)
 	// foreignIdLiteralRe is the literal a retired foreign-id construction
-	// starts with: `"v1:ns:concept:"`. It is read out of a concatenation in
-	// either edition's spelling -- `concat("v1:ns:concept:", id)` or, after
-	// the edition-2026 codemod, `"v1:ns:concept:" + id` (epic memql#5363).
+	// starts with: `"v1:ns:concept:" + id`.
 	foreignIdLiteralRe = regexp.MustCompile(`^v1:[A-Za-z0-9:]+:$`)
 )
 
@@ -21,14 +19,14 @@ var (
 // the authored tree must use the bare write form + typed foreign-concept refs.
 //   - `insert <concept> {` / `update <concept> {`  -> bare `insert {` / `update {`
 //   - `canonicalId(x, "v1:ns:name")`               -> `canonicalId(x, <name>)`
-//   - `concat("v1:ns:concept:", id)`               -> `canonicalId(id, <name>)`
+//   - `"v1:ns:concept:" + id`                      -> `canonicalId(id, <name>)`
 //
 // Edition 2026 writes the concept name of `canonicalId` as a quoted SHORT name
 // (`canonicalId(x, "campaign")`), which cidStringRe does not match: the
 // retired form is the full canonical `"v1:..."` string, and that is still the
 // one refused.
 func TestNoRetiredBindingForms(t *testing.T) {
-	bothCorpora(t, func(t *testing.T, c corpus) {
+	onTree(t, func(t *testing.T, c corpus) {
 		writes, concats := 0, 0
 		for _, p := range c.paths {
 			for i, line := range strings.Split(c.files[p], "\n") {
@@ -56,14 +54,14 @@ func TestNoRetiredBindingForms(t *testing.T) {
 				for _, lit := range concatLiteralPrefixes(line) {
 					concats++
 					if foreignIdLiteralRe.MatchString(lit) {
-						ref("`concat(\"v1:ns:concept:\", id)` (edition 2026: `\"v1:ns:concept:\" + id`) foreign-id construction is retired -- use `canonicalId(id, <name>)`")
+						ref("`\"v1:ns:concept:\" + id` foreign-id construction is retired -- use `canonicalId(id, <name>)`")
 					}
 				}
 			}
 		}
 		// Reachable positives: the write blocks and concatenations this read.
-		// Measured when the floors were set: 418 write blocks; 11 embedded and
-		// 17 migrated literal-prefixed concatenations.
+		// Measured when the floors were set: 418 write blocks and 17
+		// literal-prefixed concatenations.
 		if writes < 300 || concats < 8 {
 			t.Errorf("examined %d write blocks and %d concatenations -- the reader has stopped finding what it checks", writes, concats)
 		}

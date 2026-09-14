@@ -32,14 +32,22 @@ import (
 const planConstantDetail = "Computes before the query; cannot read the row"
 
 // completeAtExpression answers completion at an expression position the
-// manifest has rules for, and reports whether it did. It declines -- leaving
-// the existing completers in charge -- at the literal positions (whose
-// completion is the annotation's own keyword arguments) and at a pushdown
-// position still in its pre-v1 spelling, except the braceless filter clause,
-// which no completer understood before.
+// manifest has rules for, and reports whether it did. A clause written as a
+// lambda -- a query's filter and refine, a trigger @filter -- that has no
+// header yet is offered the header and nothing else. It declines, leaving the
+// existing completers in charge, at the literal positions (whose completion is
+// the annotation's own keyword arguments) and at the other pre-v1 spellings of
+// a pushdown position.
 func (s *Service) completeAtExpression(ctx CursorContext, source string, line, col int) ([]CompletionItem, bool) {
 	if ctx.Position == "" {
 		return nil, false
+	}
+	if header, ok := lambdaHeaderOf(ctx); ok && !ctx.Lambda {
+		// The clause has no lambda header yet. The parser refuses every other
+		// spelling of it -- a filter over bare field names, `payload.` or a
+		// bare `row.` intrinsic, a raw-text @filter -- so the header is the one
+		// item, and only where it goes.
+		return header.itemsAt(source, line, col, ctx.Prefix), true
 	}
 	// Inside an annotation's parentheses the classifier reports the annotation
 	// before it looks for a dot, so `@filter(row => row.` arrives as annotation
@@ -62,29 +70,66 @@ func (s *Service) completeAtExpression(ctx CursorContext, source string, line, c
 		return nil, false
 	}
 	if tiers.TierOf(ctx.Position) == tiers.TierP && !ctx.Lambda {
-		if ctx.Position == tiers.PositionQueryFilter && ctx.Kind == ContextFuncBody && !containsString(ctx.Enclosing.Blocks, "filter") {
-			return s.braceLessFilterItems(ctx, source, line), true
-		}
 		return nil, false
-	}
-	if ctx.Position == tiers.PositionQueryRefine && !ctx.Lambda {
-		// `refine` has no pre-v1 spelling: before its lambda header, the header
-		// is the one thing the clause can take.
-		return refineHeaderItems(ctx.Prefix), true
 	}
 	return s.completeExpression(ctx, source, line, col), true
 }
 
-// refineHeaderItems offers the lambda header a refine clause opens with.
-func refineHeaderItems(prefix string) []CompletionItem {
+// lambdaClauseHeader describes a clause whose value is a lambda: the text that
+// opens it, up to where its header goes, and the header item it is offered
+// while it has none.
+type lambdaClauseHeader struct {
+	opener      *regexp.Regexp
+	detail, doc string
+}
+
+var (
+	filterLambdaHeader = lambdaClauseHeader{
+		opener: regexp.MustCompile(`^\s*filter\s*$`),
+		detail: "filter lambda header",
+		doc:    "Open the filter as a lambda over the row: `filter row => row.status == args.status`.",
+	}
+	refineLambdaHeader = lambdaClauseHeader{
+		opener: regexp.MustCompile(`^\s*refine\s*$`),
+		detail: "refine lambda header",
+		doc:    "Open the clause as a lambda over each row of the page: `refine row => row.title.includes(args.q)`. It runs in process after `paginate` reads the page, so a page can come back with fewer rows.",
+	}
+	triggerFilterLambdaHeader = lambdaClauseHeader{
+		opener: regexp.MustCompile(`@filter\s*\(\s*$`),
+		detail: "trigger filter lambda header",
+		doc:    "Open the trigger filter as a lambda over the row whose event fired it: `@filter(row => row.status == \"archived\")`.",
+	}
+)
+
+// lambdaHeaderOf reports the header of the lambda clause at the cursor: a
+// query's braceless filter, its refine clause, or a trigger @filter. The query
+// a tool's @handler runs is a query filter too, but a string rather than a
+// clause, and has no header to offer.
+func lambdaHeaderOf(ctx CursorContext) (lambdaClauseHeader, bool) {
+	switch {
+	case ctx.Position == tiers.PositionQueryFilter && ctx.Enclosing.Keyword == "query" && !containsString(ctx.Enclosing.Blocks, "filter"):
+		return filterLambdaHeader, true
+	case ctx.Position == tiers.PositionQueryRefine:
+		return refineLambdaHeader, true
+	case ctx.Position == tiers.PositionTriggerFilter:
+		return triggerFilterLambdaHeader, true
+	}
+	return lambdaClauseHeader{}, false
+}
+
+// itemsAt offers the header where it goes: straight after the clause's opener,
+// with at most the word being typed in between. Anywhere else in a clause with
+// no header -- `filter status == |` -- nothing is offered.
+func (h lambdaClauseHeader) itemsAt(source string, line, col int, prefix string) []CompletionItem {
 	const label = "row => ..."
-	if !strings.HasPrefix(label, prefix) {
+	before := textBeforeCursor(source, line, col)
+	cur := before[strings.LastIndexByte(before, '\n')+1:]
+	if !h.opener.MatchString(strings.TrimSuffix(cur, prefix)) || !strings.HasPrefix(label, prefix) {
 		return nil
 	}
 	return []CompletionItem{{
-		Label: label, Kind: "snippet", Detail: "refine lambda header",
-		Documentation: "Open the clause as a lambda over each row of the page: `refine row => row.title.includes(args.q)`. It runs in process after `paginate` reads the page, so a page can come back with fewer rows.",
-		InsertText:    "row => row.$0", IsSnippet: true, SortPriority: 1,
+		Label: label, Kind: "snippet", Detail: h.detail, Documentation: h.doc,
+		InsertText: "row => row.$0", IsSnippet: true, SortPriority: 1,
 	}}
 }
 
@@ -216,38 +261,6 @@ func atStatementStart(source string, line, col int, prefix string) bool {
 	return strings.TrimSpace(strings.TrimSuffix(cur, prefix)) == ""
 }
 
-// braceLessFilterItems is the completion set of a filter clause still in its
-// pre-v1 spelling (`filter status == args.x`, no lambda header): the same set
-// the `filter { }` block offers -- the reserved heads and the bound concept's
-// fields -- and, where the clause has no header yet, the v1 one.
-func (s *Service) braceLessFilterItems(ctx CursorContext, source string, line int) []CompletionItem {
-	var items []CompletionItem
-	lines := strings.Split(source, "\n")
-	if line >= 1 && line <= len(lines) {
-		after := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[line-1]), "filter"))
-		if dslclauseOpensFilter(lines[line-1]) && (after == "" || after == ctx.Prefix) {
-			items = append(items, CompletionItem{
-				Label: "row => ...", Kind: "snippet", Detail: "filter lambda header",
-				Documentation: "Open the filter as a lambda over the row: `filter row => row.status == args.status`.",
-				InsertText:    "row => row.$0", IsSnippet: true, SortPriority: 1,
-			})
-		}
-	}
-	for _, head := range reservedFilterHeads {
-		if strings.HasPrefix(head, ctx.Prefix) {
-			items = append(items, CompletionItem{
-				Label: head, Kind: "keyword", Detail: "filter head",
-				Documentation: KeywordDocs[head], InsertText: head, SortPriority: 2,
-			})
-		}
-	}
-	return append(items, s.boundConceptFieldItems(ctx.Prefix, ctx.Enclosing)...)
-}
-
-func dslclauseOpensFilter(line string) bool {
-	return startsWithWord(strings.TrimSpace(line), "filter")
-}
-
 // completeExpressionMember is member completion at an expression position:
 // after the position's own parameter, a nested lambda's parameter, a member of
 // either, or a declared arg of a list or string type.
@@ -297,6 +310,12 @@ func (s *Service) completeExpressionMember(ctx CursorContext, source string, lin
 				return s.methodItems(ctx, functions.TypeList, false), true
 			}
 		}
+	}
+	if head == "payload" {
+		// `payload.` was the pre-v1 spelling of a payload field. Edition 2026
+		// reads a field through the position's parameter (`row.title`), and
+		// refuses a bare `payload` as a name nothing binds, so it offers nothing.
+		return nil, true
 	}
 	return nil, false
 }

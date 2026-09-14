@@ -7,7 +7,7 @@
 // SYNTHETIC cluster actor (component/automations/journal.go), whose rows
 // have their owner blanked to present-and-empty by
 // rowauthz_nonprincipal_owner.go -- they are the deployment's. So an
-// `ownerUserId==actor.userId` conjunct would match ZERO of them, and the
+// `row.ownerUserId == actor.userId` conjunct would match ZERO of them, and the
 // reads resume needs would return nothing on exactly the runs resume
 // exists for. Caller-scoping is not a narrower version of these reads; it
 // is a different read that answers about a person's own goals, and that
@@ -109,7 +109,7 @@ query approval workApprovalById {
   shape   workApprovalFull
 }
 
-/// The caller's goals, newest first. Owned: ownerUserId==actor.userId binds server-side.
+/// The caller's goals, newest first. Owned: `row.ownerUserId == actor.userId` binds server-side.
 @actor
 query goal workGoalsForOwner {
   filter  row => row.ownerUserId == actor.userId
@@ -134,7 +134,7 @@ query goal workGoalsForResponsibility {
   shape   workGoalFull
 }
 
-/// The caller's pending approvals, newest first. Owned. decision=="" is the pending state, and it
+/// The caller's pending approvals, newest first. Owned. `row.decision == ""` is the pending state, and it
 /// matches because createWorkApproval STAMPS the empty string rather than leaving the key absent.
 @actor
 query approval workApprovalsForOwner {
@@ -151,7 +151,7 @@ query approval workApprovalsForOwner {
 // the SAME rows read by the person who owns them, from a browser, and
 // they are separate constructs rather than one because the two callers
 // satisfy the owned tier by different arms: the journal by the
-// cluster-owner escape, a person by ownerUserId==actor.userId. One
+// cluster-owner escape, a person by `row.ownerUserId == actor.userId`. One
 // construct cannot spell both without widening the read for somebody.
 //
 // Spec section I names these as client-reachable; the MemQL OS Work app
@@ -169,7 +169,7 @@ query goal workGoalForOwner {
   shape   workGoalFull
 }
 
-/// The caller's runs, newest first. Owned: ownerUserId==actor.userId binds server-side, and the
+/// The caller's runs, newest first. Owned: `row.ownerUserId == actor.userId` binds server-side, and the
 /// concept's tier admits the same rows on the SUBSCRIPTION, so a browser watching this feed is not
 /// handed anybody else's work the way an undeclared concept would.
 ///
@@ -184,7 +184,7 @@ query run workRunsForOwner {
   shape   workRunFull
 }
 
-/// The caller's runs that are executing right now. Owned: ownerUserId==actor.userId binds
+/// The caller's runs that are executing right now. Owned: `row.ownerUserId == actor.userId` binds
 /// server-side, so this answers for whoever the actor is and nobody else.
 ///
 /// SEPARATE FROM workRunsForOwner rather than a narrowing of it, for the reason that one states in

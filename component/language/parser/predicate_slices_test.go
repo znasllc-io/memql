@@ -9,6 +9,7 @@ import (
 // brace-less spec or trait (memql#5364): preamble through the expression's
 // last character, continuation lines included, trailing comment excluded.
 func TestExtractPredicateDeclarationSlices(t *testing.T) {
+	// memqlmigrate:keep -- the braced spec is a case: not this slicer's.
 	src := `use agents.concepts.{ agent }
 
 /// Assistants only.
@@ -17,7 +18,9 @@ spec agent isAssistant = row => row.role == "assistant"
                          && row.kind != "system"   // not the system agent
 
 /// A braced spec beside it is not this slicer's.
-spec agent isLegacy = row => row.role == "x"
+spec agent isLegacy {
+  return role == "x"
+}
 
 /* spec agent commentedOut = row => row.a == 1 */
 trait isActiveRecord = row => row.active == true

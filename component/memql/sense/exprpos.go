@@ -24,8 +24,9 @@ package sense
 //
 // The pre-v1 spellings of the pushdown positions (a braceless filter with no
 // lambda header, a `filter { }` block, a `spec ... { return ... }` body) are
-// detected too, with lambda false: the tree is migrated in this epic, and until
-// it is those clauses are still queries an author edits.
+// detected too, with lambda false. The parser refuses each of them; knowing the
+// position is what lets completion offer a headerless filter its lambda header
+// and nothing else, and hover show the author's construct rewritten.
 
 import (
 	"regexp"

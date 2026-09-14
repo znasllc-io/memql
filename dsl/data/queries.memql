@@ -36,9 +36,9 @@ query record detectConflicts {
 // Returns:
 //   Array of matching policies (space-specific first, then global)
 //
-// Usage:
-//   policy({ targetRecordType: "vehicle" })                          // Global policy
-//   policy({ targetRecordType: "vehicle", partitionId: "space-123" })    // Space-specific or global
+// Usage, as the string a client sends to Execute:
+//   policy(targetRecordType: "vehicle")                          // Global policy
+//   policy(targetRecordType: "vehicle", partitionId: "space-123")    // Space-specific or global
 //
 
 /// Returns the validation policy for a record type. Space-specific policies take precedence over
@@ -72,11 +72,11 @@ query policy policy {
 // Returns:
 //   Array of data records with all fields
 //
-// Usage:
+// Usage, as the string a client sends to Execute:
 //   recordsByState()                                              // All active records
-//   recordsByState({ validationState: "draft" })                  // All draft records
-//   recordsByState({ partitionId: "space-123", validationState: "confirmed" })  // Confirmed in a space
-//   recordsByState({ partitionId: "space-123", recordType: "vehicle" })         // By type in a space
+//   recordsByState(validationState: "draft")                  // All draft records
+//   recordsByState(partitionId: "space-123", validationState: "confirmed")  // Confirmed in a space
+//   recordsByState(partitionId: "space-123", recordType: "vehicle")         // By type in a space
 //
 
 /// Returns active data records. Optional filters: partitionId, recordType, validationState,
@@ -108,28 +108,24 @@ query record recordsByState {
 //
 // Returns data records that are considered usable. Confirmed records are
 // always usable. Checked records are usable only if the concept's policy
-// has checkedDataUsable=true.
+// sets checkedDataUsable.
 //
-// The caller should query the policy first to determine usability, then
-// pass the appropriate includeChecked flag.
+// The caller queries the policy first to decide whether checked records
+// count, and filters with isConfirmed(row) itself when they do not.
 //
 // Arguments:
 //   partitionId (string, optional)         - Filter by space ID
 //   recordType (string, optional)      - Filter by record type
-//   includeChecked (bool, optional)    - Whether to include checked records (based on policy)
 //
 // Returns:
 //   Array of usable data records
 //
-// Usage:
-//   usableRecords({ partitionId: "space-123" })                       // Confirmed only (default)
-//   usableRecords({ partitionId: "space-123", includeChecked: true })  // Checked + confirmed
+// Usage, as the string a client sends to Execute:
+//   usableRecords(partitionId: "space-123")                       // Checked + confirmed
 //
-// Implementation note: Because the MemQL parser does not yet support
-// if-expression assignment (:=), this function always queries using
-// isUsable (which matches both checked and confirmed). When
-// includeChecked is false, the caller should use isConfirmed
-// directly in their query instead.
+// Implementation note: this query always filters with isUsable, which
+// matches both checked and confirmed records. A caller that wants
+// confirmed records only filters with isConfirmed(row) in its own query.
 //
 
 /// Returns usable data records (confirmed, or checked if policy allows)
@@ -165,10 +161,10 @@ query record usableRecords {
 // Returns:
 //   Array of log entries with full audit trail fields
 //
-// Usage:
-//   validationLog({ recordId: "record-uuid" })                      // All actions for a record
-//   validationLog({ partitionId: "space-123" })                         // All actions in a space
-//   validationLog({ partitionId: "space-123", action: "confirm" })      // Confirmations in a space
+// Usage, as the string a client sends to Execute:
+//   validationLog(recordId: "record-uuid")                      // All actions for a record
+//   validationLog(partitionId: "space-123")                         // All actions in a space
+//   validationLog(partitionId: "space-123", action: "confirm")      // Confirmations in a space
 //
 
 /// Returns validation state change history. Optional filters: recordId, partitionId, action

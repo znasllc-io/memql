@@ -7,7 +7,7 @@
 // the sourceResponsibilityId back-pointer).
 //
 // Per-row authz tier: owned. Every read filters on
-// payload.ownerUserId==actor.userId; every write stamps
+// `row.ownerUserId == actor.userId`; every write stamps
 // ownerUserId from actor.userId server-side so a caller can never
 // create or mutate another user's to-dos.
 
@@ -16,7 +16,7 @@ use identity.concepts.{ user }
 /// A user-owned to-do item: a titled task with a done flag plus optional due date, priority, and a
 /// back-pointer to the responsibility that spawned it. The standalone source-of-truth to-do concept
 /// the assistant manages on the user's behalf. Per-row authz: owned -- ownerUserId is stamped from
-/// actor.userId on every write and every read gates on ownerUserId==actor.userId.
+/// actor.userId on every write and every read gates on `row.ownerUserId == actor.userId`.
 @displayCard(primary="title", secondary="priority", tertiary="dueAt", status="done")
 @rowAuthz(owner="ownerUserId")
 concept todo {

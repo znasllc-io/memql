@@ -82,7 +82,7 @@ query subscriber mySubscriber {
 }
 
 /// The caller's subscriptions, newest first. Owned: the row set is gated by
-/// ownerUserId==actor.userId server-side. Optional status filter narrows to one lifecycle bucket.
+/// `row.ownerUserId == actor.userId` server-side. Optional status filter narrows to one lifecycle bucket.
 @actor
 query subscription mySubscriptions {
   args {
@@ -95,7 +95,7 @@ query subscription mySubscriptions {
 }
 
 /// One subscription by id, gated to its owner. Backs Orbit's plan panel. Owned --
-/// ownerUserId==actor.userId is the load-bearing guard, so a caller cannot read another account's
+/// `row.ownerUserId == actor.userId` is the load-bearing guard, so a caller cannot read another account's
 /// subscription even holding its id.
 @actor
 query subscription mySubscriptionById {

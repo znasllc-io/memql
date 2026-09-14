@@ -12,7 +12,7 @@ use common.traits.{ statusIsActive }
 // -----------------------------------------------------------------------------
 // Responsibility reads (epic #631 / program #629).
 //
-// All three are owned-tier: the filter binds payload.ownerUserId to
+// All three are owned-tier: the filter binds row.ownerUserId to
 // actor.userId server-side so a caller can only ever read their own
 // directives -- cross-user reads are impossible. The reactive-loop
 // epic #632 consumes dueResponsibilities.
@@ -23,8 +23,8 @@ use common.traits.{ statusIsActive }
 //
 // Every responsibility owned by the caller, regardless of status or
 // trigger. Backs the settings / management surface where the user
-// reviews and edits all their standing directives. The ownerUserId ==
-// actor.userId predicate is the only gate -- no userId arg, so a
+// reviews and edits all their standing directives. The
+// `row.ownerUserId == actor.userId` predicate is the only gate -- no userId arg, so a
 // caller can never request another user's rows.
 /// Every responsibility owned by the caller (all statuses + triggers). Backs the management
 /// surface. The ownerUserId predicate binds to actor.userId server-side so cross-user reads are
@@ -44,12 +44,13 @@ query responsibility responsibilitiesForUser {
 // ===========================
 //
 // The caller's active, enabled directives -- the live working set the
-// evaluator/dispatcher cares about. status=='active' is expressed via
-// the statusIsActive trait (inline payload.status=="active" is
-// rejected by the conformance test). enabled==true filters out
+// evaluator/dispatcher cares about. `row.status == "active"` is expressed via
+// the statusIsActive trait (inline `row.status == "active"` is
+// rejected by the conformance test). `row.enabled == true` filters out
 // soft-disabled rows.
-/// The caller's active + enabled responsibilities -- the live working set. Owned tier (ownerUserId
-/// == actor.userId). status filtered via statusIsActive; enabled==true drops soft-disabled rows.
+/// The caller's active + enabled responsibilities -- the live working set. Owned tier
+/// (`row.ownerUserId == actor.userId`). status filtered via statusIsActive; `row.enabled == true`
+/// drops soft-disabled rows.
 @actor
 query responsibility activeResponsibilities {
   filter  row => row.ownerUserId == actor.userId && statusIsActive(row) && row.enabled == true
@@ -84,7 +85,7 @@ query responsibility activeResponsibilities {
 // archetype; the recurring + reactive results are merged Go-side.
 /// The caller's active + enabled responsibilities of a given trigger archetype (recurring or
 /// reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness.
-/// Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side
+/// Owned tier (`row.ownerUserId == actor.userId`). Cron-due / condition-match filtering happens Go-side
 /// (no OR operator + no cron arithmetic in the filter), mirroring queryDueRefreshDomains.
 @unbounded("responsibilities due for a trigger -- an internal scheduler sweep that must see all due")
 @actor
@@ -111,7 +112,7 @@ query responsibility dueResponsibilities {
 // This is the same cron-sweep-helper shape as
 // queryAllArchivedSpacesAcrossUsers: no owner filter on purpose. The
 // per-row-authz conformance classifier buckets it as 'other' (the
-// header body references no payload.ownerUserId/userId literal -- the
+// header body references no row.ownerUserId/userId literal -- the
 // owner field is projected through the responsibilityFull shape, not
 // compared in the filter), so it needs no caller-check.
 //

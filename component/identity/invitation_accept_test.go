@@ -38,6 +38,7 @@ package identity
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
@@ -285,29 +286,29 @@ func TestAuthoredUserInvitationAcceptStampsTheRow(t *testing.T) {
 	if stmt.Concept != "invitation" {
 		t.Errorf("markUserInvitationAccepted writes concept %q, want invitation", stmt.Concept)
 	}
-	ref, ok := stmt.IDTemplate.(*languageAst.ArgRefExpr)
-	if !ok || ref.Path != "invitationId" {
-		t.Errorf("the update selects %#v, want args.invitationId -- the row it lands on is the "+
-			"whole point", stmt.IDTemplate)
+	if got := writeSlotSource(stmt.IDTemplate); got != "args.invitationId" {
+		t.Errorf("the update selects %s, want args.invitationId -- the row it lands on is the "+
+			"whole point", got)
 	}
 
 	// The payload is compared field by field rather than whole: the three that
 	// matter are named here with what breaks without each, so a failure says
 	// which property was lost rather than that a string changed.
+	fields := writeFieldSources(t, stmt)
 	for _, want := range []struct {
-		fragment, why string
+		field, value, why string
 	}{
-		{`status:"accepted"`, "resolveInvitation refuses anything that is not \"pending\" as " +
+		{"status", `"accepted"`, "resolveInvitation refuses anything that is not \"pending\" as " +
 			"invitation_already_used, so this assignment IS the single-use property"},
-		{"inviteeId:args.inviteeId", "the row records who accepted; without it an accepted " +
+		{"inviteeId", "args.inviteeId", "the row records who accepted; without it an accepted " +
 			"invitation names nobody and the concept's \"Stamped on acceptance\" description is false"},
-		{"respondedAt:now", "the acceptance timestamp, and the only record of WHEN the credential " +
+		{"respondedAt", "now", "the acceptance timestamp, and the only record of WHEN the credential " +
 			"was spent -- an audit trail with no time on it cannot answer whether a leaked link " +
 			"was used before or after it leaked"},
 	} {
-		if !strings.Contains(stmt.PayloadRaw, want.fragment) {
-			t.Errorf("the write no longer carries %s (payload: %s).\n\t%s",
-				want.fragment, stmt.PayloadRaw, want.why)
+		if got, ok := fields[want.field]; !ok || got != want.value {
+			t.Errorf("the write no longer carries %s: %s (payload: %s).\n\t%s",
+				want.field, want.value, stmt.PayloadRaw, want.why)
 		}
 	}
 
@@ -316,11 +317,37 @@ func TestAuthoredUserInvitationAcceptStampsTheRow(t *testing.T) {
 	// redeeming page the difference between "somebody cancelled this" and "you
 	// already used this" -- two different next steps for the person holding the
 	// link, as revokeUserInvitation's own doc comment records.
-	if strings.Contains(stmt.PayloadRaw, "active") {
+	if _, touched := fields["active"]; touched {
 		t.Errorf("the write now touches `active` (payload: %s). Acceptance is not cancellation; "+
 			"keeping them distinct on the row is what lets the redeeming page tell the holder "+
 			"which of the two happened", stmt.PayloadRaw)
 	}
+}
+
+// writeFieldSources reads a mutation's write block from its parse: each field
+// it writes, and the value's source as the parser prints it back
+// (languageAst.FormatExpr). A block the edition-2026 grammar did not parse is
+// a failure here, not an empty set a negative assertion would pass on.
+func writeFieldSources(t *testing.T, stmt *languageAst.MutationStmt) map[string]string {
+	t.Helper()
+	block, ok := stmt.PayloadExpr.(*languageAst.MapExpr)
+	if !ok || block == nil {
+		t.Fatalf("the write block is %T (payload text: %s), not a parsed map literal", stmt.PayloadExpr, stmt.PayloadRaw)
+	}
+	out := make(map[string]string, len(block.Entries))
+	for _, en := range block.Entries {
+		out[en.Key] = languageAst.FormatExpr(en.Value)
+	}
+	return out
+}
+
+// writeSlotSource prints a mutation's id= / createdAt= slot back as source,
+// or reports what it holds when it is not a parsed expression.
+func writeSlotSource(slot any) string {
+	if n, ok := slot.(languageAst.ExpressionNode); ok && n != nil {
+		return languageAst.FormatExpr(n)
+	}
+	return fmt.Sprintf("%#v", slot)
 }
 
 // TestMarkUserInvitationAcceptedCallMatchesTheAuthoredArgs closes the seam

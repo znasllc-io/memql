@@ -20,7 +20,7 @@ func TestCompiledDescriptions_DocCommentPrecedence(t *testing.T) {
 		"",
 		"  step persist {",
 		"    mutation createSpawnEvent (",
-		"      nodeId: coalesce(node.id, \"\")",
+		"      nodeId: node.id ?? \"\"",
 		"    )",
 		"  }",
 		"}",

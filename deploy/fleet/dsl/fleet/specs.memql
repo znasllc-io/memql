@@ -4,7 +4,7 @@
 // payload fields bare, and compiles into a SQL WHERE fragment.
 //
 // NONE OF THESE IS AN AUTHORIZATION PREDICATE. Authorization in this domain is
-// the @rowAuthz tier on each concept plus the ownerUserId==actor.userId
+// the @rowAuthz tier on each concept plus the `row.ownerUserId == actor.userId`
 // conjunct every caller-scoped query names at top level, and both are written
 // at the call site deliberately -- a per-row-authz classifier that cannot SEE
 // the gate cannot classify the query, and a gate hidden inside a spec is a gate
@@ -55,9 +55,9 @@ spec instance isRecoverableInstance = row => row.status != "torn_down"
 spec subscription isServiceableSubscription = row => row.status == "trialing" || row.status == "active" || row.status == "past_due"
 
 /// Matches subscriptions in their trial period. The trial automations (task memql#3856) sweep on
-/// this rather than on "tier=='trial'", because tier is what they will buy and status is where they
-/// are -- a subscription can be trialing on a Graph tier, which is exactly what the card-required
-/// trial offers.
+/// this rather than on `row.tier == "trial"`, because tier is what they will buy and status is
+/// where they are -- a subscription can be trialing on a Graph tier, which is exactly what the
+/// card-required trial offers.
 spec subscription isTrialingSubscription = row => row.status == "trialing"
 
 /// Matches subscriptions whose payment has failed and whose grace period is running. The dunning
