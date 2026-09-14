@@ -1257,7 +1257,12 @@ rejected at load (memql#3336, #991).
 | `now` | RFC3339 timestamp captured at eval start | every body |
 | `partition` | Active partition for this call | every body |
 | `config.X` | Allow-listed config (`component/config/policy_exposable.go`) | every body |
-| `X`, `id`, `concept`, `type`, `createdAt`, `createdBy`, `schema` | Row fields / intrinsics | queries' `filter` + `shape` only (SQL pushdown) |
+| `row.X`, `row.id`, `row.concept`, `row.type`, `row.createdAt`, `row.createdBy` | The row's payload fields and intrinsics, through the lambda parameter a predicate names (`filter row => ...`) | a query's `filter` and `refine`, a spec or trait body, a trigger `@filter` |
+
+A bare name is never a payload field: it is a lambda parameter, a reserved
+root, a local or step name, or -- when called -- a predicate or a catalog
+function. The exception is a shape body, which is a path list: `name` there is
+a payload field and `row.id` an intrinsic.
 
 For automations, `args` is the automation's own declared `args { ... }` block:
 at fire time the trigger payload is bound INTO that contract and validated
@@ -1266,8 +1271,9 @@ the run rather than binding a partial map
 (`component/automations/args_binding.go`, memql#2352). The triggering **event**
 rides its own `event` envelope (`event.topic` / `event.kind` /
 `event.payload.<field>`), which a step conventionally forwards to logic as
-`logic name ( event )`; the logic declares `event` in its args block and reads
-`args.event.payload.<field>`.
+`logic name(event: event)`; the logic declares `event` in its args block and
+reads `args.event.payload.<field>`. The bare-name argument pun
+(`logic name ( event )`) is retired (D12): name the argument.
 
 **Declared and used, in both directions.** An `args` field declared but never
 referenced is refused at load, and (memql#3626) so is an `args.X` a body READS
@@ -1297,10 +1303,22 @@ see one in an old diff:
   two-identifier construct signature.
 - `@input { ... }` — the prompt body IS the field list.
 - `include` in a shape body.
-- `;`-AND / `,`-OR filter separators, `has`, and the `?.` optional-chain prefix.
 
 Only `dsl/_reference/*.memql` still shows these, deliberately, as
 don't-do-this skeletons.
+
+**Retired expression spellings (edition 2026).** Each is refused with its
+replacement and `memqlmigrate --rewrite=expressions`, which rewrites it: the
+`when(args.x) { ... }` guard and the `?.` prefix (write
+`args.x == nil || <predicate>`), `;` and `,` as connectives (`&&`, `||`),
+`has` (`v in list`), `not in` (`!(v in list)`), `cond(`, `concat(`,
+`coalesce(`, `exists(`, `len(`, `count(x)` and `contains(s, sub)`
+(`p ? a : b`, `a + b`, `a ?? b`, `x != nil`, `x.count()`, `s.includes(sub)`),
+`null` (`nil`), a `spec` or `trait` body written `{ return ... }`
+(`= row => ...`), `@filter` without a lambda (`@filter(row => ...)`), and
+`$args.` in a tool handler (`args.`). The expression spellings are listed in
+full in [memql.md](docs/public/language/memql.md#retired-spellings);
+`parser.V1RetiredForms` is the one list.
 
 ## Levels, policies and rules
 
@@ -1393,8 +1411,9 @@ than a fallback.
 
 **There is no decision-policy tier.** Auth / feature-gating / vendor decisions
 live in Go (`component/safety` ships the risk×scope decision matrix) and in
-**specs** -- use a bare spec conjunct for caller-based boolean checks (admin /
-owner / permission). `engine.EvaluatePolicy` and `func (Policy)` do not exist.
+**specs** -- apply a context spec to the actor (`requiresOwner(actor)`) for
+caller-based boolean checks. `engine.EvaluatePolicy` and `func (Policy)` do not
+exist.
 
 ## Key Concepts
 
@@ -1403,7 +1422,7 @@ owner / permission). `engine.EvaluatePolicy` and `func (Policy)` do not exist.
 Per-row authorization is the only gate (see
 [per-row-authz-audit.md](docs/public/operate/auth/per-row-authz-audit.md)).
 Every query and mutation in the DSL classifies as **owned** (filter on
-`ownerUserId == actor.userId`), **granted** (relationship predicate gates on
+`row.ownerUserId == actor.userId`), **granted** (relationship predicate gates on
 actor.userId), **admin** (cluster-owner spec), or **public** (`@public`). The
 classification test in `test/dslconformance/conformance_test.go` hard-fails on
 any new unclassified construct.
@@ -1645,9 +1664,10 @@ use common.traits.{ isActiveRecord, isNotDeleted }
 
 The dotted path maps to a file on disk (`worker.concepts` →
 `dsl/worker/concepts.memql`); the brace-list names the constructs imported.
-The bound concept's payload is referenced from filter clauses by the **bare
-property name**, and from mutation bodies via the bare `insert { ... }` /
-`update { ... }` block without re-stating the concept id.
+A filter reads the bound concept's row through its lambda parameter
+(`filter row => row.status == args.status`); a mutation body writes it through
+the bare `insert { ... }` / `update { ... }` block without re-stating the
+concept id.
 
 > **Where the rules below are enforced (memql#3629, memql#4051).** The CONTRACT
 > gates -- retired operator forms, the two `row.` namespace rules, the per-row
@@ -1661,40 +1681,43 @@ property name**, and from mutation bodies via the bare `insert { ... }` /
 > whole corpus** -- there is no longer a tier of gate that boot cannot reach,
 > and reintroducing one is the mistake to avoid.
 
-**Canonical filter-clause syntax** (enforced at LOAD time by
-`component/memql/dslgate`, and over this repo's corpus by
-`test/dslconformance/conformance_test.go`, which runs the same detector):
+**Canonical filter-clause syntax** (edition 2026: the parser refuses every
+retired spelling, naming its replacement and `memqlmigrate --rewrite=expressions`,
+and `MemQLEngine.Init` lowers every filter against the tier manifest, so a filter
+that cannot push down refuses the load, naming the node, the position and the
+nearest pushdown spelling):
 
-- Payload fields: **bare property** (`status`, `ownerUserId`) — never
-  `<conceptName>.<field>`.
-- Row intrinsics: the **`row.` namespace** — `row.id`, `row.concept`, `row.type`,
-  `row.createdAt`, `row.createdBy`, `row.provenance.<leaf>`. A filter mixes two
-  field surfaces under one syntax, so a bare `id` is indistinguishable from a
-  payload property while compiling to entirely different SQL (a table column vs
-  a JSONB path). Enforced by `TestFilterIntrinsicsUseRowNamespace`. A spec/trait
-  body reads its signature-bound fields bare and REJECTS `row.*`; mutation
-  `insert`/`update` blocks write `id:` as a target key, not a reference.
-- Sort keys take the same namespace — `sort "row.createdAt", "desc"`
-  (`TestSortKeysUseRowNamespace`). Payload sort keys stay bare; `provenance` has
-  no sort form; the runtime/SDK sort surface accepts either spelling.
-- **One Go boolean grammar:** `&&`, `||`, parens `( )` with Go precedence. `!`
-  lexes and parses but is refused by every ASTConverter surface (memql#3630);
-  its working homes are the two surfaces served by the runtime STRING evaluator
-  (`component/automations.Evaluator`) -- an automation cond-step condition and a
-  trigger `@filter`. Everywhere else write the `!=` comparison form.
-- Membership is the single `in` operator: `args.x in list` or
-  `kind in ["a", "b"]` (payload props bare).
-- Prefix selection is `<field> startsWith <prefix>` (memql#4208): a string
+- A filter is a lambda over the row:
+  `filter row => row.status == args.status && isActiveRecord(row)`. Every field
+  goes through the parameter -- payload properties (`row.status`) and row
+  intrinsics (`row.id`, `row.concept`, `row.type`, `row.createdAt`,
+  `row.createdBy`, `row.provenance.<leaf>`) alike. A long filter continues on
+  lines that open with `&&` or `||`.
+- Sort keys keep their string form and the `row.` namespace for intrinsics --
+  `sort "row.createdAt", "desc"` (`TestSortKeysUseRowNamespace`). Payload sort
+  keys stay bare; `provenance` has no sort form; the runtime/SDK sort surface
+  accepts either spelling.
+- **One boolean grammar:** `&&`, `||`, `!` and parentheses, with the precedence
+  [memql.md](docs/public/language/memql.md#operator-precedence) publishes. `!`
+  works in every position and negates exactly; there is no truthiness, so a
+  condition must be boolean.
+- Membership is `v in list`: `row.kind in ["a", "b"]`, `args.tag in row.tags`.
+- Prefix selection is `row.<field> startsWith <prefix>` (memql#4208): a string
   literal, a list of them (starts with ANY of), or an `args.<field>` resolving
   to either. Parameterized `^@ ANY(text[])` in SQL; an EMPTY list and a BLANK
-  prefix match nothing -- a selection, never a pass-through. Filters and spec
-  bodies only; the automations condition grammar refuses it by name.
-- Arg-conditional predicates use the `when(args.x) { <expr> }` guard: if
-  `args.x` is absent the guarded block AND its connective are dropped as if
-  never written (unambiguous under `||`).
-- When a trait spec covers the predicate (e.g. `isActiveRecord` for
-  `active==true`), the trait is mandatory; inline `active==true` /
-  `deleted==false` are rejected by the conformance test.
+  prefix match nothing -- a selection, never a pass-through.
+- An optional argument is guarded by an ordinary predicate:
+  `(args.x == nil || row.f == args.x)` under `&&`,
+  `(args.x != nil && row.f == args.x)` under `||`. The guard reads no row, so it
+  is a plan constant -- computed once before the query, folding to `TRUE` or to
+  `row.f = $1` -- and that is what replaces `when(args.x) { ... }`.
+- A missing field, JSON null, `nil` and `""` are one unset value in `==` and
+  `!=`, and `!=` is null-safe: `row.f != "x"` matches a row without `f`. The
+  whole table is [memql.md](docs/public/language/memql.md#absent-values).
+- Specs and traits are applied to their receiver: `isActiveRecord(row)`,
+  `requiresOwner(actor)`. Where a trait covers the predicate (`isActiveRecord`
+  for `row.active == true`) the trait is mandatory; the conformance test
+  rejects the inline comparison.
 
 **Annotations** in the args block:
 - `@required`; `@enum("a", "b", "c")`; `@maxLength(N)`; `@pattern("re")`.
@@ -1710,9 +1733,9 @@ property name**, and from mutation bodies via the bare `insert { ... }` /
 - `@default` is **not** valid on an args field (rejected at load). Apply a
   default in the body with `args.X ?? <default>`. A concept-field `@default` is
   NOT a substitute -- it is never applied on insert either, so `??` is the only
-  mechanism that fills a value. `a ?? b ?? c` folds to what `coalesce(a, b, c)`
-  produces, and `test/dslconformance/no_coalesce_longhand_test.go` gates the
-  corpus on the shorthand (`memqlmigrate --rewrite=null-coalesce` converts).
+  mechanism that fills a value. `a ?? b ?? c` returns the first operand that
+  does not fall through, the last as the fallback; `coalesce(a, b)` is retired,
+  so `??` is the one spelling.
   **`??` is BLANK-coalescing:** it falls through on an empty OR
   WHITESPACE-ONLY string as well as on absent/null, so a caller who deliberately
   clears a text field gets the default written back; `false` / `0` / `[]` / `{}`
@@ -1731,7 +1754,7 @@ query registration registrationsForOwner {
   args {
     ownerUserId  string  @required
   }
-  filter  ownerUserId==args.ownerUserId && isActiveRecord
+  filter  row => row.ownerUserId == args.ownerUserId && isActiveRecord(row)
   shape   registrationFull
 }
 ```
@@ -1767,19 +1790,22 @@ inputs; `body { ... }` is a sequence of named statements ending in
 `return <expr>`. The single-statement form is the common case:
 
 ```memql
-use common.builtins.{ ensureDailySpaceForUser }
-
-@enabled
-@description("On user creation, ensure today's daily space exists.")
-logic logicProvisionDailySpaceOnUserCreate {
+/// Pure decide for the workspace-release sweep: every v1:workbench:workspace
+/// of the updated run.
+logic releaseWorkspaceOnRunTerminal {
   args {
-    event object @required
+    event object!
   }
   body {
-    return ensureDailySpaceForUser({ userId: args.event.payload.id })
+    return query workspaceForRun(runId: args.event.payload.id ?? "")
   }
 }
 ```
+
+A construct call names its kind and its arguments -- `query workspaceForRun(runId: ...)`,
+`mutation createLibraryFolder(folderId: args.folderId, name: args.name)`. The
+object-literal form `name({ k: v })` is refused, and the bare-name pun
+(`logic decide(event)` for `event: event`) is retired.
 
 Multi-statement bodies (intermediate `name := <call>` steps with side effects,
 followed by a trailing `return <expr>`) execute via the `LogicRunner`: the
@@ -1910,49 +1936,45 @@ and no return.
 
 Atomic boolean predicates -- **signature-bound** (epic #2281). A spec binds
 exactly one shape XOR concept in its signature (`spec <boundName> <name>`,
-resolved via the file-top `use` import) and the body `return`s a boolean over
-**bare** field names. The binding picks the evaluation strategy:
+resolved via the file-top `use` import) and its body is one lambda over what it
+binds: `= row => <predicate>`. The binding picks the evaluation strategy:
 
 - **Row-specs** bind a concept or a `@row` shape. They compile into a SQL
   `WHERE` fragment and push down to the database.
 - **Context-specs** bind an `@actor` shape (the only gateway to the auth
-  envelope). They evaluate in-process; named as a bare conjunct for actor-based
-  checks like "is admin".
+  envelope), and their parameter is `actor`. They evaluate in-process and are
+  applied to the caller: `requiresOwner(actor)`.
 
-A spec body never reads `actor.*` / `row.*` directly (bind a shape that projects
-it and read the projected key bare). A `trait` is the one deliberately-unbound
-row predicate (bare payload fields, validated at the call site).
+The parameter reads only what the binding projects: a concept's fields and
+intrinsics, a `@row` shape's keys, an `@actor` shape's `actor.*` keys. A `trait`
+is the one deliberately-unbound row predicate (fields validated at the call
+site).
 
 ```memql
 use worker.concepts.{ registration }
 
 @enabled
 @description("Matches revoked machine registrations")
-spec registration isRevokedRegistration {
-  return revoked == true             // concept-bound row-spec
-}
+spec registration isRevokedRegistration = row => row.revokedAt != nil    // concept-bound row-spec
 
 use common.shapes.{ actorEnvelope }
 
 @enabled
-@description("Actor holds an admin role")
-spec actorEnvelope requiresAdmin {
-  return role == "admin"             // @actor-bound context-spec
-}
+@description("Caller must hold the owner role -- the rollback gate (#1876)")
+spec actorEnvelope requiresOwner = actor => actor.role == "owner"        // @actor-bound context-spec
 
 @enabled
 @description("Matches records with active==true field")
-trait isActiveRecord {
-  return active == true              // unbound cross-concept trait
-}
+trait isActiveRecord = row => row.active == true                        // unbound cross-concept trait
 ```
 
-A spec/trait body is a single `return <boolean expression>` over bare field
-names; there is no `ctx` envelope and no parameter, and a bare-expression body
-with no `return` is rejected at parse time.
+A spec or trait body is that one lambda; there is no `ctx` envelope, and the
+`{ return <expr> }` body is retired and refused with
+`memqlmigrate --rewrite=expressions` as the fix.
 
 **Caller-context checks use specs, not policies.** Author the predicate as a
-context-spec in `dsl/<namespace>/specs.memql` and name it as a bare conjunct.
+context-spec in `dsl/<namespace>/specs.memql` and apply it to `actor` in the
+filter.
 
 ### Tools
 

@@ -695,22 +695,29 @@ func annotationTakesArgs(name string) bool {
 	}
 }
 
-// enclosingConstructArgsFields returns the declared args-field names of
-// the construct enclosing the cursor line -- the unified source (#2624)
-// behind both the automation bare-name completion (G2, memql#2364 / ADR
-// Decision 3) and the `args.` member completion, so the two can never
-// disagree about what is declared. Pure source-level scan, no registry.
-func enclosingConstructArgsFields(source string, line int) []string {
-	fields, _ := constructArgs(source, line, enclosingConstructHeader)
-	return fields
-}
-
-// enclosingConstructArgsTypes returns the declared type of each args field of
-// the construct enclosing the cursor line (`windowDays int` -> "int"), with the
-// required sigil stripped.
-func enclosingConstructArgsTypes(source string, line int) map[string]string {
-	_, types := constructArgs(source, line, enclosingConstructHeader)
-	return types
+// argsFieldItems offers declared args fields, as `args.` member completion
+// does wherever it reads them: constructArgs is the one source-level scan
+// (#2624) behind the automation bare-name completion (G2, memql#2364 / ADR
+// Decision 3) and every `args.` completion, so the two can never disagree
+// about what is declared.
+func argsFieldItems(fields []string, types map[string]string, prefix, doc string) []CompletionItem {
+	var items []CompletionItem
+	for _, f := range fields {
+		if !strings.HasPrefix(f, prefix) {
+			continue
+		}
+		// The detail is the declared type, the one fact an author picking an
+		// arg needs.
+		detail := types[f]
+		if detail == "" {
+			detail = "args field"
+		}
+		items = append(items, CompletionItem{
+			Label: f, Kind: "variable", Detail: detail,
+			Documentation: doc, InsertText: f, SortPriority: 1,
+		})
+	}
+	return items
 }
 
 // enclosingConstructHeader matches the header of a construct that declares an
@@ -824,24 +831,8 @@ func (s *Service) completeFieldAccess(ctx CursorContext, source string, line int
 		}
 		return nil
 	case "args":
-		var items []CompletionItem
-		types := enclosingConstructArgsTypes(source, line)
-		for _, f := range enclosingConstructArgsFields(source, line) {
-			if strings.HasPrefix(f, ctx.Prefix) {
-				// The detail is the declared type, the one fact an author
-				// picking an arg needs.
-				detail := types[f]
-				if detail == "" {
-					detail = "args field"
-				}
-				items = append(items, CompletionItem{
-					Label: f, Kind: "variable", Detail: detail,
-					Documentation: "Declared in the enclosing construct's args { } block.",
-					InsertText:    f, SortPriority: 1,
-				})
-			}
-		}
-		return items
+		fields, types := constructArgs(source, line, enclosingConstructHeader)
+		return argsFieldItems(fields, types, ctx.Prefix, "Declared in the enclosing construct's args { } block.")
 	case "row":
 		// `@row` puts the row envelope in scope: the intrinsics every
 		// stored row carries, independent of its concept's payload

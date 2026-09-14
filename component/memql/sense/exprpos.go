@@ -5,13 +5,13 @@ package sense
 // with the lambda parameters in scope and the concept the position's
 // parameter reads (memql#5365).
 //
-// It reads source TEXT, not the v1 parser, and that is deliberate twice over.
-// The v1 parser is being built on a sibling branch; and an editor's buffer is
-// mid-edit and unparseable most of the time, so a detector that needs a parse
-// would answer nothing exactly while an author is typing. The shapes it reads
-// are the record's surface forms:
+// It reads source TEXT, not the v1 parser, and that is deliberate: an editor's
+// buffer is mid-edit and unparseable most of the time, so a detector that
+// needs a parse would answer nothing exactly while an author is typing. The
+// shapes it reads are the record's surface forms:
 //
 //	filter row => <predicate>             a query filter, and its continuation lines
+//	refine row => <expression>            a query's refine clause, over the page paginate read
 //	spec <bound> <name> = row => ...      a spec body (actor => over an @actor shape)
 //	trait <name> = row => ...             a trait body
 //	@filter(row => ...)                   a trigger filter over the triggering row
@@ -238,11 +238,13 @@ func queryClausePosition(lines []string, line int, before, cur string, enc Enclo
 			}
 			switch {
 			case dslclause.StartsWith(code, "filter"):
-				return filterClause(before, text, i, enc)
+				return lambdaClause(tiers.PositionQueryFilter, "filter", before, text, i, enc)
+			case startsWithWord(code, "refine"):
+				return lambdaClause(tiers.PositionQueryRefine, "refine", before, text, i, enc)
 			case dslclause.StartsWith(code, "sort"):
 				return exprPos{position: tiers.PositionSort}
 			}
-			// shape / paginate / count / asOf / refine are not tier positions.
+			// shape / paginate / count / asOf are not tier positions.
 			return exprPos{}
 		}
 		if i != line && (code == "" || strings.HasSuffix(code, "{") || strings.HasPrefix(code, "}") || strings.HasPrefix(code, "@")) {
@@ -252,19 +254,22 @@ func queryClausePosition(lines []string, line int, before, cur string, enc Enclo
 	return exprPos{}
 }
 
-// filterClause reads a filter clause opened on line i: its lambda header, if it
-// has one, and the lambda parameters opened after the header.
-func filterClause(before, text string, i int, enc EnclosingConstruct) exprPos {
-	p := exprPos{position: tiers.PositionQueryFilter, bound: enc.Concept}
+// lambdaClause reads a query clause whose value is a lambda over the query's
+// rows -- `filter` (pushed down) or `refine` (in process, over the page) --
+// opened by keyword on line i: its lambda header, if it has one yet, and the
+// lambda parameters opened after the header. The parameter reads the query's
+// bound concept either way.
+func lambdaClause(pos tiers.Position, keyword, before, text string, i int, enc EnclosingConstruct) exprPos {
+	p := exprPos{position: pos, bound: enc.Concept}
 	indent := len(text) - len(strings.TrimLeft(text, " \t"))
-	rest := text[indent+len("filter"):]
+	rest := text[indent+len(keyword):]
 	m := lambdaHeader.FindStringSubmatchIndex(rest)
 	if m == nil {
 		return p
 	}
 	p.param = firstGroup(rest, m, 2, 4)
 	p.lambda = true
-	if start := lineStartOffset(before, i) + indent + len("filter") + m[1]; start <= len(before) {
+	if start := lineStartOffset(before, i) + indent + len(keyword) + m[1]; start <= len(before) {
 		p.nested = nestedLambdaParams(before[start:])
 	}
 	return p

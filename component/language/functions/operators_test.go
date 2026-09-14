@@ -75,37 +75,8 @@ func TestOperatorsAreInPrecedenceOrder(t *testing.T) {
 	}
 }
 
-// The levels are the record's D9 table, pinned here row by row until the
-// parser's V1PrecedenceTable exists to pin them against.
-func TestOperatorLevelsAreTheRecords(t *testing.T) {
-	want := map[string]int{
-		"member": 1, "optionalMember": 1,
-		"not": 2, "negate": 2,
-		"multiply": 3, "divide": 3, "remainder": 3,
-		"add": 4, "subtract": 4,
-		"coalesce": 5,
-		"equal":    6, "notEqual": 6, "less": 6, "lessOrEqual": 6, "greater": 6, "greaterOrEqual": 6,
-		"in": 6, "startsWith": 6,
-		"and":     7,
-		"or":      8,
-		"ternary": 9,
-		"lambda":  10,
-	}
-	got := map[string]int{}
-	for _, op := range Operators() {
-		got[op.Name] = op.Level
-	}
-	for name, level := range want {
-		if got[name] != level {
-			t.Errorf("operator %s: level %d, want %d", name, got[name], level)
-		}
-	}
-	for name := range got {
-		if _, ok := want[name]; !ok {
-			t.Errorf("operator %s is not in the record's precedence table", name)
-		}
-	}
-}
+// The levels are pinned against the parser's own table by
+// TestOperatorLevelsAreTheParsersPrecedence (precedence_test.go).
 
 // The absence rules are the record's D8 table. Pinned where a row exists for
 // the operator, because an absence rule that drifts from the table is exactly
@@ -117,10 +88,12 @@ func TestOperatorAbsenceRulesFollowTheTable(t *testing.T) {
 		byName[op.Name] = op
 	}
 	for name, needles := range map[string][]string{
-		"notEqual":       {"absent", `""`, "nil"},
-		"equal":          {"absent", `""`, "nil"},
+		// One notion of unset in == and != (D8, settled 2026-09-13): a missing
+		// field, JSON null, nil and "" are one value.
+		"notEqual":       {"unset", `""`, "nil"},
+		"equal":          {"unset", `""`, "nil"},
 		"less":           {"false"},
-		"in":             {"false"},
+		"in":             {"unset", `""`, "nil"},
 		"startsWith":     {"false"},
 		"coalesce":       {"blank"},
 		"not":            {"!="},

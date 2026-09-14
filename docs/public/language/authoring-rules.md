@@ -97,20 +97,20 @@ mutate partition createPartition {
 }
 
 // 2. An automation fires on the row landing and grants the
-//    creating user owner access. Note the step calls the logic
-//    construct by its bare (un-prefixed) name.
+//    creating user owner access. Every call names its kind
+//    (`logic`, `mutation`) and passes named arguments.
 @trigger(event="node.created", concept="v1:platform:partition", partition="*")
 /// Grant the partition creator owner access on first landing.
 automation autoBootstrapWorkspaceOwnerAccess {
   step grant {
-    logic grantOwnerOnPartitionCreate ( event )
+    logic grantOwnerOnPartitionCreate(event: event)
   }
 }
 
 logic grantOwnerOnPartitionCreate {
   args { event object @required }
   body {
-    return grantPartitionAccess(userId: args.event.payload.createdBy, partitionId: args.event.payload.id, role: "owner")
+    return mutation grantPartitionAccess(userId: args.event.payload.createdBy, partitionId: args.event.payload.id, role: "owner")
   }
 }
 ```
@@ -188,7 +188,7 @@ query deployment deploymentsForCluster {
     clusterId  string!
     asOf       datetime
   }
-  filter  clusterId == args.clusterId
+  filter  row => row.clusterId == args.clusterId
   shape   deploymentFull
   asOf    args.asOf ?? latest
 }
@@ -236,7 +236,7 @@ query artifact latestArtifactForFolder {
   args {
     folderId  string  @required
   }
-  filter  folderId == args.folderId
+  filter  row => row.folderId == args.folderId
   sort    "row.createdAt", "desc"
   paginate 1
   shape   artifactFull
@@ -249,40 +249,48 @@ receiver form itself is now retired and rejected at parse time, so
 the directive-in-body variant of the bug can only appear in `logic`
 bodies.)
 
-**Where directives DO work**: in raw query strings sent through
-`MemqlClientMessage.Stream` (the public RPC), e.g.
-`sort(concept==v1:cluster:node, "name", "asc")`. That goes
-through the top-level parser, which knows about directives.
+**Where directives do work**: in the internal query form, the raw
+string an SDK sends through `MemqlClientMessage.Stream` (the public
+RPC), e.g. `sort(concept==v1:cluster:node, "name", "asc")`. That string
+goes through the top-level parser, which knows about directives. It is
+a wire contract rather than an authoring surface, and it keeps its own
+grammar: see [memql.md](memql.md#the-internal-query-form).
 
 ---
 
 ## 2. Function-call arguments are named, not an object literal
 
-**Rule (obsolete example rewritten -- object-literal call args were
-retired entirely).** This section used to document a bare-vs-quoted
-distinction between two accepted spellings of an object-literal call
-(`createPartition({name: "test", ...})` vs
-`createPartition({"name": "test", ...})`). That premise is gone: a
-call's argument list is no longer an object literal at all. The only
-accepted call form is **named arguments** --
-`fn(key: value, key2: value2, ...)`, with an empty call as `fn()`:
+**Rule.** A call to a construct passes named arguments,
+`fn(key: value, key2: value2)`, and an empty call is `fn()`. Inside a
+body the call also names the construct's kind:
 
 ```memql fragment
-createPartition(name: "test", partitionType: "standard")
-folderArtifacts(folderId: "folder-123", kind: "document")
+rows := query folderArtifacts(folderId: "folder-123", kind: "document")
+created := mutation createPartition(name: "test", partitionType: "standard")
 ```
 
-There is nothing left to have a bare-vs-quoted split, because a named-arg
-call has no object literal for a key to live inside -- `key` is a bare
-identifier by construction, matched positionally against the callee's
-declared arg names. A quoted key (`"name": "test"`) is a **parse error**
-in this position, not an accepted alternate spelling:
+This section used to document a bare-vs-quoted distinction between two
+spellings of an object-literal call (`createPartition({name: "test"})`
+vs `createPartition({"name": "test"})`). That premise is gone: an
+argument list is not an object literal, so there is no key to quote.
+Each key is a bare name, matched by name against the callee's declared
+args. A quoted key is a parse error, not an alternate spelling:
 
 ```memql retired
-// REJECTED -- object-literal call args are retired; this parses as
+// Refused: object-literal call args are retired; this parses as
 // neither a named-arg call nor a valid expression.
 createPartition({"name": "test", "partitionType": "standard"})
 ```
+
+**The argument pun is retired.** A bare name in argument position,
+`logic composeTitle(folderId)` meaning
+`logic composeTitle(folderId: folderId)` (G3, memql#2365), is retired
+with the other step-reference shorthands (D12 of the
+[language freeze record](../../superpowers/specs/2026-09-13-dsl-v1-language-freeze-program-design.md)).
+Write the name twice: `logic composeTitle(folderId: folderId)`. The
+parser still reads the pun so that files written before the edition
+load while the tree migrates, and refuses it once the statement grammar
+flips; do not write new code against it.
 
 The public RPC (`ExecuteQuery`), the CLI/SDK call builders, the
 function-definition parser, and the automation-DSL parser all use the
@@ -681,148 +689,111 @@ ceilings).
 
 ---
 
-## 11b. cond() for conditional values -- not `if` at expression position
+## 11b. A conditional value is `p ? a : b`, not `if` at expression position
 
-**Rule.** When you need a conditional value inside an expression (a
-mutation payload, an argument, a function body), use `cond(predicate,
-thenValue, elseValue)`. The `if` keyword is reserved for the
-control-flow statement (`if condition { step }` in automations) and
-does NOT work as a value-returning expression.
+**Rule.** A value that depends on a condition is written `p ? a : b`:
+in a mutation value, a step argument, a logic statement. `if` guards a
+statement -- `if condition { ... }`, or `x := if condition { call }` in a
+logic body -- and is not an expression, so it cannot stand where a
+value goes.
 
-```memql retired
-# Wrong -- parse error
-role: if existingOwners.empty { "owner" }
-
-# Right
-role: cond(existingOwners.empty, "owner", "reader")
+```memql fragment
+role: existingOwners.empty() ? "owner" : "reader"
 ```
 
-Previously the builtin was named `if()`. It was renamed to `cond()` so
-the AST no longer collides visually with the `if` statement.
-`cond()` requires all three arguments; there is no implicit else.
+```memql retired
+role: if existingOwners.empty() { "owner" }             // refused: `if` is a statement
+role: cond(existingOwners.empty(), "owner", "reader")   // refused: cond() is retired
+```
 
-**Where cond() is evaluated.**
+`cond(p, a, b)` is retired: the parser refuses it with
+`cond(p, a, b) is retired in edition 2026: write p ? a : b
+(memqlmigrate --rewrite=expressions rewrites it)`. Both branches are
+required, as they were for `cond()`.
 
-- Inside a mutation write block (`insert { x: cond(...) }`): the
-  mutation-template evaluator handles it.
-- As a function-call arg in an automation step
-  (`createUser({role: cond(...)})`): the function-step arg resolver
-  resolves it at arg-resolution time before renderMemQLValue quotes
-  the result for the outgoing query. See
-  `component/automations/steps/function.go::resolveArgValueRef`.
+What the ternary does, from `component/memql/expr_eval.go`:
 
-Other expression builtins (`coalesce`, `concat`, `hash`, `first`,
-`last`, `lower`, `upper`, `trim`, ...) are evaluated by the MemQL
-engine when the outgoing query executes, so they don't need
-arg-resolution-time handling.
+- **The condition is a boolean.** There is no truthiness, so a string
+  or a number there is refused with `condition_not_boolean`; an absent
+  condition reads as false. Compare a flag that may arrive as a string
+  explicitly: `args.flag == true ? "on" : "off"`.
+- **Only the chosen branch runs.** The other may hold an `error(...)`
+  or a read that is only meaningful on its own side.
+- **It binds loosest of the value operators** (level 9 of the
+  [precedence table](memql.md#operator-precedence)), so
+  `row.x == 1 ? a : b` tests `row.x == 1`, `p && q ? a : b` tests
+  `p && q`, and a nested ternary groups to the right:
+  `a ? b : c ? d : e` is `a ? b : (c ? d : e)`.
+
+In a filter or spec body a ternary over the row must be boolean-valued:
+it lowers to `(c && p) || (!c && q)`, and the lowering refuses a
+ternary that chooses a value by the row (the manifest records the rule
+in `component/language/tiers/manifest.go`). Choose the value before the
+query instead, where it is a plan constant
+([21d](#21d-a-subexpression-that-does-not-read-the-row-is-a-plan-constant)):
+`row.stage == (args.urgent ? "now" : "later")`.
 
 ---
 
-## 11c. Logic-body expression grammar: what works in each position (#2542)
+## 11c. One expression grammar in every position (#2542)
 
-**Rule.** A logic body evaluates value-expressions IN-MEMORY, and the
-supported grammar differs by POSITION. memqllint (parse + boot-parity
-Init) accepts a superset of what the runtime evaluates, so the table
-below is authoritative: anything marked "no" is either a lint/boot
-rejection or an unsupported shape -- use the working idiom in the last
-column instead. `int / int` is integer division (#2316); use a float
-operand (`* 1.0`, or the `good * 100 / total` percent idiom) for a
-fractional ratio. Division / modulo by zero is a clean logic error, not
-a panic.
+**Rule.** Every place an expression is written reads the same grammar: a
+`return`, a `name := ...` statement, an `if` or `forEach ... where`
+condition, a lambda body, a map value, a mutation value, a step
+argument, a filter, a spec body. What differs between positions is where
+the expression runs and what it may call, and
+[memql.md](memql.md#where-each-expression-runs) prints that table from
+the tier manifest.
 
-The five value positions:
+Before edition 2026 each value position of a logic body had its own
+grammar, and this rule kept a table of what worked where (#2542, #2655,
+#2693, #3024). One grammar with one precedence table closes those cases:
 
-- **return** -- the terminal `return <expr>`.
-- **step RHS** -- an intermediate `x := <expr>`.
-- **cond pred** -- the predicate of `cond(predicate, then, else)` (and
-  the `if <condition>` step condition).
-- **cond branch** -- the `then` / `else` VALUE of a `cond(...)`.
-- **projection / lambda** -- an object-literal value or lambda body
-  inside a collection chain (`select(g => { k: <expr> })`,
-  `where(m => <expr>)`).
+| Written | Before edition 2026 | Edition 2026 |
+|---|---|---|
+| `a - b > 0` | parsed as `a - (b > 0)` and refused at load | `(a - b) > 0`: arithmetic binds tighter than comparison |
+| `return args.n == 5` | refused at load: an identifier-led comparison in value position was run as a store query | a comparison is a boolean value in any position |
+| `p && q` as a conditional's condition | refused inside a `cond(...)` argument | `p && q ? a : b`: `? :` binds loosest |
+| a bare name nothing binds (`role == "x"`) | refused at load; before #3024 it constant-folded | `unknown_name`: a bare name resolves to a lambda parameter, a root, a local, a predicate or a function, or to nothing ([21c](#21c-a-predicate-names-its-receiver-the-lambda-parameter-and-bare-names)) |
 
-| Form | return | step RHS | cond pred | cond branch | projection / lambda | Working idiom / note |
-|---|---|---|---|---|---|---|
-| Arithmetic `a / b`, `a * 100 / c`, `a - b` | yes | yes | -- | yes | yes | Integer division truncates; use a float operand for a ratio. |
-| Collection chain `rows.where(m => ...).count()` | yes | yes | yes (bare boolean chain) | yes | yes | `.first().field` DotAccess and `.sum/min/max/avg/count(lambda)` included. |
-| Date builtins `daysBetween(...)`, `addDuration(...)` | yes | yes | -- | yes | yes | #2541; the calendar extractors (`year` et al.) were retired under 2026.08 (#2707). |
-| `cond(...)` (nested) | yes | yes | -- | yes | yes | Connectives (`&&`/`||`) are NOT allowed inside a cond arg -- nest cond or use an `if` step. |
-| Comparison, **expression-led** `(a - b) > 0`, `0 < count`, `rows.count() >= 1` | yes | no (parse-rejected) | yes | no | yes (lambda body) | The LHS must be non-identifier-led: parenthesize the arithmetic / lead with a literal / end in a call. |
-| Comparison **over a chain aggregate** `rows.count(m => ...) > 0` | single-return only | no | yes | no | yes (lambda body) | As a cond PREDICATE this is the #2542 item-2 headline. As a bare multi-step `return`, wrap it: `return cond(rows.count(m => ...) > 0, thenV, elseV)`. |
-| Comparison, **scalar / identifier-led** `x > 10`, `role == "admin"` | boolean-condition return only | no (parse-rejected) | yes, if the identifier is a BOUND LOCAL | no | yes (lambda body) | Fine as a cond/`if` predicate and inside a boolean-condition return (`a.empty() && x == "b"`). As a cond predicate the identifier must be bound by a step of the same body; an UNBOUND one is a LOAD rejection (#3024) because it resolves against an empty scope and the cond becomes a constant -- read an argument as `args.x`. A BARE `return x == 5` is a LOAD rejection (#2693; it previously loaded green and mis-routed to a store query) -- write it expression-led `(x) == 5` / literal-led `5 == x`, boolean-condition (`... && x == 5`), or `return cond(x == 5, true, false)`. The same comparison as a `coalesce`/`concat` arg is likewise rejected. |
-| Comparison over an **ambient** `actor.role == "owner"`, `config.x == "on"` | -- | -- | yes | -- | -- | #3024: the actor / partition / now / config envelope is threaded through arg expansion, so an ambient cond predicate discriminates like an `args.` one. With no authenticated caller the envelope denies rather than omitting keys (#2801). |
-| Arithmetic over a comparison `a - b > 0` | REJECTED | REJECTED | REJECTED | REJECTED | REJECTED | The unparenthesized-comparison trap: `a - b > 0` parses as `a - (b > 0)`. Lint/boot rejects it -- parenthesize `(a - b) > 0`. |
+What still differs by position:
 
-**Notes.**
+- **Where it runs.** A filter or spec body pushes down to SQL; a
+  condition, a body, a value and a `refine` clause run in process. In a
+  pushdown position an in-process
+  function, arithmetic, `??` or a map literal is legal only on values
+  that do not read the row
+  ([21d](#21d-a-subexpression-that-does-not-read-the-row-is-a-plan-constant)).
+- **Construct calls.** `query`, `mutation`, `logic` and `builtin` calls
+  are legal in a logic body and in a step argument, the two positions
+  where the call is itself the statement a run journals. A condition, a
+  mutation value, a trigger filter, a prompt input and a `refine` clause
+  may not call a construct (`construct_call_not_allowed`), and a filter
+  or spec body never may.
 
-- **The `a - b > 0` trap is a lint/boot error (#2542).** A trailing bare
-  identifier operand folds the comparison into the arithmetic
-  (`a - (b > 0)`), so the arithmetic operand is a boolean -- never valid.
-  `convertArithmeticExpr` + `validateLogicArithmeticOperands` reject it at
-  load with the parenthesise fix; the lint/boot-parity pass surfaces it.
-- **Identifier-led comparison as a scalar VALUE is mis-routed.** The
-  engine has no scalar plan-root branch for a Field-led comparison
-  (`args.n == 5`), so it is executed as a store query and returns the
-  wrong value. Always write a value-position comparison expression-led
-  (parenthesise the left operand, or lead with the literal) or wrap it in
-  `cond(...)`. This is why a comparison is a first-class `cond` PREDICATE
-  but not a `cond` BRANCH value -- an identifier-led comparison in
-  branch-value position is a load rejection (#2655; it previously loaded
-  green and silently returned its own source text on the multi-step path).
-  **#2693** extends that load rejection from the cond BRANCH to the two
-  adjacent value positions that shared the same silent-wrong class: a
-  bare/terminal `return args.n == 5` (mis-routed as a store query, since a
-  logic value step is a named-call query and the inline `query { ... }`
-  filter form does not parse in a logic body), and the same comparison
-  laundered through a `coalesce`/`concat` arg. The gate stays OFF for a
-  comparison that is a direct `&&`/`||`/`!` operand -- that is the legal
-  boolean-condition return (`a.empty() && x == "b"`).
-- **cond predicates** accept a bare boolean chain (`x.any()`), a scalar
-  comparison (`r > 50`), an equality over a **bound local** (`role ==
-  "x"`, where an earlier step binds `role`), a comparison
-  over a chain aggregate (`x.count(m => ...) > 0`, wave 3), and a
-  coalesce-led equality in either spelling (`coalesce(args.b, "") ==
-  "y"` / `args.b ?? "" == "y"`, #2612) -- including inside NESTED
-  cond predicates, where that shape was previously a load rejection and
-  the bind-then-compare workaround (`z := coalesce(...); cond(z == ...)`)
-  was required. The workaround remains valid; it is no longer necessary.
-  The predicate aggregate is resolved through the in-memory collection
-  evaluator, not a lexicographic string compare. A **string builtin**
-  operand (`lower(args.b) == "y"`, also `upper`/`trim`/`hash`/`shortId`/
-  `concat`) is likewise evaluated in memory (#2656): before that it
-  loaded green and compared the builtin's SOURCE TEXT, so it was
-  always-false in every shape -- the door form, the parenthesised form,
-  and bind-then-compare alike.
-- **An UNBOUND bare identifier is a load rejection** (#3024). `role ==
-  "x"` is only legal when some step of the same body binds `role`; in a
-  single-statement body nothing does, so the identifier resolves against
-  an empty scope and the comparison is a CONSTANT -- the else branch for
-  every input, loading green and linting green. Read an argument as
-  `args.role`, or bind the local first. This is #2962's mechanism in the
-  spelling authors reach for first, which is why it is refused rather
-  than left to be discovered as a gate that never fires.
-- **Ambient predicates evaluate** (#3024): `cond(actor.role == "owner",
-  ...)`, and the same for `config.` / `partition` / `now`. The ambient
-  envelope is resolved once per call and threaded through arg expansion,
-  so these discriminate exactly like the `args.` ones; the multi-step
-  path binds the same envelope onto its own evaluator, so a predicate
-  answers identically whichever way the body is written. They were
-  briefly a load rejection -- expansion received only args, so an
-  ambient comparison fell through and took the else branch for every
-  input -- and that refusal is gone now that the envelope reaches the
-  predicate. With no authenticated caller the envelope DENIES (every key
-  present, owner bits false, #2801) rather than leaving keys absent,
-  because an absent key is what makes a negated gate read true.
-- **A reserved root is not the same as a resolvable one.** The envelope
-  carries exactly `actor.` / `config.` / `partition` / `now`. `trace` is
-  reserved -- no local or payload field may shadow it -- but nothing
-  supplies it, so a `trace.`-rooted cond predicate is a **load error**,
-  not an evaluation. The same goes for a path the envelope has no key
-  for: an unknown `actor.` member (the auth envelope is a closed set,
-  #2623) or a `config.` key outside the `policy_exposable.go`
-  allow-list. Each would otherwise resolve to nothing and constant-fold,
-  which is the silent gate this whole rule exists to prevent, so it is
-  refused loudly instead.
+Notes that hold in every in-process position:
+
+- **Conditions are booleans.** `if`, `&&`, `||`, `!`, `? :` and the
+  lambdas of `where`, `any` and `all` take a boolean; an absent value
+  reads as false; anything else is refused with `condition_not_boolean`.
+  There is no truthiness: `"false"`, `0` and `""` are not conditions.
+- **Integer arithmetic stays integer.** Two integers divide as integers
+  (`7 / 2` is `3`), and `.count()` returns an integer, so
+  `good.count() * 100 / total.count()` is a whole percent; multiply by
+  `1.0` for a fraction. A number decoded from JSON (a payload field, an
+  argument a client sent) is a float, so it divides as one. Division or
+  remainder by zero is `division_by_zero`, an out-of-range result is
+  `arithmetic_overflow`, and `%` needs whole numbers.
+- **The ambient roots evaluate.** `actor.role == "owner"`, a
+  `config.<key>` comparison and `now` discriminate exactly like an
+  `args.` comparison (#3024). With no authenticated caller the actor
+  envelope denies rather than leaving keys absent (#2801), because an
+  absent key is what makes a negated gate read true.
+- **A reserved root is not a readable one.** `trace` is reserved, so no
+  local or field may shadow it, but nothing supplies it: a `trace.` read
+  is `unknown_name`. The same goes for an `actor.` member outside the
+  closed envelope (#2623) and a `config.` key outside the
+  `policy_exposable.go` allow-list.
 
 ---
 
@@ -893,10 +864,10 @@ clear compile-time error.
 Example of a typo that surfaces at compile time:
 
 ```memql fragment
-checkUser := userById({ userId: args.event.payload.userId })
+checkUser := query userById(userId: args.event.payload.userId)
 
 result := if cehckUser.empty() {   // typo: cehckUser -> checkUser
-  createUser({...})
+  mutation createUser(userId: args.event.payload.userId)
 }
 ```
 
@@ -909,8 +880,8 @@ automation "bootstrapUser": step "result" references unknown step "cehckUser" --
 Example of a cycle (would deadlock at runtime):
 
 ```memql fragment
-a := if b.empty() { queryFoo({}) }
-b := if a.empty() { queryBar({}) }
+a := if b.empty() { query foo() }
+b := if a.empty() { query bar() }
 ```
 
 The compiler emits:
@@ -936,8 +907,8 @@ carries an individual construct's name.
 ```
 dsl/library/queries.memql       query folder activeFolders { ... }
 dsl/library/mutations.memql     mutate folder createFolder { ... }
-dsl/common/specs.memql          spec actorEnvelope isSelfActing { ... }
-dsl/common/traits.memql         trait isActiveRecord { ... }
+dsl/deployment/specs.memql      spec actorEnvelope requiresOwner = actor => ...
+dsl/common/traits.memql         trait isActiveRecord = row => ...
 dsl/library/logic.memql         logic indexArtifact { ... }
 ```
 
@@ -964,11 +935,11 @@ if any `naming.*` warning is emitted. References resolve structurally:
 the dependency-tree validator (C3/#2043) fails a reference that does not
 exist at load time.
 
-An automation step calls a logic construct by the same name the
-file-top import names -- `step decide { logic indexArtifact ( event )
-}` resolves through `use library.logic.{ indexArtifact }` (see
-`dsl/library/automations.memql`). The corpus uses the paren call form
-throughout.
+An automation step calls a logic construct by the name the file-top
+import gives it, with the kind prefix and a named argument:
+`step decide { logic indexArtifact(event: event) }` resolves through
+`use library.logic.{ indexArtifact }`. The pun `logic indexArtifact ( event )`
+is retired ([#2](#2-function-call-arguments-are-named-not-an-object-literal)).
 
 Automations are event-triggered, not called by name, so they use
 verb-first names with no prefix (`indexFileOnCreate`,
@@ -1024,10 +995,10 @@ values, single mirrors) stay longhand deliberately.
 // This block stays longhand deliberately: the multi-line computed id
 // is exactly the shape the codemod refuses to reflow.
 insert {
-  id: concat("filed-", hash(concat(
-    canonicalId(args.artifactId, artifact), ":",
-    canonicalId(args.folderId, folder)
-  )))
+  id: "filed-" + hash(
+    canonicalId(args.artifactId, "artifact") + ":" +
+    canonicalId(args.folderId, "folder")
+  )
   args.folderId
   args.artifactId
   kind: "document"
@@ -1039,14 +1010,12 @@ insert {
 **Constraints.**
 
 - **Simple identifier only.** The arg path must match
-  `[A-Za-z_][A-Za-z0-9_]*`. Dotted paths (`args.user.id`) are NOT
-  eligible; write those as `userId: args.user.id` explicitly. The
-  parser rejects shorthand with dotted paths instead of inventing a
-  garbage field named `user.id`.
-- **Bare `args.X` only.** `coalesce(args.x, default)`,
-  `concat(args.a, ":", args.b)`, `cond(...)`, and other wrapping
-  expressions keep the explicit `key:` prefix. Only a plain
-  `args.name` expression can be shorthand.
+  `[A-Za-z_][A-Za-z0-9_]*`. A dotted path (`args.user.id`) is not
+  eligible; write it as `userId: args.user.id`. The parser refuses the
+  dotted shorthand rather than inventing a field named `user.id`.
+- **Bare `args.X` only.** `args.x ?? "default"`, `args.a + ":" + args.b`,
+  `p ? a : b` and every other expression keep the explicit `key:`
+  prefix. Only a plain `args.name` can be shorthand.
 - **No effect on the `args { ... }` block.** That block is a type
   declaration, not a value map; its lines stay in the
   `<name> <type> [@required] ...` form.
@@ -1057,11 +1026,9 @@ declaring 20-field payloads with half the repetition. Both are valid
 and equivalent. Under the hood the struct-form rewriter translates
 `args.X` to the engine-internal `ctx.X` and the expansion lives in
 the mutation-template parser
-(`component/memql/mutation_templates.go`); step-call args in
-automations / logic bodies get the equivalent dotted-path shorthand
-from
-`component/language/compiler/automation_generator.go::tryParseBarePathShorthand`
-(see [#17](#17-automation-step-args-shorthand-bare-dotted-path-infers-the-key)).
+(`component/memql/mutation_templates.go`). The bare mirror belongs to
+the write block alone: a map literal in a step argument has no
+shorthand key (see [#17](#17-automation-step-arguments-named-with-no-shorthand-keys)).
 Authors never write `ctx.X` -- it is not part of the author surface.
 
 ---
@@ -1071,13 +1038,16 @@ Authors never write `ctx.X` -- it is not part of the author surface.
 **Rule.** Shapes are struct-form path lists. Each body line is a
 projection path. A payload property is written by **bare name**
 (`name`, `description`) -- the concept is bound by the
-`shape <Concept> <name>` signature, so `` is removed; row
-metadata stays `row.X` (`row.id`, `row.createdAt`) and the auth
-envelope stays `actor.X` (`actor.userId`). The projected field is
+`shape <Concept> <name>` signature, so the `payload.` prefix is
+removed; row metadata stays `row.X` (`row.id`, `row.createdAt`) and the
+auth envelope stays `actor.X` (`actor.userId`). The projected field is
 keyed by the path's **terminal segment**. Every shape declares its
 kind via `@row` (concept payload + row intrinsics) and/or `@actor`
-(engine envelope, no signature concept). The explicit `X`
-form is rejected at load.
+(engine envelope, no signature concept). The explicit `payload.X`
+form is rejected at load. A shape body is a path list, not an
+expression: the lambda parameter of rule
+[21c](#21c-a-predicate-names-its-receiver-the-lambda-parameter-and-bare-names)
+does not apply to it.
 
 ```memql
 use agents.concepts.{ agent }
@@ -1126,17 +1096,14 @@ shorthand: `name` projects as `name`, exactly like
 
 ---
 
-## 17. Automation step-args shorthand: bare dotted path infers the key
+## 17. Automation step arguments: named, with no shorthand keys
 
-**Rule (updated for G5, memql#2367 + Story 9, #2335).** An automation
-declares a typed `args { }` contract; the trigger binds the event payload
-to it (loud refusal on a violated contract) and step bodies read the
-fields BARE -- `event.payload.<field>` reads are retired and rejected
-with a migration hint, and the legacy `name({ ... })` object-literal call
-wrapper is rejected at parse time. A bare simple identifier in a
-construct-call arg position is PUNNED (`f(folderId)` ==
-`f(folderId: folderId)`, G3 #2365); step results read via
-`steps.<name>.result`.
+**Rule.** An automation declares a typed `args { }` contract, and the
+trigger binds the event payload into it before any step runs; a payload
+that violates the contract refuses the run rather than binding part of
+it (G1, `component/automations/args_binding.go`). A step reads a
+declared arg as `args.<field>`, reads an earlier step's result as
+`steps.<name>.result`, and passes every argument by name:
 
 ```memql
 automation indexNewDocument {
@@ -1145,41 +1112,48 @@ automation indexNewDocument {
     documentRef  string @required
   }
   step decide {
-    logic composeTitle ( folderId )                // punned
+    logic composeTitle(folderId: args.folderId)
   }
   step index {
-    mutation createArtifact (
-      folderId,                                    // punned bare field
-      sourceConceptRef: documentRef,               // renamed key
-      title:            steps.decide.result        // step-result read
+    mutation createArtifact(
+      folderId:         args.folderId,
+      sourceConceptRef: args.documentRef,
+      title:            steps.decide.result
     )
   }
 }
 ```
 
-**Constraints.**
+Three spellings are gone:
 
-- **At least two dotted segments required.** Single identifiers like
-  `allAgents` are NOT eligible -- they'd collide with step-reference
-  semantics where `allAgents` means "the `allAgents` step's result".
-  Use `allAgents.nodes()` in a `for` loop, not inside an object arg.
-- **Every segment must be a simple identifier.** Method calls
-  (`.nodes()`), index access (`.nodes()[0]`), and call arguments
-  (`concat(...)`) all disqualify the value.
-- **Terminal segment must match what you intend as the key.** If the
-  path's terminal segment isn't the field you want
-  (`registerNode.result.node.id` -> `id`, not `registerNode`), use
-  the verbose form (`nodeId: registerNode.result.node.id`).
+- **`event.<field>` reads** in an automation body are refused at load
+  (G5, memql#2367): declare the field in `args { }` and read
+  `args.<field>`. To hand the whole event to a logic, pass it:
+  `logic record(event: event)`.
+- **The argument pun**, `logic composeTitle(folderId)`, is retired
+  ([#2](#2-function-call-arguments-are-named-not-an-object-literal)):
+  write `folderId: args.folderId`.
+- **Shorthand keys in a map literal.** A map entry is `key: value`, and
+  a key is one name. `{ registerNode.result.node.id }` once inferred the
+  key `id` from the path's last segment
+  (`automation_generator.go::tryParseBarePathShorthand`); the
+  edition-2026 parser refuses it (`a map key is one name, got
+  registerNode.result.node.id: nest a map for a path`), and a bare
+  `{ folderId }` likewise (`a map entry is written key: value`). Write
+  `{ nodeId: registerNode.result.node.id }`.
+
+A declared arg also resolves bare inside an automation body
+(`folderId` for `args.folderId`, G2 memql#2364). Write `args.folderId`:
+it reads the same in every position, and a bare name that is also a
+step or loop name is the shadowing the loader has to refuse.
 
 ---
 
 ## 18. Object-literal keys: unquoted identifiers only
 
-**Rule.** Inside MemQL `{...}` object literals, keys MUST be unquoted
-identifiers (`name:`, `folderId:`, `createdAt:`). Quoted-string keys
-(`"name":`, `"folderId":`) were historically allowed by the parsers
-for JSON interop but are not idiomatic MemQL and must not appear in
-new code.
+**Rule.** Inside a MemQL `{...}` literal a key is an unquoted name
+(`name:`, `folderId:`, `createdAt:`). Quoted keys (`"name":`) were
+accepted for JSON interop and are not written in new code.
 
 ```memql fragment
 // Correct -- mutation write block
@@ -1187,7 +1161,7 @@ insert {
   name: args.name
   folderId: args.folderId
   active: true
-  metadata: { source: "import" }   // unquoted key in a nested object VALUE
+  metadata: { source: "import" }   // unquoted key in a nested map value
 }
 
 // Wrong -- unnecessary quotes on simple-identifier keys
@@ -1197,44 +1171,25 @@ insert {
 }
 ```
 
-> **Where this still applies (and where it no longer does).** This rule
-> is about `{...}` object literals: a mutation write block
-> (`insert { ... }` / `update { ... }`) and a nested object-typed field
-> VALUE (`metadata: { ... }`) both remain genuine object literals, and
-> both still accept a quoted key -- so the bare-vs-quoted style choice
-> still applies there. **Function-call arguments are a different
-> surface and no longer apply here at all**: a call's argument list is
-> named args (`fn(key: value, ...)`), not an object literal, so there is
-> no `{...}` for a key to be quoted or unquoted inside -- see
-> [#2](#2-function-call-arguments-are-named-not-an-object-literal). The
-> `createUser({ userId: ... })` call-style example this section used to
-> show here was retired along with object-literal call args generally.
+Where each parser stands:
 
-**Why it bites you.** Mixed quoting styles in the same codebase make
-every review a guessing game. All .memql files before this rule had
-unquoted keys except a handful in inline `shape(...)` templates that
-used JSON-style quoting; the blast radius on a frontend/Go consumer
-is small because the parsers accept both, but the inconsistency is
-what blocked us from spotting earlier bugs (quoted keys don't
-participate in the bare-`args.X` / dotted-path shorthand from rules
-#15 and #17 because shorthand only triggers when the key is absent).
+| Where the literal is | A quoted key |
+|---|---|
+| A map literal in an edition-2026 expression: a mutation value such as `metadata: { ... }`, a step argument, a logic statement | refused: `map keys are unquoted names (authoring rule 18)` (`parseV1Map` in `component/language/parser/v1_expr.go`) |
+| The write block itself, `insert { ... }` / `update { ... }` | still accepted by the mutation parser (`component/memql/mutation_templates.go::parseObjectKey`); do not write one |
 
-**Exception.** Quoted keys are accepted when the key content isn't a
-valid identifier -- for example a key with a hyphen or space, or
-JSON blobs embedded verbatim in a string value (those aren't
-MemQL-parsed at all). Reach for quoted keys ONLY when the name cannot
-be expressed as `[A-Za-z_][A-Za-z0-9_]*`; everything else is a
-style violation.
+In an edition-2026 map literal a key is one name: a hyphenated key is an
+identifier there (`{ user-agent: args.ua }`), a dotted key is refused,
+and a key with a space cannot be written at all.
 
-Where the parsers stand today:
+Call arguments are not an object literal and never were in this rule's
+sense: an argument list is named args (`fn(key: value)`), see
+[#2](#2-function-call-arguments-are-named-not-an-object-literal).
 
-- `component/memql/mutation_templates.go::parseObjectKey` -- accepts
-  both; prefer unquoted.
-- `component/language/parser/parser.go::parseObject` -- accepts
-  both; prefer unquoted.
-
-Enforcing via a linter rule is tracked as a follow-up; for now treat
-this as a PR-review checklist item.
+**Why it bites you.** Mixed quoting styles make every review a guessing
+game, and a quoted key opts out of the bare-`args.X` shorthand of
+[#15](#15-write-block-sugar-accept-----stamp----and-the-bare-mirror-shorthand),
+which triggers only when the key is absent.
 
 ---
 
@@ -1267,11 +1222,17 @@ intact -- while every filter naming it bare read the ENGINE NAMESPACE
 instead. `provenance` was fully silent (the push-down and the
 in-process post-filter agreed on the same wrong field, so the query
 returned the wrong rows with no error) and `actor` was silent AND
-authorization-relevant (`filter actor.userId == args.v` const-folded
-to true whenever the caller passed their own id, so the predicate
-contributed nothing and the query returned every row). Matching is
-case-insensitive and by whole name, so `Provenance` is refused while
-`arguments`, `metadata`, and `rowCount` are ordinary properties.
+authorization-relevant (the pre-edition filter `actor.userId == args.v`
+const-folded to true whenever the caller passed their own id, so the
+predicate contributed nothing and the query returned every row).
+Matching is case-insensitive and by whole name, so `Provenance` is
+refused while `arguments`, `metadata`, and `rowCount` are ordinary
+properties.
+
+Edition 2026 reads a payload field through the lambda parameter
+(`row.actor`), so a filter can no longer confuse the field with the
+root. The names stay reserved all the same, and
+`ensureReservedFieldsNotDeclared` still refuses them.
 
 Practical consequences for concept authors:
 
@@ -1310,68 +1271,71 @@ was a one-line concept-schema delete plus dropping the matching
 
 When a mutation derives a deterministic id by hashing foreign-key
 args (the filing id pattern: `id = hash(folderId + ":" + userId)`),
-the args MUST be normalised first, with `canonicalId(value, <concept>)`
-by default -- see below for when `shortId(value)` is the right choice
-instead, and what it does not give you.
-The hash is byte-level, so two callers passing the same logical
-reference under different shapes (`"user-abc"` vs
-`"_system:v1:identity:user:user-abc"`) hash to different strings and
-produce DUPLICATE rows with distinct ids.
+normalise the args first, with `canonicalId(value, "concept")` by
+default -- see below for when `shortId(value)` is the right choice
+instead, and what it does not give you. The hash is byte-level, so two
+callers passing the same logical reference under different shapes
+(`"user-abc"` vs `"_system:v1:identity:user:user-abc"`) hash to
+different strings and produce duplicate rows with distinct ids.
 
 ```memql retired
 // Wrong -- bare-vs-canonical input shape changes the derived id
 insert {
-  id: hash(concat(args.folderId, ":", args.userId))
+  id: hash(args.folderId + ":" + args.userId)
   ...
 }
 
-// Right -- canonicalId() collapses both forms to the same string, AND
-// each part is hashed before concatenation so the composite cannot
-// alias. The second argument is the imported concept short-name
-// (resolved against the file-top `use ...concepts.{ folder, user }`
-// imports).
+// Right -- canonicalId() collapses both forms to the same string, and
+// each part is hashed before joining so the composite cannot alias.
+// The second argument names an imported concept, as a string.
 insert {
-  id: hash(concat(
-    hash(canonicalId(args.folderId, folder)),
-    hash(canonicalId(args.userId,   user))
-  ))
+  id: hash(
+    hash(canonicalId(args.folderId, "folder")) +
+    hash(canonicalId(args.userId, "user"))
+  )
   ...
 }
 
-// Wrong -- joining with a separator first. `hash(concat(a, ":", b))`
-// ALIASES whenever a part can contain the separator: ("chat", "k:1")
-// and ("chat:k", "1") derive one id, so two distinct rows collapse into
-// one. A canonicalId() part happens to be safe today only because its
-// fixed `v1:ns:concept:` prefix makes the split recoverable -- that is a
+// Wrong -- joining with a separator first. `hash(a + ":" + b)` aliases
+// whenever a part can contain the separator: ("chat", "k:1") and
+// ("chat:k", "1") derive one id, so two distinct rows collapse into one.
+// A canonicalId() part happens to be safe today only because its fixed
+// `v1:ns:concept:` prefix makes the split recoverable -- that is a
 // property of the data shape, not a constraint, and it stops holding the
 // moment a part is caller-supplied (memql#3009).
 ```
 
-(Don't prefix the hash with the concept name -- `id:
-concat("folder-", hash(...))` duplicates information already in
-the canonical id position, and `test/dslconformance/conformance_test.go`'s
-`TestNoShortIdConceptPrefix` rejects known concept-name prefixes
-outright. The shortId is the bare hash / uuid / slug.)
+(Don't prefix the hash with the concept name -- `id: "folder-" + hash(...)`
+duplicates information already in the canonical id position, and
+`test/dslconformance/conformance_test.go`'s `TestNoShortIdConceptPrefix`
+rejects known concept-name prefixes outright. The shortId is the bare
+hash / uuid / slug.)
 
-`canonicalId(value, concept)` -- `concept` is an imported concept
-short-name (the stringly-typed `"v1:ns:name"` literal is retired):
+`canonicalId(value, "concept")` -- the concept is a string naming an
+imported concept, `"folder"`. An edition-2026 expression resolves no
+bare concept name, so the older `canonicalId(value, folder)` spelling is
+quoted by `memqlmigrate --rewrite=expressions`; a canonical
+`"v1:ns:name"` string is refused by the binding gate (rule 22). The
+catalog entry (`component/language/functions/catalog.go`) and
+`EvalExpr` give it this behaviour:
 
 - bare slug → prepends `<concept>:` (no partition prefix -- partitioning
   and `@scope` were both retired in #56; the composed form is the plain
   `{concept}:{shortId}` shape, see `component/memql/partition_context.go`'s
   `canonicalizeIdValue`)
 - already-canonical, matching concept → returns as-is
-- canonical for a different concept → errors loudly (catches type-tag
-  typos like passing `userId` to `canonicalId(..., folder)`)
-- an unimported / unknown concept name → errors at load
-- empty string → returns empty (optional foreign keys stay null)
+- canonical for a different concept → an error (catches type-tag typos
+  like passing a user id to `canonicalId(..., "folder")`)
+- absent or blank value → the empty string (an optional foreign key
+  stays empty)
+- a missing or blank concept argument → an error (`invalid_argument`)
 
-The engine ALSO auto-canonicalizes `@relationship`-tagged payload
-fields at insert time (`canonicalizeRelationshipFields` in
-`component/memql/partition_context.go`), so `userId == arg(...)`
-queries work with canonical-stored values. But the id derivation
-runs BEFORE the payload auto-canon, so `canonicalId()` in the id
-template is still required for stable deterministic ids.
+The engine also canonicalizes `@relationship`-tagged payload fields at
+insert time (`canonicalizeRelationshipFields` in
+`component/memql/partition_context.go`), so `row.userId == args.userId`
+works against canonical-stored values. But the id derivation runs
+before that, so `canonicalId()` in the id value is still what makes a
+deterministic id stable.
 
 **`shortId(value)` also satisfies this rule, with two caveats.** It maps
 the canonical and bare forms of a normal id onto the bare form, and it
@@ -1475,7 +1439,7 @@ with the reason. A rule with no gate and a stale roster is not a rule.
 Normalising an FK makes the same logical reference hash to one string.
 It does nothing about the *composite*. Neither normaliser guarantees a
 colon-free result — `shortId("d:x")` is `"d:x"` — so an unconstrained
-`hash(concat(a, ":", b))` is not injective:
+`hash(a + ":" + b)` is not injective:
 
 ```
 ("d:x", "y")   and   ("d", "x:y")   ->   hash("d:x:y")
@@ -1484,8 +1448,8 @@ colon-free result — `shortId("d:x")` is `"d:x"` — so an unconstrained
 Two different pairs, one id, one timeline. Whichever wrote last wins and
 the reader silently gets the wrong row.
 
-**The rule: in `hash(concat(a, sep, b))`, every part after the first must
-be free of `sep`.** The *leading* part may contain it freely. With the
+**The rule: in `hash(a + sep + b)`, every part after the first must be
+free of `sep`.** The *leading* part may contain it freely. With the
 trailing part separator-free the split at the last `sep` is unique, so
 equal concatenations force equal parts — that is the whole of the
 argument, and it generalises to any number of parts.
@@ -1503,7 +1467,7 @@ args {
   nodeType      string! @pattern("^[^:]+$")    // trailing part: no separator
 }
 insert {
-  id: hash(concat(shortId(args.deploymentId), ":", args.nodeType))
+  id: hash(shortId(args.deploymentId) + ":" + args.nodeType)
   ...
 }
 ```
@@ -1531,17 +1495,19 @@ when it is not -- the derivation memql#3009 landed, in a construct since
 removed with the cognition tree:
 
 ```memql fragment
-id: concat("utt-", hash(concat(
-  hash(args.partitionId),
-  hash(canonicalId(args.participantId, participant)),
-  hash(args.action.type),
+id: "utt-" + hash(
+  hash(args.partitionId) +
+  hash(canonicalId(args.participantId, "participant")) +
+  hash(args.action.type) +
   hash(args.action.idempotencyKey)
-)))
+)
 ```
 
 `hash()` is sha256-hex, so every part renders to exactly 64 characters
-and the concatenation has exactly one decomposition. No separator, no
+and the joined string has exactly one decomposition. No separator, no
 constraint on what a caller may send, injective by construction.
+`recordReputationWindow` (`dsl/campaigns/mutations.memql`) is a live
+construct built the same way.
 
 `sendActionUtterance` (in the cognition mutations file, since removed
 with that tree) needed it because the constraint was **both unavailable
@@ -1554,9 +1520,9 @@ colon rejects `"order:123"` to work around an internal encoding choice.
 **Do not push the engine's hashing problem into the caller's key space.**
 
 Construction is also the only answer when a part is engine-derived but
-separator-bearing. `hash(concat(args.nodeType, ":", now))` aliased with
-no caller involvement at all, because an RFC3339 timestamp always
-carries colons.
+separator-bearing. `hash(args.nodeType + ":" + now)` aliased with no
+caller involvement at all, because an RFC3339 timestamp always carries
+colons.
 
 **Where the tree stands.** The memql#3009 conversion put every composite
 id derivation in `dsl/cognition/` and `dsl/cluster/` on construction; the
@@ -1565,10 +1531,10 @@ it. The two in `dsl/deployment/` use the constraint (memql#2980). Both are
 gated — `TestConvertedIdDerivationsKeepPerPartHashing` and
 `TestCompositeHashedIdTrailingPartRejectsTheSeparator` — and **both
 gates check by path, not by shape**. A new file adopting the separator
-form trips neither. The tree-wide shape detector (find every
-`id: hash(concat(...))`, require its parts constrained or digested) is
-the durable answer, has its own false-positive design problem, and is
-not built.
+form trips neither. The tree-wide shape detector (find every `id:`
+value that hashes joined parts, require its parts constrained or
+digested) is the durable answer, has its own false-positive design
+problem, and is not built.
 
 `@pattern` on an args field is genuinely enforced, unlike some of the
 concept-field annotations: it is compiled at load (`convertArgsField`),
@@ -1588,8 +1554,8 @@ Landed in memql#2980. Gated by
 checks two mutations **by name** and is not a tree-wide detector.
 
 **The tree carries other instances of this shape, and some of them are
-live examples of the hazard rather than of the fix.** `grep -rn
-"hash(concat(" dsl/` finds around a dozen. Several are safe only
+live examples of the hazard rather than of the fix.** `dsl/` carries
+about ten `id:` values that hash joined parts. Several are safe only
 incidentally — the trailing part is a `canonicalId()` result whose fixed
 `v1:<ns>:<concept>:` prefix happens to make the split recoverable — and
 the one that was measurably not safe was `sendActionUtterance` (in the
@@ -1602,11 +1568,11 @@ as a statement that the tree complies with it -- that construct is gone,
 the missing detector is not, and the next one to be written this way
 will be found the same way.
 
-A shape detector — find every `id: hash(concat(...))` and require its
-trailing parts to be constrained — is the gate that would make the rule
-true tree-wide. It does not exist yet.
+A shape detector — find every `id:` value that hashes joined parts and
+require its trailing parts to be constrained — is the gate that would
+make the rule true tree-wide. It does not exist yet.
 
-The historical `concat("ga-", hash(actor))` pattern in the auto-join
+The historical `"ga-" + hash(actor)` pattern in the auto-join
 path was gone before the tree that held it was: the cognition logic file
 resolved the assistant via `assistantAgentForUser` + the space row's
 `ownerUserId` instead (memql#273, locked in at the time by
@@ -1617,49 +1583,63 @@ went with the cognition tree.
 
 ---
 
-## 21. Argument resolution: `args.X` for caller-passed, bare names for engine
+## 21. Argument resolution: `args.x`, the engine roots, and the lambda parameter
 
-**Rule.** Every DSL construct declares its inputs through one of
-three canonical forms:
+**Rule.** A construct declares its inputs in one of two places:
 
-- **Struct query / mutation**: `args { ... }` sub-block INSIDE the
-  construct body.
-- **Logic**: `args { ... }` block inside the construct body, ahead
-  of `body { ... }` (`logic NAME { args { ... } body { ... } }`).
-- **Automation**: no declared args — the triggering event is bound
-  as `args` (see below).
-- **Builtin / tool / prompt**: body fields directly — the body IS
-  the schema (no `args` wrapper).
+- **Query, mutation, logic, automation**: an `args { ... }` block inside
+  the construct body (ahead of `body { ... }` in a logic). An
+  automation's args are bound from the triggering event's payload at
+  fire time and validated against the block; a violation refuses the
+  run (rule [#17](#17-automation-step-arguments-named-with-no-shorthand-keys)).
+- **Builtin, tool, prompt**: the body's fields directly -- the body is
+  the schema, with no `args` wrapper.
 
-The body references caller-passed args as `args.X`. Engine-provided
-values use bare top-level identifiers: `now`, `actor.X`, `partition`,
-`config.X`. `ctx` is gone from the author surface entirely; the
-rewriter translates `args.X` -> `ctx.X` for the engine runtime so
-nothing changes underneath.
+An expression reads three kinds of name -- the declared arguments
+(`args.x`), the engine roots (`actor`, `now`, `config`, `event`), and a
+lambda parameter (`row.x`) -- and never a bare payload field:
 
-**Reserved engine names** (an args field colliding with one of these
-is rejected at load time): `now`, `actor`, `partition`, `config`,
-`trace`.
+| Written | Is | Read in |
+|---|---|---|
+| `args.folderId` | a declared argument | any body, and a query filter (where it is a plan constant) |
+| `actor.userId`, `actor.role`, `actor.isClusterOwner`, ... | the resolved auth envelope (a closed set, #2623) | any body and a query filter, once the construct declares `@actor` (rule 26); in a spec, only as the parameter of a spec bound to an `@actor` shape |
+| `now` | the RFC 3339 timestamp captured when evaluation began | any expression |
+| `config.<key>` | an allow-listed configuration value (`component/config/policy_exposable.go`) | any body, and a query filter (a plan constant) |
+| `event` | the triggering event envelope | an automation body; pass it whole, `logic record(event: event)`, and read `args.event.payload.<field>` in the logic |
+| `row.status`, `row.id` | a payload field or an intrinsic of the row, through the lambda parameter | a filter, a spec or trait body, a trigger filter, a `refine` clause, and a collection method's lambda (`t => t.status`) |
+
+A payload field is always reached through the parameter that names the
+row: `filter row => row.folderId == args.folderId` reads the field on
+the left and the argument on the right, and neither side can be
+mistaken for the other. How a bare name resolves is rule
+[#21c](#21c-a-predicate-names-its-receiver-the-lambda-parameter-and-bare-names).
+
+**Reserved names.** `now`, `actor`, `partition`, `config` and `trace`
+are reserved: an args field named one of them is refused at load, and
+so is a call-site argument of that name (memql#3626). `event` is also
+reserved for automation args (G2, memql#2364). `trace` is reserved
+without being readable: nothing binds it, so a `trace.` read is
+`unknown_name`.
 
 **An arg description is a `///` doc comment, never `@description`**
 (memql#3336). The `///` block on the line(s) immediately above an
-`args { ... }` field IS that argument's description: it lands on the
+`args { ... }` field is that argument's description: it lands on the
 field's AST slot, and it is what the corpus, the SDK generator, and the
 LSP's `memql/runnableConstructs` read. `@description` on an args field
-is **rejected at load** -- there is no AST slot for it, so it used to be
+is refused at load -- there is no AST slot for it, so it used to be
 accepted and then silently thrown away. The identical annotation on a
-`tool` / `prompt` / `builtin` field is untouched: those bodies ARE the
-schema and do retain it. Same de-overload as `@default` on an args
-field, which is likewise rejected (#991).
+`tool` / `prompt` / `builtin` field is untouched: those bodies are the
+schema and keep it. `@default` on an args field is refused the same way
+(#991); apply a default in the body with `args.x ?? <default>`.
 
 ```memql retired
 query folder activeFolders {
   args {
     /// The owner whose folders to list.
     ownerId string @required                        // correct
-    limit   number @description("page size")        // REJECTED at load
+    limit   number @description("page size")        // refused at load
   }
-  filter  ownerId == args.ownerId && isActiveRecord
+  filter  row => row.ownerId == args.ownerId && isActiveRecord(row)
   shape   folderFull
 }
 ```
@@ -1669,7 +1649,7 @@ load-bearing (it is the fallback for the construct's own `///` block).
 To fix an existing file, run `memqlmigrate --rewrite=args-description`,
 which strips the annotation; re-add the prose as a `///` comment.
 
-**Right (struct form — the canonical author surface):**
+**Right:**
 
 ```memql
 use library.concepts.{ artifact, folder }
@@ -1694,22 +1674,20 @@ query folder activeFolders {
   args {
     ownerId  string  @required
   }
-  filter  ownerId == args.ownerId && isActiveRecord
+  filter  row => row.ownerId == args.ownerId && isActiveRecord(row)
   shape   folderFull
 }
 
-// Spec — struct form. Binds one shape XOR concept in the signature;
-// the body returns a boolean over bare field names. No args.
-spec artifact isArchivedArtifact {
-  return archived == true
-}
+// A spec binds one concept or shape in its signature, and its lambda
+// names the row it reads. A spec takes no args.
+spec artifact isArchivedArtifact = row => row.archived == true
 ```
 
 **Policies take no args at all.** The live `policy` construct is an
 empty-bodied AI provider-selection record (the decision-policy tier
 that once carried `func (Policy)` bodies with `@tier` / `@audited`
-is retired, #984 — caller-context boolean checks belong in
-context-specs named as bare filter conjuncts):
+is retired, #984). A caller-context check is a context-spec applied to
+the actor in a filter, `requiresOwner(actor)`:
 
 ```memql
 @primary("streamClaudeSonnet")
@@ -1735,29 +1713,11 @@ mutate folder example {
 }
 ```
 
-**Procedural form (internal post-rewrite shape, not for authors).**
-The struct-form rewriter emits a `func (Receiver) NAME(ctx any)
-(any, error) { return <expr>, nil }` shape for the engine parser.
-The `ctx` parameter name is a placeholder identifier only; the body
-references `args.X` directly (the parser recognises both `args.X`
-and `ctx.X` and resolves them to the same caller-arg AST node).
-**Don't author that shape.** The struct form is the surface every
-author works with.
-
-For Logic bodies the author surface is ctx-free: write
-`body { ... ; return <expr> }`, reach inputs via `args.X`, never
-write `ctx.output = ...`.
-
-**Why `args.X` is required (not bare).** In a mutation's `insert`
-block, the keys ARE bare field names of the row's payload. Saying
-`folderId: args.folderId` keeps the LHS (concept payload key) and RHS
-(caller arg) visually distinct. The same precedent applies to query
-filters: `folderId == args.folderId` reads correctly without
-needing the reader to guess which side is concept-field vs caller-arg.
-
-**For automations:** the triggering event payload is bound as
-`args`, so `args.topic`, `args.kind`, and `args.payload.<field>`
-reach the event from inside the automation body.
+**The procedural form is internal.** The struct-form rewriter emits a
+`func (Receiver) NAME(ctx any) (any, error) { return <expr>, nil }`
+shape for the engine's parser, and authors never write it; `ctx` is not
+part of the author surface. A logic body is `body { ...; return <expr> }`
+and returns its value directly, with no `ctx.output = ...`.
 
 ---
 
@@ -1802,6 +1762,111 @@ Reach for a DECLARATION first. Nearly every block that had an undeclared key
 when this landed wanted the key declared, not the block opened -- the sub-field
 was real, and the schema had simply stopped describing the row.
 
+---
+
+## 21c. A predicate names its receiver: the lambda parameter and bare names
+
+**Rule.** Every predicate position names the value it reads with a
+lambda parameter, and every field is read through it (D1 of the
+[language freeze record](../../superpowers/specs/2026-09-13-dsl-v1-language-freeze-program-design.md)):
+
+```memql fragment
+filter  row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true) && (args.status == nil || row.status == args.status)
+spec sendJob isDrainableSendJob = row => row.status == "queued" || row.status == "running"
+spec actorEnvelope requiresOwner = actor => actor.role == "owner"
+trait isActiveRecord = row => row.active == true
+@filter(row => row.status == "archived")
+```
+
+The lines are the edition-2026 spellings of `campaigns` and
+`isDrainableSendJob` (`dsl/campaigns/`), `requiresOwner`
+(`dsl/deployment/specs.memql`), `isActiveRecord`
+(`dsl/common/traits.memql`) and an account automation's trigger filter
+(`dsl/accounts/automations.memql`).
+
+- **The parameter is the author's name.** Any name that is not a
+  reserved root will do, and `row` is the convention -- it is what
+  `memqlmigrate --rewrite=expressions` writes. A spec bound to an
+  `@actor` shape names its parameter `actor`, and there the parameter is
+  the actor envelope itself.
+- **A spec or trait is applied to its receiver**: `isActiveRecord(row)`,
+  `requiresOwner(actor)`. A bare `isActiveRecord` in a filter is the
+  pre-edition spelling, and `spec isX` / `trait isX` as a reference is
+  refused, naming `isX(row)`.
+- **A nested lambda names its element**: `row.tags.any(t => t == "urgent")`,
+  `args.members.where(m => m.active)`, and `(acc, x) => ...` for the two
+  parameters of `reduce`. A parameter is in scope inside its own lambda
+  body and nowhere else.
+- **A canonical id in an expression is a string.** `row.concept == v1:crm:lead`
+  is refused (`a canonical id in an expression is written as a string`);
+  write `"v1:crm:lead"`.
+
+**How a bare name resolves**, in order:
+
+1. a lambda parameter in scope, innermost first;
+2. a reserved root: `args`, `actor`, `now`, `config`, `event`, and in
+   an automation `steps`, `item`, `index` and `input`;
+3. a local or step name bound in the same body (`rows := query ...`);
+4. when called, a catalog function ([functions.md](functions.md#catalog))
+   and then a spec or trait -- the catalog is consulted first, so a
+   predicate cannot shadow a function by taking its name
+   (`component/memql/expr_eval.go`).
+
+A name that is none of these is `unknown_name`. A payload field is never
+a bare name: `status` alone is `unknown_name`, not the row's status.
+
+---
+
+## 21d. A subexpression that does not read the row is a plan constant
+
+**Rule.** In a filter or a spec body, a subexpression that does not read
+the row parameter is computed once per call, before the query runs, and
+bound as a parameter of the SQL. So an in-process function, arithmetic,
+`??` or a map literal is legal there on values that do not read the row:
+
+```memql fragment
+filter  row => row.expiresAt < addDuration(now, "P1D")
+filter  row => row.rank > args.floor * 2
+filter  row => row.stage == (args.stage ?? "active")
+```
+
+A subexpression that does read the row has to push down. The load
+refuses one that cannot, naming the node, the position and the nearest
+spelling that pushes down: `lower(row.email) == args.email` is refused
+in a query filter, and `row.email == lower(args.email)` computes the
+lower-case value before the query instead (the same test only if the
+stored emails are already lower-case). The table of what pushes down,
+per position, is [memql.md](memql.md#where-each-expression-runs).
+
+**This is what replaces `when(args.x) { ... }`.** In
+`filter row => (args.x == nil || row.f == args.x)` the test
+`args.x == nil` reads no row, so it is a plan constant: an absent
+argument folds the whole group to `TRUE` and the predicate drops, a
+present one folds it to `row.f = $1`. Under `||` the guard is written
+the other way round, as `(args.x != nil && row.f == args.x)`. The
+observability window read is the tree's `||` case
+(`dsl/observability/queries.memql`):
+
+```memql fragment
+filter  row => row.bucket == args.bucket
+            && row.windowStart >= args.windowStart
+            && row.windowStart < args.windowEnd
+            && ((args.codeReference != nil && row.codeReference == args.codeReference) || row.codeReference startsWith args.prefixes)
+```
+
+One consequence of the unset rule
+([#27](#27-unset-is-one-value-in--and--1685--2783)): `args.x == nil` is
+also true for an argument sent as `""`, so a blank argument drops the
+predicate exactly like an absent one. The `when(args.x)` guard dropped
+only on absent or `null` and kept `row.f == ""` for a blank.
+
+A collection method in a filter needs a bounded source: a row array
+field (`row.tags.any(t => t == "urgent")` lowers to SQL) or a plan
+constant (`args.tags.any(...)`). A query result is unbounded and is
+refused there.
+
+---
+
 ## 22. Tree-wide conformance gates (`test/dslconformance/conformance_test.go`)
 
 CI enforces a set of static rules over every loaded `.memql` file.
@@ -1830,36 +1895,33 @@ the change. The gates, with their test names:
 > boot over a convention would be worse than the convention drifting.
 
 - **Canonical filter prefixes** (`TestFilterSyntaxCanonical`).
-  Filter predicates reference payload fields as `<field>` -- bare, with
-  no prefix. The `payload.<field>` and `<conceptName>.<field>` forms are
-  both rejected.
-- **Row intrinsics use the `row.` namespace**
-  (`TestFilterIntrinsicsUseRowNamespace`, memql#2779). In a filter the
-  row envelope is addressed through `row.` -- `row.id`, `row.concept`,
-  `row.type`, `row.createdAt`, `row.createdBy`, `row.provenance.<leaf>`.
-  The bare spelling (`filter id == args.x`) is retired.
-
-  Why: a filter mixes two field surfaces under one syntax. Payload
-  properties are bare, so a bare `id` is indistinguishable from a payload
-  property by shape alone -- yet the two compile to completely different
-  SQL (a table column vs a JSONB path). `row.` names the envelope
-  explicitly and lines the filter up with the namespaces you already
-  write (`args.X`, `actor.X`, `config.X`) and with shape bodies, which
-  have always projected `row.id` / `row.createdAt`.
+  A filter reads a payload field through its lambda parameter,
+  `row.status`. The `payload.<field>` and `<conceptName>.<field>` forms
+  are both rejected, and a bare field name is not a field at all in
+  edition 2026 (rule
+  [#21c](#21c-a-predicate-names-its-receiver-the-lambda-parameter-and-bare-names)).
+- **Intrinsics and payload fields share one spelling**
+  (`TestFilterIntrinsicsUseRowNamespace`, memql#2779). A filter mixes
+  two field surfaces -- the row's columns and its JSON payload -- that
+  compile to entirely different SQL (a table column vs a JSONB path).
+  Before edition 2026 payload fields were bare, so a bare `id` looked
+  exactly like a payload field while compiling to a column; the `row.`
+  namespace marked the intrinsic, and this gate enforced it. Under the
+  lambda parameter both are
+  read through `row` (rule 21c), and the intrinsic names -- `id`, `concept`,
+  `type`, `createdAt`, `createdBy`, `provenance` -- are reserved field
+  names (rule 19), so the two can never collide:
 
   ```memql fragment
-  filter  row.id == args.clusterId      // correct -- the row envelope
-  filter  id == args.clusterId          // rejected -- bare intrinsic
-  filter  region == args.region         // correct -- payload property, bare
-  filter  row.region == args.region     // rejected -- not a row intrinsic
+  filter  row => row.id == args.clusterId      // an intrinsic: the row's id column
+  filter  row => row.region == args.region     // a payload field
   ```
 
-  Scope: **filter predicates.** A spec/trait body reads its
-  signature-bound fields bare and rejects `row.*` outright (epic #2281) --
-  the binding lives in the signature there. Mutation `insert` / `update`
-  blocks write `id:` / `createdAt:` as target keys rather than
-  references, and are unaffected. Sort keys are covered by their own gate,
-  below.
+  A spec or trait body reads through its own parameter the same way,
+  `spec registration isRevoked = row => row.revoked == true`. Mutation
+  `insert` / `update` blocks write `id:` / `createdAt:` as target keys
+  rather than references, and are unaffected. Sort keys are covered by
+  their own gate, below.
 - **Sort keys use the `row.` namespace**
   (`TestSortKeysUseRowNamespace`, memql#2786). The ordering half of the
   rule above: in an authored sort clause the row envelope is addressed
@@ -1884,16 +1946,16 @@ the change. The gates, with their test names:
   surface alone.
 - **Mandatory trait specs** (`TestNoInlineTraitablePredicates`).
   When a trait in `dsl/common/traits.memql` covers a predicate, the
-  filter must call the trait, not inline the comparison:
-  `isActiveRecord` (not `active == true`),
-  `isNotDeleted` (not `deleted != true`),
-  `statusIsActive` (not `status == "active"`), and so
-  on for the status / identity-type / deletion-scheduled traits.
-  Concept-specific predicates (`ownerUserId == args.userId`)
-  stay inline.
+  filter applies the trait rather than inlining the comparison:
+  `isActiveRecord(row)` (not `row.active == true`),
+  `isNotDeleted(row)` (not `row.deleted != true`),
+  `statusIsActive(row)` (not `row.status == "active"`), and so on for
+  the status / identity-type / deletion-scheduled traits.
+  Concept-specific predicates (`row.ownerUserId == args.userId`) stay
+  inline.
 - **No concept-name shortId prefixes** (`TestNoShortIdConceptPrefix`).
   Derived ids are the bare unique part (uuid / hash / slug) — never
-  `concat("agent-", ...)` or another concept-name / sub-type prefix.
+  `"agent-" + ...` or another concept-name / sub-type prefix.
   See [#20](#20-foreign-key-id-derivation-normalise-before-hashing).
 - **Typed @relationship targets** (`TestRelationshipTargetsUseImports`,
   memql#1067). `@relationship(..., target=user, ...)` names an
@@ -1904,7 +1966,8 @@ the change. The gates, with their test names:
   (`ownerUserId`, `userId`, `createdBy`, ...)
   must either carry a caller-scope check (`actor.userId` in the
   filter / write), an admin gate (`actor.isClusterOwner == true`, or an admin
-  context-spec such as `requiresOwner`, named as a bare top-level conjunct),
+  context-spec such as `requiresOwner` applied at the top level of the
+  filter, `requiresOwner(actor)`),
   an actor-gate ANNOTATION (`@requiresRank` / `@requiresCapability` — see
   [#33](#33-requiresrank-and-requirescapability-epic-memql4832--memql5166)), or an explicit `@public`
   annotation acknowledging the intent. Anything else hard-fails.
@@ -1921,19 +1984,20 @@ Companion gates in sibling files lock in the operator and binding
 grammar:
 
 - `TestNoRetiredOperatorForms` (#977,
-  `test/dslconformance/no_retired_operators_test.go`): filters use the single Go
-  boolean grammar — `&&` / `||` with parens (no `!`: it parses and is
-  then refused at load on every converter surface, memql#3630). The
-  `;`-AND and `,`-OR separators, the `has` membership operator (use
-  `in`), and the `?.` optional-chain prefix (use `when(args.x) { ... }`)
-  are rejected **by this gate**, which is a line-oriented TEXT SCAN over
-  the embedded `dsl/` tree — not by the parser, which still accepts all
-  four, and not by the engine, which still computes `;` as AND and `,`
-  as OR. That is why a `,` inside parentheses was an authorization
-  bypass and was closed here rather than in the grammar (memql#3612).
-  The scan itself now runs at load time over whatever tree the node
+  `test/dslconformance/no_retired_operators_test.go`): the retired
+  connectives -- the `;`-AND and `,`-OR separators, the `has`
+  membership operator, and the `?.` conditional prefix -- are refused
+  by a line-oriented text scan over the tree. It is a text scan because
+  the pre-edition parser accepted all four and the engine computed `;`
+  as AND and `,` as OR, which is how a `,` inside parentheses became an
+  authorization bypass, closed here rather than in the grammar
+  (memql#3612). The scan runs at load over whatever tree the node
   mounted, so a product bundle at `MEMQL_DSL_PATH` is covered too
-  (memql#3629); this test runs it over the embedded corpus.
+  (memql#3629); this test runs it over the embedded corpus. The
+  edition-2026 parser now refuses each of the four itself, naming the
+  replacement and `memqlmigrate --rewrite=expressions`
+  ([memql.md](memql.md#retired-spellings)), and `!` is legal in every
+  expression position.
 - `TestNoInfixWordAndOr` (#973,
   `test/dslconformance/no_word_logical_operators_test.go`): the English `and` / `or`
   infix forms are rejected.
@@ -1941,9 +2005,10 @@ grammar:
   named writes (`insert <concept> {` / `update <concept> {`) are
   rejected — the write target comes from the
   `mutate <Concept> <name>` signature, the block is bare
-  `insert {` / `update {`. `canonicalId(x, "v1:ns:name")` string
-  literals and `concat("v1:ns:concept:", id)` are rejected — pass
-  the imported concept short-name.
+  `insert {` / `update {`. A canonical concept id passed to
+  `canonicalId` (`canonicalId(x, "v1:ns:name")`) and a hand-built
+  `"v1:ns:concept:"` prefix are rejected — name the imported concept,
+  `canonicalId(x, "folder")`.
 
 ---
 
@@ -1961,9 +2026,10 @@ A query is list-returning when its `shape` projects a row set
 
 - **Single-row read — EXEMPT.** The filter contains a `row.id == <expr>`
   equality on the row's primary intrinsic. It reads at most one row, so
-  it is not a list. A *guarded* `when(args.x) { row.id == ... }` does
-  **not** count — the id filter is conditional, so the query can still
-  return the full set when the arg is omitted.
+  it is not a list. An optional-arg guard,
+  `(args.id == nil || row.id == args.id)`, does **not** count — the id
+  comparison applies only when the arg is present, so the query can
+  still return the full set when it is omitted.
 - **Aggregate — EXEMPT.** The query carries a `count` clause. It returns
   a `{count: N}` number, not rows.
 - **Bounded list — COMPLIANT.** The query declares `paginate` (an
@@ -1980,13 +2046,13 @@ A query is list-returning when its `shape` projects a row set
 // Single-row read — exempt (row.id == equality).
 query folder folderMeta {
   args { folderId string @required }
-  filter  row.id==args.folderId
+  filter  row => row.id == args.folderId
   shape   folderFull
 }
 
 // Bounded list — compliant (paginate window).
 query folder firstTenFolders {
-  filter  active==true
+  filter  row => isActiveRecord(row)
   paginate 10
   shape   folderFull
 }
@@ -1994,13 +2060,13 @@ query folder firstTenFolders {
 // Legitimate full-set read — compliant, marked + auditable.
 @unbounded("provider catalog is a small bounded set — never more than a handful of rows")
 query provider allProviders {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   providerFull
 }
 
 // VIOLATION — list read with no bound. Pulls the whole table.
 query widget allWidgets {
-  filter  ownerUserId==args.ownerUserId
+  filter  row => row.ownerUserId == args.ownerUserId
   shape   widgetFull
 }
 ```
@@ -2045,6 +2111,51 @@ the author think about the bound up front.
 
 ---
 
+## 23b. `refine` narrows a page in process, after `paginate`
+
+**Rule.** A predicate over the row that cannot push down -- it calls an
+in-process function on a field, or runs a collection method over
+something other than a row array -- is not a filter. Write it as a
+`refine` clause: `refine row => <expression>`. It runs in process, on
+the page `paginate` already read, and keeps the rows the expression is
+true for.
+
+```memql
+use library.concepts.{ artifact }
+use library.shapes.{ artifactFull }
+use common.traits.{ isActiveRecord }
+
+/// Artifacts in a folder whose title contains a search term, any case.
+query artifact searchFolderArtifacts {
+  args {
+    folderId  string!
+    q         string!
+  }
+  filter   row => row.folderId == args.folderId && isActiveRecord(row)
+  paginate 50
+  refine   row => lower(row.title).includes(lower(args.q))
+  shape    artifactFull
+}
+```
+
+- **`refine` requires `paginate`.** It only ever runs over a bounded
+  page; a `refine` with no `paginate` is refused at load.
+- **A page may come back short.** The clause removes rows after the
+  page is read, so a page can hold fewer rows than `paginate` asked
+  for, or none; a short page is not the end of the set.
+- **It is the in-process tier.** Every catalog function and collection
+  method is legal in it, and a construct call is not. Its parameter
+  reads the query's bound concept, like the filter's.
+
+`refine` is a named clause on purpose (D11 of the
+[language freeze record](../../superpowers/specs/2026-09-13-dsl-v1-language-freeze-program-design.md)):
+an expression never falls back to in-process evaluation on its own. A
+filter that cannot push down is refused at load and names the fix;
+moving the predicate into `refine` is a decision the author makes and a
+reviewer can see.
+
+---
+
 ## Result caching: `@cache(N)` on hot reads
 
 **Caching is ON by default, and an annotation changes the number rather
@@ -2063,7 +2174,7 @@ string (`@cache("5m")`) is not a supported form.
 ```memql
 @cache(300)
 query agentRole activeAgentRoles {
-  filter  isActiveRecord
+  filter  row => isActiveRecord(row)
   shape   agentRoleFull
 }
 ```
@@ -2213,7 +2324,7 @@ kind you touch.
 
 **Enforcement.** The two suites above are the gate; a construct kind or
 operator added without a matching negative case is the defect this rule
-targets. See also [#22](#22-tree-wide-conformance-gates-dslconformance_testgo)
+targets. See also [#22](#22-tree-wide-conformance-gates-testdslconformanceconformance_testgo)
 for the complementary tree-wide gates that scan the live `.memql` tree.
 
 ---
@@ -2265,7 +2376,8 @@ one registry, keyed by the edition it moves a tree onto and the epic that
 shipped it (`cmd/memqlmigrate/rewrites.go`), and reached with `--edition`
 (default: the edition this engine writes) and `--rewrite=<name>`;
 `--rewrite=language-line` is the one that declares the line in every domain
-that has none.
+that has none, and `--rewrite=expressions` moves filters, spec and trait
+bodies, conditions and values onto the edition-2026 expression grammar.
 
 A rewrite is **required** when a narrowing can strand source someone else
 holds: the retired form has in-tree usage, or plausible usage in a
@@ -2282,10 +2394,10 @@ naming it), diagnosable (a rejection with a hint), and mechanically fixable
 
 ## Reserved args-field names
 
-`now`, `actor`, `partition`, `config`, and `trace` are ambient top-level
-identifiers every body may read; an `args { }` field of the same name is
-REJECTED at parse time (rename it -- e.g. `asOf` for a caller-passed
-evaluation instant). `event` is additionally reserved for AUTOMATION args
+`now`, `actor`, `partition`, `config`, and `trace` are reserved
+top-level identifiers; an `args { }` field of the same name is refused at
+parse time (rename it -- e.g. `asOf` for a caller-passed evaluation
+instant). `event` is additionally reserved for automation args
 by the load-time shadow check (G2, memql#2364).
 
 ---
@@ -2306,13 +2418,13 @@ place, so the import carries nothing -- but nothing about
 `isActiveRecord` tells you it lives in `common`, so there the import is
 the only thing that says so.
 
-The cross-domain gate checks the references whose bare spelling really
-is a construct reference: a trait or spec invoked in a `filter` clause,
-and a shape named in a `shape` projection clause. It deliberately does
-NOT check bare identifiers that resolve to a concept -- a bare name in a
-filter clause is a payload field (`filter surface!=""` reads the payload
-field `surface`, not the `v1:actions:surface` concept), and 10 construct
-names double as payload field names across the tree.
+The cross-domain gate checks the references whose spelling really is a
+construct reference: a trait or spec applied in a `filter` clause
+(`isNotDeleted(row)`), and a shape named in a `shape` projection clause.
+It does not check a name that merely matches a concept: a field is read
+through the lambda parameter (`filter row => row.surface != ""` reads
+the payload field `surface`, not the `v1:actions:surface` concept), and
+10 construct names double as payload field names across the tree.
 
 A reference to a construct declared NOWHERE in the tree is skipped
 rather than flagged: a product bundle mounts extra domains at boot via
@@ -2354,40 +2466,83 @@ use planner.concepts.{ plan }
 auth envelope (`actor.*`) must declare `@actor` in its preamble --
 used-but-undeclared is a file-attributed load error AND an edit-time
 `actor-undeclared` Error squiggle (#2622, same shared detection).
-Declared-but-unused is legal. Spec/trait bodies keep the inverse rule
-(direct reads rejected; bind an `@actor` shape); shapes use `@actor`
-as their kind marker; the seed-file `@actor("system")` is a different
-construct. An unknown member (`actor.displayName`) is likewise a load
+Declared-but-unused is legal. A spec or trait body does not read the
+`actor` root: a spec that asks about the actor binds an `@actor` shape,
+and its lambda parameter, spelled `actor`, is the envelope
+(`spec actorEnvelope requiresOwner = actor => actor.role == "owner"`).
+Shapes use `@actor` as their kind marker; the seed-file
+`@actor("system")` is a different construct. An unknown member (`actor.displayName`) is likewise a load
 error and an `actor-unknown-property` squiggle (#2625): the envelope is
 a closed set, and both layers read the same canonical table.
 
 ---
 
-## 27. `!=` matches rows where the field is ABSENT (#1685 / #2783)
+## 27. Unset is one value in `==` and `!=` (#1685 / #2783)
 
-**Rule.** A `!=` predicate is null-safe: a row whose payload lacks the
-field **matches**. A `==` predicate does not. And there is ONE notion
-of unset (memql#5366): a missing key, a JSON null, `nil` and the empty
-string are one value to `==`, `!=` and `in`, so `== ""` and `== nil`
-both match an absent field and `!= ""` and `!= nil` both exclude one. A
-whitespace-only string is a value, not unset.
+**Rule.** A missing field, a JSON `null`, the `nil` literal and the empty
+string `""` are one value, unset, when `==` or `!=` compares them. `!=`
+is the exact negation of `==`, so `!=` against a set value matches an
+unset field, and `!= ""` and `!= nil` are the "is set" test.
 
 ```memql fragment
-filter deleted != true      // matches rows with NO `deleted` key
-filter status == "active"   // does NOT match rows with no `status` key
-filter consumedAt != ""     // does NOT match rows with no `consumedAt` key
-filter revokedAt == ""      // DOES match rows with no `revokedAt` key
+filter  row => row.deleted != true      // matches rows with no `deleted` key
+filter  row => row.status == "active"   // does not match rows with no `status` key
+filter  row => row.consumedAt != ""     // does not match rows with no `consumedAt` key
+filter  row => row.consumedAt != nil    // the same test: nil and "" are one value
 ```
 
-**Why.** Both directions were bugs before they were rules:
+The whole table, as `EvalExpr` implements it
+(`component/memql/expr_eval.go`, pinned row by row by
+`TestEvalExprAbsenceTable`):
+
+| Expression | `x` missing or `null` | `x` is `""` |
+|---|---|---|
+| `x == nil`, `x == ""` | true | true |
+| `x != nil`, `x != ""` | false | false |
+| `x == "open"` | false | false |
+| `x != "open"` | true | true |
+| `x < "m"` (and `<=`, `>`, `>=`) | false | compared as a string: `"" < "m"` is true |
+| `x in ["open", ""]` | true | true |
+| `x in ["open", "held"]` | false | false |
+| `"open" in x` | false | refused: `in_requires_list` |
+| `x startsWith "op"` | false | false |
+| `x.includes("op")` | false | false |
+| `!(x == "open")` | true | true |
+| `x ?? "none"` | `"none"` | `"none"` |
+| `x.count()` | `0` | `0` |
+| `x.?f` | absent | absent |
+
+Four more facts the table relies on:
+
+- **Whitespace is a value.** `" "` is not unset: `" " == ""` is false.
+  Only `??` reads a whitespace-only string as blank
+  ([#30](#30--is-blank-coalescing-not-null-coalescing-1614--memql3627)).
+- **Equality is typed.** `1 == "1"` is false, numbers compare
+  numerically across integers and floats, and `0` and `false` are
+  values, never unset.
+- **`!` negates exactly.** Every predicate answers true or false, an
+  unset operand included, so `!(x == v)` is `x != v` for every `v`.
+  An ordered comparison is false for an absent field in both
+  directions, so `!(row.n < 5)` is true for a row with no `n` while
+  `row.n >= 5` is false: negating an ordered comparison is not the
+  reversed comparison.
+- **Each rule has one SQL twin**, named beside it in `expr_eval.go`:
+  `IS DISTINCT FROM` for `!=` against a set value,
+  `COALESCE(x, '') = ''` (or `<> ''`) for a comparison against unset,
+  `NOT COALESCE((e), FALSE)` for `!`. Text orders by byte
+  (`COLLATE "C"`), so RFC 3339 UTC timestamps order as instants and no
+  locale folds `"é"` into `"e"`. The differential lane holds the SQL and
+  the in-process answer to each other, row by row.
+
+**Why.** Both halves of the old rule were bugs before they were rules:
 
 - Plain SQL `<>` yields NULL, not true, when the field is missing, so
-  `deleted != true` silently DROPPED every row that never had a
+  `deleted != true` silently dropped every row that never had a
   `deleted` key -- the concept `@default` is not always stamped
   (#1685). So `!=` is the exact negation of `==`: absent is not equal to
   `true`, so `!= true` is true for it.
 - An absent string field is logically equal to `""` -- both mean "not
-  set" -- and `!= ""` is the canonical *is set* idiom
+  set" -- and `!= ""` is the canonical is-set idiom
   (`deletionScheduledAt != ""`, `consumedAt != ""`). Under the bare
   #1685 rule those returned every unset row (#1708 / #1714).
 - `== ""`, the *is NOT set* idiom, is the same fact read the other way,
@@ -2397,54 +2552,49 @@ filter revokedAt == ""      // DOES match rows with no `revokedAt` key
   revocation does. The push-down now spells every unset test
   `COALESCE(expr, '') = ''` (or `<> ''`), for `""` and `nil` alike.
 
-**Comparisons are typed (memql#5366).** A literal compares only with a
-stored value of its own JSON type: a stored `"1"` is not equal to `1`, a
-stored `1` is not equal to `"1"`, and a stored `"true"` is not `true`.
-The push-down guards each comparison on the stored type, so a mistyped
-or malformed stored value is simply not equal, not ordered and not a
-member -- where it used to be cast, and `'abc'::numeric` failed the
-whole read with a Postgres error. `in` is `==` against each member, so
-`status in ["", "open"]` also matches an unset `status`.
+**What changed on 2026-09-13.** The two carve-outs became one rule
+(D8 of the
+[language freeze record](../../superpowers/specs/2026-09-13-dsl-v1-language-freeze-program-design.md)):
+unset is one value, so `==` is symmetric and `!=` is its exact negation
+for every pair. Four results differ from before:
 
-The SQL push-down and the in-process post-filter implement all of this
-identically, and must continue to: a combined-filter query scans in SQL
-and then re-filters in process, so any disagreement means the rows you
-get depend on which path ran. `absent_field_comparison_test.go` and
-`present_field_comparison_test.go` pin it, including that agreement.
+- `row.f == ""` matches a row with no `f`. It did not before: only
+  `!= ""` carried the carve-out.
+- `row.f == nil` matches a blank `f`, and `row.f != nil` excludes it.
+  `nil` was a separate presence test (`IS NULL`); now `x != nil` keeps
+  the blank rule `exists(x)` had, which is why `exists(x)` retires to it.
+- `!(row.f in list)`, the replacement for the retired `not in`, is true
+  for an absent `f`, exactly as `row.f != v` is. `not in` treated an
+  absent field as a non-match, so `deleted not in [true]` did not
+  behave like `deleted != true`; its replacement does.
+- A comparison is typed: a literal compares only with a stored value of
+  its own JSON type, so a stored `"1"` is not equal to `1` and a stored
+  `"true"` is not `true`. The push-down guards each comparison on the
+  stored type, so a mistyped or malformed stored value is not equal, not
+  ordered and not a member. It used to be cast, and `'abc'::numeric`
+  failed the whole read with a Postgres error.
 
-**The trap this creates.** A misspelled property in a `!=` predicate is
-ABSENT, so it matches **every row**:
+**The trap this creates.** A misspelled field in a `!=` predicate is
+absent, so it matches every row:
 
 ```memql fragment
-filter delted != true       // typo -- matches everything, including deleted rows
+filter  row => row.delted != true       // typo -- matches everything, including deleted rows
 ```
 
-The failure direction is the dangerous one. The same typo in `==`
-returns zero rows and someone notices immediately; in `!=` on an
-authorization- or deletion-scoped filter it quietly serves rows that
+The failure direction is the dangerous one. The same typo in
+`== true` returns zero rows and someone notices immediately; in `!=` on
+an authorization- or deletion-scoped filter it quietly serves rows that
 were meant to be excluded.
 
-Note the null-safety is specific to `!=` (and to the unset tests
-`== ""` / `== nil`). `not in` and the ordered comparisons (`<`, `>`,
-`<=`, `>=`) all treat an absent field as a NON-match, on both paths --
-so `deleted not in [true]` does NOT behave like `deleted != true`.
-
-String orderings compare BYTES on both paths: the push-down emits
-`COLLATE "C"` for a string `<` / `<=` / `>` / `>=` (memql#5366), so
-`"E" < "a"` whatever the database's default collation, exactly as the
-in-process evaluator orders Go strings. RFC 3339 UTC timestamps order
-correctly under it, which is what the expiry sweeps rely on.
-
 **What to do about it.** Prefer the trait over an inline predicate --
-`isNotDeleted` rather than `deleted != true`. The conformance gate
-already requires this wherever a trait exists (rule 22,
+`isNotDeleted(row)` rather than `row.deleted != true`. The conformance
+gate already requires this wherever a trait exists (rule 22,
 `TestNoInlineTraitablePredicates`).
 
-**A misspelled FIELD is now caught before it ships**, and so is a
-misspelled trait in a `use` line. Three referential lanes cover those
-three positions, each verified by injecting the typo into a shipped
-construct. A misspelled trait at a *call site* is the position they
-miss -- see below:
+**A misspelled field is caught before it ships**, and so is a misspelled
+trait in a `use` line. Three referential lanes cover those positions,
+each verified by injecting the typo into a shipped construct. A
+misspelled trait at a call site is the position they miss -- see below:
 
 | you misspell | reported as |
 |---|---|
@@ -2463,51 +2613,85 @@ section) -- so `make test` catches these two lanes but
 natural place to look. Row 3 is caught by both, since the cross-domain
 import gate (rule 25) also runs in `./dsl/...`.
 
-**The typo shape that is still silent is a misspelled trait at the CALL
-SITE.** Row 3 catches a name misspelled in the `use` line. It does not
-check that call sites match what was imported -- so this is silent:
+**A misspelled trait at the call site was the silent shape.** Row 3
+catches a name misspelled in the `use` line. It does not check that call
+sites match what was imported:
 
 ```memql fragment
 use common.traits.{ isNotDeleted }        // correct
 
-filter  planId==args.planId && isNotDeletd    // typo -- nothing reports it
-filter  ownerUserId==args.ownerUserId && isNotDeleted   // sibling keeps the import "used"
+filter  row => row.planId == args.planId && isNotDeletd(row)             // typo
+filter  row => row.ownerUserId == args.ownerUserId && isNotDeleted(row)  // a sibling keeps the import "used"
 ```
 
-Verified: `memqllint`, `go test ./dsl/...` and the referential tests all
-stay green. It surfaces only when the typo orphans the import entirely
+Measured on the pre-edition spelling (a bare `isNotDeletd` conjunct):
+`memqllint`, `go test ./dsl/...` and the referential tests all stayed
+green. It surfaced only when the typo orphaned the import entirely
 (every call site misspelled), which reports the import as never
 referenced. A same-domain trait is the same hole with no import at all
 to orphan -- rule 25 (#2617) makes it ambient, so there is nothing for
 the import lane to inspect.
 
-It does fail **closed**: at query-parse on first call the query errors
+It does fail closed: on first call the query errors
 `unknown spec "isNotDeletd"` rather than quietly returning every row. A
 loud runtime error, not a build-time gate.
 
-**What field validation structurally cannot see** is a field that is real
-and declared but scoped from the wrong *source*: `filter
-row.id==args.userId` is a well-formed reference to an existing property
--- it just trusts an argument where it should have trusted the token.
-That is #2799 / #2800 / #2803, not this rule. (Note the `row.` prefix:
-the bare-intrinsic spelling is retired by rule 22.)
+**What field validation structurally cannot see** is a field that is
+real and declared but scoped from the wrong source:
+`filter row => row.id == args.userId` is a well-formed reference to an
+existing property -- it just trusts an argument where it should have
+trusted the token. That is #2799 / #2800 / #2803, not this rule.
 
 So the fail-open direction above is real but mostly out of reach of a
 typo now. It remains reachable by a caller-supplied id, and by a field
 declared on the concept that is simply absent on a given row -- which is
-the case the null semantics get deliberately right.
+the case the unset rule gets deliberately right.
+
+---
+
+## 27b. `.?` reads through an object that may be absent
+
+**Rule.** Where the object a member path passes through may be absent --
+an optional object field, an optional arg, an untyped value -- write
+`.?` after it. The load requires `.?` there and refuses `.` with the
+`.?` spelling in the message:
+
+```memql fragment
+filter  row => row.?lineage.originatingRunId == args.runId
+@filter(row => row.?preferences.computerUseEnabled == false)
+```
+
+`lineage` on `v1:agents:agent` and `preferences` on `v1:identity:user`
+are optional object blocks, so a row may carry neither.
+
+At run time `.` and `.?` behave the same: a read through an absent
+object is absent, never an error, and the rest of the chain stays
+absent. The unset rule (#27) then decides the comparison, so the
+trigger filter above fires only for a user whose preferences say
+`false`, not for one who never set them. What `.?` adds is the
+statement, checked at load, that the author knows the object may be
+missing.
+
+`.?` is one token written after the object, and it binds like `.`. It
+is not the retired `?.` prefix, which was the optional-argument guard:
+`?.status == args.x` is refused naming
+`(args.x == nil || <predicate>)`, and `?.` written after an object is
+refused with `optional member access is written .? after the object,
+as in x.?field`.
+
+---
 
 ## 28. Whitespace changes what `-` means; a fraction needs its leading `0` (memql#3624)
 
-Two lexical traps in the same neighbourhood, one fixed and one still live.
+Two lexical traps in the same neighbourhood, both now refused.
 
-**Fixed: a fraction MUST be written with a leading digit.** `.5` used to
-lex as an identifier, so it reached the comparison as the *string* `".5"`
-while `0.5` reached it as the float:
+**A fraction is written with a leading digit.** `.5` used to lex as an
+identifier, so it reached the comparison as the *string* `".5"` while
+`0.5` reached it as the float:
 
 ```memql retired
-filter score > .5       // REJECTED at load since memql#3624
-filter score > 0.5      // correct -- and always was
+filter  row => row.score > .5       // refused at load since memql#3624
+filter  row => row.score > 0.5      // correct -- and always was
 ```
 
 Error: `a number cannot start with '.' at line N, column M: a decimal
@@ -2515,34 +2699,39 @@ literal needs a leading digit (write "0.5", not ".5")`. Rejecting rather
 than accepting `.5` as a second spelling keeps one canonical form per
 construct, matching the rest of this document.
 
-**Still live: `-` glued to an identifier is absorbed into the name.**
-`-` is a legal identifier character (the seed catalog's kebab-case slugs,
-`seed skill workbench-baseline`, and the capability-script argument names
-in `dsl/install/actions.memql`), so a hyphen with no surrounding space
-becomes part of the identifier instead of an operator:
+**A hyphen glued between two names is one name.** `-` is a legal
+identifier character (the seed catalog's kebab-case slugs,
+`seed skill workbench-baseline`, and the capability-script argument
+names in `dsl/install/actions.memql`), so `total-used` lexes as a single
+identifier. Before edition 2026 a filter compared against it and matched
+nothing, silently:
 
-```memql fragment
-filter remaining == total-used     // compares against the STRING "total-used"
-filter remaining == total - used   // subtraction -- what was probably meant
+```memql retired
+filter  remaining == total-used     // pre-edition: compared against the string "total-used"
 ```
 
-The neighbourhood is asymmetric, and only the middle row is silent:
+The lexer cannot tell a name from a subtraction -- only *position*
+separates them, and the lexer does not know position. No lexical rule
+can tell them apart without either breaking the 189 hyphenated names the
+tree depends on or silently flipping which reading wins; both were
+measured in memql#3624 and rejected, and the reasoning is recorded at
+`case '-'` in `component/language/parser/lexer.go`. The edition-2026
+parser does know position, so it closes the case there: in an
+expression a hyphenated name is refused
+(`` `row.total-used` reads as one name; write `row.total - used` (spaces) for subtraction ``),
+while a named argument or a map key, which is never an expression, may
+still be hyphenated. Put spaces around a `-` you mean as an operator:
 
-| spelling | tokens | outcome |
+```memql fragment
+filter  row => row.remaining == row.total - row.used
+```
+
+| spelling | tokens | in an edition-2026 expression |
 |---|---|---|
 | `a - b`, `a -b` | `a` `-` `b` | subtraction |
-| `a-b` | `a-b` | **silent identifier** |
-| `a- b` | `a-` `b` | loud |
-| `a -5`, `5-3` | two operands | loud |
-
-**Why it bites you.** The two readings are character-for-character
-identical; only *position* separates a name from a subtraction, and the
-lexer does not know position. No lexical rule can tell them apart without
-either breaking the 189 hyphenated names the tree already depends on or
-silently flipping which reading wins -- both were measured in memql#3624
-and rejected. **Always put spaces around a `-` you mean as an operator.**
-The reasoning, the candidate rule that was tried, and what it broke are
-recorded at `case '-'` in `component/language/parser/lexer.go`.
+| `a-b` | `a-b` | refused: one name (silent before edition 2026) |
+| `a- b` | `a-` `b` | refused |
+| `a -5`, `5-3` | two operands | refused: put a space after `-` |
 
 ## 29. A prompt's declaration must cover its template AND name a real provider (memql#3616)
 
@@ -2608,10 +2797,11 @@ and `test/dslconformance/prompt_caller_payload_test.go`.
 
 ## 30. `??` is BLANK-coalescing, not null-coalescing (#1614 / memql#3627)
 
-**Rule.** `a ?? b` (and its longhand `coalesce(a, b)`) falls through to
-`b` when `a` is absent, null, **or a string that is empty or contains
-only whitespace**. It does *not* fall through for `false`, `0`, `[]` or
-`{}` — those are values.
+**Rule.** `a ?? b` falls through to `b` when `a` is missing, `null`,
+**or a string that is empty or contains only whitespace**. It does not
+fall through for `false`, `0`, `[]` or `{}` -- those are values. `??` is
+the only spelling: `coalesce(a, b)` is retired and refused, naming
+`a ?? b` and `memqlmigrate --rewrite=expressions`.
 
 ```memql fragment
 // with the caller passing v:
@@ -2619,24 +2809,31 @@ only whitespace**. It does *not* fall through for `false`, `0`, `[]` or
 //   0       -> 0            kept
 //   []      -> []           kept
 //   {}      -> {}           kept
-//   ""      -> "DEFAULT"    REWRITTEN
-//   " "     -> "DEFAULT"    REWRITTEN   <-- the sharp edge
-//   "\t\n"  -> "DEFAULT"    REWRITTEN
+//   ""      -> "DEFAULT"    replaced
+//   " "     -> "DEFAULT"    replaced   <-- the sharp edge
+//   "\t\n"  -> "DEFAULT"    replaced
 //   "value" -> "value"      kept
 insert { v: args.v ?? "DEFAULT" }
 ```
 
+`a ?? b ?? c` folds left to the first operand that is not blank, and the
+last operand is returned even when it is blank. `??` binds tighter than
+comparison, so `args.stage ?? "" == "active"` compares the coalesced
+value, and `b` is not evaluated when `a` wins.
+
 **Why it bites you.** The operator is called null-coalescing everywhere,
-including in this repo, so nothing prepares you for the third line: **a
-user who deliberately clears a text field gets the default written back
-over their clearing**, and a field holding a single space is treated as
-absent when it is not absent by any reading.
+including in this repo, so nothing prepares you for the whitespace line:
+**a user who deliberately clears a text field gets the default written
+back over their clearing**, and a field holding a single space is
+treated as absent when it is not absent by any reading. It is also the
+one place whitespace counts as blank: to `==` a `" "` is a value
+([#27](#27-unset-is-one-value-in--and--1685--2783)).
 
 **Why it stays this way.** The empty-string behaviour is deliberate
 (#1614): `f: args.f ?? ""` has to be able to land an explicit empty
 string, because a `null` there fails JSON-schema validation on a
 non-required string field. The whole corpus is written against that
-rule, and the ARGUMENT position has no other spelling — `@default` on an
+rule, and the argument position has no other spelling — `@default` on an
 args field is rejected at load (#991), so `??` is the only mechanism
 that fills a value. Changing the operator under the corpus to settle a
 naming complaint would be the larger defect.
@@ -2647,20 +2844,27 @@ sending blank, that is `@noUnset("field")` on the mutation (memql#3415)
 incoming value is empty and the stored one is not, which is exactly the
 "do not let a blank overwrite this" rule that `??` does not express.
 
-**One rule, one implementation.** Both spellings resolve through
-`coalesceSelect` in `component/memql/mutation_templates.go`: the FINAL
-arm is the ultimate fallback and is returned even when blank, while
-every NON-final arm is skipped when nil, missing, or blank. They were
-two implementations that disagreed on a blank middle arm until
-memql#3627 (`coalesce(args.a, "", args.c)` with nothing resolving gave
-`""` from a payload slot and `nil` from an `id:` slot). Pinned by
-`coalesce_array_missing_3627_test.go`.
+**One rule, one implementation.** Every evaluator of `??` resolves
+through `coalesceSelect` in `component/memql/mutation_templates.go`,
+`EvalExpr` included: the final arm is the ultimate fallback and is
+returned even when blank, while every non-final arm is skipped when nil,
+missing, or blank. The two pre-edition spellings, `??` and
+`coalesce(...)`, were two implementations that disagreed on a blank
+middle arm until memql#3627 (`coalesce(args.a, "", args.c)` with nothing
+resolving gave `""` from a payload slot and `nil` from an `id:` slot).
+Pinned by `coalesce_array_missing_3627_test.go`.
 
-**A missing arg contributes NOTHING to either container.** An absent
-optional arg omits its key from an object literal and omits its element
-from an array literal — `{ v: [args.a, args.b, "c"] }` with only `b`
+**A missing arg contributes nothing to either container.** An absent
+optional arg omits its key from a map literal and omits its element
+from a list literal — `{ v: [args.a, args.b, "c"] }` with only `b`
 supplied renders `{"v":["B","c"]}`, not a `null` hole (memql#3627). An
-explicit `null` the author wrote is preserved in both.
+explicit `nil` the author wrote is kept in both.
+
+In a filter or a spec body `??` is legal only on values that do not read
+the row: `row.stage == (args.stage ?? "active")` computes the fallback
+before the query
+([21d](#21d-a-subexpression-that-does-not-read-the-row-is-a-plan-constant)),
+and `row.alias ?? "x"` is refused there.
 
 ---
 
@@ -2842,65 +3046,70 @@ that passes nothing gets the whole rule, which is the fail-closed direction.
 
 ## 32. `startsWith` is a selection, never a pass-through (memql#4208)
 
-**Rule.** `<field> startsWith <prefix>` matches a row whose string
-property begins with the prefix, or with ANY prefix in a list. The
-right-hand side is a string literal, a list of string literals, or an
-`args.<field>` that resolves to either at call time. Two inputs match
-NOTHING, and that is the contract rather than an edge case:
+**Rule.** `s startsWith p` is true when the string `s` begins with the
+prefix `p`, or with any prefix in a list of them. The right-hand side is
+a string, a list of strings, or an expression that yields either
+(`args.prefixes`). Two inputs match nothing, and that is the contract
+rather than an edge case:
 
 - an **empty list** (`args.prefixes` bound to `[]`);
 - a **blank prefix** (`""` or whitespace), on its own or inside a list --
   blanks are dropped, and a list of nothing but blanks is an empty list.
 
+`s.includes(sub)`, the substring test that replaced `contains(s, sub)`,
+follows the same rule: a blank `sub` matches nothing, because `""`
+occurs in every string and a blank search must not widen a selection to
+every row.
+
 Right -- a prefix-scoped read that cannot widen (the read behind
 memql#4208, `dsl/observability/queries.memql`):
 
 ```memql fragment
-filter  bucket==args.bucket && (when(args.codeReference) { codeReference==args.codeReference } || codeReference startsWith args.prefixes)
+filter  row => row.bucket == args.bucket
+            && ((args.codeReference != nil && row.codeReference == args.codeReference) || row.codeReference startsWith args.prefixes)
 ```
 
 Wrong -- expecting Go's `strings.HasPrefix(s, "")`:
 
 ```memql fragment
-filter  codeReference startsWith args.prefix   // args.prefix == "" returns NO rows, not every row
+filter  row => row.codeReference startsWith args.prefix   // args.prefix == "" returns no rows, not every row
 ```
 
 **Why.** Every language's HasPrefix says the empty string is a prefix of
-everything, and in a query filter that is exactly the fail-open shape this
-document keeps recording (`!= ""` as the is-set idiom in #27, `??`
+everything, and in a query filter that is exactly the fail-open shape
+this document keeps recording (`!= ""` as the is-set idiom in #27, `??`
 blank-coalescing in #30): a selection that admits every row on a blank
-input. `codeReference startsWith args.prefixes` is safe to hand whatever
-list the caller holds because neither an empty list nor a list of blanks
-can turn it into a cluster-wide scan. The engine rule lives in
+input. `row.codeReference startsWith args.prefixes` is safe to hand
+whatever list the caller holds because neither an empty list nor a list
+of blanks can turn it into a cluster-wide scan. The engine rule lives in
 `normalizePrefixValues` (`component/memql/executor_filter.go`) and every
 evaluator reads it -- the SQL compile (`((payload #>> '{f}') ^@
 ANY(?::text[]))`, or the constant `FALSE` for an empty list), the
-in-process post-filter every SQL candidate goes through, collection
-lambdas and shape-template matches -- so they cannot disagree.
+in-process post-filter every SQL candidate goes through, and `EvalExpr`
+(`exprStartsWith`), so they cannot disagree.
 
-**What it does NOT do.**
+**What it does not do.**
 
-- It is not a pattern. `^@` is Postgres `starts_with()` as an operator, a
-  byte-prefix test; `%` and `_` in a prefix are literal, and nothing is
-  escaped or concatenated -- one `text[]` parameter is bound whatever the
-  right-hand shape was.
-- It does not drop on absence. `when(args.x) { ... }` is the "no
-  constraint when the arg is absent" form; a blank is a VALUE, and as a
-  prefix it is not one. Declare the list arg `[]string!` when an absent
-  list must be a refused call rather than an unconstrained one.
-- It is not a runtime-condition operator. Filters and spec bodies compile
-  it; an automation cond-step condition or a trigger `@filter` is refused
-  by name (`component/automations/evaluator.go`), because that string
-  grammar would otherwise read the whole condition as a non-empty --
-  truthy -- string.
-- `not startsWith` is not a form; the left side must be a row field
-  (`args.x startsWith ...` is refused); a bare identifier on the right is
-  refused rather than read as its own literal text; a row intrinsic
-  (`row.id startsWith`) is refused at compile.
+- It is not a pattern. `^@` is Postgres `starts_with()` as an operator,
+  a byte-prefix test; `%` and `_` in a prefix are literal, and nothing
+  is escaped or concatenated -- one `text[]` parameter is bound whatever
+  the right-hand shape was.
+- It does not drop on absence. `(args.x == nil || ...)` is the "no
+  constraint when the arg is absent" form
+  ([21d](#21d-a-subexpression-that-does-not-read-the-row-is-a-plan-constant));
+  a blank is not a prefix. Declare the list arg `[]string!` when an
+  absent list must be a refused call rather than an unconstrained one.
+- It needs a string subject. An absent or non-string left side is
+  false, not an error; a right side that is neither a string nor a list
+  of strings is refused.
+- `not startsWith` is not a form: negate the comparison,
+  `!(row.codeReference startsWith p)`.
 
 **Tested by.** `component/language/parser/startswith_test.go` (grammar and
 its negative cases), `component/memql/executor_filter_startswith_test.go`
-(SQL + in-process agreement), and
+(SQL + in-process agreement), `TestEvalExprAbsenceTable` in
+`component/memql/expr_eval_test.go` (the in-process rule over absent,
+null, blank and set subjects), and
 `component/memql/code_metrics_in_window_db_test.go` (the memql#4208 read
 against a real Postgres, db-gated).
 
@@ -2998,7 +3207,7 @@ branches still decide it.
 ### It widens the TIER, not a query that narrows itself
 
 The tier's predicate is **ANDed** into a bound read. A query whose own filter
-already says `ownerUserId==actor.userId` therefore stays owner-scoped no matter
+already says `row.ownerUserId == actor.userId` therefore stays owner-scoped no matter
 what its concept declares — an AND with a hand-written owner conjunct cannot be
 widened by anything.
 
@@ -3009,7 +3218,8 @@ who the caller must be and let the tier decide.
 
 ### The generic browse caches for 60 seconds
 
-An UNBOUND read (`concept=="v1:platform:site"`, the generic concept browse)
+An unbound read (the generic concept browse, the internal query form
+`concept=="v1:platform:site"`)
 injects no tier predicate — admission is the per-row egress gate alone — so its
 plan carries no account term, and the account fingerprint joins the cache
 signature only when one is present. The signature folds in the ACTOR, so no
