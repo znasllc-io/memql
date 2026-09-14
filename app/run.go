@@ -217,55 +217,61 @@ func Run(cfg RunConfig) {
 	// Ready and the readiness probe reports ready. No-op on non-mesh binaries.
 	application.MarkNodeReady()
 
-	// MODULE READINESS (design record 2026-09-06-configuration-readiness,
-	// section 6): written here, after every dependency is Ready and the
-	// plug-ins and providers have materialized, under the same node identity
-	// the startup event carries. Earlier would report an unconfigured module
-	// for every integration that had not finished wiring up.
+	// MODULE READINESS (design records 2026-09-06-configuration-readiness
+	// section 6, and 2026-09-14-readiness-convergence D2): evaluated here,
+	// after every dependency is Ready and the plug-ins and providers have
+	// materialized, under the same node identity the startup event carries.
+	// Earlier would report an unconfigured module for every integration that
+	// had not finished wiring up.
 	//
-	// A failure keeps the PREVIOUS boot's rows and says so; it never stops the
-	// node. A cluster that will not start because it could not describe its own
-	// configuration is a worse outcome than a stale verdict.
+	// THE WRITE GOES THROUGH THE RECOMPUTE SUBSCRIBER, which retries a pass
+	// that failed or could not evaluate on a jittered backoff until one lands.
+	// On 2026-09-13 every pod's boot write hit a saturated database during the
+	// rollout (SQLSTATE 53300 and dial i/o timeouts); the direct write that
+	// used to sit here had exactly one more chance thirty seconds later, and a
+	// node nobody dials (the edge, a product bff) never receives the mesh event
+	// that would have prompted a third.
 	//
-	// AND ONE RE-WRITE THIRTY SECONDS LATER (epic memql#5118, D5). Not a poll,
-	// and it does not repeat: it covers a node whose integration materialized
-	// LAZILY, after the write above ran, and there is no event for "an
-	// integration finished resolving". The email plug-in's own resolution
-	// logged twenty seconds late on the owner's cluster, which is what sized
-	// the delay. One extra evaluation per process lifetime; a repeating timer
-	// would cost a cluster-wide registration read forever to cover a case that
-	// can only happen once.
+	// AND IT IS JITTERED 0-5 s, because every pod in a rollout reaches this
+	// line at the same moment, on top of the seed materializer, the cluster
+	// registration and provider resolution -- the peak of the surge.
+	//
+	// A failure never stops the node. A cluster that will not start because
+	// it could not describe its own configuration is a worse outcome than a
+	// stale verdict.
+	//
+	// AND ONE RE-WRITE THIRTY SECONDS LATER (epic memql#5118, D5). It covers a
+	// node whose integration materialized LAZILY, after the first write ran,
+	// and there is no event for "an integration finished resolving". It goes
+	// through the same loop, so it too is retried on failure; after it, the
+	// loop's safety net bounds how long any row can lag.
 	bootRewrite, cancelBootRewrite := context.WithCancel(context.Background())
 	defer cancelBootRewrite()
 	if eng := application.Engine(); eng != nil {
 		eng.SetReadinessIdentity(application.startupNodeID(), application.startupNodeType())
-		if n, err := eng.WriteModuleReadiness(context.Background()); err != nil {
-			cfg.Logger.Warn("module readiness: boot write failed; the previous boot's rows stand", "error", err)
-		} else {
-			cfg.Logger.Info("module readiness: rows written", "modules", n)
-		}
-		go func() {
-			timer := time.NewTimer(memql.ReadinessBootRewriteDelay)
-			defer timer.Stop()
-			select {
-			case <-bootRewrite.Done():
-				return
-			case <-timer.C:
-			}
-			// THROUGH THE DEBOUNCE WHERE THERE IS ONE, so this cannot land
-			// on top of an event-driven rewrite already in flight and write
-			// an older evaluation last. Where there is not -- a node with no
-			// event bus -- a direct write, because a re-write that quietly
-			// went nowhere is the failure this delay exists to prevent.
-			if eng.NotifyReadinessRecompute("boot") {
-				cfg.Logger.Info("module readiness: re-write after boot queued")
+		// writeOrQueue notifies the subscriber where there is one and writes
+		// directly where there is not (a binary with no event bus), because a
+		// write that quietly went nowhere is the failure this exists to prevent.
+		writeOrQueue := func(reason string) {
+			if eng.NotifyReadinessRecompute(reason) {
+				cfg.Logger.Info("module readiness: write queued", "reason", reason)
 				return
 			}
 			if n, err := eng.WriteModuleReadiness(bootRewrite); err != nil {
-				cfg.Logger.Warn("module readiness: delayed boot re-write failed; the first write's rows stand", "error", err)
+				cfg.Logger.Warn("module readiness: direct write failed; the previous rows stand", "reason", reason, "error", err)
 			} else {
-				cfg.Logger.Info("module readiness: rows re-written after boot", "modules", n)
+				cfg.Logger.Info("module readiness: rows written", "reason", reason, "modules", n)
 			}
+		}
+		go func() {
+			if !sleepOrDone(bootRewrite, memql.ReadinessBootJitter()) {
+				return
+			}
+			writeOrQueue("boot")
+			if !sleepOrDone(bootRewrite, memql.ReadinessBootRewriteDelay) {
+				return
+			}
+			writeOrQueue("bootRewrite")
 		}()
 	}
 
@@ -567,5 +573,18 @@ func waitForShutdownTrigger(wait func() os.Signal, opDrain <-chan struct{}) stri
 		return "signal:" + sig.String()
 	case <-opDrain:
 		return "operator"
+	}
+}
+
+// sleepOrDone waits d, or answers false when ctx ends first -- the boot
+// readiness writes' one wait primitive, so neither can outlive a drain.
+func sleepOrDone(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }

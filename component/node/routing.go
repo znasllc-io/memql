@@ -217,6 +217,16 @@ func defaultRoutingRules() []RoutingRule {
 		// section 4.4). Every node writes its own verdict rows; the OS folds
 		// them from a live feed on whichever replica it is attached to. No
 		// delete rule: rows are rewritten as versions, never removed.
+		//
+		// A BROADCAST RULE REACHES THE NODES THAT DIAL THE WRITER OR ITS
+		// RELAYS, NOT EVERY NODE (memql#5259): forwarding follows outbound
+		// dials only, so a node nobody dials hears none of these, nor the
+		// registration events above, and identity is excluded from every
+		// broadcast. The readiness recompute loop carries its own retry and
+		// safety net for that reason (component/memql/
+		// readiness_recompute_subscriber.go), and
+		// TestEveryReadinessParticipantConvergesWhateverTheMeshDelivers holds
+		// it to converging every replica anyway.
 		{Pattern: "graph.node.created.v1:platform:moduleReadiness", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:platform:moduleReadiness", TargetType: ""},
 		// RESPONSIBILITY, not the whole planner namespace (memql#5053).

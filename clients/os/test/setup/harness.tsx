@@ -13,7 +13,7 @@ import type { Verdict } from "../../src/system/readinessFold";
 // where an act lands and which role gets one.
 
 export function verdict(module: string, state: Verdict["state"], core = true): Verdict {
-  return { module, state, core, disagreement: [], nodes: [], lanes: [] };
+  return { module, state, core, disagreement: [], nodes: [], lanes: [], unknown: [], stale: [], aside: [] };
 }
 
 export function readiness(loaded: boolean, verdicts: Verdict[]): Readiness {

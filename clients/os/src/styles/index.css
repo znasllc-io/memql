@@ -1518,6 +1518,22 @@ button:not(:disabled):active {
   gap: 8px;
 }
 
+/* A chip in a row's state cluster is a word in a pill, and a pill that wraps
+ * is not one: "Set up on some nodes" broke onto three lines when the row got
+ * tight, while the quiet middle -- whose whole job is to yield first -- kept
+ * its width. So a chip stays on one line, and when the row is too narrow for
+ * the whole cluster it is the CLUSTER that wraps, between chips, right-aligned
+ * -- which keeps its narrowest width to one chip's rather than every chip's,
+ * so a phone-width row still fits its window. */
+.os-row-state {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 4px;
+}
+.os-row-state .os-chip {
+  white-space: nowrap;
+}
+
 /* A row that opens something is a button, and has to look and focus like the
  * rest of the shell rather than like the platform's default. */
 .os-row[data-clickable],
@@ -13518,4 +13534,62 @@ a.os-button {
   border: 1px solid var(--os-line);
   border-radius: var(--os-radius-xs);
   background: var(--os-raised);
+}
+
+/* ---------------------------------------------------------------------------
+ * Cluster -> Modules detail: one module across the cluster (memql#5259)
+ * ------------------------------------------------------------------------- */
+
+/* Each live node on one row: the node and its own answer on the first line,
+ * its type and freshness beneath -- the environment list's grammar, so the
+ * two lists on one page read as one language. */
+.os-cluster-readiness {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.os-cluster-readiness-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "node words"
+    "note note";
+  gap: 2px 10px;
+  padding: 6px 8px;
+  border-radius: var(--os-radius-xs);
+}
+
+.os-cluster-readiness-row:nth-child(odd) {
+  background: var(--os-plate);
+}
+
+.os-cluster-readiness-node {
+  grid-area: node;
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.os-cluster-readiness-words {
+  grid-area: words;
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+  white-space: nowrap;
+}
+
+.os-cluster-readiness-note {
+  grid-area: note;
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  line-height: 1.5;
+}
+
+/* A node the fold SET ASIDE reads quieter than one that voted: it is listed
+ * so an operator can see which node and since when, and it must never read as
+ * a vote. Muted ink and nothing else -- not a warn colour, because a node
+ * catching up has nothing wrong with it. */
+.os-cluster-readiness-row[data-aside] .os-cluster-readiness-node,
+.os-cluster-readiness-row[data-aside] .os-cluster-readiness-words {
+  color: var(--os-muted);
 }

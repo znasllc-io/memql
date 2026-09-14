@@ -1634,8 +1634,10 @@ func pgSQLOpener(params func() map[string]any) SQLOpener {
 		}
 
 		// Wrap the connector so Connect() retries transient Postgres
-		// connection-slot exhaustion (SQLSTATE 53300) with jittered
-		// backoff instead of failing the query outright (memql#1076).
+		// failures -- connection-slot exhaustion (SQLSTATE 53300) and a
+		// dial i/o timeout -- with jittered backoff inside a ~15 s budget,
+		// instead of failing the query outright (memql#1076; D7 of the
+		// 2026-09-14 readiness-convergence record).
 		db := sql.OpenDB(newRetryingConnector(connector, slog.Default()))
 
 		// Configure connection pool limits to prevent exhaustion.
@@ -1673,9 +1675,18 @@ func sessionConnParams() map[string]any {
 }
 
 // migrationConnParams is sessionConnParams without the statement timeout: the
-// migration runner gets its own single-connection pool built from these, so a
-// long index build or backfill is never cut off at the request deadline while
-// every request-serving backend still is.
+// migration runner gets its own single-connection pool built from these, so
+// the SERVER never cancels a long index build or backfill at the request
+// deadline while every request-serving backend still is.
+//
+// The CLIENT still stops waiting. pgdriver's read deadline (10 s, nothing here
+// overrides it) and the migration run's own context (MIGRATION_TIMEOUT_MS)
+// both end a statement's read with an i/o timeout and send no cancel, so the
+// backend carries on server-side while the migration reports a failure and is
+// retried on the next run (measured, memql#5252). A statement that is meant to
+// outlive them has to be written for that: the latest-row index build takes a
+// session lock its orphan keeps holding and verifies the catalog after waiting
+// for it (latest_row_index.go).
 func migrationConnParams() map[string]any {
 	params := sessionConnParams()
 	delete(params, "statement_timeout")

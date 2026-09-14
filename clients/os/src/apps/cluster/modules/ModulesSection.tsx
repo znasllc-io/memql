@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { ModulesClient, type ModulesInventory } from "@znasllc-io/memql-sdk-core/client";
 
-import { Button, Caption, Chip, Head, Notice, Panel, Row, Subhead, stateWords } from "../../../kit";
+import { Button, Caption, Chip, Head, Notice, Panel, Row, Subhead, setAsideLabel, stateWords, verdictDetail } from "../../../kit";
 import { useSession } from "../../../chrome/access";
 import { useOsConnection } from "../../../live/connection";
 import { useReading } from "../../../cluster/reading";
@@ -161,16 +161,25 @@ export function ModulesSection() {
                     </Chip>
                     {/* The CLUSTER-WIDE reading, beside this node's own, so
                         the operator's inventory and the apps' marks are one
-                        answer rather than two that can quietly differ. */}
+                        answer rather than two that can quietly differ. The
+                        nodes behind it are the detail's, one click away; here
+                        they are a hover and, when the fold set any aside, a
+                        count -- never the raw nodeId=state pairs, which put a
+                        row's width into a list of pod names. */}
                     {verdict ? (
                       <Chip
                         tone={verdict.state === "configured" ? "muted" : "accent"}
-                        title="Every live node's answer, folded. This row's other chips are the answering node's own."
+                        title={
+                          verdictDetail(verdict) ||
+                          "Every live node's answer, folded. This row's other chips are the answering node's own."
+                        }
                       >
                         {stateWords(verdict)}
-                        {verdict.disagreement.length > 0
-                          ? ` (${verdict.disagreement.join(", ")})`
-                          : ""}
+                      </Chip>
+                    ) : null}
+                    {setAsideLabel(verdict) ? (
+                      <Chip tone="muted" title={verdictDetail(verdict)}>
+                        {setAsideLabel(verdict)}
                       </Chip>
                     ) : null}
                   </>

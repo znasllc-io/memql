@@ -3,10 +3,18 @@ import { ArrowLeft } from "lucide-react";
 import type { Module, ModuleDetail as ModuleDetailWire, ModulesClient } from "@znasllc-io/memql-sdk-core/client";
 
 import { ActionBar, type Act, type ActionBarTone } from "../../../kit/ActionBar";
-import { Button, Caption, Chip, Fact, Facts, Head, Notice, Panel, Subhead, roleAdmits } from "../../../kit";
+import { Button, Caption, Chip, Fact, Facts, Head, Notice, Panel, Subhead, roleAdmits, stateWords } from "../../../kit";
 import { useSession } from "../../../chrome/access";
 import { useReading } from "../../../cluster/reading";
-import { envVarReading, flipOutcomeSentence, isFlippable, noSwitchSentence } from "./rows";
+import type { Verdict } from "../../../system/readinessFold";
+import {
+  envVarReading,
+  flipOutcomeSentence,
+  isFlippable,
+  noSwitchSentence,
+  readinessForModule,
+  readinessNodeLines,
+} from "./rows";
 
 // One module, and the only registry WRITE in the product.
 //
@@ -53,6 +61,9 @@ export function ModuleDetail({
   // they have to read past to learn it is not for them, and an enabled one
   // would be a refusal they find out about by being told no.
   const isOwner = roleAdmits(session.access?.role ?? "", { min: "owner" });
+  // The cluster-wide reading of this module, when the registry's name is also
+  // a readiness module -- the one feed the shell retains, never a second read.
+  const verdict = readinessForModule(module, session.readiness);
 
   const read = useCallback(
     (signal: AbortSignal): Promise<ModuleDetailWire> =>
@@ -140,6 +151,8 @@ export function ModuleDetail({
               for you.
             </Caption>
           ) : null}
+
+          {verdict ? <ReadinessAcross verdict={verdict} /> : null}
 
           <Subhead>Environment</Subhead>
           {detail.state === "failed" ? (
@@ -281,4 +294,72 @@ function barTone(state: string): ActionBarTone {
     return "paused";
   }
   return "none";
+}
+
+/**
+ * This module on every live node (memql#5259).
+ *
+ * The Facts above are ONE node's -- the one that answered the inventory -- and
+ * the verdict every app's mark reads is every live node's, folded. This is the
+ * fold opened up: each node's own answer and how fresh it is, and, drawn
+ * quieter, the nodes the fold set aside. A node behind the cluster used to
+ * surface only as "Partly set up" beside a list of pod names; here it is named
+ * with the time it last checked and what it will do about it, which is the
+ * difference between an operator waiting ten minutes and an operator
+ * restarting a pod that needed nothing.
+ *
+ * READ FROM THE LIVE FEED, so it moves when a node re-checks; the freshness
+ * words are computed at render, which the feed's own changes drive.
+ */
+function ReadinessAcross({ verdict }: { verdict: Verdict }) {
+  const lines = readinessNodeLines(verdict, new Date());
+  return (
+    <>
+      <Subhead>Across the cluster</Subhead>
+      <p className="os-cluster-fact">{acrossSentence(verdict)}</p>
+      {lines.length === 0 ? null : (
+        <div className="os-cluster-readiness" role="list" aria-label={`${verdict.module} on each live node`}>
+          {lines.map((line) => (
+            <div
+              key={line.nodeId}
+              className="os-cluster-readiness-row"
+              role="listitem"
+              data-aside={line.counted ? undefined : true}
+            >
+              <span className="os-cluster-readiness-node os-mono">{line.nodeId}</span>
+              <span className="os-cluster-readiness-words">{line.words}</span>
+              <span className="os-cluster-readiness-note">
+                {line.nodeType} &middot; {line.note}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      <Caption>
+        Every live node checks this module for itself. A node that has not re-checked since the
+        cluster last changed, or that could not check, is listed and not counted.
+      </Caption>
+    </>
+  );
+}
+
+/**
+ * The verdict as one sentence: the words, and how many nodes stand behind
+ * them. "All N nodes that count agree" rather than "on all N nodes", which
+ * reads wrong the moment the words are negative -- "Not set up on all 5"
+ * says "not on every one", which is not what five nodes agreeing means.
+ */
+function acrossSentence(v: Verdict): string {
+  const words = stateWords(v);
+  if (v.state === "unreported") {
+    return v.unknown.length > 0
+      ? `${words}. No live node could finish it.`
+      : `${words}. No live node has reported this module.`;
+  }
+  const counted = v.nodes.length;
+  if (v.state === "partial") {
+    const setUp = v.nodes.filter((n) => n.state === "configured").length;
+    if (setUp > 0 && setUp < counted) return `${words}: ${setUp} of the ${counted} that count.`;
+  }
+  return counted === 1 ? `${words}. The one node that counts says so.` : `${words}. All ${counted} nodes that count agree.`;
 }

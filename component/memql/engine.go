@@ -112,6 +112,12 @@ type MemQLEngine struct {
 	// falls back to MEMQL_NODE_ID and the resolved node type.
 	readinessNodeId   string
 	readinessNodeType string
+	// readinessMemory is what THIS PROCESS remembers of the known readiness
+	// verdicts it has evaluated, per module: with the standing rows, what
+	// keeps a pass that could not evaluate from ever writing `unknown` over a
+	// known verdict (D1 of the 2026-09-14 readiness-convergence record,
+	// readiness_write.go).
+	readinessMemory readinessMemory
 	// readinessRecompute is this node's debounced rewriter, wired by
 	// StartReadinessRecomputeSubscriber. Nil on a hand-built engine and on any
 	// binary that has not started it, and every method on it is nil-safe --

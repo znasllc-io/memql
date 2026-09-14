@@ -3803,6 +3803,7 @@
         "module",
         "nodeId",
         "nodeType",
+        "reason",
         "reportedAt",
         "state"
       ],
@@ -3818,7 +3819,8 @@
           "configured",
           "notApplicable",
           "partial",
-          "unconfigured"
+          "unconfigured",
+          "unknown"
         ]
       }
     },
@@ -3830,7 +3832,9 @@
         "disagreement",
         "module",
         "nodes",
-        "state"
+        "stale",
+        "state",
+        "unknown"
       ],
       "required": [
         "module",
@@ -4142,6 +4146,7 @@
       "file": "platform/concepts.memql",
       "fields": [
         "nodeId",
+        "unknown",
         "written"
       ],
       "required": [

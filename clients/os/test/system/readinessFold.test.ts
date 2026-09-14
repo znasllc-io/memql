@@ -21,7 +21,7 @@ interface Fixture {
   now: string;
   reports: NodeReport[];
   nodes: NodeLiveness[];
-  expect: { module: string; state: string; disagreement: string[] }[];
+  expect: { module: string; state: string; disagreement: string[]; unknown?: string[]; stale?: string[] }[];
 }
 
 describe("the fold mirrors component/memql/readiness", () => {
@@ -31,7 +31,7 @@ describe("the fold mirrors component/memql/readiness", () => {
 
   // Without this, a mistyped path reads as a suite with no cases and passes.
   it("finds the shared fixtures", () => {
-    expect(files.length).toBeGreaterThanOrEqual(9);
+    expect(files.length).toBeGreaterThanOrEqual(15);
   });
 
   for (const file of files) {
@@ -39,8 +39,14 @@ describe("the fold mirrors component/memql/readiness", () => {
     it(fx.name, () => {
       const got = foldReadiness(fx.reports, fx.nodes, new Date(fx.now));
       expect(
-        got.map((v) => ({ module: v.module, state: v.state, disagreement: v.disagreement })),
-      ).toEqual(fx.expect);
+        got.map((v) => ({
+          module: v.module,
+          state: v.state,
+          disagreement: v.disagreement,
+          unknown: v.unknown,
+          stale: v.stale,
+        })),
+      ).toEqual(fx.expect.map((e) => ({ ...e, unknown: e.unknown ?? [], stale: e.stale ?? [] })));
     });
   }
 
@@ -67,6 +73,37 @@ describe("the fold mirrors component/memql/readiness", () => {
     expect(ai?.lanes.find((l) => l.name === "local")?.slots).toEqual([
       { name: "live", present: false },
     ]);
+  });
+
+  // THE SET-ASIDE ROWS ARE THE SHELL'S HALF TOO. The Go Verdict names the
+  // stale and unknown nodes and no more; the Cluster app's per-node reading
+  // needs each one's own time and reason to say "behind since 09:14" or "the
+  // fleet read failed". So the shared fixture holds the ids equal and this
+  // holds the shell to carrying the rows through.
+  it("carries each set-aside node's own row, stale and unknown alike", () => {
+    const fx = JSON.parse(
+      readFileSync(resolve(FIXTURES, "15-stale-unknown-and-dead-together.json"), "utf8"),
+    ) as Fixture;
+    const [ai] = foldReadiness(fx.reports, fx.nodes, new Date(fx.now));
+    expect(ai?.aside).toEqual([
+      {
+        nodeId: "edge-a",
+        nodeType: "edge",
+        state: "unconfigured",
+        reportedAt: "2026-09-13T09:00:00Z",
+        why: "stale",
+      },
+      {
+        nodeId: "bff-b",
+        nodeType: "bff",
+        state: "unknown",
+        reportedAt: "2026-09-13T12:00:20Z",
+        reason: "fleetReadFailed",
+        why: "unknown",
+      },
+    ]);
+    // Set aside means NOT a voter: neither list may be read as a vote.
+    expect(ai?.nodes.map((n) => n.nodeId)).toEqual(["agent-a", "bff-a"]);
   });
 
   it("nodeIsLive needs a live health word and a recent heartbeat", () => {
