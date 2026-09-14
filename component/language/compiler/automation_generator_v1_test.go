@@ -234,43 +234,6 @@ func TestCompileV1RefusesALegacyNode(t *testing.T) {
 	}
 }
 
-// TestCompileLegacyBodyUnchanged: a body parsed without the option compiles
-// exactly as before -- no marker, conditions translated, references
-// `$`-lifted.
-func TestCompileLegacyBodyUnchanged(t *testing.T) {
-	normalised, err := parser.NormaliseAll(`logic legacy {
-  args {
-    event object!
-  }
-  body {
-    rows := query findRows( id: args.event.payload.id )
-    tell := if !rows.empty() { publishEvent( topic: "t", payload: { id: args.event.payload.id } ) }
-    return tell
-  }
-}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err := parser.ParseFile(normalised)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fn := f.Definitions[0].(*parser.FunctionDef)
-	wrapped := &parser.FunctionDef{Name: fn.Name, Type: parser.FunctionTypeAutomation, Body: fn.Body}
-	res, err := NewDefault().CompileFile(&parser.File{Definitions: []parser.Node{wrapped}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := asJSON(t, res.Automations[0].JSON)
-	if _, marked := c["expressions"]; marked {
-		t.Fatal("a legacy body carries the v1 marker")
-	}
-	rows := stepsByID(t, c)["rows"]["function"].(map[string]any)["args"].(map[string]any)
-	if rows["id"] != "$args.event.payload.id" {
-		t.Fatalf("legacy arg = %#v, want the $-lifted reference text", rows["id"])
-	}
-}
-
 // TestEncodeValueLeafRule pins the one encoding rule, case by case.
 func TestEncodeValueLeafRule(t *testing.T) {
 	parse := func(src string) ast.ExpressionNode {

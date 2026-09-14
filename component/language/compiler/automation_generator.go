@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/num"
 )
@@ -594,8 +595,8 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		}
 
 	case *parser.LogicalExpr:
-		left := c.expressionToString(e.Left)
-		right := c.expressionToString(e.Right)
+		left := c.logicalOperandString(e.Left)
+		right := c.logicalOperandString(e.Right)
 		sep := ";"
 		if e.Op == parser.LogicalOr {
 			sep = ","
@@ -860,6 +861,15 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		}
 		return fmt.Sprintf("(%s) => %s", strings.Join(e.Params, ", "), body)
 
+	case *ast.IdentExpr, *ast.MemberExpr, *ast.CallExpr, *ast.UnaryExpr, *ast.BinaryExpr, *ast.ListExpr, *ast.MapExpr, *ast.ParenExpr:
+		// An edition-2026 node: a query's filter lambda body (the struct-form
+		// rewriter joins it as `concept==<id> && (row => ...)`), or a
+		// mutation value. Its canonical source is its serialisation -- the
+		// internal form reads a v1 lambda where it meets an operand
+		// (parser.tryParseV1LambdaOperand), and a mutation value parses
+		// with the v1 grammar.
+		return ast.FormatExpr(e)
+
 	default:
 		// SAFETY: emitting `%T` here puts the Go type name (e.g.
 		// `*parser.CanonicalIdExpr`) into the generated code as a
@@ -870,6 +880,17 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 		// id strings.
 		return fmt.Sprintf("<<unsupported expression %T>>", expr)
 	}
+}
+
+// logicalOperandString is expressionToString for an operand of `;` / `,`. A
+// lambda operand is parenthesised, as the struct-form rewriter writes a v1
+// filter's join (`concept==<id> && (row => ...)`): a lambda's body extends as
+// far right as it can, so a bare one would take in whatever follows it.
+func (c *Compiler) logicalOperandString(n parser.ExpressionNode) string {
+	if _, ok := n.(*ast.LambdaExpr); ok {
+		return "(" + c.expressionToString(n) + ")"
+	}
+	return c.expressionToString(n)
 }
 
 // mutationToString converts a mutation statement to MemQL string format.
