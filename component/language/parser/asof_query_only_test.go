@@ -15,7 +15,7 @@ import (
 // fails to parse with the query-only migration message.
 func TestAsOfRejectedInLogicBody(t *testing.T) {
 	src := `func (Logic) logicReadsAsOf(ctx any) (any, error) {
-  return asOf(concept==v1:cluster:node, latest)
+  return asOf(concept == "v1:cluster:node", latest)
 }`
 	_, err := ParseFile(src)
 	if err == nil {
@@ -30,7 +30,7 @@ func TestAsOfRejectedInLogicBody(t *testing.T) {
 // `asOf` fails to parse.
 func TestAsOfRejectedInAutomationBody(t *testing.T) {
 	src := `func (Automation) autoReadsAsOf(ctx any) (any, error) {
-  x := asOf(concept==v1:cluster:node, latest)
+  x := asOf(concept == "v1:cluster:node", latest)
   return x
 }`
 	_, err := ParseFile(src)

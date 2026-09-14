@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/znasllc-io/memql/component/language/ast"
 )
@@ -35,6 +36,16 @@ func ParseSpecDecl(source string) (*ast.SpecDecl, error) {
 	decl, ok := def.(*ast.SpecDecl)
 	if !ok {
 		return nil, fmt.Errorf("expected spec or trait declaration, got %T", def)
+	}
+	// The slice is one declaration, all of it: a token left over is text the
+	// declaration would drop (refuseAfterPredicate says why a lambda body
+	// cannot see its own end).
+	if !p.check(TokenEOF) {
+		kind := "spec"
+		if decl.IsTrait {
+			kind = "trait"
+		}
+		return nil, p.v1Trailing("the " + kind + " " + strconv.Quote(decl.Name))
 	}
 	return decl, nil
 }

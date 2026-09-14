@@ -163,7 +163,7 @@ mutate candidate mutateDoneProbe {
 func TestRewriteDocComments_LongDescriptionWrapsAndRoundTrips(t *testing.T) {
 	long := strings.Repeat("alpha beta gamma delta epsilon ", 12)
 	long = strings.TrimSpace(long)
-	src := "@description(\"" + long + "\")\nquery space queryLongProbe {\n  filter ownerUserId == \"x\"\n}\n"
+	src := "@description(\"" + long + "\")\nquery space queryLongProbe {\n  filter row => row.ownerUserId == \"x\"\n}\n"
 	got := rewriteDoc(t, src)
 	if LeadingDocComment(got) != long {
 		t.Errorf("wrapped description must round-trip through the join:\ngot  %q\nwant %q", LeadingDocComment(got), long)

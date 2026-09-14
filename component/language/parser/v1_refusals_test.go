@@ -3,6 +3,9 @@ package parser
 // v1_refusals_test.go -- what the edition-2026 expression parser refuses, and
 // how: a retired spelling names its replacement and the migrator that writes
 // it, and every other refusal names the fix and where it is.
+//
+// memqlmigrate:keep-file -- the retired spellings in this file are its cases,
+// so the fixture codemod must leave them as written.
 
 import (
 	"errors"
@@ -80,11 +83,11 @@ var v1RetiredSamples = []struct {
 	{"retired_keyless_map_entry", `{delegationId: args.event.payload.id, args.event.payload.identityId, timestamp: now}`, false},
 	{"retired_keyless_map_entry", `{a}`, false},
 	{"retired_keyless_map_entry", `f(x: {a: 1, row.b})`, false},
-	{"retired_filter_without_lambda", "query thing probe {\n  filter row => row.a == 1\n}", true},
-	{"retired_filter_without_lambda", "query thing probe {\n  filter row => row.a == 1 && isX(row)\n  paginate 5\n  shape probeCard\n}", true},
-	{"retired_spec_return_body", "spec thing isX = row => row.a == 1", true},
-	{"retired_trait_return_body", "trait isX = row => row.a == 1", true},
-	{"retired_filter_annotation", "@filter(row => row.a == 1)\n@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  step s {\n    logic f(x: 1)\n  }\n}", true},
+	{"retired_filter_without_lambda", "query thing probe {\n  filter a == 1\n}", true},
+	{"retired_filter_without_lambda", "query thing probe {\n  filter a == 1 && isX\n  paginate 5\n  shape probeCard\n}", true},
+	{"retired_spec_return_body", "spec thing isX {\n  return a == 1\n}", true},
+	{"retired_trait_return_body", "trait isX {\n  return a == 1\n}", true},
+	{"retired_filter_annotation", "@filter(payload.a == 1)\n@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  step s {\n    logic f(x: 1)\n  }\n}", true},
 	{"retired_filter_annotation", "@trigger(event=\"node.created\", concept=\"v1:probe:thing\", filter=\"payload.a == 1\")\nautomation probe {\n  step s {\n    logic f(x: 1)\n  }\n}", true},
 }
 
