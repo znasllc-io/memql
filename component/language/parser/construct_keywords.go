@@ -28,8 +28,23 @@ type UnknownConstructKeyword struct {
 	// Keyword is that word.
 	Keyword string
 	// Message names the word, the nearest construct keyword when one is close,
-	// and every construct keyword; it ends with " [construct_unknown]".
+	// and every construct keyword -- or, for a retired statement, what
+	// replaced it; it ends with " [construct_unknown]".
 	Message string
+}
+
+// Error is the message, so the refusal can travel as an error: the parser
+// carries it as the cause of the parse error it raises for the statement.
+func (u *UnknownConstructKeyword) Error() string { return u.Message }
+
+// retiredStatements maps a word that once opened a top-level statement to
+// what replaced it, so its refusal names the replacement rather than listing
+// every construct keyword.
+var retiredStatements = map[string]string{
+	// The file-top import block (D17 of the DSL v1 record) loaded on the engine
+	// before epic memql#5356; no loader ever read it, and a construct is
+	// imported by name with a `use` line.
+	"import": "the import ( ... ) block is retired: a construct is imported with a file-top use line, use <domain>.<file>.{ names }",
 }
 
 // ConstructKeywords is every word that may open a top-level statement: the
@@ -97,7 +112,20 @@ func FindUnknownConstructKeywords(source string) []UnknownConstructKeyword {
 	return out
 }
 
+// unknownConstruct is the refusal for one top-level statement opened by word,
+// exactly as FindUnknownConstructKeywords words it for its line: the parser
+// raises this same refusal for a statement it cannot open, so the parse and
+// the load gate say one thing about one statement, from one keyword table.
+func unknownConstruct(line int, word string) *UnknownConstructKeyword {
+	keywords := ConstructKeywords()
+	return &UnknownConstructKeyword{Line: line, Keyword: word,
+		Message: unknownConstructMessage(word, keywords, strings.Join(keywords, ", "))}
+}
+
 func unknownConstructMessage(word string, keywords []string, all string) string {
+	if replaced, ok := retiredStatements[word]; ok {
+		return fmt.Sprintf("%s [%s]", replaced, CodeConstructUnknown)
+	}
 	if near, ok := nearestKeyword(word, keywords); ok {
 		return fmt.Sprintf("%s is not a construct keyword: did you mean %s? The constructs are: %s [%s]",
 			word, near, all, CodeConstructUnknown)

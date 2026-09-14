@@ -176,11 +176,11 @@ func Load(root fs.FS) (*Tree, error) {
 
 			importsOnly, importsErr := languageParser.ExtractImports(string(content))
 			if importsErr != nil {
-				diagnostics = append(diagnostics, fmt.Errorf("%s: parse: %w", p, parseErr))
+				diagnostics = append(diagnostics, &FileParseError{File: p, Err: parseErr})
 				continue
 			}
 			if !treatAsDedicatedParserFile {
-				diagnostics = append(diagnostics, fmt.Errorf("%s: parse: %w", p, parseErr))
+				diagnostics = append(diagnostics, &FileParseError{File: p, Err: parseErr})
 			}
 			importsOnly.Path = p
 			tree.Files[p] = importsOnly
@@ -260,6 +260,20 @@ type LanguageLineError struct {
 }
 
 func (e *LanguageLineError) Error() string { return e.Problem.Message }
+
+// FileParseError is one file of the tree the parser refused. Its text is the
+// one Load has always printed ("<file>: parse: <the parser's error>"); the
+// type lets a caller read the file, and reach the parser's own error and its
+// cause, without taking the text apart.
+type FileParseError struct {
+	File string
+	Err  error
+}
+
+func (e *FileParseError) Error() string { return e.File + ": parse: " + e.Err.Error() }
+
+// Unwrap exposes the parser's error for errors.Is / errors.As.
+func (e *FileParseError) Unwrap() error { return e.Err }
 
 // LoadError aggregates every per-file diagnostic from a single Load
 // pass. The validator CLI prints these to the user; the engine

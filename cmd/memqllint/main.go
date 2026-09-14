@@ -350,14 +350,17 @@ func asDomainTree(rootDir string) (name string, tree fs.FS, ok bool) {
 // withoutParityEchoes drops each Load diagnostic the engine-parity pass
 // reports too, so an author reads one refusal once (memql#5356).
 //
-// Both passes refuse a domain whose language line the engine will not read:
-// Load because a caller that runs it alone -- memql-cockpit's `memql lint` --
-// must see what boot refuses, the parity pass because it IS boot. The parity
-// pass's copy is kept: it is the engine's own answer, worded as boot words
-// it. A Load diagnostic is an echo only when a parity diagnostic about the
-// SAME file carries the same refusal, never merely because the parity pass
-// ran: that pass mounts only the domains MountOverlayDomains takes, so a
-// refusal in a domain it left out is Load's alone to report.
+// Both passes refuse some things: a domain whose language line the engine
+// will not read -- Load because a caller that runs it alone (memql-cockpit's
+// `memql lint`) must see what boot refuses, the parity pass because it IS
+// boot -- and a statement the parser refuses with a coded refusal, which Load
+// meets parsing the whole file and the parity pass meets in the loader or
+// gate that reads the statement. The parity pass's copy is kept: it is the
+// engine's own answer, worded as boot words it, with the authored line. A
+// Load diagnostic is an echo only when a parity diagnostic about the SAME
+// file carries the same refusal, never merely because the parity pass ran:
+// that pass mounts only the domains MountOverlayDomains takes, so a refusal
+// in a domain it left out is Load's alone to report.
 func withoutParityEchoes(load []error, parity []memql.LintDiagnostic) []error {
 	if len(parity) == 0 {
 		return load
@@ -373,12 +376,20 @@ func withoutParityEchoes(load []error, parity []memql.LintDiagnostic) []error {
 }
 
 // refusalOf returns the file and the text of a Load diagnostic that the
-// parity pass also makes: a domain's language line the engine will not read.
-// ok is false for every other diagnostic.
+// parity pass also makes: a domain's language line the engine will not read,
+// or a parse refusal carrying a typed cause -- a statement no construct
+// keyword opens (construct_unknown), an annotation the registry refuses --
+// which the parity pass's loaders and gates raise in the same words. ok is
+// false for every other diagnostic.
 func refusalOf(d error) (file, text string, ok bool) {
 	var line *dslimports.LanguageLineError
 	if errors.As(d, &line) {
 		return line.Problem.Source, line.Problem.Message, true
+	}
+	var parse *dslimports.FileParseError
+	var refusal *langparser.ParseError
+	if errors.As(d, &parse) && errors.As(parse.Err, &refusal) && refusal.Cause != nil {
+		return parse.File, refusal.Message, true
 	}
 	return "", "", false
 }

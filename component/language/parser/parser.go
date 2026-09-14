@@ -703,15 +703,7 @@ func (p *Parser) parseDefinition() (Node, error) {
 			attributes = nil
 		}
 	default:
-		// Story S3 (#2358): the expected-keyword hint now lists the FULL
-		// author-facing set -- `func` + every contextual declaration keyword +
-		// the rewriter-handled query/mutate/logic/automation family (previously
-		// omitted, so a typo'd `query` got a hint list that didn't contain
-		// `query`). A Levenshtein did-you-mean points at the nearest keyword
-		// (`quer` -> `query`, `conept` -> `concept`).
-		hint := topLevelKeywordHintKeywords()
-		return nil, newParseErrorf(&p.current, "unexpected token %q, expected a top-level declaration keyword -- one of %s%s",
-			p.current.Literal, renderKeywordList(hint), didYouMean(p.current.Literal, hint))
+		return nil, p.refuseTopLevelToken()
 	}
 
 	if err != nil {
@@ -727,6 +719,36 @@ func (p *Parser) parseDefinition() (Node, error) {
 	}
 
 	return def, nil
+}
+
+// refuseTopLevelToken refuses a top-level statement no construct parser
+// takes (memql#5356). A statement opened by a word that is not a construct
+// keyword -- a typo'd `qurey`, a retired `import`, a keyword only another
+// edition spells -- gets construct_unknown's own refusal, the one the load
+// gate gives the line (FindUnknownConstructKeywords): the same message, read
+// from the same table (ConstructKeywords) with the same did-you-mean, and
+// carried as the cause. One statement is one refusal, whether the author
+// meets it in the editor, in memqllint or at boot. Anything else -- a stray
+// symbol, or a construct keyword in a form the parser cannot read here --
+// names the construct keywords from that same table.
+func (p *Parser) refuseTopLevelToken() error {
+	tok := p.current
+	if m := statementHead.FindStringSubmatch(tok.Literal); m != nil && !isConstructKeyword(m[1]) {
+		u := unknownConstruct(tok.Line, m[1])
+		return &ParseError{Message: u.Message, Pos: tok.Pos, Line: tok.Line, Column: tok.Column, Cause: u}
+	}
+	return newParseErrorf(&tok, "unexpected token %q, expected a top-level declaration keyword -- one of %s",
+		tok.Literal, strings.Join(ConstructKeywords(), ", "))
+}
+
+// isConstructKeyword reports whether word opens a top-level statement.
+func isConstructKeyword(word string) bool {
+	for _, k := range ConstructKeywords() {
+		if k == word {
+			return true
+		}
+	}
+	return false
 }
 
 // parseAttribute parses a Python-style @attribute decorator.
