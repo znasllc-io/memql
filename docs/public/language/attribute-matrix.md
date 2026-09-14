@@ -14,14 +14,13 @@ owner: znas
 This document defines the `@attribute` decorators available on the
 function-style constructs (queries, mutations, automations) and points
 at the annotation surfaces of the other construct kinds. The Yes/No
-columns reflect the **load-time allow-list** — `annotations.ByReceiver`
-in `component/language/annotations/registry.go`, the authoritative gate
-`ValidateConstructAnnotations` enforces. A `Yes` means the construct
-actually accepts the annotation at load; a `No` means it is rejected
-(even where the parser still folds it into an AST field — several
-annotations were removed from the allow-lists in #989 and are load-
-rejected, shown as `No` here). `TestAttributeMatrixMatchesAllowLists`
-pins this table to the allow-lists so the two cannot drift.
+columns reflect the **annotation registry** — `annotations.ByReceiver`
+in `component/language/annotations`, the one gate every construct parser
+runs at parse time (memql#5359). A `Yes` means the construct accepts the
+annotation; a `No` means it is refused (even where the parser still folds
+it into an AST field — several annotations were removed in #989 and are
+refused, shown as `No` here). `TestAttributeMatrixMatchesAllowLists`
+pins this table to the registry so the two cannot drift.
 
 ---
 

@@ -39,11 +39,11 @@ var BuiltinFunctions = specBuiltinFunctions()
 // AnnotationsByReceiver is the editor projection of the single
 // annotation registry (component/language/annotations, #991),
 // re-exported under its historic name so the sense complete / diagnose
-// / hover code keeps referring to a package-local symbol. For the four
-// function constructs (Query / Mutation / Logic / Automation) the same
-// registry backs the parser-side load gate (constructAnnotationAllowLists),
-// so they cannot drift; TestAnnotationReceiverGateConsistency (#991)
-// guards that the derived views still agree.
+// / hover code keeps referring to a package-local symbol. The same
+// registry is the parser's one annotation gate for every receiver
+// (memql#5359), so the editor and the gate cannot drift;
+// component/memql's TestEveryReceiverGateReadsTheRegistry drives the gates
+// themselves.
 var AnnotationsByReceiver = annotations.ByReceiver
 
 // AnnotationDocs maps annotation names to documentation strings. Note that a

@@ -1,10 +1,11 @@
 package parser
 
 import (
-	"sort"
+	"fmt"
 	"strconv"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/core/num"
 )
@@ -39,10 +40,14 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 	decl := &ast.ToolDecl{Name: p.current.Literal}
 	p.advance()
 
-	// Translate the leading attribute set into typed ToolDecl fields.
-	// Unknown annotations are hard-rejected (#990) -- every other
-	// construct kind already does this; closing the silent-tolerance
-	// gap keeps typos and stale annotations from being dropped at load.
+	// Which annotations, forms and keyword keys a tool takes is the
+	// registry's answer (memql#5359); a typo'd annotation or a mistyped
+	// @handler / @rateLimit key is refused there before anything is read
+	// (#990, memql#3625). The switch below keeps only what a legal value
+	// MEANS.
+	if err := p.checkAnnotations(annotations.Tool, fmt.Sprintf("tool %q", decl.Name), attrs); err != nil {
+		return nil, err
+	}
 	for _, attr := range attrs {
 		if attr == nil {
 			continue
@@ -68,10 +73,8 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 			// name="createTodo")` dropped the ENTIRE handler -- decl.HandlerType
 			// stayed "", so toolDeclToTool never built a ToolHandler and the
 			// tool registered with no way to execute. Both then reached the LLM
-			// as an advertised, callable tool.
-			if err := rejectUnknownAttrArgs(&p.current, decl.Name, "handler", attr, toolHandlerArgNames); err != nil {
-				return nil, err
-			}
+			// as an advertised, callable tool. The registry's closed key set
+			// refuses both now, above.
 			decl.HandlerType = attrArgString(attr, "type")
 			if decl.HandlerType == "" {
 				return nil, newParseErrorf(&p.current, "tool %q: @handler requires a non-empty type=... argument (\"function\", \"query\", \"webhook\" or \"delegate\") -- a @handler whose type does not resolve is dropped whole, and the tool then registers with no way to execute", decl.Name)
@@ -89,9 +92,6 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 				decl.HandlerMethod = strings.ToUpper(v)
 			}
 		case "rateLimit":
-			if err := rejectUnknownAttrArgs(&p.current, decl.Name, "rateLimit", attr, toolRateLimitArgNames); err != nil {
-				return nil, err
-			}
 			// A non-integer value was silently discarded here too, which is the
 			// same defect one annotation over: the author declared a ceiling and
 			// got none (memql#3625).
@@ -115,20 +115,6 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 			decl.Scopes = attrStringListValue(attr)
 		case "mcp":
 			decl.MCPExposed = true
-
-		// --- Retired (recognised only to emit a migration hint) ---
-		//
-		// @clientExecution put a tool's body in the connected browser and
-		// reached it over the client-tool relay, both of which went with the
-		// conversational product (epic memql#4988). Falling through to the
-		// unknown-annotation arm below would tell an author who wrote this
-		// last month that they had made a typo. They had not: the annotation
-		// was real, and it is gone.
-		case "clientExecution":
-			return nil, newParseErrorf(&p.current, "tool %q: @clientExecution is retired -- it dispatched the tool to the connected browser over the client-tool relay, which was removed with the cognition node (epic memql#4988). Every tool now needs a server-side @handler", decl.Name)
-
-		default:
-			return nil, newParseErrorf(&p.current, "tool %q: unknown annotation @%s -- supported: @allowedRoles, @description, @destructive, @disabled, @enabled, @executionTime, @handler, @mcp, @rateLimit, @requiresConfirmation, @scopes", decl.Name, attr.Name)
 		}
 	}
 
@@ -182,16 +168,26 @@ func (p *Parser) parseToolFieldDecl(toolName string) (*ast.ToolFieldDecl, error)
 		field.Required = true
 	}
 
-	// Trailing annotations.
+	// Trailing annotations. Anything the ToolField receiver does not take
+	// used to fall off the end of the switch below and be discarded
+	// (memql#3625): `@enums("a", "b")` was the measured case -- the constraint
+	// the author wrote never reached the JSON schema, so the LLM was told the
+	// field was an unconstrained string and nothing complained. The registry
+	// refuses it now, before anything is read.
+	var attrs []*ast.Attribute
 	for p.check(TokenAt) {
-		at := p.current
 		attr, err := p.parseAttribute()
 		if err != nil {
 			return nil, err
 		}
-		if attr == nil {
-			continue
+		if attr != nil {
+			attrs = append(attrs, attr)
 		}
+	}
+	if err := p.checkAnnotations(annotations.ToolField, fmt.Sprintf("tool %q field %q", toolName, field.Name), attrs); err != nil {
+		return nil, err
+	}
+	for _, attr := range attrs {
 		switch attr.Name {
 		case "required":
 			field.Required = true
@@ -203,63 +199,10 @@ func (p *Parser) parseToolFieldDecl(toolName string) (*ast.ToolFieldDecl, error)
 			field.Default = attrStringValue(attr)
 		case "enum":
 			field.EnumValues = attrEnumValues(attr)
-		default:
-			// Anything else used to fall off the end of this switch and be
-			// discarded (memql#3625). `@enums("a", "b")` was the measured case:
-			// pure declaration theatre -- the constraint the author wrote never
-			// reached the JSON schema, so the LLM was told the field was an
-			// unconstrained string and nothing complained. Concept property
-			// annotations are already closed this way; tool fields now are too.
-			return nil, newParseErrorf(&at, "tool %q field %q: unknown annotation @%s (supported: @required, @autoInjected, @description, @default, @enum) -- an unknown annotation was silently discarded, so the constraint you wrote was never enforced", toolName, field.Name, attr.Name)
 		}
 	}
 
 	return field, nil
-}
-
-// toolHandlerArgNames is the closed set of `@handler(...)` keyword arguments.
-// `type` picks the dispatch arm; the rest carry that arm's target.
-var toolHandlerArgNames = map[string]bool{
-	"type": true, "name": true, "query": true, "url": true, "method": true,
-}
-
-// toolRateLimitArgNames is the closed set of `@rateLimit(...)` keyword
-// arguments.
-var toolRateLimitArgNames = map[string]bool{
-	"maxCalls": true, "periodSeconds": true,
-}
-
-// rejectUnknownAttrArgs refuses any keyword argument on a typed-payload
-// annotation that is not in the allowed set, naming the offender and the
-// supported spellings.
-//
-// The annotations this guards read their arguments by NAME out of
-// attr.Args, so an unrecognised key is not an error today -- it is simply
-// never read. That makes a single-letter typo indistinguishable from
-// omitting the argument, which is how a tool with `nmae=` shipped an empty
-// function name and a tool with `tipe=` shipped no handler at all
-// (memql#3625, the memql#3605 archetype).
-func rejectUnknownAttrArgs(tok *Token, toolName, annotation string, attr *ast.Attribute, allowed map[string]bool) error {
-	if attr == nil || len(attr.Args) == 0 {
-		return nil
-	}
-	unknown := make([]string, 0, len(attr.Args))
-	for k := range attr.Args {
-		if !allowed[k] {
-			unknown = append(unknown, k)
-		}
-	}
-	if len(unknown) == 0 {
-		return nil
-	}
-	sort.Strings(unknown)
-	supported := make([]string, 0, len(allowed))
-	for k := range allowed {
-		supported = append(supported, k)
-	}
-	sort.Strings(supported)
-	return newParseErrorf(tok, "tool %q: unknown @%s argument(s) %s (supported: %s) -- an unrecognised argument name is never read, so the value you wrote was dropped",
-		toolName, annotation, strings.Join(unknown, ", "), strings.Join(supported, ", "))
 }
 
 // attrArgString fetches a named argument from an annotation's

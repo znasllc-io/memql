@@ -196,10 +196,8 @@ seed agent ordered {
 	}
 }
 
-// TestParseSeedDecl_UnknownAnnotationRejected mirrors
-// parseSeedMemQL's hard-fail default branch: any annotation
-// outside the seed allow-list errors at parse time. This is the
-// behavior parity test that catches a sibling PR's drift.
+// TestParseSeedDecl_UnknownAnnotationRejected: any annotation outside
+// the seed receiver's registry set errors at parse time (memql#5359).
 func TestParseSeedDecl_UnknownAnnotationRejected(t *testing.T) {
 	source := `use agents.concepts.{ agent }
 
@@ -209,14 +207,14 @@ seed agent oops { }`
 	if err == nil {
 		t.Fatal("ParseSeedDecl: expected error for unknown annotation, got nil")
 	}
-	if !strings.Contains(err.Error(), "@nope") && !strings.Contains(err.Error(), "unknown seed annotation") {
+	if !strings.Contains(err.Error(), "unknown annotation @nope on a seed") {
 		t.Errorf("error %q does not mention the unknown annotation", err.Error())
 	}
 }
 
 // TestParseSeedDecl_ScopeEnumGuard checks @scope only accepts
 // "global" / "perUser". Any other value fails at parse time,
-// matching parseSeedMemQL's enum guard.
+// matching the retired hand-rolled parser's enum guard.
 func TestParseSeedDecl_ScopeEnumGuard(t *testing.T) {
 	source := `use agents.concepts.{ agent }
 

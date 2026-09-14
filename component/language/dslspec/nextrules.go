@@ -1,5 +1,7 @@
 package dslspec
 
+import "strings"
+
 // nextrules.go encodes the coarse "what is legal to type next" state model
 // that drives context-aware completion (#2126 builds the richer AST-aware
 // analysis on top of these). Each rule names a cursor context and the
@@ -17,7 +19,11 @@ func nextRules() []NextRule {
 		{
 			Context: "topLevel",
 			Expect:  []string{"annotation", "construct"},
-			Doc:     "At top of file (or between declarations): an @annotation block or a construct keyword (concept, query, mutate, logic, automation, action, capability, spec, trait, shape, tool, prompt, provider, builtin, policy, seed) or a `use` import.",
+			// The keyword list is DERIVED from the construct set, which the
+			// parser owns (constructs.go): the hand-written list this replaced
+			// had fallen behind it and never offered `rule` (memql#5359).
+			Doc: "At top of file (or between declarations): an @annotation block or a construct keyword (" +
+				strings.Join(declarationKeywords(), ", ") + ") or a `use` import.",
 		},
 		{
 			Context:                  "afterMutationKeyword",
@@ -71,7 +77,7 @@ func nextRules() []NextRule {
 		{
 			Context: "inFilterClause",
 			Expect:  []string{"specRef", "operator", "payloadPath", "intrinsic"},
-			Doc:     "Inside a query filter: spec references, trait references, payload.<field> / intrinsic comparisons joined by && / || / ! with Go precedence; membership via `in`; arg-guards via when(args.x){ }.",
+			Doc:     "Inside a query filter: spec references, trait references, payload.<field> / intrinsic comparisons joined by && / || with Go precedence (the `!` negation is refused in a filter -- write the != comparison form); membership via `in`; arg-guards via when(args.x){ }. `filter` takes the rest of its line; it opens no block.",
 		},
 		{
 			Context: "inShapeBody",
@@ -89,4 +95,17 @@ func nextRules() []NextRule {
 			Doc:     "After `@`: an annotation legal for the construct being declared (filtered by the construct's annotation receiver).",
 		},
 	}
+}
+
+// declarationKeywords is every construct keyword a declaration can start
+// with -- the construct set minus the `use` import, which the topLevel rule
+// names on its own.
+func declarationKeywords() []string {
+	var out []string
+	for _, kw := range constructKeywords() {
+		if kw != useKeyword {
+			out = append(out, kw)
+		}
+	}
+	return out
 }

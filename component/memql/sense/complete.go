@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
+	"github.com/znasllc-io/memql/component/language/dslspec"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Complete returns completion suggestions at a cursor position.
@@ -88,15 +90,19 @@ func (s *Service) completeTopLevel(prefix string) []CompletionItem {
 
 // completeAnnotation returns annotation name completions after @.
 func (s *Service) completeAnnotation(ctx CursorContext) []CompletionItem {
+	if receivers := fieldAnnotationReceivers(ctx.Enclosing); len(receivers) > 0 {
+		return fieldAnnotationItems(receivers, ctx.Prefix, "", 1)
+	}
 	validAnnotations := annotationsForConstruct(ctx.Enclosing)
 
+	receiver := receiverOfConstruct(ctx.Enclosing)
 	var items []CompletionItem
 	for _, name := range validAnnotations {
 		if strings.HasPrefix(name, ctx.Prefix) {
 			doc := AnnotationDocs[name]
 			insertText := name
 			// Annotations with args get parens.
-			if annotationTakesArgs(name) {
+			if annotationTakesArgs(receiver, name) {
 				insertText = name + "("
 			}
 			items = append(items, CompletionItem{
@@ -189,22 +195,46 @@ func (s *Service) completeFuncBody(prefix string, enc EnclosingConstruct, source
 
 	var items []CompletionItem
 
-	// Construct-scoped body blocks (#2627): the spec's BodyBlocks for
-	// THIS construct, offered where a block can open (directly in the
+	// Construct-scoped body clauses (#2627): the spec's BodyBlocks for
+	// THIS construct, offered where a clause can start (directly in the
 	// construct body, not nested inside another block). A logic body
-	// never offers `filter`; a shape body never offers `insert`.
+	// never offers `filter`; a shape body never offers `insert`. A LINE
+	// clause (`filter <expr>`, `paginate 25`) is inserted as its keyword and
+	// a space: it opens no block, and the `filter {` this used to insert is
+	// a form the rewriter refuses (memql#5359).
 	if len(enc.Blocks) == 0 {
 		for _, blk := range bodyBlocksForConstruct(enc) {
-			if strings.HasPrefix(blk, prefix) {
+			if !strings.HasPrefix(blk, prefix) {
+				continue
+			}
+			if parser.IsLineClause(blk) {
 				items = append(items, CompletionItem{
-					Label: blk, Kind: "keyword", Detail: enc.Keyword + " block",
-					Documentation: KeywordDocs[blk], InsertText: blk + " {",
+					Label: blk, Kind: "keyword", Detail: enc.Keyword + " clause",
+					Documentation: specClauseDoc(blk), InsertText: blk + " ",
 					SortPriority: 2,
 				})
-				// The snippet form opens the block and places the cursor
-				// inside (#2629).
-				items = append(items, blockSnippet(blk, enc.Keyword))
+				continue
 			}
+			// A named block (`step <name> { ... }`) needs its name before the
+			// brace -- a nameless one is refused -- so the keyword is inserted
+			// with a space and the snippet puts the name first.
+			if parser.IsNamedBlock(blk) {
+				items = append(items, CompletionItem{
+					Label: blk, Kind: "keyword", Detail: enc.Keyword + " block",
+					Documentation: specClauseDoc(blk), InsertText: blk + " ",
+					SortPriority: 2,
+				})
+				items = append(items, namedBlockSnippet(blk, enc.Keyword))
+				continue
+			}
+			items = append(items, CompletionItem{
+				Label: blk, Kind: "keyword", Detail: enc.Keyword + " block",
+				Documentation: specClauseDoc(blk), InsertText: blk + " {",
+				SortPriority: 2,
+			})
+			// The snippet form opens the block and places the cursor
+			// inside (#2629).
+			items = append(items, blockSnippet(blk, enc.Keyword))
 		}
 	}
 
@@ -618,23 +648,81 @@ func (s *Service) completeConceptDef(prefix string) []CompletionItem {
 			})
 		}
 	}
-	// Field-level annotations.
-	for _, ann := range []string{"required", "default", "description"} {
-		items = append(items, CompletionItem{
-			Label: "@" + ann, Kind: "annotation", Detail: "field annotation",
-			Documentation: AnnotationDocs[ann], InsertText: "@" + ann,
-			SortPriority: 5,
-		})
+	// Field-level annotations and the body's own @relationship: the
+	// registry's concept-field and concept-body receivers, the sets the
+	// concept translator checks against, each with the paren it needs
+	// (memql#5359).
+	items = append(items, fieldAnnotationItems([]annotations.Receiver{annotations.ConceptField, annotations.ConceptBody}, "", "@", 5)...)
+	return items
+}
+
+// fieldAnnotationReceivers returns the registry receivers of the field an `@`
+// at the cursor is written on, or nil when the cursor is not in a field list
+// -- in a construct's preamble, where the construct's own set applies. A
+// concept body takes its fields' annotations and its own @relationship (a
+// nested object or variant block, its fields' only); a tool / prompt /
+// builtin body its fields'; an args block its fields'. Before memql#5359 an
+// `@` after a field's type offered the CONSTRUCT's annotations, every one of
+// which the field refuses.
+func fieldAnnotationReceivers(enc EnclosingConstruct) []annotations.Receiver {
+	if enc.Keyword == "" || enc.Preamble {
+		return nil
+	}
+	body := dslspec.BodyFieldReceiver(enc.Keyword)
+	if n := len(enc.Blocks); n > 0 {
+		switch {
+		case enc.Blocks[n-1] == "args":
+			return []annotations.Receiver{annotations.ArgsField}
+		case body == annotations.ConceptField:
+			return []annotations.Receiver{annotations.ConceptField}
+		}
+		return nil
+	}
+	switch body {
+	case "":
+		return nil
+	case annotations.ConceptField:
+		return []annotations.Receiver{annotations.ConceptField, annotations.ConceptBody}
+	}
+	return []annotations.Receiver{body}
+}
+
+// fieldAnnotationItems renders the annotations of the given receivers that
+// start with prefix, each once, inserting lead + the name and the `(` when its
+// placement cannot be written bare.
+func fieldAnnotationItems(receivers []annotations.Receiver, prefix, lead string, priority int) []CompletionItem {
+	var items []CompletionItem
+	seen := map[string]bool{}
+	for _, r := range receivers {
+		for _, name := range AnnotationsByReceiver[string(r)] {
+			if seen[name] || !strings.HasPrefix(name, prefix) {
+				continue
+			}
+			seen[name] = true
+			insert := lead + name
+			if annotationTakesArgs(string(r), name) {
+				insert += "("
+			}
+			items = append(items, CompletionItem{
+				Label: "@" + name, Kind: "annotation", Detail: "field annotation",
+				Documentation: AnnotationDocs[name], InsertText: insert,
+				SortPriority: priority,
+			})
+		}
 	}
 	return items
 }
 
-// allAnnotationNames returns all known annotation names.
+// allAnnotationNames returns every annotation a construct may carry in its
+// leading position -- the union fallback. Field-only annotations (@pii,
+// @minimum, ...) are left out: they are written after a field's type, never
+// before a declaration, so offering them at an `@` above one would offer an
+// annotation every construct refuses.
 func allAnnotationNames() []string {
 	seen := make(map[string]bool)
 	var names []string
-	for _, annotations := range AnnotationsByReceiver {
-		for _, name := range annotations {
+	for _, c := range dslSpec.Constructs {
+		for _, name := range AnnotationsByReceiver[c.AnnotationReceiver] {
 			if !seen[name] {
 				seen[name] = true
 				names = append(names, name)
@@ -645,36 +733,34 @@ func allAnnotationNames() []string {
 	return names
 }
 
-// annotationTakesArgs returns true if the annotation expects arguments.
-func annotationTakesArgs(name string) bool {
-	switch name {
-	case "description", "version", "trigger", "filter", "schedule",
-		// rateLimit + relationship were MISSING from this
-		// hand-maintained switch, so completion inserted them without
-		// the opening paren (#2627's in-sync test is what caught it).
-		// schedule joined the automation surface in #2712.
-		"rateLimit", "relationship",
-		"handler", "executionTime", "executor", "args",
-		"defaultProvider", "templateFile", "type", "model", "extends",
-		"cache", "defaultFilter", "concepts", "default",
-		// The whole field-list family was missing here (memql#4951): every
-		// one takes `("a", "b")` and completion offered them bare. The
-		// in-sync test only fires for annotations declared in
-		// annotations.KeywordArgs, and these take POSITIONAL strings, so it
-		// could not see them. Added together rather than one at a time,
-		// because the next one added would inherit the same gap.
-		"mergeFields", "appendFields", "addToSet", "removeFromSet",
-		"createOnly", "noUnset", "requiresRank", "visibility", "alias",
-		// The rule surface (epic memql#5127). @when takes keyword arguments
-		// and is declared in annotations.KeywordArgs, so the in-sync test
-		// fires on it by name; the other four take a positional value, which
-		// that test cannot see -- they are added together for the reason the
-		// field-list family above was.
-		"when", "policy", "level", "precedence", "onUnavailable", "exclude":
-		return true
-	default:
-		return false
+// annotationTakesArgs reports whether completion should insert `@name(` --
+// the placement takes arguments and cannot be written bare -- read off the
+// registry's argument forms rather than a hand list (the hand switch this
+// replaced missed rateLimit, relationship and the whole field-list family
+// before it was noticed, memql#4951). On an unknown receiver (the union
+// fallback) the name takes arguments when any placement of it must.
+func annotationTakesArgs(receiver, name string) bool {
+	if p, ok := annotations.Lookup(annotations.Receiver(receiver), name); ok {
+		return p.Forms&annotations.FormFlag == 0
 	}
+	for _, p := range annotations.Placements() {
+		if p.Name == name && p.Forms&annotations.FormFlag == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// receiverOfConstruct is the registry receiver of the detected construct's
+// leading annotations, or "" when none was detected.
+func receiverOfConstruct(enc EnclosingConstruct) string {
+	if enc.Keyword == "" {
+		return ""
+	}
+	if c := dslSpec.ConstructByKeyword(enc.Keyword); c != nil {
+		return c.AnnotationReceiver
+	}
+	return ""
 }
 
 // enclosingConstructArgsFields returns the declared args-field names of
@@ -893,9 +979,9 @@ func eventMemberCompletions(prefix string) []CompletionItem {
 // annotationsForConstruct maps a detected construct to the annotations
 // legal on it (#2627), handling the three documented edges:
 //
-//   - the CONCEPT construct's receiver key is "" -- a real registry key,
-//     not "unresolved", so an empty Keyword (detection abstained) and an
-//     empty Receiver (concept) must not be conflated;
+//   - the CONCEPT construct's receiver key is "Concept" (it was "" before
+//     memql#5359, which is why an empty Keyword -- detection abstained -- is
+//     tested for rather than an empty receiver);
 //   - an unbacked construct (today exactly `use`, pinned by the dslspec
 //     drift test's knownUnbacked set) falls back to the union rather
 //     than offering nothing;

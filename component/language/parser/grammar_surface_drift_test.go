@@ -197,6 +197,81 @@ concept probe {
     id: args.id
   }
 }`},
+	// ---- the annotation registry's parse-time narrowings (memql#5359) -----
+	// The registry became the one annotation gate, at PARSE time, for every
+	// construct and field list. Each of these parsed on this path before it:
+	// the field lists accepted any annotation, the four function kinds were
+	// checked only by a load-time text scan of their names, an action had no
+	// check at all, and no check looked at an annotation's arguments.
+	{"unknown annotation on a prompt field (memql#5359)", false, `prompt probe {
+  topic string @bogusFieldAnnotation
+}`},
+	{"unknown annotation on a builtin field (memql#5359)", false, `builtin probe {
+  topic string @bogusFieldAnnotation
+}`},
+	{"a flag annotation given an argument (memql#5359)", false, `@serverOnly("yes")
+query thing probe {
+  filter row.id!=""
+}`},
+	{"unknown annotation on a query, refused at parse (memql#5359)", false, `@bogusAnnotation
+query thing probe {
+  filter row.id!=""
+}`},
+	{"unknown annotation on an action (memql#5359)", false, `@bogusAnnotation
+action probe {
+  capability script(script: "x")
+}`},
+	{"unknown keyword key on @trigger (memql#5359)", false, `@trigger(evnt="node.created")
+automation probe {
+  step run {
+    mutation createThing (id: "x")
+  }
+}`},
+	{"a non-repeatable annotation written twice (memql#5359)", false, `@description("one")
+@description("two")
+query thing probe {
+  filter row.id!=""
+}`},
+	{"@when() with empty parentheses on a rule", true, `@when()
+@policy("localFirst")
+rule probe { }`},
+	// A keyword key written in the shape its placement does not take: the
+	// parser stores a bare key as `true`, so a valued key written bare read
+	// as "" downstream -- this tool registered with no rate limit.
+	{"a valued keyword key written bare (memql#5359)", false, `@handler(type="function", name="x")
+@rateLimit(maxCalls, periodSeconds)
+tool probe {
+  x string
+}`},
+	{"the @trigger(on=...) synonym for event= (memql#5359)", true, `@trigger(on=participant.created)
+automation probe {
+  step run {
+    mutation createThing (id: "x")
+  }
+}`},
+	// Logic, automation and mutation bodies refuse a clause they do not
+	// take; each emitter kept what it recognised and dropped the rest.
+	{"an unlisted clause in an automation body (memql#5359)", false, `automation probe {
+  filter row.id != ""
+  step run {
+    mutation createThing (id: "x")
+  }
+}`},
+	{"an unlisted block in a logic body (memql#5359)", false, `logic probe {
+  step s {
+    mutation createThing (id: "x")
+  }
+  body {
+    return 1
+  }
+}`},
+	{"a stray top-level line in a mutation body (memql#5359)", false, `mutate thing probe {
+  insert {
+    id: "x"
+  }
+  filter row.id != ""
+}`},
+
 	// NOT in this corpus: the retired procedural `func (Query) name(ctx any)`
 	// author-side form. It is refused, but NOT by NormaliseAll + ParseFile --
 	// measured here, it parses clean at this layer, so an entry asserting

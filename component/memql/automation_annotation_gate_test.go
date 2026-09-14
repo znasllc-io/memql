@@ -3,14 +3,18 @@ package memql
 import (
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/language/annotations"
 )
 
-// TestValidateAutomationAnnotations pins the #2712 gate: automations now run
-// through the same allow-list + retired-name gate the function kinds use.
+// TestAutomationAnnotationGate pins the #2712 gate on the path it now runs on:
+// an automation's annotations are held to the Automation receiver at PARSE
+// time by the annotation registry (memql#5359), the same check every
+// construct runs, rather than by a load-time text scan of their names.
 // @schedule is LIVE (folds to the honored AutomationDef.Schedule) and must be
-// accepted; the six dead behavior-promise annotations and the retired/buried
-// names must be rejected with the pointed message.
-func TestValidateAutomationAnnotations(t *testing.T) {
+// accepted; the dead behavior-promise annotations and the retired/buried
+// names must be refused, the latter with the pointed message.
+func TestAutomationAnnotationGate(t *testing.T) {
 	body := func(preamble string) string {
 		return preamble + "automation probe {\n  step run {\n    logic doThing { event: event }\n  }\n}\n"
 	}
@@ -22,29 +26,32 @@ func TestValidateAutomationAnnotations(t *testing.T) {
 		"@schedule(cron=\"0 5 9 * * *\")\n", // LIVE -- must stay accepted
 	}
 	for _, p := range accept {
-		if err := ValidateAutomationAnnotations(body(p)); err != nil {
+		if err := runReceiverGate(annotations.Automation, body(p)); err != nil {
 			t.Errorf("accepted annotation rejected: %q -> %v", strings.TrimSpace(p), err)
 		}
 	}
 
-	// Dead behavior-promises -- rejected as unknown (not in the allow-list).
+	// Dead behavior-promises -- not on the Automation receiver. @version is
+	// live on a concept and a seed, so it is refused as misplaced; the rest
+	// are unknown.
 	for _, name := range []string{"retry", "audit", "async", "deprecated", "version", "timeout"} {
-		err := ValidateAutomationAnnotations(body("@" + name + "\n"))
-		if err == nil {
-			t.Errorf("dead @%s must be rejected on an automation", name)
+		err := runReceiverGate(annotations.Automation, body("@"+name+"\n"))
+		if code := refusalCode(err); code != annotations.CodeUnknown && code != annotations.CodeMisplaced {
+			t.Errorf("dead @%s must be refused on an automation, got code %q: %v", name, code, err)
 		}
 	}
 
-	// Retired / buried -- rejected with the pointed ticket message.
+	// Retired / buried -- refused with the pointed ticket message.
 	for name, ticket := range map[string]string{"internal": "#2708", "role": "#2709", "permission": "#2713"} {
-		err := ValidateAutomationAnnotations(body("@" + name + "\n"))
-		if err == nil || !strings.Contains(err.Error(), ticket) {
+		err := runReceiverGate(annotations.Automation, body("@"+name+"\n"))
+		if refusalCode(err) != annotations.CodeRetired || !strings.Contains(err.Error(), ticket) {
 			t.Errorf("retired @%s must carry %s on an automation, got: %v", name, ticket, err)
 		}
 	}
 
-	// Typo -- rejected.
-	if err := ValidateAutomationAnnotations(body("@triggr(event=\"x\")\n")); err == nil {
-		t.Error("typo'd @triggr must be rejected")
+	// Typo -- refused, and the refusal suggests the name.
+	err := runReceiverGate(annotations.Automation, body("@triggr(event=\"x\")\n"))
+	if refusalCode(err) != annotations.CodeUnknown || !strings.Contains(err.Error(), "did you mean @trigger") {
+		t.Errorf("typo'd @triggr must be refused with a did-you-mean, got: %v", err)
 	}
 }

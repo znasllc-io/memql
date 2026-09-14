@@ -38,7 +38,7 @@ func escapeSnippetLiteral(text string) string {
 	return out
 }
 
-// blockSnippet builds the body-block snippet for a named block:
+// blockSnippet builds the body-block snippet for a block clause:
 //
 //	args {
 //	  <cursor>
@@ -52,8 +52,27 @@ func blockSnippet(block, construct string) CompletionItem {
 		Label:         block + " { ... }",
 		Kind:          "snippet",
 		Detail:        construct + " block",
-		Documentation: "Insert an `" + block + " { }` block with the cursor inside.",
+		Documentation: "Insert a `" + block + " { }` block with the cursor inside.",
 		InsertText:    block + " {\n\t$0\n}",
+		IsSnippet:     true,
+		SortPriority:  1,
+	}
+}
+
+// namedBlockSnippet builds the snippet for a block that carries a name
+// (parser.IsNamedBlock): the name is the first tabstop and the cursor lands
+// inside, because `step { ... }` without one is refused.
+//
+//	step <name> {
+//	  <cursor>
+//	}
+func namedBlockSnippet(block, construct string) CompletionItem {
+	return CompletionItem{
+		Label:         block + " <name> { ... }",
+		Kind:          "snippet",
+		Detail:        construct + " block",
+		Documentation: "Insert a named `" + block + " <name> { }` block with the cursor inside.",
+		InsertText:    block + " ${1:name} {\n\t$0\n}",
 		IsSnippet:     true,
 		SortPriority:  1,
 	}
@@ -67,8 +86,11 @@ var constructSkeletons = []struct {
 }{
 	{
 		keyword: "query", label: "query <Concept> <name> { ... }",
-		doc:  "A read construct bound to a concept: filter clause plus optional args and shape.",
-		body: "query ${1:Concept} ${2:name} {\n\tfilter ${1:Concept}.${3:field} == args.${4:arg}\n\t$0\n}",
+		doc: "A read construct bound to a concept: filter clause plus optional args and shape.",
+		// A filter reads the bound concept's payload fields BARE; the
+		// `<Concept>.field` spelling this skeleton used to insert is refused
+		// at load by the canonical filter-syntax gate.
+		body: "query ${1:Concept} ${2:name} {\n\tfilter ${3:field} == args.${4:arg}\n\t$0\n}",
 	},
 	{
 		keyword: "mutate", label: "mutate <Concept> <name> { ... }",

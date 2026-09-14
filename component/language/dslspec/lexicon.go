@@ -1,5 +1,7 @@
 package dslspec
 
+import "github.com/znasllc-io/memql/component/language/parser"
+
 // lexicon.go holds the non-construct vocabulary: control-flow / clause /
 // reserved keywords, the one-Go-grammar operator set (#971), and the field
 // type names. These tables are the SoT for the corresponding sense surfaces
@@ -7,11 +9,58 @@ package dslspec
 // `array`).
 
 // keywords returns reserved words that are not top-level constructs:
-// control-flow words used inside logic/automation bodies, the block-header
-// clause keywords, the reserved engine identifiers, and `use`.
+// control-flow words used inside logic/automation bodies, the body clause
+// keywords (derived from the parser's clause table, bodyClauseKeywords), the
+// reserved engine identifiers, and `use`.
 func keywords() []Keyword {
+	out := controlKeywords()
+	out = append(out, bodyClauseKeywords()...)
+	return append(out, reservedKeywords()...)
+}
+
+// bodyClauseKeywords returns one clause keyword per body clause any
+// construct accepts, in the order the constructs list them, DERIVED from
+// parser.BodyClauses (memql#5359) -- the hand list this replaced lacked sort,
+// paginate, asOf, count, step and precondition. The doc of each is
+// clauseDocs'; a clause without one fails the drift test.
+func bodyClauseKeywords() []Keyword {
+	seen := map[string]bool{}
+	var out []Keyword
+	for _, kw := range constructKeywords() {
+		for _, clause := range parser.BodyClauses(kw) {
+			if seen[clause] {
+				continue
+			}
+			seen[clause] = true
+			out = append(out, Keyword{Name: clause, Doc: clauseDocs[clause], Kind: "clause"})
+		}
+	}
+	return out
+}
+
+// clauseDocs is the one-line doc of each body clause.
+var clauseDocs = map[string]string{
+	"args":         "Input-schema block: declares caller-passed args read as args.X in the body.",
+	"filter":       "Query clause: the boolean row predicate (specs + payload/intrinsic comparisons). A line clause -- `filter <expr>`, no block.",
+	"shape":        "Query clause: names the projection shape for the result -- `shape <name>`. (Also the `shape` construct keyword and the `<expr> with shape(...)` expression.)",
+	"sort":         "Query clause: order the result -- `sort \"row.createdAt\", \"desc\"`. Payload keys are bare; row intrinsics take the row. namespace.",
+	"paginate":     "Query clause: bound the result to a window -- `paginate 25`. A list-returning query carries paginate, sort, count or @unbounded(\"reason\") (memql#1965).",
+	"asOf":         "Query clause: read the stream as of a moment -- `asOf latest`, or `asOf args.at ?? latest`. Query-only (core-builtins ADR 2.3).",
+	"count":        "Query clause: aggregate the matching set to {count: N} -- a bare `count`. Mutually exclusive with shape, sort and paginate.",
+	"insert":       "Mutation block: the row to create. Exactly one insert OR update per mutation.",
+	"update":       "Mutation block: partial read-merge-write of an existing row (keyed by id).",
+	"accept":       "Write-block sugar: `accept { name, ... }` lists the public fields the mutation accepts -- each auto-binds to its same-named arg (`name` -> `name: args.name`). Every name must be a declared arg. Nested inside insert{}/update{} (or top-level, which means insert). Never mixed with loose fields.",
+	"stamp":        "Write-block sugar: `stamp { key: value, ... }` carries the server-set fields beside an accept{} list. Nested inside insert{}/update{} (or top-level with accept, which means insert).",
+	"body":         "Logic block: named statements ending in `return <expr>`. An automation has no body block -- its body is step blocks.",
+	"step":         "Automation block: `step <name> { <call> }`, one unit of the automation's work; steps run in order, and each result is readable by name.",
+	"precondition": "Automation block: `precondition <name> { ... }`, a deterministic check that must hold before the steps run (Epic 4, memql#2139).",
+	"params":       "Provider block: model/window/cost parameters.",
+	"auth":         "Provider block: vendor auth (e.g. apiKey env(\"...\")).",
+}
+
+// controlKeywords are the control-flow words of logic / automation bodies.
+func controlKeywords() []Keyword {
 	return []Keyword{
-		// Control flow (logic / automation bodies).
 		{Name: "if", Doc: "Conditional control flow: if cond { ... } else { ... }. For a conditional VALUE use the cond(...) expression.", Kind: "control"},
 		{Name: "else", Doc: "Alternative branch of an if statement.", Kind: "control"},
 		{Name: "for", Doc: "Iterate a collection: for item := range collection { ... }.", Kind: "control"},
@@ -20,19 +69,12 @@ func keywords() []Keyword {
 		{Name: "when", Doc: "Arg-conditional guard: when(args.x) { <expr> } -- the guarded block (and its connective) is dropped if args.x is absent.", Kind: "control"},
 		{Name: "in", Doc: "Membership test: args.x in payload.list, or payload.kind in [\"a\", \"b\"]. The single membership operator (`has` is retired).", Kind: "control"},
 		{Name: "startsWith", Doc: "String-prefix test: <field> startsWith \"lit\", [\"a\", \"b\"] (ANY of) or args.x. Filter and spec predicate; an empty list and a blank prefix match nothing (memql#4208).", Kind: "control"},
+	}
+}
 
-		// Block-header clauses (struct-form construct bodies).
-		{Name: "args", Doc: "Input-schema block: declares caller-passed args read as args.X in the body.", Kind: "clause"},
-		{Name: "filter", Doc: "Query clause: the boolean row predicate (specs + payload/intrinsic comparisons).", Kind: "clause"},
-		{Name: "shape", Doc: "Query clause: names the projection shape for the result. (Also the `shape` construct keyword and the `<expr> with shape(...)` expression.)", Kind: "clause"},
-		{Name: "insert", Doc: "Mutation block: the row to create. Exactly one insert OR update per mutation.", Kind: "clause"},
-		{Name: "update", Doc: "Mutation block: partial read-merge-write of an existing row (keyed by id).", Kind: "clause"},
-		{Name: "accept", Doc: "Write-block sugar: `accept { name, ... }` lists the public fields the mutation accepts -- each auto-binds to its same-named arg (`name` -> `name: args.name`). Every name must be a declared arg. Nested inside insert{}/update{} (or top-level, which means insert). Never mixed with loose fields.", Kind: "clause"},
-		{Name: "stamp", Doc: "Write-block sugar: `stamp { key: value, ... }` carries the server-set fields beside an accept{} list. Nested inside insert{}/update{} (or top-level with accept, which means insert).", Kind: "clause"},
-		{Name: "body", Doc: "Logic/automation block: named statements ending in `return <expr>`.", Kind: "clause"},
-		{Name: "params", Doc: "Provider block: model/window/cost parameters.", Kind: "clause"},
-		{Name: "auth", Doc: "Provider block: vendor auth (e.g. apiKey env(\"...\")).", Kind: "clause"},
-
+// reservedKeywords are the reserved engine identifiers and `use`.
+func reservedKeywords() []Keyword {
+	return []Keyword{
 		// Reserved engine identifiers (bare top-level names, not args).
 		{Name: "now", Doc: "Reserved: RFC3339 timestamp captured at eval start.", Kind: "reserved"},
 		{Name: "actor", Doc: "Reserved: the auth envelope. Closed member set (#2623): userId, role, identityId, isClusterOwner, primaryEmail, now, plus the legacy isOwner alias. Reading it requires @actor in the construct preamble (#2621).", Kind: "reserved", Properties: []KeywordProperty{
