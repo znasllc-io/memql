@@ -155,8 +155,11 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 
 // withUnreadRootManifest adds the diagnostic for a memql.toml at the root of
 // the mounted tree, which no mount reads (dsl.UnreadRootManifest, memql#5357).
-// Boot never sees that file, so it is the offline passes that must say so --
-// in their diagnostics, where an author reads, not in a log they discard.
+// Boot never sees that file, so it is the offline passes that must say so,
+// where an author reads rather than in a log they discard: memqllint in its
+// diagnostics, a package deploy as a warning of its own
+// (PackageDSLResult.UnreadRootManifest) -- boot refuses nothing for it, so a
+// deploy must not either.
 func withUnreadRootManifest(diags []LintDiagnostic, root fs.FS) []LintDiagnostic {
 	if msg, unread := memqldsl.UnreadRootManifest(root); unread {
 		diags = append(diags, LintDiagnostic{File: dslfs.ManifestFile, Message: msg})

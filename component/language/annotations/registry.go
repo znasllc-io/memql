@@ -329,7 +329,7 @@ var placementTable = concat(
 	lifecycle(Prompt, "Distil a cluster of episodes into one memory."),
 	[]Placement{
 		{Receiver: Prompt, Name: "defaultProvider", Forms: FormString, Example: `@defaultProvider("fleet")`},
-		{Receiver: Prompt, Name: "level", Forms: FormString, Example: `@level("fast")`, Doc: "How much intelligence the call needs: fast, strong, reasoning or embeddings. Required on every prompt; the router's rules branch on it, so a prompt never names a model (epic memql#5127)."},
+		{Receiver: Prompt, Name: "level", Forms: FormString, Example: `@level("fast")`, Doc: "How much intelligence the call needs: fast, strong, reasoning or embeddings. The router's rules branch on it, so a prompt never names a model (epic memql#5127). Every prompt should declare one; a prompt without one is not yet refused at load (memql#5426)."},
 		{Receiver: Prompt, Name: "templateFile", Forms: FormString, Example: `@templateFile("prompts/consolidateMemory.tmpl")`, Doc: "The prompt's template: a .tmpl file beside the prompt, rendered with the input fields."},
 	},
 
@@ -373,7 +373,7 @@ var placementTable = concat(
 	// ---- Seed -----------------------------------------------------------
 	lifecycle(Seed, "Knowledge baseline for every professional role."),
 	[]Placement{
-		{Receiver: Seed, Name: "namespace", Forms: FormString, Example: `@namespace("agents")`, Doc: "The namespace the seeded row's concept is resolved in, when it differs from the file's domain."},
+		{Receiver: Seed, Name: "namespace", Forms: FormString, Example: `@namespace("agents")`, Doc: "Accepted, and read by nothing yet: the seeded row's concept is resolved from the seed's signature (`seed <Concept> <name>`, through the file's use imports), never from this annotation (memql#5426)."},
 		{Receiver: Seed, Name: "scope", Forms: FormString, Example: `@scope("perUser")`, Doc: "Seed scope: \"global\" seeds once for the cluster, \"perUser\" once for every user."},
 		{Receiver: Seed, Name: "templateFile", Forms: FormString, Example: `@templateFile("templates/assistant.tmpl")`, Doc: "A template file whose rendered text is the seeded row's content."},
 		{Receiver: Seed, Name: "version", Forms: FormString, Example: `@version("1.0.0")`, Doc: "Version tag for the seed."},

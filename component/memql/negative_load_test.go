@@ -109,7 +109,7 @@ func TestNegativeLoad_TypoTopLevelKeyword(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load accepted a typo'd top-level keyword `conept`")
 	}
-	if !strings.Contains(err.Error(), "did you mean 'concept'") {
+	if !strings.Contains(err.Error(), "did you mean concept?") {
 		t.Errorf("expected a did-you-mean hint for `conept`; got: %v", err)
 	}
 }

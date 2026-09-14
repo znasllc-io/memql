@@ -19,6 +19,18 @@ someone deciding whether to install rather than for someone reading the repo.
 - A cluster whose engine predates the comparison does not report its MemQL, and
   the extension says nothing about it.
 
+**Writing MemQL**
+- **The language line.** Each domain declares the language it is written in, in
+  a `memql.toml` beside its `.memql` files. A domain without one is flagged on
+  its files with a quick fix that writes it. Until then the workspace does not
+  load: hover is off, and completion offers keywords, annotations and snippets
+  but no loaded concepts, fields or functions. A notification says why.
+- **The parse-time refusals.** Annotations are checked as you type against one
+  registry of where each may be written and with what arguments. A misplaced,
+  mis-argued or retired annotation is an error that names the fix.
+- Closing a file now clears its diagnostics, because the language server
+  analyzes open files only.
+
 **Writing edition 2026**
 - Filters, specs, traits and trigger filters are written as a lambda over a
   named parameter: `filter row => row.status == "open" && isActiveRecord(row)`.

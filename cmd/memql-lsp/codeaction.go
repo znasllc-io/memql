@@ -112,11 +112,24 @@ func kindRequested(only []protocol.CodeActionKind, kind protocol.CodeActionKind)
 	return false
 }
 
+// codeAction answers textDocument/codeAction with every action this server
+// offers: the language line's "Create memql.toml" quick fix (languageline.go)
+// and "Rewrite to edition 2026" (rewriteCodeActions). Each checks its own
+// diagnostics and the request's `only` filter, so a request collects exactly
+// the actions that apply to it.
 func (s *server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) (any, error) {
+	actions := append(s.languageLineCodeActions(params), s.rewriteCodeActions(params)...)
+	if len(actions) == 0 {
+		return nil, nil
+	}
+	return actions, nil
+}
+
+func (s *server) rewriteCodeActions(params *protocol.CodeActionParams) []protocol.CodeAction {
 	uri := params.TextDocument.URI
 	text, ok := s.docs.get(uri)
 	if !ok {
-		return nil, nil
+		return nil
 	}
 	var diags []protocol.Diagnostic
 	if kindRequested(params.Context.Only, protocol.CodeActionKindQuickFix) {
@@ -128,11 +141,11 @@ func (s *server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) 
 	}
 	wantFile := kindRequested(params.Context.Only, codeActionKindFixAllMemql)
 	if len(diags) == 0 && !wantFile {
-		return nil, nil
+		return nil
 	}
 	fixes := s.rewriteFixes(uri, text)
 	if len(fixes) == 0 {
-		return nil, nil
+		return nil
 	}
 
 	var actions []protocol.CodeAction
@@ -166,9 +179,9 @@ func (s *server) codeAction(_ *glsp.Context, params *protocol.CodeActionParams) 
 		})
 	}
 	if len(actions) == 0 {
-		return nil, nil
+		return nil
 	}
-	return actions, nil
+	return actions
 }
 
 // rewriteFixes returns the verified fixes for one buffer, memoized on the

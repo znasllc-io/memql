@@ -16,6 +16,7 @@ import (
 
 	"github.com/znasllc-io/memql/cmd/memql-lsp/internal/position"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/sense"
 )
 
@@ -82,7 +83,7 @@ func workspaceServer(t *testing.T, root string) *server {
 	t.Helper()
 	commonlog.Configure(-4, nil)
 	s := newServer(root, commonlog.GetLogger(lsName))
-	s.setSense(sense.New(nil))
+	s.setBuild(sense.New(nil), memql.WorkspaceLanguageLines{})
 	s.rewrite.load(root)
 	return s
 }

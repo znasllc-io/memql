@@ -96,7 +96,7 @@ func TestTwoEditionsLoadInOneEngine(t *testing.T) {
 		"alpha/memql.toml":   editionLine("2026"),
 		"alpha/traits.memql": {Data: predicate},
 	})
-	if err == nil || !strings.Contains(err.Error(), `unexpected token "predicate"`) {
+	if err == nil || !strings.Contains(err.Error(), "predicate is not a construct keyword") {
 		t.Errorf("under 2026 the predicate source must be refused as an unknown keyword, got: %v", err)
 	}
 	if _, err := dslimports.Load(fstest.MapFS{

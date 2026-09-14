@@ -40,7 +40,7 @@ concept gadget {
 	}
 	commonlog.Configure(-4, nil)
 	s := newServer(dir, commonlog.GetLogger(lsName))
-	s.buildSense()
+	s.buildSense(nil)
 
 	for _, tc := range []struct {
 		doc  string

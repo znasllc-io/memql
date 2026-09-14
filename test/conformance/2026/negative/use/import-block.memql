@@ -1,0 +1,8 @@
+import (
+	"./fixture"
+)
+
+/// A ticket, in a file that still opens with the retired import block.
+concept ticket {
+  title  string
+}

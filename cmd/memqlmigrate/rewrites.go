@@ -26,11 +26,14 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/dslfs"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 type rewrite struct {
@@ -95,7 +98,7 @@ var registry = []rewrite{
 		plain: rewriteArgsDescription},
 	{name: "language-line", edition: "2026", epic: "dsl-v1-foundations",
 		doc:  "declare memql = \"" + langparser.LanguageVersion + "\" and edition = \"2026\" in every domain that has no " + dslfs.ManifestFile,
-		tree: rewriteLanguageLine("2026")},
+		tree: rewriteLanguageLine("2026", memqldsl.EmbeddedTree{})},
 	{name: "expressions", edition: "2026", epic: "dsl-v1-expressions",
 		doc:  "filters, spec and trait bodies and @filter -> lambdas (filter row => ...); cond / concat / exists / null -> ? : / + / != nil / nil; $args.x in query tool handlers -> args.x",
 		tree: rewriteExpressions},
@@ -157,35 +160,61 @@ func rewriteNames(edition string) []string {
 // language line in every domain of a tree that has none (epic
 // dsl-v1-foundations, memql#5357).
 //
-// A domain is exactly what the loader asks a line of: the first path segment
-// of a .memql file some loader reads, however deep beneath it the file sits
-// (parser.LanguageLineDomainOf, the rule the resolver itself keys on), so a
-// domain holding only a sub-namespace (beta/sub/concepts.memql) is one, and
-// `_`/`.` segments are skipped as the walkers and mounts skip them. When the
-// root itself directly holds .memql files it is one domain (the caller passed
-// dsl/<domain> rather than dsl/). A domain that already has a memql.toml is
-// left alone whatever it declares, because moving a declared line is a
-// decision about the tree, not a migration of it.
-func rewriteLanguageLine(edition string) func(root string, files map[string][]byte) (map[string][]byte, error) {
+// A domain is exactly what the loader asks a line of, and the rewrite asks
+// the resolver's own questions to find it:
+//
+//   - which files make a domain: the first path segment of a .memql file some
+//     loader reads, however deep beneath it the file sits
+//     (parser.LanguageLineDomainOf), so a domain holding only a sub-namespace
+//     (beta/sub/concepts.memql) is one, and `_`/`.` segments are skipped as
+//     the walkers and mounts skip them;
+//   - whether the loader reads the domain's line at all: a domain the
+//     embedded tree owns (core.IsCoreDomain, the resolver's CoreTree seam)
+//     speaks the embedded dsl/memql.toml, and every mount skips a directory
+//     that collides with one, so it is given no file. Over the engine's own
+//     dsl/ the rewrite therefore writes nothing.
+//
+// When the root itself directly holds .memql files (parser.
+// LanguageLineRootIsDomain -- the caller passed bundle/<domain> rather than
+// bundle/), it is ONE directory, and everything beneath it belongs to it. It
+// gets a line only when a mount would read it as a domain
+// (parser.MountableDomainRoot, the rule memqllint asks too): not a
+// sub-namespace of its parent, not a `_` or `.` name, not a core domain.
+// `-w bundle/_draft` or `-w dsl/agents/roles` would otherwise write a file no
+// mount reads.
+//
+// A domain that already has a memql.toml is left alone whatever it declares,
+// because moving a declared line is a decision about the tree, not a
+// migration of it.
+func rewriteLanguageLine(edition string, core langparser.CoreTree) func(root string, files map[string][]byte) (map[string][]byte, error) {
 	return func(root string, files map[string][]byte) (map[string][]byte, error) {
-		domains := map[string]bool{} // domain dir ("" = the root) -> needs a line
-		rootIsDomain := false
+		paths := make([]string, 0, len(files))
 		for p := range files {
-			if !strings.Contains(p, "/") && strings.HasSuffix(p, ".memql") && !strings.HasPrefix(p, "_") {
-				rootIsDomain = true
-			}
-			if d := langparser.LanguageLineDomainOf(p); d != "" {
-				domains[d] = true
-			}
+			paths = append(paths, p)
 		}
-		// A root that is itself a domain makes everything beneath it part of
-		// that one domain, not domains of their own.
-		if rootIsDomain {
-			domains = map[string]bool{"": true}
+		dirs := map[string]string{} // domain -> the directory its line goes in ("" = the root)
+		if langparser.LanguageLineRootIsDomain(paths) {
+			abs, err := filepath.Abs(root)
+			if err != nil {
+				return nil, err
+			}
+			parent := filepath.Dir(abs)
+			if name := filepath.Base(abs); langparser.MountableDomainRoot(os.DirFS(parent), filepath.Base(parent), name, core) {
+				dirs[name] = ""
+			}
+		} else {
+			for _, p := range paths {
+				if d := langparser.LanguageLineDomainOf(p); d != "" {
+					dirs[d] = d
+				}
+			}
 		}
 		line := dslfs.Manifest{Language: langparser.LanguageVersion, Edition: edition}
 		out := map[string][]byte{}
-		for dir := range domains {
+		for domain, dir := range dirs {
+			if core != nil && core.IsCoreDomain(domain) {
+				continue
+			}
 			target := dslfs.ManifestFile
 			if dir != "" {
 				target = dir + "/" + dslfs.ManifestFile

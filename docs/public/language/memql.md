@@ -44,7 +44,7 @@ The file is a strict subset of TOML: blank lines, `#` comments, and exactly thos
 
 ### Where it lives: in every domain directory
 
-**Every domain directory carries its own `<domain>/memql.toml`.** A domain directory is the only thing that reaches a node: a bundle image copies domain directories into `MEMQL_DSL_PATH`, a package deploy stages each domain on its own, and every mount reads domain directories and skips the files at its root. A declaration at the root of a bundle would never arrive, so there is no inheritance from one — a `memql.toml` at the root of `MEMQL_DSL_PATH`, of a bundle `memqllint` lints, or of a package's `dsl/` is never read. `memqllint` and a package deploy report one as a diagnostic (`language_line_unread`), and the `MEMQL_DSL_PATH` mount logs a warning; each says the line belongs inside each domain directory.
+**Every domain directory carries its own `<domain>/memql.toml`.** A domain directory is the only thing that reaches a node: a bundle image copies domain directories into `MEMQL_DSL_PATH`, a package deploy stages each domain on its own, and every mount reads domain directories and skips the files at its root. A declaration at the root of a bundle would never arrive, so there is no inheritance from one — a `memql.toml` at the root of `MEMQL_DSL_PATH`, of a bundle `memqllint` lints, or of a package's `dsl/` is never read. `memqllint` reports one as a diagnostic (`language_line_unread`), a package deploy reports it as a warning that does not stop the deploy (`dsl_language_line_unread`), and the `MEMQL_DSL_PATH` mount logs a warning; each says the line belongs inside each domain directory.
 
 ```
 bundle/
@@ -77,11 +77,11 @@ A newer line reads, for example:
 domain "storefront" declares memql = "1.1", newer than the 1.0 this engine speaks: run an engine that speaks 1.1, or declare memql = "1.0" in storefront/memql.toml [language_version_newer]
 ```
 
-A refused domain is read by no loader at all, so its author sees exactly one refusal per domain rather than everything that reading it under a line it did not declare would produce; fix the line, and the next boot reports what the domain itself holds. `memqllint` runs the same check over a bundle before it ships, and reports each refusal once.
+A refused domain is read by no loader at all, so its author sees exactly one refusal per domain rather than everything that reading it under a line it did not declare would produce; fix the line, and the next boot reports what the domain itself holds. `memqllint` runs the same check over a bundle before it ships, and reports each refusal once. Pointed at one domain directory instead of at the bundle (`memqllint bundle/storefront`, or a file inside it), it checks that directory's own `memql.toml` when a mount would read the directory as a domain -- not a sub-namespace, not a `_` or `.` name, not a core domain: a malformed or newer file is refused with its code, and a missing one is a warning, because only the tree the directory is mounted in decides whether it is a domain. Linting the bundle checks every domain exactly as boot does.
 
 ### Adding the line
 
-`memqlmigrate` writes the engine's line into every domain that has none, and leaves a domain that already declares one alone — moving a declared line is a decision about the tree, not a migration of it. Run it over a bundle root (or over one domain directory), with `-w` to write in place:
+`memqlmigrate` writes the engine's line into every domain that has none, and leaves a domain that already declares one alone — moving a declared line is a decision about the tree, not a migration of it. It asks the loader's own questions, so it also writes nothing for a domain the engine compiles in: that domain speaks `dsl/memql.toml`, and every mount skips a directory named after it. Handed one directory rather than a bundle, it writes the line there only when a mount would read that directory as a domain -- the same rule `memqllint` asks. Run it over a bundle root (or over one domain directory), with `-w` to write in place:
 
 ```bash
 memqlmigrate --rewrite=language-line -w bundle/
@@ -1220,7 +1220,7 @@ provider anthropic {
 
 The legacy `func (Provider) name { ... }` form is retired; the parser rejects it with a migration hint.
 
-**Provider types** (registered in `component/memql/ai_providers.go`) include `OpenAI` / `OpenAIChat` (chat completions), `OpenAIStream` (streaming chat), `OpenAITTS` (text-to-speech), and `Anthropic` (Claude chat / vision).
+**Provider types** (`@type`, matched without regard to case; the clients are in `component/memql/ai_providers.go`) are `OpenAI` / `OpenAIChat` (chat completions), `OpenAITTS` (text-to-speech) and `OpenAIEmbedding` (embeddings) for OpenAI, and `Anthropic` / `AnthropicChat` (Claude chat / vision) for Anthropic. `Fleet` and `SubscriptionApp` are accepted on a `@base` provider only: their models are named from a policy (`fleet:<model>`, `app:<id>`) rather than declared as children. Streaming is a parameter (`streaming true` in `params`), not a type, and a child that `@extends` a base takes the base's type. Any other type leaves the provider registered but unavailable (`unsupported provider type`).
 
 **Lifecycle annotations (`@enabled` / `@disabled`).** Providers accept the same lifecycle flags as every other construct kind (the uniform ruling, #2604-#2608). `@enabled` is the explicit-on default (a no-op). `@disabled` skips the provider at load — it is **not registered and no auth resolution is attempted** — while staying in the tree for a future re-enable. `@disabled` on a `@base` **propagates**: every child that `@extends` it is skipped too. Dependents degrade gracefully — a policy whose `@primary` is disabled routes via its `@fallback`; a prompt whose `@defaultProvider` is disabled falls back to the default.
 
