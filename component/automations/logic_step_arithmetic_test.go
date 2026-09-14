@@ -27,20 +27,18 @@ logic doubler {
   args {
     n int @required
   }
-  body {
-    base := args.n ?? 0
-    doubled := base * 2
-    return doubled
-  }
+  base := args.n ?? 0
+  doubled := base * 2
+  return doubled
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 	registry := &recordingStepRegistry{}
 	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
 
-	out, err := r.RunLogic(context.Background(), "doubler", body, map[string]any{"n": 21})
+	out, err := r.RunLogicBody(context.Background(), "doubler", bodySteps, map[string]any{"n": 21})
 	if err != nil {
-		t.Fatalf("RunLogic (#2542 GAP 2 arithmetic step RHS must evaluate): %v", err)
+		t.Fatalf("RunLogicBody (#2542 GAP 2 arithmetic step RHS must evaluate): %v", err)
 	}
 	if !numericEquals(out, 42) {
 		t.Errorf("RunLogic return = %#v (%T), want 42 (21 * 2)", out, out)
@@ -61,18 +59,16 @@ logic netAmount {
     gross int @required
     fee int @required
   }
-  body {
-    net := args.gross - args.fee
-    return net
-  }
+  net := args.gross - args.fee
+  return net
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
 
-	out, err := r.RunLogic(context.Background(), "netAmount", body, map[string]any{"gross": 100, "fee": 30})
+	out, err := r.RunLogicBody(context.Background(), "netAmount", bodySteps, map[string]any{"gross": 100, "fee": 30})
 	if err != nil {
-		t.Fatalf("RunLogic (args-operand arithmetic step): %v", err)
+		t.Fatalf("RunLogicBody (args-operand arithmetic step): %v", err)
 	}
 	if !numericEquals(out, 70) {
 		t.Errorf("RunLogic return = %#v (%T), want 70 (100 - 30)", out, out)
@@ -92,21 +88,19 @@ logic weeksBetween {
     a string @required
     b string @required
   }
-  body {
-    weeks := daysBetween(args.a, args.b) / 7
-    return weeks
-  }
+  weeks := daysBetween(args.a, args.b) / 7
+  return weeks
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
 
-	out, err := r.RunLogic(context.Background(), "weeksBetween", body, map[string]any{
+	out, err := r.RunLogicBody(context.Background(), "weeksBetween", bodySteps, map[string]any{
 		"a": "2026-07-01",
 		"b": "2026-07-15",
 	})
 	if err != nil {
-		t.Fatalf("RunLogic (date-builtin arithmetic step): %v", err)
+		t.Fatalf("RunLogicBody (date-builtin arithmetic step): %v", err)
 	}
 	if !numericEquals(out, 2) {
 		t.Errorf("RunLogic return = %#v (%T), want 2 (14 days / 7)", out, out)
@@ -124,18 +118,16 @@ logic ratioStep {
     a int @required
     b int @required
   }
-  body {
-    x := args.a ?? 0
-    y := args.b ?? 0
-    q := x / y
-    return q
-  }
+  x := args.a ?? 0
+  y := args.b ?? 0
+  q := x / y
+  return q
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
 
-	_, err := r.RunLogic(context.Background(), "ratioStep", body, map[string]any{"a": 10, "b": 0})
+	_, err := r.RunLogicBody(context.Background(), "ratioStep", bodySteps, map[string]any{"a": 10, "b": 0})
 	if err == nil {
 		t.Fatalf("RunLogic succeeded on x / 0 step RHS; want a division-by-zero error")
 	}

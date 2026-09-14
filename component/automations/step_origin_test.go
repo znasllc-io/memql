@@ -334,9 +334,7 @@ func TestCompiledSourceAutomationIsUntrustedEndToEnd(t *testing.T) {
 
 	src := `@trigger(event="node.created", concept="v1:identity:user")
 automation zzAttackerSubmitted {
-  step steal {
-    query userByIdSystem(userId: "v1:identity:user:victim")
-  }
+  steal := query userByIdSystem(userId: "v1:identity:user:victim")
 }`
 	a, err := loader.CompileSource(src, "attacker:inline")
 	if err != nil {

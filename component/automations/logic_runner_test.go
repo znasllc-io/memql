@@ -493,13 +493,11 @@ logic logicSeedKnowledgeDomains {
   args {
     event object @required
   }
-  body {
-    seed := knowledgeSeedStandardDomains()
-    return 1
-  }
+  seed := builtin knowledgeSeedStandardDomains()
+  return 1
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 	registry := &recordingStepRegistry{}
 	// A zero-value engine is enough: the side-effect step is served by the
 	// stub registry, and the literal `return 1` is resolved locally before
@@ -507,11 +505,11 @@ logic logicSeedKnowledgeDomains {
 	// which RunLogic tolerates.
 	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
 
-	out, err := r.RunLogic(context.Background(), "logicSeedKnowledgeDomains", body, map[string]any{
+	out, err := r.RunLogicBody(context.Background(), "logicSeedKnowledgeDomains", bodySteps, map[string]any{
 		"event": map[string]any{"payload": map[string]any{"id": "u1"}},
 	})
 	if err != nil {
-		t.Fatalf("RunLogic returned error (memql#1090 regression): %v", err)
+		t.Fatalf("RunLogicBody returned error (memql#1090 regression): %v", err)
 	}
 	if out != int64(1) {
 		t.Errorf("RunLogic return = %#v, want int64(1)", out)
@@ -549,13 +547,11 @@ logic logicProbe {
   args {
     members []object @required
   }
-  body {
-    active := args.members.where(m => m.active)
-    return active.count()
-  }
+  active := args.members.where(m => m.active)
+  return active.count()
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 	registry := &recordingStepRegistry{}
 	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
 
@@ -564,11 +560,11 @@ logic logicProbe {
 		map[string]any{"name": "bob", "active": false},
 		map[string]any{"name": "carol", "active": true},
 	}
-	out, err := r.RunLogic(context.Background(), "logicProbe", body, map[string]any{
+	out, err := r.RunLogicBody(context.Background(), "logicProbe", bodySteps, map[string]any{
 		"members": members,
 	})
 	if err != nil {
-		t.Fatalf("RunLogic returned error (#2317 collection-chain step RHS must load + evaluate): %v", err)
+		t.Fatalf("RunLogicBody returned error (#2317 collection-chain step RHS must load + evaluate): %v", err)
 	}
 	if !numericEquals(out, 2) {
 		t.Errorf("RunLogic return = %#v (%T), want 2 (the active member count)", out, out)
@@ -739,23 +735,21 @@ logic aov {
     revenue int @required
     orders int @required
   }
-  body {
-    r := args.revenue ?? 0
-    o := args.orders ?? 1
-    return r / o
-  }
+  r := args.revenue ?? 0
+  o := args.orders ?? 1
+  return r / o
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 	registry := &recordingStepRegistry{}
 	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
 
-	out, err := r.RunLogic(context.Background(), "aov", body, map[string]any{
+	out, err := r.RunLogicBody(context.Background(), "aov", bodySteps, map[string]any{
 		"revenue": 100,
 		"orders":  4,
 	})
 	if err != nil {
-		t.Fatalf("RunLogic returned error (#2542 terminal-return arithmetic must evaluate): %v", err)
+		t.Fatalf("RunLogicBody returned error (#2542 terminal-return arithmetic must evaluate): %v", err)
 	}
 	if !numericEquals(out, 25) {
 		t.Errorf("RunLogic return = %#v (%T), want 25 (100 / 4)", out, out)
@@ -775,17 +769,15 @@ logic ratio {
     a int @required
     b int @required
   }
-  body {
-    x := args.a ?? 0
-    y := args.b ?? 0
-    return x / y
-  }
+  x := args.a ?? 0
+  y := args.b ?? 0
+  return x / y
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
 
-	_, err := r.RunLogic(context.Background(), "ratio", body, map[string]any{"a": 10, "b": 0})
+	_, err := r.RunLogicBody(context.Background(), "ratio", bodySteps, map[string]any{"a": 10, "b": 0})
 	if err == nil {
 		t.Fatalf("RunLogic succeeded on x / 0; want a division-by-zero error")
 	}
@@ -804,17 +796,15 @@ logic remainder {
     a float @required
     b int @required
   }
-  body {
-    x := args.a ?? 0
-    y := args.b ?? 1
-    return x % y
-  }
+  x := args.a ?? 0
+  y := args.b ?? 1
+  return x % y
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
 
-	_, err := r.RunLogic(context.Background(), "remainder", body, map[string]any{"a": 10.5, "b": 3})
+	_, err := r.RunLogicBody(context.Background(), "remainder", bodySteps, map[string]any{"a": 10.5, "b": 3})
 	if err == nil {
 		t.Fatalf("RunLogic succeeded on float %% int; want an integer-operands error")
 	}
@@ -850,13 +840,11 @@ logic isProfitable {
     revenue int @required
     cost int @required
   }
-  body {
-    delta := args.revenue - args.cost
-    return delta - 5 > 0
-  }
+  delta := args.revenue - args.cost
+  return delta - 5 > 0
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 
 	cases := []struct {
 		name    string
@@ -873,7 +861,7 @@ logic isProfitable {
 		t.Run(tc.name, func(t *testing.T) {
 			registry := &recordingStepRegistry{}
 			r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
-			out, err := r.RunLogic(context.Background(), "isProfitable", body, map[string]any{
+			out, err := r.RunLogicBody(context.Background(), "isProfitable", bodySteps, map[string]any{
 				"revenue": tc.revenue,
 				"cost":    tc.cost,
 			})
@@ -903,17 +891,15 @@ logic hasSurplus {
     revenue int @required
     cost int @required
   }
-  body {
-    delta := args.revenue - args.cost
-    return 0 < delta
-  }
+  delta := args.revenue - args.cost
+  return 0 < delta
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 	registry := &recordingStepRegistry{}
 	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
 
-	out, err := r.RunLogic(context.Background(), "hasSurplus", body, map[string]any{"revenue": 10, "cost": 4})
+	out, err := r.RunLogicBody(context.Background(), "hasSurplus", bodySteps, map[string]any{"revenue": 10, "cost": 4})
 	if err != nil {
 		t.Fatalf("RunLogic (literal-led comparison must evaluate): %v", err)
 	}
@@ -938,22 +924,20 @@ logic streakDelta {
     prev string @required
     curr string @required
   }
-  body {
-    delta := daysBetween(args.prev, args.curr)
-    return delta
-  }
+  delta := daysBetween(args.prev, args.curr)
+  return delta
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 	registry := &recordingStepRegistry{}
 	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
 
-	out, err := r.RunLogic(context.Background(), "streakDelta", body, map[string]any{
+	out, err := r.RunLogicBody(context.Background(), "streakDelta", bodySteps, map[string]any{
 		"prev": "2026-07-13T22:00:00Z",
 		"curr": "2026-07-14T22:00:00Z",
 	})
 	if err != nil {
-		t.Fatalf("RunLogic returned error (#2541 date-builtin step value must evaluate): %v", err)
+		t.Fatalf("RunLogicBody returned error (#2541 date-builtin step value must evaluate): %v", err)
 	}
 	if !numericEquals(out, 1) {
 		t.Errorf("RunLogic return = %#v (%T), want 1 (one day apart)", out, out)
@@ -971,20 +955,18 @@ logic boundary {
   args {
     start string @required
   }
-  body {
-    seed := args.start ?? ""
-    return addDuration(seed, "P1D")
-  }
+  seed := args.start ?? ""
+  return addDuration(seed, "P1D")
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
 
-	out, err := r.RunLogic(context.Background(), "boundary", body, map[string]any{
+	out, err := r.RunLogicBody(context.Background(), "boundary", bodySteps, map[string]any{
 		"start": "2026-03-10",
 	})
 	if err != nil {
-		t.Fatalf("RunLogic returned error (#2541 date builtin in terminal return must evaluate): %v", err)
+		t.Fatalf("RunLogicBody returned error (#2541 date builtin in terminal return must evaluate): %v", err)
 	}
 	if out != "2026-03-11T00:00:00Z" {
 		t.Errorf("RunLogic return = %#v, want 2026-03-11T00:00:00Z", out)
@@ -1002,21 +984,19 @@ logic weeksBetween {
     a string @required
     b string @required
   }
-  body {
-    seed := args.a ?? ""
-    return daysBetween(args.a, args.b) / 7
-  }
+  seed := args.a ?? ""
+  return daysBetween(args.a, args.b) / 7
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
 
-	out, err := r.RunLogic(context.Background(), "weeksBetween", body, map[string]any{
+	out, err := r.RunLogicBody(context.Background(), "weeksBetween", bodySteps, map[string]any{
 		"a": "2026-07-01",
 		"b": "2026-07-15",
 	})
 	if err != nil {
-		t.Fatalf("RunLogic returned error: %v", err)
+		t.Fatalf("RunLogicBody returned error: %v", err)
 	}
 	if !numericEquals(out, 2) {
 		t.Errorf("RunLogic return = %#v (%T), want 2 (14 days / 7)", out, out)

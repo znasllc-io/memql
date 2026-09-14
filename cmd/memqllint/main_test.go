@@ -231,9 +231,7 @@ logic decideThing {
   args {
     event object @required
   }
-  body {
-    return true
-  }
+  return true
 }`,
 				"demo/automations.memql": `use demo.logic.{ decideThing }
 
@@ -241,9 +239,7 @@ logic decideThing {
 @trigger(event="graph.node.created.v1:demo:item")
 @description("Step call renamed away from the import.")
 automation onItemCreated {
-  step decide {
-    logic decideThingX ( event: event )
-  }
+  decide := logic decideThingX(event: event)
 }`,
 			},
 		},

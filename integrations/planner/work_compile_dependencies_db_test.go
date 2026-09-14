@@ -54,12 +54,12 @@ func TestSealWorkDraftDBUsesOwnedCurrentCatalog(t *testing.T) {
 			answer = 99
 		}
 		write(owner, "createAuthoringBundle", map[string]any{"bundleId": owner + "-bundle", "title": "catalog"})
-		write(owner, "createAuthoringConstruct", map[string]any{"constructId": owner + "-logic", "bundleId": owner + "-bundle", "kind": "logic", "name": "savedAnswer", "targetNamespace": "authored", "source": fmt.Sprintf("logic savedAnswer { body { return %d } }", answer)})
+		write(owner, "createAuthoringConstruct", map[string]any{"constructId": owner + "-logic", "bundleId": owner + "-bundle", "kind": "logic", "name": "savedAnswer", "targetNamespace": "authored", "source": fmt.Sprintf("logic savedAnswer {\n  return %d\n}", answer)})
 		write(owner, "setConstructStatus", map[string]any{"constructId": owner + "-logic", "status": "active"})
 		write(owner, "catalogueConstruct", map[string]any{"constructId": owner + "-logic", "catalogKey": "answer", "catalogMatchText": "answer", "fromBundleId": owner + "-bundle"})
 	}
 	l := &PlannerAgentLoop{engine: &draftDBCompiler{engine: e}, logger: testLogger()}
-	bundle := authoringBundle{AutomationName: "sealedRun", Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: "sealedRun", Source: "@template\nautomation sealedRun { step answer { logic savedAnswer {} } }"}}, ReuseEdges: []reuseEdge{{Kind: "logic", Name: "savedAnswer", Namespace: "authored"}}}
+	bundle := authoringBundle{AutomationName: "sealedRun", Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: "sealedRun", Source: "@template\nautomation sealedRun {\n  answer := logic savedAnswer()\n}"}}, ReuseEdges: []reuseEdge{{Kind: "logic", Name: "savedAnswer", Namespace: "authored"}}}
 	sealed, err := l.sealWorkDraft(ctx, "alice", bundle)
 	if err != nil {
 		result, readErr := e.Execute(auth.ContextWithUserActor(ctx, "alice"), `concept=="v1:authoring:construct" && name=="savedAnswer"`)

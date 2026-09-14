@@ -10,8 +10,8 @@ import (
 // #2612 (review finding 1): with no EqExpr case the string lowering path
 // turned a nested equality predicate into "<<unsupported expression
 // *ast.EqExpr>>", which the string evaluator resolved to FALSE: == pinned
-// always-false, != always-true, silently. These pin the real path (parse ->
-// compile -> re-parse -> RunLogic) on both operators and both branches.
+// always-false, != always-true, silently. These pin the real path (the
+// loader's compile -> RunLogicBody) on both operators and both branches.
 func TestRunLogic_NestedCondCoalesceEquality(t *testing.T) {
 	mkSrc := func(op string) string {
 		pred := "(args.b ?? \"\") " + op + " \"y\""
@@ -21,10 +21,8 @@ logic condEqProbe {
     a string @required
     b string
   }
-  body {
-    z := args.b ?? ""
-    return args.a == "x" ? (` + pred + ` ? "1" : "2") : "3"
-  }
+  z := args.b ?? ""
+  return args.a == "x" ? (` + pred + ` ? "1" : "2") : "3"
 }
 `
 	}
@@ -66,16 +64,14 @@ logic condBranchProbe {
     a string @required
     b string
   }
-  body {
-    z := args.b ?? ""
-    return args.a == "x" ? (args.b ?? "" == "y") : "n"
-  }
+  z := args.b ?? ""
+  return args.a == "x" ? (args.b ?? "" == "y") : "n"
 }
 `
 	for b, want := range map[string]any{"y": true, "z": false} {
-		body := parseLogicBody(t, src)
+		_, steps := compiledLogic(t, src)
 		r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
-		got, err := r.RunLogic(context.Background(), "condBranchProbe", body, map[string]any{"a": "x", "b": b})
+		got, err := r.RunLogicBody(context.Background(), "condBranchProbe", steps, map[string]any{"a": "x", "b": b})
 		if err != nil {
 			t.Fatalf("b=%q: %v", b, err)
 		}

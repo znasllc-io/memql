@@ -71,11 +71,9 @@ shape widget widgetFull {
 	fileC := baseloader.RawFile{
 		Path: "gamma/automations.memql",
 		Content: `
-@trigger(event="node.created", concept="v1:gamma:thing", partition="*")
+@trigger(event="node.created", concept="v1:gamma:thing")
 automation syncThing {
-  step run {
-    logic syncThing { event: event }
-  }
+  run := logic syncThing(event: event)
 }
 `,
 	}

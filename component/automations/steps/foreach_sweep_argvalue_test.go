@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/events"
 )
 
 // memql#2235 -- arg-VALUE coverage for the authored forEach sweep pattern.
@@ -17,31 +18,39 @@ import (
 // sub-automation and asserts only the fire count -- not the per-row ARGUMENT
 // VALUES, and not the conditional-gating shape. The #2235 sweep migration
 // turns each impure per-row sweep logic into a PURE logic (returns the rows)
-// + an automation that does the per-row WRITE via a step-wrapped forEach:
+// + an automation that does the per-row WRITE in a `for`:
 //
-//	step decide { logic <pure> { event: event } }
-//	step apply  { forEach item in decide.nodes() { mut({ id: item.id, ... }) } }
+//	decide := logic <pure>(event: event)
+//	for item in decide.nodes() { mutation <write>(id: item.id, ...) }
 //
 // For the destructive sweeps (accountDeletionSweep -> deleteUserHard) and the
 // safety sweep (killSwitchSuspendsRunningPlans -> updatePlanStatus) it is not
 // enough to know the loop fires N times -- it must fire with the RIGHT per-row
 // args (so the right user is deleted / the right plan is suspended), and a
 // conditionally-gated write must fire ONLY on matching rows. These tests pin
-// that, driven through the REAL loader (rewriter -> parser -> compiler -> IR)
-// and the REAL ForEachExecutor.
+// that, driven through the REAL loader (parser -> compiler -> IR) and the REAL
+// executor, a trigger's event and all: runSweep fires the whole automation.
 
 // argRecorder is a function-step executor that records the fully-resolved
 // per-call args via the SAME evaluation the real FunctionExecutor runs
 // (Evaluator.ResolveV1Map), so the captured values are exactly what would
 // reach the engine -- no live DB needed.
 type argRecorder struct {
-	name string
-	args []map[string]any
+	name  string           // the last recorded call's name
+	args  []map[string]any // each recorded call's args, in order
+	calls []string         // each recorded call's name, in order
+	// answers are the calls answered with a value and not recorded: a
+	// sweep's pure decide.
+	answers map[string]any
 }
 
 func (r *argRecorder) Execute(ctx context.Context, step *automations.Step, stepCtx *Context) (*automations.StepResult, error) {
 	if step.Function != nil {
+		if answer, ok := r.answers[step.Function.Name]; ok {
+			return &automations.StepResult{StepId: step.ID, Status: "success", StartedAt: time.Now(), CompletedAt: time.Now(), Result: answer}, nil
+		}
 		r.name = step.Function.Name
+		r.calls = append(r.calls, step.Function.Name)
 		resolved, err := stepCtx.Evaluator.ResolveV1Map(ctx, step.Function.Args)
 		if err != nil {
 			return nil, err
@@ -65,51 +74,50 @@ func sweepRow(id, label string) any {
 	return map[string]any{"id": id, "payload": map[string]any{"label": label}}
 }
 
-func bundleOf(rows ...any) any {
-	return map[string]any{"Bundle": map[string]any{"nodes": rows}}
-}
-
-// runSweepForEach compiles a sweep automation, finds its forEach step, seeds
-// the `decide` step result with the given rows, executes the loop through the
-// real ForEachExecutor, and returns the recorder of the per-row writes.
-func runSweepForEach(t *testing.T, src string, rows []any) *argRecorder {
+// runSweep compiles a sweep automation and fires it through the real
+// executor on a system.startup event carrying payload (bound into the
+// automation's args): `decideRows` answers the given rows, and every other
+// construct call is recorded with its resolved arguments.
+func runSweep(t *testing.T, src string, rows []any, payload map[string]any) *argRecorder {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	loader := automations.NewLoader(automations.LoaderOptions{Logger: logger})
-	auto, err := loader.CompileSource(src, "test:sweep-argvalue")
+	auto, err := automations.NewLoader(automations.LoaderOptions{Logger: logger}).CompileSource(src, "test:sweep-argvalue")
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	var loop *automations.Step
+	var loops int
 	for _, s := range auto.Steps {
 		if s != nil && s.Type == automations.StepTypeForEach {
-			loop = s
+			loops++
 		}
 	}
-	if loop == nil {
-		t.Fatalf("compiled automation has NO forEach step -- the rewriter dropped the loop. Steps: %+v", auto.Steps)
+	if loops == 0 {
+		t.Fatalf("compiled automation has NO forEach step -- the compile dropped the loop. Steps: %+v", auto.Steps)
 	}
 
-	eval := automations.NewEvaluator()
-	eval.SetStepResult("decide", &automations.StepResult{
-		StepId: "decide",
-		Status: "success",
-		Result: bundleOf(rows...),
-	})
-
-	rec := &argRecorder{}
+	rec := &argRecorder{answers: map[string]any{"decideRows": stepResultFor("query", rows)}}
 	reg := NewRegistry()
 	reg.Register(automations.StepTypeFunction, rec)
-	exec := &ForEachExecutor{Registry: reg}
-
-	res, err := exec.Execute(context.Background(), loop, &Context{Evaluator: eval, Logger: logger})
+	ev := events.NewEvent("system.startup", events.KindMessage, payload)
+	exec, err := automations.NewExecutor(automations.ExecutorOptions{Logger: logger, StepRegistry: reg}).ExecuteWithEvent(context.Background(), auto, "test", &ev)
 	if err != nil {
-		t.Fatalf("forEach execute: %v", err)
+		t.Fatalf("run: %v", err)
 	}
-	if res.Status != "success" {
-		t.Fatalf("forEach status = %q, want success (err=%q)", res.Status, res.Error)
+	if exec.Status != "completed" {
+		t.Fatalf("run status = %q, want completed", exec.Status)
 	}
 	return rec
+}
+
+// called reports how many times the recorder saw name.
+func (r *argRecorder) called(name string) int {
+	n := 0
+	for _, c := range r.calls {
+		if c == name {
+			n++
+		}
+	}
+	return n
 }
 
 // TestForEachSweep_BareWrite_PerRowArgs: an unconditional per-row write fires
@@ -119,11 +127,9 @@ func TestForEachSweep_BareWrite_PerRowArgs(t *testing.T) {
 	const src = `@description("bare per-row write")
 @trigger(event="system.startup")
 automation sweepBare {
-  step decide { logic decideRows { event: event } }
-  step apply {
-    forEach item in decide.nodes() {
-      mutate markRow { rowId: item.id, label: item.payload.label }
-    }
+  decide := logic decideRows(event: event)
+  for item in decide.nodes() {
+    mutation markRow(rowId: item.id, label: item.label)
   }
 }`
 	rows := []any{
@@ -131,7 +137,7 @@ automation sweepBare {
 		sweepRow("v1:identity:magiclink:b", "bravo"),
 		sweepRow("v1:identity:magiclink:c", "charlie"),
 	}
-	rec := runSweepForEach(t, src, rows)
+	rec := runSweep(t, src, rows, nil)
 
 	if rec.name != "markRow" {
 		t.Errorf("write name = %q, want markRow", rec.name)
@@ -160,12 +166,10 @@ func TestForEachSweep_ConditionalWrite_GatesPerRow(t *testing.T) {
 	const src = `@description("conditional per-row write")
 @trigger(event="system.startup")
 automation sweepConditional {
-  step decide { logic decideRows { event: event } }
-  step apply {
-    forEach item in decide.nodes() {
-      if item.payload.label == "expired" {
-        mutate retireRow { rowId: item.id }
-      }
+  decide := logic decideRows(event: event)
+  for item in decide.nodes() {
+    if item.label == "expired" {
+      mutation retireRow(rowId: item.id)
     }
   }
 }`
@@ -175,7 +179,7 @@ automation sweepConditional {
 		sweepRow("u-3", "expired"),
 		sweepRow("u-4", "active"),
 	}
-	rec := runSweepForEach(t, src, rows)
+	rec := runSweep(t, src, rows, nil)
 
 	if len(rec.args) != 2 {
 		t.Fatalf("conditional write fired %d times, want 2 (only 'expired' rows)", len(rec.args))
@@ -192,12 +196,11 @@ automation sweepConditional {
 // migrated killSwitchSuspendsRunningPlans sweep (#2235): the per-row suspend
 // fires for a running plan ONLY when (a) the plan has a computerUseScope AND
 // (b) the user's computerUseEnabled preference is explicitly false (the kill
-// switch is engaged). It uses exists(item.payload.computerUseScope) rather than
-// `... != ""` because the automation condition evaluator's `!= ""` fires on an
-// empty-string value (empty resolves as missing; missing != "" -> true), which
-// would over-suspend non-computer-use plans. The event gate reproduces the
-// original !coalesce(computerUseEnabled, true) for the realistic false/true/
-// absent cases (absent -> not engaged -> no suspend).
+// switch is engaged). The scope test is `item.computerUseScope != nil`, which
+// an empty scope does not pass, so a non-computer-use plan is never
+// suspended. The event gate reproduces the original
+// !coalesce(computerUseEnabled, true) for the realistic false/true/absent
+// cases (absent -> not engaged -> no suspend).
 //
 // THE GATE IS READ FROM AN ARGS FIELD, and the seeded envelope is the one the
 // CDC publisher actually builds (memql#3610). This fixture used to write
@@ -213,31 +216,13 @@ automation killSwitch {
   args {
     preferences any
   }
-  step decide { logic decideRows { event: event } }
-  step apply {
-    forEach item in decide.nodes() {
-      if item.payload.computerUseScope != nil && preferences.computerUseEnabled == false {
-        updatePlanStatus { planId: item.id, status: "awaitingFeedback", feedbackReason: "kill_switch_engaged" }
-      }
+  decide := logic decideRows(event: event)
+  for item in decide.nodes() {
+    if item.computerUseScope != nil && args.preferences.computerUseEnabled == false {
+      mutation updatePlanStatus(planId: item.id, status: "awaitingFeedback", feedbackReason: "kill_switch_engaged")
     }
   }
 }`
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	loader := automations.NewLoader(automations.LoaderOptions{Logger: logger})
-	auto, err := loader.CompileSource(src, "test:killswitch")
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
-	var loop *automations.Step
-	for _, s := range auto.Steps {
-		if s != nil && s.Type == automations.StepTypeForEach {
-			loop = s
-		}
-	}
-	if loop == nil {
-		t.Fatalf("no forEach step; steps=%+v", auto.Steps)
-	}
-
 	rows := []any{
 		map[string]any{"id": "plan-scoped", "payload": map[string]any{"computerUseScope": "full"}},
 		map[string]any{"id": "plan-empty", "payload": map[string]any{"computerUseScope": ""}},
@@ -249,25 +234,9 @@ automation killSwitch {
 		if enabledPresent {
 			prefs["computerUseEnabled"] = enabledVal
 		}
-		// The CDC envelope shape: flattened node fields at the top level, plus
-		// the nested `payload`. There is no `node` key, which is the whole point.
-		nodePayload := map[string]any{"preferences": prefs}
-		ev := map[string]any{"id": "u1", "nodeId": "u1", "concept": "v1:identity:user", "payload": nodePayload}
-		for k, v := range nodePayload {
-			ev[k] = v
-		}
-		eval := automations.NewEvaluator()
-		eval.SetCustom("event", ev)
-		eval.SetCustom("args", map[string]any{"preferences": prefs})
-		eval.SetCustom("argsDeclared", map[string]bool{"preferences": true})
-		eval.SetStepResult("decide", &automations.StepResult{StepId: "decide", Status: "success", Result: bundleOf(rows...)})
-		rec := &argRecorder{}
-		reg := NewRegistry()
-		reg.Register(automations.StepTypeFunction, rec)
-		exec := &ForEachExecutor{Registry: reg}
-		if _, err := exec.Execute(context.Background(), loop, &Context{Evaluator: eval, Logger: logger}); err != nil {
-			t.Fatalf("execute: %v", err)
-		}
+		// The payload binds into the args block, as the CDC envelope's does.
+		// There is no `node` key, which is the whole point.
+		rec := runSweep(t, src, rows, map[string]any{"id": "u1", "preferences": prefs})
 		ids := make([]string, 0, len(rec.args))
 		for _, a := range rec.args {
 			ids = append(ids, a["planId"].(string))
@@ -288,14 +257,11 @@ automation killSwitch {
 
 // TestForEachSweep_ReleaseWorkspace pins the migrated releaseWorkspaceOnPlanTerminal
 // sweep (#2235), which has three moving parts the original logic crammed inline:
-//   - apply (forEach): release each still-`provisioned` workspace, gated on the
-//     plan having reached a terminal status;
-//   - teardown (gated step): call the workbenchTeardownDirectory builtin on
+//   - the loop: release each still-`provisioned` workspace, gated on the plan
+//     having reached a terminal status;
+//   - teardown (an `if`): call the workbenchTeardownDirectory builtin on
 //     terminal status -- even when the plan has ZERO workspace rows (the MVP
 //     integration provisions on-disk without writing the concept row).
-//
-// All gates are `==` / `||` / `exists` (well-behaved in the condition evaluator),
-// so this migration is behavior-faithful to the original.
 func TestForEachSweep_ReleaseWorkspace(t *testing.T) {
 	const src = `@description("release workspace on plan terminal")
 @trigger(event="system.startup")
@@ -304,66 +270,27 @@ automation rw {
     id any
     status any
   }
-  step decide { logic decideRows { event: event } }
-  step apply {
-    forEach item in decide.nodes() {
-      if item.payload.status == "provisioned" && (status == "succeeded" || status == "failed" || status == "cancelled") {
-        releaseWorkspace { workspaceId: item.id, reason: "plan_terminal" }
-      }
+  decide := logic decideRows(event: event)
+  for item in decide.nodes() {
+    if item.status == "provisioned" && (args.status == "succeeded" || args.status == "failed" || args.status == "cancelled") {
+      mutation releaseWorkspace(workspaceId: item.id, reason: "plan_terminal")
     }
   }
-  step teardown {
-    if id != nil && (status == "succeeded" || status == "failed" || status == "cancelled") {
-      workbenchTeardownDirectory { runId: id }
-    }
+  if args.id != nil && (args.status == "succeeded" || args.status == "failed" || args.status == "cancelled") {
+    teardown := builtin workbenchTeardownDirectory(runId: args.id)
   }
 }`
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
-	loader := automations.NewLoader(automations.LoaderOptions{Logger: logger})
-	auto, err := loader.CompileSource(src, "test:releaseworkspace")
-	if err != nil {
-		t.Fatalf("compile: %v", err)
-	}
-	var forEachStep, teardownStep *automations.Step
-	for _, s := range auto.Steps {
-		if s == nil {
-			continue
-		}
-		if s.Type == automations.StepTypeForEach {
-			forEachStep = s
-		}
-		if s.ID == "teardown" {
-			teardownStep = s
-		}
-	}
-	if forEachStep == nil || teardownStep == nil {
-		t.Fatalf("expected a forEach apply step + a teardown step; got %+v", auto.Steps)
-	}
-
 	scenario := func(status string, workspaces []any) (released []string, teardown bool) {
-		// The CDC envelope shape -- see the kill-switch fixture above for why
-		// the hand-built `{"node": ...}` it replaced was misleading (memql#3610).
-		nodePayload := map[string]any{"status": status}
-		ev := map[string]any{"id": "run-1", "nodeId": "run-1", "concept": "v1:work:run", "payload": nodePayload}
-		for k, v := range nodePayload {
-			ev[k] = v
+		// The payload binds into the args block -- see the kill-switch
+		// fixture above for why a hand-built `{"node": ...}` envelope was
+		// misleading (memql#3610).
+		rec := runSweep(t, src, workspaces, map[string]any{"id": "run-1", "status": status})
+		for i, a := range rec.args {
+			if rec.calls[i] == "releaseWorkspace" {
+				released = append(released, a["workspaceId"].(string))
+			}
 		}
-		eval := automations.NewEvaluator()
-		eval.SetCustom("event", ev)
-		eval.SetCustom("args", map[string]any{"id": "run-1", "status": status})
-		eval.SetCustom("argsDeclared", map[string]bool{"id": true, "status": true})
-		eval.SetStepResult("decide", &automations.StepResult{StepId: "decide", Status: "success", Result: bundleOf(workspaces...)})
-		rec := &argRecorder{}
-		reg := NewRegistry()
-		reg.Register(automations.StepTypeFunction, rec)
-		if _, err := (&ForEachExecutor{Registry: reg}).Execute(context.Background(), forEachStep, &Context{Evaluator: eval, Logger: logger}); err != nil {
-			t.Fatalf("forEach execute: %v", err)
-		}
-		for _, a := range rec.args {
-			released = append(released, a["workspaceId"].(string))
-		}
-		ok, _ := eval.StepCondition(context.Background(), teardownStep)
-		return released, ok
+		return released, rec.called("workbenchTeardownDirectory") == 1
 	}
 
 	prov := map[string]any{"id": "ws-prov", "payload": map[string]any{"status": "provisioned"}}

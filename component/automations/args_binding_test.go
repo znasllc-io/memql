@@ -25,9 +25,7 @@ automation deployWithArgs {
     engineNodeTypes []string @required
     replicas        int
   }
-  step gate {
-    logic requireForwardDeploy { environment: args.environment }
-  }
+  gate := logic requireForwardDeploy(environment: args.environment)
 }`
 
 // --- parse / compile: args block accepted, schema round-trips -------------
@@ -83,7 +81,7 @@ automation badDefault {
   args {
     environment string @default("staging")
   }
-  step gate { logic noop { event: event } }
+  gate := logic noop(event: event)
 }`
 	if _, err := loader.compileMemQL(src, "test:badDefault"); err == nil {
 		t.Fatalf("expected compile to reject @default on an args field")
@@ -96,9 +94,9 @@ automation badDefault {
 // the backward-compatible untyped-event path (zero regression).
 func TestCompileMemQL_NoArgsBlock_NilArgs(t *testing.T) {
 	loader := NewLoader(LoaderOptions{})
-	src := `@trigger(event="node.created", concept="v1:cognition:space", partition="*")
+	src := `@trigger(event="node.created", concept="v1:cognition:space")
 automation legacyUntyped {
-  step greet { publishEvent { topic: "demo.greeted" } }
+  publish "demo.greeted" {}
 }`
 	auto, err := loader.compileMemQL(src, "test:legacyUntyped")
 	if err != nil {

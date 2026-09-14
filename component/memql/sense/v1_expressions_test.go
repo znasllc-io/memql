@@ -424,7 +424,7 @@ func TestCompletionOffersTheTierOfThePosition(t *testing.T) {
 		}
 		// The members are the args of the automation the annotation decorates,
 		// which is declared BELOW the cursor.
-		automation := "\nautomation onTodoChanged {\n  args {\n    status string\n    tags   []string\n  }\n  step s {\n    logic record(status: args.status)\n  }\n}\n"
+		automation := "\nautomation onTodoChanged {\n  args {\n    status string\n    tags   []string\n  }\n  s := logic record(status: args.status)\n}\n"
 		got = completionAt(t, s, "@trigger(event=\"graph.node.updated.v1:todos:todo\")\n@filter(row => row.status == args.<|>)"+automation)
 		for field, typ := range map[string]string{"status": "string", "tags": "[]string"} {
 			if it, ok := got[field]; !ok || it.Detail != typ {
@@ -735,6 +735,7 @@ func TestHoverOnOperators(t *testing.T) {
 	if card := hoverOn(t, s, "automation sweep {\n  forEach item in rows {", " in "); strings.Contains(card, "v in list") {
 		t.Errorf("forEach's `in` is the loop keyword, not membership, got:\n%s", card)
 	}
+	// memqlmigrate:keep -- the terse arrow is the case.
 	if card := hoverOn(t, s, "@trigger(event=\"x.y\")\nautomation sweep @trigger(event=\"x.y\") => logic handle", "=>"); strings.Contains(card, "parameter") {
 		t.Errorf("the terse automation arrow is not a lambda, got:\n%s", card)
 	}
@@ -1002,7 +1003,7 @@ func TestRetiredPredicateHover(t *testing.T) {
 		"a lambda filter":          {v1Query + "  filter row => row.status == args.owner\n}", "filter"},
 		"a lambda spec":            {"spec todo isOverdue = row => row.done == false", "spec"},
 		"a lambda @filter":         {"@filter(row => row.done == true)\nautomation onTodo {\n}", "@filter"},
-		"a return in a logic body": {"logic compute {\n  body {\n    return args.a\n  }\n}", "return"},
+		"a return in a logic body": {"logic compute {\n  return args.a\n}", "return"},
 		"a filter not yet written": {v1Query + "  filter \n}", "filter"},
 	} {
 		if card := hoverFirst(t, s, c.src, c.needle); strings.Contains(card, "retired") {

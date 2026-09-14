@@ -375,9 +375,7 @@ logic logicProvisionBoard {
   args {
     event  object  @required
   }
-  body {
-    return builtin provisionBoard(id: args.event.payload.id)
-  }
+  return builtin provisionBoard(id: args.event.payload.id)
 }
 `)
 

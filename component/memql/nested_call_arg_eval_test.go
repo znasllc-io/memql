@@ -15,7 +15,6 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // nested_call_arg_eval_test.go -- memql#2870.
@@ -301,23 +300,7 @@ func TestDeployGateGreenFailsClosed(t *testing.T) {
 	if err != nil || fn == nil {
 		t.Fatalf("deployGateGreen is not in this tree: %v", err)
 	}
-	if fn.LogicBody == nil {
-		t.Fatal("deployGateGreen must load as a statement body (fn.LogicBody)")
-	}
-	var src string
-	for _, st := range fn.LogicBody {
-		if st["type"] == "return" {
-			ret, _ := st["return"].(map[string]any)
-			src, _ = ret["value"].(string)
-		}
-	}
-	if src == "" {
-		t.Fatalf("deployGateGreen's compiled body returns no value: %v", fn.LogicBody)
-	}
-	ret, err := languageParser.ParseV1Expression(src)
-	if err != nil {
-		t.Fatalf("deployGateGreen's returned value %q does not parse: %v", src, err)
-	}
+	ret := statementReturnExpr(t, fn)
 
 	cases := []struct {
 		name string

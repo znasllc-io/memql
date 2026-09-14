@@ -46,9 +46,7 @@ func TestCrossNamespaceReferenceNeedsAnImport(t *testing.T) {
 	got := gateOn(t, map[string]string{
 		"common/builtins.memql": "builtin trackPresence {\n  x string\n}\n",
 		"cognition/automations.memql": `automation a {
-  step s {
-    builtin trackPresence(x: "1")
-  }
+  s := builtin trackPresence(x: "1")
 }
 `,
 	})
@@ -275,9 +273,7 @@ func coreIs(domains ...string) Options {
 }
 
 const lateBoundCaller = `logic onSecondActiveHuman {
-  body {
-    return mutation mutationCreateCanvasState(stateId: "voice-migrated", space: "s1")
-  }
+  return mutation mutationCreateCanvasState(stateId: "voice-migrated", space: "s1")
 }
 `
 
@@ -348,9 +344,7 @@ func TestCoreReferenceToAnotherCoreNamespaceStillNeedsAnImport(t *testing.T) {
 	got := gateOnWith(t, map[string]string{
 		"common/builtins.memql": "builtin trackPresence {\n  x string\n}\n",
 		"cognition/automations.memql": `automation a {
-  step s {
-    builtin trackPresence(x: "1")
-  }
+  s := builtin trackPresence(x: "1")
 }
 `,
 	}, coreIs("common", "cognition"))

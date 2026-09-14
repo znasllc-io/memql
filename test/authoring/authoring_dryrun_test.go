@@ -56,16 +56,14 @@ const dryRunMutationAutomation = `@enabled
 @trigger(event="node.created", concept="v1:authoring:bundle")
 @description("Sandbox: record a construct when a bundle is created")
 automation sandboxRecordConstruct {
-  step record {
-    createAuthoringConstruct(
-      constructId: "c-dryrun-1",
-      bundleId: "b-dryrun-1",
-      kind: "automation",
-      name: "someAutomation",
-      targetNamespace: "cognition",
-      source: "automation someAutomation { }"
-    )
-  }
+  record := mutation createAuthoringConstruct(
+    constructId: "c-dryrun-1",
+    bundleId: "b-dryrun-1",
+    kind: "automation",
+    name: "someAutomation",
+    targetNamespace: "cognition",
+    source: "automation someAutomation { }"
+  )
 }`
 
 // TestDryRun_MutationIsolatedToSandboxPartition: a dry-run of an automation that

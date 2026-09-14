@@ -25,9 +25,7 @@ func TestBodyRule_LogicWithoutBodyIsTheStatementForm(t *testing.T) {
 func TestBodyRule_LogicWithBodyClean(t *testing.T) {
 	src := `logic decideThing {
   args { x string @required }
-  body {
-    return x
-  }
+  return x
 }`
 	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
 	if has(fs, "body-rule") {

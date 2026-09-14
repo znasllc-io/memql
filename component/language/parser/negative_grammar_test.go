@@ -178,8 +178,8 @@ func TestNegative_UnknownAnnotation_Rejected(t *testing.T) {
 // must not lower to a silently-untriggered automation.
 func TestNegative_MalformedTrigger(t *testing.T) {
 	cases := map[string]string{
-		"empty-event-value": "@trigger(event=)\nautomation a {\n  step run { logic doThing { event: event } }\n}\n",
-		"unclosed-trigger":  "@trigger(event=\"x\"\nautomation a {\n  step run { logic doThing { event: event } }\n}\n",
+		"empty-event-value": "@trigger(event=)\nautomation a {\n  run := logic doThing(event: event)\n}\n",
+		"unclosed-trigger":  "@trigger(event=\"x\"\nautomation a {\n  run := logic doThing(event: event)\n}\n",
 	}
 	for label, src := range cases {
 		t.Run(label, func(t *testing.T) {

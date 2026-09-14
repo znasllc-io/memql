@@ -22,9 +22,9 @@ package automations
 //  1. the migrated authored shape compiles to the intended step IR (decide ->
 //     pure logic; the writes are if-gated / forEach mutation steps targeting the
 //     right mutations), and
-//  2. the gating SEMANTICS: the `steps.decide.result == true` guard fires the
-//     creates only when the logic returned true (bff + no cluster), and the idp
-//     `&& exists(payload.identityProvider)` guard additionally requires the
+//  2. the gating SEMANTICS: the `decide == true` guard fires the creates only
+//     when the logic returned true (bff + no cluster), and the idp
+//     `&& args.identityProvider != nil` guard additionally requires the
 //     envelope block -- so "bff + no cluster" creates the rows and anything else
 //     creates nothing.
 
@@ -47,40 +47,30 @@ automation bootstrapCluster {
     node any
     provider any
   }
-  step decide {
-    logic bootstrapCluster {
-      event: event
-    }
+  decide := logic bootstrapCluster(event: event)
+  if decide == true {
+    databaseRecord := mutation createDatabase(
+      host:    args.database.host ?? "localhost",
+      dbName:  args.database.dbName ?? "memql",
+      sslMode: args.database.sslMode ?? "disable"
+    )
   }
-  step databaseRecord {
-    if steps.decide.result == true {
-      createDatabase {
-        host:    database.host ?? "localhost",
-        dbName:  database.dbName ?? "memql",
-        sslMode: database.sslMode ?? "disable"
-      }
-    }
+  if decide == true && args.identityProvider != nil {
+    idpRecord := mutation createIdentityProvider(
+      name:           args.identityProvider.name ?? "memql-identity",
+      issuerUrl:      args.identityProvider.issuerUrl ?? "",
+      clientIdPrefix: args.identityProvider.clientIdPrefix ?? "",
+      redirectUrl:    args.identityProvider.redirectUrl ?? ""
+    )
   }
-  step idpRecord {
-    if steps.decide.result == true && payload.identityProvider != nil {
-      createIdentityProvider {
-        name:           identityProvider.name ?? "memql-identity",
-        issuerUrl:      identityProvider.issuerUrl ?? "",
-        clientIdPrefix: identityProvider.clientIdPrefix ?? "",
-        redirectUrl:    identityProvider.redirectUrl ?? ""
-      }
-    }
-  }
-  step cluster {
-    if steps.decide.result == true {
-      createCluster {
-        name:        "development",
-        environment: "development",
-        region:      "local",
-        provider:    provider ?? "",
-        version:     node.version ?? ""
-      }
-    }
+  if decide == true {
+    cluster := mutation createCluster(
+      name:        "development",
+      environment: "development",
+      region:      "local",
+      provider:    args.provider ?? "",
+      version:     args.node.version ?? ""
+    )
   }
 }`
 
@@ -88,19 +78,13 @@ const pruneStaleClusterNodesAutomation = `@enabled
 @trigger(schedule="0 */10 * * * *")
 @description("Every 10 min: mark departed cluster nodes as health='stopped'.")
 automation pruneStaleClusterNodes {
-  step decide {
-    logic pruneStaleClusterNodes {
-      event: event
-    }
-  }
-  step prune {
-    forEach node in decide.result {
-      updateNodeHealth {
-        id:       node.id,
-        health:   "stopped",
-        lastSeen: now
-      }
-    }
+  decide := logic pruneStaleClusterNodes(event: event)
+  for node in decide {
+    mutation updateNodeHealth(
+      id:       node.id,
+      health:   "stopped",
+      lastSeen: now
+    )
   }
 }`
 
@@ -140,9 +124,9 @@ func TestBootstrapCluster_CompilesToDecideThenGatedCreates(t *testing.T) {
 	cases := []struct {
 		step, mutation, condition string
 	}{
-		{"databaseRecord", "createDatabase", "steps.decide.result == true"},
-		{"idpRecord", "createIdentityProvider", "steps.decide.result == true && payload.identityProvider != nil"},
-		{"cluster", "createCluster", "steps.decide.result == true"},
+		{"databaseRecord", "createDatabase", "decide == true"},
+		{"idpRecord", "createIdentityProvider", "decide == true && args.identityProvider != nil"},
+		{"cluster", "createCluster", "decide == true"},
 	}
 	for _, tc := range cases {
 		s := stepByID(auto, tc.step)
@@ -160,25 +144,27 @@ func TestBootstrapCluster_CompilesToDecideThenGatedCreates(t *testing.T) {
 }
 
 // TestBootstrapCluster_GateSemantics proves the runtime gating: given the pure
-// logic's decision (the `decide` result) and the trigger envelope, the create
-// steps fire under "bff + no cluster (+ idp present for the idp row)" and are
-// skipped otherwise. This is the behavioral half -- that the relocated
-// condition reproduces the original `if existing.empty() && node.type=="bff"
-// (&& identityProvider != nil)` guards.
+// logic's decision (the `decide` result) and the trigger payload bound into the
+// args, the create steps fire under "bff + no cluster (+ idp present for the
+// idp row)" and are skipped otherwise. This is the behavioral half -- that the
+// relocated condition reproduces the original `if existing.empty() &&
+// node.type=="bff" (&& identityProvider != nil)` guards. The conditions are
+// the ones the compile writes on the create steps, evaluated as a statement
+// run evaluates them: `decide` a bound name, the payload the args.
 func TestBootstrapCluster_GateSemantics(t *testing.T) {
-	const (
-		databaseCond = "steps.decide.result == true"
-		idpCond      = "steps.decide.result == true && payload.identityProvider != nil"
-	)
+	auto := compileAuto(t, bootstrapClusterAutomation, "test:bootstrap")
+	databaseCond := stepByID(auto, "databaseRecord").Condition
+	idpCond := stepByID(auto, "idpRecord").Condition
 
 	mkEval := func(create bool, idpPresent bool) *Evaluator {
 		e := NewEvaluator()
-		e.SetStepResult("decide", &StepResult{StepId: "decide", Status: "success", Result: create})
-		payload := map[string]any{"node": map[string]any{"type": "bff"}}
+		e.enterStatements()
+		e.Bind("decide", create)
+		args := map[string]any{"node": map[string]any{"type": "bff"}}
 		if idpPresent {
-			payload["identityProvider"] = map[string]any{"name": "memql-identity"}
+			args["identityProvider"] = map[string]any{"name": "memql-identity"}
 		}
-		e.SetCustom("event", map[string]any{"payload": payload})
+		e.SetCustom("args", args)
 		return e
 	}
 
@@ -243,11 +229,11 @@ func TestPruneStaleClusterNodes_CompilesToDecideThenForEachWrite(t *testing.T) {
 	if prune == nil || prune.ForEach == nil {
 		t.Fatalf("prune step must be a forEach; steps=%+v", auto.Steps)
 	}
-	if prune.ForEach.Source != "decide.result" {
-		t.Errorf("forEach must iterate the decide result, got source %q", prune.ForEach.Source)
+	if prune.ForEach.Source != "decide" {
+		t.Errorf("the loop must iterate the decide result, got source %q", prune.ForEach.Source)
 	}
-	if prune.ForEach.As != "item" {
-		t.Errorf("forEach must bind the canonical `item` var, got %q", prune.ForEach.As)
+	if prune.ForEach.As != "node" {
+		t.Errorf("the loop must bind its author's variable, `node`, got %q", prune.ForEach.As)
 	}
 	if len(prune.ForEach.Do) != 1 || prune.ForEach.Do[0].Function == nil ||
 		prune.ForEach.Do[0].Function.Name != "updateNodeHealth" {
@@ -265,9 +251,8 @@ func TestPruneStaleClusterNodes_CompilesToDecideThenForEachWrite(t *testing.T) {
 // to engine.Execute, whose converter refused the `existing.empty()`
 // collection-method operand with the ADR 2.2 gate; it must resolve to the
 // correct `create` boolean. (The sibling TestBootstrapCluster_GateSemantics
-// only exercises the automation `if steps.decide.result == true` given a
-// decide result; it never evaluates the logic body that PRODUCES that
-// boolean.)
+// only exercises the automation's `if decide == true` given a decide result;
+// it never evaluates the logic body that PRODUCES that boolean.)
 func TestBootstrapCluster_LogicReturnResolvesCreate(t *testing.T) {
 	const ret = `existing.empty() && args.event.payload.node.type == "bff"`
 

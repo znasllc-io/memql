@@ -77,6 +77,7 @@ func TestReject_UnknownInvocationKind_InLogicBody(t *testing.T) {
 	// Faithful reproduction of the audit probe "in a logic body": the full
 	// struct-form logic construct, rewritten by NormaliseAll then parsed. The
 	// body's `return <expr>` carries the malformed call.
+	// memqlmigrate:keep -- `mutate` is the malformed kind under test.
 	src := `logic doThing {
   body {
     return mutate createNode(id: "x")

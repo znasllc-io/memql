@@ -85,9 +85,7 @@ query thing second {
 @filter(row => row.b == null)
 @trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
-  step first {
-    logic other(x: 1)
-  }
+  first := logic other(x: 1)
 }
 `, "null"},
 		{"a terse automation's @filter", `/// Note a thing when it is created.

@@ -132,7 +132,7 @@ func TestSignatureHelp_Builtin(t *testing.T) {
 func TestSignatureHelp_NoneOutsideCall(t *testing.T) {
 	s := New(&stubRegistry{})
 	// Cursor in a plain body, not inside a call.
-	if res := s.SignatureHelp("logic x {\n  body {\n    return 1\n  }\n}", 3, 5); res != nil {
+	if res := s.SignatureHelp("logic x {\n  return 1\n}", 3, 5); res != nil {
 		t.Errorf("expected no signature outside a call, got %+v", res)
 	}
 }

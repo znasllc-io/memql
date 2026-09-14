@@ -767,7 +767,7 @@ func TestNamingDocGateIsLive(t *testing.T) {
 		{"prefixed query declaration in a fence",
 			"```memql\nquery user queryUserById {\n  filter row => row.id == args.id\n}\n```", true},
 		{"prefixed logic declaration in a fence",
-			"```memql\nlogic logicBootstrapSession {\n  body { return true }\n}\n```", true},
+			"```memql\nlogic logicBootstrapSession {\n  return true\n}\n```", true},
 		{"prefixed spec declaration in a fence",
 			"```memql\nspec participant specIsGuest = row => row.isGuest == true\n```", true},
 		{"prefixed trait declaration in a fence",

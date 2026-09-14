@@ -287,13 +287,9 @@ automation g2BareFieldsDeploy {
     workdir         string   @required
     engineNodeTypes []string @required
   }
-  step gate {
-    logic deployGateGreen { environment: environment, workdir: workdir }
-  }
-  step fan {
-    forEach nt in engineNodeTypes {
-      logic buildOne { nodeType: nt, workdir: workdir }
-    }
+  gate := logic deployGateGreen(environment: args.environment, workdir: args.workdir)
+  for nt in args.engineNodeTypes {
+    logic buildOne(nodeType: nt, workdir: args.workdir)
   }
 }`
 
@@ -310,15 +306,16 @@ func TestCompileMemQL_BareArgsFieldsAccepted(t *testing.T) {
 
 func TestCompileMemQL_TypoedBareFieldRejected(t *testing.T) {
 	loader := NewLoader(LoaderOptions{})
-	// A typo'd bare name in a condition is an unknown name, refused at load.
+	// A typo'd bare name in a condition is an unknown name, refused at load
+	// by the scope checker.
 	src := strings.Replace(g2E2ESource,
-		"logic deployGateGreen { environment: environment, workdir: workdir }",
-		"if enviroment == \"development\" {\n      logic deployGateGreen { environment: environment, workdir: workdir }\n    }", 1)
+		"gate := logic deployGateGreen(environment: args.environment, workdir: args.workdir)",
+		"if enviroment == \"development\" {\n    gate := logic deployGateGreen(environment: args.environment, workdir: args.workdir)\n  }", 1)
 	if src == g2E2ESource {
 		t.Fatal("test setup: replacement did not apply")
 	}
 	_, err := loader.compileMemQL(src, "test:g2Typo")
-	if err == nil || !strings.Contains(err.Error(), `unknown name "enviroment"`) {
+	if err == nil || !strings.Contains(err.Error(), "`enviroment` is not a statement name") || !strings.Contains(err.Error(), "[body_unknown_name]") {
 		t.Fatalf("typo'd bare field in a condition must fail compile, got: %v", err)
 	}
 }
@@ -330,9 +327,7 @@ func TestCompileMemQL_EventPayloadReadRetired(t *testing.T) {
 	loader := NewLoader(LoaderOptions{})
 	src := `@trigger(event="deploy.requested")
 automation legacyReader {
-  step run {
-    logic doThing(deploymentId: event.payload.deploymentId)
-  }
+  run := logic doThing(deploymentId: event.payload.deploymentId)
 }`
 	_, err := loader.compileMemQL(src, "test:legacyReader")
 	if err == nil || !strings.Contains(err.Error(), "reads are retired") {
@@ -367,9 +362,7 @@ automation dottedEventRead {
 	// -- it is how a logic body receives the whole envelope.
 	okSrc := `@trigger(event="node.updated", concept="v1:identity:user")
 automation forwardsEnvelope {
-  step run {
-    logic doThing ( event: event )
-  }
+  run := logic doThing(event: event)
 }`
 	if _, err := loader.compileMemQL(okSrc, "test:forwardsEnvelope"); err != nil {
 		t.Errorf("forwarding the bare envelope must stay legal, got: %v", err)
@@ -383,9 +376,7 @@ automation proseOnly {
   args {
     deploymentId any
   }
-  step run {
-    logic doThing(deploymentId)
-  }
+  run := logic doThing(deploymentId: args.deploymentId)
 }`
 	if _, err := loader.compileMemQL(prose, "test:proseOnly"); err != nil {
 		t.Fatalf("prose-only event.payload mentions must not trip the retirement scan: %v", err)

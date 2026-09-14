@@ -22,8 +22,8 @@ func hoverAtFile(t *testing.T, s *Service, source string, line, col int, filePat
 
 func TestHover_Keyword(t *testing.T) {
 	s := New(&stubRegistry{})
-	// "    return 1" -- 'return' spans cols 5..10; hover mid-token.
-	res := hoverAt(t, s, "logic x {\n  body {\n    return 1\n  }\n}", 3, 7)
+	// "  return 1" -- 'return' spans cols 3..8; hover mid-token.
+	res := hoverAt(t, s, "logic x {\n  return 1\n}", 2, 5)
 	if res == nil || !strings.Contains(res.Contents, "(keyword)") {
 		t.Fatalf("expected a keyword hover for 'return', got %+v", res)
 	}

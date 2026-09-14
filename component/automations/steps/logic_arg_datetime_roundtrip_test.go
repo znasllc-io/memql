@@ -16,7 +16,7 @@ package steps
 //  2. RE-PARSE -- MemQLEngine.Parse on the real engine (the same
 //     parseWithFunctions path engine.Execute runs), with the receiving
 //     logic registered so the call classifies as plan.LogicCall.
-//  3. RUN -- LogicRunner.RunLogic with the re-parsed args, with the
+//  3. RUN -- LogicRunner.RunLogicBody with the re-parsed args, with the
 //     receiving logic filtering ON the datetime field, proving the
 //     round-tripped value is evaluable data, not just parseable text.
 //
@@ -30,44 +30,44 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/language/compiler"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// parseLogicBodyForSteps parses a logic source and returns the multi-step
-// body the function loader would store as fn.LogicSteps -- the same shape
-// LogicRunner.RunLogic receives in production. SetSource matters: the
-// collection-chain step RHS (#2317) is captured as a verbatim source slice.
-func parseLogicBodyForSteps(t *testing.T, src string) *langparser.AutomationDef {
+// compiledLogicForSteps parses a logic source and compiles its statement
+// body as the function loader does (compiler.CompileBody): the steps
+// LogicRunner.RunLogicBody receives in production, from fn.LogicBody.
+func compiledLogicForSteps(t *testing.T, src string) []map[string]any {
 	t.Helper()
 	normalised, err := langparser.NormaliseAll(src)
 	if err != nil {
 		t.Fatalf("NormaliseAll: %v", err)
 	}
-	lexer := langparser.NewLexer(normalised)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Tokenize: %v", err)
-	}
-	p := langparser.NewParser(tokens)
-	ast, err := p.Parse()
+	file, err := langparser.ParseFile(normalised)
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
-	}
-	file, ok := ast.(*langparser.File)
-	if !ok {
-		t.Fatalf("expected *File, got %T", ast)
 	}
 	for _, def := range file.Definitions {
 		fd, ok := def.(*langparser.FunctionDef)
 		if !ok || fd.Type != langparser.FunctionTypeLogic {
 			continue
 		}
-		body, ok := fd.Body.(*langparser.AutomationDef)
-		if !ok {
-			t.Fatalf("expected *AutomationDef body, got %T", fd.Body)
+		auto, ok := fd.Body.(*langparser.AutomationDef)
+		if !ok || auto.Body == nil {
+			t.Fatalf("expected a statement body, got %T", fd.Body)
 		}
-		return body
+		var args []string
+		if fd.ArgsSchema != nil {
+			for _, f := range fd.ArgsSchema.Fields {
+				args = append(args, f.Name)
+			}
+		}
+		steps, problems := compiler.CompileBody("logic", fd.Name, args, auto.Body)
+		if len(problems) > 0 {
+			t.Fatalf("compile: %v", problems)
+		}
+		return steps
 	}
 	t.Fatalf("no logic function found in source")
 	return nil
@@ -104,18 +104,16 @@ logic logicDayRollupProbe {
     rows []object @required
     day string @required
   }
-  body {
-    matching := args.rows.where(r => r.createdAt == "2026-07-14T08:30:00Z")
-    return matching.count()
-  }
+  matching := args.rows.where(r => r.createdAt == "2026-07-14T08:30:00Z")
+  return matching.count()
 }
 `
-	body := parseLogicBodyForSteps(t, logicSrc)
+	body := compiledLogicForSteps(t, logicSrc)
 	if err := eng.Functions().Upsert(&memql.Function{
 		Name:         "logicDayRollupProbe",
 		FunctionKind: "logic",
 		Enabled:      true,
-		LogicSteps:   body,
+		LogicBody:    body,
 	}); err != nil {
 		t.Fatalf("register probe logic: %v", err)
 	}
@@ -177,9 +175,9 @@ logic logicDayRollupProbe {
 	// datetime field, so a wrong representation cannot sneak through as an
 	// ignored blob.
 	runner := automations.NewLogicRunner(eng, &nullStepRegistry{}, nil)
-	out, err := runner.RunLogic(context.Background(), "logicDayRollupProbe", body, plan.LogicCall.Args)
+	out, err := runner.RunLogicBody(context.Background(), "logicDayRollupProbe", body, plan.LogicCall.Args)
 	if err != nil {
-		t.Fatalf("RunLogic on round-tripped args: %v", err)
+		t.Fatalf("RunLogicBody on round-tripped args: %v", err)
 	}
 	if !intEquals(out, 1) {
 		t.Errorf("logic filtered on the round-tripped createdAt: got %#v (%T), want 1 matching row", out, out)

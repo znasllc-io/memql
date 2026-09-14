@@ -672,23 +672,20 @@ func TestV1LogicCodemodShapes(t *testing.T) {
 }
 
 // TestV1LogicReturnOnlyBodyRuns: a body that is one `return` of an expression
-// runs on the LogicRunner (the loader sends it there,
-// component/memql/logic_body_v1.go). It compiles to no steps, which an
-// automation may not have, so its return is its one step.
+// runs on the LogicRunner like any other statement body: it compiles to its
+// one return step, which the runner evaluates in process.
 func TestV1LogicReturnOnlyBodyRuns(t *testing.T) {
-	body := parseV1Logic(t, `logic returnOnly {
+	_, steps := compiledLogic(t, `logic returnOnly {
   args {
     x string
   }
-  body {
-    return args.x ?? "none"
-  }
+  return args.x ?? "none"
 }`)
 	runner := NewLogicRunner(&memql.MemQLEngine{}, &v1ProbeRegistry{}, nil)
 	for arg, want := range map[string]string{"ex": "ex", "": "none"} {
-		out, err := runner.RunLogic(context.Background(), "returnOnly", body, map[string]any{"x": arg})
+		out, err := runner.RunLogicBody(context.Background(), "returnOnly", steps, map[string]any{"x": arg})
 		if err != nil {
-			t.Fatalf("RunLogic: %v", err)
+			t.Fatalf("RunLogicBody: %v", err)
 		}
 		if out != want {
 			t.Fatalf("return = %#v, want %q", out, want)

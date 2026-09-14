@@ -11,20 +11,21 @@ import (
 // cond_projection_logic_test.go drives #2542 items 2 (cond over a collection
 // chain) and 3 (arithmetic in a groupBy-projection object-literal value), plus
 // the lambda-carrying-chain terminal-return serializer gap, END-TO-END through
-// the REAL logic path: parseLogicBody -> compileBodyToAutomation (serialize) ->
-// RunLogic (re-parse + evaluate). A stub step registry stands in for the DB;
-// every case below resolves locally, so nothing is dispatched -- the assertions
-// pin both that the serializer emits re-parseable source and that the runtime
-// re-parse evaluates it.
+// the REAL logic path: the statement body compiled as the function loader
+// compiles it (compiledLogic) and run by RunLogicBody. A stub step registry
+// stands in for the DB; every case below resolves locally, so nothing is
+// dispatched -- the assertions pin that the compiled body evaluates.
+// (TestRunLogic_CompileRoundTrip_CondAndProjection still drives the retired
+// body grammar's serializer, and goes with it.)
 
 func runProjectionLogic(t *testing.T, src, fn string, args map[string]any) (any, []string) {
 	t.Helper()
-	body := parseLogicBody(t, src)
+	_, steps := compiledLogic(t, src)
 	registry := &recordingStepRegistry{}
 	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
-	out, err := r.RunLogic(context.Background(), fn, body, args)
+	out, err := r.RunLogicBody(context.Background(), fn, steps, args)
 	if err != nil {
-		t.Fatalf("RunLogic(%s): %v", fn, err)
+		t.Fatalf("RunLogicBody(%s): %v", fn, err)
 	}
 	return out, registry.dispatched
 }
@@ -38,10 +39,8 @@ logic condReturn {
   args {
     members []object @required
   }
-  body {
-    active := args.members.where(m => m.active)
-    return active.count() > 0 ? active.count() : 0
-  }
+  active := args.members.where(m => m.active)
+  return active.count() > 0 ? active.count() : 0
 }
 `
 	out, dispatched := runProjectionLogic(t, src, "condReturn", map[string]any{
@@ -68,10 +67,8 @@ logic condElse {
   args {
     members []object @required
   }
-  body {
-    active := args.members.where(m => m.active)
-    return active.count() > 0 ? "some-active" : "none-active"
-  }
+  active := args.members.where(m => m.active)
+  return active.count() > 0 ? "some-active" : "none-active"
 }
 `
 	out, _ := runProjectionLogic(t, src, "condElse", map[string]any{
@@ -93,11 +90,9 @@ logic condStep {
   args {
     members []object @required
   }
-  body {
-    active := args.members.where(m => m.active)
-    label := active.count() > 0 ? "has-active" : "no-active"
-    return label
-  }
+  active := args.members.where(m => m.active)
+  label := active.count() > 0 ? "has-active" : "no-active"
+  return label
 }
 `
 	out, dispatched := runProjectionLogic(t, src, "condStep", map[string]any{
@@ -122,10 +117,8 @@ logic condScalar {
   args {
     revenue int @required
   }
-  body {
-    r := args.revenue ?? 0
-    return r > 50 ? "high" : "low"
-  }
+  r := args.revenue ?? 0
+  return r > 50 ? "high" : "low"
 }
 `
 	if out, _ := runProjectionLogic(t, src, "condScalar", map[string]any{"revenue": 100}); out != "high" {
@@ -151,10 +144,8 @@ logic condChainCmp {
   args {
     members []object @required
   }
-  body {
-    active := args.members.where(m => m.active)
-    return active.count() > 1 ? "many" : "few"
-  }
+  active := args.members.where(m => m.active)
+  return active.count() > 1 ? "many" : "few"
 }
 `
 	members := map[string]any{"members": []any{
@@ -190,11 +181,9 @@ logic condChainCmpStep {
   args {
     members []object @required
   }
-  body {
-    active := args.members.where(m => m.active)
-    label := active.count() >= 2 ? "quorum" : "short"
-    return label
-  }
+  active := args.members.where(m => m.active)
+  label := active.count() >= 2 ? "quorum" : "short"
+  return label
 }
 `
 	members := map[string]any{"members": []any{
@@ -252,10 +241,8 @@ logic lambdaReturn {
   args {
     members []object @required
   }
-  body {
-    rows := args.members.where(m => m.active)
-    return rows.where(m => m.vip).count()
-  }
+  rows := args.members.where(m => m.active)
+  return rows.where(m => m.vip).count()
 }
 `
 	out, dispatched := runProjectionLogic(t, src, "lambdaReturn", map[string]any{
@@ -282,10 +269,8 @@ logic projCount {
   args {
     scans []object @required
   }
-  body {
-    rows := args.scans.where(s => s.done)
-    return rows.groupBy(s => s.worker).select(g => {worker: g.key, n: g.items.count()})
-  }
+  rows := args.scans.where(s => s.done)
+  return rows.groupBy(s => s.worker).select(g => {worker: g.key, n: g.items.count()})
 }
 `
 	out, dispatched := runProjectionLogic(t, src, "projCount", map[string]any{
@@ -327,10 +312,8 @@ logic accuracy {
     scans []object @required
     total int @required
   }
-  body {
-    rows := args.scans.where(s => s.done)
-    return rows.groupBy(s => s.worker).select(g => {worker: g.key, pct: g.items.count() * 100 / args.total})
-  }
+  rows := args.scans.where(s => s.done)
+  return rows.groupBy(s => s.worker).select(g => {worker: g.key, pct: g.items.count() * 100 / args.total})
 }
 `
 	out, _ := runProjectionLogic(t, src, "accuracy", map[string]any{
@@ -367,10 +350,8 @@ logic accuracyRatio {
     scans []object @required
     total int @required
   }
-  body {
-    rows := args.scans.where(s => s.done)
-    return rows.groupBy(s => s.worker).select(g => {worker: g.key, acc: g.items.count() / (args.total * 1.0)})
-  }
+  rows := args.scans.where(s => s.done)
+  return rows.groupBy(s => s.worker).select(g => {worker: g.key, acc: g.items.count() / (args.total * 1.0)})
 }
 `
 	out, _ := runProjectionLogic(t, src, "accuracyRatio", map[string]any{
@@ -407,15 +388,13 @@ logic ratioZero {
     scans []object @required
     zero int @required
   }
-  body {
-    rows := args.scans.where(s => s.done)
-    return rows.groupBy(s => s.worker).select(g => {worker: g.key, r: g.items.count() / args.zero})
-  }
+  rows := args.scans.where(s => s.done)
+  return rows.groupBy(s => s.worker).select(g => {worker: g.key, r: g.items.count() / args.zero})
 }
 `
-	body := parseLogicBody(t, src)
+	_, steps := compiledLogic(t, src)
 	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
-	_, err := r.RunLogic(context.Background(), "ratioZero", body, map[string]any{
+	_, err := r.RunLogicBody(context.Background(), "ratioZero", steps, map[string]any{
 		"scans": []any{map[string]any{"worker": "w1", "done": true}},
 		"zero":  0,
 	})

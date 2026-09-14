@@ -89,16 +89,18 @@ func TestCompileSource_ParallelStep(t *testing.T) {
 	}
 }
 
+// A statement parallel waits for every branch and stops the others when one
+// fails: `wait any` and `on error continue` are the two ways to say otherwise.
 func TestCompileSource_ParallelStep_Defaults(t *testing.T) {
 	src := `@description("Defaults probe.")
 @trigger(event="system.startup")
 automation gather {
-  step layer0 {
-    parallel {
-      branches: [
-        step a { automation fetchA { } },
-        step b { automation fetchB { } }
-      ]
+  parallel {
+    branch a {
+      automation fetchA()
+    }
+    branch b {
+      automation fetchB()
     }
   }
 }`
@@ -110,8 +112,8 @@ automation gather {
 	if cfg == nil {
 		t.Fatal("parallel config missing")
 	}
-	if cfg.Wait != "all" || cfg.FailFast {
-		t.Errorf("defaults must be wait=all failFast=false, got wait=%q failFast=%v", cfg.Wait, cfg.FailFast)
+	if cfg.Wait != "all" || !cfg.FailFast {
+		t.Errorf("defaults must be wait=all failFast=true, got wait=%q failFast=%v", cfg.Wait, cfg.FailFast)
 	}
 }
 

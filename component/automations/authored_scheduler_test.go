@@ -118,9 +118,7 @@ func TestAuthoredScheduler_EventTrigger_FiresUnderAuthorEnvelope(t *testing.T) {
 @trigger(event="node.created", concept="v1:identity:user")
 @description("Authored: react to user creation")
 automation aliceOnUserCreate {
-  step run {
-    logic sandboxNoopLogic { event: event }
-  }
+  run := logic sandboxNoopLogic(event: event)
 }`
 
 	// Register AT RUNTIME -- no restart.
@@ -228,9 +226,7 @@ func TestAuthoredScheduler_OwnerScopedIsolation(t *testing.T) {
 	src := `@enabled
 @trigger(event="node.created", concept="v1:identity:user")
 automation onUser {
-  step run {
-    logic sandboxNoopLogic { event: event }
-  }
+  run := logic sandboxNoopLogic(event: event)
 }`
 	if err := s.Activate(authoredAutomationConstruct("user-a", "onUser", src)); err != nil {
 		t.Fatalf("activate a: %v", err)
@@ -277,9 +273,7 @@ func TestAuthoredScheduler_ScheduledTrigger(t *testing.T) {
 	src := `@enabled
 @trigger(schedule="* * * * * *")
 automation everySecondSweep {
-  step run {
-    logic sandboxNoopLogic { event: event }
-  }
+  run := logic sandboxNoopLogic(event: event)
 }`
 	if err := s.Activate(authoredAutomationConstruct("user-a", "everySecondSweep", src)); err != nil {
 		t.Fatalf("Activate: %v", err)

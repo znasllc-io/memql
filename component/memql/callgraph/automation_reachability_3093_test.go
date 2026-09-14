@@ -24,12 +24,10 @@ func noSideEffects(string) bool { return false }
 // the tree actually uses, because kind inference is `singular(basename)` and
 // that inference is half of what was broken.
 func TestCheckFile_ReachesAutomationConditions(t *testing.T) {
-	src := `@trigger(event="node.updated", concept="v1:forge:request", partition="*")
+	src := `@trigger(event="node.updated", concept="v1:forge:request")
 automation probe {
-  step apply {
-    if submitterRole == "admin" || submitterRole == "writer" {
-      mutation advanceRequest ( requestId: id )
-    }
+  if submitterRole == "admin" || submitterRole == "writer" {
+    apply := mutation advanceRequest(requestId: id)
   }
 }`
 
@@ -64,9 +62,12 @@ automation probe {
 // conditions, which is memql#3043's failure mode reproduced inside the fix for
 // memql#3093.
 func TestCheckFile_ReachesBodilessAutomationFilter(t *testing.T) {
-	src := `@trigger(event="node.created", concept="v1:data:record", partition="*")
+	src := `@trigger(event="node.created", concept="v1:data:record")
 @filter(row => (row.kind ?? "regular") == "daily")
-automation conflictDetection @trigger(schedule="0 0 2 * * *") => logic conflictDetection
+@trigger(schedule="0 0 2 * * *")
+automation conflictDetection {
+  logic conflictDetection(event: event)
+}
 `
 
 	findings := CheckFile("data/automations.memql", src, noSideEffects)
@@ -91,13 +92,14 @@ automation conflictDetection @trigger(schedule="0 0 2 * * *") => logic conflictD
 func TestSplitConstructs_AttributesAnnotationsToTheRightAutomation(t *testing.T) {
 	src := `@trigger(schedule="0 5 9 * * *")
 @filter(row => (row.kind ?? "regular") == "daily")
-automation firstBodiless @trigger(schedule="0 5 9 * * *") => logic firstBodiless
+@trigger(schedule="0 5 9 * * *")
+automation firstBodiless {
+  logic firstBodiless(event: event)
+}
 
-@trigger(event="node.created", concept="v1:identity:user", partition="*")
+@trigger(event="node.created", concept="v1:identity:user")
 automation secondBraced {
-  step apply {
-    logic doThing ( event: event )
-  }
+  apply := logic doThing(event: event)
 }
 `
 	constructs := splitConstructs("automation", src)

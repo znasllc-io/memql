@@ -63,9 +63,7 @@ logic grantGateProbeLogic {
   args {
     probe string @required
   }
-  body {
-    return args.probe == "x" ? "yes" : "no"
-  }
+  return args.probe == "x" ? "yes" : "no"
 }
 `
 
@@ -78,9 +76,7 @@ logic rankGateProbeLogic {
   args {
     probe string @required
   }
-  body {
-    return args.probe == "x" ? "yes" : "no"
-  }
+  return args.probe == "x" ? "yes" : "no"
 }
 `
 

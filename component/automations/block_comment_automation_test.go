@@ -47,9 +47,7 @@ const liveAutomation = `@enabled
 @description("control")
 @trigger(event="node.created", concept="v1:cluster:node")
 automation blockCommentControl {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 `
 
@@ -184,9 +182,7 @@ func TestBraceInsideBlockCommentDoesNotTruncateSlice(t *testing.T) {
 @trigger(event="node.created", concept="v1:cluster:node")
 automation braceInBlockComment {
   /* this comment closes a brace } and opens one { on purpose */
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 `
 
@@ -208,9 +204,7 @@ func TestBlockCommentMarkerInsideStringIsNotAComment(t *testing.T) {
 @description("a string carrying comment markers")
 @trigger(event="node.created", concept="v1:cluster:node")
 automation commentMarkerInString {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "/* not a comment */")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "/* not a comment */")
 }
 `
 
@@ -236,9 +230,7 @@ func TestBlockCommentDoesNotNest(t *testing.T) {
 @description("live again after the first close")
 @trigger(event="node.created", concept="v1:cluster:node")
 automation afterFirstClose {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 `
 
@@ -394,9 +386,7 @@ func TestUnterminatedBlockCommentWarns(t *testing.T) {
 /* unterminated -- everything past here is comment
 @trigger(event="node.created", concept="v1:cluster:node")
 automation swallowed {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 `
 
@@ -410,9 +400,9 @@ automation swallowed {
 	if !strings.Contains(logs, "unterminated block comment") {
 		t.Errorf("silently swallowing every automation below a typo'd /* is exactly what #2830 outlawed -- expected a WARN, got logs:\n%s", logs)
 	}
-	// liveAutomation is 8 lines + trailing newline, then a blank line, so the
-	// unterminated opener sits on line 10.
-	if !strings.Contains(logs, "line=10") {
+	// liveAutomation is 6 lines + trailing newline, then a blank line, so the
+	// unterminated opener sits on line 8.
+	if !strings.Contains(logs, "line=8") {
 		t.Errorf("the WARN must name the line the comment opens on so the operator can find it, got logs:\n%s", logs)
 	}
 }
@@ -502,9 +492,7 @@ automation parkedOne {
 @enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation gatedAutomation {
-  step persist {
-    mutation createSpawnEvent (nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
-  }
+  persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 `
 	_, err := loadFixtureDomain(t, "s2861fixturegate", src)

@@ -168,7 +168,7 @@ func TestCompileV1LogicBody(t *testing.T) {
 }
 
 // TestCompileV1AutomationTriggerFilter: the trigger filter is the lambda's
-// canonical source, and a step's bare args field is an expression leaf.
+// canonical source, and a statement's args field read is an expression leaf.
 func TestCompileV1AutomationTriggerFilter(t *testing.T) {
 	c := asJSON(t, compileV1(t, `@trigger(event="node.created", concept="v1:probe:thing")
 @filter(row => row.status startsWith "arch")
@@ -176,16 +176,14 @@ automation probe {
   args {
     status string
   }
-  step first {
-    logic other(s: status, e: event, n: 1)
-  }
+  first := logic other(s: args.status, e: event, n: 1)
 }`))
 	trigger := c["trigger"].(map[string]any)
 	if trigger["filter"] != `row => row.status startsWith "arch"` {
 		t.Fatalf("trigger.filter = %#v", trigger["filter"])
 	}
-	wantJSON(t, "the step", stepsByID(t, c)["first"]["function"], `{"name": "other", "args": {
-		"s": {"$expr": "status"}, "e": {"$expr": "event"}, "n": 1}}`)
+	wantJSON(t, "the step", stepsByID(t, c)["first"]["function"], `{"name": "other", "kind": "logic", "args": {
+		"s": {"$expr": "args.status"}, "e": {"$expr": "event"}, "n": 1}}`)
 }
 
 // TestCompileV1OrdersByV1References: the topological sort reads a v1 step's

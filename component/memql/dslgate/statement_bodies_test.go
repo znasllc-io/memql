@@ -113,6 +113,7 @@ func TestStatementBodiesRefuseAnUnknownBareCall(t *testing.T) {
 // TestStatementBodiesPassOverARetiredForm: a body still in a retired form is
 // the rewriter's until the flip, and its expressions the legacy grammar's.
 func TestStatementBodiesPassOverARetiredForm(t *testing.T) {
+	// memqlmigrate:keep -- the retired form is the case.
 	src := `logic legacy {
   body {
     return config.definitelyNotExposed
@@ -127,6 +128,7 @@ func TestStatementBodiesPassOverARetiredForm(t *testing.T) {
 // TestStatementBodiesReadIsTheGatesCoverage: the coverage names each body the
 // gates read, and not one they passed over.
 func TestStatementBodiesReadIsTheGatesCoverage(t *testing.T) {
+	// memqlmigrate:keep -- the legacy construct is the one the coverage must not name.
 	src := `logic native {
   return 1
 }

@@ -52,13 +52,13 @@ func TestSynthesizeHeadline_ChainsPhasesInOrder(t *testing.T) {
 // memql#1366).
 func TestSynthesizeHeadline_RealGate1Compiles(t *testing.T) {
 	phase0 := memql.SandboxConstruct{Kind: "automation", Name: "digestPhase0",
-		Source: "@description(\"phase 0\")\nautomation digestPhase0 {\n  step run {\n    logic digestPhase0Body { }\n  }\n}"}
+		Source: "@description(\"phase 0\")\nautomation digestPhase0 {\n  run := logic digestPhase0Body()\n}"}
 	phase1 := memql.SandboxConstruct{Kind: "automation", Name: "digestPhase1",
-		Source: "@description(\"phase 1\")\nautomation digestPhase1 {\n  step run {\n    logic digestPhase1Body { }\n  }\n}"}
+		Source: "@description(\"phase 1\")\nautomation digestPhase1 {\n  run := logic digestPhase1Body()\n}"}
 	l0 := memql.SandboxConstruct{Kind: "logic", Name: "digestPhase0Body",
-		Source: "logic digestPhase0Body {\n  body { return now }\n}"}
+		Source: "logic digestPhase0Body {\n  return now\n}"}
 	l1 := memql.SandboxConstruct{Kind: "logic", Name: "digestPhase1Body",
-		Source: "logic digestPhase1Body {\n  body { return now }\n}"}
+		Source: "logic digestPhase1Body {\n  return now\n}"}
 	headline := synthesizeHeadlineAutomation("digest", "Run the digest in two phases.", []string{"digestPhase0", "digestPhase1"})
 
 	report := memql.SandboxCompileBundle([]memql.SandboxConstruct{phase0, phase1, l0, l1, headline})

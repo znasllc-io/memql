@@ -14,6 +14,9 @@ import (
 // The expressions codemod (memql#5368). Each case is the ONE text a legacy
 // clause must become; the structural and truth-table harnesses further down
 // check that the text means what the old clause meant.
+//
+// memqlmigrate:keep-file -- the inputs are edition-2025 sources on purpose,
+// retired body forms included: they are what the codemod reads.
 
 // xmtPreds is the predicate set the clause cases resolve against: the traits
 // and specs the corpus uses, two of them over the @actor envelope.

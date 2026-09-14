@@ -528,15 +528,11 @@ spec participant isGuestParticipant = row => row.isGuest == true
 
 @trigger(event="node.deleted", concept="v1:cognition:participant")
 automation onParticipantRemoved {
-  step decide {
-    logic onParticipantRemoved ( event )
-  }
+  decide := logic onParticipantRemoved(event: event)
 }
 
 automation noPreamble {
-  step decide {
-    logic noPreamble ( event )
-  }
+  decide := logic noPreamble(event: event)
 }
 `
 	got := newRunnableService().RunnableConstructs(src)
@@ -565,17 +561,21 @@ func TestRunnableConstructs_TerseAutomationForm(t *testing.T) {
 	const src = `use identity.concepts.{ user }
 
 /// Soft-revoke expired delegations every 5 minutes.
-automation expireDelegations @trigger(schedule="0 */5 * * * *") => logic revokeExpiredDelegations
+@trigger(schedule="0 */5 * * * *")
+automation expireDelegations {
+  logic revokeExpiredDelegations(event: event)
+}
 
 /// React to a new delegation row.
-automation onDelegationCreated @trigger(event="node.created", concept="v1:identity:delegation", partition="*") => logic onDelegationCreated
+@trigger(event="node.created", concept="v1:identity:delegation")
+automation onDelegationCreated {
+  logic onDelegationCreated(event: event)
+}
 
 @description("A block-form automation immediately after two terse ones")
 @trigger(event="node.updated", concept="v1:identity:user")
 automation onUserUpdated {
-  step decide {
-    logic onUserUpdated ( event )
-  }
+  decide := logic onUserUpdated(event: event)
 }
 `
 	got := newRunnableService().RunnableConstructs(src)

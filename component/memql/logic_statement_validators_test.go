@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // logic_statement_validators_test.go -- the load-time validators that read a
@@ -47,6 +49,25 @@ func TestStatementLogicValidatorsReachTheBody(t *testing.T) {
 		"  who := actor.userId\n  return args.event.payload.id ?? who\n}")
 	require.NoError(t, err)
 	require.NotNil(t, fn.LogicBody, "the probe must load as a statement body, or this measures the legacy path")
+}
+
+// statementReturnExpr is a statement-body logic's returned value, parsed as
+// the LogicRunner parses it before evaluating it with EvalExpr over the
+// call's arguments.
+func statementReturnExpr(t *testing.T, fn *Function) languageParser.ExpressionNode {
+	t.Helper()
+	require.NotNil(t, fn.LogicBody, "%s must load as a statement body", fn.Name)
+	var src string
+	for _, st := range fn.LogicBody {
+		if st["type"] == "return" {
+			ret, _ := st["return"].(map[string]any)
+			src, _ = ret["value"].(string)
+		}
+	}
+	require.NotEmptyf(t, src, "%s's compiled body returns no value: %v", fn.Name, fn.LogicBody)
+	ret, err := languageParser.ParseV1Expression(src)
+	require.NoErrorf(t, err, "%s's returned value %q must parse", fn.Name, src)
+	return ret
 }
 
 // TestExtractFunctionBodyFindsAStatementBody: the statements after the args

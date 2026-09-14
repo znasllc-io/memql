@@ -215,9 +215,7 @@ logic logicValid {
   args {
     event object @required
   }
-  body {
-    return 1
-  }
+  return 1
 }
 `)},
 	}

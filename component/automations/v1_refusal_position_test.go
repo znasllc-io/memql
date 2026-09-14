@@ -17,18 +17,14 @@ func TestAutomationSliceRefusalNamesTheFileLine(t *testing.T) {
 	file := `/// The first automation.
 @trigger(event="node.created", concept="v1:probe:thing")
 automation first {
-  step run {
-    logic noteThing(x: 1)
-  }
+  run := logic noteThing(x: 1)
 }
 
 /// The second, whose filter holds the retired null.
 @filter(row => row.b == null)
 @trigger(event="node.created", concept="v1:probe:thing")
 automation second {
-  step run {
-    logic noteThing(x: 2)
-  }
+  run := logic noteThing(x: 2)
 }
 `
 	lowered, err := languageParser.NormaliseTerseAutomationSource(file)
@@ -64,9 +60,7 @@ func TestTerseAutomationRefusalNamesTheFileLine(t *testing.T) {
 	file := `/// The first automation.
 @trigger(event="node.created", concept="v1:probe:thing")
 automation first {
-  step run {
-    logic noteThing(x: 1)
-  }
+  run := logic noteThing(x: 1)
 }
 
 /// Note a thing whose b is missing, written with the retired null.

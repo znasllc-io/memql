@@ -31,9 +31,7 @@ query participant spaceParticipants {
 
 @trigger(schedule="0 */10 * * * *")
 automation sweepStalePlans {
-  step decide {
-    logic sweepStalePlans ( event )
-  }
+  decide := logic sweepStalePlans(event: event)
 }
 `
 
@@ -328,9 +326,7 @@ tool produceArtifact {
 @disabled
 @trigger(schedule="0 */10 * * * *")
 automation disabledBootstrap {
-  step decide {
-    logic sweepStalePlans ( event )
-  }
+  decide := logic sweepStalePlans(event: event)
 }
 `
 

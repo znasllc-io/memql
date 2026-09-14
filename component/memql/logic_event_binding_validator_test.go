@@ -31,9 +31,7 @@ func eventBindingRegistry() memoryNodes.Registry {
 func TestLogicEventBinding_RejectsUsedButUndeclaredEvent(t *testing.T) {
 	src := `@description("reads the event but never declares it")
 logic logicUsesEventNoDecl {
-  body {
-    return builtin ensureDailySpaceForUser( userId: args.event.payload.id )
-  }
+  return builtin ensureDailySpaceForUser(userId: args.event.payload.id)
 }`
 	_, err := tryParseNewFunctionSyntax("logicUsesEventNoDecl", "logic", src, "test.memql", eventBindingRegistry())
 	require.Error(t, err)
@@ -42,17 +40,18 @@ logic logicUsesEventNoDecl {
 	require.Contains(t, err.Error(), "1706")
 }
 
-// The bare `event.<field>` form (not prefixed with `args.`) is caught too.
+// The bare `event.<field>` form (not prefixed with `args.`) is refused too. In
+// a statement body `event` is no name at all, so the scope checker refuses it
+// (body_unknown_name), with the message that names args.event as the way in.
 func TestLogicEventBinding_RejectsBareEventRefWithoutDecl(t *testing.T) {
 	src := `@description("bare event.* form, still undeclared")
 logic logicBareEventNoDecl {
-  body {
-    return builtin ensureDailySpaceForUser( userId: event.payload.id )
-  }
+  return builtin ensureDailySpaceForUser(userId: event.payload.id)
 }`
 	_, err := tryParseNewFunctionSyntax("logicBareEventNoDecl", "logic", src, "test.memql", eventBindingRegistry())
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "does not declare an `event` input")
+	require.Contains(t, err.Error(), "a logic has no trigger of its own")
+	require.Contains(t, err.Error(), "[body_unknown_name]")
 }
 
 // The same body WITH a declared `event` input loads cleanly -- this is the
@@ -63,9 +62,7 @@ logic logicUsesEventDecl {
   args {
     event object @required
   }
-  body {
-    return builtin ensureDailySpaceForUser( userId: args.event.payload.id )
-  }
+  return builtin ensureDailySpaceForUser(userId: args.event.payload.id)
 }`
 	_, err := tryParseNewFunctionSyntax("logicUsesEventDecl", "logic", src, "test.memql", eventBindingRegistry())
 	require.NoError(t, err)
@@ -80,9 +77,7 @@ logic logicCronNoEventRead {
   args {
     event object @required
   }
-  body {
-    return 1
-  }
+  return 1
 }`
 	_, err := tryParseNewFunctionSyntax("logicCronNoEventRead", "logic", src, "test.memql", eventBindingRegistry())
 	require.NoError(t, err)
@@ -92,9 +87,7 @@ logic logicCronNoEventRead {
 func TestLogicEventBinding_AcceptsNoEventAtAll(t *testing.T) {
 	src := `@description("interactive logic: no event involved")
 logic logicNoEventAtAll {
-  body {
-    return builtin ensureDailySpaceForCaller()
-  }
+  return builtin ensureDailySpaceForCaller()
 }`
 	_, err := tryParseNewFunctionSyntax("logicNoEventAtAll", "logic", src, "test.memql", eventBindingRegistry())
 	require.NoError(t, err)

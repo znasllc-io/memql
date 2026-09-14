@@ -383,9 +383,7 @@ automation live {
     literal: MEMQL_ENV
     description: "Only drive the staging deploy spine in staging."
   }
-  step s {
-    logic someLogic ( event: event )
-  }
+  s := logic someLogic(event: event)
 }`
 	l := &Loader{}
 	auto, err := l.compileMemQL(src, "test:real-precondition")
@@ -491,9 +489,7 @@ automation live {
     description: "parked"
     */
   }
-  step s {
-    logic someLogic ( event: event )
-  }
+  s := logic someLogic(event: event)
 }`
 	l := &Loader{}
 	auto, err := l.compileMemQL(src, "test:precondition-field-shadow")

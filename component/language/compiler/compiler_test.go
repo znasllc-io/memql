@@ -81,14 +81,10 @@ mutate thing createThing {
 func TestCompileSource_Automation(t *testing.T) {
 	source := `
 @enabled
-@schedule("*/30 * * * *")
+@trigger(schedule="0 */30 * * * *")
 automation leadProcessor {
-  step fetchLeads {
-    query activeLeads(limit: 10)
-  }
-  step processLeads {
-    logic processLeads(leads: fetchLeads)
-  }
+  fetchLeads := query activeLeads(limit: 10)
+  processLeads := logic processLeads(leads: fetchLeads)
 }`
 
 	result, err := CompileSource(source)
@@ -111,9 +107,7 @@ func TestTranspileAutomation(t *testing.T) {
 @enabled
 @trigger(event="node.created", concept="v1:probe:thing")
 automation testAuto {
-  step step1 {
-    query listThings()
-  }
+  step1 := query listThings()
 }`
 
 	jsonOutput, err := TranspileAutomation(source)
@@ -141,13 +135,9 @@ func TestTranspileAutomation_ForEachBareVarReferencesNotQuoted(t *testing.T) {
 @enabled
 @trigger(event="node.created", concept="v1:probe:agent")
 automation autoJoinAIExample {
-  step getAgents {
-    query activeAgents()
-  }
-  step join {
-    forEach agent in getAgents.nodes() where agent.status != "left" {
-      mutation createParticipant(agentId: agent.id, status: "joined")
-    }
+  getAgents := query activeAgents()
+  for agent in getAgents.nodes() if agent.status != "left" {
+    mutation createParticipant(agentId: agent.id, status: "joined")
   }
 }`
 
@@ -158,18 +148,19 @@ automation autoJoinAIExample {
 
 	// A reference to the loop variable is an expression the runtime
 	// evaluates, never a string: it compiles to an {"$expr"} leaf, and a
-	// literal beside it stays a literal.
-	if strings.Contains(jsonOutput, `"agentId": "item.id"`) {
+	// literal beside it stays a literal. A statement loop keeps the name its
+	// author gave the variable.
+	if strings.Contains(jsonOutput, `"agentId": "agent.id"`) {
 		t.Fatalf("the loop variable was written as a string, which the runtime reads as text: %s", jsonOutput)
 	}
-	if !strings.Contains(jsonOutput, `"$expr": "item.id"`) {
-		t.Fatalf("expected the loop variable read as {\"$expr\": \"item.id\"}, got: %s", jsonOutput)
+	if !strings.Contains(jsonOutput, `"$expr": "agent.id"`) {
+		t.Fatalf("expected the loop variable read as {\"$expr\": \"agent.id\"}, got: %s", jsonOutput)
 	}
 	if !strings.Contains(jsonOutput, `"status": "joined"`) {
 		t.Fatalf("expected the literal argument to stay a literal, got: %s", jsonOutput)
 	}
-	if !strings.Contains(jsonOutput, `"filter": "item.status != \"left\""`) {
-		t.Fatalf("expected the where clause as canonical v1 source, got: %s", jsonOutput)
+	if !strings.Contains(jsonOutput, `"filter": "agent.status != \"left\""`) {
+		t.Fatalf("expected the loop's filter as canonical v1 source, got: %s", jsonOutput)
 	}
 }
 
@@ -255,9 +246,10 @@ func TestCompileSource_FunctionCallStepInAutomation(t *testing.T) {
 @enabled
 @trigger(event="node.created", concept="v1:probe:user")
 automation testAuto {
-  step checkUser {
-    query userById(userId: event.payload.userId)
+  args {
+    userId any
   }
+  checkUser := query userById(userId: args.userId)
 }`
 
 	result, err := CompileSource(source)
@@ -287,7 +279,7 @@ automation testAuto {
 		t.Fatalf("expected function name userById, got %v", functionConfig["name"])
 	}
 	args, _ := functionConfig["args"].(map[string]any)
-	if leaf, _ := args["userId"].(map[string]any); leaf["$expr"] != "event.payload.userId" {
+	if leaf, _ := args["userId"].(map[string]any); leaf["$expr"] != "args.userId" {
 		t.Fatalf("expected the userId argument as an expression leaf, got %#v", args["userId"])
 	}
 }
@@ -313,9 +305,7 @@ func TestCompileResult_ToJSON(t *testing.T) {
 	source := `
 @trigger(event="node.created", concept="v1:probe:thing")
 automation testAuto {
-  step step1 {
-    query listThings()
-  }
+  step1 := query listThings()
 }`
 
 	result, err := CompileSource(source)
@@ -398,13 +388,9 @@ func TestCompiler_AutomationWithCondition(t *testing.T) {
 	source := `
 @trigger(event="node.created", concept="v1:probe:thing")
 automation conditional {
-  step checkExists {
-    query thingById(id: "test-id")
-  }
-  step createIfMissing {
-    if checkExists.empty() {
-      mutation createThing(id: "test-id", created: true)
-    }
+  checkExists := query thingById(id: "test-id")
+  if checkExists.empty() {
+    createIfMissing := mutation createThing(id: "test-id", created: true)
   }
 }`
 

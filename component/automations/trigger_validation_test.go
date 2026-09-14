@@ -41,7 +41,7 @@ func triggerTestLoaderWithRegistry(t *testing.T) *Loader {
 }
 
 const triggerProbeBody = ` {
-  step noop { logic noopLogic { } }
+  noop := logic noopLogic()
 }`
 
 // ---------------------------------------------------------------------------
@@ -63,11 +63,11 @@ func TestTrigger_UnrecognisedEventKindRejectsStructuredKwargs(t *testing.T) {
 	}{
 		{
 			name:    "live-shape-deploy-requested",
-			trigger: `@trigger(event="deploy.requested", concept="v1:cluster:deployment", partition="*")`,
+			trigger: `@trigger(event="deploy.requested", concept="v1:cluster:deployment")`,
 		},
 		{
 			name:    "typo-node-create",
-			trigger: `@trigger(event="node.create", concept="v1:cluster:node", partition="*")`,
+			trigger: `@trigger(event="node.create", concept="v1:cluster:node")`,
 		},
 		{
 			name:    "capitalisation-node-Created",
@@ -77,10 +77,9 @@ func TestTrigger_UnrecognisedEventKindRejectsStructuredKwargs(t *testing.T) {
 			name:    "already-composed-topic-plus-concept",
 			trigger: `@trigger(event="graph.node.created.v1:cluster:node", concept="v1:cluster:node")`,
 		},
-		{
-			name:    "partition-only",
-			trigger: `@trigger(event="system.startup", partition="*")`,
-		},
+		// (A stray `partition=` was the sixth case. The statement parser now
+		// refuses `partition=` on every @trigger (trigger_partition_retired),
+		// before this check could see it.)
 		{
 			name:    "schedule-trigger-carrying-concept",
 			trigger: `@trigger(schedule="0 */10 * * * *", concept="v1:cluster:node")`,

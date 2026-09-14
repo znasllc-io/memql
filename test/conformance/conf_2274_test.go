@@ -60,10 +60,8 @@ func parseLogicForTest(t *testing.T, src string) *languageParser.AutomationDef {
 func runObjectLiteralReturn(t *testing.T, e *Env) {
 	src := `logic objLitReturnProbe {
   args { event object @required }
-  body {
-    found := query workspaceForRun(runId: args.event.payload.id)
-    return { wasEmpty: found.empty(), pid: args.event.payload.id, lit: "constant" }
-  }
+  found := query workspaceForRun(runId: args.event.payload.id)
+  return { wasEmpty: found.empty(), pid: args.event.payload.id, lit: "constant" }
 }`
 	body := parseLogicForTest(t, src)
 	runner := automations.NewLogicRunner(e.Eng, automationSteps.NewRegistry(), e.Eng.Logger)

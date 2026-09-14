@@ -36,8 +36,13 @@ func receiverFixture(r annotations.Receiver, name, ann string) string {
 	case annotations.Mutation:
 		return ann + "\nmutate thing probe {\n  args {\n    id string!\n  }\n  update {\n    id: args.id\n  }\n}\n"
 	case annotations.Logic:
-		return ann + "\nlogic probe {\n  body {\n    return 1\n  }\n}\n"
+		return ann + "\nlogic probe {\n  return 1\n}\n"
 	case annotations.Automation:
+		// The retired body form until the parser refuses it: the registry
+		// still places @schedule and @trigger's partition key on an
+		// automation, and a statement body refuses both (D15). The two go
+		// together when the retired forms are refused.
+		// memqlmigrate:keep
 		return ann + "\nautomation probe {\n  step run {\n    mutation createThing (id: \"x\")\n  }\n}\n"
 	case annotations.Action:
 		return ann + "\naction probe {\n  capability script(script: \"x\")\n}\n"

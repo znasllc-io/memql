@@ -332,12 +332,8 @@ func TestKeywordDocsFreeOfRetiredForms(t *testing.T) {
 // construction; this test pins the wiring end-to-end.
 func TestTokenize_InvocationKindPrefixesAreKeywords(t *testing.T) {
 	src := `automation deploy {
-  step record {
-    mutation createDeployment(deploymentId: x)
-  }
-  step decide {
-    logic deployGateGreen(environment: y)
-  }
+  record := mutation createDeployment(deploymentId: x)
+  decide := logic deployGateGreen(environment: y)
 }`
 	s := New(nil)
 	tokens := s.Tokenize(src)

@@ -15,6 +15,10 @@ import (
 	"github.com/znasllc-io/memql/core/repowalk"
 )
 
+// memqlmigrate:keep-file -- every fixture here is written to be refused, the
+// retired body forms among them; carried across by the bodies rewrite, a case
+// would parse and stop testing its refusal.
+
 // v1BodyRefusalCases are parsed with ParseFile directly, without the
 // struct-form rewriter: that is how every file parses once the tree is
 // migrated, and until then the rewriter still expands the retired forms these

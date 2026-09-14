@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -37,12 +38,12 @@ func TestParallelExecutor_ReturnsBranchContentToFollowingSteps(t *testing.T) {
 	}
 }
 
-// memql#1368 -- execution-level coverage for the authored `parallel` step:
-// a struct-form DSL source with a parallel layer is compiled through the
-// REAL automation loader (rewriter -> parser -> compiler -> IR) and then
-// executed by the real ParallelExecutor. Both branches must run, branch ids
-// surface as <parent>.<branch>, and `wait: "all"` semantics hold (the step
-// does not complete until the slow branch has).
+// memql#1368 -- execution-level coverage for the authored `parallel`
+// statement: a statement body with a parallel is compiled through the REAL
+// automation loader (parser -> compiler -> IR) and fired through the real
+// executor, whose ParallelExecutor runs the branches. Both branches must run,
+// and the wait for all of them holds: the statement after the parallel does
+// not start until the slow branch has finished.
 
 // recordingExecutor records each executed step id; an optional per-step
 // delay simulates a slow branch.
@@ -84,15 +85,15 @@ func TestParallelExecutor_AuthoredDSL_WaitAllRunsBothBranches(t *testing.T) {
 	const src = `@description("Gather two reports concurrently.")
 @trigger(event="system.startup")
 automation gather {
-  step layer0 {
-    parallel {
-      wait: "all"
-      branches: [
-        step sales   { automation fetchSales { } },
-        step support { automation fetchSupport { } }
-      ]
+  parallel {
+    branch sales {
+      automation fetchSales()
+    }
+    branch support {
+      automation fetchSupport()
     }
   }
+  automation afterBoth()
 }`
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	loader := automations.NewLoader(automations.LoaderOptions{Logger: logger})
@@ -100,57 +101,35 @@ automation gather {
 	if err != nil {
 		t.Fatalf("authored parallel automation must compile: %v", err)
 	}
-	if len(auto.Steps) != 1 || auto.Steps[0].Type != automations.StepTypeParallel {
-		t.Fatalf("expected one parallel step, got %+v", auto.Steps)
+	if len(auto.Steps) != 2 || auto.Steps[0].Type != automations.StepTypeParallel {
+		t.Fatalf("expected the parallel step and the one after it, got %+v", auto.Steps)
 	}
 
-	// Replace the sub-automation executor with a recorder; the `support`
-	// branch is slowed down so wait:"all" is observable (the parallel step
-	// must not return before the slow branch lands).
+	// The sub-automation calls go to a recorder; the `support` branch is
+	// slowed down so the wait for all branches is observable.
 	rec := &recordingExecutor{delays: map[string]time.Duration{
-		"layer0.support": 50 * time.Millisecond,
+		"fetchSupport": 50 * time.Millisecond,
 	}}
 	reg := NewRegistry()
 	reg.Register(automations.StepTypeAutomation, rec)
-	exec := &ParallelExecutor{Registry: reg}
-
-	res, err := exec.Execute(context.Background(), auto.Steps[0], &Context{
-		Evaluator: automations.NewEvaluator(),
-	})
+	ev := events.NewEvent("system.startup", events.KindMessage, nil)
+	exec, err := automations.NewExecutor(automations.ExecutorOptions{Logger: logger, StepRegistry: reg}).ExecuteWithEvent(context.Background(), auto, "test", &ev)
 	if err != nil {
 		t.Fatalf("parallel execution failed: %v", err)
 	}
-	if res.Status != "success" {
-		t.Fatalf("want status success, got %q (error: %s)", res.Status, res.Error)
+	if exec.Status != "completed" {
+		t.Fatalf("want status completed, got %q", exec.Status)
 	}
 
-	// wait:"all" -- BOTH branches must have completed by the time the step
-	// result is returned, including the slow one.
+	// Both branches ran, and the statement after the parallel ran after both,
+	// the slow one included.
 	got := rec.executed()
-	if len(got) != 2 {
-		t.Fatalf("want both branches executed before the step returns, got %v", got)
+	if len(got) != 3 || got[2] != "afterBoth" {
+		t.Fatalf("want both branches, then afterBoth, got %v", got)
 	}
-	seen := map[string]bool{}
-	for _, id := range got {
-		seen[id] = true
-	}
-	// Branch ids surface as <parent>.<branch> (the executor's contract).
-	if !seen["layer0.sales"] || !seen["layer0.support"] {
-		t.Errorf("branch ids must surface as <parent>.<branch>, got %v", got)
-	}
-
-	if len(res.Children) != 2 {
-		t.Fatalf("want 2 child results, got %d", len(res.Children))
-	}
-	// Children are reassembled in branch order regardless of completion order.
-	if res.Children[0].StepId != "layer0.sales" || res.Children[1].StepId != "layer0.support" {
-		t.Errorf("children must be in branch order, got %s / %s",
-			res.Children[0].StepId, res.Children[1].StepId)
-	}
-	for _, child := range res.Children {
-		if child.Status != "success" {
-			t.Errorf("branch %s must succeed, got %q", child.StepId, child.Status)
-		}
+	seen := map[string]bool{got[0]: true, got[1]: true}
+	if !seen["fetchSales"] || !seen["fetchSupport"] {
+		t.Errorf("both branches must run before the statement after them, got %v", got)
 	}
 }
 

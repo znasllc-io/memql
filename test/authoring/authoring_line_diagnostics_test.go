@@ -83,9 +83,7 @@ logic logicBad {
   args {
     x string @required
   }
-  body {
-    return args.x $ "y"
-  }
+  return args.x $ "y"
 }`,
 		},
 		{
@@ -102,12 +100,9 @@ action actionBad {
 		},
 		{
 			kind: "automation", name: "autoBad", marker: "host: $", exactCol: true,
-			src: `@trigger(event="deploy.requested", concept="v1:cluster:deployment", partition="*")
+			src: `@trigger(event="deploy.requested", concept="v1:cluster:deployment")
 automation autoBad {
-  step decide {
-    mutation createDatabase (
-      host: $ )
-  }
+  decide := mutation createDatabase(host: $)
 }`,
 		},
 	}
@@ -151,9 +146,7 @@ logic logicShift {
   args {
     x string @required
   }
-  body {
-    return args.x $ "y"
-  }
+  return args.x $ "y"
 }`
 	base := priorConcept + "\n\n" + erroring
 	// Insert N extra blank lines between the prior construct and the erroring one.
@@ -184,9 +177,7 @@ logic noAnchor {
   args {
     x string @required
   }
-  body {
-    return args.x $ "y"
-  }
+  return args.x $ "y"
 }`,
 	}})
 	for _, dd := range report.Diagnostics {

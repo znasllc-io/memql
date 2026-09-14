@@ -250,9 +250,7 @@ func TestCrossRef_AutomationTriggerConceptExists(t *testing.T) {
 			Name: "crossOnUser",
 			Source: `@trigger(event="node.created", concept="v1:identity:user")
 automation crossOnUser {
-  step run {
-    logic crossNoop { event: event }
-  }
+  run := logic crossNoop(event: event)
 }`,
 		},
 	}, eng)
@@ -266,9 +264,7 @@ automation crossOnUser {
 			Name: "crossOnGhost",
 			Source: `@trigger(event="node.created", concept="v1:ghostns:ghostConcept")
 automation crossOnGhost {
-  step run {
-    logic crossNoop { event: event }
-  }
+  run := logic crossNoop(event: event)
 }`,
 		},
 	}, eng)
@@ -301,9 +297,7 @@ concept crossEvented {
 			Name: "crossOnEvented",
 			Source: `@trigger(event="node.created", concept="v1:crossns:crossEvented")
 automation crossOnEvented {
-  step run {
-    logic crossNoop { event: event }
-  }
+  run := logic crossNoop(event: event)
 }`,
 		},
 	}, eng)
@@ -333,9 +327,7 @@ concept crossEphemeral {
 			Name: "crossOnEphemeral",
 			Source: `@trigger(event="node.created", concept="v1:crossns:crossEphemeral")
 automation crossOnEphemeral {
-  step run {
-    logic crossNoop { event: event }
-  }
+  run := logic crossNoop(event: event)
 }`,
 		},
 	}, eng)

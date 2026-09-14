@@ -23,7 +23,9 @@ func TestRunScopedAuthoredFunctionsReachOrdinaryExecute(t *testing.T) {
 
 	var err error
 	reg := NewAuthoredRuntimeRegistry()
-	_, err = AuthorSessionBundle(reg, "alice", `logic executionAnswer { body { return 42 } }`, "")
+	_, err = AuthorSessionBundle(reg, "alice", `logic executionAnswer {
+  return 42
+}`, "")
 	if err != nil {
 		t.Fatal(err)
 	}

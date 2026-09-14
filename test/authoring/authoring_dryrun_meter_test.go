@@ -26,12 +26,8 @@ const dryRunMeteredAutomation = `@enabled
 @trigger(event="node.created", concept="v1:authoring:bundle")
 @description("Sandbox: read-heavy automation")
 automation sandboxReadHeavy {
-  step search {
-    webSearch(query: "memql dry run sandbox")
-  }
-  step fetch {
-    fetchUrl(url: "https://example.com/doc")
-  }
+  search := builtin webSearch(query: "memql dry run sandbox")
+  fetch := builtin fetchUrl(url: "https://example.com/doc")
 }`
 
 // TestDryRun_MetersWebReads: a webSearch() and a fetchUrl() read each record a

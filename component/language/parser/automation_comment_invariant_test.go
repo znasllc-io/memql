@@ -43,8 +43,8 @@ func compiledForm(s string) string {
 func TestAutomationSource_CommentContentNeverChangesTheCompiledAutomation(t *testing.T) {
 	// %s is where the comment is spliced in.
 	positions := map[string]string{
-		"preamble":       "%s\n@trigger(event=\"e\", concept=\"v1:a:b\", partition=\"*\")\nautomation a {\n  args {\n    x string @required\n  }\n  step s {\n    logic l { x: args.x }\n  }\n}",
-		"after trigger":  "@trigger(event=\"e\", concept=\"v1:a:b\", partition=\"*\")\n%s\nautomation a {\n  args {\n    x string @required\n  }\n  step s {\n    logic l { x: args.x }\n  }\n}",
+		"preamble":       "%s\n@trigger(event=\"e\", concept=\"v1:a:b\")\nautomation a {\n  args {\n    x string @required\n  }\n  s := logic l(x: args.x)\n}",
+		"after trigger":  "@trigger(event=\"e\", concept=\"v1:a:b\")\n%s\nautomation a {\n  args {\n    x string @required\n  }\n  s := logic l(x: args.x)\n}",
 		"body top":       "@trigger(event=\"e\", concept=\"v1:a:b\", partition=\"*\")\nautomation a {\n%s\n  args {\n    x string @required\n  }\n  step s {\n    logic l { x: args.x }\n  }\n}",
 		"between blocks": "@trigger(event=\"e\", concept=\"v1:a:b\", partition=\"*\")\nautomation a {\n  args {\n    x string @required\n  }\n%s\n  step s {\n    logic l { x: args.x }\n  }\n}",
 		"in step":        "@trigger(event=\"e\", concept=\"v1:a:b\", partition=\"*\")\nautomation a {\n  args {\n    x string @required\n  }\n  step s {\n%s\n    logic l { x: args.x }\n  }\n}",
@@ -115,14 +115,12 @@ func TestAutomationSource_CommentContentNeverChangesTheCompiledAutomation(t *tes
 // step whose name is plainly present -- and the 105-case sweep stayed green
 // throughout, because line-granularity positions cannot express it.
 func TestAutomationSource_CommentsInsideAHeaderLine(t *testing.T) {
-	const ctl = `@trigger(event="e", concept="v1:a:b", partition="*")
+	const ctl = `@trigger(event="e", concept="v1:a:b")
 automation a {
   args {
     x string @required
   }
-  step s {
-    logic l { x: args.x }
-  }
+  s := logic l(x: args.x)
 }`
 	want, err := NormaliseAutomationSource(ctl)
 	if err != nil {
@@ -179,12 +177,10 @@ func TestAutomationSource_NonASCIIWhitespaceAtAStepBodyEdge(t *testing.T) {
 		{"U+3000 ideographic space", "　"},
 	} {
 		t.Run(sp.name, func(t *testing.T) {
-			ctl := `@trigger(event="e", concept="v1:a:b", partition="*")
+			ctl := `@trigger(event="e", concept="v1:a:b")
 automation a {
-  step s {
-    forEach item in args.x {
-      logic l { x: item }
-    }
+  for item in args.x {
+    logic l(x: item)
   }
 }`
 			want, err := NormaliseAutomationSource(ctl)

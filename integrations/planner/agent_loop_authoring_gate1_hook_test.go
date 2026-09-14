@@ -44,9 +44,9 @@ func requireAutomationsActuallyCompiled(t *testing.T, report memql.SandboxReport
 func TestGate1AutomationHookRegistered(t *testing.T) {
 	report := memql.SandboxCompileBundle([]memql.SandboxConstruct{
 		{Kind: "automation", Name: "hookProbe",
-			Source: "@description(\"hook probe\")\nautomation hookProbe {\n  step run {\n    logic hookProbeBody { }\n  }\n}"},
+			Source: "@description(\"hook probe\")\nautomation hookProbe {\n  run := logic hookProbeBody()\n}"},
 		{Kind: "logic", Name: "hookProbeBody",
-			Source: "logic hookProbeBody {\n  body { return now }\n}"},
+			Source: "logic hookProbeBody {\n  return now\n}"},
 	})
 	requireAutomationsActuallyCompiled(t, report)
 	if !report.OK {

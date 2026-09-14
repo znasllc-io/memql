@@ -28,11 +28,9 @@ func TestLogicCallingMutationIsFlagged(t *testing.T) {
 use cluster.queries.{ existingCluster }
 logic registerBad {
   args { event object @required }
-  body {
-    existing := query existingCluster()
-    node := mutation createNode(id: args.event.payload.id)
-    return node
-  }
+  existing := query existingCluster()
+  node := mutation createNode(id: args.event.payload.id)
+  return node
 }`
 	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
 	if !has(fs, "logic-purity") {
@@ -78,7 +76,7 @@ mutate node createNodeBad {
 func TestTriggeredLogicIsFlagged(t *testing.T) {
 	src := `@trigger(event="system.startup")
 logic onStartupBad {
-  body { return true }
+  return true
 }`
 	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
 	if !has(fs, "trigger-monopoly") {
@@ -112,11 +110,9 @@ func TestCompliantLogicIsClean(t *testing.T) {
 use common.builtins.{ serviceVersion }
 logic decide {
   args { event object @required }
-  body {
-    existing := query existingCluster()
-    v := builtin serviceVersion()
-    return existing.first() ?? v
-  }
+  existing := query existingCluster()
+  v := builtin serviceVersion()
+  return existing.first() ?? v
 }`
 	if fs := CheckFile("dsl/cluster/logic.memql", src, nil); len(fs) != 0 {
 		t.Fatalf("compliant logic must be clean; got %v", rules(fs))
@@ -130,8 +126,11 @@ func TestAutomationIsUnrestricted(t *testing.T) {
 use cluster.logic.{ decide }
 @trigger(event="deploy.requested", concept="v1:cluster:deployment")
 automation deploy {
-  step decide { logic decide { event: event } }
-  step record { mutation createDeployment { deploymentId: event.payload.id } }
+  args {
+    id any
+  }
+  decide := logic decide(event: event)
+  record := mutation createDeployment(deploymentId: args.id)
 }`
 	if fs := CheckFile("dsl/cluster/automations.memql", src, nil); len(fs) != 0 {
 		t.Fatalf("automations are unrestricted; got %v", rules(fs))
@@ -142,10 +141,10 @@ automation deploy {
 func TestSplitsMultipleConstructs(t *testing.T) {
 	src := `use cluster.mutations.{ createNode }
 logic clean {
-  body { return 1 }
+  return 1
 }
 logic dirty {
-  body { return mutation createNode(id: "x") }
+  return mutation createNode(id: "x")
 }`
 	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
 	if len(fs) != 1 || fs[0].Construct != "dirty" {

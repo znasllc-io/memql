@@ -16,6 +16,9 @@ import (
 // names must be refused, the latter with the pointed message.
 func TestAutomationAnnotationGate(t *testing.T) {
 	body := func(preamble string) string {
+		// The retired body form until the parser refuses it: the accepted
+		// list still holds @schedule, which a statement body refuses (D15).
+		// memqlmigrate:keep
 		return preamble + "automation probe {\n  step run {\n    logic doThing { event: event }\n  }\n}\n"
 	}
 	accept := []string{

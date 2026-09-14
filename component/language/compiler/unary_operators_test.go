@@ -58,15 +58,11 @@ query test testMissing {
 	t.Run("!= nil in an automation condition", func(t *testing.T) {
 		result, err := CompileSource(`
 @enabled
-@schedule(cron="0 */15 * * * *")
+@trigger(schedule="0 */15 * * * *")
 automation testAutomation {
-  step flagged {
-    query openFlags()
-  }
-  step escalate {
-    if flagged.first().slaDeadline != nil {
-      logic escalateFlag(flag: flagged.first())
-    }
+  flagged := query openFlags()
+  if flagged.first().slaDeadline != nil {
+    escalate := logic escalateFlag(flag: flagged.first())
   }
 }`)
 		if err != nil {
