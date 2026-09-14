@@ -925,6 +925,14 @@ func (p *Parser) parseV1List() (v1Expr, error) {
 // expression); a key written twice is refused, because a map collapses it
 // last-wins and the first value would vanish with no signal.
 func (p *Parser) parseV1Map() (v1Expr, error) {
+	return p.parseV1MapWith(false)
+}
+
+// parseV1MapWith is parseV1Map, admitting with allowPuns a bare name as the
+// entry `name: name` -- only where a map is a construct call's argument list
+// in other clothing (a step config's args, parseV1ArgsMap). A map literal an
+// author writes as a value never puns.
+func (p *Parser) parseV1MapWith(allowPuns bool) (v1Expr, error) {
 	open := p.v1Take()
 	var entries []ast.MapEntry
 	seen := map[string]bool{}
@@ -949,6 +957,13 @@ func (p *Parser) parseV1Map() (v1Expr, error) {
 		seen[key] = true
 		p.v1Take()
 		if !p.check(TokenColon) {
+			if allowPuns && keyTok.Type == TokenIdentifier && !strings.Contains(key, "-") && (p.check(TokenComma) || p.check(TokenBraceClose)) {
+				entries = append(entries, ast.MapEntry{Key: key, Value: &ast.IdentExpr{Name: key, Span: v1TokenSpan(keyTok)}})
+				if p.check(TokenComma) {
+					p.v1Take()
+				}
+				continue
+			}
 			if p.check(TokenComma) || p.check(TokenBraceClose) {
 				return v1Expr{}, v1Errorf(keyTok, "a map entry is written key: value (write %s: %s)", key, key)
 			}

@@ -12,60 +12,70 @@ import (
 
 // v1RetiredSamples is one input per retired form, plus extra positions for the
 // forms that can appear in more than one place. TestV1EveryRetiredFormHasASample
-// holds the table and this list together.
+// holds the table and this list together. A FILE sample is a whole authored
+// construct, parsed the way the engine parses one (the struct-form rewriter,
+// then the parser) with Options.ExpressionsV1 on: the predicate positions'
+// legacy forms are refused only there.
 var v1RetiredSamples = []struct {
 	rule string
 	src  string
+	file bool
 }{
-	{"retired_when_guard", `row.a == 1 && when(args.x) { row.f == args.x }`},
-	{"retired_when_guard", `p ? when(args.x) { a } : b`},
-	{"retired_conditional_prefix", `?.status == args.status`},
-	{"retired_conditional_prefix", `row.a == 1 && ?.b == args.b`},
-	{"retired_semicolon_connective", `row.a == 1; row.b == 2`},
-	{"retired_semicolon_connective", `f(a; b)`},
-	{"retired_semicolon_connective", `(a == 1; b == 2)`},
-	{"retired_comma_connective", `row.a == 1, row.b == 2`},
-	{"retired_comma_connective", `(a == 1, b == 2)`},
-	{"retired_comma_connective", `x => x.a, x.b`},
-	{"retired_has", `row.tags has "x"`},
-	{"retired_has", `has x`},
-	{"retired_has", `xs.any(x => x has 1)`},
-	{"retired_not_in", `row.status not in ["a", "b"]`},
-	{"retired_and_call", `and(a, b)`},
-	{"retired_or_call", `or(a, b)`},
-	{"retired_not_call", `not(a)`},
-	{"retired_not_call", `not a`},
-	{"retired_lt_call", `lt(a, b)`},
-	{"retired_gt_call", `gt(a, b)`},
-	{"retired_lte_call", `lte(a, b)`},
-	{"retired_gte_call", `gte(a, b)`},
-	{"retired_cond_call", `cond(p, a, b)`},
-	{"retired_cond_call", `[cond(a == 1, "x", "y")]`},
-	{"retired_concat_call", `concat(a, b)`},
-	{"retired_concat_call", `CONCAT(a, b)`},
-	{"retired_coalesce_call", `coalesce(a, b)`},
-	{"retired_coalesce_call", `Coalesce(a, b)`},
-	{"retired_exists_call", `exists(x)`},
-	{"retired_len_call", `len(x)`},
-	{"retired_len_call", `{a: len(x)}`},
-	{"retired_count_call", `count(x)`},
-	{"retired_contains_call", `contains(s, "sub")`},
-	{"retired_mean_call", `mean(xs)`},
-	{"retired_mean_call", `row.a > mean(args.scores)`},
-	{"retired_first_call", `first(xs)`},
-	{"retired_last_call", `last(xs)`},
-	{"retired_timestamp_call", `timestamp()`},
-	{"retired_now_call", `now()`},
-	{"retired_null", `row.a == null`},
-	{"retired_null", `null`},
-	{"retired_null", `null.x`},
-	{"retired_dollar_args", `$args.x == 1`},
-	{"retired_dollar_args", `row.a == $args.x`},
-	{"retired_spec_reference", `spec isActive`},
-	{"retired_spec_reference", `row.a == 1 && spec isActive`},
-	{"retired_trait_reference", `trait isActiveRecord`},
-	{"retired_contains_method", `row.tags.contains("x")`},
-	{"retired_contains_method", `f(x).contains(y)`},
+	{"retired_when_guard", `row.a == 1 && when(args.x) { row.f == args.x }`, false},
+	{"retired_when_guard", `p ? when(args.x) { a } : b`, false},
+	{"retired_conditional_prefix", `?.status == args.status`, false},
+	{"retired_conditional_prefix", `row.a == 1 && ?.b == args.b`, false},
+	{"retired_semicolon_connective", `row.a == 1; row.b == 2`, false},
+	{"retired_semicolon_connective", `f(a; b)`, false},
+	{"retired_semicolon_connective", `(a == 1; b == 2)`, false},
+	{"retired_comma_connective", `row.a == 1, row.b == 2`, false},
+	{"retired_comma_connective", `(a == 1, b == 2)`, false},
+	{"retired_comma_connective", `x => x.a, x.b`, false},
+	{"retired_has", `row.tags has "x"`, false},
+	{"retired_has", `has x`, false},
+	{"retired_has", `xs.any(x => x has 1)`, false},
+	{"retired_not_in", `row.status not in ["a", "b"]`, false},
+	{"retired_and_call", `and(a, b)`, false},
+	{"retired_or_call", `or(a, b)`, false},
+	{"retired_not_call", `not(a)`, false},
+	{"retired_not_call", `not a`, false},
+	{"retired_lt_call", `lt(a, b)`, false},
+	{"retired_gt_call", `gt(a, b)`, false},
+	{"retired_lte_call", `lte(a, b)`, false},
+	{"retired_gte_call", `gte(a, b)`, false},
+	{"retired_cond_call", `cond(p, a, b)`, false},
+	{"retired_cond_call", `[cond(a == 1, "x", "y")]`, false},
+	{"retired_concat_call", `concat(a, b)`, false},
+	{"retired_concat_call", `CONCAT(a, b)`, false},
+	{"retired_coalesce_call", `coalesce(a, b)`, false},
+	{"retired_coalesce_call", `Coalesce(a, b)`, false},
+	{"retired_exists_call", `exists(x)`, false},
+	{"retired_len_call", `len(x)`, false},
+	{"retired_len_call", `{a: len(x)}`, false},
+	{"retired_count_call", `count(x)`, false},
+	{"retired_contains_call", `contains(s, "sub")`, false},
+	{"retired_mean_call", `mean(xs)`, false},
+	{"retired_mean_call", `row.a > mean(args.scores)`, false},
+	{"retired_first_call", `first(xs)`, false},
+	{"retired_last_call", `last(xs)`, false},
+	{"retired_timestamp_call", `timestamp()`, false},
+	{"retired_now_call", `now()`, false},
+	{"retired_null", `row.a == null`, false},
+	{"retired_null", `null`, false},
+	{"retired_null", `null.x`, false},
+	{"retired_dollar_args", `$args.x == 1`, false},
+	{"retired_dollar_args", `row.a == $args.x`, false},
+	{"retired_spec_reference", `spec isActive`, false},
+	{"retired_spec_reference", `row.a == 1 && spec isActive`, false},
+	{"retired_trait_reference", `trait isActiveRecord`, false},
+	{"retired_contains_method", `row.tags.contains("x")`, false},
+	{"retired_contains_method", `f(x).contains(y)`, false},
+	{"retired_filter_without_lambda", "query thing probe {\n  filter a == 1\n}", true},
+	{"retired_filter_without_lambda", "query thing probe {\n  filter a == 1 && isX\n  paginate 5\n  shape probeCard\n}", true},
+	{"retired_spec_return_body", "spec thing isX {\n  return a == 1\n}", true},
+	{"retired_trait_return_body", "trait isX {\n  return a == 1\n}", true},
+	{"retired_filter_annotation", "@filter(payload.a == 1)\n@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  step s {\n    logic f(x: 1)\n  }\n}", true},
+	{"retired_filter_annotation", "@trigger(event=\"node.created\", concept=\"v1:probe:thing\", filter=\"payload.a == 1\")\nautomation probe {\n  step s {\n    logic f(x: 1)\n  }\n}", true},
 }
 
 // TestV1RetiredFormsRefuse: every retired spelling refuses with the pinned
@@ -82,9 +92,14 @@ func TestV1RetiredFormsRefuse(t *testing.T) {
 			if !ok {
 				t.Fatalf("no retired form has rule %q", c.rule)
 			}
-			_, err := ParseV1Expression(c.src)
+			var err error
+			if c.file {
+				_, err = parseV1Authored(t, c.src, v1On)
+			} else {
+				_, err = ParseV1Expression(c.src)
+			}
 			if err == nil {
-				t.Fatalf("ParseV1Expression(%q) accepted a retired form", c.src)
+				t.Fatalf("%q was accepted, a retired form", c.src)
 			}
 			var rf *RetiredFormError
 			if !errors.As(err, &rf) {

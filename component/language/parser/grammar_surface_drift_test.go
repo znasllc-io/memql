@@ -148,6 +148,33 @@ shape probe {
 concept probe {
   a string
 }`},
+	// Edition-2026 predicate positions (memql#5364): accepted beside the
+	// legacy spellings until Options.ExpressionsV1 flips.
+	{"struct query: v1 lambda filter", true, `query thing probe {
+  args {
+    id string @required
+  }
+  filter row => row.id == args.id && isX(row)
+}`},
+	{"struct query: refine over paginate", true, `query thing probe {
+  filter row => row.id != ""
+  paginate 25
+  refine row => row.title.includes("x")
+}`},
+	{"spec: = lambda form", true, `spec thing isProbe = row => row.a == 1`},
+	{"trait: = lambda form", true, `trait isProbe = row => row.active == true`},
+	{"automation: @filter lambda", true, `@filter(row => row.status == "x")
+@trigger(event="node.created", concept="v1:probe:thing")
+automation probe {
+  step run {
+    logic probe(x: 1)
+  }
+}`},
+	{"terse automation: inline @filter lambda", true, `automation probe @trigger(event="node.created", concept="v1:probe:thing") @filter(row => row.a != nil) => logic probe`},
+	{"struct query: refine without paginate", false, `query thing probe {
+  filter row => row.id != ""
+  refine row => row.title.includes("x")
+}`},
 
 	// ---- the narrowings memql#3089 records --------------------------------
 	// Each of these PARSED under some earlier grammar epoch and does not now.
