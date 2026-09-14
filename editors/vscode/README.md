@@ -822,7 +822,9 @@ the test suite (`test/clusterForm.test.ts`, `test/clusterStatus.test.ts`,
    material lives in an output channel.** Three channels: `MemQL Install`
    (capability stderr and run refusals), `MemQL Connection` (dial, sign-in and
    language-server failures -- every dial failure is recorded exactly once, at
-   the connection-state seam), `MemQL Training` (schema diffs and outcomes).
+   the connection-state seam -- and the connect-time comparison of the
+   cluster's MemQL grammar with this extension's), `MemQL Training` (schema
+   diffs and outcomes).
    A toast that has more to say offers "Show details", which reveals the
    channel. A hover can be neither scrolled nor copied, so it is never the
    only home of a diagnostic.

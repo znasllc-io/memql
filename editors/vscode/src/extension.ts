@@ -172,6 +172,14 @@ import {
 } from './state/deploymentHistory.js';
 import { resolveInstallRoot } from './install/root.js';
 import { readBuildStamp } from './version/buildStamp.js';
+import {
+  MEMQL_EXTENSION_ID,
+  OPEN_IN_EXTENSIONS,
+  extensionLanguageFacts,
+  watchLanguageSkew,
+  type LanguageFacts,
+  type LanguageSkewNotice,
+} from './version/editionSkew.js';
 import { ClusterVersionRefresher } from './version/learners.js';
 import { createVersionCollector } from './version/collectors.js';
 import { releaseCache } from './version/releaseCache.js';
@@ -307,7 +315,7 @@ function noteDiagnostic(output: OutputChannel | undefined, headline: string, det
  * caller's action when one was clicked; reveal is handled here.
  */
 async function offerDetails(
-  severity: 'error' | 'warning',
+  severity: 'error' | 'warning' | 'information',
   output: OutputChannel | undefined,
   headline: string,
   ...actions: string[]
@@ -315,12 +323,55 @@ async function offerDetails(
   const details = 'Show details';
   const choice = await (severity === 'error'
     ? window.showErrorMessage(headline, ...actions, details)
-    : window.showWarningMessage(headline, ...actions, details));
+    : severity === 'warning'
+      ? window.showWarningMessage(headline, ...actions, details)
+      : window.showInformationMessage(headline, ...actions, details));
   if (choice === details) {
     output?.show(true);
     return undefined;
   }
   return choice;
+}
+
+/**
+ * Shows the connect-time language notice (memql#5362, D25): the adapter half
+ * of src/version/editionSkew.ts, which decides whether there is one, what it
+ * says, how loud it is and which action it offers.
+ *
+ * The details go to the MemQL Connection channel first, as every other
+ * connect-time record does, and the toast's "Show details" reveals them. The
+ * one action beyond that -- "Open in Extensions", on a cluster newer than this
+ * extension -- opens this extension's own page, where the update is.
+ */
+function presentLanguageSkew(notice: LanguageSkewNotice, clusterName: string): void {
+  noteDiagnostic(
+    connectionOutput,
+    `MemQL language on "${clusterName}": ${notice.headline}`,
+    notice.details.join('\n')
+  );
+  void (async () => {
+    const choice = await offerDetails(notice.severity, connectionOutput, notice.headline, ...notice.actions);
+    if (choice === OPEN_IN_EXTENSIONS) {
+      await commands.executeCommand('extension.open', MEMQL_EXTENSION_ID);
+    }
+  })();
+}
+
+/**
+ * Wires the connect-time language comparison onto a connection manager and
+ * returns the function that stops it. registerRuntimeSurface calls it once,
+ * on the manager activation builds, so the memory it carries is this
+ * session's: each cluster is told about each grammar once.
+ *
+ * Exported for test/languageSkewWiring.test.ts, which drives it with a real
+ * ConnectionManager over a fake dial: activation's own manager dials a real
+ * cluster, which no unit test can reach.
+ */
+export function wireLanguageSkewNotice(
+  manager: ConnectionManager,
+  readExtension: () => LanguageFacts
+): () => void {
+  return watchLanguageSkew(manager, readExtension, presentLanguageSkew);
 }
 
 /** The action an enrolment failure toast carries when the link survives it. */
@@ -1292,6 +1343,18 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         state.message
       );
     }
+  });
+
+  // The connect-time language comparison (memql#5362, D25): on every
+  // "connected", the cluster's edition and grammar against the ones this
+  // extension was built from, read from its own package.json. A listener on
+  // the manager covers every connect path at once. `context.extension` is
+  // guarded because the fake contexts the activation tests build have none,
+  // and a build with no pin compares as unknown, which shows nothing.
+  context.subscriptions.push({
+    dispose: wireLanguageSkewNotice(connections, () =>
+      extensionLanguageFacts(context.extension?.packageJSON)
+    ),
   });
 
   // The version machinery (epic memql#3989). Constructed here, driven by the
