@@ -36,8 +36,8 @@ The PR body must name both. A reader who knows D17 will look for each.
 | | |
 |---|---|
 | Branch | `epic/dsl-v1-attributes` |
-| HEAD | `a5ddeb07f` — "fix(campaigns): restore the XSS fixture's expected-escaped string" |
-| Commits ahead of `origin/main` | 28 |
+| HEAD | run `git log --oneline -1` — this line rots, the command does not |
+| Commits ahead of `origin/main` | `git rev-list --count origin/main..HEAD` (was 30 when this was written) |
 | Uncommitted changes | **none** (working tree clean) |
 | Pushed | **NO.** The branch exists only locally. `git ls-remote --heads origin epic/dsl-v1-attributes` returns nothing. |
 | PR | **none opened** |
