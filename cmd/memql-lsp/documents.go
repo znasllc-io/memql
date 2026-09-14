@@ -3,8 +3,8 @@ package main
 import (
 	"sync"
 
-	"github.com/znasllc-io/memql/cmd/memql-lsp/internal/position"
 	protocol "github.com/tliron/glsp/protocol_3_16"
+	"github.com/znasllc-io/memql/cmd/memql-lsp/internal/position"
 )
 
 // documentStore holds the authoritative full text of every open document,
@@ -40,6 +40,17 @@ func (s *documentStore) get(uri protocol.DocumentUri) (string, bool) {
 	defer s.mu.RUnlock()
 	text, ok := s.docs[uri]
 	return text, ok
+}
+
+// snapshot returns a copy of every open document's text, by URI.
+func (s *documentStore) snapshot() map[protocol.DocumentUri]string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[protocol.DocumentUri]string, len(s.docs))
+	for uri, text := range s.docs {
+		out[uri] = text
+	}
+	return out
 }
 
 // uris returns the URIs of every open document.

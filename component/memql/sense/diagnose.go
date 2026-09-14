@@ -163,8 +163,20 @@ func rewriteErrorDiagnostic(err error, source string) Diagnostic {
 		},
 		Severity: SeverityError,
 		Message:  msg,
-		Code:     "rewrite-error",
+		Code:     errorCode(err, "rewrite-error"),
 	}
+}
+
+// errorCode is the diagnostic code for a lowering or parse failure: the rule
+// id of a retired edition-2026 form (parser.RetiredFormError), so an editor
+// can key a quick fix on it and a person sees which rule fired, or fallback
+// for every other failure.
+func errorCode(err error, fallback string) string {
+	var retired *parser.RetiredFormError
+	if errors.As(err, &retired) && retired.Form.Rule != "" {
+		return retired.Form.Rule
+	}
+	return fallback
 }
 
 // findConstructHeader returns the position of `name` where it appears as a
@@ -239,7 +251,7 @@ func parserDiagnostics(err error) []Diagnostic {
 		},
 		Severity: SeverityError,
 		Message:  msg,
-		Code:     "parse-error",
+		Code:     errorCode(err, "parse-error"),
 	}}
 }
 
