@@ -389,7 +389,7 @@ func (l *lowerer) undeclaredFieldRefusal(e *ast.MemberExpr, segs []memberSeg) er
 		}
 		fix = "Did you mean `" + ast.FormatExpr(rebuilt) + "`?"
 	}
-	return l.refuse(e, fmt.Sprintf("`%s` is not a declared field of %s", path, concept), fix)
+	return l.refuseAs(LowerCodeUnknownField, e, fmt.Sprintf("`%s` is not a declared field of %s", path, concept), fix)
 }
 
 // optionalHopRefusal refuses `row.a.b` where `a` is an optional object field:
@@ -405,7 +405,7 @@ func (l *lowerer) optionalHopRefusal(e *ast.MemberExpr, segs []memberSeg, idx in
 	for i := 0; i <= idx; i++ {
 		names[i] = segs[i].name
 	}
-	return l.refuse(e, "`"+l.rowParam()+"."+strings.Join(names, ".")+"` is an optional object, so it may be absent",
+	return l.refuseAs(LowerCodeOptionalHop, e, "`"+l.rowParam()+"."+strings.Join(names, ".")+"` is an optional object, so it may be absent",
 		"Read through it with `.?`: `"+ast.FormatExpr(rebuilt)+"`")
 }
 

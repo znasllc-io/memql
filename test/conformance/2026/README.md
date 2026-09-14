@@ -62,7 +62,7 @@ constructs carry the annotation's name for that reason (`openTicketsCache`,
 |---|---|
 | `file` | The case file, in this directory. |
 | `verdict` | One of the five below. |
-| `code` | The stable rule id a refusal carries, when it carries one. A refusal that carries one must have it named here: the id is the part of the contract a reworded message keeps. |
+| `code` | The stable rule id a refusal carries, when it carries one -- a retired form's rule and an annotation's `annotation_*` at parse, an annotation's and the lowering's `lower_*` at load, printed last in brackets. A refusal that carries one must have it named here, at parse and at load alike: the id is the part of the contract a reworded message keeps. |
 | `message` | Text the refusal must contain. Required for a refusal: the wording is part of the contract. |
 | `concept` | For `lower` and `evaluate`: the concept, by bare name, the expression is over. The fixture declares it. |
 | `position` | For `lower` and `evaluate`: the expression position. Under `expr/<position>/` it defaults to the directory. |

@@ -36,6 +36,7 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/component/memql/baseloader"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
@@ -140,6 +141,10 @@ type SandboxDiagnostic struct {
 	Column    int `json:"column,omitempty"`
 	EndLine   int `json:"endLine,omitempty"`
 	EndColumn int `json:"endColumn,omitempty"`
+	// Code is the failure's stable rule id when it carries one -- a lowering
+	// refusal's `lower_*` (D24) -- and empty otherwise. Error carries it too,
+	// in brackets at the end; this is the field a client keys on.
+	Code string `json:"code,omitempty"`
 }
 
 // SandboxReport is the bundle-level Gate 1 result.
@@ -597,6 +602,9 @@ func attachPos(d SandboxDiagnostic, c SandboxConstruct, err error) SandboxDiagno
 		pos = constructAnchor(c)
 	}
 	d.Line, d.Column, d.EndLine, d.EndColumn = pos.Line, pos.Column, pos.EndLine, pos.EndColumn
+	if code := baseloader.RuleCode(err); code != "" {
+		d.Code = code
+	}
 	return d
 }
 

@@ -49,6 +49,11 @@ func (r *Refusal) Error() string {
 	return r.Message + " [" + r.Code + "]"
 }
 
+// RuleCode is the refusal's stable rule id. A load report reads a refusal's
+// code through this method (baseloader.CodedRefusal), without importing this
+// package.
+func (r *Refusal) RuleCode() string { return r.Code }
+
 // Check decides one written annotation on one receiver. It returns nil when
 // the receiver accepts the annotation in the form it was written, and the
 // refusal otherwise.

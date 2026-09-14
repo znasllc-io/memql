@@ -150,7 +150,7 @@ func LoadOne[T any](
 					logger.Warn(component+": parse failed",
 						"file", raw.Path, keyword, slice.Name, "error", err)
 				}
-				sink.Add(Skip{Component: component, Keyword: keyword, Name: slice.Name, File: raw.Path, Phase: "parse", Err: err.Error()})
+				sink.Add(SkipFor(component, keyword, slice.Name, raw.Path, "parse", err))
 				continue
 			}
 			// A nil item with a nil error is an intentional skip -- e.g. a
@@ -166,7 +166,7 @@ func LoadOne[T any](
 					logger.Warn(component+": register failed",
 						"file", raw.Path, keyword, slice.Name, "error", err)
 				}
-				sink.Add(Skip{Component: component, Keyword: keyword, Name: slice.Name, File: raw.Path, Phase: "register", Err: err.Error()})
+				sink.Add(SkipFor(component, keyword, slice.Name, raw.Path, "register", err))
 				continue
 			}
 			total++
@@ -213,7 +213,7 @@ func LoadMany[T any](
 					logger.Warn(component+": parse failed",
 						"file", raw.Path, keyword, slice.Name, "error", err)
 				}
-				sink.Add(Skip{Component: component, Keyword: keyword, Name: slice.Name, File: raw.Path, Phase: "parse", Err: err.Error()})
+				sink.Add(SkipFor(component, keyword, slice.Name, raw.Path, "parse", err))
 				continue
 			}
 			for _, item := range items {
@@ -222,7 +222,7 @@ func LoadMany[T any](
 						logger.Warn(component+": register failed",
 							"file", raw.Path, keyword, slice.Name, "error", err)
 					}
-					sink.Add(Skip{Component: component, Keyword: keyword, Name: slice.Name, File: raw.Path, Phase: "register", Err: err.Error()})
+					sink.Add(SkipFor(component, keyword, slice.Name, raw.Path, "register", err))
 					continue
 				}
 				total++

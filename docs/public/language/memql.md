@@ -683,9 +683,23 @@ filter  row => row.bucket == args.bucket
 ```
 
 A subexpression that reads the row has to push down itself. The load refuses
-one that cannot, and names the node, the position and the nearest pushdown
-spelling: `lower(row.email) == args.email` is refused in a filter, and
-`row.email == lower(args.email)` is the filter that runs.
+one that cannot, and names the node, the position, the nearest pushdown
+spelling and the rule's id: `lower(row.email) == args.email` is refused in a
+filter, and `row.email == lower(args.email)` is the filter that runs. The id is
+printed last, in brackets, and carried as a field on the load report and on an
+authoring diagnostic; the message may be reworded, the id may not:
+
+| Rule id | Refused |
+|---|---|
+| `lower_refused` | A node with no form at its position: an in-process function or arithmetic over the row, a construct call in a predicate, a node kind the position does not admit |
+| `lower_unknown_name` | A name the position does not bind: a bare payload field (`status` for `row.status`), an undeclared argument, a predicate nothing registers |
+| `lower_unknown_field` | A field the bound concept, shape or actor envelope does not declare |
+| `lower_optional_hop` | A read through an optional object written with `.` instead of `.?` |
+| `lower_context_spec_on_row` | A context spec applied to the row |
+| `lower_row_predicate_on_actor` | A row spec or trait applied to the actor |
+| `lower_not_boolean` | A condition whose type is known and is not boolean |
+| `lower_cost_over_budget` | An in-process expression whose static cost estimate is over the bound below |
+| `lower_actor_in_row_predicate` | A spec or trait over rows reading the `actor` root ([Specs](#specs)) |
 
 An in-process expression is bounded twice. At load, a static estimate of how
 many nodes it can evaluate is refused above 1,000,000; the estimate counts a
@@ -1482,6 +1496,8 @@ Specs are atomic boolean predicates, declared in `dsl/<namespace>/specs.memql`. 
 - **Context-specs** bind an `@actor` shape, the only gateway to the auth envelope. The parameter is spelled `actor` and is the envelope (`actor.role`); the body evaluates in process against the caller, and a query applies it to the actor: `requiresOwner(actor)`.
 
 A spec reads only what its binding provides, through its parameter: the bound concept's fields and intrinsics, or the keys the bound shape projects. The `@shape("name")` annotation is **removed**; the binding moved to the signature.
+
+A spec or trait over rows does not read the `actor` root. It is the same predicate for every caller -- applied in any query, cached, composed -- and the ownership test is what row-authz looks for in a query's own filter, where a spec would hide it. `spec note isCallersNote = row => row.ownerUserId == actor.userId` is refused at load (`lower_actor_in_row_predicate`): compare in the query filter (`row.ownerUserId == actor.userId`), or ask the actor question with a context-spec over an `@actor` shape.
 
 ```memql fragment
 use library.concepts.{ artifact }

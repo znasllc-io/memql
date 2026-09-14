@@ -60,7 +60,7 @@ func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conce
 						"kind", slice.Kind,
 						"error", parseErr)
 				}
-				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedFunctionLoader", Keyword: string(slice.Kind), Name: slice.Name, File: raw.Path, Phase: "parse", Err: parseErr.Error()})
+				rep.AddSkip(baseloader.SkipFor("memql.unifiedFunctionLoader", string(slice.Kind), slice.Name, raw.Path, "parse", parseErr))
 				continue
 			}
 			if fn == nil {
@@ -95,7 +95,7 @@ func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conce
 						"function", slice.Name,
 						"error", upsertErr)
 				}
-				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedFunctionLoader", Keyword: string(slice.Kind), Name: slice.Name, File: raw.Path, Phase: "register", Err: upsertErr.Error()})
+				rep.AddSkip(baseloader.SkipFor("memql.unifiedFunctionLoader", string(slice.Kind), slice.Name, raw.Path, "register", upsertErr))
 				continue
 			}
 
