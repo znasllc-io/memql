@@ -7,6 +7,9 @@ import (
 
 	"github.com/tliron/commonlog"
 	protocol "github.com/tliron/glsp/protocol_3_16"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // TestCompletion_ConceptImportIsAnAdditionalEdit: at the concept slot, the
@@ -18,6 +21,12 @@ import (
 func TestCompletion_ConceptImportIsAnAdditionalEdit(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "gadgets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The domain declares its language line, as a real bundle domain must
+	// (memql#5357); without it the engine refuses the domain's concepts.
+	line := dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}
+	if err := os.WriteFile(filepath.Join(dir, "gadgets", dslfs.ManifestFile), []byte(line.Render()), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "gadgets", "concepts.memql"), []byte(`@version("1.0.0")
