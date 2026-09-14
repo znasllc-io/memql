@@ -1988,7 +1988,7 @@ types and annotations (`@required`, `@default`, `@enum`, `@description`).
 ```memql
 @enabled
 @description("Search for users")
-@handler(type="query", query="concept==v1:memql:backend:user")
+@handler(type="query", query="paginate(query searchUsers(active: args.active), args.limit)")
 @executionTime("fast")
 tool searchUsers {
   active  boolean  @description("Filter by active status")
@@ -2002,7 +2002,11 @@ tool searchUsers {
   `method`) and `type` is required. `@rateLimit` is closed the same way, and a
   non-integer value is refused.
 - **The handler is validated at load** -- unknown type, missing function name /
-  query / URL -- and a tool must carry a handler at all. There is no
+  query / URL -- and a tool must carry a handler at all. A query handler is
+  parsed there: ONE construct call, or that call inside `paginate(...)`, whose
+  arguments read `args.<name>`; a raw filter or the retired `$args.`
+  placeholder refuses the load. A webhook's url is one expression, a fixed
+  address quoted. There is no
   exception: `@clientExecution` put a tool's body in the connected browser and
   reached it over the client-tool relay, and both went with the conversational
   product (epic memql#4988). The annotation is now REFUSED at parse, so an
