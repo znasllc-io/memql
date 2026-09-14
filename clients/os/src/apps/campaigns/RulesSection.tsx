@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { Plus, Zap } from "lucide-react";
 
@@ -36,14 +36,17 @@ import {
 import {
   RECIPIENT_MODES,
   conceptEntity,
+  conditionRowIs,
   emailRuleFromRow,
   recipientModeLabel,
   ruleFingerprint,
   ruleName,
   pauseReading,
   ruleSentence,
+  ruleSentenceParts,
   type EmailRuleRow,
   type RecipientMode,
+  type SentencePart,
 } from "./rows";
 import { useAuthoredAutomations, useTriggerConcepts, type CampaignFeeds } from "./useCampaigns";
 
@@ -53,8 +56,8 @@ import { useAuthoredAutomations, useTriggerConcepts, type CampaignFeeds } from "
 // THE BUILDER IS A SENTENCE, AND THE LANE IS NEVER A TOGGLE
 // ===========================================================================
 // A rule has six fields and every one of them is a clause in one English
-// sentence: when a [thing] is [created or changed] -- optionally [only when
-// ...] -- email [template] to [who]. Laying that out as six labelled form
+// sentence: when a [thing] is [created or changed], email [template] to [who]
+// -- optionally, but only when [...]. Laying that out as six labelled form
 // fields would make somebody assemble the meaning themselves, every time, from
 // parts that only mean anything together.
 //
@@ -255,10 +258,10 @@ function RuleLine({
   open: boolean;
   onToggle: () => void;
 }) {
-  const sentence = ruleSentence(rule, {
+  const names = {
     template: nameOfTemplate(templates, rule.templateId),
     audience: nameOfAudience(audiences, rule.audienceId),
-  });
+  };
   return (
     <ListRow
       icon={<Zap size={16} aria-hidden />}
@@ -276,12 +279,32 @@ function RuleLine({
     >
       {/* THE LIST READS THE WAY THE BUILDER DOES. Somebody who built a rule by
           filling in a sentence should recognise it here without translating. */}
-      <span className="os-caption os-campaign-rule-sentence">{sentence}</span>
+      <span className="os-caption os-campaign-rule-sentence" title={ruleSentence(rule, names)}>
+        <SentenceText parts={ruleSentenceParts(rule, names)} />
+      </span>
       {/* LIVENESS IS DISPLAYED, NEVER RUNG. */}
       {rule.firedCount === 0 ? null : (
         <span className="os-caption os-mono">{rule.firedCount}x</span>
       )}
     </ListRow>
+  );
+}
+
+/** A rule's sentence, with what the person typed set in the code face -- the
+ *  way a raw value sits inside prose everywhere else in the OS. */
+function SentenceText({ parts }: { parts: SentencePart[] }) {
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.code ? (
+          <code key={i} className="os-mono">
+            {part.text}
+          </code>
+        ) : (
+          <Fragment key={i}>{part.text}</Fragment>
+        ),
+      )}
+    </>
   );
 }
 
@@ -317,10 +340,12 @@ function RuleDetail({
         </div>
 
         <p className="os-campaign-rule-headline">
-          {ruleSentence(rule, {
-            template: nameOfTemplate(templates, rule.templateId),
-            audience: nameOfAudience(audiences, rule.audienceId),
-          })}
+          <SentenceText
+            parts={ruleSentenceParts(rule, {
+              template: nameOfTemplate(templates, rule.templateId),
+              audience: nameOfAudience(audiences, rule.audienceId),
+            })}
+          />
         </p>
 
         {rule.description === "" ? null : <Caption>{rule.description}</Caption>}
@@ -556,6 +581,12 @@ const EVENT_KINDS = [
   { value: "updated", label: "changes" },
 ];
 
+// The condition field's two examples, and they differ on purpose. The
+// placeholder is the smallest condition there is; the caption's shows the two
+// things nobody can guess -- how a list is written and how two tests join.
+const CONDITION_PLACEHOLDER = 'row.role == "admin"';
+const CONDITION_EXAMPLE = 'row.status in ["active", "trial"] && row.plan != "free"';
+
 /**
  * Build a rule by finishing a sentence.
  *
@@ -759,16 +790,36 @@ function RuleBuilder({
 
       <details className="os-campaign-more">
         <summary>Only sometimes, and other details</summary>
-        <div className="os-campaign-form">
+        {/* THE ONE PLACE IN THE OS WHERE A PERSON WRITES AN EXPRESSION, so the
+            field carries its whole reference directly beneath it: what `row`
+            is, one example, the operators, and when a mistake is caught. It
+            stands on its own full-width line rather than in the grid below,
+            because a real condition is longer than half a form, and help that
+            sits three fields away is help nobody connects to the field. */}
+        <div className="os-campaign-condition">
           <Field label="Only when">
             <Input
               id="os-rule-condition"
               label="Condition that must hold for the rule to fire"
               value={draft.condition}
               onChange={(v) => setDraft({ ...draft, condition: v })}
-              placeholder={'role=="admin"'}
+              placeholder={CONDITION_PLACEHOLDER}
+              code
             />
           </Field>
+          <Caption>
+            Leave the condition empty and the rule fires every time.{" "}
+            <code className="os-mono">row</code> is {conditionRowIs(draft)}. For example,{" "}
+            <code className="os-mono">{CONDITION_EXAMPLE}</code> means the status is active or trial
+            and the plan is not free. Use <code className="os-mono">{"=="}</code> (is),{" "}
+            <code className="os-mono">{"!="}</code> (is not), <code className="os-mono">in</code> (is
+            one of), <code className="os-mono">{"&&"}</code> (and),{" "}
+            <code className="os-mono">{"||"}</code> (or) and <code className="os-mono">{"!"}</code>{" "}
+            (not). A condition with a mistake in it is refused when you turn the rule on, not later
+            when it fires.
+          </Caption>
+        </div>
+        <div className="os-campaign-form">
           <Field label="Sends as">
             <Select
               id="os-rule-sender"
@@ -804,11 +855,6 @@ function RuleBuilder({
             />
           </Field>
         </div>
-        <Caption>
-          Leave the condition empty and the rule fires every time. When it is set, it must hold for
-          the mail to go out -- it is checked before anything is sent, and a condition that will not
-          compile is refused when the rule is turned on rather than at 3am.
-        </Caption>
         {draft.recipientMode === "cluster_roles" ? (
           <Caption>
             The mailbox is not used for this rule: internal mail leaves through the cluster&apos;s own

@@ -1931,6 +1931,12 @@ button:not(:disabled):active {
   outline: 2px solid var(--os-accent);
   outline-offset: 1px;
 }
+/* An input holding code (kit `Input` with `code`, `CopyField` with `mono`).
+ * A compound selector, because `.os-input`'s `font: inherit` comes later in
+ * this file than `.os-mono` and on its own would put the prose face back. */
+.os-input.os-mono {
+  font-family: var(--os-font-mono);
+}
 .os-select-label {
   display: inline-flex;
 }
@@ -6990,6 +6996,19 @@ a.os-button {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* The rule's condition: a full-width field with its reference right under it
+ * (see RuleBuilder). The caption keeps a reading measure while the field
+ * takes the width a real condition needs. */
+.os-campaign-condition {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+.os-campaign-condition > .os-caption {
+  max-width: 72ch;
 }
 
 .os-campaign-more {
