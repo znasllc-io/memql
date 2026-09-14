@@ -26,9 +26,7 @@ func declToSpec(t *testing.T, src string) (*Spec, error) {
 // engine-bootstrap binding resolver, so Kind is empty at conversion time.
 func TestSpecRole_AllowsContextSpec(t *testing.T) {
 	spec, err := declToSpec(t, `@description("owner only")
-spec actorEnvelope requiresOwner {
-  return role == "owner"
-}`)
+spec actorEnvelope requiresOwner = actor => actor.role == "owner"`)
 	if err != nil {
 		t.Fatalf("context-spec should be a valid spec, got: %v", err)
 	}
@@ -44,9 +42,7 @@ spec actorEnvelope requiresOwner {
 // predicate over bare payload fields) converts cleanly as a trait.
 func TestSpecRole_AllowsTrait(t *testing.T) {
 	spec, err := declToSpec(t, `@description("kind is assistant")
-trait agentKindAssistant {
-  return kind == "assistant"
-}`)
+trait agentKindAssistant = row => row.kind == "assistant"`)
 	if err != nil {
 		t.Fatalf("row predicate should be a valid trait, got: %v", err)
 	}

@@ -131,8 +131,8 @@ func TestNegativeLoad_ConstructNestedAtWrongDepth(t *testing.T) {
 // closure and asserts (a) only one construct registers and (b) the drop is
 // surfaced as a WARN the load-clean gate (skipLike) catches.
 func TestNegativeLoad_DuplicateNamesWarnSkip(t *testing.T) {
-	const dup = "@enabled\nspec activeRowTrait sA {\n  return active == true\n}\n" +
-		"@enabled\nspec activeRowTrait sA {\n  return active == false\n}\n"
+	const dup = "@enabled\nspec activeRowTrait sA = row => row.active == true\n" +
+		"@enabled\nspec activeRowTrait sA = row => row.active == false\n"
 	capture := newCaptureHandler()
 	logger := slog.New(capture)
 	files := []baseloader.RawFile{{Path: "x/specs.memql", Content: dup}}

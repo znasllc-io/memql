@@ -8,10 +8,10 @@
 // owner's behalf (not as the owner), ownerUserId is threaded from the
 // backing row's owner rather than stamped from actor.userId -- the
 // same shape v1:knowledge:document uses with its uploadedBy field.
-// Reads stay owner-gated (ownerUserId==actor.userId, see #695).
+// Reads stay owner-gated (row.ownerUserId == actor.userId, see #695).
 //
 // The artifact id is derived deterministically from sourceConceptRef
-// (concat("artifact-", hash(ref))) so re-promoting the same source
+// ("artifact-" + hash(ref)) so re-promoting the same source
 // re-versions the same logical row instead of creating duplicates --
 // the idempotency guarantee #694 calls for.
 
@@ -632,7 +632,7 @@ mutate artifact moveArtifactToFolder {
 /// `accountIds` is STAMPED with `?? []`, not accepted, for moveArtifactToFolder's reason applied to
 /// a list: an accepted arg omitted is dropped and inherited, so REMOVING the last label would
 /// silently re-save the label just removed. An explicit empty list is what "no client" looks like,
-/// and the coalesce is what lets an omitted arg mean it.
+/// and the `??` is what lets an omitted arg mean it.
 ///
 /// `updatedAt` advances because a re-label IS a change a person made to the row, and the Library's
 /// default sort should say so -- the same call moveArtifactToFolder makes.

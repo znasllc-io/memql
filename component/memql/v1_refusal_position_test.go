@@ -32,7 +32,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }
 
 @enabled
@@ -74,9 +74,7 @@ func TestSpecSliceRefusalNamesTheFileLine(t *testing.T) {
 
 @enabled
 @description("An item with a name.")
-spec item isNamed {
-  return name != ""
-}
+spec item isNamed = row => row.name != ""
 
 /// An item with a status, written with the retired null.
 spec item hasStatus = row => row.status != null`
@@ -109,7 +107,7 @@ concept widget {
 @description("first")
 @public
 query widget allA {
-  filter  status == "x"
+  filter  row => row.status == "x"
 }
 
 @description("second")
@@ -151,7 +149,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }
 
 @enabled
@@ -186,7 +184,7 @@ concept widget {
 @description("first")
 @public
 query widget allA {
-  filter  status == "x"
+  filter  row => row.status == "x"
 }
 
 @description("second")

@@ -118,8 +118,22 @@ func TestRefine_FiltersThePageInProcessAndCountsTheDrop(t *testing.T) {
 	require.Equal(t, float64(2), metrics.QueryRefineRowsValue(query, "kept"))
 	require.Equal(t, float64(2), metrics.QueryRefineRowsValue(query, "dropped"))
 
-	notBoolean := &RefineExpression{Lambda: refineLambda(t, `row => row.title`), Bindings: map[string]any{}}
-	_, err = e.applyRefine(context.Background(), notBoolean, query, page[:1])
+	// A stored value that is not a boolean is data, and data answers: it is
+	// not true, so the row is dropped and its negation keeps it -- as the
+	// pushdown reads the same field (expr_stored.go).
+	storedNotBoolean := &RefineExpression{Lambda: refineLambda(t, `row => row.title`), Bindings: map[string]any{}}
+	kept, err = e.applyRefine(context.Background(), storedNotBoolean, query, page[:1])
+	require.NoError(t, err, "a stored non-boolean is not true; it does not fail the read")
+	require.Empty(t, kept)
+	negated := &RefineExpression{Lambda: refineLambda(t, `row => !row.title`), Bindings: map[string]any{}}
+	kept, err = e.applyRefine(context.Background(), negated, query, page[:1])
+	require.NoError(t, err)
+	require.Len(t, kept, 1)
+
+	// A value the predicate COMPUTED that is not a boolean is the author's
+	// mistake: the row cannot be decided, and the read fails naming it.
+	computed := &RefineExpression{Lambda: refineLambda(t, `row => lower(row.title)`), Bindings: map[string]any{}}
+	_, err = e.applyRefine(context.Background(), computed, query, page[:1])
 	require.ErrorContains(t, err, "condition_not_boolean", "a row the predicate cannot decide fails the read, naming the row")
 	require.ErrorContains(t, err, "v1:x:ticket:a")
 }

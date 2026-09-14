@@ -27,12 +27,15 @@ func (s *server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 	items := svc.Complete(text, line, col, uriToPath(params.TextDocument.URI))
 	out := make([]protocol.CompletionItem, 0, len(items))
 	for _, it := range items {
-		out = append(out, toLSPCompletionItem(it))
+		out = append(out, toLSPCompletionItem(it, text))
 	}
 	return out, nil
 }
 
-func toLSPCompletionItem(it sense.CompletionItem) protocol.CompletionItem {
+// toLSPCompletionItem maps a Sense completion onto the LSP shape. text is the
+// document the completion was asked in: the item's additional edits carry
+// Sense positions, which convert to LSP's against it.
+func toLSPCompletionItem(it sense.CompletionItem, text string) protocol.CompletionItem {
 	kind := completionKind(it.Kind)
 	ci := protocol.CompletionItem{Label: it.Label, Kind: &kind}
 	if it.Detail != "" {
@@ -54,6 +57,18 @@ func toLSPCompletionItem(it sense.CompletionItem) protocol.CompletionItem {
 			format := protocol.InsertTextFormatPlainText
 			ci.InsertTextFormat = &format
 		}
+	}
+	// Edits the item makes elsewhere in the document -- the file-top `use`
+	// line a concept import adds -- travel as additionalTextEdits, which the
+	// client applies with the insertion (memql#5359).
+	for _, e := range it.AdditionalEdits {
+		ci.AdditionalTextEdits = append(ci.AdditionalTextEdits, protocol.TextEdit{
+			Range: protocol.Range{
+				Start: position.ToLSPPosition(text, e.Range.Start.Line, e.Range.Start.Column),
+				End:   position.ToLSPPosition(text, e.Range.End.Line, e.Range.End.Column),
+			},
+			NewText: e.NewText,
+		})
 	}
 	// LSP sorts sortText lexically; zero-pad the numeric priority so lower
 	// priority (higher rank) sorts first.

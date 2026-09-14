@@ -41,13 +41,14 @@ use platform.shapes.{ siteFull }
 /// screen, and the source every account picker in the OS reads.
 ///
 /// ARCHIVED ROWS ARE EXCLUDED BY DEFAULT and returned under the filter (D8).
-/// The archive term is a DISJUNCTION rather than a `when(args.includeArchived)`
-/// guard, and the difference is not stylistic: `when(...)` drops its block on
-/// the argument's ABSENCE, not on its falsity, so a caller passing
-/// `includeArchived: false` -- which is exactly what a checkbox bound to a
-/// boolean sends -- would have widened the read to every archived row. Written
-/// as `isNotArchived || args.includeArchived==true` the three cases are the three answers:
-/// absent resolves nil and fails the comparison (active only), false fails it
+/// The archive term compares the argument with true rather than testing its
+/// presence (`args.includeArchived != nil`, the optional-argument guard), and the
+/// difference is not stylistic: a presence test answers whether the argument was
+/// PASSED, not whether it is true, so a caller passing `includeArchived: false`
+/// -- which is exactly what a checkbox bound to a boolean sends -- would have
+/// widened the read to every archived row. Written as
+/// `isNotArchived(row) || args.includeArchived == true` the three cases are the
+/// three answers: unset fails the comparison (active only), false fails it
 /// (active only), true admits everything.
 ///
 /// "Everything", note, and not "the archived ones": a person looking for a

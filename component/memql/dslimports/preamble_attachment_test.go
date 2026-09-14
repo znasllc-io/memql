@@ -23,7 +23,7 @@ query thing zzParked {
 }
 */
 query thing zzLive {
-  filter  label=="y"
+  filter  row => row.label == "y"
 }
 `
 
@@ -32,7 +32,7 @@ const cleanQuerySource = `use probe.concepts.{ thing }
 @public
 @description("intentionally caller-scope-free")
 query thing zzLive {
-  filter  label=="y"
+  filter  row => row.label == "y"
 }
 `
 

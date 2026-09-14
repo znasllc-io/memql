@@ -87,8 +87,8 @@ func TestRewriteEnumTypeArgs(t *testing.T) {
 }
 
 func TestRewriteCachePositional(t *testing.T) {
-	in := "@cache(ttl=\"300\")\nquery widget listWidgets {\n  filter widget.kind == args.kind\n}\n@cache(600)\n"
-	want := "@cache(300)\nquery widget listWidgets {\n  filter widget.kind == args.kind\n}\n@cache(600)\n"
+	in := "@cache(ttl=\"300\")\nquery widget listWidgets {\n  filter row => row.kind == args.kind\n}\n@cache(600)\n"
+	want := "@cache(300)\nquery widget listWidgets {\n  filter row => row.kind == args.kind\n}\n@cache(600)\n"
 	if got := runRewrite(t, RewriteCachePositional, in); got != want {
 		t.Errorf("cache:\n got %q\nwant %q", got, want)
 	}

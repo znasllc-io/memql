@@ -79,9 +79,13 @@ func TestConceptRejectsMalformedRowAuthz(t *testing.T) {
 		annotation string
 		wantHint   string
 	}{
-		{"unknown tier", `@rowAuthz(everyone)`, `unknown tier "everyone"`},
-		{"no tier", `@rowAuthz()`, "requires a tier"},
-		{"bare value", `@rowAuthz("public")`, "does not take a bare value"},
+		// The name, form and key of the annotation are the registry's to
+		// refuse (memql#5359), before ParseRowAuthz reads what the tier
+		// means; ParseRowAuthz's own wording for these is pinned in
+		// component/language/parser/rowauthz_binding_test.go.
+		{"unknown tier", `@rowAuthz(everyone)`, "@rowAuthz on a concept has no key everyone"},
+		{"no tier", `@rowAuthz()`, "@rowAuthz on a concept takes keyword arguments"},
+		{"bare value", `@rowAuthz("public")`, "@rowAuthz on a concept takes keyword arguments"},
 		{"two tiers", `@rowAuthz(public, clusterOwner)`, "takes exactly one tier"},
 		{"empty owner", `@rowAuthz(owner="")`, "is empty"},
 		{"owner names an undeclared field", `@rowAuthz(owner="noSuchField")`, "does not declare"},

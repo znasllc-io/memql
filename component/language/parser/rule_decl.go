@@ -1,9 +1,11 @@
 package parser
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/core/airoute"
 )
@@ -74,7 +76,7 @@ func (p *Parser) parseRuleDecl(attrs []*ast.Attribute) (*ast.RuleDecl, error) {
 	// Reject an annotation the Rule receiver does not carry BEFORE reading the
 	// ones it does, so a typo is reported as a typo rather than as a missing
 	// @policy.
-	if err := p.validateDeclAnnotations("Rule", "rule", decl.Name, attrs); err != nil {
+	if err := p.checkAnnotations(annotations.Rule, fmt.Sprintf("rule %q", decl.Name), attrs); err != nil {
 		return nil, err
 	}
 

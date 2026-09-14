@@ -86,8 +86,7 @@ func parseLogicBody(t *testing.T, src string) *languageParser.AutomationDef {
 // its own `_return` step on the output side) and the steps must
 // arrive in topological dependency order.
 func TestLogicRunner_CompilesMultiStepBody(t *testing.T) {
-	src := `@useQuery(queryFoo, queryBar)
-@description("test")
+	src := `@description("test")
 logic doStuff {
   args {
     partitionId  string  @required
@@ -95,7 +94,7 @@ logic doStuff {
   body {
     first := queryFoo( partitionId: args.partitionId )
     second := queryBar( id: first.first().id )
-    return coalesce(second.first(), first.first())
+    return second.first() ?? first.first()
   }
 }`
 	body := parseLogicBody(t, src)
@@ -153,9 +152,7 @@ logic doStuff {
 // string. The runner's step loop evaluates the condition before
 // dispatching, mirroring the automation executor's behaviour.
 func TestLogicRunner_HandlesConditionalSteps(t *testing.T) {
-	src := `@useQuery(queryThing)
-@useMutation(mutationCreateThing)
-@description("test")
+	src := `@description("test")
 logic provisionThing {
   args {
     name  string  @required
@@ -165,7 +162,7 @@ logic provisionThing {
     created := if existing.empty() {
       mutationCreateThing( name: args.name )
     }
-    return coalesce(created, existing.first())
+    return created ?? existing.first()
   }
 }`
 	body := parseLogicBody(t, src)
@@ -314,9 +311,7 @@ func TestLogicRunner_EventBindingSeededWhenAbsent(t *testing.T) {
 // have received it and the value was dropped. This fixture is about the
 // _return step, so the argument name only has to be a legal one.
 func TestLogicRunner_PreservesReturnStep(t *testing.T) {
-	src := `@useQuery(queryFoo)
-@useMutation(mutationBar)
-@description("repro")
+	src := `@description("repro")
 logic logicSweep {
   args {
     asOf string @required
@@ -1107,8 +1102,8 @@ logic aov {
     orders int @required
   }
   body {
-    r := coalesce(args.revenue, 0)
-    o := coalesce(args.orders, 1)
+    r := args.revenue ?? 0
+    o := args.orders ?? 1
     return r / o
   }
 }
@@ -1143,8 +1138,8 @@ logic ratio {
     b int @required
   }
   body {
-    x := coalesce(args.a, 0)
-    y := coalesce(args.b, 0)
+    x := args.a ?? 0
+    y := args.b ?? 0
     return x / y
   }
 }
@@ -1172,8 +1167,8 @@ logic remainder {
     b int @required
   }
   body {
-    x := coalesce(args.a, 0)
-    y := coalesce(args.b, 1)
+    x := args.a ?? 0
+    y := args.b ?? 1
     return x % y
   }
 }
@@ -1339,7 +1334,7 @@ logic boundary {
     start string @required
   }
   body {
-    seed := coalesce(args.start, "")
+    seed := args.start ?? ""
     return addDuration(seed, "P1D")
   }
 }
@@ -1370,7 +1365,7 @@ logic weeksBetween {
     b string @required
   }
   body {
-    seed := coalesce(args.a, "")
+    seed := args.a ?? ""
     return daysBetween(args.a, args.b) / 7
   }
 }

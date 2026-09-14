@@ -22,9 +22,7 @@ func TestMultiStepLogicReturnParsing(t *testing.T) {
 	// revokeExpiredDelegations body shape. The parser layer
 	// doesn't care that the inner calls are unresolved -- it just has
 	// to recognise the trailing `return` keyword + expression.
-	source := `@useQuery(expiredActiveDelegations)
-@useMutation(revokeDelegation)
-@description("repro of revokeExpiredDelegations shape")
+	source := `@description("repro of revokeExpiredDelegations shape")
 logic revokeExpiredDelegations {
   args {
     asOf string @required
@@ -132,7 +130,7 @@ func TestConvertExpressionHandlesCoalesce(t *testing.T) {
 @description("repro: return value uses coalesce")
 logic logicSample {
   body {
-    return coalesce("a", "b")
+    return "a" ?? "b"
   }
 }
 `

@@ -11,9 +11,9 @@ package memql
 //
 //   * Prompt-level annotations: @enabled / @disabled (no-ops at the
 //     converter -- they're loader-pipeline flags), @description,
-//     @defaultProvider, @templateFile. Unknown annotations are
-//     tolerated silently to match the hand-rolled parser's
-//     drain-and-skip default branch.
+//     @defaultProvider, @templateFile, @level. Which annotations a prompt
+//     and its fields take is decided at parse time by the annotation
+//     registry (memql#5359); this reads what they mean.
 //   * Body fields lower to the internal toolField slice (prompts +
 //     tools share the same in-package field type so the JSON-schema
 //     compilation path on promptDecl can stay unchanged). The `[]T`
@@ -22,7 +22,6 @@ package memql
 //     compiler keys on at registration time.
 //   * Field annotations: @required (acted on), @description /
 //     @enum / @default (carried through to the JSON-schema layer).
-//     Unknown field annotations are tolerated silently.
 //
 // What this converter does NOT do: resolve the template sidecar,
 // compile the JSON schema, or register the prompt. Those steps stay
@@ -82,8 +81,7 @@ func promptDeclToPromptDecl(decl *languageParser.PromptDecl, origin string) (*pr
 			out.defaultProvider = val
 		case "level":
 			// Read off the typed field the parser filled, not off the raw
-			// value: this arm exists so the annotation is not rejected as
-			// unknown below. Validation happened at parse.
+			// value. Validation happened at parse.
 			if _, ok := attr.Value.(string); !ok {
 				return nil, fmt.Errorf("%s: @level expects a string value", origin)
 			}
@@ -93,11 +91,6 @@ func promptDeclToPromptDecl(decl *languageParser.PromptDecl, origin string) (*pr
 				return nil, fmt.Errorf("%s: @templateFile expects a string value", origin)
 			}
 			out.templateFile = val
-		default:
-			// Unknown annotation -- hard-rejected (#990). Closes the
-			// silent-tolerance gap so typos and stale annotations on
-			// prompts fail at load instead of being dropped.
-			return nil, fmt.Errorf("%s: prompt %q: unknown annotation @%s -- supported: @defaultProvider, @description, @disabled, @enabled, @level, @templateFile", origin, decl.Name, attr.Name)
 		}
 	}
 
@@ -163,9 +156,6 @@ func promptFieldToToolField(field *languageParser.PromptField, origin string) (t
 			// the args as either a single string or a list under
 			// Args["values"] depending on grammar -- normalise both.
 			tf.enumValues = enumValuesFromAttr(attr)
-		default:
-			// Unknown field annotation -- tolerated silently. Matches
-			// parsePromptMemQL's "skip args + continue" default.
 		}
 	}
 

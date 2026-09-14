@@ -3582,7 +3582,7 @@ func CreateDeploymentBuild(args CreateDeploymentArgs) string {
 	return b.String()
 }
 
-// CreateDeploymentNodeSpec -- Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. The concept id is hash(concat(shortId(deploymentId), ':', nodeType)) so re-pins append to one timeline and a bare or canonical deploymentId derive the same row. Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
+// CreateDeploymentNodeSpec -- Create a v1:cluster:deploymentNodeSpec row for a (deploymentId, nodeType) pair. The concept id is hash(shortId(deploymentId) + ":" + nodeType) so re-pins append to one timeline and a bare or canonical deploymentId derive the same row. Engine-as-spine: empty version resolves against the deployment engine version. Epic 2 / #2094.
 //
 // Bound concept: v1:cluster:deploymentNodeSpec (machine-readable: BoundConcepts["createDeploymentNodeSpec"] in generated_concepts.go).
 type CreateDeploymentNodeSpecArgs struct {
@@ -11085,7 +11085,7 @@ func RotateAuthSessionBuild(args RotateAuthSessionArgs) string {
 // # One row per person, by construction
 // The id is DERIVED from the actor rather than supplied, so there is no call that writes a second desktop for one person and no read a writer has to hope was fresh. That is what makes this a single `insert{}` instead of the create-or-update pair a caller-minted id forces (compare createRoutingPolicy / updateRoutingPolicy, whose "exactly one active row per owner" is held on the write side by an editor that read first). `insert{}` is create-or-upsert at the engine's single write chokepoint (memql#1709), so the first call creates and the rest overwrite.
 // It is `hash(actor.userId)` and not `actor.userId` itself: an actor id is canonical (`v1:identity:user:<slug>`), and a canonical id under a DIFFERENT concept is refused by the storage gate (core/id.ValidateShortId). hash() gives a bare slug -- the form the gate names, derived identically on every replica.
-// UNPREFIXED, per authoring-rules.md section 20: `concat("desktop-", hash(...))` would repeat in the shortId what the canonical id already says one colon to its left. (The gate that rejects that, TestNoShortIdConceptPrefix, works off a hardcoded list of known prefixes and would not have caught `desktop-`; the rule is the rule regardless of whether a list has caught up with it.)
+// UNPREFIXED, per authoring-rules.md section 20: `"desktop-" + hash(...)` would repeat in the shortId what the canonical id already says one colon to its left. (The gate that rejects that, TestNoShortIdConceptPrefix, works off a hardcoded list of known prefixes and would not have caught `desktop-`; the rule is the rule regardless of whether a list has caught up with it.)
 // # Every save fires graph.node.created, including the ones that overwrite
 // Only the update() path publishes graph.node.updated; executeWrite publishes created for every write it takes, insert and update alike. So the client subscribes to created and the mesh routing rule (component/node/routing.go) forwards created -- an `updated` rule here would be a rule for an event this mutation cannot emit. Do not "complete the pair".
 // # revision is the caller's, on purpose
@@ -11195,7 +11195,7 @@ func SetAccountEntitlementBuild(args SetAccountEntitlementArgs) string {
 
 // SetArtifactAccounts -- Label a Library item with the clients it is about (epic memql#4800, D5) -- the Files inspector's account picker, and its only caller.
 // A READ-MERGE update in the shape moveArtifactToFolder set: folder, labels, archived and every other index field survive a re-label untouched, which is what makes labelling cheap enough to be a chip somebody toggles rather than a form they submit.
-// `accountIds` is STAMPED with `?? []`, not accepted, for moveArtifactToFolder's reason applied to a list: an accepted arg omitted is dropped and inherited, so REMOVING the last label would silently re-save the label just removed. An explicit empty list is what "no client" looks like, and the coalesce is what lets an omitted arg mean it.
+// `accountIds` is STAMPED with `?? []`, not accepted, for moveArtifactToFolder's reason applied to a list: an accepted arg omitted is dropped and inherited, so REMOVING the last label would silently re-save the label just removed. An explicit empty list is what "no client" looks like, and the `??` is what lets an omitted arg mean it.
 // `updatedAt` advances because a re-label IS a change a person made to the row, and the Library's default sort should say so -- the same call moveArtifactToFolder makes.
 // Ids are not validated against the registry: an account has no read effect, and a list filtered against the caller's own visible accounts would quietly DROP a label somebody else's account put there. The Files browse filter reads an unresolvable id as a tie to something not visible.
 //

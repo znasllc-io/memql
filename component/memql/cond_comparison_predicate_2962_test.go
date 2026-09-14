@@ -175,7 +175,7 @@ logic roleGate {
     role string @required
   }
   body {
-    return cond(args.role == "owner", "elevated", "plain")
+    return args.role == "owner" ? "elevated" : "plain"
   }
 }
 `

@@ -41,7 +41,7 @@ func TestDescriptionFlip_ShapeToolSpecPromptPolicy(t *testing.T) {
 		t.Fatal("shape not parsed")
 	})
 	t.Run("spec", func(t *testing.T) {
-		decl, err := languageParser.ParseSpecDecl("/// Spec doc.\n@description(\"Spec annot.\")\nspec actorEnvelope flipSpec {\n  return role == \"admin\"\n}")
+		decl, err := languageParser.ParseSpecDecl("/// Spec doc.\n@description(\"Spec annot.\")\nspec actorEnvelope flipSpec = actor => actor.role == \"admin\"")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -67,7 +67,7 @@ func TestDescriptionFlip_ShapeToolSpecPromptPolicy(t *testing.T) {
 		}
 	})
 	t.Run("annotation-only-identical", func(t *testing.T) {
-		decl, err := languageParser.ParseSpecDecl("@description(\"Only annot.\")\nspec actorEnvelope flipSpec2 {\n  return role == \"admin\"\n}")
+		decl, err := languageParser.ParseSpecDecl("@description(\"Only annot.\")\nspec actorEnvelope flipSpec2 = actor => actor.role == \"admin\"")
 		if err != nil {
 			t.Fatal(err)
 		}

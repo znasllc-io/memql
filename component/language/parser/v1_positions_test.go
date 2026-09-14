@@ -252,7 +252,7 @@ func TestLegacyFilterParsesOffAndRefusesOn(t *testing.T) {
     a string
     b string
   }
-  filter a == args.a || b == args.b
+  filter row => row.a == args.a || row.b == args.b
 }`
 	fn := onlyFunction(t, mustParseV1Authored(t, src, v1Off))
 	and, ok := queryBase(fn.Body.(ast.ExpressionNode)).(*ast.LogicalExpr)
@@ -381,8 +381,8 @@ func TestSpecAndTraitLambdaForm(t *testing.T) {
 	}
 
 	legacy := map[string]struct{ src, rule string }{
-		"spec":  {"spec registration isRevoked {\n  return revoked == true\n}", "retired_spec_return_body"},
-		"trait": {"trait isActiveRecord {\n  return active == true\n}", "retired_trait_return_body"},
+		"spec":  {"spec registration isRevoked = row => row.revoked == true", "retired_spec_return_body"},
+		"trait": {"trait isActiveRecord = row => row.active == true", "retired_trait_return_body"},
 	}
 	for name, c := range legacy {
 		t.Run("legacy "+name, func(t *testing.T) {
@@ -428,14 +428,14 @@ func TestFilterAnnotationLambda(t *testing.T) {
 	}
 
 	// The legacy raw-text form, unchanged with the option off.
-	legacy := automation(`@filter(payload.status == "x")`)
+	legacy := automation(`@filter(row => row.status == "x")`)
 	auto := automationBody(t, mustParseV1Authored(t, legacy, v1Off))
 	if auto.Trigger == nil || auto.Trigger.Filter != "payload.status==x" || auto.Trigger.FilterLambda != nil {
 		t.Fatalf("the legacy @filter changed: %+v", auto.Trigger)
 	}
 	_, err := parseV1Authored(t, legacy, v1On)
 	wantRetired(t, err, "retired_filter_annotation")
-	_, err = parseV1Authored(t, automation(`@filter("payload.status == 1")`), v1On)
+	_, err = parseV1Authored(t, automation(`@filter(row => row.status == 1)`), v1On)
 	wantRetired(t, err, "retired_filter_annotation")
 
 	// The filter= argument of @trigger takes the same lambda.
@@ -735,11 +735,11 @@ func TestMutationValuesV1(t *testing.T) {
 // in-process position with the option off and are refused with it on.
 func TestRetiredSpellingsInProcessPositions(t *testing.T) {
 	cases := map[string]struct{ src, rule string }{
-		"cond in a return":             {"logic probe {\n  args {\n    a bool\n  }\n  body {\n    return cond(args.a, 1, 2)\n  }\n}", "retired_cond_call"},
-		"concat on a step":             {"logic probe {\n  args {\n    a string\n  }\n  body {\n    x := concat(args.a, \"b\")\n    return x\n  }\n}", "retired_concat_call"},
-		"exists in an if":              {"logic probe {\n  args {\n    a string\n  }\n  body {\n    if exists(args.a) {\n      x := f(a: args.a)\n    }\n    return args.a\n  }\n}", "retired_exists_call"},
-		"coalesce in a mutation value": {"mutate thing probe {\n  args {\n    id string @required\n    a string\n  }\n  insert {\n    id: args.id\n    a: coalesce(args.a, \"x\")\n  }\n}", "retired_coalesce_call"},
-		"cond in a step argument":      {"@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  step first {\n    logic other(x: cond(true, 1, 2))\n  }\n}", "retired_cond_call"},
+		"cond in a return":             {"logic probe {\n  args {\n    a bool\n  }\n  body {\n    return args.a ? 1 : 2\n  }\n}", "retired_cond_call"},
+		"concat on a step":             {"logic probe {\n  args {\n    a string\n  }\n  body {\n    x := args.a + \"b\"\n    return x\n  }\n}", "retired_concat_call"},
+		"exists in an if":              {"logic probe {\n  args {\n    a string\n  }\n  body {\n    if args.a != nil {\n      x := f(a: args.a)\n    }\n    return args.a\n  }\n}", "retired_exists_call"},
+		"coalesce in a mutation value": {"mutate thing probe {\n  args {\n    id string @required\n    a string\n  }\n  insert {\n    id: args.id\n    a: args.a ?? \"x\"\n  }\n}", "retired_coalesce_call"},
+		"cond in a step argument":      {"@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  step first {\n    logic other(x: true ? 1 : 2)\n  }\n}", "retired_cond_call"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -761,13 +761,13 @@ func TestDefaultOptionsReachesEveryEntry(t *testing.T) {
 	t.Cleanup(func() { DefaultOptions = saved })
 	DefaultOptions = Options{ExpressionsV1: true}
 
-	legacySpec := "spec thing isX {\n  return a == 1\n}"
+	legacySpec := "spec thing isX = row => row.a == 1"
 	_, err := ParseSpecDecl(legacySpec)
 	wantRetired(t, err, "retired_spec_return_body")
 	_, err = ParseFile(legacySpec)
 	wantRetired(t, err, "retired_spec_return_body")
 
-	logic, err := NormaliseAll("logic probe {\n  args {\n    a bool\n  }\n  body {\n    return cond(args.a, 1, 2)\n  }\n}")
+	logic, err := NormaliseAll("logic probe {\n  args {\n    a bool\n  }\n  body {\n    return args.a ? 1 : 2\n  }\n}")
 	if err != nil {
 		t.Fatal(err)
 	}

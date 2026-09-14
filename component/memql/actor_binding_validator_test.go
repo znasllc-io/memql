@@ -79,7 +79,7 @@ func TestSandboxInheritsActorBinding(t *testing.T) {
 		Kind: "query",
 		Name: "sandboxOwned",
 		Source: `query todo sandboxOwned {
-  filter todo.ownerUserId == actor.userId
+  filter row => row.ownerUserId == actor.userId
 }`,
 	}})
 	if rep.OK {
@@ -94,7 +94,7 @@ func TestSandboxInheritsActorBinding(t *testing.T) {
 		Name: "sandboxOwned",
 		Source: `@actor
 query todo sandboxOwned {
-  filter todo.ownerUserId == actor.userId
+  filter row => row.ownerUserId == actor.userId
 }`,
 	}})
 	if !rep.OK {

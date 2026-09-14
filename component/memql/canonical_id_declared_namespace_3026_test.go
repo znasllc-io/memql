@@ -132,7 +132,7 @@ func TestCanonicalId_AmbiguousRemappedPackAgreesWithTheSameDomainGate(t *testing
 	// 3. And the gate positively PERMITS the working spelling: a file with no
 	//    same-domain import passes through byte-identical. A gate that mangled
 	//    it would leave the pack with no spelling at all again.
-	ambient := []byte("mutate widget doThing {\n  insert {\n    id: canonicalId(args.x, widget)\n  }\n}\n")
+	ambient := []byte("mutate widget doThing {\n  insert {\n    id: canonicalId(args.x, \"widget\")\n  }\n}\n")
 	permitted, err := languageParser.RewriteSameDomainUse(domain, ambient)
 	if err != nil {
 		t.Fatalf("RewriteSameDomainUse on the ambient spelling: %v", err)
@@ -432,7 +432,7 @@ mutate deployment nestedAmbientRef {
     x  string  @required
   }
   insert {
-    id: canonicalId(args.x, deployment)
+    id: canonicalId(args.x, "deployment")
   }
 }`
 	if _, err := tryParseNewFunctionSyntax(
@@ -476,7 +476,7 @@ mutate widget nestedForeignRef {
     x  string  @required
   }
   insert {
-    id: canonicalId(args.x, widget)
+    id: canonicalId(args.x, "widget")
   }
 }`
 	if _, err := tryParseNewFunctionSyntax(

@@ -19,7 +19,7 @@ verify anything here.
 | `parser/` | Lexer, parser, and the **struct-form rewriter**. Every `.memql` construct is authored in struct form; the rewriter translates it to the procedural form the grammar reads, before the parser proper sees it. | ~286 files |
 | `ast/` | The AST node types, in their own module so consumers can depend on the shape without pulling in the lexer/parser. `parser` re-exports every symbol as a type alias, so old call sites still compile; **new code imports `ast/` directly**. | ~64 files |
 | `compiler/` | AST -> output format (primarily the `.json` the automation scheduler consumes), plus the linter, the CQS validator, and the automation generator. | ~8 files |
-| `annotations/` | The single physical source of truth for **which annotations each receiver kind accepts** (`ByReceiver`) and their one-line docs (`Docs`). A leaf package -- it imports nothing inside the repo -- so the engine load gate and the editor surface can both derive from it with no import cycle (memql#991). | ~12 files |
+| `annotations/` | The annotation **registry**: every receiver (each construct, the concept body, each field list), every annotation it accepts with its argument forms, keyword keys and example, the retired/misplaced hints, and `Check` / `CheckAll`, which answer with a stable `annotation_*` code (memql#5359). A leaf package -- it imports nothing inside the repo -- so the parser, the concept translator and the editor surface all derive from it with no import cycle. | ~12 files |
 | `dslspec/` | The single machine-readable spec of the authoring surface: constructs, keywords, operators, field types, and the legal-next rules that drive completion. Derives annotations FROM `annotations/` rather than re-listing them, and exports as portable JSON (memql#2122-2125). | ~9 files |
 | `dslclause/` | One answer to "which keywords terminate a filter clause", shared by the text-scanning gates so they cannot drift about it (memql#2815). Owns clause EXTRACTION only, not predicate decomposition -- the package comment says why that split is deliberate. | ~5 files |
 | `pagination/` | The pure classifier behind the pagination authoring rule: a list-returning query must carry `paginate`, `sort`, `count`, or `@unbounded("reason")` (memql#1965). Operates on raw source text using line structure only. | ~3 files |
@@ -76,8 +76,12 @@ annotation family, `@concepts(...)`, `@input { ... }`, `include` in a shape
 body) are refused at parse time with a migration hint. They survive only in
 `dsl/_reference/*.memql` as don't-do-this skeletons. Do not restore them when
 you see one in an old diff. The retired expression spellings (`;`/`,` as
-connectives, `has`, `?.`, `when(...)`, `cond(`, `null`, ...) are refused with
-`memqlmigrate --rewrite=expressions` as the fix.
+connectives, `has`, `?.`, `when(...)`, `cond(`, `null`, a filter with no
+lambda header, ...) are refused at parse wherever a `.memql` file writes them:
+`parser.DefaultOptions` has `ExpressionsV1` on, so every file is read in
+edition 2026. The refusal names `memqlmigrate --rewrite=expressions` as the
+fix, and the language server offers the same rewrite as a quick fix
+(`cmd/memql-lsp/codeaction.go`).
 
 ---
 
@@ -87,12 +91,17 @@ These are deliberate and are what keep the editor, the load gate, and the
 grammar from disagreeing. Adding a second copy of any of them is the
 mistake this layout exists to prevent:
 
-- **Annotations** live in `annotations/`. `dslspec` inverts that registry
-  rather than re-listing it, so the spec cannot disagree with the gate.
-  The per-construct decl parsers in `parser/` (`tool_decl.go`,
-  `provider_decl.go`, ...) remain the authoritative *parse-time* gate for
-  the declarative constructs; `annotations/` mirrors their accepted sets
-  for the editor, kept in sync by review.
+- **Annotations** live in `annotations/`, and the registry IS the gate:
+  every construct parser and every field list in `parser/` converts what it
+  read with `AnnotationUse` and calls one check (`checkAnnotations`) at
+  parse time, and the concept translator in `component/database` calls
+  `annotations.CheckAll` for a concept, its body and its fields. The
+  per-construct parsers keep only what a legal value MEANS -- no parser,
+  converter or loader carries a list of names of its own (memql#5359).
+  `dslspec` projects the registry rather than re-listing it.
+  `component/memql`'s `TestEveryReceiverGateReadsTheRegistry` drives every
+  receiver's real gate, so a gate that stops reading the registry fails
+  there by name.
 - **Constructs / keywords / operators / field types / legal-next** live in
   `dslspec/`. There was no pre-existing registry -- the truth was split
   between `parser/parser.go`'s top-level dispatch and `parser/rewriter.go`.

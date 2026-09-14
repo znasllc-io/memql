@@ -534,7 +534,8 @@ filter  row => row.folderId == args.folderId
 
 `!` works in every position: every predicate answers true or false, so `!e` is
 its exact negation. There is no truthiness. `&&`, `||`, `!` and a condition take
-a boolean, an absent value counts as false, and anything else is refused with
+a boolean, an absent value counts as false, a row field holding a value of
+another type is not true, and anything else is refused with
 `condition_not_boolean`: write `args.name != nil`, not `args.name`.
 
 Equality is typed. `1 == "1"` is false, numbers compare numerically across
@@ -726,8 +727,8 @@ the rows before any of them is read.
 
 ### Retired spellings
 
-Edition 2026 retires the spellings below. The parser refuses each one where an
-expression is written, with one message shape:
+Edition 2026 retires the spellings below. The parser refuses each one wherever
+a `.memql` file writes it, with one message shape:
 
 ```text
 cond(p, a, b) is retired in edition 2026: write p ? a : b (memqlmigrate --rewrite=expressions rewrites it)
@@ -735,8 +736,15 @@ cond(p, a, b) is retired in edition 2026: write p ? a : b (memqlmigrate --rewrit
 
 `memqlmigrate --rewrite=expressions` rewrites a tree onto the new forms, and
 refuses, naming the clause, anything it cannot convert without changing what it
-means. The table is the parser's own (`parser.V1RetiredForms`), which Sense reads
-for its hover too.
+means. In VS Code the refusal is underlined as an error, and the language server
+offers the same rewrite as a quick fix, **Rewrite to edition 2026**, for one
+construct or the whole file ([Sense](sense.md#the-rewrite-quick-fix)). The table
+is the parser's own (`parser.V1RetiredForms`), which Sense reads for its hover
+too.
+
+The string a client sends to `Execute` is not an authored expression:
+[the internal query form](#the-internal-query-form) keeps its own grammar, which
+this table does not change.
 
 <!-- BEGIN GENERATED: retired spellings. Do not edit: go test github.com/znasllc-io/memql/component/language/parser -run TestV1RetiredFormsArePublished -update-docs -->
 

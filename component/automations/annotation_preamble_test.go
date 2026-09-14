@@ -30,9 +30,10 @@ import (
 // BOOT REFUSAL -- a comment mentioning `$steps.`, or containing an
 // `@`-annotation, or a commented-out `mutation(...)` call. Worse, a
 // commented-out copy of an automation above the live one (exactly what an
-// author writes when parking a version) silently DISABLES the #2712 annotation
-// gate, because ValidateConstructAnnotations cuts its header scan at the first
-// `automation ... {` -- which lands on the commented-out header.
+// author writes when parking a version) silently DISABLED the #2712 annotation
+// gate while it was a text scan (it cut its header scan at the first
+// `automation ... {` -- which landed on the commented-out header). The gate is
+// the parser's annotation check since memql#5359.
 //
 // So the fix is not "skip comments in the walk". It is "every gate that scans
 // raw construct text must scan a COMMENT-BLANKED view", which is the same
@@ -235,11 +236,13 @@ automation bad ` + bodyStub,
 
 // TestCommentedOutHeaderDoesNotShadowTheAnnotationGate is the subtlest half.
 //
-// ValidateConstructAnnotations cuts its header scan at the first
-// `automation ... {`. If that lands on a COMMENTED-OUT header -- exactly what an
-// author writes when parking a version above the live one -- the live
-// automation's annotations are never inspected at all, and the #2712 gate is
-// silently disabled. An invalid @public then loads clean.
+// The load-time text scan that used to be the #2712 gate cut its header scan at
+// the first `automation ... {`. If that landed on a COMMENTED-OUT header --
+// exactly what an author writes when parking a version above the live one --
+// the live automation's annotations were never inspected at all, and an
+// invalid @public loaded clean. The gate is the parser's annotation check now
+// (memql#5359), which reads the annotations of the construct it parsed; this
+// keeps that true.
 func TestCommentedOutHeaderDoesNotShadowTheAnnotationGate(t *testing.T) {
 	l := &Loader{}
 	src := `/*
@@ -260,7 +263,7 @@ automation live ` + bodyStub
 	if err == nil {
 		t.Fatal("an invalid @public on the LIVE automation loaded clean.\n\n" +
 			"A commented-out automation header above it shadowed the annotation gate: " +
-			"ValidateConstructAnnotations cuts its header scan at the first `automation ... {`, " +
+			"the annotation gate read a header other than the live automation's, " +
 			"which landed inside the comment, so the live automation's annotations were never " +
 			"inspected. The gate must scan a comment-blanked view (memql#2872 / #2712).")
 	}

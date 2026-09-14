@@ -66,7 +66,7 @@ query thing openThings {
   args {
     status string
   }
-  filter  status == args.status
+  filter  row => row.status == args.status
   paginate 10
 }
 `

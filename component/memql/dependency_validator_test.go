@@ -39,7 +39,7 @@ use guide.shapes.{ card }
 @description("get a guide by id")
 query guide byId {
   args { id string @required }
-  filter id==args.id
+  filter row => row.id == args.id
   shape card
 }
 `)},
@@ -65,7 +65,7 @@ shape tour card {
 use tour.shapes.{ card }
 
 query guide listGuides {
-  filter id==args.id
+  filter row => row.id == args.id
   shape tour.card
 }
 `)},
@@ -89,7 +89,7 @@ shape tour card {
 `)},
 		"guide/queries.memql": &fstest.MapFile{Data: []byte(`
 query guide listGuides {
-  filter id==args.id
+  filter row => row.id == args.id
   shape card
 }
 `)},
@@ -127,7 +127,7 @@ shape actorEnvelope {
 use common.shapes.{ actorEnvelope }
 
 query guide whoAmI {
-  filter id==args.id
+  filter row => row.id == args.id
   shape actorEnvelope
 }
 `)},

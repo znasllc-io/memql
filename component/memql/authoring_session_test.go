@@ -25,15 +25,13 @@ mutate mcpWidget mutationCreateMcpWidget {
     widgetId  string  @required
   }
   insert {
-    id:    canonicalId(args.widgetId, mcpWidget)
+    id:    canonicalId(args.widgetId, "mcpWidget")
     label: "x"
   }
 }`
 
 const sessionSpecSrc = `@description("session spec")
-spec actorEnvelope mcpSessSpec {
-  return role == "admin"
-}`
+spec actorEnvelope mcpSessSpec = actor => actor.role == "admin"`
 
 // SplitBundleSource recognizes concept + function-family + shape constructs and
 // dedupes by (kind, name).

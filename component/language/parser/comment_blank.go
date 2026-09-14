@@ -4,11 +4,11 @@ import "github.com/znasllc-io/memql/core/baseparser"
 
 // comment_blank.go -- thin re-exports.
 //
-// The implementation moved to component/memql/baseparser (memql#2872).
-// baseparser is a LEAF -- it imports only fmt/sort/strings -- and it hosts
-// ValidateConstructAnnotations, which is one of the raw-text gates that has to
-// scan a comment-blanked view. This package imports baseparser, so the helper
-// could not stay here without a cycle.
+// The implementation moved to core/baseparser (memql#2872). baseparser is a
+// LEAF -- it imports only fmt/sort/strings -- and the raw-text gates that have
+// to scan a comment-blanked view live beside it or below this package. This
+// package imports baseparser, so the helper could not stay here without a
+// cycle.
 //
 // Moved rather than duplicated for the reason #2815 / #2863 / #2852 all record:
 // two implementations of one lexical answer agree right up until they do not,

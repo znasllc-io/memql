@@ -26,7 +26,7 @@ concept order {
 @enabled
 query order listOrders {
   args { id  string  @required }
-  filter  id == args.id
+  filter  row => row.id == args.id
 }`)},
 	}
 }
@@ -158,7 +158,7 @@ concept item {
 		}
 		return out
 	}
-	tail := "\n\nquery item listItems {\n  filter id == \"x\"\n}\n"
+	tail := "\n\nquery item listItems {\n  filter row => row.id == \"x\"\n}\n"
 
 	// Valid import: zero import diagnostics.
 	if got := importCodes("use demo.concepts.{ item }" + tail); len(got) != 0 {

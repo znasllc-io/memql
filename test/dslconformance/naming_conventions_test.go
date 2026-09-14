@@ -288,7 +288,7 @@ func TestNoKindPrefixGateIsLive(t *testing.T) {
 	}{
 		{
 			name:    "plain prefixed query",
-			src:     "query user queryFooBar {\n  filter id == args.id\n}\n",
+			src:     "query user queryFooBar {\n  filter row => row.id == args.id\n}\n",
 			want:    "queryFooBar",
 			wantHit: true,
 		},
@@ -336,17 +336,17 @@ func TestNoKindPrefixGateIsLive(t *testing.T) {
 		},
 		{
 			name:    "unprefixed name is fine",
-			src:     "query user userById {\n  filter id == args.id\n}\n",
+			src:     "query user userById {\n  filter row => row.id == args.id\n}\n",
 			wantHit: false,
 		},
 		{
 			name:    "prefix must be followed by uppercase -- `queryable` is a fine name",
-			src:     "query user queryable {\n  filter id == args.id\n}\n",
+			src:     "query user queryable {\n  filter row => row.id == args.id\n}\n",
 			wantHit: false,
 		},
 		{
 			name:    "commented-out example must not be reported",
-			src:     "// query user queryFooBar {\n/// mutate user mutationFooBar {\nquery user userById {\n  filter id == args.id\n}\n",
+			src:     "// query user queryFooBar {\n/// mutate user mutationFooBar {\nquery user userById {\n  filter row => row.id == args.id\n}\n",
 			wantHit: false,
 		},
 		{
@@ -369,7 +369,7 @@ func TestNoKindPrefixGateIsLive(t *testing.T) {
 		{
 			name: "a terse automation's `=> logic X` tail is a CALL SITE, not a declaration",
 			src: "automation purgeThings @trigger(schedule=\"0 0 2 * * *\") => logic logicPurgeThings\n" +
-				"query user userById {\n  filter id == args.id\n}\n",
+				"query user userById {\n  filter row => row.id == args.id\n}\n",
 			wantHit: false,
 		},
 	}
@@ -762,13 +762,13 @@ func TestNamingDocGateIsLive(t *testing.T) {
 			"see `queryStaleClusterNodes` in `dsl/cluster/queries.memql` for this", true},
 		// C -- teaching by example, across the half the substring list was blind to
 		{"prefixed query declaration in a fence",
-			"```memql\nquery user queryUserById {\n  filter row.id == args.id\n}\n```", true},
+			"```memql\nquery user queryUserById {\n  filter row => row.id == args.id\n}\n```", true},
 		{"prefixed logic declaration in a fence",
 			"```memql\nlogic logicBootstrapSession {\n  body { return true }\n}\n```", true},
 		{"prefixed spec declaration in a fence",
-			"```memql\nspec participant specIsGuest {\n  return isGuest == true\n}\n```", true},
+			"```memql\nspec participant specIsGuest = row => row.isGuest == true\n```", true},
 		{"prefixed trait declaration in a fence",
-			"```memql\ntrait traitIsActive {\n  return active == true\n}\n```", true},
+			"```memql\ntrait traitIsActive = row => row.active == true\n```", true},
 		{"prefixed seed declaration in a fence",
 			"```memql\nseed skill seedWorkbenchBaseline {\n  name: \"x\"\n}\n```", true},
 		{"kebab-prefixed seed declaration in a fence",
@@ -781,7 +781,7 @@ func TestNamingDocGateIsLive(t *testing.T) {
 		{"real un-prefixed name claimed live",
 			"see `staleClusterNodes` in `dsl/cluster/queries.memql`", false},
 		{"un-prefixed declaration in a fence",
-			"```memql\nquery user userById {\n  filter row.id == args.id\n}\n```", false},
+			"```memql\nquery user userById {\n  filter row => row.id == args.id\n}\n```", false},
 		{"absent but UN-prefixed name (product DSL, out of scope)",
 			"use cognition.concepts.{ canvasState }", false},
 		{"deliberate does-not-exist citation",

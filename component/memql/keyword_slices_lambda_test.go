@@ -33,9 +33,7 @@ spec lead isHot = row =>
 trait isActiveRecord = row => row.active == true
 
 /// A legacy body beside the new ones still slices.
-spec lead isLegacy {
-  return status == "won"
-}
+spec lead isLegacy = row => row.status == "won"
 
 // A string holding a declaration keyword does not end the body.
 spec lead mentionsSpec = row =>

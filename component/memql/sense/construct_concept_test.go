@@ -1,6 +1,10 @@
 package sense
 
-import "testing"
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
 
 // fakeRegistry is a minimal RegistryProvider stub for the construct-concept
 // completion tests. It only models the concept surface the tests exercise; all
@@ -203,5 +207,58 @@ func TestConstructConceptImportSuppressedForSameDomain(t *testing.T) {
 	}
 	if !found {
 		t.Error("cross-domain concept must still get the import suggestion")
+	}
+}
+
+// TestConceptImportInsertsOnlyTheName: at the concept slot the import
+// suggestion inserts the concept's NAME -- the `use` line is an edit of its
+// own, with the file's imports (memql#5359). It inserted the whole
+// `use <domain>.concepts.{ <name> }` line at the slot, which made
+// `query use cognition.concepts.{ space }` -- a file that does not parse.
+func TestConceptImportInsertsOnlyTheName(t *testing.T) {
+	s := New(&fakeRegistry{concepts: []string{"v1:cognition:space"}})
+	for _, src := range []string{"query ", "mutate ", "seed ", "shape "} {
+		var found bool
+		for _, it := range s.Complete(src, 1, len(src)+1, "probe.memql") {
+			if it.Label != "use cognition.concepts.{ space }" {
+				continue
+			}
+			found = true
+			if it.InsertText != "space" {
+				t.Errorf("%q: the import suggestion inserts %q at the concept slot, want the name alone", src, it.InsertText)
+			}
+		}
+		if !found {
+			t.Errorf("%q: no import suggestion for an unimported concept", src)
+		}
+	}
+}
+
+// TestConceptImportEditGoesWithTheFileImports: the import suggestion's `use`
+// line is an insertion after the file's last `use` declaration -- past the
+// closing brace of one whose list spans lines -- or at the top of a file with
+// none, followed by a blank line.
+func TestConceptImportEditGoesWithTheFileImports(t *testing.T) {
+	s := New(&fakeRegistry{concepts: []string{"v1:cognition:space"}})
+	for _, tc := range []struct {
+		src  string
+		at   Position
+		text string
+	}{
+		{"query ", Position{Line: 1, Column: 1}, "use cognition.concepts.{ space }\n\n"},
+		{"use cluster.concepts.{ node }\nquery ", Position{Line: 2, Column: 1}, "use cognition.concepts.{ space }\n"},
+		{"use cluster.concepts.{\n  node,\n  row\n}\n\nquery ", Position{Line: 5, Column: 1}, "use cognition.concepts.{ space }\n"},
+	} {
+		lines := strings.Split(tc.src, "\n")
+		var edits []TextEdit
+		for _, it := range s.Complete(tc.src, len(lines), len(lines[len(lines)-1])+1, "probe.memql") {
+			if it.Label == "use cognition.concepts.{ space }" {
+				edits = it.AdditionalEdits
+			}
+		}
+		want := []TextEdit{{Range: Range{Start: tc.at, End: tc.at}, NewText: tc.text}}
+		if !reflect.DeepEqual(edits, want) {
+			t.Errorf("%q: the import edit is %+v, want %+v", tc.src, edits, want)
+		}
 	}
 }

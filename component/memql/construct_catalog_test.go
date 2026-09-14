@@ -62,7 +62,9 @@ query widget catalogFixtureWidgets {
     /// Which lifecycle state to read.
     state     string  @enum("live", "retired")
   }
-  filter  ownerUserId==actor.userId && when(args.widgetId) { row.id==args.widgetId } && when(args.state) { status==args.state }
+  filter  row => row.ownerUserId == actor.userId
+              && (args.widgetId == nil || row.id == args.widgetId)
+              && (args.state == nil || row.status == args.state)
   sort    "row.createdAt", "desc"
   shape   widgetFull
 }

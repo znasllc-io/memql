@@ -23,14 +23,10 @@ func lifecycleDiscardLogger() *slog.Logger {
 
 func TestLoadUnifiedSpecs_DisabledSpecSkipped(t *testing.T) {
 	overlay := fstest.MapFS{"specs.memql": {Data: []byte(`@disabled
-spec actorEnvelope retiredProbeSpec {
-  return role == "admin"
-}
+spec actorEnvelope retiredProbeSpec = actor => actor.role == "admin"
 
 @enabled
-spec actorEnvelope liveProbeSpec {
-  return role == "admin"
-}
+spec actorEnvelope liveProbeSpec = actor => actor.role == "admin"
 `)}}
 	const domain = "lifecycledisabledspecs"
 	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
@@ -85,14 +81,10 @@ spec actorEnvelope brokenRetiredSpec {
 
 func TestLoadUnifiedSpecs_DisabledTraitSkipped(t *testing.T) {
 	overlay := fstest.MapFS{"traits.memql": {Data: []byte(`@disabled
-trait retiredProbeTrait {
-  return effect == "allow"
-}
+trait retiredProbeTrait = row => row.effect == "allow"
 
 @enabled
-trait liveProbeTrait {
-  return effect == "allow"
-}
+trait liveProbeTrait = row => row.effect == "allow"
 `)}}
 	const domain = "lifecycledisabledtraits"
 	memqldsl.RegisterTree(domain, withLanguageLine(overlay))

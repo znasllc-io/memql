@@ -164,9 +164,9 @@ A condition is boolean: there is no truthiness, and `!` negates exactly. An
 optional argument is a plain predicate, `args.x == nil || row.f == args.x`,
 which the engine folds before the query runs. The retired spellings (`when(...)`,
 `;` and `,` as connectives, `has`, `?.`, `cond(...)`, `coalesce(...)`,
-`concat(...)`, ...) are refused where an expression is written; the full list is
-[memql.md](memql.md#retired-spellings), and `memqlmigrate --rewrite=expressions`
-rewrites them.
+`concat(...)`, ...) are refused at parse wherever a `.memql` file writes them;
+the full list is [memql.md](memql.md#retired-spellings), and
+`memqlmigrate --rewrite=expressions` rewrites them.
 
 ---
 
@@ -214,9 +214,9 @@ Filter rules:
 An optional argument is a plain predicate: `args.x == nil || <predicate>`.
 Nothing in it reads the row until the second half, so the engine computes
 `args.x == nil` once before the query runs: the clause becomes true when the
-caller leaves the argument out and the predicate alone when they pass it. It
-replaces the retired `when(args.x) { ... }` guard, and under `||` the form is
-`args.x != nil && <predicate>`:
+argument is unset (left out, null or `""`) and the predicate alone when it is
+set. It replaces the retired `when(args.x) { ... }` guard, and under `||` the
+form is `args.x != nil && <predicate>`:
 
 ```memql
 @description("Active folders, optionally narrowed to a creator")
@@ -576,7 +576,7 @@ argument does what each entry says.
 | `list.all(pred lambda) bool` | Pushed down on a row field, in process otherwise | Reports whether pred holds for every element of the list. An empty or absent list answers true. |  |
 | `list.any(pred lambda) bool` | Pushed down on a row field, in process otherwise | Reports whether pred holds for at least one element of the list. An empty or absent list answers false. |  |
 | `list.avg(fn lambda) number` | In process | Returns the mean of fn over the elements of the list. An empty or absent list yields an absent value, and fn returning a non-number is an error. |  |
-| `list.count() number` | Pushed down on a row field, in process otherwise | Returns the number of elements in the list. An absent list counts as zero. | `len(x)`, `count(x)` |
+| `list.count() number` | Pushed down on a row field, in process otherwise | Returns the number of elements in the list. An absent list counts as zero. Over a row field it counts what is stored: an array's elements, a string's characters, and zero for anything else. | `len(x)`, `count(x)` |
 | `list.distinct(key? lambda) list` | In process | Returns the list with repeated elements dropped, keeping the first of each; with key, two elements repeat when key gives both the same value. An absent list yields an empty list. |  |
 | `list.empty() bool` | In process | Reports whether the list has no elements. An absent list is empty. |  |
 | `list.first() any` | In process | Returns the first element of the list. An empty or absent list yields an absent value; to take the first match, filter first: `xs.where(x => p).first()`. | `first(x)` |

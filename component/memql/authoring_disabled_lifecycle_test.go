@@ -24,9 +24,7 @@ import (
 
 const sessionDisabledSpecSrc = `@disabled
 @description("session spec, deliberately disabled")
-spec actorEnvelope mcpDisabledSpec {
-  return role == "admin"
-}`
+spec actorEnvelope mcpDisabledSpec = actor => actor.role == "admin"`
 
 const sessionDisabledCapSrc = `@disabled
 @sideEffect("read")
@@ -177,9 +175,7 @@ func TestSandboxCompile_DisabledCapability_NamesTheState(t *testing.T) {
 }
 
 const sessionCorrectedSpecSrc = `@description("session spec, re-enabled")
-spec actorEnvelope mcpDisabledSpec {
-  return role == "admin"
-}`
+spec actorEnvelope mcpDisabledSpec = actor => actor.role == "admin"`
 
 // TestRehydrateBundle_DisabledStoredSpec_SkipsWithoutFailed: the LIVE
 // propagation walk (the authoring.promote broadcast path peer replicas run)

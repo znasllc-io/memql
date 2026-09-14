@@ -33,9 +33,7 @@ spec agent isAssistant = row => row.role == "assistant"
 trait isActiveRecord = row => row.active == true
 
 /// A braced spec beside them.
-spec agent isLegacy {
-  return role == "x"
-}
+spec agent isLegacy = row => row.role == "x"
 
 /// Reads active assistants.
 @unbounded("fixture")

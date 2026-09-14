@@ -383,6 +383,13 @@
       "verdict": "evaluate",
       "concept": "ticket",
       "expect": null
+    },
+    {
+      "file": "keyless-map-entry.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_keyless_map_entry",
+      "message": "a map entry needs a key: write identityId: args.event.payload.identityId (memqlmigrate --rewrite=expressions rewrites it)",
+      "note": "Every entry of a map literal names its key. The retired spelling took the key from the path's last segment."
     }
   ]
 }

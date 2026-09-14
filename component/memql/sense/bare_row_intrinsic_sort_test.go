@@ -37,7 +37,7 @@ func TestScanBareRowIntrinsicSortKeys(t *testing.T) {
 		{"omitted direction still advances", "query widget q {\n  sort \"version\", \"createdAt\"\n}\n", []string{"createdAt"}},
 
 		// Not a sort clause.
-		{"filter clause untouched", "query widget q {\n  filter name==\"createdAt\"\n}\n", nil},
+		{"filter clause untouched", "query widget q {\n  filter row => row.name == \"createdAt\"\n}\n", nil},
 		{"sortOrder does not open a clause", "query widget q {\n  sortOrder \"createdAt\", \"desc\"\n}\n", nil},
 
 		// A construct FIELD named `sort` is an ordinary shape (it lets a
@@ -45,7 +45,7 @@ func TestScanBareRowIntrinsicSortKeys(t *testing.T) {
 		// contents, a boundary-only opener check read its annotation literals
 		// as sort keys and failed CI pointing inside an @enum. Requiring the
 		// string literal the grammar demands is what excludes it.
-		{"args field named sort", "query widget q {\n  args {\n    sort  string  @enum(\"createdAt\", \"title\")\n  }\n  filter status==\"a\"\n}\n", nil},
+		{"args field named sort", "query widget q {\n  args {\n    sort  string  @enum(\"createdAt\", \"title\")\n  }\n  filter row => row.status == \"a\"\n}\n", nil},
 		{"concept field named sort", "concept widget {\n  sort  string  @default(\"createdAt\")\n}\n", nil},
 		{"tool field named sort", "tool t {\n  sort  string  @enum(\"createdAt\", \"desc\")\n}\n", nil},
 

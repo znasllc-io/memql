@@ -13,7 +13,7 @@ func TestToLSPCompletionItemInsertTextFormat(t *testing.T) {
 	snip := toLSPCompletionItem(sense.CompletionItem{
 		Label: "args { ... }", Kind: "snippet",
 		InsertText: "args {\n\t$0\n}", IsSnippet: true,
-	})
+	}, "")
 	if snip.InsertTextFormat == nil {
 		t.Fatal("snippet item must declare InsertTextFormat")
 	}
@@ -23,7 +23,7 @@ func TestToLSPCompletionItemInsertTextFormat(t *testing.T) {
 
 	plain := toLSPCompletionItem(sense.CompletionItem{
 		Label: "userId", Kind: "field", InsertText: "userId",
-	})
+	}, "")
 	if plain.InsertTextFormat == nil {
 		t.Fatal("plain item must declare InsertTextFormat explicitly")
 	}

@@ -72,7 +72,7 @@ query probeWidget queryBad {
   args {
     id 999 @required
   }
-  filter ownerUserId == args.id
+  filter row => row.ownerUserId == args.id
   shape whatever
 }`,
 		},
@@ -232,7 +232,7 @@ query doesNotExistConcept queryDangling {
   args {
     id string @required
   }
-  filter ownerUserId == args.id
+  filter row => row.ownerUserId == args.id
   shape whatever
 }`
 	d := diagFor(t, bundle, "queryDangling")

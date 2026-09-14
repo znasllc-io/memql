@@ -18,9 +18,9 @@ func TestSenseSurfacesRetiredAnnotationBury(t *testing.T) {
 		src    string
 		ticket string
 	}{
-		{"role", "@role(\"admin\")\nquery user queryAdminThing {\n  filter isActiveRecord\n}\n", "#2709"},
-		{"internal", "@internal\nquery user queryHiddenThing {\n  filter isActiveRecord\n}\n", "#2708"},
-		{"permission", "@permission(\"read:users\")\nquery user queryPermThing {\n  filter isActiveRecord\n}\n", "#2713"},
+		{"role", "@role(\"admin\")\nquery user queryAdminThing {\n  filter row => isActiveRecord(row)\n}\n", "#2709"},
+		{"internal", "@internal\nquery user queryHiddenThing {\n  filter row => isActiveRecord(row)\n}\n", "#2708"},
+		{"permission", "@permission(\"read:users\")\nquery user queryPermThing {\n  filter row => isActiveRecord(row)\n}\n", "#2713"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

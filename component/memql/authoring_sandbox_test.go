@@ -15,9 +15,7 @@ func TestSandboxCompileBundle_ValidConstructs(t *testing.T) {
 			Kind: "spec",
 			Name: "specSandboxAdmin",
 			Source: `@description("Caller is admin")
-spec actorEnvelope specSandboxAdmin {
-  return role == "admin"
-}`,
+spec actorEnvelope specSandboxAdmin = actor => actor.role == "admin"`,
 		},
 		{
 			Kind: "shape",
@@ -52,9 +50,7 @@ func TestSandboxCompileBundle_SyntaxErrorFailsBundle(t *testing.T) {
 			Kind: "spec",
 			Name: "specOK",
 			Source: `@description("ok")
-spec actorEnvelope specOK {
-  return role == "admin"
-}`,
+spec actorEnvelope specOK = actor => actor.role == "admin"`,
 		},
 		{
 			Kind: "shape",
@@ -116,7 +112,7 @@ func TestSandboxCompileBundle_UnsupportedKindSkipped(t *testing.T) {
 func TestSandboxCompileBundle_NoMutationOfConceptRegistry(t *testing.T) {
 	before := len(memoryNodes.List())
 	_ = SandboxCompileBundle([]SandboxConstruct{
-		{Kind: "spec", Name: "specSandboxAdmin", Source: `spec actorEnvelope specSandboxAdmin { return role == "admin" }`},
+		{Kind: "spec", Name: "specSandboxAdmin", Source: `spec actorEnvelope specSandboxAdmin = actor => actor.role == "admin"`},
 		{Kind: "shape", Name: "sandboxActorEnv", Source: "@actor\nshape sandboxActorEnv {\n  actor.userId\n}"},
 		{Kind: "automation", Name: "autoX", Source: "automation autoX { }"},
 	})
@@ -130,7 +126,7 @@ func TestSandboxCompileBundle_NoMutationOfConceptRegistry(t *testing.T) {
 // non-skipped constructs (one failure flips the whole bundle).
 func TestSandboxCompileBundle_AggregatesOK(t *testing.T) {
 	rep := SandboxCompileBundle([]SandboxConstruct{
-		{Kind: "spec", Name: "good", Source: `spec actorEnvelope good { return role == "admin" }`},
+		{Kind: "spec", Name: "good", Source: `spec actorEnvelope good = actor => actor.role == "admin"`},
 		{Kind: "spec", Name: "bad", Source: `spec actorEnvelope bad { return role == }`}, // dangling operator
 		{Kind: "automation", Name: "skip", Source: "automation skip { }"},
 	})
@@ -143,8 +139,8 @@ func TestSandboxCompileBundle_AggregatesOK(t *testing.T) {
 // (kind, name) fail the bundle; same name across different kinds does not.
 func TestSandboxCompileBundle_DuplicateConstruct(t *testing.T) {
 	rep := SandboxCompileBundle([]SandboxConstruct{
-		{Kind: "spec", Name: "dup", Source: `spec actorEnvelope dup { return role == "admin" }`},
-		{Kind: "spec", Name: "dup", Source: `spec actorEnvelope dup { return role == "owner" }`},
+		{Kind: "spec", Name: "dup", Source: `spec actorEnvelope dup = actor => actor.role == "admin"`},
+		{Kind: "spec", Name: "dup", Source: `spec actorEnvelope dup = actor => actor.role == "owner"`},
 	})
 	if rep.OK {
 		t.Fatalf("expected bundle FAIL on duplicate, got OK: %+v", rep.Diagnostics)
@@ -160,7 +156,7 @@ func TestSandboxCompileBundle_DuplicateConstruct(t *testing.T) {
 	}
 
 	rep2 := SandboxCompileBundle([]SandboxConstruct{
-		{Kind: "spec", Name: "same", Source: `spec actorEnvelope same { return role == "admin" }`},
+		{Kind: "spec", Name: "same", Source: `spec actorEnvelope same = actor => actor.role == "admin"`},
 		{Kind: "shape", Name: "same", Source: "@actor\nshape same {\n  actor.userId\n}"},
 	})
 	if !rep2.OK {
@@ -172,7 +168,7 @@ func TestSandboxCompileBundle_DuplicateConstruct(t *testing.T) {
 // match the name in the source.
 func TestSandboxCompileBundle_NameMismatch(t *testing.T) {
 	rep := SandboxCompileBundle([]SandboxConstruct{
-		{Kind: "spec", Name: "claimedName", Source: `spec actorEnvelope actualName { return role == "admin" }`},
+		{Kind: "spec", Name: "claimedName", Source: `spec actorEnvelope actualName = actor => actor.role == "admin"`},
 	})
 	if rep.OK {
 		t.Fatalf("expected bundle FAIL on name mismatch, got OK: %+v", rep.Diagnostics)

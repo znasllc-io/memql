@@ -93,7 +93,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`
 
 const testShapes = `use demo.concepts.{ item }
@@ -182,7 +182,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`,
 			},
 		},
@@ -198,7 +198,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`,
 			},
 		},
@@ -445,7 +445,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }`,
 	})
 
@@ -559,7 +559,7 @@ query item queryItems {
   args {
     name  string  @required
   }
-  filter  name == args.name
+  filter  row => row.name == args.name
 }
 
 @enabled
@@ -575,9 +575,7 @@ query item unstatusedItems {
 
 @enabled
 @description("An item with a name.")
-spec item isNamed {
-  return name != ""
-}
+spec item isNamed = row => row.name != ""
 
 @enabled
 @description("An item with a status, written with the retired null.")
@@ -625,7 +623,6 @@ var lintRewriteRefusalCases = []struct {
 	{"refine with count", "query thing q {\n  filter row => row.a == 1\n  refine row => row.b == 2\n  count\n}\n", "refine", 1, "`refine` cannot be combined with `count`"},
 	{"count with shape", "query thing q {\n  filter row => row.a == 1\n  shape thingCard\n  count\n}\n", "count", 1, "`count` and `shape` are mutually exclusive"},
 	{"count with paginate", "query thing q {\n  filter row => row.a == 1\n  count\n  paginate 10\n}\n", "count", 1, "`count` cannot be combined with `sort` or `paginate`"},
-	{"@unbounded with no reason", "@unbounded\nquery thing q {\n  filter row => row.a == 1\n}\n", "@unbounded", 1, "`@unbounded` requires a reason string"},
 	{"@unbounded with an empty reason", "@unbounded(\"  \")\nquery thing q {\n  filter row => row.a == 1\n}\n", "@unbounded", 1, "requires a non-empty reason string"},
 	{"@unbounded with paginate", "@unbounded(\"every one\")\nquery thing q {\n  filter row => row.a == 1\n  paginate 10\n}\n", "@unbounded", 1, "cannot be combined with `paginate` or `sort`"},
 	{"@unbounded with count", "@unbounded(\"every one\")\nquery thing q {\n  filter row => row.a == 1\n  count\n}\n", "@unbounded", 1, "cannot be combined with `count`"},
@@ -669,9 +666,7 @@ var lintRewriteRefusalCases = []struct {
 	// one line, and a query the query stage lowers to fewer lines.
 	{"a refine below a stripped spec and a lowered query", `use probe.concepts.{ thing }
 
-spec thing isOpen {
-  return status == "open"
-}
+spec thing isOpen = row => row.status == "open"
 
 query thing first {
   args {

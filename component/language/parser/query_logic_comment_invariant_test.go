@@ -43,12 +43,12 @@ import (
 func TestQuerySource_CommentContentNeverChangesTheCompiledQuery(t *testing.T) {
 	// %s is where the comment is spliced in.
 	positions := map[string]string{
-		"preamble":      "%s\n@description(\"d\")\nquery widget q {\n  args {\n    id string @required\n  }\n  filter id==args.id\n  shape widgetCard\n}",
-		"body top":      "@description(\"d\")\nquery widget q {\n%s\n  args {\n    id string @required\n  }\n  filter id==args.id\n  shape widgetCard\n}",
-		"inside args":   "@description(\"d\")\nquery widget q {\n  args {\n%s\n    id string @required\n  }\n  filter id==args.id\n  shape widgetCard\n}",
-		"after args":    "@description(\"d\")\nquery widget q {\n  args {\n    id string @required\n  }\n%s\n  filter id==args.id\n  shape widgetCard\n}",
-		"between field": "@description(\"d\")\nquery widget q {\n  args {\n    id string @required\n  }\n  filter id==args.id\n%s\n  shape widgetCard\n}",
-		"body end":      "@description(\"d\")\nquery widget q {\n  args {\n    id string @required\n  }\n  filter id==args.id\n  shape widgetCard\n%s\n}",
+		"preamble":      "%s\n@description(\"d\")\nquery widget q {\n  args {\n    id string @required\n  }\n  filter row => row.id == args.id\n  shape widgetCard\n}",
+		"body top":      "@description(\"d\")\nquery widget q {\n%s\n  args {\n    id string @required\n  }\n  filter row => row.id == args.id\n  shape widgetCard\n}",
+		"inside args":   "@description(\"d\")\nquery widget q {\n  args {\n%s\n    id string @required\n  }\n  filter row => row.id == args.id\n  shape widgetCard\n}",
+		"after args":    "@description(\"d\")\nquery widget q {\n  args {\n    id string @required\n  }\n%s\n  filter row => row.id == args.id\n  shape widgetCard\n}",
+		"between field": "@description(\"d\")\nquery widget q {\n  args {\n    id string @required\n  }\n  filter row => row.id == args.id\n%s\n  shape widgetCard\n}",
+		"body end":      "@description(\"d\")\nquery widget q {\n  args {\n    id string @required\n  }\n  filter row => row.id == args.id\n  shape widgetCard\n%s\n}",
 	}
 
 	payloads := map[string]string{
@@ -157,7 +157,7 @@ func TestLogicSource_CommentContentNeverChangesTheCompiledLogic(t *testing.T) {
 // rather than refuse the load, since the field parsers take the rest of the
 // line verbatim.
 func TestQuerySource_TrailingCommentOnAFieldLine(t *testing.T) {
-	const control = "@description(\"d\")\nquery widget q {\n  filter id==args.id\n  shape widgetCard\n}"
+	const control = "@description(\"d\")\nquery widget q {\n  filter row => row.id == args.id\n  shape widgetCard\n}"
 
 	want, err := NormaliseQuerySource(control)
 	if err != nil {
@@ -165,8 +165,8 @@ func TestQuerySource_TrailingCommentOnAFieldLine(t *testing.T) {
 	}
 
 	for name, src := range map[string]string{
-		"line comment after filter": "@description(\"d\")\nquery widget q {\n  filter id==args.id // only this one\n  shape widgetCard\n}",
-		"block comment after shape": "@description(\"d\")\nquery widget q {\n  filter id==args.id\n  shape widgetCard /* the card projection */\n}",
+		"line comment after filter": "@description(\"d\")\nquery widget q {\n  filter row => row.id == args.id // only this one\n  shape widgetCard\n}",
+		"block comment after shape": "@description(\"d\")\nquery widget q {\n  filter row => row.id == args.id\n  shape widgetCard /* the card projection */\n}",
 	} {
 		t.Run(name, func(t *testing.T) {
 			got, err := NormaliseQuerySource(src)
@@ -185,7 +185,7 @@ func TestQuerySource_TrailingCommentOnAFieldLine(t *testing.T) {
 // aware, or this fix would silently truncate a legitimate value. If this fails,
 // the blanked-view read is unsafe and the fix must slice from raw instead.
 func TestQuerySource_CommentMarkersInsideStringsSurvive(t *testing.T) {
-	const src = "@description(\"d\")\nquery widget q {\n  filter path==\"a//b\" && note==\"ends /* here\"\n  shape widgetCard\n}"
+	const src = "@description(\"d\")\nquery widget q {\n  filter row => row.path == \"a//b\" && row.note == \"ends /* here\"\n  shape widgetCard\n}"
 
 	got, err := NormaliseQuerySource(src)
 	if err != nil {

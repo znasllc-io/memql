@@ -148,7 +148,7 @@ use crossns.shapes.{ crossThingCard }
 
 @description("query over the bundle concept via the bundle shape")
 query crossThing queryCrossThing {
-  filter  name == "x"
+  filter  row => row.name == "x"
   shape   crossThingCard
 }`,
 		},

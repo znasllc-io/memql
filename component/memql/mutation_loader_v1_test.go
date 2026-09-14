@@ -76,7 +76,7 @@ mutate probe createProbe {
     source   string
   }
   insert {
-    id: concat("p-", hash(concat(args.probeId, ":", args.title)))
+    id: "p-" + hash(args.probeId + ":" + args.title)
     args.title
     args.status
     note: args.note ?? "none"
@@ -84,8 +84,8 @@ mutate probe createProbe {
     done: false
     tags: [args.tagA, args.tagB, "fixed"]
     details: { source: args.source ?? "import", depth: 1 }
-    label: cond(args.status == "active", "LIVE", "IDLE")
-    ref: concat("ref-", args.probeId)
+    label: args.status == "active" ? "LIVE" : "IDLE"
+    ref: "ref-" + args.probeId
     ownerUserId: actor.userId
   }
 }

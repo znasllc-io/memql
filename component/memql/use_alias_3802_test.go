@@ -159,7 +159,7 @@ func TestAliasIsHonouredByTheAuthoringSandbox(t *testing.T) {
 	const src = `use harness.concepts.{ plan as harnessPlan }
 
 query harnessPlan probeAliasInSandbox {
-  filter  row.id != ""
+  filter  row => row.id != ""
 }`
 	// The ORIGIN is memql#3800's half: it supplies the ambient domain, so this
 	// bundle is validated as a planner file exactly as the loader would see it.

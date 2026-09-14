@@ -150,7 +150,7 @@ func TestSignatureAmbientBind_QueryFilterIsGated(t *testing.T) {
   args {
     widgetId string @required
   }
-  filter row.id==args.widgetId
+  filter row => row.id == args.widgetId
 }`
 
 	// Refused: only the foreign concept exists.
