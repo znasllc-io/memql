@@ -21,8 +21,10 @@ package automations
 // a completed step is served from the journal and never re-run; a step
 // whose type has no external effect (query, shape, function, forEach,
 // parallel, switch, automation) is re-run; a mutation, webhook, event or
-// action step at the resume point needs AllowSideEffects, because the
-// journal cannot yet tell whether its far side already holds a receipt.
+// action step at the resume point -- and a statement body's `mutation` call
+// (stepRetryable) -- needs AllowSideEffects, because the journal cannot yet
+// tell whether its far side already holds a receipt. A statement body
+// resumes by running again over its recorded values (resume_statements.go).
 // Epic A2 wires the receipts and narrows this to "retried when
 // idempotent by key".
 //
@@ -43,6 +45,7 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 var (
@@ -92,6 +95,17 @@ type RunJournal struct {
 	// FailedStep is the key of the step at `failed` or `running` with no
 	// receipt -- the default resume point.
 	FailedStep string
+	// StepStates is every step's latest row, by key: its status and the
+	// attempt it recorded. A statement body resumes from these (epic
+	// memql#5370): a `failed` statement that carries `on error continue` was
+	// continued past, and stays so.
+	StepStates map[string]StepState
+}
+
+// StepState is one step's latest journal row: its status and its attempt.
+type StepState struct {
+	Status  string
+	Attempt int
 }
 
 // ResumeOptions configures resume behavior.
@@ -177,6 +191,7 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 		ChainHead:             stringField(run, "chainHead"),
 		InitialChainHead:      stringField(run, "initialChainHead"),
 		Steps:                 map[string]*MinimalStepResult{},
+		StepStates:            map[string]StepState{},
 	}
 	j.HeartbeatAt, _ = time.Parse(time.RFC3339Nano, stringField(run, "heartbeatAt"))
 	j.WaitingOn, _ = run["waitingOn"].(map[string]any)
@@ -193,9 +208,13 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 	}
 	for _, row := range steps {
 		key := stringField(row, "key")
-		if key == "" {
+		if key == "" || isNestedStepKey(key) {
+			// A nested key is a row of a logic a statement called (a logic's
+			// statements journal under the calling statement's key): resume
+			// re-runs that statement, never into it.
 			continue
 		}
+		j.StepStates[key] = StepState{Status: stringField(row, "status"), Attempt: intField(row, "attempt")}
 		if stringField(row, "status") == "running" {
 			j.HasRunningStep = true
 		}
@@ -258,6 +277,30 @@ func boolField(m map[string]any, k string) bool {
 	return b
 }
 
+// intField reads a step row's attempt however the row decoded it.
+//
+// narrowing: ZERO -- the one caller reads 0 as "no attempt recorded" and
+// resumes as the second attempt (attemptBase); a number out of range is no
+// attempt this executor wrote, and saturating would claim an attempt count
+// nobody made.
+func intField(m map[string]any, k string) int {
+	switch n := m[k].(type) {
+	case int:
+		return n
+	case int64:
+		return num.Int64OrZero(n)
+	case float64:
+		return num.Float64OrZero(n)
+	}
+	return 0
+}
+
+// isNestedStepKey reports whether a step key belongs to a list inside a step
+// -- `decide/a`, `for_x/0/touch` -- rather than to the run's own list.
+func isNestedStepKey(key string) bool {
+	return strings.Contains(key, "/")
+}
+
 // ResumeFrom resumes execution from the work journal.
 // It rehydrates the evaluator with the completed step results the journal
 // holds, then continues execution from the specified step (or the
@@ -288,6 +331,9 @@ func (e *Executor) ResumeFrom(
 
 	// Determine the resume point
 	resumeStepId := journal.FailedStep
+	if automation.IsStatementBody() {
+		resumeStepId = statementResumePoint(journal, automation)
+	}
 	if opts.FromStep != "" {
 		resumeStepId = opts.FromStep
 	}
@@ -307,7 +353,7 @@ func (e *Executor) ResumeFrom(
 	}
 
 	// Check if resume step is retryable
-	if !IsStepRetryable(resumeStep.Type) && !opts.AllowSideEffects {
+	if !stepRetryable(automation, resumeStep) && !opts.AllowSideEffects {
 		return nil, fmt.Errorf("%w: step %q is type %s, set AllowSideEffects to retry",
 			ErrNonRetryableStep, resumeStepId, resumeStep.Type)
 	}
@@ -472,6 +518,14 @@ func (e *Executor) ResumeFrom(
 		Execution:            exec,
 		AutomationTrigger:    e.automationTrigger,
 		ChainTrackingEnabled: e.chainTrackingEnabled,
+	}
+
+	if automation.IsStatementBody() {
+		// The body runs again from its first statement over names rehydrated
+		// from the journal; the statement order is the body's, so it is not
+		// copied from the journal.
+		exec.StepOrder = exec.StepOrder[:0]
+		return e.runStatementAutomation(ctx, automation, exec, nil, writer, stepCtx, chainHead, resumedStatements(journal, automation, resumeIndex))
 	}
 
 	// Execute steps starting from resumeIndex
@@ -720,6 +774,7 @@ func ToMinimalStepResults(steps map[string]*StepResult) map[string]*MinimalStepR
 				minResult.Result = UnwrapStepResult(result.Result)
 			}
 		}
+		minResult.Value = result.Bound
 
 		// Extract key metadata for evaluator
 		if result.Metadata != nil {

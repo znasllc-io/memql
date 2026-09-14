@@ -718,6 +718,23 @@ The run belongs to the deployment (the synthetic journal actor), as an automatio
 - [ ] **Step 4: Run** the db-gated trees.
 - [ ] **Step 5: Commit** `Issue #5372: dry run and resume behave identically over the statement form`.
 
+**As built.** `dryrun.go` needed no change: the driver already runs a statement body through the same executor.
+
+*The sandbox:*
+- A statement `for` and a `block` (a parallel branch) re-enter the sandbox through the executor's sequence runner, whose registry is the sandbox. `block` needed classifying; before, the fail-closed arm refused it.
+- A function statement that says `mutation` is intercepted even where the registry can't answer.
+- A statement-body logic runs through the sandbox registry on a runner `WithoutJournal`.
+
+*Resume:* a statement body doesn't jump into its list. It runs again from its first statement over names rehydrated from the journal.
+- Each receipt records the value its statement bound (`StepResult.Bound`, journaled as `MinimalStepResult.Value`).
+- Before the resume point, a `done` statement rebinds its recorded value and doesn't run, and a statement that failed under `on error continue` stays absent.
+- The resume point is the first statement in the body's order that failed without `on error continue` or was left `running`. Rows come back in no particular order, so `FailedStep` can name a continued failure. The resume point's attempts carry on from the one it recorded.
+- `runJournalFromRows` drops nested keys (`decide/a`, `for_x/0/touch`), so a logic's row never becomes the resume point.
+- A statement `mutation` needs `AllowSideEffects`, as a mutation step does.
+- A query's rows past 100 aren't recorded, and the resumed body reads them again.
+
+*Known limit, inherited from `forEach`:* a `for` or `parallel` that failed part-way runs again whole on resume, because its iterations aren't journaled individually.
+
 ## Task 12: The corpus: statement cells, the completeness gate, scenarios (#5374)
 
 **Files:**

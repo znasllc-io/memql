@@ -192,13 +192,27 @@ automation applies%d {
 	if err != nil {
 		t.Fatalf("the automation's run: %v", err)
 	}
-	for _, key := range []string{"verdict", "verdict/a", "verdict/write", "verdict/return", "after"} {
-		if s := journal.Steps[key]; s == nil || s.Status != "success" {
-			t.Errorf("step %q: %+v", key, s)
-		}
-	}
 	if len(journal.StepOrder) != 2 {
 		t.Errorf("step order %v: the run's own statements only", journal.StepOrder)
+	}
+	// Read the step rows themselves: the RunJournal resume reads leaves the
+	// nested ones out by design.
+	call, err := journalArgs("workStepsForRun", map[string]any{"runId": exec.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := engine.Execute(journalContext(context.Background()), "query "+call)
+	if err != nil {
+		t.Fatalf("read the step rows: %v", err)
+	}
+	status := map[string]string{}
+	for _, row := range memql.MaterializeRows(res) {
+		status[stringField(row, "key")] = stringField(row, "status")
+	}
+	for _, key := range []string{"verdict", "verdict/a", "verdict/write", "verdict/return", "after"} {
+		if status[key] != "done" {
+			t.Errorf("step %q is %q, want a done row in the automation's run (rows: %v)", key, status[key], status)
+		}
 	}
 	for _, run := range probe.runs {
 		if run != exec.ID {

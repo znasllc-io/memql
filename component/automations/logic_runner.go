@@ -46,6 +46,8 @@ type LogicRunner struct {
 	// journalExec writes a statement-body logic's journal instead of the
 	// engine: a test's recorder (logic_statements.go). Nil in production.
 	journalExec journalExecutor
+	// noJournal is WithoutJournal's: the logic journals nothing.
+	noJournal bool
 }
 
 // NewLogicRunner constructs a LogicRunner. The step registry and engine

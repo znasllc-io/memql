@@ -388,6 +388,27 @@ automation reacts {
 	}
 }
 
+func TestALogicRunWithoutJournalLeavesNoRow(t *testing.T) {
+	// The dry-run sandbox's runner: a preview leaves no run, even where a
+	// write gets past the sandbox -- directly called or inside a run.
+	name, body := compiledLogic(t, `logic writes {
+  builtin write()
+  return 1
+}`)
+	for _, ctx := range []context.Context{
+		context.Background(),
+		common.ContextWithRun(context.Background(), common.RunContext{RunId: "run-1", StepKey: "s", Mode: common.RunModeLive}),
+	} {
+		r, _, rec := newLogicRig(nil)
+		if _, err := r.WithoutJournal().RunLogicBody(ctx, name, body, nil); err != nil {
+			t.Fatal(err)
+		}
+		if calls := rec.all(); len(calls) != 0 {
+			t.Fatalf("a runner without a journal wrote %d row(s): %v", len(calls), calls)
+		}
+	}
+}
+
 func TestJournalWritesAreNotTheRunsWrites(t *testing.T) {
 	// Were they, the first write of a held journal's flush would re-enter the
 	// release that is flushing it.

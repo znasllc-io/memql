@@ -740,7 +740,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	// A statement body runs through runSequence (sequence.go), the one loop
 	// for its lists; the loop below is every other automation's.
 	if automation.IsStatementBody() {
-		return e.runStatementAutomation(ctx, automation, exec, triggeringEvent, journal, stepCtx, chainHead)
+		return e.runStatementAutomation(ctx, automation, exec, triggeringEvent, journal, stepCtx, chainHead, nil)
 	}
 
 	// The graph-level stop. See cancel.go: the zero value asks at the FIRST

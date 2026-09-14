@@ -121,6 +121,9 @@ func (r *LogicRunner) RunLogicBody(ctx context.Context, fnName string, body []ma
 			// compile): its rows go through the engine's journal.
 			journal = r.logicJournal()
 		}
+		if r.noJournal {
+			journal = nil
+		}
 		exec.ID = caller.RunId
 		steps = keyedUnder(steps, caller.StepKey)
 		run.journal, run.rowsOnly = journal, true
@@ -155,10 +158,22 @@ func (r *LogicRunner) RunLogicBody(ctx context.Context, fnName string, body []ma
 	return out.Value, nil
 }
 
+// WithoutJournal returns a runner whose logic journals nothing, however it is
+// called: the dry-run sandbox's (component/automations/steps), whose preview
+// must leave no run behind, whatever the logic writes.
+func (r *LogicRunner) WithoutJournal() *LogicRunner {
+	c := *r
+	c.noJournal = true
+	return &c
+}
+
 // logicJournal is a journal for a logic's statements: through a test's
-// recorder (journalExec) or the engine. Nil without either -- every journal
-// method is a no-op on nil.
+// recorder (journalExec) or the engine. Nil without either, and for a runner
+// WithoutJournal -- every journal method is a no-op on nil.
 func (r *LogicRunner) logicJournal() *workJournal {
+	if r.noJournal {
+		return nil
+	}
 	if r.journalExec != nil {
 		return newWorkJournal(r.journalExec, r.logger)
 	}

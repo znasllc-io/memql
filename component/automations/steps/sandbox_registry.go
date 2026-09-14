@@ -117,6 +117,12 @@ func (s *sandboxStepRegistry) Execute(ctx context.Context, step *automations.Ste
 		return (&ParallelExecutor{Registry: s.real, Dispatch: s.Execute}).Execute(ctx, step, stepCtx)
 	case automations.StepTypeSwitch:
 		return (&SwitchExecutor{Registry: s.real, Dispatch: s.Execute}).Execute(ctx, step, stepCtx)
+	case automations.StepTypeBlock:
+		// A statement body's parallel branch. Its list runs through the
+		// executor's sequence runner, whose registry is this one, so every
+		// statement in it -- to any depth -- re-enters this switch. (A statement
+		// `for` does the same through the ForEachExecutor above.)
+		return (&BlockExecutor{}).Execute(ctx, step, stepCtx)
 
 	// Genuinely read-only / pure compute. Named EXPLICITLY rather than left to
 	// a default arm -- which is the point of this change: a step type reaches
@@ -243,31 +249,41 @@ func (s *sandboxStepRegistry) note(stepId, msg string) {
 // "query" / ...) of a function step's target, by consulting the engine's live
 // function registry. Returns "" when the function is unknown (delegated to the
 // real executor, which surfaces the error -- we must not silently swallow it).
+//
+// A statement names its callee's kind itself (`mutation advance(...)`, epic
+// memql#5370), so a statement that says mutation is intercepted as one even
+// where the registry cannot answer; otherwise the registry decides, and the
+// statement's word stands in for an unknown name.
 func (s *sandboxStepRegistry) functionKind(step *automations.Step) string {
-	if step.Function == nil || s.engine == nil {
+	if step.Function == nil {
 		return ""
+	}
+	said := strings.ToLower(strings.TrimSpace(step.Function.Kind))
+	if said == "mutation" {
+		return said
 	}
 	name := strings.TrimSpace(step.Function.Name)
-	if name == "" {
-		return ""
+	if s.engine != nil && name != "" {
+		if fn, ok := s.engine.Functions().Lookup(name); ok && fn != nil {
+			return strings.ToLower(strings.TrimSpace(fn.FunctionKind))
+		}
 	}
-	fn, ok := s.engine.Functions().Lookup(name)
-	if !ok || fn == nil {
-		return ""
-	}
-	return strings.ToLower(strings.TrimSpace(fn.FunctionKind))
+	return said
 }
 
-// interceptLogicFunction runs a multi-step logic body through a sandbox
-// LogicRunner that shares THIS registry, so the body's mutation / webhook steps
-// are intercepted recursively. A single-statement logic (no multi-step body)
-// evaluates through engine.Execute and is delegated to the real executor; its
-// own mutation/webhook would route back through the engine's wired runner --
-// out of scope for increment 1 (multi-step logic is the authored write path).
+// interceptLogicFunction runs a logic body through a sandbox LogicRunner that
+// shares THIS registry, so the body's mutation / webhook steps are intercepted
+// recursively: a statement body (fn.LogicBody) on the sequence runner, a legacy
+// multi-step body on RunLogic. The sandbox's runner journals nothing -- a
+// preview leaves no run, whatever the logic does. A legacy single-statement
+// logic (no multi-step body) evaluates through engine.Execute and is delegated
+// to the real executor; its own mutation/webhook would route back through the
+// engine's wired runner -- out of scope for increment 1 (multi-step logic is
+// the authored write path).
 func (s *sandboxStepRegistry) interceptLogicFunction(ctx context.Context, step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
 	name := strings.TrimSpace(step.Function.Name)
 	fn, ok := s.engine.Functions().Lookup(name)
-	if !ok || fn == nil || fn.LogicSteps == nil {
+	if !ok || fn == nil || (fn.LogicSteps == nil && fn.LogicBody == nil) {
 		// Single-statement logic (or unknown): no multi-step body to recurse
 		// into. Delegate to the real executor.
 		return s.real.Execute(ctx, step, stepCtx)
@@ -276,8 +292,16 @@ func (s *sandboxStepRegistry) interceptLogicFunction(ctx context.Context, step *
 	started := time.Now()
 	s.note(step.ID, "logic "+name+" run in sandbox (nested side effects intercepted)")
 	args := s.stepCallArgs(step, stepCtx, s.resolveLogicCallArgs)
-	runner := automations.NewLogicRunner(s.engine, s, nil)
-	out, err := runner.RunLogic(ctx, name, fn.LogicSteps, args)
+	runner := automations.NewLogicRunner(s.engine, s, nil).WithoutJournal()
+	var (
+		out any
+		err error
+	)
+	if fn.LogicBody != nil {
+		out, err = runner.RunLogicBody(ctx, name, fn.LogicBody, args)
+	} else {
+		out, err = runner.RunLogic(ctx, name, fn.LogicSteps, args)
+	}
 	now := time.Now()
 	if err != nil {
 		return &automations.StepResult{

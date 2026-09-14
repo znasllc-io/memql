@@ -813,6 +813,14 @@ type StepResult struct {
 
 	// ChildFingerprints contains ordered fingerprints for ForEach/Parallel children.
 	ChildFingerprints []string `json:"childFingerprints,omitempty"`
+
+	// Bound is the value a statement bound its name to, or returned, as its
+	// consumers read it (epic memql#5370): what the journal records so a
+	// resumed statement body can rebind the name without re-running the
+	// statement. Nil outside statement bodies, for a statement that binds
+	// nothing, and for a query's rows past maxJournaledRows (resume re-reads
+	// those).
+	Bound any `json:"-"`
 }
 
 // AutomationExecution represents a complete automation run.
@@ -998,4 +1006,7 @@ type MinimalStepResult struct {
 	Error     string         `json:"error,omitempty"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
 	ContentId string         `json:"contentId,omitempty"`
+	// Value is StepResult.Bound: the value a statement bound its name to,
+	// which a resumed statement body rebinds the name to.
+	Value any `json:"value,omitempty"`
 }

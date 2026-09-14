@@ -34,6 +34,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
@@ -65,6 +66,54 @@ type sequenceRun struct {
 	rowsOnly   bool
 	chainHead  string
 	cancelPoll *cancelPoller
+	// resumed is a resumed run's own list's view of its journal (ResumeFrom).
+	resumed *resumedList
+}
+
+// resumedList is what a resumed statement body knows from its journal. The
+// statements before the one it resumes at that finished bind the values they
+// recorded and do not run; those that failed under `on error continue` stay
+// absent, as they were. The statement it resumes at runs on its next attempt,
+// and every statement after it runs as it would have.
+type resumedList struct {
+	done      map[string]*MinimalStepResult
+	continued map[string]bool
+	at        string
+	// attempt is the attempt `at` last recorded.
+	attempt int
+}
+
+// attemptBase is how many attempts of step the journal already holds: its
+// attempts go on from there.
+func (r *sequenceRun) attemptBase(step *Step) int {
+	if r.resumed != nil && step.ID == r.resumed.at {
+		return max(r.resumed.attempt, 1)
+	}
+	return 0
+}
+
+// maxJournaledRows bounds the rows a query statement's recorded value holds,
+// as shouldIncludeResult bounds a bundle's; a longer read is not recorded, and
+// a resumed body reads it again.
+const maxJournaledRows = 100
+
+// journaledValue is the value the journal records for a statement that binds
+// or returns one (StepResult.Bound), as its consumers read it.
+func journaledValue(step *Step, value any) any {
+	if step.Binds == "" && !step.Returns {
+		return nil
+	}
+	v := unwrapStatementValue(value)
+	if rows, ok := v.([]any); ok && len(rows) > maxJournaledRows && isQueryStatement(step) {
+		return nil
+	}
+	return v
+}
+
+// isQueryStatement reports whether a statement is a query call: a read, which
+// a resumed body may run again.
+func isQueryStatement(step *Step) bool {
+	return step.Type == StepTypeFunction && step.Function != nil && strings.EqualFold(step.Function.Kind, "query")
 }
 
 // bodyRunnerKey carries the executor's sequence runner to the step executors
@@ -176,6 +225,15 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 				}
 			}
 		}
+		if r := run.resumed; r != nil {
+			if m, ok := r.done[step.ID]; ok {
+				ev.names.bind(step.Binds, viewRows(m.Value))
+				continue
+			}
+			if r.continued[step.ID] {
+				continue
+			}
+		}
 
 		if step.Exprs != nil && step.Exprs.Condition != nil {
 			shouldRun, err := ev.StepCondition(ctx, step)
@@ -219,6 +277,7 @@ func (e *Executor) runSequence(ctx context.Context, steps []*Step, run *sequence
 			}
 			res.Status, res.Result = "success", unwrapStatementValue(v)
 			if step.Type == StepTypeExpression {
+				res.Bound = journaledValue(step, v)
 				e.recordStep(ctx, run, step, res)
 				ev.names.bind(step.Binds, v)
 				continue
@@ -275,7 +334,7 @@ func (e *Executor) runStatementStep(ctx context.Context, step *Step, stepIndex i
 		if run.top {
 			stepCtx.PreviousChainHead = run.chainHead
 		}
-		run.journalRunning(ctx, step, stepIndex, attempt)
+		run.journalRunning(ctx, step, stepIndex, run.attemptBase(step)+attempt)
 		result, err = e.executeJournaledStep(ctx, run.heartbeatJournal(), step, stepCtx)
 		if result != nil && run.top && stepCtx.ChainTrackingEnabled {
 			result.PreviousChainHead = run.chainHead
@@ -283,6 +342,10 @@ func (e *Executor) runStatementStep(ctx context.Context, step *Step, stepIndex i
 			run.chainHead = string(fingerprintEngine.Combine(id.ID(run.chainHead), id.ID(result.ContentId)))
 		}
 		if result != nil {
+			if err == nil {
+				// Before the receipt, which records it.
+				result.Bound = journaledValue(step, statementValue(step, result))
+			}
 			e.recordStep(ctx, run, step, result)
 		}
 		if err == nil {
@@ -398,8 +461,10 @@ func (c *runCancelled) Error() string { return "run cancelled by " + c.by }
 // its list through runSequence, then the run's close exactly as the legacy
 // loop closes it -- the journal's terminal row, the chain head and dedup
 // registration, the completed event -- plus the value a `return` ended it
-// with, on the execution and in the run's outcome.
-func (e *Executor) runStatementAutomation(ctx context.Context, automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, journal *workJournal, stepCtx *StepContext, chainHead string) (*AutomationExecution, error) {
+// with, on the execution and in the run's outcome. resumed is nil for a
+// fresh run; a resume (ResumeFrom) closes as the legacy resume does, with no
+// dedup registration and no error hook, and says so on the completed event.
+func (e *Executor) runStatementAutomation(ctx context.Context, automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, journal *workJournal, stepCtx *StepContext, chainHead string, resumed *resumedList) (*AutomationExecution, error) {
 	stepCtx.Evaluator.enterStatements()
 	run := &sequenceRun{
 		stepCtx:    stepCtx,
@@ -407,6 +472,7 @@ func (e *Executor) runStatementAutomation(ctx context.Context, automation *Autom
 		journal:    journal,
 		chainHead:  chainHead,
 		cancelPoll: newCancelPoller(e.cancelPollInterval),
+		resumed:    resumed,
 	}
 	out, err := e.runSequence(ctx, automation.Steps, run)
 	chainHead = run.chainHead
@@ -424,7 +490,9 @@ func (e *Executor) runStatementAutomation(ctx context.Context, automation *Autom
 		}
 		exec.Fail(err)
 		journal.closeRun(ctx, exec, chainHead)
-		e.handleAutomationError(ctx, automation, exec, triggeringEvent, err)
+		if resumed == nil {
+			e.handleAutomationError(ctx, automation, exec, triggeringEvent, err)
+		}
 		return exec, err
 	}
 
@@ -433,7 +501,7 @@ func (e *Executor) runStatementAutomation(ctx context.Context, automation *Autom
 	journal.closeRun(ctx, exec, chainHead)
 	if e.chainTrackingEnabled {
 		exec.ChainHead = chainHead
-		if e.dedup != nil {
+		if e.dedup != nil && resumed == nil {
 			e.dedup.register(automation.Name, exec.InitialChainHead, exec.ID)
 		}
 	}
@@ -442,6 +510,10 @@ func (e *Executor) runStatementAutomation(ctx context.Context, automation *Autom
 		"executionId":    exec.ID,
 		"duration":       exec.Duration.Milliseconds(),
 		"stepCount":      len(exec.Steps),
+	}
+	if resumed != nil {
+		completedPayload["runId"] = exec.ID
+		completedPayload["resumed"] = true
 	}
 	if e.chainTrackingEnabled && exec.ChainHead != "" {
 		completedPayload["chainHead"] = exec.ChainHead
