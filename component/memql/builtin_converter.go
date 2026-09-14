@@ -12,9 +12,9 @@ package memql
 //   * Annotation surface: @enabled / @disabled / @sdk (no-ops at the
 //     converter layer -- the loader pipeline reads them elsewhere),
 //     @description, @executor (REQUIRED), @alias (multi-valued),
-//     @args(profile=..., stringKey=..., additionalProperties=...).
-//     Unknown annotations are tolerated silently (mirroring the
-//     drain-and-skip behaviour of parseBuiltinDecorator).
+//     @args(profile=..., stringKey=..., additionalProperties=...). Which
+//     annotations a builtin takes is decided at parse time by the
+//     annotation registry (memql#5359); this reads what they mean.
 //   * Body fields populate BuiltinArgContract.Properties (name->type
 //     map) and BuiltinArgContract.Required (slice of @required names).
 //   * Profile is read from @args(profile=...) when present; otherwise
@@ -62,8 +62,6 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 			enabled = false
 		case "sdk":
 			// Generator marker (sdk/gen reads from source). No engine effect.
-		case "requiresCapability":
-			// Consumed above; listed here so it is not an unknown annotation.
 		case "description":
 			val, ok := attr.Value.(string)
 			if !ok {
@@ -100,11 +98,6 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 					argAdditionalProperties = &flag
 				}
 			}
-		default:
-			// Unknown annotation -- hard-rejected (#990). Closes the
-			// silent-tolerance gap so typos and stale annotations on
-			// builtins fail at load instead of being dropped.
-			return nil, fmt.Errorf("%s: builtin %q: unknown annotation @%s -- supported: @alias, @args, @description, @disabled, @enabled, @executor, @requiresCapability, @sdk", origin, decl.Name, attr.Name)
 		}
 	}
 

@@ -4,7 +4,7 @@ package annotations
 // the pointed message each one earns. They moved here from core/baseparser
 // (the construct-level retirements and the @row hint) and from the
 // per-construct parsers and loaders (@kind / @sideEffect / @reliability on an
-// action, @clientExecution on a tool, @shape on a spec, @concepts / @caller on
+// action, @clientExecution on a tool, @shape / @row / @actor on a spec, @concepts / @caller on
 // a shape, @scope / @cache on a concept, @default / @description on an args
 // field), so every gate gives the same answer about them.
 //
@@ -35,6 +35,8 @@ var retiredOn = map[retiredKey]string{
 	{Action, "reliability"}:    "reliability is machine-managed runtime state, not source (ADR Decision 3); remove it",
 	{Tool, "clientExecution"}:  "it dispatched the tool to the connected browser over the client-tool relay, which was removed with the cognition node (epic memql#4988). Every tool now needs a server-side @handler",
 	{Spec, "shape"}:            "a spec binds its shape or concept in the signature (epic #2281): `spec <boundName> <name> { return <bool> }`, with boundName resolved through the file-top `use` import",
+	{Spec, "row"}:              "it is a shape-only marker since epic #2281 -- to predicate on row metadata, bind a @row shape in the signature (`spec <shape> <name>`) and read its projected key by bare name",
+	{Spec, "actor"}:            "it is a shape-only marker since epic #2281 -- to predicate on the caller, bind an @actor shape in the signature (`spec <shape> <name>`) and read its projected key by bare name",
 	{Shape, "concepts"}:        "bind the concept in the signature instead: `shape <Concept> <name> { ... }`, with the concept imported by a file-top `use` line",
 	{Shape, "caller"}:          "use @actor (#221); the field accessor was renamed at the same time (caller.X -> actor.X)",
 	{Concept, "scope"}:         "remove the annotation; every concept lives in the default partition post-#56",

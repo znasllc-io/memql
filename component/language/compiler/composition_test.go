@@ -80,7 +80,6 @@ func TestValidateFileComposition_MutationWithQueries(t *testing.T) {
 	// Valid: 1 mutation + validation queries
 	source := `
 @enabled
-@audit
 func (Mutation) createUser() {
   insert("v1:user", payload={"name": args.name})
 }
@@ -365,7 +364,6 @@ func TestValidateFileComposition_MutationArgsWithBlock(t *testing.T) {
 	// Valid: Mutation with args parameter AND file-top args block.
 	source := `
 @enabled
-@audit
 args {
   email  string  @required
   name   string  @required

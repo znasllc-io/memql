@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/num"
@@ -440,18 +441,14 @@ type parsedConcept struct {
 	rowAuthz *parser.RowAuthzDecl
 
 	// origin / mirroredTo are the data-origins declaration (epic
-	// memql#4378). Held as the raw declaration plus a "was it written"
-	// bit each, because the two annotations are only jointly valid --
-	// @mirroredTo beside an external @origin is refused -- and that
-	// check needs BOTH in hand, which is only true once the attribute
-	// loop has finished. The bits are what make a SECOND @origin a load
-	// error rather than a silent last-one-wins, the same rule @rowAuthz
-	// carries and for the same reason: a reader scanning top-down must
-	// not see a declaration the engine does not use.
-	origin             string
-	originDeclared     bool
-	mirroredTo         []string
-	mirroredToDeclared bool
+	// memql#4378), held as the raw declaration because the two
+	// annotations are only jointly valid -- @mirroredTo beside an external
+	// @origin is refused -- and that check needs BOTH in hand, which is
+	// only true once the attribute loop has finished. A SECOND @origin is
+	// refused by the annotation registry's repeat rule (memql#5359), the
+	// same rule that holds @rowAuthz to one declaration.
+	origin     string
+	mirroredTo []string
 }
 
 // parsedProperty mirrors the legacy internal type so the JSON-Schema
@@ -540,6 +537,24 @@ type parsedPropertyVariant struct {
 func conceptDeclToParsed(decl *parser.ConceptDecl) (*parsedConcept, error) {
 	out := &parsedConcept{noAdditional: true}
 
+	// Which annotations a concept, its body and its fields take -- names,
+	// argument forms, keyword keys, repeats -- is the annotation registry's
+	// answer (memql#5359); applyConceptAttribute and applyPropertyAttribute
+	// keep only what a legal value MEANS. The field check runs in
+	// propertyDeclToParsed, so nested blocks and variant branches reach it.
+	if ref := annotations.CheckAll(annotations.Concept, parser.AnnotationUses(decl.Attributes)); ref != nil {
+		return nil, ref
+	}
+	var relationshipAttrs []*parser.Attribute
+	for _, rel := range decl.Relationships {
+		if rel != nil && rel.Attribute != nil {
+			relationshipAttrs = append(relationshipAttrs, rel.Attribute)
+		}
+	}
+	if ref := annotations.CheckAll(annotations.ConceptBody, parser.AnnotationUses(relationshipAttrs)); ref != nil {
+		return nil, ref
+	}
+
 	for _, attr := range decl.Attributes {
 		if err := applyConceptAttribute(out, attr); err != nil {
 			return nil, err
@@ -588,6 +603,10 @@ func conceptDeclToParsed(decl *parser.ConceptDecl) (*parsedConcept, error) {
 // nested object blocks.
 func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 	out := parsedProperty{name: prop.Name}
+
+	if ref := annotations.CheckAll(annotations.ConceptField, parser.AnnotationUses(prop.Attributes)); ref != nil {
+		return parsedProperty{}, ref
+	}
 
 	if prop.Type != nil {
 		out.typeName = prop.Type.Kind
@@ -1106,7 +1125,10 @@ func elementFromTypeRef(ref *parser.TypeRef) *parsedProperty {
 }
 
 // applyConceptAttribute folds an @annotation into the intermediate
-// concept representation.
+// concept representation. The annotation registry has already decided the
+// annotation is legal here, in this form, and written once
+// (conceptDeclToParsed); this reads what it means. The retired @scope,
+// @visibility and @cache are refused there with their hints.
 func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 	if attr == nil {
 		return nil
@@ -1116,18 +1138,6 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		c.description = attrString(attr)
 	case "type":
 		c.conceptType = strings.ToLower(attrString(attr))
-	case "scope":
-		// `@scope` was retired in #56 (partition removal). Every
-		// concept lives in one partition; the per-concept scope
-		// distinction is gone. Reject explicitly so stale concept
-		// files surface a clear error instead of silently parsing
-		// to the post-removal default.
-		return fmt.Errorf("`@scope` is retired -- remove the annotation; every concept lives in the default partition post-#56")
-	// @visibility was removed in the genesis simplification. Every
-	// binary now loads every concept; functional specialization
-	// happens at the build-tag layer (which integrations are active),
-	// not the DSL layer. The parser no longer recognizes @visibility;
-	// the strip-from-files migration removed it from every .memql.
 	case "version":
 		// @version("MAJOR.MINOR.PATCH") -- strict semver, metadata
 		// only (canonical ids are PARTITION-prefixed -- v1: is the
@@ -1178,19 +1188,16 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		//   -- the Materializer's mark: this concept's rows are worth
 		//   composing a file FROM (epic memql#4977, design D2).
 		//
-		//   Declared at most once, for the reason @rowAuthz and
-		//   @origin are: the parser folds attributes in source order,
-		//   so a second declaration would silently win and a reader
-		//   scanning top-down would see a projection the engine does
-		//   not use.
+		//   Declared at most once (the registry's repeat rule), for the
+		//   reason @rowAuthz and @origin are: the parser folds attributes
+		//   in source order, so a second declaration would silently win
+		//   and a reader scanning top-down would see a projection the
+		//   engine does not use.
 		//
 		//   The `fields` existence check runs in BuildConceptFromDecl
 		//   AFTER the property pass, exactly as @displayCard's slot
 		//   check does -- attributes are folded before properties on
 		//   this code path, so there is nothing to check against yet.
-		if c.composable != nil {
-			return fmt.Errorf("@composable declared more than once -- name every composable field in one annotation, e.g. @composable(fields=\"a,b\")")
-		}
 		mark, err := parseComposableAttr(attr)
 		if err != nil {
 			return err
@@ -1215,16 +1222,12 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		//   about what a declaration means (#2621's lesson).
 		//
 		//   A SECOND @rowAuthz is a load error, not a silent
-		//   overwrite. The parser folds attributes in source order, so
-		//   without this a concept carrying two declarations loaded
-		//   with the LAST one winning -- a reader scanning top-down
-		//   sees a tier the engine does not use. "One tier per
-		//   concept" has to be enforced for the declaration to mean
-		//   anything.
-		if c.rowAuthz != nil {
-			return fmt.Errorf("@%s declared more than once -- a concept declares exactly one tier",
-				parser.RowAuthzAnnotation)
-		}
+		//   overwrite: the registry's repeat rule refuses it. The parser
+		//   folds attributes in source order, so without that a concept
+		//   carrying two declarations loaded with the LAST one winning --
+		//   a reader scanning top-down sees a tier the engine does not
+		//   use. "One tier per concept" has to be enforced for the
+		//   declaration to mean anything.
 		decl, err := parser.ParseRowAuthz(attr)
 		if err != nil {
 			return err
@@ -1237,48 +1240,37 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		//   component/memql's write guard enforces as read-only by
 		//   construction.
 		//
-		//   Declared at most once, for the reason @rowAuthz is: the
-		//   parser folds attributes in source order, so without this a
-		//   concept carrying two origins would load with the LAST one
-		//   winning, and "where is this data owned" would have a
-		//   different answer for a reader than for the engine.
-		if c.originDeclared {
-			return fmt.Errorf("@%s declared more than once -- a concept has exactly one origin",
-				parser.OriginAnnotation)
-		}
+		//   Declared at most once (the registry's repeat rule), for the
+		//   reason @rowAuthz is: the parser folds attributes in source
+		//   order, so without it a concept carrying two origins would load
+		//   with the LAST one winning, and "where is this data owned"
+		//   would have a different answer for a reader than for the
+		//   engine.
 		name, err := parser.ParseOrigin(attr)
 		if err != nil {
 			return err
 		}
 		c.origin = name
-		c.originDeclared = true
 	case parser.MirroredToAnnotation:
 		// @mirroredTo("<connector>", ...) -- WHO ELSE holds a copy of
 		//   this MemQL-origin concept (D2/D5). The pairing check --
 		//   refused beside an external @origin -- runs after the whole
 		//   attribute loop, in conceptDeclToParsed, because it needs
 		//   both annotations and attributes arrive one at a time.
-		if c.mirroredToDeclared {
-			return fmt.Errorf("@%s declared more than once -- name every mirror target in one annotation, e.g. @%s(\"a\", \"b\")",
-				parser.MirroredToAnnotation, parser.MirroredToAnnotation)
-		}
 		targets, err := parser.ParseMirroredTo(attr)
 		if err != nil {
 			return err
 		}
 		c.mirroredTo = targets
-		c.mirroredToDeclared = true
-	default:
-		return fmt.Errorf("unknown concept annotation @%s", attr.Name)
 	}
 	return nil
 }
 
 // parseDisplayCardAttr extracts the named args from
 // @displayCard(primary=..., secondary=..., tertiary=..., status=...).
-// Validates that `primary` is non-empty and that no unrecognised
-// argument name was supplied; field-existence checks happen later.
-// Reference: memql#160.
+// Validates that `primary` is non-empty; the argument names are the
+// registry's closed key set (memql#5359), and field-existence checks
+// happen later. Reference: memql#160.
 func parseDisplayCardAttr(attr *parser.Attribute) (*DisplayCard, error) {
 	if attr == nil {
 		return nil, fmt.Errorf("@displayCard: nil attribute")
@@ -1298,8 +1290,6 @@ func parseDisplayCardAttr(attr *parser.Attribute) (*DisplayCard, error) {
 			out.Tertiary = val
 		case "status":
 			out.Status = val
-		default:
-			return nil, fmt.Errorf("@displayCard: unknown argument %q (allowed: primary, secondary, tertiary, status)", k)
 		}
 	}
 	if out.Primary == "" {
@@ -1337,8 +1327,6 @@ func parseComposableAttr(attr *parser.Attribute) (*Composable, error) {
 			}
 		case "list":
 			out.List = val
-		default:
-			return nil, fmt.Errorf("@composable: unknown argument %q (allowed: as, fields, list)", k)
 		}
 	}
 	// FORM ONLY. The query registry does not exist during the concept
@@ -1386,7 +1374,9 @@ func asString(v any) string {
 
 // applyPropertyAttribute folds an @annotation into the property
 // intermediate. Phase 3 expanded the vocabulary: @unique, @pattern,
-// @minLength, @maxLength, @minimum, @maximum, @immutable, @secret.
+// @minLength, @maxLength, @minimum, @maximum, @immutable, @secret. The
+// registry has already decided the annotation is legal on a concept field
+// (propertyDeclToParsed); this reads what it means.
 func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error {
 	if attr == nil {
 		return nil
@@ -1449,8 +1439,6 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 		// attribute itself is kept on the AST node so the folder
 		// can read its discriminator arg.
 		return nil
-	default:
-		return fmt.Errorf("unknown property annotation @%s on field %q", attr.Name, prop.name)
 	}
 	return nil
 }

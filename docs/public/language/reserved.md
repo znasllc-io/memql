@@ -261,9 +261,11 @@ referenced bare.
 
 ## 6. Reserved annotation names
 
-The full annotation surface is per-construct and enforced by each
-parser's allow-list (search `allowedXAnnotations` in
-`component/memql/`). Cross-construct annotations:
+The full annotation surface is per-construct and enforced at parse time
+by the annotation registry (`component/language/annotations`, memql#5359),
+the one check every construct parser and field list runs; a refusal names
+the construct, the annotation and what to write, and ends with a stable
+`annotation_*` code. Cross-construct annotations:
 
 | Annotation | Where it applies |
 |------------|------------------|
@@ -303,7 +305,7 @@ several Go files. When the list below changes, update this doc:
 | Row intrinsics | `component/memql/intrinsic_fields.go` |
 | Caller envelope | `component/memql/sense/builtins.go` + `runtime_evaluator.go` |
 | Construct keywords | per-construct parser allow-lists in `component/memql/` |
-| Annotation allow-lists | per-construct parser allow-lists in `component/memql/` |
+| Annotations | the registry in `component/language/annotations` |
 | Imported names (`use`) | `component/memql/dslimports/dslimports.go` |
 
 ---

@@ -483,11 +483,11 @@ func TestBlockCommentAboveAutomationDoesNotDisturbTheLoad(t *testing.T) {
 }
 
 // TestAnnotationGateStillSeesTheLiveAutomation guards the memql#2712
-// annotation gate against the same over-step. ValidateConstructAnnotations
-// cuts its header scan at the first `automation ... {`; if a commented-out
-// automation above reaches the slice, the cut lands on the COMMENTED header
-// and the live automation's annotations are never inspected -- silently
-// re-opening the gap #2712 closed.
+// annotation gate against the same over-step. While the gate was a text scan
+// it cut its header scan at the first `automation ... {`; a commented-out
+// automation above the slice put the cut on the COMMENTED header and the live
+// automation's annotations were never inspected. The gate is the parser's
+// annotation check since memql#5359, which must keep reading the live one.
 func TestAnnotationGateStillSeesTheLiveAutomation(t *testing.T) {
 	src := `/*
 @enabled

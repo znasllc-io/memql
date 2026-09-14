@@ -781,7 +781,30 @@ type Attribute struct {
 	Name  string         // e.g., "enabled", "trigger", "description"
 	Value any            // Single value (string, bool, etc.) or nil for flag attributes
 	Args  map[string]any // Named args: key=value pairs
+	// Spelling records how the argument list was written, for the three
+	// spellings Value and Args cannot tell apart (memql#5359): `@when()` and
+	// `@when` both leave Value and Args empty; `@filter(a == b)` and
+	// `@filter("a == b")` both leave the text in Value; `@x(!"a")` and
+	// `@x("!a")` both store "!a". The annotation registry's check reads it,
+	// because a placement may take one spelling and not the other.
+	Spelling ArgSpelling
 }
+
+// ArgSpelling is how an attribute's arguments were written, where Value and
+// Args alone cannot say.
+type ArgSpelling uint8
+
+const (
+	// ArgsAsParsed: Value and Args say everything there is to say.
+	ArgsAsParsed ArgSpelling = iota
+	// ArgsEmptyParens: written `@name()`.
+	ArgsEmptyParens
+	// ArgsRawExpression: `@filter(<expr>)`; Value holds the expression text
+	// verbatim rather than a quoted string.
+	ArgsRawExpression
+	// ArgsExclusion: `@name(!"a", !"b")`; Value holds "!a" or {"!a", "!b"}.
+	ArgsExclusion
+)
 
 func (*Attribute) node() {}
 
@@ -1911,6 +1934,12 @@ type RelationshipDecl struct {
 	// an engine release. Empty means unlabelled, which every declaration
 	// predating #3652 is.
 	As string
+
+	// Attribute is the @relationship(...) annotation this was read from, kept
+	// so the concept translator can hold it to the annotation registry (its
+	// keyword keys, its form) -- the typed fields above drop what they do not
+	// read (memql#5359).
+	Attribute *Attribute
 }
 
 // ProviderDecl is the shared-frontend AST node for an AI provider

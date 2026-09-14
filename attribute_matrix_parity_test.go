@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
-	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // TestAttributeMatrixMatchesAllowLists is the parity guard the #2712 review
@@ -60,8 +59,8 @@ func TestAttributeMatrixMatchesAllowLists(t *testing.T) {
 		name := m[1]
 		// Buried / retired annotations are intentionally out of every
 		// allow-list and are marked specially (e.g. @permission "--"); the
-		// gate rejects them via the retired map, not ByReceiver.
-		if _, buried := baseparser.RetiredConstructAnnotation(name); buried {
+		// registry refuses them as retired, not as absent from ByReceiver.
+		if ref := annotations.Check(annotations.Query, annotations.Use{Name: name}); ref != nil && ref.Code == annotations.CodeRetired {
 			continue
 		}
 		cells := strings.Split(l, "|")

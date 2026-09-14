@@ -764,20 +764,19 @@ func emitQuery(name, conceptId, body, preamble string) (string, error) {
 // enumerate why each bypass is legitimate.
 var unboundedReasonRe = regexp.MustCompile(`@unbounded\s*\(\s*"((?:[^"\\]|\\.)*)"\s*\)`)
 
-// unboundedBareRe matches a bare `@unbounded` (no argument list), which
-// is rejected -- the reason is required.
-var unboundedBareRe = regexp.MustCompile(`@unbounded\b`)
-
 // unboundedReason inspects a construct's preamble for the
-// `@unbounded("reason")` annotation. Returns the captured reason, a
-// presence flag, and an error if the annotation is present but
-// malformed (bare, or empty/whitespace reason).
+// `@unbounded("reason")` annotation. Returns the captured reason and a
+// presence flag.
+//
+// An @unbounded written in any other form -- bare, a number, a list -- is
+// reported ABSENT here, not refused: the annotation line stays in the source,
+// and the parser's annotation check refuses its form against the registry
+// (memql#5359), which says what @unbounded takes and shows the example. A
+// second, text-scanning form check here answered first with an uncoded
+// message, so the registry was not the one gate for this annotation.
 func unboundedReason(preamble string) (string, bool, error) {
 	if m := unboundedReasonRe.FindStringSubmatch(preamble); m != nil {
 		return strings.TrimSpace(m[1]), true, nil
-	}
-	if unboundedBareRe.MatchString(preamble) {
-		return "", true, fmt.Errorf("`@unbounded` requires a reason string: @unbounded(\"why this query reads the full set\")")
 	}
 	return "", false, nil
 }

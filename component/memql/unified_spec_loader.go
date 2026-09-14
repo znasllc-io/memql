@@ -8,11 +8,9 @@ package memql
 // -- run through the same shared baseloader pipeline.
 //
 // memql#334 (sub-epic #329 / #310 Stage 1C) migrated the parsing
-// half off the hand-rolled parseSpecMemQL onto
+// half off the hand-rolled spec parser onto
 // languageParser.ParseSpecDecl + the in-package specDeclToSpec
-// converter. The hand-rolled parser is unreferenced from production
-// after this child; spec_parser_test.go still exercises it pending
-// the final deletion in sub-epic #329's cleanup PR.
+// converter; the hand-rolled parser was deleted with memql#5359.
 
 import (
 	"fmt"

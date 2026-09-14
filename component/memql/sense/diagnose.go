@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	"github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // Diagnose returns errors and warnings for a MemQL source document.
@@ -232,6 +232,17 @@ func parserDiagnostics(err error) []Diagnostic {
 		pos.Column = col
 	}
 
+	// An annotation the registry refused is the parser's to report, and
+	// the editor keeps the code it has always shown for one: the message is
+	// the registry's own (it names the receiver, the annotation, what to
+	// write, and ends with the stable refusal code), so the squiggle and the
+	// load gate say the same thing.
+	code := "parse-error"
+	var refusal *annotations.Refusal
+	if errors.As(err, &refusal) {
+		code = "invalid-annotation"
+	}
+
 	return []Diagnostic{{
 		Range: Range{
 			Start: pos,
@@ -239,7 +250,7 @@ func parserDiagnostics(err error) []Diagnostic {
 		},
 		Severity: SeverityError,
 		Message:  msg,
-		Code:     "parse-error",
+		Code:     code,
 	}}
 }
 
@@ -278,25 +289,12 @@ func (s *Service) semanticDiagnostics(file *parser.File, source string) []Diagno
 			continue
 		}
 
-		// Validate annotations for receiver type.
+		// A function construct's annotations are held to its receiver by
+		// the parser itself (the annotation registry, memql#5359), so an
+		// invalid one never reaches this pass: it is a parse error, which
+		// parserDiagnostics reports as "invalid-annotation".
 		if funcDef.Receiver != nil {
 			receiverType := string(funcDef.Receiver.Type)
-			validAnnotations := AnnotationsByReceiver[receiverType]
-			for _, attr := range funcDef.Attributes {
-				if !containsStr(validAnnotations, attr.Name) {
-					// Find position of @attrName in source.
-					pos := findInSource(source, "@"+attr.Name)
-					diagnostics = append(diagnostics, Diagnostic{
-						Range: Range{
-							Start: pos,
-							End:   Position{Line: pos.Line, Column: pos.Column + len(attr.Name) + 1},
-						},
-						Severity: SeverityError,
-						Message:  annotationRejectionMessage(attr.Name, receiverType),
-						Code:     "invalid-annotation",
-					})
-				}
-			}
 
 			// Check @defaultProvider references for Prompt.
 			if receiverType == "Prompt" {
@@ -463,27 +461,4 @@ func extractLineCol(msg string) (int, int, bool) {
 		return 0, 0, false
 	}
 	return line, col, true
-}
-
-// containsStr checks if a string slice contains a value.
-func containsStr(slice []string, s string) bool {
-	for _, v := range slice {
-		if v == s {
-			return true
-		}
-	}
-	return false
-}
-
-// annotationRejectionMessage renders the invalid-annotation diagnostic,
-// preferring the pointed retirement hint (#2708) over the generic
-// not-valid-for-receiver message so the editor matches the load gate.
-func annotationRejectionMessage(name, receiverType string) string {
-	if hint, retired := baseparser.RetiredConstructAnnotation(name); retired {
-		return fmt.Sprintf("annotation @%s is retired -- %s", name, hint)
-	}
-	if hint, misplaced := baseparser.MisplacedConstructAnnotation(name); misplaced {
-		return fmt.Sprintf("annotation @%s is not valid on a %s -- %s", name, strings.ToLower(receiverType), hint)
-	}
-	return fmt.Sprintf("annotation @%s is not valid for receiver type %s", name, receiverType)
 }

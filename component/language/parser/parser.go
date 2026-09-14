@@ -2,12 +2,14 @@ package parser
 
 import (
 	"fmt"
+	"github.com/znasllc-io/memql/component/language/annotations"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/core/airoute"
 	"github.com/znasllc-io/memql/core/baseparser"
 	"github.com/znasllc-io/memql/core/num"
@@ -75,6 +77,11 @@ type Parser struct {
 	// swallow the comparison into the coalesce arm (the JS-loose shape) --
 	// precedence must not depend on the operand's token type.
 	suppressComparisonFold bool
+
+	// attrTokens maps each parsed annotation to its `@` token, so a refusal
+	// from the annotation registry points at the annotation rather than at
+	// wherever the parser happened to be when it ran the check (memql#5359).
+	attrTokens map[*Attribute]Token
 }
 
 // NewParser creates a new parser for the given tokens.
@@ -706,7 +713,10 @@ func (p *Parser) parseDefinition() (Node, error) {
 
 	// Attach attributes to the definition
 	if len(attributes) > 0 {
-		def = p.attachAttributes(def, attributes)
+		def, err = p.attachAttributes(def, attributes)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return def, nil
@@ -719,16 +729,33 @@ func (p *Parser) parseDefinition() (Node, error) {
 //   - @trigger(event="session.opened")   (named arguments)
 //   - @args({ "userId": {...} })         (object value)
 func (p *Parser) parseAttribute() (*Attribute, error) {
+	at := p.current
+	attr, err := p.parseAttributeArgs()
+	if attr != nil {
+		if p.attrTokens == nil {
+			p.attrTokens = map[*Attribute]Token{}
+		}
+		p.attrTokens[attr] = at
+	}
+	return attr, err
+}
+
+// parseAttributeArgs is parseAttribute's body: the `@name` and its argument
+// list, with the spellings Value and Args cannot record kept in
+// Attribute.Spelling.
+func (p *Parser) parseAttributeArgs() (*Attribute, error) {
 	if err := p.expect(TokenAt); err != nil {
 		return nil, err
 	}
 
-	// Attribute name accepts identifiers and a specific set of
-	// keyword-tokens that overlap with legal annotation names
-	// (`@default`, `@return`, `@case`, etc.). The lexer promotes
-	// those words to keyword tokens for their control-flow role but
-	// they're perfectly valid annotation names.
-	if !p.check(TokenIdentifier) && !isKeywordTokenForAttribute(p.current.Type) {
+	// Attribute name accepts identifiers and every lexer-promoted
+	// keyword: the lexer promotes `default`, `retry`, `when`, ... for
+	// their control-flow role, but after `@` the word can only be an
+	// annotation name. Whether the NAME is legal is the annotation
+	// registry's question (memql#5359) -- refusing a keyword here instead
+	// would answer `@retry` with "expected attribute name" rather than
+	// with what the construct takes.
+	if !p.check(TokenIdentifier) && !isKeywordToken(p.current.Type) {
 		return nil, newParseErrorf(&p.current, "expected attribute name after @, got %q", p.current.Literal)
 	}
 	name := p.current.Literal
@@ -746,6 +773,7 @@ func (p *Parser) parseAttribute() (*Attribute, error) {
 		// Empty parens: @name()
 		if p.check(TokenParenClose) {
 			p.advance()
+			attr.Spelling = ast.ArgsEmptyParens
 			return attr, nil
 		}
 
@@ -767,6 +795,7 @@ func (p *Parser) parseAttribute() (*Attribute, error) {
 				p.advance()
 			}
 			attr.Value = strings.Join(parts, "")
+			attr.Spelling = ast.ArgsRawExpression
 			if err := p.expect(TokenParenClose); err != nil {
 				return nil, err
 			}
@@ -865,6 +894,7 @@ func (p *Parser) parseAttribute() (*Attribute, error) {
 			} else {
 				attr.Value = first
 			}
+			attr.Spelling = ast.ArgsExclusion
 			if err := p.expect(TokenParenClose); err != nil {
 				return nil, err
 			}
@@ -2058,7 +2088,7 @@ func (p *Parser) parseShapeDecl(attrs []*Attribute) (*ShapeDecl, error) {
 		decl.Name = first
 	}
 
-	if err := p.validateDeclAnnotations("Shape", "shape", decl.Name, attrs); err != nil {
+	if err := p.checkAnnotations(annotations.Shape, fmt.Sprintf("shape %q", decl.Name), attrs); err != nil {
 		return nil, err
 	}
 
@@ -2126,7 +2156,7 @@ func (p *Parser) parseBuiltinDecl(attrs []*Attribute) (*BuiltinDecl, error) {
 	}
 	p.advance()
 
-	if err := p.validateDeclAnnotations("Builtin", "builtin", decl.Name, attrs); err != nil {
+	if err := p.checkAnnotations(annotations.Builtin, fmt.Sprintf("builtin %q", decl.Name), attrs); err != nil {
 		return nil, err
 	}
 
@@ -2135,7 +2165,7 @@ func (p *Parser) parseBuiltinDecl(attrs []*Attribute) (*BuiltinDecl, error) {
 	}
 
 	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
-		field, err := p.parseBuiltinField()
+		field, err := p.parseBuiltinField(decl.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -2150,11 +2180,11 @@ func (p *Parser) parseBuiltinDecl(attrs []*Attribute) (*BuiltinDecl, error) {
 
 // parseBuiltinField parses one `<name> <type> [@annotation ...]` row
 // inside a builtin body. Type accepts primitives and the array-of-
-// primitive shorthand `[]primitive`. Field-level annotations are
-// captured as Attribute list; only `@required` is acted on today
-// (parses semantics-bearing flag), but the slice carries any future
-// annotations forward verbatim.
-func (p *Parser) parseBuiltinField() (*BuiltinField, error) {
+// primitive shorthand `[]primitive`. The field's annotations are held to
+// the BuiltinField receiver (memql#5359) -- they were accepted whatever
+// they were, which let a typo read as a constraint -- and only
+// `@required` is acted on here.
+func (p *Parser) parseBuiltinField(builtinName string) (*BuiltinField, error) {
 	if !p.check(TokenIdentifier) {
 		return nil, newParseErrorf(&p.current, "expected builtin field name, got %q", p.current.Literal)
 	}
@@ -2194,14 +2224,12 @@ func (p *Parser) parseBuiltinField() (*BuiltinField, error) {
 	// Field-level annotations: consume `@attribute(args)` while next
 	// token is `@`. The annotation cluster ends as soon as we see an
 	// ident (= next field's name) or `}` (= end of body).
-	for p.check(TokenAt) {
-		attr, err := p.parseAttribute()
-		if err != nil {
-			return nil, err
-		}
-		if attr == nil {
-			continue
-		}
+	authored, err := p.parseFieldAnnotations(annotations.BuiltinField,
+		fmt.Sprintf("builtin %q field %q", builtinName, field.Name))
+	if err != nil {
+		return nil, err
+	}
+	for _, attr := range authored {
 		if attr.Name == "required" {
 			field.Required = true
 		}
@@ -2209,6 +2237,26 @@ func (p *Parser) parseBuiltinField() (*BuiltinField, error) {
 	}
 
 	return field, nil
+}
+
+// parseFieldAnnotations reads the run of annotations that trails a field of a
+// builtin or prompt body and holds them to the field receiver. Only what the
+// author wrote is checked: the `enum(...)` type's synthesized @enum is not.
+func (p *Parser) parseFieldAnnotations(r annotations.Receiver, subject string) ([]*Attribute, error) {
+	var attrs []*Attribute
+	for p.check(TokenAt) {
+		attr, err := p.parseAttribute()
+		if err != nil {
+			return nil, err
+		}
+		if attr != nil {
+			attrs = append(attrs, attr)
+		}
+	}
+	if err := p.checkAnnotations(r, subject, attrs); err != nil {
+		return nil, err
+	}
+	return attrs, nil
 }
 
 // parsePromptDecl parses a struct-form prompt declaration:
@@ -2260,7 +2308,7 @@ func (p *Parser) parsePromptDecl(attrs []*Attribute) (*PromptDecl, error) {
 	}
 	p.advance()
 
-	if err := p.validateDeclAnnotations("Prompt", "prompt", decl.Name, attrs); err != nil {
+	if err := p.checkAnnotations(annotations.Prompt, fmt.Sprintf("prompt %q", decl.Name), attrs); err != nil {
 		return nil, err
 	}
 
@@ -2308,7 +2356,7 @@ func (p *Parser) parsePromptDecl(attrs []*Attribute) (*PromptDecl, error) {
 			return nil, newParseErrorf(&p.current,
 				"unexpected '@' in prompt body -- annotations attach to field declarations, not the body itself")
 		}
-		field, err := p.parsePromptField()
+		field, err := p.parsePromptField(decl.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -2325,8 +2373,10 @@ func (p *Parser) parsePromptDecl(attrs []*Attribute) (*PromptDecl, error) {
 // inside a prompt body. Mirrors parseBuiltinField -- prompts and
 // builtins share the same per-field grammar; the converter handles
 // the (small) semantic differences in how the field surface lowers
-// to each construct's internal type.
-func (p *Parser) parsePromptField() (*PromptField, error) {
+// to each construct's internal type. The field's annotations are held to
+// the PromptField receiver (memql#5359); an unknown one used to be
+// accepted here and dropped by the converter.
+func (p *Parser) parsePromptField(promptName string) (*PromptField, error) {
 	if !p.check(TokenIdentifier) {
 		return nil, newParseErrorf(&p.current, "expected prompt field name, got %q", p.current.Literal)
 	}
@@ -2365,14 +2415,12 @@ func (p *Parser) parsePromptField() (*PromptField, error) {
 
 	// Field-level annotations: consume `@attribute(args)` while next
 	// token is `@`. Mirrors parseBuiltinField.
-	for p.check(TokenAt) {
-		attr, err := p.parseAttribute()
-		if err != nil {
-			return nil, err
-		}
-		if attr == nil {
-			continue
-		}
+	authored, err := p.parseFieldAnnotations(annotations.PromptField,
+		fmt.Sprintf("prompt %q field %q", promptName, field.Name))
+	if err != nil {
+		return nil, err
+	}
+	for _, attr := range authored {
 		if attr.Name == "required" {
 			field.Required = true
 		}
@@ -2412,22 +2460,11 @@ func (p *Parser) parseActionDecl(attrs []*Attribute) (*ActionDecl, error) {
 	decl := &ActionDecl{Name: p.current.Literal, Attributes: attrs}
 	p.advance()
 
-	// Reject the retired action-level annotations (ADR Decision 3 table).
-	for _, attr := range attrs {
-		if attr == nil {
-			continue
-		}
-		switch attr.Name {
-		case "kind":
-			return nil, newParseErrorf(&p.current,
-				"action %q: @kind is retired (construct-invocation ADR Decision 3) -- composites are automations now and primitives need no marker; remove it", decl.Name)
-		case "sideEffect":
-			return nil, newParseErrorf(&p.current,
-				"action %q: @sideEffect is retired on actions (ADR Decision 3) -- the authoritative side-effect class lives on the CAPABILITY declaration now (Story 5); remove it from the action", decl.Name)
-		case "reliability":
-			return nil, newParseErrorf(&p.current,
-				"action %q: @reliability is retired (ADR Decision 3) -- reliability is machine-managed runtime state, not source; remove it", decl.Name)
-		}
+	// An action takes @description / @enabled / @disabled; the retired
+	// action-level annotations (@kind / @sideEffect / @reliability, ADR
+	// Decision 3) are refused by the registry with their migration hints.
+	if err := p.checkAnnotations(annotations.Action, fmt.Sprintf("action %q", decl.Name), attrs); err != nil {
+		return nil, err
 	}
 
 	if err := p.expect(TokenBraceOpen); err != nil {
@@ -2573,6 +2610,10 @@ func (p *Parser) parseCapabilityDecl(attrs []*Attribute) (*CapabilityDecl, error
 	}
 	decl := &CapabilityDecl{Name: name, Attributes: attrs}
 	p.advance()
+
+	if err := p.checkAnnotations(annotations.Capability, fmt.Sprintf("capability %q", decl.Name), attrs); err != nil {
+		return nil, err
+	}
 
 	if err := p.expect(TokenBraceOpen); err != nil {
 		return nil, err
@@ -3051,6 +3092,12 @@ func (p *Parser) parseTypeRef() (*TypeRef, error) {
 // edited, which reads as drift and gets debugged in the wrong place.
 func IsKeywordUsableAsName(t TokenType) bool { return isKeywordTokenForAttribute(t) }
 
+// isKeywordToken reports whether the lexer promoted the token to a keyword
+// (the TokenKeywordQuery .. TokenKeywordStartsWith family).
+func isKeywordToken(t TokenType) bool {
+	return t >= TokenKeywordQuery && t <= TokenKeywordStartsWith
+}
+
 // isKeywordTokenForAttribute reports whether a token type that the
 // lexer promoted to a keyword is still a valid annotation name. Covers
 // the annotations that clash with control-flow keywords in practice:
@@ -3094,6 +3141,7 @@ func attributeToRelationshipDecl(attr *Attribute) (*RelationshipDecl, error) {
 		Target:      get("target"),
 		Direction:   get("direction"),
 		As:          get("as"),
+		Attribute:   attr,
 	}, nil
 }
 
@@ -3755,23 +3803,35 @@ func (p *Parser) parseIntLiteral() int {
 	return val
 }
 
-// attachAttributes attaches attributes to a definition
-func (p *Parser) attachAttributes(def Node, attributes []*Attribute) Node {
+// attachAttributes attaches attributes to a definition, after holding a
+// function construct's annotations to its receiver in the registry
+// (memql#5359). The four function kinds reach the parser as the rewritten
+// `func (Receiver)` form, so this is where their annotations are checked --
+// the load-time text scan that used to do it read the source a second time
+// and could only see names.
+func (p *Parser) attachAttributes(def Node, attributes []*Attribute) (Node, error) {
 	switch d := def.(type) {
 	case *FunctionDef:
+		if d.Receiver != nil {
+			if fr, ok := functionReceivers[d.Receiver.Type]; ok {
+				if err := p.checkAnnotations(fr.receiver, fmt.Sprintf("%s %q", fr.keyword, d.Name), attributes); err != nil {
+					return nil, err
+				}
+			}
+		}
 		d.Attributes = attributes
 		p.processFunctionAttributes(d, attributes)
 		if automation, ok := d.Body.(*AutomationDef); ok {
 			automation.Attributes = attributes
 			p.processAutomationAttributes(automation, attributes)
 		}
-		return d
+		return d, nil
 	case *AutomationDef:
 		d.Attributes = attributes
 		p.processAutomationAttributes(d, attributes)
-		return d
+		return d, nil
 	}
-	return def
+	return def, nil
 }
 
 // getAttrString extracts a string value from an attribute (from Value or Args[""])

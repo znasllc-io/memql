@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"fmt"
+	"github.com/znasllc-io/memql/component/language/annotations"
 	"strconv"
 	"strings"
 
@@ -41,10 +43,12 @@ func (p *Parser) parseProviderDecl(attrs []*ast.Attribute) (*ast.ProviderDecl, e
 		return nil, newParseErrorf(&p.current, "expected provider name, got empty token")
 	}
 
-	// Translate the leading attribute set into typed ProviderDecl
-	// fields. Unknown attributes are tolerated -- a future annotation
-	// will be picked up at the loader/registry layer rather than
-	// rejected here.
+	// Which annotations a provider takes is the registry's answer
+	// (memql#5359); the switch below translates the legal ones into typed
+	// ProviderDecl fields.
+	if err := p.checkAnnotations(annotations.Provider, fmt.Sprintf("provider %q", decl.Name), attrs); err != nil {
+		return nil, err
+	}
 	for _, attr := range attrs {
 		if attr == nil {
 			continue
@@ -72,8 +76,6 @@ func (p *Parser) parseProviderDecl(attrs []*ast.Attribute) (*ast.ProviderDecl, e
 			// register it or resolve auth); on a @base it propagates
 			// to every @extends child.
 			decl.Disabled = true
-		default:
-			return nil, newParseErrorf(&p.current, "provider %q: unknown annotation @%s -- supported: @base, @default, @description, @disabled, @enabled, @extends, @modality, @model, @type", decl.Name, attr.Name)
 		}
 	}
 

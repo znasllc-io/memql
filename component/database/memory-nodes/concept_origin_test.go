@@ -107,12 +107,13 @@ func TestConceptOriginDeclarationsAreRefusedWhenRepeatedOrIncoherent(t *testing.
 		{
 			name: "two origins",
 			src:  "@origin(\"shopify\")\n@origin(\"quickBooks\")\nconcept probe" + originProbeBody,
-			want: "exactly one origin",
+			// Refused by the annotation registry's repeat rule (memql#5359).
+			want: "@origin is written more than once on a concept",
 		},
 		{
 			name: "two mirroredTo annotations",
 			src:  "@mirroredTo(\"shopify\")\n@mirroredTo(\"quickBooks\")\nconcept probe" + originProbeBody,
-			want: "one annotation",
+			want: "@mirroredTo is written more than once on a concept",
 		},
 		{
 			name: "mirroredTo on a mirror",

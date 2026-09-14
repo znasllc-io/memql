@@ -165,7 +165,7 @@ func TestNegative_UnknownAnnotation_Rejected(t *testing.T) {
 			func(s string) error { _, e := ParseToolDecl(s); return e }},
 		{"provider", "@bogusAnno\n@extends(\"openai\")\nprovider p {\n  params { contextWindow 1 }\n}\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParseProviderDecl(s); return e }},
-		{"seed", "@bogusAnno\nseed agent s {\n  name: \"x\"\n}\n", "unknown seed annotation @bogusAnno",
+		{"seed", "@bogusAnno\nseed agent s {\n  name: \"x\"\n}\n", "unknown annotation @bogusAnno on a seed",
 			func(s string) error { _, e := ParseSeedDecl(s); return e }},
 	}
 	for _, tc := range cases {
@@ -349,9 +349,9 @@ func TestRetiredOperators_ParserAcceptsToTreeScanGate(t *testing.T) {
 // ===========================================================================
 
 // HOLE 1 -- CLOSED (memql#2395): shape / builtin / prompt / spec / trait /
-// policy now reject an unknown annotation against the canonical
-// annotations.ByReceiver registry (validateDeclAnnotations), matching the
-// tool / provider / seed behavior pinned by the active test above.
+// policy reject an unknown annotation against the annotation registry --
+// since memql#5359 through the one parse-time check every construct parser
+// runs (checkAnnotations), the same gate as tool / provider / seed above.
 func TestHOLE_UnknownAnnotationSilentlyAccepted(t *testing.T) {
 	cases := []struct {
 		kind, src, want string
@@ -377,10 +377,10 @@ func TestHOLE_UnknownAnnotationSilentlyAccepted(t *testing.T) {
 	}
 
 	// Message quality: a typo'd annotation gets a did-you-mean against the
-	// kind's registry set (suggest.go, the #2358 helper).
+	// receiver's registry set, and the refusal ends with its code.
 	t.Run("did-you-mean", func(t *testing.T) {
 		_, err := ParseShapeDecl("@descripton(\"x\")\n@row\nshape s {\n  row.id\n}\n")
-		assertParseErr(t, "shape @descripton", err, "did you mean 'description'?")
+		assertParseErr(t, "shape @descripton", err, "did you mean @description?", "[annotation_unknown]")
 	})
 }
 

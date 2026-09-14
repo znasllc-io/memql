@@ -1,7 +1,10 @@
 package parser
 
 import (
+	"fmt"
 	"strconv"
+
+	"github.com/znasllc-io/memql/component/language/annotations"
 )
 
 // parseFileTopArgsBlock parses a file-level `args { ... }` declaration.
@@ -143,24 +146,29 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 		field.Optional = false
 	}
 
+	// The annotations are held to the ArgsField receiver (memql#5359) as each
+	// one is reached, before its arguments are read: the per-annotation
+	// parsing below keeps only what a legal value MEANS. The retired
+	// @default (#991: never applied; `args.X ?? <default>` in the body is the
+	// mechanism, and a concept-field @default is no substitute, memql#2960)
+	// and @description (memql#3336: never retained; the `///` doc comment is
+	// the channel) are refused there with their hints.
+	subject := fmt.Sprintf("args field %q", name)
+	var uses []annotations.Use
 	for p.check(TokenAt) {
+		at := p.current
 		p.advance() // consume `@`
-		if !p.check(TokenIdentifier) {
-			// `default` lexes as a keyword token, not an identifier, so an
-			// `@default` on an args field lands here. It is retired (#991):
-			// it was never applied at arg resolution (a silent footgun).
-			// Apply the default explicitly in the body with the `??`
-			// shorthand, which is the spelling test/dslconformance/no_coalesce_longhand_test.go
-			// gates the corpus on. A concept-field @default is NOT a
-			// substitute -- it is emitted into the schema and never applied on
-			// insert either (memql#2960).
-			if p.current.Literal == "default" {
-				return nil, newParseErrorf(&p.current, "@default on an args field %q is retired -- it is never applied; use `args.%s ?? <default>` in the body", name, name)
-			}
+		// `default` lexes as a keyword token, not an identifier.
+		if !p.check(TokenIdentifier) && !isKeywordToken(p.current.Type) {
 			return nil, newParseErrorf(&p.current, "expected annotation name after `@` on args field %q", name)
 		}
 		ann := p.current.Literal
 		p.advance()
+		form, keys := p.peekAnnotationArgs(ann)
+		uses = append(uses, annotations.Use{Name: ann, Form: form, Keys: keys})
+		if ref := annotations.CheckAll(annotations.ArgsField, uses); ref != nil {
+			return nil, annotationRefusalError(at, subject, ref)
+		}
 		switch ann {
 		case "required":
 			field.Optional = false
@@ -182,16 +190,6 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 			}
 			p.advance() // consume `)`
 			field.Enum = values
-		case "description":
-			// `@description` on an args field is retired (memql#3336). It was
-			// accepted and then thrown away -- there is no AST slot for it, so
-			// the prose never reached the runtime while the identical
-			// annotation on a tool / prompt / builtin field IS retained. Same
-			// de-overload as @default above (#991): reject, don't discard. The
-			// live channel for an arg description is the `///` doc comment on
-			// the line above the field, which lands on ArgsField.DocComment
-			// (#2601 / memql#2633) and is what the corpus and the LSP use.
-			return nil, newParseErrorf(&p.current, "@description on an args field %q is retired -- it was never retained (no AST slot); document the field with a `///` doc comment on the line above it", name)
 		case "maxLength":
 			// @maxLength(N) -- rune-count cap for string args. Other
 			// arg types accept the annotation at parse time but the
@@ -262,11 +260,72 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 			} else {
 				field.Maximum = &bound
 			}
-		default:
-			return nil, newParseErrorf(&p.current, "unknown annotation @%s on args field %q (supported: @required, @enum, @maxLength, @pattern, @minimum, @maximum; an arg description is a `///` doc comment above the field, not @description -- memql#3336)", ann, name)
 		}
 	}
 	return field, nil
+}
+
+// peekAnnotationArgs classifies the argument list after an annotation's name
+// without consuming it, reading the same forms parseAttribute distinguishes
+// (plus the leading `-` of a negative number, which the args block parses and
+// parseAttribute does not). The args block reads its annotations' arguments
+// itself, so the registry check needs this to see the form BEFORE the
+// per-annotation parsing reports a narrower error about it.
+func (p *Parser) peekAnnotationArgs(name string) (annotations.Form, []string) {
+	if !p.check(TokenParenOpen) {
+		return annotations.FormFlag, nil
+	}
+	first := p.peekAhead(1)
+	switch {
+	case first.Type == TokenParenClose:
+		return annotations.FormEmpty, nil
+	case name == "filter" && first.Type != TokenString && first.Type != TokenBraceOpen:
+		return annotations.FormExpression, nil
+	case first.Type == TokenBraceOpen:
+		return annotations.FormObject, nil
+	case first.Type == TokenBang:
+		return annotations.FormExclude, nil
+	case first.Type == TokenString:
+		if p.peekAhead(2).Type == TokenComma {
+			return annotations.FormStrings, nil
+		}
+		return annotations.FormString, nil
+	case first.Type == TokenNumber:
+		return annotations.FormNumber, nil
+	case first.Literal == "-" && p.peekAhead(2).Type == TokenNumber:
+		return annotations.FormNumber, nil
+	case (first.Literal == "true" || first.Literal == "false") && p.peekAhead(2).Type == TokenParenClose:
+		return annotations.FormBool, nil
+	}
+	// Keyword arguments: every identifier that opens an argument (after the
+	// `(` or a `,` at the top level of the list).
+	var keys []string
+	depth := 0
+	opensArg := true
+	for i := 1; ; i++ {
+		tok := p.peekAhead(i)
+		switch tok.Type {
+		case TokenEOF:
+			return annotations.FormKeywords, keys
+		case TokenParenOpen, TokenBraceOpen, TokenBracketOpen:
+			depth++
+		case TokenParenClose, TokenBraceClose, TokenBracketClose:
+			if depth == 0 {
+				return annotations.FormKeywords, keys
+			}
+			depth--
+		case TokenComma:
+			if depth == 0 {
+				opensArg = true
+				continue
+			}
+		default:
+			if opensArg && depth == 0 && (tok.Type == TokenIdentifier || isKeywordTokenForAttribute(tok.Type)) {
+				keys = append(keys, tok.Literal)
+			}
+		}
+		opensArg = false
+	}
 }
 
 // reservedArgsNames are the ambient top-level identifiers an args field may

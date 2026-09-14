@@ -23,9 +23,9 @@ import (
 // further leading annotations) heads a construct declaration is flagged.
 //
 // This grep is belt-and-suspenders for a clear tree-wide file:line report;
-// the real gate is the loader (ValidateConstructAnnotations / the declarative
-// parser validator), which rejects the retired names in ANY formatting the
-// parser accepts. The `(internal|role|permission)` alternation is anchored between `@`
+// the real gate is the parser's annotation check against the registry
+// (component/language/annotations, memql#5359), which rejects the retired names
+// in ANY formatting the parser accepts. The `(internal|role|permission)` alternation is anchored between `@`
 // and a mandatory paren-or-end, so it never matches longer live names like
 // @allowedRoles / @preferredRole / @permissions.
 var standaloneRetiredRe = regexp.MustCompile(`^\s*@(internal|role|permission)(\s*\([^)]*\))?\s*$`)

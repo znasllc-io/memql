@@ -96,17 +96,6 @@ func KeywordArgsFor(name string) []ArgSpec {
 	return KeywordArgs[name]
 }
 
-// Set returns the receiver's accepted names as a fresh membership set.
-// TRANSITIONAL: its last consumers are the load-time allow lists this
-// registry replaces, and it goes with them.
-func Set(receiver string) map[string]bool {
-	out := map[string]bool{}
-	for _, n := range ByReceiver[receiver] {
-		out[n] = true
-	}
-	return out
-}
-
 // docFor returns the doc a placement shows: its own, or the name's.
 func docFor(p Placement) string {
 	if p.Doc != "" {
