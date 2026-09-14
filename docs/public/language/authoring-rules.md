@@ -2377,7 +2377,10 @@ shipped it (`cmd/memqlmigrate/rewrites.go`), and reached with `--edition`
 (default: the edition this engine writes) and `--rewrite=<name>`;
 `--rewrite=language-line` is the one that declares the line in every domain
 that has none, and `--rewrite=expressions` moves filters, spec and trait
-bodies, conditions and values onto the edition-2026 expression grammar.
+bodies, conditions and values onto the edition-2026 expression grammar. In
+VS Code the language server makes the same `--rewrite=expressions` edit one
+construct at a time, as the **Rewrite to edition 2026** quick fix on a retired
+spelling's diagnostic ([Sense](sense.md#the-rewrite-quick-fix)).
 
 A rewrite is **required** when a narrowing can strand source someone else
 holds: the retired form has in-tree usage, or plausible usage in a

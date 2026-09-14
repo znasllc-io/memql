@@ -164,9 +164,9 @@ A condition is boolean: there is no truthiness, and `!` negates exactly. An
 optional argument is a plain predicate, `args.x == nil || row.f == args.x`,
 which the engine folds before the query runs. The retired spellings (`when(...)`,
 `;` and `,` as connectives, `has`, `?.`, `cond(...)`, `coalesce(...)`,
-`concat(...)`, ...) are refused where an expression is written; the full list is
-[memql.md](memql.md#retired-spellings), and `memqlmigrate --rewrite=expressions`
-rewrites them.
+`concat(...)`, ...) are refused at parse wherever a `.memql` file writes them;
+the full list is [memql.md](memql.md#retired-spellings), and
+`memqlmigrate --rewrite=expressions` rewrites them.
 
 ---
 
@@ -214,9 +214,9 @@ Filter rules:
 An optional argument is a plain predicate: `args.x == nil || <predicate>`.
 Nothing in it reads the row until the second half, so the engine computes
 `args.x == nil` once before the query runs: the clause becomes true when the
-caller leaves the argument out and the predicate alone when they pass it. It
-replaces the retired `when(args.x) { ... }` guard, and under `||` the form is
-`args.x != nil && <predicate>`:
+argument is unset (left out, null or `""`) and the predicate alone when it is
+set. It replaces the retired `when(args.x) { ... }` guard, and under `||` the
+form is `args.x != nil && <predicate>`:
 
 ```memql
 @description("Active folders, optionally narrowed to a creator")

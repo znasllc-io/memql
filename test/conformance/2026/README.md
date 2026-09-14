@@ -67,15 +67,13 @@ named by a case; the runner refuses a file nothing names.
 | `lower` | lower the expression to SQL containing `sql`. |
 | `evaluate` | evaluate the expression against `row` to `expect`. |
 
-The edition's grammar is the expression grammar of edition 2026, which the
-loaders read behind `parser.Options.ExpressionsV1` until the embedded tree is
-migrated and the option becomes the default. Until then the loaders still read
-the four spellings it retires from the predicate positions -- a filter with no
-lambda header, a spec or trait `{ return }` body, a raw-text `@filter` -- so
-a refusal is judged by the edition's grammar, and a case that loads must parse
-in both: the grammar the loaders read it with today, and the one they will
-read it with after the flip. A cell written today therefore means the same
-thing after the flip, without anyone touching the corpus.
+The edition's grammar is the expression grammar of edition 2026, which is the
+loaders' default (`parser.DefaultOptions` has `ExpressionsV1` on): a case is
+judged by the grammar a node boots with. Every spelling edition 2026 retires is
+a parse refusal, the predicate positions' old forms included -- a filter with
+no lambda header, a spec or trait `{ return }` body, a raw-text `@filter`.
+The cells were written before the flip to mean the same thing after it, and
+they needed no edit when it landed.
 
 A case file for `lower` or `evaluate` holds the expression alone -- at a
 position written as a lambda over the row (a query filter, a spec body, a

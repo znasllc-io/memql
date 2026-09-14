@@ -1307,18 +1307,22 @@ see one in an old diff:
 Only `dsl/_reference/*.memql` still shows these, deliberately, as
 don't-do-this skeletons.
 
-**Retired expression spellings (edition 2026).** Each is refused with its
-replacement and `memqlmigrate --rewrite=expressions`, which rewrites it: the
-`when(args.x) { ... }` guard and the `?.` prefix (write
+**Retired expression spellings (edition 2026).** Each is refused at parse,
+wherever a `.memql` file writes it, with its replacement and
+`memqlmigrate --rewrite=expressions`, which rewrites it (in VS Code the
+language server's **Rewrite to edition 2026** quick fix makes the same edit):
+the `when(args.x) { ... }` guard and the `?.` prefix (write
 `args.x == nil || <predicate>`), `;` and `,` as connectives (`&&`, `||`),
 `has` (`v in list`), `not in` (`!(v in list)`), `cond(`, `concat(`,
 `coalesce(`, `exists(`, `len(`, `count(x)` and `contains(s, sub)`
 (`p ? a : b`, `a + b`, `a ?? b`, `x != nil`, `x.count()`, `s.includes(sub)`),
-`null` (`nil`), a `spec` or `trait` body written `{ return ... }`
-(`= row => ...`), `@filter` without a lambda (`@filter(row => ...)`), and
-`$args.` in a tool handler (`args.`). The expression spellings are listed in
-full in [memql.md](docs/public/language/memql.md#retired-spellings);
-`parser.V1RetiredForms` is the one list.
+`null` (`nil`), a filter without its lambda header (`filter row => ...`), a
+`spec` or `trait` body written `{ return ... }` (`= row => ...`), `@filter`
+without a lambda (`@filter(row => ...)`), and `$args.` in a tool handler
+(`args.`). The expression spellings are listed in full in
+[memql.md](docs/public/language/memql.md#retired-spellings);
+`parser.V1RetiredForms` is the one list. The string a client sends to
+`Execute` is the internal query form, which keeps its own grammar.
 
 ## Levels, policies and rules
 
