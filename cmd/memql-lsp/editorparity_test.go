@@ -32,11 +32,15 @@ import (
 // changelog did not move with it, so a grammar change cannot merge without the
 // extension release that carries it. Every message names the exact edit.
 //
-// What it cannot see, and says in its messages rather than pretending to: it
-// is hermetic, so it cannot know whether parser.EditorRelease has already been
-// PUBLISHED. Before that release ships, moving the grammar means editing its
-// pin and its changelog line; after it ships, the grammar needs a new release.
-// The grammar-mismatch message spells out both.
+// What it cannot see, and asks instead of guessing: it is hermetic, so it
+// cannot know whether parser.EditorRelease has already been PUBLISHED. Before
+// that release ships, a moved grammar or edition is carried by it, and its pin
+// and changelog lines are edited in place. After it ships, the same in-place
+// edits are exactly the change this gate cannot catch -- they would claim a
+// published extension carries a grammar it was never built with -- so the
+// change needs a new release. Every message about a moved grammar or edition
+// therefore OPENS with "Has <release> been published?" and gives both fixes
+// the same weight (askPublished).
 const checkedInExtensionChangelog = "../../editors/vscode/CHANGELOG.md"
 
 // extensionLanguageManifest reads only the two manifest facts this gate
@@ -66,21 +70,39 @@ type editorParityInput struct {
 	Changelog string
 }
 
+// askPublished renders a moved grammar or edition's two fixes with the same
+// weight, opening with the question only the author can answer (see the file
+// comment). notPublished and published are numbered steps.
+func askPublished(release, drift string, notPublished, published []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Has %s been published? %s\n", release, drift)
+	fmt.Fprintf(&b, "  Not published -- %s carries the change:\n", release)
+	for i, step := range notPublished {
+		fmt.Fprintf(&b, "    %d. %s\n", i+1, step)
+	}
+	fmt.Fprintf(&b, "  Published -- %s cannot change, so the change needs a new release:\n", release)
+	for i, step := range published {
+		fmt.Fprintf(&b, "    %d. %s\n", i+1, step)
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
 // editorParity returns one problem per drift, each naming the edit that ends
 // it. Empty means the extension and the parser agree.
 func editorParity(in editorParityInput) []string {
 	var problems []string
 	release := in.EditorRelease
 
-	// Written once, because two checks point at it: after release has shipped,
-	// fixing the pin in place would claim a published extension carries a
-	// grammar it was never built with.
-	ifPublished := fmt.Sprintf(
-		"If %[1]s has already been published, the change needs a new release instead: raise "+
-			"parser.EditorRelease (component/language/parser/edition.go) and \"version\" in "+
-			"editors/vscode/package.json to that release, and give editors/vscode/CHANGELOG.md a "+
-			"\"## <release>\" section naming %[2]q and \"edition %[3]s\".",
-		release, in.GrammarVersion, in.Edition)
+	// The published branch's closing steps, the same whichever fact moved: a
+	// section of its own for the new release, and parser.EditorRelease naming
+	// it -- the release a cluster tells an older editor to install.
+	newReleaseSteps := []string{
+		fmt.Sprintf("editors/vscode/CHANGELOG.md: add a \"## <new release>\" section naming %q and "+
+			"\"edition %s\", and leave \"## %s\" as it was published.", in.GrammarVersion, in.Edition, release),
+		"component/language/parser/edition.go: set EditorRelease to the new release.",
+	}
+	regenerate := "Run `make vscode-grammar`, which regenerates the TextMate grammar " +
+		"(editors/vscode/syntaxes/memql.tmLanguage.json) and the language configuration."
 
 	// A stale pin's message names the changelog edit as part of the whole fix,
 	// so the changelog checks below do not report the same edit a second time.
@@ -94,23 +116,34 @@ func editorParity(in editorParityInput) []string {
 	default:
 		if pin.GrammarVersion != in.GrammarVersion {
 			pinGrammarStale = true
-			problems = append(problems, fmt.Sprintf(
-				"editors/vscode/package.json pins \"memql\": {\"grammarVersion\": %[1]q}, but "+
-					"parser.GrammarVersion is %[2]q. A grammar change merges together with the extension "+
-					"release that carries it, and the whole fix is three edits:\n"+
-					"  1. editors/vscode/package.json: set \"memql\": {\"grammarVersion\": %[2]q}.\n"+
-					"  2. editors/vscode/CHANGELOG.md: name %[2]q in the \"## %[3]s\" section, in place of %[1]q.\n"+
-					"  3. Run `make vscode-grammar`, which regenerates the TextMate grammar "+
-					"(editors/vscode/syntaxes/memql.tmLanguage.json) and the language configuration.\n%[4]s",
-				pin.GrammarVersion, in.GrammarVersion, release, ifPublished))
+			setPin := fmt.Sprintf("\"memql\": {\"grammarVersion\": %q}", in.GrammarVersion)
+			problems = append(problems, askPublished(release,
+				fmt.Sprintf("parser.GrammarVersion is %q, but editors/vscode/package.json pins "+
+					"\"memql\": {\"grammarVersion\": %q}, and a grammar change merges together with the "+
+					"extension release that carries it.", in.GrammarVersion, pin.GrammarVersion),
+				[]string{
+					"editors/vscode/package.json: set " + setPin + ".",
+					fmt.Sprintf("editors/vscode/CHANGELOG.md: name %q in the \"## %s\" section, in place of %q.",
+						in.GrammarVersion, release, pin.GrammarVersion),
+					regenerate,
+				},
+				append(append([]string{
+					"editors/vscode/package.json: set " + setPin + " and raise \"version\" to the new release.",
+				}, newReleaseSteps...), regenerate)))
 		}
 		if pin.Edition != in.Edition {
 			pinEditionStale = true
-			problems = append(problems, fmt.Sprintf(
-				"editors/vscode/package.json pins \"memql\": {\"edition\": %[1]q}, but parser.Edition is %[2]q. "+
-					"Set \"memql\": {\"edition\": %[2]q} and say \"edition %[2]s\" in the \"## %[3]s\" section of "+
-					"editors/vscode/CHANGELOG.md.\n%[4]s",
-				pin.Edition, in.Edition, release, ifPublished))
+			setPin := fmt.Sprintf("\"memql\": {\"edition\": %q}", in.Edition)
+			problems = append(problems, askPublished(release,
+				fmt.Sprintf("parser.Edition is %q, but editors/vscode/package.json pins \"memql\": {\"edition\": %q}.",
+					in.Edition, pin.Edition),
+				[]string{
+					"editors/vscode/package.json: set " + setPin + ".",
+					fmt.Sprintf("editors/vscode/CHANGELOG.md: say \"edition %s\" in the \"## %s\" section.", in.Edition, release),
+				},
+				append([]string{
+					"editors/vscode/package.json: set " + setPin + " and raise \"version\" to the new release.",
+				}, newReleaseSteps...)))
 		}
 	}
 
@@ -143,17 +176,26 @@ func editorParity(in editorParityInput) []string {
 				"the grammar (%[2]q) and \"edition %[3]s\".",
 			release, in.GrammarVersion, in.Edition))
 	default:
+		// The pin is in step here, so only the changelog and -- once the
+		// release is out -- the version and EditorRelease are left to move.
+		bumpVersion := "editors/vscode/package.json: raise \"version\" to the new release."
 		if !pinGrammarStale && !strings.Contains(section, in.GrammarVersion) {
-			problems = append(problems, fmt.Sprintf(
-				"the \"## %[1]s\" section of editors/vscode/CHANGELOG.md does not name GrammarVersion %[2]q. "+
-					"Write %[2]q into it: %[1]s is the release that carries that grammar.",
-				release, in.GrammarVersion))
+			problems = append(problems, askPublished(release,
+				fmt.Sprintf("The \"## %s\" section of editors/vscode/CHANGELOG.md does not name GrammarVersion %q, "+
+					"which editors/vscode/package.json pins.", release, in.GrammarVersion),
+				[]string{
+					fmt.Sprintf("editors/vscode/CHANGELOG.md: name %q in the \"## %s\" section.", in.GrammarVersion, release),
+				},
+				append([]string{bumpVersion}, newReleaseSteps...)))
 		}
 		if !pinEditionStale && !editionPhrase(in.Edition).MatchString(section) {
-			problems = append(problems, fmt.Sprintf(
-				"the \"## %[1]s\" section of editors/vscode/CHANGELOG.md does not say \"edition %[2]s\". "+
-					"Name the edition that release speaks.",
-				release, in.Edition))
+			problems = append(problems, askPublished(release,
+				fmt.Sprintf("The \"## %s\" section of editors/vscode/CHANGELOG.md does not say \"edition %s\".",
+					release, in.Edition),
+				[]string{
+					fmt.Sprintf("editors/vscode/CHANGELOG.md: say \"edition %s\" in the \"## %s\" section.", in.Edition, release),
+				},
+				append([]string{bumpVersion}, newReleaseSteps...)))
 		}
 	}
 	return problems
@@ -274,27 +316,46 @@ func TestEditorParityRefusesEachDrift(t *testing.T) {
 		t.Fatalf("an extension in step with the parser was refused:\n%s", strings.Join(problems, "\n"))
 	}
 
+	// What the published branch of every moved-language message must say: a
+	// published release cannot take the change, so a new one must.
+	newRelease := func(grammar, edition string) []string {
+		return []string{
+			`raise "version" to the new release`,
+			`add a "## <new release>" section naming "` + grammar + `" and "edition ` + edition + `"`,
+			`leave "## 0.4.0" as it was published`,
+			`set EditorRelease to the new release`,
+		}
+	}
+
 	for _, tc := range []struct {
 		name  string
 		drift func(*editorParityInput)
 		// Every string must appear in the ONE problem reported: the edit it
 		// names is the point of the message.
 		want []string
+		// A moved grammar or edition is fixed in place only while the release
+		// is unpublished. Its message must OPEN with that question and carry
+		// both fixes, the published one included.
+		asksPublished bool
 	}{
 		{
 			name:  "the parser's grammar moved and the pin did not",
 			drift: func(in *editorParityInput) { in.GrammarVersion = "2026.10-next-grammar-89abcdef" },
-			want: []string{
-				`set "memql": {"grammarVersion": "2026.10-next-grammar-89abcdef"}`,
-				`"## 0.4.0" section, in place of "2026.09-example-grammar-0123abcd"`,
+			want: append([]string{
+				`set "memql": {"grammarVersion": "2026.10-next-grammar-89abcdef"}.`,
+				`name "2026.10-next-grammar-89abcdef" in the "## 0.4.0" section, in place of "2026.09-example-grammar-0123abcd"`,
 				"make vscode-grammar",
-				"If 0.4.0 has already been published",
-			},
+			}, newRelease("2026.10-next-grammar-89abcdef", "2026")...),
+			asksPublished: true,
 		},
 		{
 			name:  "the parser's edition moved and the pin did not",
 			drift: func(in *editorParityInput) { in.Edition = "2027" },
-			want:  []string{`Set "memql": {"edition": "2027"}`, `say "edition 2027" in the "## 0.4.0" section`},
+			want: append([]string{
+				`set "memql": {"edition": "2027"}.`,
+				`say "edition 2027" in the "## 0.4.0" section`,
+			}, newRelease("2026.09-example-grammar-0123abcd", "2027")...),
+			asksPublished: true,
 		},
 		{
 			name: "the pin moved with the grammar and the changelog did not",
@@ -302,7 +363,11 @@ func TestEditorParityRefusesEachDrift(t *testing.T) {
 				in.GrammarVersion = "2026.10-next-grammar-89abcdef"
 				in.Manifest.MemQL = pinned(edition, in.GrammarVersion)
 			},
-			want: []string{`does not name GrammarVersion "2026.10-next-grammar-89abcdef"`},
+			want: append([]string{
+				`does not name GrammarVersion "2026.10-next-grammar-89abcdef"`,
+				`name "2026.10-next-grammar-89abcdef" in the "## 0.4.0" section.`,
+			}, newRelease("2026.10-next-grammar-89abcdef", "2026")...),
+			asksPublished: true,
 		},
 		{
 			name:  "the manifest carries no pin at all",
@@ -326,14 +391,21 @@ func TestEditorParityRefusesEachDrift(t *testing.T) {
 			drift: func(in *editorParityInput) {
 				in.Changelog = strings.Replace(in.Changelog, grammar, "2026.08-older-grammar-00000000", 1)
 			},
-			want: []string{`does not name GrammarVersion "2026.09-example-grammar-0123abcd"`},
+			want: append([]string{
+				`does not name GrammarVersion "2026.09-example-grammar-0123abcd"`,
+			}, newRelease("2026.09-example-grammar-0123abcd", "2026")...),
+			asksPublished: true,
 		},
 		{
 			name: "the section does not name the edition",
 			drift: func(in *editorParityInput) {
 				in.Changelog = strings.Replace(in.Changelog, "edition 2026", "the current edition", 1)
 			},
-			want: []string{`does not say "edition 2026"`},
+			want: append([]string{
+				`does not say "edition 2026"`,
+				`say "edition 2026" in the "## 0.4.0" section`,
+			}, newRelease("2026.09-example-grammar-0123abcd", "2026")...),
+			asksPublished: true,
 		},
 		{
 			name:  "EditorRelease is not a release",
@@ -357,6 +429,21 @@ func TestEditorParityRefusesEachDrift(t *testing.T) {
 				if !strings.Contains(problems[0], want) {
 					t.Errorf("the problem does not name %q:\n%s", want, problems[0])
 				}
+			}
+			if tc.asksPublished {
+				// The question comes FIRST, and neither fix is an afterthought:
+				// after the release ships, the in-place steps are the change
+				// this gate cannot catch.
+				if !strings.HasPrefix(problems[0], "Has 0.4.0 been published? ") {
+					t.Errorf("the problem does not open with the publication question:\n%s", problems[0])
+				}
+				for _, branch := range []string{"\n  Not published -- 0.4.0 carries the change:\n", "\n  Published -- 0.4.0 cannot change, so the change needs a new release:\n"} {
+					if !strings.Contains(problems[0], branch) {
+						t.Errorf("the problem lacks the branch %q:\n%s", strings.TrimSpace(branch), problems[0])
+					}
+				}
+			} else if strings.Contains(problems[0], "been published?") {
+				t.Errorf("a drift that publication does not change asks about it anyway:\n%s", problems[0])
 			}
 		})
 	}

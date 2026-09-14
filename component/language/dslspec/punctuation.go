@@ -14,9 +14,12 @@ package dslspec
 //
 // The LEXER is the truth this table describes
 // (component/language/parser/lexer.go). punctuation_test.go lexes every entry
-// and fails when the two disagree -- including when the lexer grows an opener
-// the table does not list -- so a table edit that is not a lexer edit, or the
-// other way round, cannot pass.
+// and fails when a listed delimiter lexes as something else, and when a
+// printable character lexes to one of the lexer's three opening token types
+// (brace, bracket, paren) without being listed. What it cannot see is a NEW
+// kind of opening token: the lexer's token types are a plain enum with no
+// opener/closer pairing to read, so the test names those three, and a lexer
+// change adding a fourth must add it to the test's closerFor map as well.
 
 // DelimiterPair is an opening delimiter and the one that closes it.
 type DelimiterPair struct {

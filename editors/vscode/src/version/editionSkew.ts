@@ -22,11 +22,11 @@
 //                 in a release newer than this one. A warning naming the release
 //                 to install.
 //   clusterOlder  the cluster's edition is earlier, or its grammar first shipped
-//                 in a release older than this one. Information: the editor may
-//                 suggest forms the cluster refuses, and nothing installed here
-//                 changes a cluster.
+//                 in a release older than this one. Information: completion may
+//                 offer forms the cluster refuses until the cluster is updated,
+//                 and nothing installed here changes a cluster.
 //   differs       they differ and no order can be shown. Information naming
-//                 both.
+//                 both, pointing at the release built for the cluster's grammar.
 //
 // WHAT MAY BE ORDERED, AND WHAT MAY NOT. A grammar version is a LABEL --
 // `<year>.<month>-<slug>-<8 hex>` -- and two labels are only equal or
@@ -34,13 +34,15 @@
 // edition (editions are years), and the release that first carried the
 // cluster's grammar (ServerHello.editor_release) against this extension's own
 // version, both releases compared by compare.ts. Anything neither can decide
-// is `differs`, and its words say the order cannot be shown. That is
-// describe.ts's discipline one layer over: "cannot tell" is never "current",
-// and it is never "newer" either.
+// is `differs`, and its words claim no order: they name both sides and the
+// release to look for. That is describe.ts's discipline one layer over:
+// "cannot tell" is never "current", and it is never "newer" either.
 //
-// THE NOTICE READS AS WHAT IT IS. Plain, active sentences that name both sides
-// or the release, never an apology -- and never a claim the facts cannot
-// carry, the rule skewHint.ts states for its own sentence.
+// THE NOTICE SAYS WHAT RESOLVES IT. Plain, active sentences that name both
+// sides or the release, and the next step -- update this extension, update
+// the cluster, or use the release built for the cluster's grammar -- never an
+// apology, and never a claim the facts cannot carry, the rule skewHint.ts
+// states for its own sentence.
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go):
 // src/extension.ts shows the notice, runs its one action and writes the
@@ -51,7 +53,10 @@ import { compareVersions } from "./compare.js";
 
 export type LanguageSkewState = "unknown" | "match" | "clusterNewer" | "clusterOlder" | "differs";
 
-/** One side's language. The cluster fills the first three, this extension the other. */
+/**
+ * One side's language. Both sides give `edition` and `grammarVersion`; the
+ * cluster adds `editorRelease` and this extension its own `version`.
+ */
 export interface LanguageFacts {
   /** The edition, e.g. "2026". */
   edition?: string;
@@ -73,14 +78,13 @@ export interface LanguageSkew {
   releaseToInstall?: string;
 }
 
-/** The id `extension.open` takes to open this extension's page in the Extensions view. */
-export const MEMQL_EXTENSION_ID = "znasllc.memql";
-
-/** The warning's own action. */
+/**
+ * The warning's own action. It opens this extension's page in the Extensions
+ * view, by the id the host reports (src/extension.ts passes
+ * `context.extension.id`); there is no copy of the id here to drift from the
+ * manifest.
+ */
 export const OPEN_IN_EXTENSIONS = "Open in Extensions";
-
-/** What a notice without an order can still say about its consequence. */
-const MAY_NOT_MATCH = "Completion and diagnostics may not match the cluster.";
 
 /** Editions are years, so two of them order as numbers -- when both are years. */
 const EDITION = /^\d{4}$/;
@@ -151,9 +155,9 @@ export function compareLanguage(cluster: LanguageFacts, extension: LanguageFacts
   if (c.edition === "" || e.edition === "") return { state: "unknown", headline: "", details };
 
   if (c.edition !== e.edition) {
-    const both = `This cluster speaks MemQL edition ${c.edition}; this extension speaks edition ${e.edition}.`;
     const order = compareEditions(c.edition, e.edition);
     if (order !== undefined && order > 0) {
+      const both = `This cluster speaks MemQL edition ${c.edition}; this extension speaks edition ${e.edition}.`;
       // The release comes from the cluster. One that did not name it leaves
       // the notice naming the edition to get rather than inventing a version.
       if (c.release === "") {
@@ -171,15 +175,20 @@ export function compareLanguage(cluster: LanguageFacts, extension: LanguageFacts
       };
     }
     if (order !== undefined && order < 0) {
+      // Nothing installed here changes a cluster, so the resolution named is
+      // the cluster's update.
       return {
         state: "clusterOlder",
-        headline: `${both} The editor may suggest forms this cluster refuses.`,
+        headline: `This cluster speaks MemQL edition ${c.edition}, older than this extension's edition ${e.edition}. Completion may offer forms it refuses until the cluster is updated.`,
         details,
       };
     }
+    // Neither side can be shown to be newer, so the notice claims no order and
+    // points at the release that matches the cluster; the details name it
+    // when the cluster sent one.
     return {
       state: "differs",
-      headline: `This cluster speaks MemQL edition ${c.edition} and this extension speaks edition ${e.edition}, and which is newer cannot be shown. ${MAY_NOT_MATCH}`,
+      headline: `This cluster speaks MemQL edition ${c.edition}; this extension was built for edition ${e.edition}. Use the MemQL for VS Code release built for this cluster's edition (Show details has both).`,
       details,
     };
   }
@@ -202,16 +211,17 @@ export function compareLanguage(cluster: LanguageFacts, extension: LanguageFacts
       return {
         state: "clusterOlder",
         headline:
-          "This cluster's MemQL grammar is older than this extension's. The editor may suggest forms this cluster refuses.",
+          "This cluster runs an older MemQL grammar than this extension. Completion may offer forms it refuses until the cluster is updated.",
         details,
       };
     default:
       // "current" -- the cluster's grammar first shipped in this very release
       // number, yet the grammars differ: a locally built extension -- or a
-      // release that does not parse. Either way, no order.
+      // release that does not parse. Either way, no order: name both labels
+      // and the release to look for.
       return {
         state: "differs",
-        headline: `This cluster's MemQL grammar (${c.grammar}) differs from this extension's (${e.grammar}), and which is newer cannot be shown. ${MAY_NOT_MATCH}`,
+        headline: `This cluster runs MemQL grammar ${c.grammar}; this extension was built for ${e.grammar}. Use the MemQL for VS Code release built for this cluster's grammar (Show details has both).`,
         details,
       };
   }

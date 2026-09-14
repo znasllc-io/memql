@@ -23,8 +23,12 @@ func lex(t *testing.T, src string) []parser.Token {
 
 // TestBracketPairsAreTheLexersNestingPairs: each pair's opener and closer lex
 // to one of the lexer's matching open/close token types, and no printable
-// character the table does not list lexes to an opener.
+// character the table does not list lexes to one of those opening types.
 func TestBracketPairsAreTheLexersNestingPairs(t *testing.T) {
+	// The lexer's opening token types, named here because the lexer offers no
+	// opener/closer pairing to read: TokenType is a plain enum. So this test
+	// cannot notice a NEW kind of opener -- a lexer change that adds one must
+	// add it here, and the checks below then hold the table to it.
 	closerFor := map[parser.TokenType]parser.TokenType{
 		parser.TokenBraceOpen:   parser.TokenBraceClose,
 		parser.TokenBracketOpen: parser.TokenBracketClose,
@@ -45,9 +49,9 @@ func TestBracketPairsAreTheLexersNestingPairs(t *testing.T) {
 		}
 	}
 
-	// The other direction: every printable ASCII character that lexes to an
-	// opener is in the table. Characters the lexer refuses on their own are
-	// skipped; they open nothing.
+	// The other direction: every printable ASCII character that lexes to one
+	// of those opening types is in the table. Characters the lexer refuses on
+	// their own are skipped; they open nothing.
 	for r := rune(0x21); r < 0x7f; r++ {
 		toks, err := parser.NewLexer(string(r)).Tokenize()
 		if err != nil || len(toks) == 0 {

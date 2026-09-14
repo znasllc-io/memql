@@ -173,7 +173,6 @@ import {
 import { resolveInstallRoot } from './install/root.js';
 import { readBuildStamp } from './version/buildStamp.js';
 import {
-  MEMQL_EXTENSION_ID,
   OPEN_IN_EXTENSIONS,
   extensionLanguageFacts,
   watchLanguageSkew,
@@ -341,18 +340,28 @@ async function offerDetails(
  * The details go to the MemQL Connection channel first, as every other
  * connect-time record does, and the toast's "Show details" reveals them. The
  * one action beyond that -- "Open in Extensions", on a cluster newer than this
- * extension -- opens this extension's own page, where the update is.
+ * extension -- opens this extension's own page, where the update is, by the id
+ * the host reported. With no id to give `extension.open` the button is not
+ * drawn: a control that cannot work is not drawn. Only the fake contexts the
+ * activation tests build lack one, and they carry no pin, so they never reach
+ * a notice at all.
  */
-function presentLanguageSkew(notice: LanguageSkewNotice, clusterName: string): void {
+function presentLanguageSkew(
+  notice: LanguageSkewNotice,
+  clusterName: string,
+  extensionId: string | undefined
+): void {
   noteDiagnostic(
     connectionOutput,
     `MemQL language on "${clusterName}": ${notice.headline}`,
     notice.details.join('\n')
   );
+  const actions =
+    extensionId === undefined ? notice.actions.filter((action) => action !== OPEN_IN_EXTENSIONS) : notice.actions;
   void (async () => {
-    const choice = await offerDetails(notice.severity, connectionOutput, notice.headline, ...notice.actions);
-    if (choice === OPEN_IN_EXTENSIONS) {
-      await commands.executeCommand('extension.open', MEMQL_EXTENSION_ID);
+    const choice = await offerDetails(notice.severity, connectionOutput, notice.headline, ...actions);
+    if (choice === OPEN_IN_EXTENSIONS && extensionId !== undefined) {
+      await commands.executeCommand('extension.open', extensionId);
     }
   })();
 }
@@ -360,18 +369,23 @@ function presentLanguageSkew(notice: LanguageSkewNotice, clusterName: string): v
 /**
  * Wires the connect-time language comparison onto a connection manager and
  * returns the function that stops it. registerRuntimeSurface calls it once,
- * on the manager activation builds, so the memory it carries is this
- * session's: each cluster is told about each grammar once.
+ * on the manager activation builds, with this extension's manifest and the id
+ * the host reports for it (`context.extension`), so the memory it carries is
+ * this session's: each cluster is told about each grammar once.
  *
  * Exported for test/languageSkewWiring.test.ts, which drives it with a real
  * ConnectionManager over a fake dial: activation's own manager dials a real
- * cluster, which no unit test can reach.
+ * cluster, which no unit test can reach. That file also scans
+ * registerRuntimeSurface for the call, so removing it fails a test.
  */
 export function wireLanguageSkewNotice(
   manager: ConnectionManager,
-  readExtension: () => LanguageFacts
+  readExtension: () => LanguageFacts,
+  extensionId: string | undefined
 ): () => void {
-  return watchLanguageSkew(manager, readExtension, presentLanguageSkew);
+  return watchLanguageSkew(manager, readExtension, (notice, clusterName) =>
+    presentLanguageSkew(notice, clusterName, extensionId)
+  );
 }
 
 /** The action an enrolment failure toast carries when the link survives it. */
@@ -1348,12 +1362,17 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // The connect-time language comparison (memql#5362, D25): on every
   // "connected", the cluster's edition and grammar against the ones this
   // extension was built from, read from its own package.json. A listener on
-  // the manager covers every connect path at once. `context.extension` is
-  // guarded because the fake contexts the activation tests build have none,
+  // the manager covers every connect path at once. The id "Open in Extensions"
+  // opens is the one the host reports, never a copy of it. `context.extension`
+  // is guarded because the fake contexts the activation tests build have none,
   // and a build with no pin compares as unknown, which shows nothing.
+  // test/languageSkewWiring.test.ts scans this function for the call.
+  const extensionId: string | undefined = context.extension?.id;
   context.subscriptions.push({
-    dispose: wireLanguageSkewNotice(connections, () =>
-      extensionLanguageFacts(context.extension?.packageJSON)
+    dispose: wireLanguageSkewNotice(
+      connections,
+      () => extensionLanguageFacts(context.extension?.packageJSON),
+      extensionId
     ),
   });
 

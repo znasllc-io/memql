@@ -12,8 +12,10 @@
 // first so the MemQL Connection channel exists, exactly as it does in the
 // editor; the notice is then driven through a REAL ConnectionManager over a
 // fake dial, wired by the same function registerRuntimeSurface wires the
-// activation-built manager with. (That manager dials a real cluster, which no
-// case in this lane can reach.)
+// activation-built manager with. That manager dials a real cluster, which no
+// case in this lane can reach -- so the last case reads registerRuntimeSurface
+// itself and fails if the call wiring it is removed, the textual approach the
+// vscode-import rule takes (cmd/memql-lsp/vscodeimportrule_test.go).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -93,11 +95,22 @@ function fakeConn(language: LanguageFacts): Connection {
   } as unknown as Connection;
 }
 
+// The id these cases hand the adapter, standing in for `context.extension.id`.
+// Deliberately NOT this extension's real id: the assertion is that
+// "Open in Extensions" opens whatever id the host reported, and a copy of the
+// real id in the adapter would pass a test written with the real id too.
+const HOST_REPORTED_ID = "tester.memql-under-test";
+
 // A manager whose every dial answers with `language`, wired the way
-// registerRuntimeSurface wires the real one.
-function wiredManager(language: () => LanguageFacts): ConnectionManager {
+// registerRuntimeSurface wires the real one. The host's id rides in an object
+// rather than a defaulted parameter: JavaScript applies a parameter default to
+// an explicit `undefined` too, which would quietly turn "no id" back into one.
+function wiredManager(
+  language: () => LanguageFacts,
+  host: { extensionId: string | undefined } = { extensionId: HOST_REPORTED_ID },
+): ConnectionManager {
   const manager = new ConnectionManager(() => Promise.resolve(fakeConn(language())));
-  wireLanguageSkewNotice(manager, () => EXTENSION);
+  wireLanguageSkewNotice(manager, () => EXTENSION, host.extensionId);
   return manager;
 }
 
@@ -124,12 +137,29 @@ test("a newer cluster raises a warning naming the release, with both actions", a
   assert.deepEqual(recorded.warningActions[at], ["Open in Extensions", "Show details"]);
 });
 
-test("Open in Extensions opens this extension's own page", () => {
+test("Open in Extensions opens the page of the id the host reported", () => {
   // Armed on the case above. The id is the assertion: `extension.open` with
   // any other id opens somebody else's page and looks just as successful.
   const at = recorded.executed.lastIndexOf("extension.open");
   assert.ok(at >= 0, `extension.open was not run; ran: ${JSON.stringify(recorded.executed)}`);
-  assert.deepEqual(recorded.executedArgs[at], ["znasllc.memql"]);
+  assert.deepEqual(recorded.executedArgs[at], [HOST_REPORTED_ID]);
+});
+
+test("with no id from the host, the notice draws no Open in Extensions button", async () => {
+  // Only a fake context lacks `extension`, and a control that cannot work is
+  // not drawn: the warning keeps its words and its details.
+  const manager = wiredManager(
+    () => ({ edition: "2026", grammarVersion: GRAMMAR_B, editorRelease: "0.6.0" }),
+    { extensionId: undefined },
+  );
+  await manager.connect(cluster("no-id"));
+  await flush();
+
+  const at = recorded.warnings.indexOf(
+    "This cluster's MemQL grammar is newer than this extension's. Update MemQL for VS Code to 0.6.0 or newer so completion and diagnostics match the cluster.",
+  );
+  assert.ok(at >= 0, `the notice was not shown; saw: ${JSON.stringify(recorded.warnings)}`);
+  assert.deepEqual(recorded.warningActions[at], ["Show details"]);
 });
 
 test("the details land in the MemQL Connection channel, naming both grammars and the release", () => {
@@ -170,7 +200,7 @@ test("an older cluster is an information notice whose one action reveals the det
   await flush();
 
   const at = recorded.infos.indexOf(
-    "This cluster's MemQL grammar is older than this extension's. The editor may suggest forms this cluster refuses.",
+    "This cluster runs an older MemQL grammar than this extension. Completion may offer forms it refuses until the cluster is updated.",
   );
   assert.ok(at >= 0, `the notice was not shown; saw: ${JSON.stringify(recorded.infos)}`);
   assert.deepEqual(recorded.infoActions[at], ["Show details"]);
@@ -185,4 +215,44 @@ test("a matching cluster, and one that predates the fields, raise nothing", asyn
   await old.connect(cluster("old"));
   await flush();
   assert.equal(recorded.warnings.length + recorded.infos.length, before);
+});
+
+// The body of a top-level function in src/extension.ts: from its signature to
+// the first `}` in column 0, which is where every top-level function in that
+// hand-formatted, two-space-indented file closes.
+function topLevelFunctionBody(source: string, name: string): string {
+  const start = source.indexOf(`\nfunction ${name}(`);
+  assert.ok(start >= 0, `src/extension.ts has no top-level function ${name}; if it was renamed, follow it here`);
+  const end = source.indexOf("\n}\n", start);
+  assert.ok(end > start, `could not find where ${name} closes`);
+  return source.slice(start, end);
+}
+
+// Comment LINES removed -- `//`, and the lines of a `/* */` or JSDoc block --
+// so a commented-out call does not count. Line-based on purpose: a regex over
+// `/* ... */` would treat the `/*` inside a glob string such as '**/*.memql'
+// as a comment opener and delete real code.
+function withoutCommentLines(body: string): string {
+  return body
+    .split("\n")
+    .filter((line) => !/^\s*(\/\/|\/\*|\*)/.test(line))
+    .join("\n");
+}
+
+test("activation wires the notice onto the manager it builds, with the host's manifest and id", () => {
+  // Every case above calls wireLanguageSkewNotice on a manager of its own.
+  // This one holds registerRuntimeSurface to calling it on THE manager
+  // activation builds (`connections`), with this extension's manifest and the
+  // id the host reports -- the call no unit test can drive, since that
+  // manager dials a real cluster. Delete the call and this fails.
+  const source = fs.readFileSync(path.join(__dirname, "..", "..", "src", "extension.ts"), "utf8");
+  const body = withoutCommentLines(topLevelFunctionBody(source, "registerRuntimeSurface"));
+
+  assert.match(body, /wireLanguageSkewNotice\(\s*connections\s*,/, "registerRuntimeSurface does not wire the notice onto its manager");
+  assert.match(
+    body,
+    /extensionLanguageFacts\(\s*context\.extension\?\.packageJSON\s*\)/,
+    "the extension's side must come from its own manifest",
+  );
+  assert.match(body, /context\.extension\?\.id\b/, "the id Open in Extensions opens must be the one the host reports");
 });

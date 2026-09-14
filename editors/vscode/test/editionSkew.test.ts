@@ -111,7 +111,7 @@ test("a grammar first carried by an older release than this extension is cluster
   assert.equal(skew.state, "clusterOlder");
   assert.equal(
     skew.headline,
-    "This cluster's MemQL grammar is older than this extension's. The editor may suggest forms this cluster refuses.",
+    "This cluster runs an older MemQL grammar than this extension. Completion may offer forms it refuses until the cluster is updated.",
   );
   assert.equal(skew.releaseToInstall, undefined, "an older cluster is not fixed by installing anything here");
 });
@@ -121,7 +121,7 @@ test("an earlier edition is clusterOlder, naming both editions", () => {
   assert.equal(skew.state, "clusterOlder");
   assert.equal(
     skew.headline,
-    "This cluster speaks MemQL edition 2025; this extension speaks edition 2026. The editor may suggest forms this cluster refuses.",
+    "This cluster speaks MemQL edition 2025, older than this extension's edition 2026. Completion may offer forms it refuses until the cluster is updated.",
   );
 });
 
@@ -129,13 +129,14 @@ test("different grammars that cannot be ordered are differs, naming both grammar
   // The release that carries the cluster's grammar is this extension's own
   // version, yet the grammars differ: a locally built extension. Or the
   // cluster named a release that is not one. Either way no order can be
-  // shown, and the notice says exactly that.
+  // shown, so the notice claims none: it names both labels and the release
+  // to look for.
   for (const editorRelease of ["0.4.0", "main", "", undefined]) {
     const skew = compareLanguage({ edition: "2026", grammarVersion: GRAMMAR_B, editorRelease }, EXTENSION);
     assert.equal(skew.state, "differs", `editorRelease ${JSON.stringify(editorRelease)}`);
     assert.equal(
       skew.headline,
-      `This cluster's MemQL grammar (${GRAMMAR_B}) differs from this extension's (${GRAMMAR_A}), and which is newer cannot be shown. Completion and diagnostics may not match the cluster.`,
+      `This cluster runs MemQL grammar ${GRAMMAR_B}; this extension was built for ${GRAMMAR_A}. Use the MemQL for VS Code release built for this cluster's grammar (Show details has both).`,
     );
     assert.equal(skew.releaseToInstall, undefined);
   }
@@ -146,7 +147,7 @@ test("editions that are not years cannot be ordered either", () => {
   assert.equal(skew.state, "differs");
   assert.equal(
     skew.headline,
-    "This cluster speaks MemQL edition next and this extension speaks edition 2026, and which is newer cannot be shown. Completion and diagnostics may not match the cluster.",
+    "This cluster speaks MemQL edition next; this extension was built for edition 2026. Use the MemQL for VS Code release built for this cluster's edition (Show details has both).",
   );
 });
 
@@ -192,14 +193,31 @@ test("every notice's headline names both sides, or the release to install", () =
 });
 
 test("no notice claims an order it cannot show", () => {
-  // Only clusterNewer and clusterOlder may say "newer than" / "older than";
-  // differs says the order cannot be shown.
+  // Only clusterNewer and clusterOlder may place one side before the other;
+  // differs names both and claims no order.
   for (const { name, cluster } of NOTICE_CASES) {
     const skew = compareLanguage(cluster, EXTENSION);
     if (skew.state === "differs") {
-      assert.doesNotMatch(skew.headline, /\b(newer|older) than\b/, `${name}: ${skew.headline}`);
-      assert.match(skew.headline, /cannot be shown/, `${name}: ${skew.headline}`);
+      assert.doesNotMatch(skew.headline, /\b(newer|older)\b/, `${name}: ${skew.headline}`);
     }
+  }
+});
+
+test("every notice says what resolves it", () => {
+  // A notice that names a consequence and stops there leaves the reader to
+  // work out the next step. Each state has one, and its sentence names it:
+  // update this extension, update the cluster, or use the release built for
+  // the cluster's language.
+  const resolution: Record<string, RegExp> = {
+    clusterNewer: /Update MemQL for VS Code to /,
+    clusterOlder: / until the cluster is updated\.$/,
+    differs: /Use the MemQL for VS Code release built for this cluster's (grammar|edition) \(Show details has both\)\.$/,
+  };
+  for (const { name, cluster } of NOTICE_CASES) {
+    const skew = compareLanguage(cluster, EXTENSION);
+    const pattern = resolution[skew.state];
+    assert.ok(pattern !== undefined, `${name}: no resolution is pinned for state ${skew.state}`);
+    assert.match(skew.headline, pattern, `${name}: ${skew.headline}`);
   }
 });
 

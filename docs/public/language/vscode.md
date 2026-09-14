@@ -122,27 +122,34 @@ silently (D25 of the language-freeze program, memql#5362):
   `parser.GrammarVersion` or `parser.Edition`, when `parser.EditorRelease` is
   newer than the extension's `version`, or when `CHANGELOG.md` has no
   `## <EditorRelease>` section naming the grammar and the edition. Its messages
-  name each edit.
+  name each edit, and one about a moved grammar or edition opens with
+  `Has <EditorRelease> been published?`, because the answer decides the fix.
 - **The cluster states its language on connect.** `ServerHello` carries
   `edition`, `grammar_version` and `editor_release`, and the extension compares
   them with its own pin on every connect. A cluster on a newer grammar raises a
   warning naming the release to install, with **Open in Extensions**; a cluster
-  on an older grammar raises a notice that the editor may suggest forms the
-  cluster refuses; two grammars that cannot be ordered raise a notice naming
-  both. Grammar versions are labels, never ordered: the only orders the
-  extension states are one edition against another and `editor_release`
-  against its own version. A cluster that predates the fields reports nothing,
-  and nothing is shown. Each cluster is mentioned once per grammar per session,
-  and the details are in the **MemQL Connection** output channel.
+  on an older grammar raises a notice that completion may offer forms it
+  refuses until the cluster is updated; two grammars that cannot be ordered
+  raise a notice naming both and pointing at the release built for the
+  cluster's grammar. Grammar versions are labels, never ordered: the only
+  orders the extension states are one edition against another and
+  `editor_release` against its own version. A cluster that predates the fields
+  reports nothing, and nothing is shown. Each cluster is mentioned once per
+  grammar per session, and the details are in the **MemQL Connection** output
+  channel.
 - **Any other client asks the same question.** The `DslSpec` export over the
   stream (spec version `1.1.0`) carries `edition` and `grammarVersion`.
 
-**When the grammar moves**, the change that moves it also updates the pin, the
-changelog line and the generated assets: set `memql.grammarVersion`, name the
-new grammar in the `## <EditorRelease>` section of `CHANGELOG.md`, and run
-`make vscode-grammar`. Once that release has been published, a further grammar
-change needs a new release instead: raise `parser.EditorRelease` and the
-extension's `version` together and give it its own changelog section.
+**When the grammar moves**, the change that moves it carries the extension's
+side too, and whether `parser.EditorRelease` has been published decides how:
+
+- **Not published** -- that release carries the new grammar: set
+  `memql.grammarVersion`, name the new grammar in its `## <EditorRelease>`
+  section of `CHANGELOG.md`, and run `make vscode-grammar`.
+- **Published** -- a published release cannot change, so the grammar needs a
+  new one: set `memql.grammarVersion`, raise the extension's `version` and
+  `parser.EditorRelease` to the new release, give it its own changelog section
+  naming the grammar and the edition, and run `make vscode-grammar`.
 
 ## Setup and development
 
@@ -234,12 +241,6 @@ backed by a workspace symbol graph built from the `dslimports` tree (#2729):
 - A syntax&lt;-&gt;Sense parity gate keeps these tables in step with the grammar
   (#2734).
 
-**Updating:** the intelligence lives in the bundled `memql-lsp` binary, so a new
-release ships only when you rebuild it. Run `make vscode-package`, reinstall the
-`.vsix` (`code --install-extension editors/vscode/memql-0.3.0.vsix --force`), and
-reload the window -- a stale editor is a locally-installed VSIX, never a repo
-artifact.
-
 ### 0.4.0 -- editor parity (#5362)
 
 The first release that declares the language it was built from: edition 2026,
@@ -251,6 +252,12 @@ and the `GrammarVersion` its section of `editors/vscode/CHANGELOG.md` names
   install (see above).
 - The language configuration is generated from `dslspec`, like the grammar,
   and gated the same way.
+
+**Updating:** the intelligence lives in the bundled `memql-lsp` binary, so a new
+release ships only when you rebuild it. Run `make vscode-package`, reinstall the
+`.vsix` (`code --install-extension editors/vscode/memql-0.4.0.vsix --force`), and
+reload the window -- a stale editor is a locally-installed VSIX, never a repo
+artifact.
 
 ## Snippet completions
 

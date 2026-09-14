@@ -2682,18 +2682,20 @@ type ServerHello struct {
 	EngineCommit string `protobuf:"bytes,4,opt,name=engine_commit,json=engineCommit,proto3" json:"engine_commit,omitempty"`
 	// The edition this node speaks: the coarse label a tree declares as
 	// `edition = "2026"` (component/language/parser.Edition). Editions are
-	// years, so two of them order as numbers.
+	// years, so two of them order as numbers; that orders two languages ACROSS
+	// editions.
 	Edition string `protobuf:"bytes,5,opt,name=edition,proto3" json:"edition,omitempty"`
 	// The fine label inside the edition (component/language/parser.
 	// GrammarVersion), `<year>.<month>-<slug>-<8 hex>`. It is a LABEL, not a
 	// number: two grammar versions compare equal or different, never older or
-	// newer. The order comes from editor_release below.
+	// newer. Inside one edition the order comes from editor_release below.
 	GrammarVersion string `protobuf:"bytes,6,opt,name=grammar_version,json=grammarVersion,proto3" json:"grammar_version,omitempty"`
 	// The first release of MemQL for VS Code that carries grammar_version
 	// (component/language/parser.EditorRelease), e.g. "0.4.0". An editor newer
 	// than this knows the grammar; an older one has never heard of it, and this
-	// is the release it is told to install. It is the one ordered fact the
-	// comparison has: it compares with the extension's own version as semver.
+	// is the release it is told to install. It is what orders two grammars
+	// INSIDE one edition, where their labels cannot: it compares with the
+	// extension's own version as semver.
 	EditorRelease string `protobuf:"bytes,7,opt,name=editor_release,json=editorRelease,proto3" json:"editor_release,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

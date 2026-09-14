@@ -30,8 +30,9 @@
 //     parser's top-level dispatch (component/language/parser/parser.go) and
 //     the struct-form rewriter (parser/rewriter.go). dslspec is the SoT for
 //     those; the drift test (#2124) introspects the parser/rewriter and
-//     asserts this spec stays in lockstep, rather than this package
-//     importing the (heavy, non-introspectable-by-switch) parser.
+//     asserts this spec stays in lockstep, because the parser's dispatch
+//     switch cannot be read from here. (The package does import the parser,
+//     for Edition and GrammarVersion only; see below.)
 //
 // The package imports component/language/annotations and, since memql#5362,
 // component/language/parser for the two labels naming the language a spec
