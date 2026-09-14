@@ -28,7 +28,7 @@ query run benchRunById {
   args {
     benchRunId  string!
   }
-  filter  row.id==args.benchRunId
+  filter  row => row.id == args.benchRunId
   shape   benchRunFull
 }
 
@@ -38,7 +38,7 @@ query sample benchSamplesForRun {
   args {
     benchRunId  string!
   }
-  filter  benchRunId==args.benchRunId
+  filter  row => row.benchRunId == args.benchRunId
   sort    "metric", "asc"
   shape   benchSampleFull
 }
@@ -50,7 +50,7 @@ query sample benchSamplesForMetric {
     metric  string!
     arm     string
   }
-  filter  metric==args.metric && when(args.arm) { arm==args.arm }
+  filter  row => row.metric == args.metric && (args.arm == nil || row.arm == args.arm)
   sort    "row.createdAt", "desc"
   shape   benchSampleFull
 }

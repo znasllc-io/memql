@@ -8,7 +8,7 @@
 /// so cross-user reads are impossible.
 @actor
 query note notes {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full notes-list pull. Literal page size --
   // the struct-query paginate directive only accepts an integer literal.
@@ -27,7 +27,7 @@ query note noteById {
   args {
     noteId  string!
   }
-  filter  when(args.noteId) { row.id==args.noteId } && ownerUserId==actor.userId
+  filter  row => (args.noteId == nil || row.id == args.noteId) && row.ownerUserId == actor.userId
   shape   noteFull
 }
 
@@ -39,7 +39,7 @@ query note notesByTag {
   args {
     tag  string!
   }
-  filter  ownerUserId==actor.userId && when(args.tag) { args.tag in tags }
+  filter  row => row.ownerUserId == actor.userId && (args.tag == nil || args.tag in row.tags)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full tag-filtered notes pull. Literal page
   // size -- the struct-query paginate directive only accepts an integer literal.

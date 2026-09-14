@@ -41,8 +41,8 @@ logic requestRouteStatus {
   }
   body {
     role := args.submitterRole ?? ""
-    isPrivileged := cond(role == "admin", true, cond(role == "writer", true, false))
-    status := cond(role == "owner", "queued", cond(isPrivileged == true, "needs_approval", "needs_validation"))
+    isPrivileged := role == "admin" ? true : role == "writer" ? true : false
+    status := role == "owner" ? "queued" : isPrivileged == true ? "needs_approval" : "needs_validation"
     return status
   }
 }
@@ -60,9 +60,9 @@ logic transitionEventKind {
   body {
     st := args.status ?? ""
     old := args.oldStatus ?? ""
-    lateKind := cond(st == "changes_requested", "changes_requested", cond(st == "rejected", "rejected", ""))
-    mappedKind := cond(st == "needs_approval", "validated", cond(st == "queued", "approved", lateKind))
-    kind := cond(old == st, "", mappedKind)
+    lateKind := st == "changes_requested" ? "changes_requested" : st == "rejected" ? "rejected" : ""
+    mappedKind := st == "needs_approval" ? "validated" : st == "queued" ? "approved" : lateKind
+    kind := old == st ? "" : mappedKind
     return kind
   }
 }

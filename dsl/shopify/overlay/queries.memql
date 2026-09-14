@@ -14,7 +14,7 @@ query store storeById {
   args {
     storeId  string!
   }
-  filter  row.id==args.storeId && actor.isClusterOwner==true
+  filter  row => row.id == args.storeId && actor.isClusterOwner == true
   shape   storeFull
 }
 
@@ -25,7 +25,7 @@ query store storeByDomain {
   args {
     domain  string!
   }
-  filter    domain==args.domain && actor.isClusterOwner==true
+  filter    row => row.domain == args.domain && actor.isClusterOwner == true
   paginate  1
   shape     storeFull
 }
@@ -37,7 +37,7 @@ query store stores {
   args {
     status  string
   }
-  filter    actor.isClusterOwner==true && when(args.status) { status==args.status }
+  filter    row => actor.isClusterOwner == true && (args.status == nil || row.status == args.status)
   sort      "domain", "asc"
   paginate  100
   shape     storeFull
@@ -50,7 +50,7 @@ query store stores {
 /// catalog to answer a boolean would get slower as the store grew.
 @actor
 query productVariant purchasableVariants {
-  filter    availableForSale==true && isNotDeleted && actor.isClusterOwner==true
+  filter    row => row.availableForSale == true && isNotDeleted(row) && actor.isClusterOwner == true
   sort      "updatedAt", "desc"
   paginate  1
 }
@@ -62,7 +62,10 @@ query productVariant purchasableVariantsForStore {
   args {
     storeId  string!
   }
-  filter    storeId==args.storeId && availableForSale==true && isNotDeleted && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && row.availableForSale == true
+                && isNotDeleted(row)
+                && actor.isClusterOwner == true
   sort      "updatedAt", "desc"
   paginate  100
 }
@@ -94,7 +97,11 @@ query order ordersInWindow {
     from     string!
     to       string!
   }
-  filter    storeId==args.storeId && isNotDeleted && sourceCreatedAt>=args.from && sourceCreatedAt<=args.to && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && isNotDeleted(row)
+                && row.sourceCreatedAt >= args.from
+                && row.sourceCreatedAt <= args.to
+                && actor.isClusterOwner == true
   sort      "sourceCreatedAt", "desc"
   paginate  250
   shape     orderMirror
@@ -107,7 +114,10 @@ query orderLineItem lineItemsForOrder {
     storeId    string!
     orderGid   string!
   }
-  filter    storeId==args.storeId && parentGid==args.orderGid && isNotDeleted && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && row.parentGid == args.orderGid
+                && isNotDeleted(row)
+                && actor.isClusterOwner == true
   paginate  250
   shape     orderLineItemMirror
 }
@@ -121,7 +131,10 @@ query orderLineItem soldByProduct {
     storeId     string!
     productGid  string!
   }
-  filter    storeId==args.storeId && productGid==args.productGid && isNotDeleted && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && row.productGid == args.productGid
+                && isNotDeleted(row)
+                && actor.isClusterOwner == true
   paginate  250
   shape     orderLineItemMirror
 }
@@ -135,7 +148,10 @@ query orderLineItem soldByVariant {
     storeId     string!
     variantGid  string!
   }
-  filter    storeId==args.storeId && variantGid==args.variantGid && isNotDeleted && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && row.variantGid == args.variantGid
+                && isNotDeleted(row)
+                && actor.isClusterOwner == true
   paginate  250
   shape     orderLineItemMirror
 }
@@ -149,7 +165,7 @@ query productVariant neverSold {
   args {
     storeId  string!
   }
-  filter    storeId==args.storeId && isNotDeleted && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId && isNotDeleted(row) && actor.isClusterOwner == true
   sort      "updatedAt", "desc"
   paginate  250
   shape     productVariantMirror
@@ -164,7 +180,10 @@ query inventoryLevel stockBelow {
     storeId      string!
     locationGid  string!
   }
-  filter    storeId==args.storeId && locationGid==args.locationGid && isNotDeleted && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && row.locationGid == args.locationGid
+                && isNotDeleted(row)
+                && actor.isClusterOwner == true
   paginate  250
   shape     inventoryLevelMirror
 }
@@ -178,7 +197,12 @@ query order repeatCustomers {
     from     string!
     to       string!
   }
-  filter    storeId==args.storeId && isNotDeleted && customerGid!="" && sourceCreatedAt>=args.from && sourceCreatedAt<=args.to && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && isNotDeleted(row)
+                && row.customerGid != ""
+                && row.sourceCreatedAt >= args.from
+                && row.sourceCreatedAt <= args.to
+                && actor.isClusterOwner == true
   sort      "customerGid", "asc"
   paginate  250
   shape     orderMirror
@@ -194,7 +218,11 @@ query refund refundRate {
     from     string!
     to       string!
   }
-  filter    storeId==args.storeId && isNotDeleted && sourceCreatedAt>=args.from && sourceCreatedAt<=args.to && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && isNotDeleted(row)
+                && row.sourceCreatedAt >= args.from
+                && row.sourceCreatedAt <= args.to
+                && actor.isClusterOwner == true
   sort      "sourceCreatedAt", "desc"
   paginate  250
   shape     refundMirror
@@ -209,7 +237,12 @@ query order ordersByCompany {
     from        string!
     to          string!
   }
-  filter    storeId==args.storeId && isNotDeleted && purchasingEntity.company.id==args.companyGid && sourceCreatedAt>=args.from && sourceCreatedAt<=args.to && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && isNotDeleted(row)
+                && row.?purchasingEntity.company.id == args.companyGid
+                && row.sourceCreatedAt >= args.from
+                && row.sourceCreatedAt <= args.to
+                && actor.isClusterOwner == true
   sort      "sourceCreatedAt", "desc"
   paginate  250
   shape     orderMirror
@@ -222,7 +255,10 @@ query order paymentTermsOutstanding {
   args {
     storeId  string!
   }
-  filter    storeId==args.storeId && isNotDeleted && fullyPaid==false && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && isNotDeleted(row)
+                && row.fullyPaid == false
+                && actor.isClusterOwner == true
   sort      "sourceCreatedAt", "asc"
   paginate  250
   shape     orderMirror
@@ -237,7 +273,10 @@ query abandonedCheckout abandonedCheckouts {
     storeId  string!
     since    string!
   }
-  filter    storeId==args.storeId && isNotDeleted && sourceCreatedAt>=args.since && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && isNotDeleted(row)
+                && row.sourceCreatedAt >= args.since
+                && actor.isClusterOwner == true
   sort      "sourceCreatedAt", "desc"
   paginate  250
   shape     abandonedCheckoutMirror
@@ -249,7 +288,7 @@ query complianceJob complianceJobsDue {
   args {
     asOf  datetime!
   }
-  filter    statusIsPending && dueAt<=args.asOf && actor.isClusterOwner==true
+  filter    row => statusIsPending(row) && row.dueAt <= args.asOf && actor.isClusterOwner == true
   sort      "dueAt", "asc"
   paginate  100
   shape     complianceJobFull
@@ -261,7 +300,7 @@ query complianceJob complianceJobsForStore {
   args {
     storeId  string!
   }
-  filter    storeId==args.storeId && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId && actor.isClusterOwner == true
   sort      "row.createdAt", "desc"
   paginate  100
   shape     complianceJobFull

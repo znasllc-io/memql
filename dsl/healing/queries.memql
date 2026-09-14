@@ -29,7 +29,11 @@ query healedOverride resolveValidOverride {
   args {
     baseConstructId  string!
   }
-  filter  baseConstructId==args.baseConstructId && ownerUserId==actor.userId && tier=="overlay" && valid==true && isActiveRecord
+  filter  row => row.baseConstructId == args.baseConstructId
+              && row.ownerUserId == actor.userId
+              && row.tier == "overlay"
+              && row.valid == true
+              && isActiveRecord(row)
   sort     "version", "desc"
   paginate 1
   shape   healedOverrideFull
@@ -43,7 +47,7 @@ query healedOverride overridesForConstruct {
   args {
     baseConstructId  string!
   }
-  filter  baseConstructId==args.baseConstructId && ownerUserId==actor.userId
+  filter  row => row.baseConstructId == args.baseConstructId && row.ownerUserId == actor.userId
   sort     "version", "desc"
   paginate 50
   shape   healedOverrideFull
@@ -58,6 +62,6 @@ query healedOverride overrideById {
   args {
     overrideId  string!
   }
-  filter  when(args.overrideId) { row.id==args.overrideId } && ownerUserId==actor.userId
+  filter  row => (args.overrideId == nil || row.id == args.overrideId) && row.ownerUserId == actor.userId
   shape   healedOverrideFull
 }

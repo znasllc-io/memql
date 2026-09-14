@@ -50,7 +50,10 @@ query codeMetric codeMetricsInWindow {
     /// Exclusive window end, aligned to the bucket by the caller.
     windowEnd      datetime!
   }
-  filter  bucket==args.bucket && windowStart>=args.windowStart && windowStart<args.windowEnd && (when(args.codeReference) { codeReference==args.codeReference } || codeReference startsWith args.prefixes)
+  filter  row => row.bucket == args.bucket
+              && row.windowStart >= args.windowStart
+              && row.windowStart < args.windowEnd
+              && ((args.codeReference != nil && row.codeReference == args.codeReference) || row.codeReference startsWith args.prefixes)
   sort     "row.createdAt", "asc"
   paginate 500
 }

@@ -24,7 +24,7 @@ type Options struct {
 }
 
 // DefaultOptions is what ParseFile parses with.
-var DefaultOptions Options
+var DefaultOptions = Options{ExpressionsV1: true}
 
 // ParseFileWithOptions is ParseFile under explicit options.
 func ParseFileWithOptions(source string, o Options) (*File, error) {

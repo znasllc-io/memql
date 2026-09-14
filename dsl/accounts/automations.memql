@@ -123,7 +123,7 @@ automation ensureAccountGroup {
 /// would find nothing to do only because the groups it walks are already
 /// active. The one time it mattered would be indistinguishable from the noise.
 @trigger(event="node.updated", concept="v1:accounts:account", partition="*")
-@filter(payload.status == "archived")
+@filter(row => row.status == "archived")
 automation archiveAccountGroup {
   args {
     id any

@@ -2680,7 +2680,7 @@ mutate accountEntitlement setAccountEntitlement {
   insert {
     accept { accountId, tier }
     stamp {
-      id: concat("accountEntitlement-", hash(args.accountId))
+      id: "accountEntitlement-" + hash(args.accountId)
       accountKind: args.accountKind ?? "user"
       maxConcurrentTasks: args.maxConcurrentTasks ?? 0
       note: args.note ?? ""

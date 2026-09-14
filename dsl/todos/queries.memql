@@ -13,7 +13,7 @@ query todo todos {
   args {
     done  bool
   }
-  filter  ownerUserId==actor.userId && when(args.done) { done==args.done }
+  filter  row => row.ownerUserId == actor.userId && (args.done == nil || row.done == args.done)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -32,6 +32,6 @@ query todo todoById {
   args {
     todoId  string!
   }
-  filter  when(args.todoId) { row.id==args.todoId } && ownerUserId==actor.userId
+  filter  row => (args.todoId == nil || row.id == args.todoId) && row.ownerUserId == actor.userId
   shape   todoFull
 }

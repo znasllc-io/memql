@@ -20,7 +20,7 @@ query workspace workspaceForRun {
   args {
     runId  string!
   }
-  filter  runId==args.runId && ownerUserId==actor.userId
+  filter  row => row.runId == args.runId && row.ownerUserId == actor.userId
   shape   workspaceFull
 }
 
@@ -34,7 +34,7 @@ query workspace workspaceForRun {
 @actor
 @unbounded("one person's live workspaces -- one per plan they have running")
 query workspace provisionedWorkspaces {
-  filter  status=="provisioned" && ownerUserId==actor.userId
+  filter  row => row.status == "provisioned" && row.ownerUserId == actor.userId
   shape   workspaceFull
 }
 
@@ -51,7 +51,7 @@ query workspace provisionedWorkspaces {
 /// list on /fleet/workbenches for a person who is not a cluster owner.
 @actor
 query workspace myWorkspaces {
-  filter   ownerUserId==actor.userId
+  filter   row => row.ownerUserId == actor.userId
   sort     "row.createdAt", "desc"
   paginate 100
   shape    workspaceFull
@@ -65,7 +65,7 @@ query workspace allWorkspaces {
   args {
     status  enum("provisioned", "released")
   }
-  filter   actor.isClusterOwner==true && when(args.status) { status==args.status }
+  filter   row => actor.isClusterOwner == true && (args.status == nil || row.status == args.status)
   sort     "row.createdAt", "desc"
   paginate 200
   shape    workspaceFull

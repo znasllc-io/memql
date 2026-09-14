@@ -5,7 +5,7 @@
 
 /// Get detailed usage guidance for a MemQL named function (docs, args schema, and key calling
 /// rules)
-@handler(type="query", query="builtin help(name: \"$args.name\")")
+@handler(type="query", query="builtin help(name: args.name)")
 @executionTime("fast")
 @mcp
 tool describeFunction {
@@ -28,7 +28,7 @@ tool describeFunction {
 // added an inner `paginate 50` while this wrapper was still here. One paginate,
 // driven by the caller's limit.
 /// Search for users
-@handler(type="query", query="paginate(query searchUsers(active: $args.active), $args.limit)")
+@handler(type="query", query="paginate(query searchUsers(active: args.active), args.limit)")
 @executionTime("fast")
 @mcp
 tool searchUsers {

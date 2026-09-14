@@ -38,22 +38,22 @@ logic driveDeploymentInProgress {
     event object @required
   }
   body {
-    status := coalesce(args.event.payload.status, "")
-    provider := coalesce(args.event.payload.provider, "")
-    deploymentId := coalesce(args.event.payload.deploymentId, "")
-    version := coalesce(args.event.payload.version, "")
-    previousDeploymentId := coalesce(args.event.payload.previousDeploymentId, "")
-    isAzure := cond(provider == "azure", true, cond(provider == "", true, false))
+    status := args.event.payload.status ?? ""
+    provider := args.event.payload.provider ?? ""
+    deploymentId := args.event.payload.deploymentId ?? ""
+    version := args.event.payload.version ?? ""
+    previousDeploymentId := args.event.payload.previousDeploymentId ?? ""
+    isAzure := provider == "azure" ? true : provider == "" ? true : false
     result := if status == "in_progress" && isAzure == true && version != "" && deploymentId != "" {
       deployObserveReconciledState(app: "")
     }
-    observedProbe := coalesce(result.First().payload.effect, "")
-    syncedVal := coalesce(result.First().payload.synced, false)
-    healthyVal := coalesce(result.First().payload.healthy, false)
-    observed := cond(observedProbe == "", false, true)
-    reconciled := cond(syncedVal == true, cond(healthyVal == true, true, false), false)
-    isRollback := cond(previousDeploymentId == "", false, true)
-    outcome := cond(reconciled == true, cond(isRollback == true, "rolled_back", "succeeded"), cond(observed == true, "failed", ""))
+    observedProbe := result.First().payload.effect ?? ""
+    syncedVal := result.First().payload.synced ?? false
+    healthyVal := result.First().payload.healthy ?? false
+    observed := observedProbe == "" ? false : true
+    reconciled := syncedVal == true ? (healthyVal == true ? true : false) : false
+    isRollback := previousDeploymentId == "" ? false : true
+    outcome := reconciled == true ? (isRollback == true ? "rolled_back" : "succeeded") : observed == true ? "failed" : ""
     return { deploymentId: deploymentId, outcome: outcome }
   }
 }
@@ -66,24 +66,24 @@ logic recordReconciledState {
     event object @required
   }
   body {
-    status := coalesce(args.event.payload.status, "")
-    provider := coalesce(args.event.payload.provider, "")
-    deploymentId := coalesce(args.event.payload.deploymentId, "")
-    version := coalesce(args.event.payload.version, "")
-    imageDigest := coalesce(args.event.payload.imageDigest, "")
-    isAzure := cond(provider == "azure", true, cond(provider == "", true, false))
+    status := args.event.payload.status ?? ""
+    provider := args.event.payload.provider ?? ""
+    deploymentId := args.event.payload.deploymentId ?? ""
+    version := args.event.payload.version ?? ""
+    imageDigest := args.event.payload.imageDigest ?? ""
+    isAzure := provider == "azure" ? true : provider == "" ? true : false
     observation := if status == "succeeded" && isAzure == true && deploymentId != "" {
       deployObserveReconciledState(app: "")
     }
-    obsProbe := coalesce(observation.First().payload.effect, "")
-    syncedVal := coalesce(observation.First().payload.synced, false)
-    healthyVal := coalesce(observation.First().payload.healthy, false)
-    observed := cond(obsProbe == "", false, true)
-    reconciled := cond(syncedVal == true, cond(healthyVal == true, true, false), false)
+    obsProbe := observation.First().payload.effect ?? ""
+    syncedVal := observation.First().payload.synced ?? false
+    healthyVal := observation.First().payload.healthy ?? false
+    observed := obsProbe == "" ? false : true
+    reconciled := syncedVal == true ? (healthyVal == true ? true : false) : false
     recorded := if reconciled == true {
       deployRecordBack(deploymentId: deploymentId, nodeType: "bff", version: version, replicas: 2, imageDigest: imageDigest)
     }
-    verdict := cond(reconciled == true, "recorded", cond(observed == true, "correct", ""))
+    verdict := reconciled == true ? "recorded" : observed == true ? "correct" : ""
     return { deploymentId: deploymentId, verdict: verdict }
   }
 }

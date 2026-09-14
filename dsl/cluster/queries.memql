@@ -45,7 +45,7 @@ query node nodesForDeployment {
   args {
     deploymentId  string!
   }
-  filter  deploymentId == args.deploymentId
+  filter  row => row.deploymentId == args.deploymentId
   asOf    latest
 }
 
@@ -70,7 +70,7 @@ query node nodesNotInDeployment {
   args {
     deploymentId  string!
   }
-  filter  deploymentId != args.deploymentId
+  filter  row => row.deploymentId != args.deploymentId
   asOf    latest
 }
 
@@ -134,7 +134,7 @@ query node staleClusterNodes {
   args {
     olderThan  string
   }
-  filter  health!="stopped" && when(args.olderThan) { lastSeen<args.olderThan }
+  filter  row => row.health != "stopped" && (args.olderThan == nil || row.lastSeen < args.olderThan)
   asOf    latest
 }
 
@@ -188,12 +188,12 @@ query releaseCut releaseCutByVersion {
   args {
     version  string!
   }
-  filter  row.id==args.version && requiresOwner && actor.isClusterOwner==true
+  filter  row => row.id == args.version && requiresOwner(actor) && actor.isClusterOwner == true
 }
 
 @actor
 query releaseCut releaseCuts {
-  filter   requiresOwner && actor.isClusterOwner==true
+  filter   row => requiresOwner(actor) && actor.isClusterOwner == true
   sort     "row.createdAt", "desc"
   paginate 50
 }
@@ -237,7 +237,7 @@ query database clusterDatabase {
   // returns that orphan alongside the current row and a panel shows two
   // databases, one of them wrong. Pinning makes the read what its @unbounded
   // reason already claims it is: a singleton at a fixed id.
-  filter  row.id=="v1:cluster:database:primary" && requiresOwner && actor.isClusterOwner==true
+  filter  row => row.id == "v1:cluster:database:primary" && requiresOwner(actor) && actor.isClusterOwner == true
 }
 
 /// The identity provider this cluster authenticates against: issuer, JWKS URL and accepted
@@ -247,5 +247,7 @@ query database clusterDatabase {
 query identityProvider clusterIdentityProvider {
   // Pinned for the reason clusterDatabase records: a pre-memql#4766 cluster
   // holds an orphan at a generated id.
-  filter  row.id=="v1:cluster:identityProvider:primary" && requiresOwner && actor.isClusterOwner==true
+  filter  row => row.id == "v1:cluster:identityProvider:primary"
+              && requiresOwner(actor)
+              && actor.isClusterOwner == true
 }

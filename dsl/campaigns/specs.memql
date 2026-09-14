@@ -36,29 +36,21 @@
 /// Matches recipients that may be mailed: subscription state 'subscribed', which is the only one of
 /// the four that is sendable. 'unsubscribed' is the recipient's own choice, 'bounced' and
 /// 'complained' are the provider's verdict, and all three suppress.
-spec recipient isSendableRecipient {
-  return subscriptionStatus=="subscribed"
-}
+spec recipient isSendableRecipient = row => row.subscriptionStatus == "subscribed"
 
 /// Matches templates an operator has marked ready to attach to a campaign. Drafts stay out of the
 /// campaign editor's picker, so half-written copy cannot be scheduled by accident.
-spec template isReadyTemplate {
-  return status=="ready"
-}
+spec template isReadyTemplate = row => row.status == "ready"
 
 /// Matches send jobs the drain worker still has work to do on: queued (enqueued, never batched) or
 /// running (batched at least once, not yet terminal). Paused / completed / failed / cancelled are
 /// all states where the worker must leave the row alone, and naming the two live ones positively is
 /// safer than excluding the four dead ones -- a sixth status added later defaults to "not drained"
 /// rather than to "drained".
-spec sendJob isDrainableSendJob {
-  return status=="queued" || status=="running"
-}
+spec sendJob isDrainableSendJob = row => row.status == "queued" || row.status == "running"
 
 /// Matches send jobs waiting for their scheduled time (memql#3459). Deliberately NOT part of
 /// isDrainableSendJob: a scheduled job is inert, and the worker has to promote it to 'queued' before
 /// a single message can leave. Keeping the two predicates apart is what makes "the row exists" and
 /// "the row may mail somebody" different statements.
-spec sendJob isScheduledSendJob {
-  return status=="scheduled"
-}
+spec sendJob isScheduledSendJob = row => row.status == "scheduled"

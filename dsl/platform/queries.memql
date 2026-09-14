@@ -33,7 +33,7 @@ query globalVariable globalVariable {
   args {
     name  string!
   }
-  filter  name==args.name && isActiveRecord
+  filter  row => row.name == args.name && isActiveRecord(row)
   shape   variableFull
 }
 
@@ -65,7 +65,7 @@ query globalVariable globalVariables {
   args {
     names  array!
   }
-  filter  name in args.names && isActiveRecord
+  filter  row => row.name in args.names && isActiveRecord(row)
   shape   variableFull
 }
 
@@ -112,7 +112,8 @@ query globalVariable globalVariables {
 /// Returns default configuration variables for user provisioning. Used by bootstrapUser automation.
 @unbounded("user-default variables -- a fixed bounded allow-list of names consumed whole")
 query globalVariable userDefaults {
-  filter  isActiveRecord && name in ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME", "MEMQL_DEFAULT_USER_LANGUAGE", "MEMQL_AUTO_PROVISION_USERS", "MEMQL_UPDATE_LAST_SEEN"]
+  filter  row => isActiveRecord(row)
+              && row.name in ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME", "MEMQL_DEFAULT_USER_LANGUAGE", "MEMQL_AUTO_PROVISION_USERS", "MEMQL_UPDATE_LAST_SEEN"]
 }
 
 /// Per Q7: list missingCapability rows by status, sorted by sightingCount desc. Backs the
@@ -123,7 +124,7 @@ query missingCapability missingCapabilitiesByStatus {
   args {
     status  string!
   }
-  filter  status==args.status
+  filter  row => row.status == args.status
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -141,7 +142,7 @@ query missingCapability missingCapabilityByKindAndName {
     kind        string!
     capability  string!
   }
-  filter  kind==args.kind && capability==args.capability
+  filter  row => row.kind == args.kind && row.capability == args.capability
   shape   missingCapabilityFull
 }
 
@@ -155,7 +156,7 @@ query outboundRequest outboundRequestsByStatus {
   args {
     status  string!
   }
-  filter  status==args.status
+  filter  row => row.status == args.status
   sort     "row.createdAt", "asc"
   paginate 50
   shape   outboundRequestFull
@@ -170,7 +171,7 @@ query inboundRequest inboundRequestsByStatus {
   args {
     status  string!
   }
-  filter  status==args.status
+  filter  row => row.status == args.status
   sort     "row.createdAt", "asc"
   paginate 50
   shape   inboundRequestFull
@@ -187,7 +188,7 @@ query inboundRequest inboundRequestById {
   args {
     requestId  string!
   }
-  filter  row.id==args.requestId
+  filter  row => row.id == args.requestId
   shape   inboundRequestFull
 }
 
@@ -201,7 +202,7 @@ query inboundRequest inboundRequestByDedupeKey {
     source     string!
     dedupeKey  string!
   }
-  filter  source==args.source && dedupeKey==args.dedupeKey
+  filter  row => row.source == args.source && row.dedupeKey == args.dedupeKey
   shape   inboundRequestFull
 }
 
@@ -236,7 +237,9 @@ query site siteByHostname {
   args {
     hostname  string!
   }
-  filter  hostname==args.hostname && isNotDeleted && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.hostname == args.hostname
+              && isNotDeleted(row)
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   siteFull
 }
 
@@ -266,7 +269,7 @@ query site siteByHostname {
 /// it against a real database for a member, a developer and a stranger.
 @actor
 query site sitesAll {
-  filter  isNotDeleted && isNotArchived
+  filter  row => isNotDeleted(row) && isNotArchived(row)
   shape   siteFull
   sort    "hostname", "asc"
 }
@@ -286,7 +289,7 @@ query site siteById {
   args {
     siteId  string!
   }
-  filter  row.id==args.siteId && isNotDeleted
+  filter  row => row.id == args.siteId && isNotDeleted(row)
   shape   siteFull
 }
 
@@ -321,7 +324,7 @@ query customDomain liveCustomDomainByHostname {
   args {
     hostname  string!
   }
-  filter  hostname==args.hostname && status=="live" && actor.isClusterOwner==true
+  filter  row => row.hostname == args.hostname && row.status == "live" && actor.isClusterOwner == true
   shape   customDomainFull
 }
 
@@ -337,7 +340,7 @@ query customDomain customDomainsForSite {
   args {
     siteId  string!
   }
-  filter    siteId==args.siteId && actor.isClusterOwner==true
+  filter    row => row.siteId == args.siteId && actor.isClusterOwner == true
   sort      "hostname", "asc"
   paginate  100
   shape     customDomainFull
@@ -352,7 +355,7 @@ query customDomain customDomainsForSite {
 /// row per bound hostname, not per request.
 @actor
 query customDomain customDomainsAll {
-  filter    actor.isClusterOwner==true
+  filter    row => actor.isClusterOwner == true
   sort      "hostname", "asc"
   paginate  200
   shape     customDomainFull
@@ -375,7 +378,8 @@ query customDomain customDomainsAll {
 @unbounded("custom domains awaiting reconciliation -- an internal sweep that must see all of them, bounded by how many are in flight rather than by how many exist")
 @actor
 query customDomain customDomainsToReconcile {
-  filter  status in ["pending_dns", "verifying", "issuing", "removing"] && actor.isClusterOwner==true
+  filter  row => row.status in ["pending_dns", "verifying", "issuing", "removing"]
+              && actor.isClusterOwner == true
   shape   customDomainFull
 }
 
@@ -387,7 +391,7 @@ query customDomain customDomainById {
   args {
     domainId  string!
   }
-  filter  row.id==args.domainId && actor.isClusterOwner==true
+  filter  row => row.id == args.domainId && actor.isClusterOwner == true
   shape   customDomainFull
 }
 
@@ -413,7 +417,7 @@ query accountFrontDoor liveAccountFrontDoorByReservedName {
   args {
     reservedName  string!
   }
-  filter  reservedName==args.reservedName && status=="live" && actor.isClusterOwner==true
+  filter  row => row.reservedName == args.reservedName && row.status == "live" && actor.isClusterOwner == true
   shape   accountFrontDoorFull
 }
 
@@ -435,7 +439,8 @@ query accountFrontDoor liveAccountFrontDoorByReservedName {
 @unbounded("account front doors awaiting reconciliation -- an internal sweep that must see all of them, bounded by how many are in flight rather than by how many exist")
 @actor
 query accountFrontDoor accountFrontDoorsToReconcile {
-  filter  status in ["pending_dns", "verifying", "issuing", "removing"] && actor.isClusterOwner==true
+  filter  row => row.status in ["pending_dns", "verifying", "issuing", "removing"]
+              && actor.isClusterOwner == true
   shape   accountFrontDoorFull
 }
 
@@ -451,7 +456,7 @@ query accountFrontDoor accountFrontDoorsForAccount {
   args {
     accountId  string!
   }
-  filter    accountId==args.accountId && actor.isClusterOwner==true
+  filter    row => row.accountId == args.accountId && actor.isClusterOwner == true
   sort      "row.createdAt", "desc"
   paginate  50
   shape     accountFrontDoorFull
@@ -465,7 +470,7 @@ query accountFrontDoor accountFrontDoorsForAccount {
 /// `live` row the first time one is touched and never has one on load.
 @actor
 query accountFrontDoor accountFrontDoorsAll {
-  filter    actor.isClusterOwner==true
+  filter    row => actor.isClusterOwner == true
   sort      "reservedName", "asc"
   paginate  200
   shape     accountFrontDoorFull
@@ -478,7 +483,7 @@ query accountFrontDoor accountFrontDoorById {
   args {
     doorId  string!
   }
-  filter  row.id==args.doorId && actor.isClusterOwner==true
+  filter  row => row.id == args.doorId && actor.isClusterOwner == true
   shape   accountFrontDoorFull
 }
 
@@ -502,7 +507,8 @@ query accountFrontDoor accountFrontDoorById {
 @unbounded("open account front doors -- an internal sweep that must see all of them, bounded by how many accounts hold a reserved name")
 @actor
 query accountFrontDoor accountFrontDoorsOpen {
-  filter  status in ["pending_dns", "verifying", "issuing", "live", "removing"] && actor.isClusterOwner==true
+  filter  row => row.status in ["pending_dns", "verifying", "issuing", "live", "removing"]
+              && actor.isClusterOwner == true
   shape   accountFrontDoorFull
 }
 
@@ -523,7 +529,9 @@ query outboxEntry outboxPending {
   args {
     target  string!
   }
-  filter    target==args.target && status in ["pending", "failed"] && actor.isClusterOwner==true
+  filter    row => row.target == args.target
+                && row.status in ["pending", "failed"]
+                && actor.isClusterOwner == true
   sort      "row.createdAt", "asc"
   paginate  100
   shape     outboxEntryFull
@@ -537,7 +545,7 @@ query outboxEntry outboxDeadLetters {
   args {
     target  string!
   }
-  filter    target==args.target && status=="dead" && actor.isClusterOwner==true
+  filter    row => row.target == args.target && row.status == "dead" && actor.isClusterOwner == true
   sort      "row.createdAt", "desc"
   paginate  100
   shape     outboxEntryFull
@@ -550,7 +558,7 @@ query outboxEntry outboxEntryById {
   args {
     entryId  string!
   }
-  filter  row.id==args.entryId && actor.isClusterOwner==true
+  filter  row => row.id == args.entryId && actor.isClusterOwner == true
   shape   outboxEntryFull
 }
 
@@ -564,7 +572,10 @@ query syncState syncStateFor {
     connector  string!
     direction  string!
   }
-  filter  conceptId==args.conceptId && connector==args.connector && direction==args.direction && actor.isClusterOwner==true
+  filter  row => row.conceptId == args.conceptId
+              && row.connector == args.connector
+              && row.direction == args.direction
+              && actor.isClusterOwner == true
   sort    "row.createdAt", "desc"
   shape   syncStateFull
 }
@@ -575,7 +586,7 @@ query syncState syncStatesAll {
   args {
     connector  string
   }
-  filter    actor.isClusterOwner==true && when(args.connector) { connector==args.connector }
+  filter    row => actor.isClusterOwner == true && (args.connector == nil || row.connector == args.connector)
   sort      "row.createdAt", "desc"
   paginate  100
   shape     syncStateFull
@@ -614,7 +625,7 @@ query syncState syncStatesAll {
 /// The packages this caller may see, active only. The OS packages list.
 @actor
 query package packagesAll {
-  filter  statusIsActive
+  filter  row => statusIsActive(row)
   sort    "name", "asc"
   shape   packageFull
 }
@@ -623,7 +634,7 @@ query package packagesAll {
 /// rows instead of inheriting a filter that would hide them; see the note above.
 @actor
 query package packagesArchived {
-  filter  statusIsArchived
+  filter  row => statusIsArchived(row)
   sort    "name", "asc"
   shape   packageFull
 }
@@ -635,7 +646,7 @@ query package packageById {
   args {
     packageId  string!
   }
-  filter  row.id==args.packageId
+  filter  row => row.id == args.packageId
   shape   packageFull
 }
 
@@ -653,7 +664,9 @@ query package packagesByRepoUrl {
   args {
     repoUrl  string!
   }
-  filter  repoUrl==args.repoUrl && statusIsActive && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.repoUrl == args.repoUrl
+              && statusIsActive(row)
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   sort    "name", "asc"
   shape   packageFull
 }
@@ -663,7 +676,9 @@ query package packagesByRepoUrl {
 /// calling it reads exactly their own, which is harmless and correct.
 @actor
 query package packagesTrackingRepos {
-  filter    sourceKind=="repo" && statusIsActive && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter    row => row.sourceKind == "repo"
+                && statusIsActive(row)
+                && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   sort      "name", "asc"
   paginate  200
   shape     packageFull
@@ -676,7 +691,7 @@ query packageDeployment packageDeployments {
   args {
     packageId  string!
   }
-  filter    packageId==args.packageId
+  filter    row => row.packageId == args.packageId
   sort      "row.createdAt", "desc"
   paginate  50
   shape     packageDeploymentFull
@@ -695,7 +710,7 @@ query packageDeployment packageDeployments {
 /// somebody has half-composed. The sort is what keeps the read a bounded one for the parser.
 @actor
 query packageDeployment packageDeploymentsAwaitingConfirm {
-  filter  status=="awaiting_confirm"
+  filter  row => row.status == "awaiting_confirm"
   sort    "row.createdAt", "desc"
   shape   packageDeploymentFull
 }
@@ -707,7 +722,7 @@ query packageDeployment packageDeploymentById {
   args {
     deploymentId  string!
   }
-  filter  row.id==args.deploymentId
+  filter  row => row.id == args.deploymentId
   shape   packageDeploymentFull
 }
 
@@ -742,7 +757,12 @@ query packageDeployment packageDeploymentById {
 /// bounded page keeps ONE answer to "how old is too old" rather than two that can disagree.
 @actor
 query packageDeployment packageDeploymentsInFlight {
-  filter    status!="succeeded" && status!="refused" && status!="failed" && status!="abandoned" && status!="cancelled" && status!="awaiting_confirm"
+  filter    row => row.status != "succeeded"
+                && row.status != "refused"
+                && row.status != "failed"
+                && row.status != "abandoned"
+                && row.status != "cancelled"
+                && row.status != "awaiting_confirm"
   sort      "row.createdAt", "asc"
   paginate  500
   shape     packageDeploymentFull
@@ -757,7 +777,7 @@ query site sitesForPackage {
   args {
     packageId  string!
   }
-  filter  packageId==args.packageId && isNotDeleted
+  filter  row => row.packageId == args.packageId && isNotDeleted(row)
   sort    "hostname", "asc"
   shape   siteFull
 }
@@ -767,7 +787,7 @@ query site sitesForPackage {
 /// together are the whole population.
 @actor
 query site sitesArchived {
-  filter  statusIsArchived && isNotDeleted
+  filter  row => statusIsArchived(row) && isNotDeleted(row)
   sort    "hostname", "asc"
   shape   siteFull
 }
@@ -794,7 +814,7 @@ query site sitesArchived {
 /// the way every composite-tier sibling writes the term, it is recognised as the tier's own.
 @actor
 query sourceCredential sourceCredentialsMine {
-  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.ownerUserId == actor.userId || actor.isClusterOwner == true
   sort    "label", "asc"
   shape   sourceCredentialCard
 }
@@ -806,7 +826,8 @@ query sourceCredential sourceCredentialById {
   args {
     credentialId  string!
   }
-  filter  row.id==args.credentialId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.id == args.credentialId
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   sourceCredentialCard
 }
 
@@ -832,7 +853,7 @@ query sourceCredential sourceCredentialSealedById {
   args {
     credentialId  string!
   }
-  filter  row.id==args.credentialId && ownerUserId==actor.userId
+  filter  row => row.id == args.credentialId && row.ownerUserId == actor.userId
   shape   sourceCredentialSealed
 }
 
@@ -878,7 +899,9 @@ query sourceCredential githubAppGrantByExternalId {
   args {
     externalId  string!
   }
-  filter  kind=="github_app" && externalId==args.externalId && ownerUserId==actor.userId
+  filter  row => row.kind == "github_app"
+              && row.externalId == args.externalId
+              && row.ownerUserId == actor.userId
   shape   sourceCredentialSealed
 }
 
@@ -897,7 +920,7 @@ query sourceCredential githubAppGrantByExternalId {
 @serverOnly
 @actor
 query sourceCredential githubAppGrantForCaller {
-  filter  kind=="github_app" && statusIsActive && ownerUserId==actor.userId
+  filter  row => row.kind == "github_app" && statusIsActive(row) && row.ownerUserId == actor.userId
   sort    "row.createdAt", "desc"
   shape   sourceCredentialSealed
 }
@@ -919,7 +942,7 @@ query moduleReadiness moduleReadinessAll {
 @unbounded("the active embedder binding -- one row at a literal id")
 @cache(60)
 query embedderBinding activeEmbedderBinding {
-  filter  row.id=="active"
+  filter  row => row.id == "active"
   shape   embedderBindingFull
 }
 
@@ -945,7 +968,8 @@ query modelMeasurement measurementsForMachine {
   // tier narrows every read over the concept, and the enforcement gate requires
   // the filter to IMPLY the tier rather than merely not contradict it -- a read
   // that leaves it implicit is one whose narrowing nobody can check.
-  filter   machineId==args.machineId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter   row => row.machineId == args.machineId
+               && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   sort     "measuredAt", "desc"
   paginate 200
   shape    modelMeasurementFull
@@ -960,7 +984,8 @@ query modelMeasurement measurementsForModel {
   args {
     modelId  string!
   }
-  filter   modelId==args.modelId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter   row => row.modelId == args.modelId
+               && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   sort     "measuredAt", "desc"
   paginate 200
   shape    modelMeasurementFull
@@ -980,7 +1005,7 @@ query modelEvidence recentModelEvidence {
   // with one would be undecidable rather than merely strict -- and an
   // undecidable read is one the enforcement gate cannot pass whatever it
   // actually does.
-  filter   actor.isClusterOwner==true && when(args.week) { week==args.week }
+  filter   row => actor.isClusterOwner == true && (args.week == nil || row.week == args.week)
   sort     "foldedAt", "desc"
   paginate 200
   shape    modelEvidenceFull
@@ -998,7 +1023,10 @@ query modelEvidence modelEvidenceForKey {
     level    string!
     week     string!
   }
-  filter   actor.isClusterOwner==true && modelId==args.modelId && level==args.level && week==args.week
+  filter   row => actor.isClusterOwner == true
+               && row.modelId == args.modelId
+               && row.level == args.level
+               && row.week == args.week
   sort     "foldedAt", "desc"
   paginate 5
   shape    modelEvidenceFull
@@ -1020,7 +1048,7 @@ query modelMeasurement measurementsForCaller {
   // enforcement gate reports the read as undecidable rather than as safe or
   // unsafe. The parentheses make it a single composite conjunct the analyzer
   // can match against the tier.
-  filter   (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter   row => row.ownerUserId == actor.userId || actor.isClusterOwner == true
   sort     "measuredAt", "desc"
   paginate 500
   shape    modelMeasurementFull

@@ -284,10 +284,10 @@ mutate deploymentNodeSpec createDeploymentNodeSpec {
       // `asOf latest`, so a canonical re-pin would make the spec invisible to
       // a bare lookup (#2925 review).
       deploymentId: shortId(args.deploymentId)
-      id: hash(concat(
-        shortId(args.deploymentId), ":",
+      id: hash(
+        shortId(args.deploymentId) + ":" +
         args.nodeType
-      ))
+      )
       version: args.version ?? ""
       replicas: args.replicas ?? 1
       imageDigest: args.imageDigest ?? ""
@@ -331,10 +331,10 @@ mutate deploymentNodeSpec updateDeploymentNodeSpec {
     imageDigest   string
   }
   update {
-    id: hash(concat(
-      shortId(args.deploymentId), ":",
+    id: hash(
+      shortId(args.deploymentId) + ":" +
       args.nodeType
-    ))
+    )
     version: args.version ?? ""
     replicas: args.replicas ?? 1
     imageDigest: args.imageDigest ?? ""

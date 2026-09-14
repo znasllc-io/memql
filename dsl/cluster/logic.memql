@@ -71,7 +71,7 @@ logic clusterInfraRefresh {
   // instead of evaluating (#2655/#2693), and the loader refuses it. Its
   // sibling above gets away with the same shape only because the comparison
   // is one half of an `&&`.
-  return cond(args.event.payload.node.type == "bff", true, false)
+  return args.event.payload.node.type == "bff" ? true : false
   }
 }
 
@@ -146,7 +146,7 @@ logic pruneStaleClusterNodes {
   }
   body {
   windowMinutes := query globalVariable( name: "MEMQL_NODE_STALE_PRUNE_MINUTES" )
-  stale := query staleClusterNodes( olderThan: addDuration(now, concat("PT-", windowMinutes.first().payload.value ?? "30", "M")) )
+  stale := query staleClusterNodes( olderThan: addDuration(now, "PT-" + (windowMinutes.first().payload.value ?? "30") + "M") )
   return stale.nodes()
   }
 }

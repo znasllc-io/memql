@@ -21,7 +21,7 @@ use common.traits.{ statusIsActive }
 /// resolver (Phase 2 #1737). Owned tier.
 @actor
 query surface surfacesForOwner {
-  filter  ownerUserId == actor.userId && statusIsActive
+  filter  row => row.ownerUserId == actor.userId && statusIsActive(row)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -42,7 +42,7 @@ query surface surfacesForOwner {
 /// sweep (Phase 4 #1739). Owned tier.
 @actor
 query action activeActionsForOwner {
-  filter  ownerUserId == actor.userId && statusIsActive
+  filter  row => row.ownerUserId == actor.userId && statusIsActive(row)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -62,7 +62,7 @@ query action actionByIdAndVersion {
     actionId  string!
     version   int!
   }
-  filter  row.id == args.actionId && version == args.version && ownerUserId == actor.userId
+  filter  row => row.id == args.actionId && row.version == args.version && row.ownerUserId == actor.userId
   shape   actionFull
 }
 
@@ -75,7 +75,7 @@ query action actionById {
   args {
     actionId  string!
   }
-  filter  row.id == args.actionId && ownerUserId == actor.userId
+  filter  row => row.id == args.actionId && row.ownerUserId == actor.userId
   shape   actionFull
 }
 

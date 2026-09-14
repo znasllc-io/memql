@@ -38,7 +38,7 @@ query deployment deploymentsForCluster {
     clusterId  string!
     asOf       datetime
   }
-  filter  clusterId == args.clusterId
+  filter  row => row.clusterId == args.clusterId
   shape   deploymentFull
   asOf    args.asOf ?? latest
 }
@@ -111,7 +111,7 @@ query deployment deploymentById {
   args {
     deploymentId  string!
   }
-  filter  row.id == args.deploymentId
+  filter  row => row.id == args.deploymentId
   shape   deploymentFull
 }
 
@@ -146,7 +146,7 @@ query deployment deploymentById {
 /// active-topology reaper (#1874). asOf latest -> current status per deployment.
 @unbounded("superseded/failed/rolled-back deployments GC sweep -- an internal sweep that must see all")
 query deployment supersededDeployments {
-  filter  status in ["superseded", "failed", "rolled_back"]
+  filter  row => row.status in ["superseded", "failed", "rolled_back"]
   shape   deploymentFull
   asOf    latest
 }
@@ -180,7 +180,7 @@ query deploymentNodeSpec nodeSpecsForDeployment {
   args {
     deploymentId  string!
   }
-  filter  deploymentId == args.deploymentId
+  filter  row => row.deploymentId == args.deploymentId
   shape   deploymentNodeSpecFull
   asOf    latest
 }

@@ -13,7 +13,7 @@ use common.traits.{ statusIsActive }
 /// management list.
 @actor
 query bundle authoringBundlesForOwner {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -29,7 +29,7 @@ query bundle authoringBundleById {
   args {
     bundleId  string!
   }
-  filter  ownerUserId==actor.userId && row.id==args.bundleId
+  filter  row => row.ownerUserId == actor.userId && row.id == args.bundleId
   shape   bundleFull
 }
 
@@ -37,7 +37,7 @@ query bundle authoringBundleById {
 /// set of authored automations to register on boot / on change.
 @actor
 query bundle activeAuthoringBundles {
-  filter  ownerUserId==actor.userId && statusIsActive
+  filter  row => row.ownerUserId == actor.userId && statusIsActive(row)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -67,7 +67,7 @@ query bundle activeAuthoringBundles {
 /// automations after a restart.
 @actor
 query bundle systemActiveAuthoringBundles {
-  filter  actor.isClusterOwner==true && statusIsActive
+  filter  row => actor.isClusterOwner == true && statusIsActive(row)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -84,7 +84,7 @@ query bundle authoringBundleForResponsibility {
   args {
     responsibilityId  string!
   }
-  filter  ownerUserId==actor.userId && responsibilityId==args.responsibilityId
+  filter  row => row.ownerUserId == actor.userId && row.responsibilityId == args.responsibilityId
   shape   bundleFull
 }
 
@@ -98,7 +98,7 @@ query bundle authoringBundleForRun {
   args {
     sourceRunId  string!
   }
-  filter  ownerUserId==actor.userId && sourceRunId==args.sourceRunId
+  filter  row => row.ownerUserId == actor.userId && row.sourceRunId == args.sourceRunId
   shape   bundleFull
 }
 
@@ -110,7 +110,7 @@ query construct authoringConstructsForBundle {
   args {
     bundleId  string!
   }
-  filter  ownerUserId==actor.userId && bundleId==args.bundleId
+  filter  row => row.ownerUserId == actor.userId && row.bundleId == args.bundleId
   shape   constructFull
 }
 
@@ -118,7 +118,7 @@ query construct authoringConstructsForBundle {
 /// planner searches these before authoring a net-new dependency.
 @actor
 query construct cataloguedConstructsForOwner {
-  filter  ownerUserId==actor.userId && catalogued==true
+  filter  row => row.ownerUserId == actor.userId && row.catalogued == true
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -135,7 +135,7 @@ query dependencyEdge dependencyEdgesForBundle {
   args {
     bundleId  string!
   }
-  filter  ownerUserId==actor.userId && bundleId==args.bundleId
+  filter  row => row.ownerUserId == actor.userId && row.bundleId == args.bundleId
   shape   dependencyEdgeFull
 }
 
@@ -149,14 +149,14 @@ query dependencyEdge dependentsOfConstruct {
     toName  string!
     toKind  string!
   }
-  filter  ownerUserId==actor.userId && toName==args.toName && toKind==args.toKind
+  filter  row => row.ownerUserId == actor.userId && row.toName == args.toName && row.toKind == args.toKind
   shape   dependencyEdgeFull
 }
 
 /// Every dependency edge owned by the caller. Backs a full dependency-graph view.
 @actor
 query dependencyEdge dependencyEdgesForOwner {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -176,7 +176,9 @@ query construct cataloguedConstructsForGoalSignature {
   args {
     goalSignature  string!
   }
-  filter  ownerUserId==actor.userId && catalogued==true && goalSignature==args.goalSignature
+  filter  row => row.ownerUserId == actor.userId
+              && row.catalogued == true
+              && row.goalSignature == args.goalSignature
   shape   constructFull
 }
 
@@ -185,6 +187,6 @@ query construct cataloguedConstructsForGoalSignature {
 @actor
 query construct authoringConstructById {
   args { constructId string! }
-  filter ownerUserId==actor.userId && row.id==args.constructId
+  filter row => row.ownerUserId == actor.userId && row.id == args.constructId
   shape constructFull
 }

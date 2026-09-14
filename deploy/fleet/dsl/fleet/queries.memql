@@ -35,7 +35,7 @@ use fleet.specs.{ isBuyableTier, isOpenMeter }
 query tierSpec publicTiers {
   sort      "monthlyPriceUsd", "asc"
   paginate  20
-  filter    isBuyableTier
+  filter    row => isBuyableTier(row)
   shape     tierPublic
 }
 
@@ -47,7 +47,7 @@ query tierSpec tierByName {
   args {
     tier  string!
   }
-  filter  tier==args.tier
+  filter  row => row.tier == args.tier
   shape   tierPublic
 }
 
@@ -61,7 +61,7 @@ query tierSpec tierSpecByName {
   args {
     tier  string!
   }
-  filter  tier==args.tier
+  filter  row => row.tier == args.tier
   shape   tierFull
 }
 
@@ -76,7 +76,7 @@ query tierSpec tierSpecByName {
 query subscriber mySubscriber {
   sort      "row.createdAt", "desc"
   paginate  5
-  filter    ownerUserId==actor.userId
+  filter    row => row.ownerUserId == actor.userId
   shape     subscriberFull
 }
 
@@ -89,7 +89,7 @@ query subscription mySubscriptions {
   }
   sort      "row.createdAt", "desc"
   paginate  20
-  filter    ownerUserId==actor.userId && when(args.status) { status==args.status }
+  filter    row => row.ownerUserId == actor.userId && (args.status == nil || row.status == args.status)
   shape     subscriptionFull
 }
 
@@ -101,7 +101,7 @@ query subscription mySubscriptionById {
   args {
     subscriptionId  string!
   }
-  filter  row.id==args.subscriptionId && ownerUserId==actor.userId
+  filter  row => row.id == args.subscriptionId && row.ownerUserId == actor.userId
   shape   subscriptionFull
 }
 
@@ -113,7 +113,7 @@ query instance myInstances {
   }
   sort      "row.createdAt", "desc"
   paginate  20
-  filter    ownerUserId==actor.userId && when(args.status) { status==args.status }
+  filter    row => row.ownerUserId == actor.userId && (args.status == nil || row.status == args.status)
   shape     instanceFull
 }
 
@@ -124,7 +124,7 @@ query instance myInstanceById {
   args {
     instanceId  string!
   }
-  filter  row.id==args.instanceId && ownerUserId==actor.userId
+  filter  row => row.id == args.instanceId && row.ownerUserId == actor.userId
   shape   instanceFull
 }
 
@@ -138,7 +138,9 @@ query usageMeter myCurrentUsage {
   }
   sort      "metric", "asc"
   paginate  20
-  filter    ownerUserId==actor.userId && isOpenMeter && when(args.subscriptionId) { subscriptionId==args.subscriptionId }
+  filter    row => row.ownerUserId == actor.userId
+                && isOpenMeter(row)
+                && (args.subscriptionId == nil || row.subscriptionId == args.subscriptionId)
   shape     usageMeterFull
 }
 
@@ -151,7 +153,9 @@ query usageMeter myUsageHistory {
   }
   sort      "periodStart", "desc"
   paginate  50
-  filter    ownerUserId==actor.userId && when(args.subscriptionId) { subscriptionId==args.subscriptionId } && when(args.metric) { metric==args.metric }
+  filter    row => row.ownerUserId == actor.userId
+                && (args.subscriptionId == nil || row.subscriptionId == args.subscriptionId)
+                && (args.metric == nil || row.metric == args.metric)
   shape     usageMeterFull
 }
 
@@ -190,7 +194,7 @@ query subscription subscriptionsByStatus {
   args {
     status  string!
   }
-  filter  status==args.status
+  filter  row => row.status == args.status
   shape   subscriptionFull
 }
 
@@ -207,7 +211,7 @@ query subscription subscriptionByStripeId {
   args {
     stripeSubscriptionId  string!
   }
-  filter  stripeSubscriptionId==args.stripeSubscriptionId
+  filter  row => row.stripeSubscriptionId == args.stripeSubscriptionId
   shape   subscriptionFull
 }
 
@@ -218,6 +222,6 @@ query instance instancesByStatus {
   args {
     status  string!
   }
-  filter  status==args.status
+  filter  row => row.status == args.status
   shape   instanceFull
 }

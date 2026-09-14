@@ -34,7 +34,7 @@ logic workerInvocationRetentionSweep {
   }
   body {
   windowDays := query globalVariable( name: "WORKER_INVOCATION_RETENTION_DAYS" )
-  candidates := query expiredWorkerInvocations( createdBefore: addDuration(now, concat("P-", windowDays.first().payload.value ?? "90", "D")) )
+  candidates := query expiredWorkerInvocations( createdBefore: addDuration(now, "P-" + (windowDays.first().payload.value ?? "90") + "D") )
   return candidates.nodes()
   }
 }
@@ -80,8 +80,8 @@ logic workerModelPullStaleSweep {
   claimGrace := query globalVariable( name: "MEMQL_MODEL_PULL_CLAIM_GRACE_SECONDS" )
   stallGrace := query globalVariable( name: "MEMQL_MODEL_PULL_STALL_GRACE_SECONDS" )
   abandoned := query openModelPulls(
-    requestedBefore: addDuration(now, concat("PT-", claimGrace.first().payload.value ?? "90", "S")),
-    updatedBefore: addDuration(now, concat("PT-", stallGrace.first().payload.value ?? "420", "S"))
+    requestedBefore: addDuration(now, "PT-" + (claimGrace.first().payload.value ?? "90") + "S"),
+    updatedBefore: addDuration(now, "PT-" + (stallGrace.first().payload.value ?? "420") + "S")
   )
   return abandoned.nodes()
   }
@@ -128,8 +128,8 @@ logic workerModelProbeStaleSweep {
   claimGrace := query globalVariable( name: "MEMQL_MODEL_PROBE_CLAIM_GRACE_SECONDS" )
   stallGrace := query globalVariable( name: "MEMQL_MODEL_PROBE_STALL_GRACE_SECONDS" )
   abandoned := query openModelProbes(
-    requestedBefore: addDuration(now, concat("PT-", claimGrace.first().payload.value ?? "90", "S")),
-    updatedBefore: addDuration(now, concat("PT-", stallGrace.first().payload.value ?? "900", "S"))
+    requestedBefore: addDuration(now, "PT-" + (claimGrace.first().payload.value ?? "90") + "S"),
+    updatedBefore: addDuration(now, "PT-" + (stallGrace.first().payload.value ?? "900") + "S")
   )
   return abandoned.nodes()
   }

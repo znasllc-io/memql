@@ -28,7 +28,8 @@ query campaign campaigns {
   args {
     status  string
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && when(args.status) { status==args.status }
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && (args.status == nil || row.status == args.status)
   sort      "row.createdAt", "desc"
   paginate  50
   shape     campaignFull
@@ -41,7 +42,7 @@ query campaign campaignById {
   args {
     campaignId  string!
   }
-  filter  row.id==args.campaignId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.id == args.campaignId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   campaignFull
 }
 
@@ -52,7 +53,8 @@ query audience audiences {
   args {
     status  string
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && when(args.status) { status==args.status }
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && (args.status == nil || row.status == args.status)
   sort      "row.createdAt", "desc"
   paginate  50
   shape     audienceFull
@@ -64,7 +66,7 @@ query audience audienceById {
   args {
     audienceId  string!
   }
-  filter  row.id==args.audienceId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.id == args.audienceId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   audienceFull
 }
 
@@ -75,7 +77,8 @@ query template templates {
   args {
     status  string
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && when(args.status) { status==args.status }
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && (args.status == nil || row.status == args.status)
   sort      "row.createdAt", "desc"
   paginate  50
   shape     templateFull
@@ -88,7 +91,7 @@ query template templateById {
   args {
     templateId  string!
   }
-  filter  row.id==args.templateId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.id == args.templateId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   templateFull
 }
 
@@ -101,7 +104,8 @@ query recipient recipientsForAudience {
   args {
     audienceId  string!
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && audienceId==args.audienceId
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && row.audienceId == args.audienceId
   sort      "row.createdAt", "desc"
   paginate  100
   shape     recipientFull
@@ -115,7 +119,9 @@ query recipient sendableRecipientsForAudience {
   args {
     audienceId  string!
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && audienceId==args.audienceId && isSendableRecipient
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && row.audienceId == args.audienceId
+                && isSendableRecipient(row)
   sort      "row.createdAt", "desc"
   paginate  100
   shape     recipientFull
@@ -129,7 +135,8 @@ query delivery deliveriesForCampaign {
   args {
     campaignId  string!
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && row.campaignId == args.campaignId
   sort      "row.createdAt", "desc"
   paginate  100
   shape     deliveryFull
@@ -161,7 +168,7 @@ query delivery deliveriesForCampaign {
 /// operator identity and why the row it returns carries no recipient data.
 @actor
 query sendJob drainableSendJobs {
-  filter    isDrainableSendJob && actor.isClusterOwner==true
+  filter    row => isDrainableSendJob(row) && actor.isClusterOwner == true
   sort      "row.createdAt", "asc"
   paginate  50
   shape     sendJobFull
@@ -174,7 +181,7 @@ query sendJob drainableSendJobs {
 /// unsubscribe link in front of a recipient. The row carries no recipient data.
 @actor
 query sendJob recentSendJobs {
-  filter    actor.isClusterOwner==true
+  filter    row => actor.isClusterOwner == true
   sort      "row.createdAt", "desc"
   paginate  200
   shape     sendJobFull
@@ -192,7 +199,7 @@ query sendJob recentSendJobs {
 /// small by nature (one row per pending scheduled campaign), which is what makes that affordable.
 @actor
 query sendJob scheduledSendJobs {
-  filter    isScheduledSendJob && actor.isClusterOwner==true
+  filter    row => isScheduledSendJob(row) && actor.isClusterOwner == true
   sort      "row.createdAt", "asc"
   paginate  200
   shape     sendJobFull
@@ -205,7 +212,7 @@ query sendJob sendJobById {
   args {
     sendJobId  string!
   }
-  filter  row.id==args.sendJobId && actor.isClusterOwner==true
+  filter  row => row.id == args.sendJobId && actor.isClusterOwner == true
   shape   sendJobFull
 }
 
@@ -219,7 +226,7 @@ query suppression suppressionByDigest {
   args {
     emailDigest  string!
   }
-  filter  row.id==args.emailDigest && actor.isClusterOwner==true
+  filter  row => row.id == args.emailDigest && actor.isClusterOwner == true
   shape   suppressionFull
 }
 
@@ -245,7 +252,8 @@ query recipient audienceRosterForSend {
   args {
     audienceId  string!
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && audienceId==args.audienceId
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && row.audienceId == args.audienceId
   sort      "row.createdAt", "asc"
   paginate  500
   shape     recipientFull
@@ -261,7 +269,8 @@ query recipient audienceRosterSize {
   args {
     audienceId  string!
   }
-  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true) && audienceId==args.audienceId
+  filter  row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+              && row.audienceId == args.audienceId
   count
 }
 
@@ -287,7 +296,9 @@ query delivery deliveriesForRecipients {
     campaignId    string!
     recipientIds  array!
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId && recipientId in args.recipientIds
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && row.campaignId == args.campaignId
+                && row.recipientId in args.recipientIds
   sort      "row.createdAt", "asc"
   paginate  1000
   shape     deliveryLedgerEntry
@@ -302,7 +313,8 @@ query delivery deliveryLedgerForCampaign {
   args {
     campaignId  string!
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && row.campaignId == args.campaignId
   sort      "row.createdAt", "asc"
   paginate  5000
   shape     deliveryLedgerEntry
@@ -322,7 +334,7 @@ query reputationWindow reputationWindowsSince {
   args {
     since  string!
   }
-  filter    windowStart>=args.since && actor.isClusterOwner==true
+  filter    row => row.windowStart >= args.since && actor.isClusterOwner == true
   sort      "row.createdAt", "asc"
   paginate  5000
   shape     reputationWindowFull
@@ -336,7 +348,7 @@ query warmupState warmupStateForIdentity {
   args {
     sendingIdentity  string!
   }
-  filter  row.id==args.sendingIdentity && actor.isClusterOwner==true
+  filter  row => row.id == args.sendingIdentity && actor.isClusterOwner == true
   shape   warmupStateFull
 }
 
@@ -348,7 +360,8 @@ query consentEvent consentEventsBySubscriber {
   args {
     emailDigest  string!
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && emailDigest==args.emailDigest
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && row.emailDigest == args.emailDigest
   sort      "row.createdAt", "desc"
   paginate  50
   shape     consentEventFull
@@ -361,7 +374,8 @@ query consentEvent consentStatus {
   args {
     emailDigest  string!
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && emailDigest==args.emailDigest
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && row.emailDigest == args.emailDigest
   sort      "row.createdAt", "desc"
   paginate  1
   shape     consentEventFull
@@ -391,7 +405,7 @@ query recipient recipientById {
   args {
     recipientId  string!
   }
-  filter  row.id==args.recipientId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.id == args.recipientId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   recipientFull
 }
 
@@ -403,7 +417,8 @@ query senderIdentity senderIdentities {
   args {
     status  string
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && when(args.status) { status==args.status }
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && (args.status == nil || row.status == args.status)
   sort      "address", "asc"
   paginate  200
   shape     senderIdentityFull
@@ -417,7 +432,8 @@ query senderIdentity senderIdentityById {
   args {
     senderIdentityId  string!
   }
-  filter  row.id==args.senderIdentityId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.id == args.senderIdentityId
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   senderIdentityFull
 }
 
@@ -429,7 +445,8 @@ query senderIdentity senderIdentitiesForAccount {
   args {
     accountId  string!
   }
-  filter  accountId==args.accountId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.accountId == args.accountId
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   senderIdentityFull
   sort    "address", "asc"
 }
@@ -449,7 +466,9 @@ query delivery campaignDeliveryCountByStatus {
     campaignId  string!
     status      string!
   }
-  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId && status==args.status
+  filter  row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+              && row.campaignId == args.campaignId
+              && row.status == args.status
   count
 }
 
@@ -462,7 +481,10 @@ query delivery campaignSkipCountByReason {
     campaignId   string!
     skipReasons  array!
   }
-  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId && status=="skipped" && skipReason in args.skipReasons
+  filter  row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+              && row.campaignId == args.campaignId
+              && row.status == "skipped"
+              && row.skipReason in args.skipReasons
   count
 }
 
@@ -474,7 +496,9 @@ query engagementEvent campaignEngagementCountByKind {
     campaignId  string!
     kind        string!
   }
-  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId && kind==args.kind
+  filter  row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+              && row.campaignId == args.campaignId
+              && row.kind == args.kind
   count
 }
 
@@ -488,7 +512,9 @@ query engagementEvent campaignEngagementRefs {
     campaignId  string!
     kind        string!
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId && kind==args.kind
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && row.campaignId == args.campaignId
+                && row.kind == args.kind
   sort      "row.createdAt", "desc"
   paginate  5000
   shape     engagementDeliveryRef
@@ -504,7 +530,9 @@ query consentEvent campaignConsentCountByKind {
     campaignId  string!
     kind        string!
   }
-  filter  (ownerUserId==actor.userId || actor.isClusterOwner==true) && campaignId==args.campaignId && kind==args.kind
+  filter  row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+              && row.campaignId == args.campaignId
+              && row.kind == args.kind
   count
 }
 
@@ -519,7 +547,8 @@ query emailRule emailRules {
   args {
     status  string
   }
-  filter    (ownerUserId==actor.userId || actor.isClusterOwner==true) && when(args.status) { status==args.status }
+  filter    row => (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
+                && (args.status == nil || row.status == args.status)
   sort      "row.createdAt", "desc"
   paginate  200
   shape     emailRuleFull
@@ -531,6 +560,6 @@ query emailRule emailRuleById {
   args {
     emailRuleId  string!
   }
-  filter  row.id==args.emailRuleId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.id == args.emailRuleId && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   emailRuleFull
 }

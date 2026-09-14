@@ -44,7 +44,7 @@ mutate artifact createArtifact {
     validationStatus  enum("none", "unvalidated", "validated", "rejected", "partiallyValidated", "superseded")
   }
   insert {
-    id: concat("artifact-", hash(args.sourceConceptRef))
+    id: "artifact-" + hash(args.sourceConceptRef)
     args.sourceConceptRef
     args.ownerUserId
     args.lens

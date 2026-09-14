@@ -39,7 +39,7 @@ query artifact libraryArtifacts {
   // who asked for one lens, kind or label asked a question about that facet,
   // and the archive filter belongs to the DEFAULT list, which is the one a
   // person lands on.
-  filter  ownerUserId==actor.userId && archived!=true
+  filter  row => row.ownerUserId == actor.userId && row.archived != true
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -56,7 +56,7 @@ query artifact libraryArtifactsByLens {
   args {
     lens  string!
   }
-  filter  ownerUserId==actor.userId && lens==args.lens
+  filter  row => row.ownerUserId == actor.userId && row.lens == args.lens
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -73,7 +73,7 @@ query artifact libraryArtifactsByKind {
   args {
     kind  string!
   }
-  filter  ownerUserId==actor.userId && kind==args.kind
+  filter  row => row.ownerUserId == actor.userId && row.kind == args.kind
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -91,7 +91,7 @@ query artifact libraryArtifactsByLabel {
   args {
     label  string!
   }
-  filter  ownerUserId==actor.userId && when(args.label) { args.label in labels }
+  filter  row => row.ownerUserId == actor.userId && (args.label == nil || args.label in row.labels)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -118,7 +118,7 @@ query artifact libraryArtifactById {
   args {
     artifactId  string!
   }
-  filter  when(args.artifactId) { row.id==args.artifactId } && ownerUserId==actor.userId
+  filter  row => (args.artifactId == nil || row.id == args.artifactId) && row.ownerUserId == actor.userId
   shape   artifactFull
 }
 
@@ -143,7 +143,7 @@ query artifact libraryArtifactBySourceConceptRef {
   args {
     sourceConceptRef  string!
   }
-  filter  ownerUserId==actor.userId && sourceConceptRef==args.sourceConceptRef
+  filter  row => row.ownerUserId == actor.userId && row.sourceConceptRef == args.sourceConceptRef
   shape   artifactFull
 }
 
@@ -156,7 +156,7 @@ query generatedOutput generatedOutputById {
   args {
     outputId  string!
   }
-  filter  when(args.outputId) { row.id==args.outputId } && ownerUserId==actor.userId
+  filter  row => (args.outputId == nil || row.id == args.outputId) && row.ownerUserId == actor.userId
   shape   generatedOutputFull
 }
 
@@ -170,7 +170,7 @@ query generatedOutput generatedOutputsForRun {
   args {
     runId  string!
   }
-  filter  ownerUserId==actor.userId && producedByRunId==args.runId
+  filter  row => row.ownerUserId == actor.userId && row.producedByRunId == args.runId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -188,7 +188,7 @@ query memory memoryById {
   args {
     memoryId  string!
   }
-  filter  when(args.memoryId) { row.id==args.memoryId } && ownerUserId==actor.userId
+  filter  row => (args.memoryId == nil || row.id == args.memoryId) && row.ownerUserId == actor.userId
   shape   memoryFull
 }
 
@@ -218,7 +218,7 @@ query memory memoryById {
 /// is unreachable on every path. See the note above (#723 for the original shape, D8 for the tier).
 @actor
 query artifact libraryWorkspaceLiveSources {
-  filter  ownerUserId==actor.userId && kind=="live_source" && scope=="workspace"
+  filter  row => row.ownerUserId == actor.userId && row.kind == "live_source" && row.scope == "workspace"
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -246,7 +246,7 @@ query documentVersion documentVersions {
   args {
     documentId  string!
   }
-  filter  ownerUserId==actor.userId && documentId==args.documentId
+  filter  row => row.ownerUserId == actor.userId && row.documentId == args.documentId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -264,7 +264,7 @@ query documentVersion documentVersionById {
   args {
     versionId  string!
   }
-  filter  when(args.versionId) { row.id==args.versionId } && ownerUserId==actor.userId
+  filter  row => (args.versionId == nil || row.id == args.versionId) && row.ownerUserId == actor.userId
   shape   documentVersionFull
 }
 
@@ -286,7 +286,7 @@ query documentVersion documentVersionsForOwner {
   args {
     documentId  string!
   }
-  filter  ownerUserId==actor.userId && documentId==args.documentId
+  filter  row => row.ownerUserId == actor.userId && row.documentId == args.documentId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -326,7 +326,7 @@ query artifact artifactsForRun {
   args {
     runId  string!
   }
-  filter  ownerUserId==actor.userId && producedByRunId==args.runId
+  filter  row => row.ownerUserId == actor.userId && row.producedByRunId == args.runId
   shape   artifactFull
 }
 
@@ -364,7 +364,7 @@ query file libraryFileById {
   args {
     fileId  string!
   }
-  filter  when(args.fileId) { row.id==args.fileId } && ownerUserId==actor.userId
+  filter  row => (args.fileId == nil || row.id == args.fileId) && row.ownerUserId == actor.userId
   shape   libraryFileFull
 }
 
@@ -394,7 +394,10 @@ query file libraryFileByUploadedFrom {
     workerId  string!
     path      string!
   }
-  filter  ownerUserId==actor.userId && when(args.workerId) { uploadedFromWorkerId==args.workerId } && when(args.path) { uploadedFromPath==args.path } && archived!=true
+  filter  row => row.ownerUserId == actor.userId
+              && (args.workerId == nil || row.uploadedFromWorkerId == args.workerId)
+              && (args.path == nil || row.uploadedFromPath == args.path)
+              && row.archived != true
   shape   libraryFileFull
 }
 
@@ -411,7 +414,10 @@ query file libraryFilesForOwner {
     stepKey string
     status string
   }
-  filter  ownerUserId==actor.userId && when(args.runId) { producedByRunId==args.runId } && when(args.stepKey) { producedByStepKey==args.stepKey } && when(args.status) { status==args.status }
+  filter  row => row.ownerUserId == actor.userId
+              && (args.runId == nil || row.producedByRunId == args.runId)
+              && (args.stepKey == nil || row.producedByStepKey == args.stepKey)
+              && (args.status == nil || row.status == args.status)
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -429,7 +435,7 @@ query fileChunk libraryFileChunksForFile {
   args {
     fileId  string!
   }
-  filter  ownerUserId==actor.userId && fileId==args.fileId
+  filter  row => row.ownerUserId == actor.userId && row.fileId == args.fileId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -456,7 +462,7 @@ query fileVersion libraryFileVersionsForFile {
   args {
     fileId  string!
   }
-  filter  ownerUserId==actor.userId && fileId==args.fileId
+  filter  row => row.ownerUserId == actor.userId && row.fileId == args.fileId
   sort     "versionNumber", "desc"
   paginate 200
   shape   libraryFileVersionFull
@@ -477,7 +483,9 @@ query fileVersion libraryFileVersionByNumber {
     fileId         string!
     versionNumber  int!
   }
-  filter  ownerUserId==actor.userId && fileId==args.fileId && versionNumber==args.versionNumber
+  filter  row => row.ownerUserId == actor.userId
+              && row.fileId == args.fileId
+              && row.versionNumber == args.versionNumber
   shape   libraryFileVersionFull
 }
 
@@ -489,7 +497,7 @@ query fileVersion libraryFileVersionByNumber {
 @unbounded("quota enforcement must sum EVERY superseded version the owner holds -- a truncated page fails open, admitting an upload the quota should refuse; owner-scoped and two fields per row")
 @actor
 query fileVersion libraryFileVersionSizesForOwner {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   libraryFileVersionSize
 }
 
@@ -508,7 +516,7 @@ query fileVersion libraryFileVersionSizesForOwner {
 @unbounded("the caller's whole folder tree -- the client-side tree fold needs every row at once, and a truncated page silently renders missing ancestors' children at root as orphans; owner-scoped and hand-created, so the set is small by construction. No sort either: the fold orders by (name, id) itself, because a picture that depended on wire order would reshuffle while somebody watches")
 @actor
 query folder libraryFolders {
-  filter  ownerUserId==actor.userId && archived!=true && isNotDeleted
+  filter  row => row.ownerUserId == actor.userId && row.archived != true && isNotDeleted(row)
   shape   libraryFolderFull
 }
 
@@ -531,7 +539,7 @@ query folder libraryFolders {
 /// Files.
 @actor
 query artifact libraryArchivedArtifacts {
-  filter  ownerUserId==actor.userId && archived==true
+  filter  row => row.ownerUserId == actor.userId && row.archived == true
   sort     "row.createdAt", "desc"
   paginate 50
   shape   artifactFull
@@ -554,7 +562,7 @@ query artifact libraryArchivedArtifacts {
 @unbounded("the caller's archived folders -- the Bin files each item under the folder it came from, and a truncated page would render rows whose parent did not arrive as root-level orphans, indistinguishable from items that really were at the root. Owner-scoped and hand-created, so the set is small by construction")
 @actor
 query folder libraryArchivedFolders {
-  filter  ownerUserId==actor.userId && archived==true && isNotDeleted
+  filter  row => row.ownerUserId == actor.userId && row.archived == true && isNotDeleted(row)
   shape   libraryFolderFull
 }
 
@@ -574,7 +582,9 @@ query folder libraryFolderById {
   args {
     folderId  string!
   }
-  filter  when(args.folderId) { row.id==args.folderId } && ownerUserId==actor.userId && isNotDeleted
+  filter  row => (args.folderId == nil || row.id == args.folderId)
+              && row.ownerUserId == actor.userId
+              && isNotDeleted(row)
   shape   libraryFolderFull
 }
 
@@ -590,7 +600,7 @@ query uploadSession uploadSessionById {
   args {
     uploadId  string!
   }
-  filter  when(args.uploadId) { row.id==args.uploadId } && ownerUserId==actor.userId
+  filter  row => (args.uploadId == nil || row.id == args.uploadId) && row.ownerUserId == actor.userId
   shape   uploadSessionFull
 }
 
@@ -603,7 +613,7 @@ query uploadSession uploadSessionById {
 @unbounded("quota enforcement must see EVERY open session's declared size -- a truncated page fails open, admitting an upload the quota should refuse; owner-scoped and two fields per row")
 @actor
 query uploadSession openUploadSessionsForOwner {
-  filter  ownerUserId==actor.userId && isOpen
+  filter  row => row.ownerUserId == actor.userId && isOpen(row)
   shape   uploadSessionSize
 }
 
@@ -615,7 +625,7 @@ query uploadSession openUploadSessionsForOwner {
 @unbounded("quota enforcement must sum EVERY file the owner holds, archived included -- a truncated page fails open, admitting an upload the quota should refuse; owner-scoped and two fields per row")
 @actor
 query file libraryFileSizesForOwner {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   libraryFileSize
 }
 
@@ -646,6 +656,8 @@ query watchedFolder libraryWatchedFolders {
     /// renders.
     workerId  string
   }
-  filter  ownerUserId==actor.userId && when(args.workerId) { workerId==args.workerId } && archived!=true
+  filter  row => row.ownerUserId == actor.userId
+              && (args.workerId == nil || row.workerId == args.workerId)
+              && row.archived != true
   shape   watchedFolderFull
 }

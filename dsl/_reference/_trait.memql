@@ -42,24 +42,16 @@
 // Bare payload field name, `return` body, comparison against a literal.
 
 @description("Matches records with active==true field.")
-trait isActiveRecord {
-  return active == true
-}
+trait isActiveRecord = row => row.active == true
 
 @description("Matches records with status=='cancelled'.")
-trait isCancelled {
-  return status == "cancelled"
-}
+trait isCancelled = row => row.status == "cancelled"
 
 @description("Matches records that are not soft-deleted (deleted!=true).")
-trait isNotDeleted {
-  return deleted != true
-}
+trait isNotDeleted = row => row.deleted != true
 
 @description("Matches records whose status sits in the live set.")
-trait isLive {
-  return status == "active" || status == "saved"
-}
+trait isLive = row => row.status == "active" || row.status == "saved"
 
 // =============================================================================
 //   3. Row intrinsics -- bare-name references inside traits
@@ -79,14 +71,10 @@ trait isLive {
 // keeps them bare (a non-intrinsic bare name resolves to payload.<name>).
 
 @description("Matches rows from the worker:registration concept.")
-trait isParticipantRow {
-  return concept == "v1:worker:registration"
-}
+trait isParticipantRow = row => row.concept == "v1:worker:registration"
 
 @description("Matches rows authored by a specific known identity.")
-trait isSeedRow {
-  return createdBy == "seed"
-}
+trait isSeedRow = row => row.createdBy == "seed"
 
 // =============================================================================
 //   4. Caller predicates are SPECS, not traits
@@ -150,12 +138,8 @@ trait isSeedRow {
 //   - @disabled = parse the trait but skip registration (#2607).
 
 @description("Live, registered.")
-trait liveExample {
-  return active == true
-}
+trait liveExample = row => row.active == true
 
 @disabled
 @description("Parsed but skipped at registration. Remove @disabled to re-enable.")
-trait parkedExample {
-  return active == true
-}
+trait parkedExample = row => row.active == true

@@ -7,7 +7,9 @@ query productContent productContentForProduct {
     storeId     string!
     productGid  string!
   }
-  filter    storeId==args.storeId && productGid==args.productGid && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && row.productGid == args.productGid
+                && actor.isClusterOwner == true
   paginate  1
   shape     productContentFull
 }
@@ -20,7 +22,9 @@ query productContent productContentForStore {
     storeId  string!
     status   string
   }
-  filter    storeId==args.storeId && actor.isClusterOwner==true && when(args.status) { status==args.status }
+  filter    row => row.storeId == args.storeId
+                && actor.isClusterOwner == true
+                && (args.status == nil || row.status == args.status)
   sort      "row.createdAt", "desc"
   paginate  100
   shape     productContentFull
@@ -33,7 +37,9 @@ query customerNote customerNoteFor {
     storeId      string!
     customerGid  string!
   }
-  filter    storeId==args.storeId && customerGid==args.customerGid && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && row.customerGid == args.customerGid
+                && actor.isClusterOwner == true
   paginate  1
   shape     customerNoteFull
 }
@@ -45,7 +51,9 @@ query companyLocationNote companyLocationNoteFor {
     storeId             string!
     companyLocationGid  string!
   }
-  filter    storeId==args.storeId && companyLocationGid==args.companyLocationGid && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && row.companyLocationGid == args.companyLocationGid
+                && actor.isClusterOwner == true
   paginate  1
   shape     companyLocationNoteFull
 }
@@ -58,7 +66,9 @@ query creditLimit creditLimitForLocation {
     storeId             string!
     companyLocationGid  string!
   }
-  filter    storeId==args.storeId && companyLocationGid==args.companyLocationGid && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && row.companyLocationGid == args.companyLocationGid
+                && actor.isClusterOwner == true
   paginate  1
   shape     creditLimitFull
 }
@@ -70,7 +80,9 @@ query creditLimit creditLimitsForCompany {
     storeId     string!
     companyGid  string!
   }
-  filter    storeId==args.storeId && companyGid==args.companyGid && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && row.companyGid == args.companyGid
+                && actor.isClusterOwner == true
   sort      "companyLocationGid", "asc"
   paginate  100
   shape     creditLimitFull
@@ -82,7 +94,7 @@ query quote quoteById {
   args {
     quoteId  string!
   }
-  filter  row.id==args.quoteId && actor.isClusterOwner==true
+  filter  row => row.id == args.quoteId && actor.isClusterOwner == true
   shape     quoteFull
 }
 
@@ -94,7 +106,10 @@ query quote quotesForCompany {
     companyGid  string!
     status      string
   }
-  filter    storeId==args.storeId && companyGid==args.companyGid && actor.isClusterOwner==true && when(args.status) { status==args.status }
+  filter    row => row.storeId == args.storeId
+                && row.companyGid == args.companyGid
+                && actor.isClusterOwner == true
+                && (args.status == nil || row.status == args.status)
   sort      "row.createdAt", "desc"
   paginate  100
   shape     quoteFull
@@ -108,7 +123,10 @@ query quote quotesForRep {
     salesRepId  string!
     status      string
   }
-  filter    storeId==args.storeId && salesRepId==args.salesRepId && actor.isClusterOwner==true && when(args.status) { status==args.status }
+  filter    row => row.storeId == args.storeId
+                && row.salesRepId == args.salesRepId
+                && actor.isClusterOwner == true
+                && (args.status == nil || row.status == args.status)
   sort      "row.createdAt", "desc"
   paginate  100
   shape     quoteFull
@@ -122,7 +140,10 @@ query quote quotesPastValidity {
     storeId  string!
     asOf     datetime!
   }
-  filter    storeId==args.storeId && status=="sent" && validUntil<=args.asOf && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && row.status == "sent"
+                && row.validUntil <= args.asOf
+                && actor.isClusterOwner == true
   sort      "validUntil", "asc"
   paginate  100
   shape     quoteFull
@@ -134,7 +155,7 @@ query approvalChain approvalChainById {
   args {
     chainId  string!
   }
-  filter  row.id==args.chainId && actor.isClusterOwner==true
+  filter  row => row.id == args.chainId && actor.isClusterOwner == true
   shape     approvalChainFull
 }
 
@@ -146,7 +167,9 @@ query approvalChain approvalChainsForCompany {
     storeId     string!
     companyGid  string
   }
-  filter    storeId==args.storeId && actor.isClusterOwner==true && when(args.companyGid) { companyGid==args.companyGid }
+  filter    row => row.storeId == args.storeId
+                && actor.isClusterOwner == true
+                && (args.companyGid == nil || row.companyGid == args.companyGid)
   sort      "thresholdAmount", "asc"
   paginate  100
   shape     approvalChainFull
@@ -158,7 +181,7 @@ query salesRep salesRepsForStore {
   args {
     storeId  string!
   }
-  filter    storeId==args.storeId && isActiveRecord && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId && isActiveRecord(row) && actor.isClusterOwner == true
   sort      "displayName", "asc"
   paginate  100
   shape     salesRepFull
@@ -170,7 +193,7 @@ query territory territoriesForStore {
   args {
     storeId  string!
   }
-  filter    storeId==args.storeId && isActiveRecord && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId && isActiveRecord(row) && actor.isClusterOwner == true
   sort      "name", "asc"
   paginate  100
   shape     territoryFull
@@ -183,7 +206,10 @@ query reorderList reorderListsForCompany {
     storeId     string!
     companyGid  string!
   }
-  filter    storeId==args.storeId && companyGid==args.companyGid && isActiveRecord && actor.isClusterOwner==true
+  filter    row => row.storeId == args.storeId
+                && row.companyGid == args.companyGid
+                && isActiveRecord(row)
+                && actor.isClusterOwner == true
   sort      "name", "asc"
   paginate  100
   shape     reorderListFull

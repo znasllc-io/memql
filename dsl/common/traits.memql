@@ -4,9 +4,7 @@
 // files cover the other construct kinds.
 
 /// Matches records with active==true field
-trait isActiveRecord {
-  return active==true
-}
+trait isActiveRecord = row => row.active == true
 
 // ---- specs/v1/common/isCancelled.memql ----
 
@@ -20,9 +18,7 @@ trait isActiveRecord {
 //   concept==v1:hr:checkin;isCancelled()
 //
 /// Matches records with cancelled status
-trait isCancelled {
-  return status=="cancelled"
-}
+trait isCancelled = row => row.status == "cancelled"
 
 // ---- specs/v1/data/isChecked.memql ----
 
@@ -37,9 +33,7 @@ trait isCancelled {
 //   concept==v1:data:record;isChecked()
 //
 /// Matches active data records in checked validation state
-trait isChecked {
-  return active==true && validationState=="checked"
-}
+trait isChecked = row => row.active == true && row.validationState == "checked"
 
 // ---- specs/v1/common/isCompleted.memql ----
 
@@ -55,9 +49,7 @@ trait isChecked {
 //   concept==v1:hr:flag;isCompleted()
 //
 /// Matches records with completed status
-trait isCompleted {
-  return status=="completed"
-}
+trait isCompleted = row => row.status == "completed"
 
 // ---- specs/v1/data/isConfirmed.memql ----
 
@@ -72,9 +64,7 @@ trait isCompleted {
 //   concept==v1:data:record;isConfirmed()
 //
 /// Matches active data records in confirmed validation state
-trait isConfirmed {
-  return active==true && validationState=="confirmed"
-}
+trait isConfirmed = row => row.active == true && row.validationState == "confirmed"
 
 // ---- specs/v1/data/isDraft.memql ----
 
@@ -88,9 +78,7 @@ trait isConfirmed {
 //   concept==v1:data:record;isDraft()
 //
 /// Matches active data records in draft validation state
-trait isDraft {
-  return active==true && validationState=="draft"
-}
+trait isDraft = row => row.active == true && row.validationState == "draft"
 
 // ---- specs/v1/common/isInProgress.memql ----
 
@@ -104,9 +92,7 @@ trait isDraft {
 //   concept==v1:hr:checkin;isInProgress()
 //
 /// Matches records with inProgress status
-trait isInProgress {
-  return status=="inProgress"
-}
+trait isInProgress = row => row.status == "inProgress"
 
 // ---- specs/v1/common/isNotArchived.memql ----
 
@@ -120,9 +106,7 @@ trait isInProgress {
 //   concept==v1:library:artifact;isNotArchived()
 //
 /// Matches records that are not archived
-trait isNotArchived {
-  return status!="archived"
-}
+trait isNotArchived = row => row.status != "archived"
 
 // ---- specs/v1/common/isNotDeleted.memql ----
 
@@ -139,9 +123,7 @@ trait isNotArchived {
 //   concept==v1:agents:agent;isNotDeleted()
 //
 /// Excludes records with deleted==true field
-trait isNotDeleted {
-  return deleted!=true
-}
+trait isNotDeleted = row => row.deleted != true
 
 // ---- specs/v1/common/isOpen.memql ----
 
@@ -157,9 +139,7 @@ trait isNotDeleted {
 //   concept==v1:hr:case;isOpen()
 //
 /// Matches records with open status requiring action
-trait isOpen {
-  return status=="open"
-}
+trait isOpen = row => row.status == "open"
 
 // ---- specs/v1/common/isScheduled.memql ----
 
@@ -174,9 +154,7 @@ trait isOpen {
 //   concept==v1:calendar:event;isScheduled()
 //
 /// Matches records with scheduled status
-trait isScheduled {
-  return status=="scheduled"
-}
+trait isScheduled = row => row.status == "scheduled"
 
 // ---- specs/v1/data/isUsable.memql ----
 
@@ -197,9 +175,7 @@ trait isScheduled {
 //   concept==v1:data:record;isUsable()
 //
 /// Matches active data records in checked or confirmed validation state
-trait isUsable {
-  return active==true && validationState!="draft"
-}
+trait isUsable = row => row.active == true && row.validationState != "draft"
 
 // The retired `requiresAdmin` was an actor.* predicate; under the spec/shape binding
 // redesign (epic #2281) a caller predicate is a `spec` bound to an
@@ -223,9 +199,7 @@ trait isUsable {
 //   concept==v1:hr:advocate;statusIsActive()
 //
 /// Matches records with active status
-trait statusIsActive {
-  return status=="active"
-}
+trait statusIsActive = row => row.status == "active"
 
 // ---- specs/v1/common/statusIsArchived.memql ----
 
@@ -245,9 +219,7 @@ trait statusIsActive {
 //   concept==v1:library:artifact;statusIsArchived()
 //
 /// Matches records with payload.status == 'archived'.
-trait statusIsArchived {
-  return status=="archived"
-}
+trait statusIsArchived = row => row.status == "archived"
 
 // ---- specs/v1/common/statusIsSaved.memql ----
 
@@ -263,9 +235,7 @@ trait statusIsArchived {
 //   concept==v1:library:artifact;statusIsSaved()
 //
 /// Matches records with payload.status == 'saved'.
-trait statusIsSaved {
-  return status=="saved"
-}
+trait statusIsSaved = row => row.status == "saved"
 
 // ---- statusIsPending ----
 //
@@ -274,9 +244,7 @@ trait statusIsSaved {
 // rows are queued for action by an admin or the original requester.
 
 /// Matches records with payload.status == 'pending'.
-trait statusIsPending {
-  return status=="pending"
-}
+trait statusIsPending = row => row.status == "pending"
 
 // ---- statusIsRunning ----
 //
@@ -285,9 +253,7 @@ trait statusIsPending {
 // actively executing right now.
 
 /// Matches records with payload.status == 'running'.
-trait statusIsRunning {
-  return status=="running"
-}
+trait statusIsRunning = row => row.status == "running"
 
 // ---- identityIsApiKey ----
 //
@@ -297,9 +263,7 @@ trait statusIsRunning {
 // queries explicitly.
 
 /// Matches v1:identity:identity rows with identityType=='api_key'.
-trait identityIsApiKey {
-  return identityType=="api_key"
-}
+trait identityIsApiKey = row => row.identityType == "api_key"
 
 // ---- identityIsWorkerToken ----
 //
@@ -309,9 +273,7 @@ trait identityIsApiKey {
 // credential lookups.
 
 /// Matches v1:identity:identity rows with identityType=='worker_token'.
-trait identityIsWorkerToken {
-  return identityType=="worker_token"
-}
+trait identityIsWorkerToken = row => row.identityType == "worker_token"
 
 // ---- identityIsNodeToken ----
 //
@@ -322,9 +284,7 @@ trait identityIsWorkerToken {
 // minted identity-row persistence path (memql#343).
 
 /// Matches v1:identity:identity rows with identityType=='node_token'.
-trait identityIsNodeToken {
-  return identityType=="node_token"
-}
+trait identityIsNodeToken = row => row.identityType == "node_token"
 
 // ---- identityIsBadge ----
 //
@@ -336,9 +296,7 @@ trait identityIsNodeToken {
 // token for the owning user.
 
 /// Matches v1:identity:identity rows with identityType=='badge'.
-trait identityIsBadge {
-  return identityType=="badge"
-}
+trait identityIsBadge = row => row.identityType == "badge"
 
 // ---- identityIsMagicLink ----
 //
@@ -354,9 +312,7 @@ trait identityIsBadge {
 // rather than silently performed.
 
 /// Matches v1:identity:identity rows with identityType=='magic_link'.
-trait identityIsMagicLink {
-  return identityType=="magic_link"
-}
+trait identityIsMagicLink = row => row.identityType == "magic_link"
 
 // ---- identityIsPasskey ----
 //
@@ -368,9 +324,7 @@ trait identityIsMagicLink {
 // usernameless assertion through the same key.
 
 /// Matches v1:identity:identity rows with identityType=='passkey'.
-trait identityIsPasskey {
-  return identityType=="passkey"
-}
+trait identityIsPasskey = row => row.identityType == "passkey"
 
 // ---- identityIsOidc ----
 //
@@ -382,9 +336,7 @@ trait identityIsPasskey {
 // existing user row rather than a duplicate.
 
 /// Matches v1:identity:identity rows with identityType=='oidc'.
-trait identityIsOidc {
-  return identityType=="oidc"
-}
+trait identityIsOidc = row => row.identityType == "oidc"
 
 // ---- identityIsRecoveryKey ----
 //
@@ -406,9 +358,7 @@ trait identityIsOidc {
 // identityType description, and on the query itself.
 
 /// Matches v1:identity:identity rows with identityType=='recovery_key'.
-trait identityIsRecoveryKey {
-  return identityType=="recovery_key"
-}
+trait identityIsRecoveryKey = row => row.identityType == "recovery_key"
 
 // ---- isDeletionScheduled ----
 //
@@ -417,6 +367,4 @@ trait identityIsRecoveryKey {
 // queued for hard delete after the retention window expires.
 
 /// Matches records that have a deletion scheduled (deletionScheduledAt is set).
-trait isDeletionScheduled {
-  return deletionScheduledAt!=""
-}
+trait isDeletionScheduled = row => row.deletionScheduledAt != ""

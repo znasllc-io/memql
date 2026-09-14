@@ -31,7 +31,7 @@ use common.traits.{ statusIsActive }
 /// impossible.
 @actor
 query responsibility responsibilitiesForUser {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -52,7 +52,7 @@ query responsibility responsibilitiesForUser {
 /// == actor.userId). status filtered via statusIsActive; enabled==true drops soft-disabled rows.
 @actor
 query responsibility activeResponsibilities {
-  filter  ownerUserId==actor.userId && statusIsActive && enabled==true
+  filter  row => row.ownerUserId == actor.userId && statusIsActive(row) && row.enabled == true
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.
@@ -92,7 +92,10 @@ query responsibility dueResponsibilities {
   args {
     trigger  enum("reactive", "recurring")!
   }
-  filter  ownerUserId==actor.userId && statusIsActive && enabled==true && trigger==args.trigger
+  filter  row => row.ownerUserId == actor.userId
+              && statusIsActive(row)
+              && row.enabled == true
+              && row.trigger == args.trigger
   shape   responsibilityFull
 }
 
@@ -126,7 +129,7 @@ query responsibility dueResponsibilities {
 /// per-user writes.
 @unbounded("cross-user active responsibilities -- an internal scheduler sweep that must see all")
 query responsibility activeResponsibilitiesAcrossUsers {
-  filter  statusIsActive && enabled==true
+  filter  row => statusIsActive(row) && row.enabled == true
   shape   responsibilityFull
 }
 
@@ -146,7 +149,7 @@ query responsibility responsibilityById {
   args {
     responsibilityId  string!
   }
-  filter  row.id==args.responsibilityId
+  filter  row => row.id == args.responsibilityId
   shape   responsibilityFull
 }
 

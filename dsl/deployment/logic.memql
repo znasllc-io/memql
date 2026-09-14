@@ -73,8 +73,8 @@ logic nextDeploymentVersion {
 logic deploymentForwardAllowed {
   body {
     role := actor.role ?? ""
-    isElevated := cond(role == "admin", true, cond(role == "owner", true, false))
-    allowed := cond(role == "developer", true, isElevated)
+    isElevated := role == "admin" ? true : role == "owner" ? true : false
+    allowed := role == "developer" ? true : isElevated
     return allowed
   }
 }
@@ -89,7 +89,7 @@ logic deploymentForwardAllowed {
 logic deploymentRollbackAllowed {
   body {
     role := actor.role ?? ""
-    allowed := cond(role == "owner", true, false)
+    allowed := role == "owner" ? true : false
     return allowed
   }
 }
@@ -107,7 +107,7 @@ logic deployRollbackTarget {
   body {
     prev := args.previousDeploymentId ?? ""
     ok := args.passed ?? false
-    target := cond(ok == true, "", prev)
+    target := ok == true ? "" : prev
     return target
   }
 }
@@ -158,7 +158,7 @@ logic deployOutcomeLabel {
   }
   body {
     ok := args.passed ?? false
-    outcome := cond(ok == true, "succeeded", "failed")
+    outcome := ok == true ? "succeeded" : "failed"
     return outcome
   }
 }
@@ -181,7 +181,7 @@ logic installDependencyVerdict {
   }
   body {
     ok := args.passed ?? false
-    verdict := cond(ok == true, "ok", "missing")
+    verdict := ok == true ? "ok" : "missing"
     return verdict
   }
 }
@@ -209,7 +209,7 @@ logic renderDiffVerdict {
   body {
     gateRequired := args.required ?? false
     clear := args.passed ?? false
-    verdict := cond(gateRequired == true, cond(clear == true, "clear", "blocked"), "clear")
+    verdict := gateRequired == true ? (clear == true ? "clear" : "blocked") : "clear"
     return verdict
   }
 }

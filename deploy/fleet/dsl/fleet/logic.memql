@@ -37,10 +37,10 @@ logic instanceCommand {
   }
   body {
     s := args.status ?? ""
-    teardown := cond(s == "tearing_down", "teardown", "")
-    resume := cond(s == "resuming", "resume", teardown)
-    suspend := cond(s == "suspending", "suspend", resume)
-    return cond(s == "provisioning", "provision", suspend)
+    teardown := s == "tearing_down" ? "teardown" : ""
+    resume := s == "resuming" ? "resume" : teardown
+    suspend := s == "suspending" ? "suspend" : resume
+    return s == "provisioning" ? "provision" : suspend
   }
 }
 
@@ -55,8 +55,8 @@ logic subscriptionIsServiceable {
   }
   body {
     s := args.status ?? ""
-    active := cond(s == "active", true, cond(s == "past_due", true, false))
-    return cond(s == "trialing", true, active)
+    active := s == "active" ? true : s == "past_due" ? true : false
+    return s == "trialing" ? true : active
   }
 }
 
@@ -71,7 +71,7 @@ logic teardownConfirmationPhrase {
     tenant string!
   }
   body {
-    return concat("teardown ", args.tenant)
+    return "teardown " + args.tenant
   }
 }
 

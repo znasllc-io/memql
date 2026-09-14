@@ -31,7 +31,7 @@ logic runIsTerminal {
   }
   body {
     st := args.status ?? ""
-    isTerminal := cond(st == "succeeded", true, cond(st == "failed", true, cond(st == "cancelled", true, cond(st == "abandoned", true, false))))
+    isTerminal := st == "succeeded" ? true : st == "failed" ? true : st == "cancelled" ? true : st == "abandoned" ? true : false
     return isTerminal
   }
 }

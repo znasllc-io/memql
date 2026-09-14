@@ -195,7 +195,7 @@ automation indexMemoryOnCreate {
 /// argument has no conditional form, so the mapping lives in Go and its answer lives on the row.
 /// memql#4340.
 @trigger(event="node.created", concept="v1:library:file", partition="*")
-@filter(payload.status == "stored")
+@filter(row => row.status == "stored")
 automation indexFileOnCreate {
   args {
     producedByRunId any
@@ -253,7 +253,7 @@ automation indexFileOnCreate {
 /// through the artifact is the portal's path; archiveLibraryFile is the file-level operation.
 /// Idempotent: archiving an already-archived file writes the same value. memql#4340.
 @trigger(event="node.updated", concept="v1:library:artifact", partition="*")
-@filter(payload.kind == "file" && payload.archived == true)
+@filter(row => row.kind == "file" && row.archived == true)
 automation archiveFileOnArtifactArchive {
   args {
     sourceConceptRef any

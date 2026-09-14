@@ -98,7 +98,7 @@ automation bootstrapCluster {
     }
   }
   step idpRecord {
-    if steps.refreshInfra.result == true && exists(payload.identityProvider) {
+    if steps.refreshInfra.result == true && payload.identityProvider != nil {
       mutation createIdentityProvider (
         identityProviderId: "v1:cluster:identityProvider:primary",
         clusterId:          "v1:cluster:cluster:self",

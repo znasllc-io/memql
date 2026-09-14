@@ -89,7 +89,7 @@ query account clientAccountsAll {
   args {
     includeArchived  boolean
   }
-  filter  isNotArchived || args.includeArchived==true
+  filter  row => isNotArchived(row) || args.includeArchived == true
   shape   clientAccountFull
   sort    "name", "asc"
 }
@@ -103,7 +103,7 @@ query account clientAccountById {
   args {
     accountId  string!
   }
-  filter  row.id==args.accountId
+  filter  row => row.id == args.accountId
   shape   clientAccountFull
 }
 
@@ -148,7 +148,8 @@ query account clientAccountById {
 @serverOnly
 @unbounded("the self account singleton -- bounded to a single row (literal id)")
 query account existingSelfAccount {
-  filter  row.id=="v1:accounts:account:self" && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.id == "v1:accounts:account:self"
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   clientAccountFull
 }
 
@@ -183,7 +184,7 @@ query site sitesForAccount {
   args {
     accountId  string!
   }
-  filter  accountId==args.accountId && isNotDeleted && isNotArchived
+  filter  row => row.accountId == args.accountId && isNotDeleted(row) && isNotArchived(row)
   shape   siteFull
   sort    "hostname", "asc"
 }
@@ -204,7 +205,7 @@ query artifact libraryItemsForAccount {
   args {
     accountId  string!
   }
-  filter  args.accountId in accountIds && archived!=true && ownerUserId==actor.userId
+  filter  row => args.accountId in row.accountIds && row.archived != true && row.ownerUserId == actor.userId
   shape   artifactFull
   sort    "updatedAt", "desc"
 }
@@ -233,7 +234,7 @@ query knowledgeDomain domainsForAccount {
   args {
     accountId  string!
   }
-  filter  accountId==args.accountId
+  filter  row => row.accountId == args.accountId
   shape   knowledgeDomainFull
   sort    "name", "asc"
 }
@@ -262,7 +263,7 @@ query invitation invitationsForAccount {
   args {
     accountId  string!
   }
-  filter  accountId==args.accountId
+  filter  row => row.accountId == args.accountId
   shape   invitationAdminSummary
   sort    "row.createdAt", "desc"
 }
@@ -285,7 +286,8 @@ query campaign campaignsForAccount {
   args {
     accountId  string!
   }
-  filter  accountId==args.accountId && (ownerUserId==actor.userId || actor.isClusterOwner==true)
+  filter  row => row.accountId == args.accountId
+              && (row.ownerUserId == actor.userId || actor.isClusterOwner == true)
   shape   campaignFull
   sort    "row.createdAt", "desc"
 }
@@ -303,7 +305,7 @@ query campaign campaignsForAccount {
 @serverOnly
 @unbounded("the boot backfill must see EVERY active account -- a truncated page leaves an account with no group, which is a client whose people can reach none of their work, and nothing reports it")
 query account accountsForGroupSweep {
-  filter  actor.isClusterOwner==true && statusIsActive
+  filter  row => actor.isClusterOwner == true && statusIsActive(row)
   shape   accountIdRef
 }
 
@@ -324,7 +326,10 @@ query account accountsForGroupSweep {
 @serverOnly
 @unbounded("the domain walk must see EVERY account still waiting on its DNS record -- a truncated page leaves a client's domain unverified indefinitely, and the person watching the panel has no way to tell that from a record they typed wrong")
 query account accountsForDomainWalk {
-  filter  actor.isClusterOwner==true && statusIsActive && domainStatus!="verified" && domain!=""
+  filter  row => actor.isClusterOwner == true
+              && statusIsActive(row)
+              && row.domainStatus != "verified"
+              && row.domain != ""
   shape   accountDomainWalk
 }
 
@@ -351,7 +356,7 @@ query account accountsForDomainWalk {
 @serverOnly
 @unbounded("the account front-door sweep must see EVERY held reservation -- a truncated page leaves a client's door unopened, or worse leaves a withdrawn one serving, and the person watching the stop has no way to tell either from a record they typed wrong")
 query account accountsWithAReservedName {
-  filter  actor.isClusterOwner==true && statusIsActive && memqlDomain!=""
+  filter  row => actor.isClusterOwner == true && statusIsActive(row) && row.memqlDomain != ""
   shape   accountDomainWalk
 }
 
@@ -378,7 +383,11 @@ query account accountForDomainJoin {
   args {
     domain  string!
   }
-  filter  actor.isClusterOwner==true && domain==args.domain && statusIsActive && domainStatus=="verified" && joinOnDomain==true
+  filter  row => actor.isClusterOwner == true
+              && row.domain == args.domain
+              && statusIsActive(row)
+              && row.domainStatus == "verified"
+              && row.joinOnDomain == true
   shape   accountIdRef
   sort    "row.createdAt", "asc"
 }
