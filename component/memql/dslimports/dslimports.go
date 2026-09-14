@@ -94,12 +94,23 @@ func Load(root fs.FS) (*Tree, error) {
 
 	// Each file is parsed through the front end of the edition its domain
 	// declares (memql#5358), exactly as the engine reads it at boot, so a
-	// tree written in another edition lints as it loads. A domain the engine
-	// would refuse is read with the engine's own edition; the refusal itself
-	// is the engine-parity pass's to report (memqllint runs both).
+	// tree written in another edition lints as it loads.
+	//
+	// A domain whose language line the engine refuses is read by no loader
+	// at boot, so it is not parsed here either: its files enter the tree
+	// OPAQUE -- present, importing nothing, defining nothing, marked
+	// ImportsOnly -- with no diagnostic of their own. The refusal is the
+	// engine-parity pass's to report, once (memqllint runs both), and an
+	// importer in another domain still resolves the module rather than
+	// cascading a "does not exist" off a file that is merely unread.
 	lines, _ := languageParser.ResolveLanguageLines(root, memqldsl.EmbeddedTree{})
 
 	for _, p := range paths {
+		if line, ok := lines.For(p); ok && line.Refused {
+			tree.Files[p] = &languageAst.File{Path: p}
+			tree.ImportsOnly[p] = true
+			continue
+		}
 		f, openErr := root.Open(p)
 		if openErr != nil {
 			diagnostics = append(diagnostics, fmt.Errorf("%s: open: %w", p, openErr))

@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,8 +44,8 @@ func withLanguageLine(tree fstest.MapFS) fstest.MapFS {
 func withLanguageLines(root fstest.MapFS) fstest.MapFS {
 	domains := map[string]bool{}
 	for p := range root {
-		if i := strings.IndexByte(p, '/'); i > 0 && strings.HasSuffix(p, ".memql") {
-			domains[p[:i]] = true
+		if d := langparser.LanguageLineDomainOf(p); d != "" {
+			domains[d] = true
 		}
 	}
 	for d := range domains {
@@ -195,7 +196,7 @@ func TestLanguageLine_UnknownEditionRefusesBootNamingTheEditions(t *testing.T) {
 	if err == nil {
 		t.Fatal("Init booted a tree declaring an edition this engine does not read")
 	}
-	want := `domain "langlineedition" declares edition = "2027", which this engine does not read (it reads: 2026) [edition_unknown]`
+	want := `domain "langlineedition" declares edition = "2027" in langlineedition/memql.toml, which this engine does not read (it reads: 2026): declare edition = "2026" [edition_unknown]`
 	if !strings.Contains(err.Error(), want) {
 		t.Fatalf("want the refusal to carry\n  %s\ngot:\n%v", want, err)
 	}
@@ -216,9 +217,10 @@ func TestLanguageLine_BreakGlassBootsWithTheProblemReported(t *testing.T) {
 	if !found || !strings.HasSuffix(msg, "[language_line_missing]") {
 		t.Fatalf("the break-glass boot must still report the missing line; skips: %+v", eng.LoadReport().Skipped)
 	}
-	// The domain still parsed, under the engine's own edition: its trait loaded.
-	if !eng.specs.Has("langLineProbeTrait") {
-		t.Error("a problem domain's files must still parse (with the engine's own edition), so one boot reports every problem")
+	// A refused domain is read by NO loader, so nothing in it registers --
+	// its author sees the one refusal, not what reading it would produce.
+	if eng.specs.Has("langLineProbeTrait") {
+		t.Error("a construct of a domain whose language line is refused was registered; the domain must be skipped whole")
 	}
 }
 
@@ -302,11 +304,80 @@ func TestLanguageLine_LanguageLineForReturnsTheDeclaration(t *testing.T) {
 	}
 }
 
+// A memql.toml at the root of a tree no mount reads reaches the author as a
+// diagnostic from both offline passes -- memqllint's and a package deploy's
+// -- rather than as a log line neither shows (review of memql#5357).
+func TestLanguageLine_OfflinePassesReportAnUnreadRootManifest(t *testing.T) {
+	root := func() fstest.MapFS {
+		return fstest.MapFS{
+			"memql.toml":                languageLineFile(),
+			"langlineroot/memql.toml":   languageLineFile(),
+			"langlineroot/traits.memql": {Data: []byte(languageLineTrait)},
+		}
+	}
+	unread := func(diags []LintDiagnostic) int {
+		n := 0
+		for _, d := range diags {
+			if d.File == dslfs.ManifestFile && strings.HasSuffix(d.Message, "[language_line_unread]") {
+				n++
+			}
+		}
+		return n
+	}
+
+	diags, _, err := LintUnifiedTree(nil, root())
+	if err != nil {
+		t.Fatalf("LintUnifiedTree: %v", err)
+	}
+	if unread(diags) != 1 || len(diags) != 1 {
+		t.Errorf("LintUnifiedTree: want exactly the unread root manifest, got %+v", diags)
+	}
+
+	result, err := AnalyzePackageDSL(nil, root())
+	if err != nil {
+		t.Fatalf("AnalyzePackageDSL: %v", err)
+	}
+	if unread(result.Diagnostics) != 1 || len(result.Diagnostics) != 1 {
+		t.Errorf("AnalyzePackageDSL: want exactly the unread root manifest, got %+v", result.Diagnostics)
+	}
+}
+
+// A boot refused at the concept phase leads with what it found, and a domain
+// whose line is refused is not a "malformed concept" -- app/database.go heads
+// its refusal with this, so an operator reads the right thing to fix.
+func TestLanguageLine_ConceptSkipsHeadingNamesWhatWasFound(t *testing.T) {
+	refusal := func(domain, code string) ConceptSkip {
+		s := languageLineSkip(LanguageLineProblem{Domain: domain, Source: domain + "/memql.toml", Code: code, Message: "m [" + code + "]"})
+		return ConceptSkip{File: s.File, Err: errors.New(s.Err), Refusal: &s}
+	}
+	malformedSkip := ConceptSkip{File: "shop/concepts.memql", Concept: "v1:shop:order", Err: errors.New("bad type")}
+	for _, tc := range []struct {
+		name  string
+		skips []ConceptSkip
+		want  string
+	}{
+		{"refusals only, one domain wrong twice", []ConceptSkip{refusal("shop", "language_version_newer"), refusal("shop", "edition_unknown"), refusal("orders", "language_line_missing")},
+			"2 domain(s) whose language line this engine will not read"},
+		{"malformed only", []ConceptSkip{malformedSkip}, "1 malformed concept(s)"},
+		{"both", []ConceptSkip{refusal("shop", "language_line_missing"), malformedSkip, malformedSkip},
+			"1 domain(s) whose language line this engine will not read, and 2 malformed concept(s)"},
+	} {
+		if got := ConceptSkipsHeading(tc.skips); got != tc.want {
+			t.Errorf("%s: ConceptSkipsHeading = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // The concept build and Init both refuse a problem domain, and the lint pass
 // collects both: the refusal must reach an author once, not twice.
 func TestLanguageLine_LintReportsARefusedLineOnce(t *testing.T) {
+	// A concept, a shape and a query bound to it, and a trait: were the
+	// refused domain read at all, its shape and query would cascade off the
+	// dropped concept ("binds concept ... which does not resolve").
 	root := fstest.MapFS{
 		"langlinelint/concepts.memql": {Data: []byte("@description(\"A hub.\")\nconcept hub {\n  name  string  @description(\"Hub name.\")\n}\n")},
+		"langlinelint/shapes.memql":   {Data: []byte("use langlinelint.concepts.{ hub }\n\n@description(\"Hub card.\")\n@row\nshape hub hubCard {\n  row.id\n  name\n}\n")},
+		"langlinelint/queries.memql":  {Data: []byte("use langlinelint.concepts.{ hub }\nuse langlinelint.shapes.{ hubCard }\n\n@enabled\n@description(\"Hubs by name.\")\n@public\nquery hub hubsByName {\n  args {\n    name  string  @required\n  }\n  filter  name == args.name\n  shape   hubCard\n  paginate\n}\n")},
 		"langlinelint/traits.memql":   {Data: []byte(languageLineTrait)},
 	}
 	diags, _, err := LintUnifiedTree(nil, root)
@@ -321,6 +392,17 @@ func TestLanguageLine_LintReportsARefusedLineOnce(t *testing.T) {
 	}
 	if len(hits) != 1 {
 		t.Fatalf("want the missing line reported exactly once, got %d: %+v", len(hits), diags)
+	}
+	if len(diags) != 1 {
+		t.Errorf("want the refusal to be the domain's ONLY diagnostic -- a refused domain is read by no loader, so nothing may cascade from it -- got %d:\n%+v", len(diags), diags)
+	}
+
+	// Positive control: the same domain declaring its line lints clean, so
+	// every construct above is one that loads, and the missing cascade above
+	// is the skip at work rather than a fixture with nothing in it.
+	clean, _, err := LintUnifiedTree(nil, withLanguageLines(root))
+	if err != nil || len(clean) != 0 {
+		t.Errorf("the fixture declaring its line must lint clean, got %v:\n%+v", err, clean)
 	}
 	if hits[0].File != "langlinelint/memql.toml" {
 		t.Errorf("the diagnostic names file %q, want langlinelint/memql.toml", hits[0].File)

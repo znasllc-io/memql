@@ -63,6 +63,31 @@ func (s ConceptSkip) String() string {
 		"will fail at runtime: %v", s.Concept, s.Err)
 }
 
+// ConceptSkipsHeading names what a list of concept skips holds, for the line
+// a refused boot leads with (app/database.go). A domain whose language line
+// the engine refuses and a malformed concept are different things to fix, so
+// the heading counts each: refused DOMAINS (one may carry two refusals) and
+// malformed CONCEPTS.
+func ConceptSkipsHeading(skips []ConceptSkip) string {
+	refusedDomains := map[string]bool{}
+	malformed := 0
+	for _, s := range skips {
+		if s.Refusal != nil {
+			refusedDomains[s.Refusal.Name] = true
+		} else {
+			malformed++
+		}
+	}
+	var parts []string
+	if len(refusedDomains) > 0 {
+		parts = append(parts, fmt.Sprintf("%d domain(s) whose language line this engine will not read", len(refusedDomains)))
+	}
+	if malformed > 0 {
+		parts = append(parts, fmt.Sprintf("%d malformed concept(s)", malformed))
+	}
+	return strings.Join(parts, ", and ")
+}
+
 // LoadUnifiedConcepts loads every concept in the mounted tree and
 // registers it. See LoadUnifiedConceptsWithSkips for the variant that
 // also reports which concepts were dropped.
@@ -148,9 +173,7 @@ func BuildUnifiedConcepts(logger *slog.Logger, tree fs.FS) (map[string]*memoryNo
 	// Init records, so app/database.go refuses boot here and the offline
 	// passes print it once.
 	lines, lineProblems := ResolveLanguageLines(tree)
-	refusedDomains := map[string]bool{}
 	for _, p := range lineProblems {
-		refusedDomains[p.Domain] = true
 		refusal := languageLineSkip(p)
 		skips = append(skips, ConceptSkip{File: p.Source, Err: errors.New(p.Message), Refusal: &refusal})
 		if logger != nil {
@@ -179,8 +202,8 @@ func BuildUnifiedConcepts(logger *slog.Logger, tree fs.FS) (map[string]*memoryNo
 	index := make(map[string]map[string]string) // dir -> conceptName -> canonicalId
 
 	for _, p := range paths {
-		if line, ok := lines.For(p); ok && refusedDomains[line.Domain] {
-			continue
+		if line, ok := lines.For(p); ok && line.Refused {
+			continue // skipped whole; its refusal is the skip recorded above
 		}
 		file, openErr := tree.Open(p)
 		if openErr != nil {

@@ -67,12 +67,49 @@ type LanguageLine struct {
 	// for a core domain, <domain>/memql.toml otherwise.
 	Source string
 	// Language is the declared `memql` line; Edition the declared edition.
-	// A domain the engine refuses carries the engine's own line and edition
-	// instead, because that is what its files are read with.
+	// Either is empty when the declaration does not say, or cannot be read.
 	Language string
 	Edition  string
 	// Embedded is true for a domain compiled into the engine.
 	Embedded bool
+	// Refused is true when the engine will not read this domain: its line is
+	// missing, malformed, newer or older than the engine's, or names an
+	// edition with no front end. No loader reads a file of a refused domain
+	// (Prepare answers ErrLanguageLineRefused), so its author sees the one
+	// refusal, and nothing that reading the domain under a line it did not
+	// declare would have produced.
+	Refused bool
+}
+
+// ErrLanguageLineRefused is Prepare's answer for a file of a Refused domain.
+// A loader skips such a file WITHOUT a word of its own: the refusal is
+// reported once per domain, from the resolver's problems, and a per-file echo
+// of it is exactly the cascade a refused domain must not produce.
+var ErrLanguageLineRefused = errors.New("the domain's language line is refused, so no file of it is read")
+
+// LanguageLineDomainOf is the one rule for which files of a tree make a
+// domain that must declare a language line: the first segment of a .memql
+// file some loader reads, however deep beneath it the file sits. It answers ""
+// for a file no loader reads -- one at the root, one under a `_`-prefixed
+// directory or with a `_`-prefixed name at any depth (dslfs.WalkMemqlFiles
+// skips them), one under a top-level `.`-prefixed directory (no mount mounts
+// one) -- and for anything that is not a .memql file. The resolver and
+// memqlmigrate --rewrite=language-line both key on it, so the migrator writes
+// exactly the lines the loader asks for.
+func LanguageLineDomainOf(path string) string {
+	if !strings.HasSuffix(path, ".memql") {
+		return ""
+	}
+	segments := strings.Split(path, "/")
+	if len(segments) < 2 || strings.HasPrefix(segments[0], ".") {
+		return ""
+	}
+	for _, seg := range segments {
+		if seg == "" || strings.HasPrefix(seg, "_") {
+			return ""
+		}
+	}
+	return segments[0]
 }
 
 // LanguageLineProblem is one declaration the engine will not read.
@@ -88,17 +125,21 @@ type LanguageLineProblem struct {
 // LanguageLines is every resolved domain of one tree, by domain.
 type LanguageLines map[string]LanguageLine
 
-// languageVersionPattern is the one shape a language line has.
-var languageVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+$`)
+// languageVersionShape is what a language line looks like; canonicalVersion
+// is how one is spelled: no leading zeros, so one line has one spelling and a
+// string written down is the string compared.
+var (
+	languageVersionShape = regexp.MustCompile(`^[0-9]+\.[0-9]+$`)
+	canonicalVersion     = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+)
 
-// ResolveLanguageLines reads the declaration of every domain of tree that
-// holds a .memql file to read (as dslfs.WalkMemqlFiles walks it).
+// ResolveLanguageLines reads the declaration of every domain of tree
+// (LanguageLineDomainOf over the files dslfs.WalkMemqlFiles walks).
 //
-// It never fails outright. A domain the engine refuses is returned in the
-// lines too, carrying the engine's own line and edition, so its files still
-// parse and one boot reports every problem the tree has rather than the first.
-// A tree that cannot be walked resolves to nothing; every loader walking it
-// reports the walk failure itself.
+// It never fails outright: every domain is returned, and one the engine will
+// not read is returned Refused, beside the problems naming why. A tree that
+// cannot be walked resolves to nothing; every loader walking it reports the
+// walk failure itself.
 func ResolveLanguageLines(tree fs.FS, core CoreTree) (LanguageLines, []LanguageLineProblem) {
 	lines := LanguageLines{}
 	if tree == nil {
@@ -111,7 +152,7 @@ func ResolveLanguageLines(tree fs.FS, core CoreTree) (LanguageLines, []LanguageL
 	seen := map[string]bool{}
 	var domains []string
 	for _, p := range paths {
-		if d := lineDomain(p); d != "" && !seen[d] {
+		if d := LanguageLineDomainOf(p); d != "" && !seen[d] {
 			seen[d] = true
 			domains = append(domains, d)
 		}
@@ -121,9 +162,7 @@ func ResolveLanguageLines(tree fs.FS, core CoreTree) (LanguageLines, []LanguageL
 	var problems []LanguageLineProblem
 	for _, d := range domains {
 		line, found := resolveDomainLine(tree, core, d)
-		if len(found) > 0 {
-			line.Language, line.Edition = LanguageVersion, Edition
-		}
+		line.Refused = len(found) > 0
 		lines[d] = line
 		problems = append(problems, found...)
 	}
@@ -149,14 +188,17 @@ func (l LanguageLines) For(path string) (LanguageLine, bool) {
 // of the pipeline only ever sees the core grammar.
 //
 // A file in no resolved domain -- one at the root of a tree, or a path of
-// another tree -- is read with this engine's own edition, which is also what a
-// domain the engine refused carries (ResolveLanguageLines).
+// another tree -- is read with this engine's own edition. A file of a Refused
+// domain is not read at all: Prepare answers ErrLanguageLineRefused.
 //
 // An error means the file must not be parsed at all: read under the core
 // grammar, text written for another edition could parse into something else.
 func (l LanguageLines) Prepare(path string, src []byte) ([]byte, error) {
 	edition := Edition
 	if line, ok := l.For(path); ok {
+		if line.Refused {
+			return nil, ErrLanguageLineRefused
+		}
 		edition = line.Edition
 	}
 	fe, err := FrontEndFor(edition)
@@ -228,9 +270,13 @@ func checkLine(line LanguageLine, m dslfs.Manifest) (LanguageLine, []LanguageLin
 	case m.Language == "":
 		add(CodeLanguageLineMalformed, "domain %q declares no memql version in %s: add the line memql = %q",
 			line.Domain, line.Source, LanguageVersion)
-	case !languageVersionPattern.MatchString(m.Language):
+	case !languageVersionShape.MatchString(m.Language):
 		add(CodeLanguageLineMalformed, "domain %q declares memql = %q in %s, which is not a language version: write <major>.<minor>, as in memql = %q",
 			line.Domain, m.Language, line.Source, LanguageVersion)
+	case !canonicalVersion.MatchString(m.Language):
+		major, minor, _ := splitLanguageVersion(m.Language)
+		add(CodeLanguageLineMalformed, "domain %q declares memql = %q in %s, which spells the version with a leading zero: write memql = %q",
+			line.Domain, m.Language, line.Source, fmt.Sprintf("%d.%d", major, minor))
 	default:
 		switch cmp, ok := compareLanguageVersions(m.Language, LanguageVersion); {
 		case !ok:
@@ -251,8 +297,8 @@ func checkLine(line LanguageLine, m dslfs.Manifest) (LanguageLine, []LanguageLin
 			line.Domain, line.Source, Edition)
 	default:
 		if _, err := FrontEndFor(m.Edition); err != nil {
-			add(CodeEditionUnknown, "domain %q declares edition = %q, which this engine does not read (it reads: %s)",
-				line.Domain, m.Edition, strings.Join(Editions(), ", "))
+			add(CodeEditionUnknown, "domain %q declares edition = %q in %s, which this engine does not read (it reads: %s): declare edition = %q",
+				line.Domain, m.Edition, line.Source, strings.Join(Editions(), ", "), Edition)
 		}
 	}
 

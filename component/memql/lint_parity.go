@@ -28,6 +28,7 @@ import (
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 	"github.com/znasllc-io/memql/core/component"
+	"github.com/znasllc-io/memql/core/dslfs"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
@@ -87,7 +88,7 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 		for _, cs := range conceptSkips {
 			diags = append(diags, LintDiagnostic{File: cs.File, Message: cs.String()})
 		}
-		return diags, skippedCore, fmt.Errorf("loading concepts from merged tree: %w", err)
+		return withUnreadRootManifest(diags, root), skippedCore, fmt.Errorf("loading concepts from merged tree: %w", err)
 	}
 	registry := concept.DefaultRegistry()
 
@@ -137,6 +138,7 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 	if initErr != nil && !strings.Contains(initErr.Error(), "strict DSL boot refused") {
 		diags = append(diags, LintDiagnostic{Message: initErr.Error()})
 	}
+	diags = withUnreadRootManifest(diags, root)
 
 	sort.SliceStable(diags, func(i, j int) bool {
 		if diags[i].File != diags[j].File {
@@ -145,6 +147,17 @@ func LintUnifiedTree(logger *slog.Logger, root fs.FS) ([]LintDiagnostic, []strin
 		return diags[i].Message < diags[j].Message
 	})
 	return dedupeDiagnostics(diags), skippedCore, nil
+}
+
+// withUnreadRootManifest adds the diagnostic for a memql.toml at the root of
+// the mounted tree, which no mount reads (dsl.UnreadRootManifest, memql#5357).
+// Boot never sees that file, so it is the offline passes that must say so --
+// in their diagnostics, where an author reads, not in a log they discard.
+func withUnreadRootManifest(diags []LintDiagnostic, root fs.FS) []LintDiagnostic {
+	if msg, unread := memqldsl.UnreadRootManifest(root); unread {
+		diags = append(diags, LintDiagnostic{File: dslfs.ManifestFile, Message: msg})
+	}
+	return diags
 }
 
 // skipDiagnostic is how the offline passes print one load-report skip. A

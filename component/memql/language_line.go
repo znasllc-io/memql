@@ -36,6 +36,7 @@ package memql
 // cannot import this one. This file is the engine's side of it.
 
 import (
+	"errors"
 	"io/fs"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
@@ -146,7 +147,11 @@ func editionRefusals(tree fs.FS, lines LanguageLines) []baseloader.Skip {
 		if err != nil {
 			continue
 		}
-		if _, err := lines.Prepare(p, raw); err != nil {
+		_, err = lines.Prepare(p, raw)
+		if errors.Is(err, langparser.ErrLanguageLineRefused) {
+			continue // its domain's refusal is already on the report, once
+		}
+		if err != nil {
 			out = append(out, baseloader.Skip{
 				Component: languageLineComponent,
 				Keyword:   "file",

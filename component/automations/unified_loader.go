@@ -15,6 +15,7 @@ package automations
 // isolation.
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -140,6 +141,12 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 		// extractor below both read the core grammar. A file the front end
 		// refuses is a load problem like any other, and is not read at all.
 		data, prepErr := lines.Prepare(path, data)
+		if errors.Is(prepErr, languageParser.ErrLanguageLineRefused) {
+			// The domain's language line is refused, so none of it is read;
+			// engine Init reports that once, and an automation-level echo
+			// per file would bury it.
+			return nil
+		}
 		if prepErr != nil {
 			if l.logger != nil {
 				l.logger.Warn("unified automation loader: file refused by its edition's front end",

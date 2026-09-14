@@ -40,12 +40,8 @@ import (
 // a "_"-prefixed soft-disable, a sidecar with no .memql in it -- and reporting
 // them would bury the collision signal in noise.
 //
-// A memql.toml at the root beside a product domain is reported through the
-// logger (memql#5357): no mount reads a root file, so each domain carries its
-// own <domain>/memql.toml, and one at the root is a declaration its author
-// believes governs the tree while nothing does. A root holding core domains
-// alone is the engine's own dsl/, whose root memql.toml IS read -- it is the
-// embedded line -- so that one is not reported.
+// A memql.toml at the root beside a product domain is not a mount's to report:
+// the passes that mount a root and print diagnostics ask UnreadRootManifest.
 func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore []string, unmount func()) {
 	noop := func() {}
 	if root == nil {
@@ -65,12 +61,8 @@ func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore 
 		core[d] = struct{}{}
 	}
 
-	rootManifest, productDomains := false, 0
 	for _, e := range entries {
 		if !e.IsDir() {
-			if e.Name() == dslfs.ManifestFile {
-				rootManifest = true
-			}
 			continue
 		}
 		domain := e.Name()
@@ -84,11 +76,7 @@ func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore 
 		if !directoryHasMemqlFile(root, domain) {
 			continue
 		}
-		_, isCore := core[domain]
-		if !isCore {
-			productDomains++
-		}
-		if isCore {
+		if _, isCore := core[domain]; isCore {
 			if logger != nil {
 				logger.Warn("lint overlay mount: ignoring domain that collides with a core embedded domain",
 					"component", "dsl.lintMount", "domain", domain)
@@ -129,11 +117,6 @@ func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore 
 		mounted = append(mounted, domain)
 	}
 
-	if rootManifest && productDomains > 0 && logger != nil {
-		logger.Warn("lint overlay mount: "+dslfs.ManifestFile+" at the root is never read; declare the language line in each domain directory as <domain>/"+dslfs.ManifestFile,
-			"component", "dsl.lintMount")
-	}
-
 	unmount = func() {
 		for _, d := range mounted {
 			UnregisterTree(d)
@@ -159,4 +142,40 @@ func directoryHasMemqlFile(root fs.FS, dir string) bool {
 		}
 	}
 	return false
+}
+
+// UnreadRootManifestCode ends the diagnostic UnreadRootManifest answers.
+const UnreadRootManifestCode = "language_line_unread"
+
+// UnreadRootManifest reports a memql.toml at the root of a tree mounted the
+// way MountOverlayDomains mounts one, beside at least one product domain
+// (memql#5357), and the diagnostic an offline pass prints for it. No mount
+// reads a root file -- a domain directory is the only thing that reaches a
+// node -- so each domain declares its line in <domain>/memql.toml, and one at
+// the root is a declaration its author believes governs the tree while
+// nothing does. A root of core domains alone is the engine's own dsl/, whose
+// root memql.toml IS read -- it is the embedded line -- so it is not reported.
+func UnreadRootManifest(root fs.FS) (string, bool) {
+	if root == nil {
+		return "", false
+	}
+	if info, err := fs.Stat(root, dslfs.ManifestFile); err != nil || info.IsDir() {
+		return "", false
+	}
+	entries, err := fs.ReadDir(root, ".")
+	if err != nil {
+		return "", false
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if !e.IsDir() || strings.HasPrefix(name, "_") || strings.HasPrefix(name, ".") {
+			continue
+		}
+		if directoryHasMemqlFile(root, name) && !IsCoreDomain(name) {
+			return dslfs.ManifestFile + " at the root of this tree is never read: a mount reads domain directories only, " +
+				"so declare the language line in each domain directory as <domain>/" + dslfs.ManifestFile +
+				" and remove this one [" + UnreadRootManifestCode + "]", true
+		}
+	}
+	return "", false
 }

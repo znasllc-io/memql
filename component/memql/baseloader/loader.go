@@ -12,6 +12,7 @@
 package baseloader
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -48,7 +49,9 @@ type RawFile struct {
 // edition a domain is written in. A file its front end refuses is left out
 // -- read under the core grammar it could mean something else -- and engine
 // Init refuses the tree naming it (component/memql/language_line.go), so
-// leaving it out here is never the only word on it.
+// leaving it out here is never the only word on it. Every file of a domain
+// whose language line is refused is left out too, without a word here: that
+// domain's refusal is reported once, and nothing read from it may cascade.
 func ReadAll(logger *slog.Logger) []RawFile {
 	tree := memqldsl.Tree()
 	paths, err := dslfs.WalkMemqlFiles(tree)
@@ -74,6 +77,9 @@ func ReadAll(logger *slog.Logger) []RawFile {
 			continue
 		}
 		prepared, prepErr := lines.Prepare(p, raw)
+		if errors.Is(prepErr, langparser.ErrLanguageLineRefused) {
+			continue // a refused domain is read by no loader; Init reports it once
+		}
 		if prepErr != nil {
 			if logger != nil {
 				logger.Warn("baseloader: file refused by its edition's front end; not loaded (engine Init refuses the tree)",

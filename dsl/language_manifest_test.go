@@ -79,29 +79,33 @@ func TestRuntimeMountWarnsOfARootManifestNoMountReads(t *testing.T) {
 	}
 }
 
-func TestLintMountWarnsOfARootManifestNoMountReads(t *testing.T) {
+// A memql.toml at the root of a lint or package root is reported back to the
+// caller -- which prints it -- rather than logged into a logger memqllint
+// discards: the author wrote it believing it governs the tree, and it governs
+// nothing (review of memql#5357).
+func TestUnreadRootManifestIsReportedToTheCaller(t *testing.T) {
 	manifest := &fstest.MapFile{Data: []byte("memql = \"1.0\"\nedition = \"2026\"\n")}
 
-	logger, buf := captureLogger()
-	_, _, unmount := MountOverlayDomains(logger, fstest.MapFS{
+	msg, unread := UnreadRootManifest(fstest.MapFS{
 		"memql.toml":                     manifest,
 		"rootmanifestlint/queries.memql": {Data: []byte("// a file\n")},
 		"rootmanifestlint/memql.toml":    manifest,
 	})
-	unmount()
-	if !strings.Contains(buf.String(), "is never read") {
-		t.Errorf("a root-level memql.toml beside a product domain must be reported; log:\n%s", buf.String())
+	if !unread || !strings.Contains(msg, "is never read") || !strings.HasSuffix(msg, "[language_line_unread]") {
+		t.Errorf("a root-level memql.toml beside a product domain must be reported, got %v %q", unread, msg)
 	}
 
 	// The engine's own dsl/ holds dsl/memql.toml at its root, and there it IS
 	// read: it is the embedded line. A root of core domains alone is that tree.
-	logger, buf = captureLogger()
-	_, _, unmount = MountOverlayDomains(logger, fstest.MapFS{
+	if msg, unread := UnreadRootManifest(fstest.MapFS{
 		"memql.toml":            manifest,
 		"library/queries.memql": {Data: []byte("// a file\n")},
-	})
-	unmount()
-	if strings.Contains(buf.String(), "is never read") {
-		t.Errorf("a root of core domains is the embedded tree, whose memql.toml is read; log:\n%s", buf.String())
+	}); unread {
+		t.Errorf("a root of core domains is the embedded tree, whose memql.toml is read; got %q", msg)
+	}
+	if msg, unread := UnreadRootManifest(fstest.MapFS{
+		"rootmanifestlint/queries.memql": {Data: []byte("// a file\n")},
+	}); unread {
+		t.Errorf("no root-level memql.toml, yet one was reported: %q", msg)
 	}
 }

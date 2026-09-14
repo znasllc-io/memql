@@ -44,7 +44,7 @@ The file is a strict subset of TOML: blank lines, `#` comments, and exactly thos
 
 ### Where it lives: in every domain directory
 
-**Every domain directory carries its own `<domain>/memql.toml`.** A domain directory is the only thing that reaches a node: a bundle image copies domain directories into `MEMQL_DSL_PATH`, a package deploy stages each domain on its own, and every mount reads domain directories and skips the files at its root. A declaration at the root of a bundle would never arrive, so there is no inheritance from one — a `memql.toml` at the root of `MEMQL_DSL_PATH`, or of a tree `memqllint` mounts, is never read, and the mount logs a warning saying it belongs inside each domain directory.
+**Every domain directory carries its own `<domain>/memql.toml`.** A domain directory is the only thing that reaches a node: a bundle image copies domain directories into `MEMQL_DSL_PATH`, a package deploy stages each domain on its own, and every mount reads domain directories and skips the files at its root. A declaration at the root of a bundle would never arrive, so there is no inheritance from one — a `memql.toml` at the root of `MEMQL_DSL_PATH`, of a bundle `memqllint` lints, or of a package's `dsl/` is never read. `memqllint` and a package deploy report one as a diagnostic (`language_line_unread`), and the `MEMQL_DSL_PATH` mount logs a warning; each says the line belongs inside each domain directory.
 
 ```
 bundle/
@@ -77,7 +77,7 @@ A newer line reads, for example:
 domain "storefront" declares memql = "1.1", newer than the 1.0 this engine speaks: run an engine that speaks 1.1, or declare memql = "1.0" in storefront/memql.toml [language_version_newer]
 ```
 
-A refused domain still parses, with the engine's own edition, so one boot reports every problem the tree has rather than the first. `memqllint` runs the same check over a bundle before it ships, and reports each refusal once.
+A refused domain is read by no loader at all, so its author sees exactly one refusal per domain rather than everything that reading it under a line it did not declare would produce; fix the line, and the next boot reports what the domain itself holds. `memqllint` runs the same check over a bundle before it ships, and reports each refusal once.
 
 ### Adding the line
 

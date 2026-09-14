@@ -33,10 +33,6 @@ import (
 // synthetic overlay. Unregistering is unconditional and a no-op for
 // the domains that were only ever offered to a RegisterTree expected
 // to panic.
-// languageLine is the memql.toml every domain-shaped overlay carries: a mounted
-// domain declares the language it is written in (memql#5357).
-var languageLine = dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render()
-
 func uniqueDomain(t *testing.T) string {
 	t.Helper()
 	// t.Name slashes happen with t.Run; replace them so the result
@@ -45,6 +41,10 @@ func uniqueDomain(t *testing.T) string {
 	t.Cleanup(func() { dsl.UnregisterTree(domain) })
 	return domain
 }
+
+// languageLine is the memql.toml every domain-shaped overlay carries: a mounted
+// domain declares the language it is written in (memql#5357).
+var languageLine = dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render()
 
 // TestRegisterTree_MountsOverlayAlongsideEmbedded asserts that after
 // RegisterTree, the merged Tree() lists the overlay domain at the

@@ -5,6 +5,7 @@ package main
 // report, since downstream product CI consumes exactly this surface.
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -82,10 +83,7 @@ concept item {
   status  string  @description("Item status.")
 }`
 
-func TestRun_CleanTreeExitsZero(t *testing.T) {
-	root := writeTree(t, map[string]string{
-		"demo/concepts.memql": testConcepts,
-		"demo/queries.memql": `use demo.concepts.{ item }
+const testQueries = `use demo.concepts.{ item }
 
 @enabled
 @description("A clean query.")
@@ -94,7 +92,21 @@ query item queryItems {
     name  string  @required
   }
   filter  name == args.name
-}`,
+}`
+
+const testShapes = `use demo.concepts.{ item }
+
+@description("An item card.")
+@row
+shape item itemCard {
+  row.id
+  name
+}`
+
+func TestRun_CleanTreeExitsZero(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/queries.memql":  testQueries,
 	})
 	if code := run([]string{root}); code != 0 {
 		t.Errorf("clean tree: run() = %d, want 0", code)
@@ -103,25 +115,50 @@ query item queryItems {
 
 // TestRun_BundleWithoutLanguageLineExitsOne: memqllint is the pre-boot gate a
 // product bundle has, so a domain the engine would refuse for declaring no
-// language line (memql#5357) must fail the lint with the line to add -- once.
+// language line (memql#5357) must fail the lint with the line to add -- as
+// the domain's ONE diagnostic. The fixture carries a shape and a query bound
+// to the concept, so anything read from the refused domain would cascade
+// ("binds concept ... which does not resolve") and show here.
 func TestRun_BundleWithoutLanguageLineExitsOne(t *testing.T) {
-	root := writeTreeAsIs(t, map[string]string{
+	files := map[string]string{
 		"demo/concepts.memql": testConcepts,
-	})
-	code, out := captureRun(t, []string{"--json", root})
+		"demo/shapes.memql":   testShapes,
+		"demo/queries.memql":  testQueries,
+	}
+	code, out := captureRun(t, []string{"--json", writeTreeAsIs(t, files)})
 	if code != 1 {
 		t.Fatalf("a bundle domain with no memql.toml: run() = %d, want 1\n%s", code, out)
 	}
-	if n := strings.Count(out, "[language_line_missing]"); n != 1 {
-		t.Errorf("want the missing line reported exactly once, got %d:\n%s", n, out)
+	var report Report
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("the --json report does not parse: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, "add demo/memql.toml containing") {
-		t.Errorf("the report must name the file to add:\n%s", out)
+	if len(report.Errors) != 1 {
+		t.Fatalf("want exactly one diagnostic, the missing line, got %d:\n%s", len(report.Errors), out)
+	}
+	if msg := report.Errors[0].Message; !strings.Contains(msg, "[language_line_missing]") || !strings.Contains(msg, "add demo/memql.toml containing") {
+		t.Errorf("the one diagnostic must be the missing line naming the file to add, got %q", msg)
 	}
 
-	// The same bundle declaring the line lints clean.
-	if code := run([]string{writeTree(t, map[string]string{"demo/concepts.memql": testConcepts})}); code != 0 {
-		t.Errorf("the same bundle with its language line: run() = %d, want 0", code)
+	// Positive control: the same bundle declaring its line lints clean, so
+	// the shape and query are constructs that load, and their silence above
+	// is the refused domain being read by no loader.
+	if code, out := captureRun(t, []string{writeTree(t, files)}); code != 0 {
+		t.Errorf("the same bundle with its language line: run() = %d, want 0\n%s", code, out)
+	}
+}
+
+// TestRun_UnreadRootManifestIsReported: a memql.toml at the root of the
+// linted tree is never read -- each domain carries its own -- so memqllint
+// prints it rather than letting an author believe it governs the bundle.
+func TestRun_UnreadRootManifestIsReported(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"memql.toml":          dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render(),
+		"demo/concepts.memql": testConcepts,
+	})
+	code, out := captureRun(t, []string{"--json", root})
+	if code != 1 || !strings.Contains(out, "[language_line_unread]") {
+		t.Errorf("a root-level memql.toml: run() = %d, want 1 with a language_line_unread diagnostic:\n%s", code, out)
 	}
 }
 

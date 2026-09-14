@@ -94,6 +94,7 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 	}
 	if err != nil {
 		result.Diagnostics = append(result.Diagnostics, LintDiagnostic{Message: err.Error()})
+		result.Diagnostics = withUnreadRootManifest(result.Diagnostics, root)
 		sortDiagnostics(result.Diagnostics)
 		return result, nil
 	}
@@ -122,6 +123,7 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 	if initErr != nil && !strings.Contains(initErr.Error(), "strict DSL boot refused") {
 		result.Diagnostics = append(result.Diagnostics, LintDiagnostic{Message: initErr.Error()})
 	}
+	result.Diagnostics = withUnreadRootManifest(result.Diagnostics, root)
 
 	sortDiagnostics(result.Diagnostics)
 	// The concept build and Init both refuse a domain whose language line the
