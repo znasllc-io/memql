@@ -244,6 +244,46 @@ func TestLanguageLineWritesNoLineForACoreDomain(t *testing.T) {
 	}
 }
 
+// A directory handed over as the root gets a line only when a mount would
+// read it as a domain -- parser.MountableDomainRoot, the rule memqllint asks
+// too. Each of these got a memql.toml no mount reads: a soft-disabled
+// directory, a hidden one, a sub-namespace of a domain holding .memql files,
+// and the engine's own sub-namespace of a core domain. The product domain
+// beside them is the positive control.
+func TestLanguageLineWritesNoLineWhereNoMountReadsOne(t *testing.T) {
+	bundle := t.TempDir()
+	for rel, content := range map[string]string{
+		"_draft/concepts.memql":  "// soft-disabled\n",
+		".hidden/concepts.memql": "// hidden\n",
+		"team/concepts.memql":    "// a domain\n",
+		"team/roles/civic.memql": "// a sub-namespace of team\n",
+		"shop/queries.memql":     "// a product domain\n",
+	} {
+		full := filepath.Join(bundle, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, dir := range []string{
+		filepath.Join(bundle, "_draft"),
+		filepath.Join(bundle, ".hidden"),
+		filepath.Join(bundle, "team", "roles"),
+		filepath.Join("..", "..", "dsl", "shopify", "generated"),
+		filepath.Join("..", "..", "dsl", "agents", "roles"),
+	} {
+		if out, stderr, err := runMigrate(t, "--rewrite=language-line", "-check", dir); err != nil || out != "" {
+			t.Errorf("%s as the root: -check = %q, %v (%s); want nothing to write -- no mount reads it as a domain", dir, out, err, stderr)
+		}
+	}
+	if out, _, err := runMigrate(t, "--rewrite=language-line", "-check", filepath.Join(bundle, "shop")); !errors.Is(err, errChanged) ||
+		strings.TrimSpace(out) != filepath.Join(bundle, "shop", dslfs.ManifestFile) {
+		t.Errorf("a product domain directory as the root: -check = %q, %v; want its own manifest at the root", out, err)
+	}
+}
+
 func TestTreeRewriteRefusesAFileArgument(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "concepts.memql")
 	if err := os.WriteFile(file, []byte("concept a {\n  id string\n}\n"), 0o644); err != nil {

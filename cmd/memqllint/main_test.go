@@ -258,46 +258,110 @@ func TestRun_RefusedLineOutsideTheParityMountIsStillReported(t *testing.T) {
 	}
 }
 
-// TestRun_ADomainDirectoryIsLintedAsItsDomain: pointed at one domain
-// directory rather than at its bundle -- or at one file inside it --
-// memqllint reads the directory the way a node receives it, as the domain it
-// is named for, with its memql.toml inside it (memql#5356). Read as a bare
-// root, its files sat at depth 1, where no rule finds a domain, so a domain
-// with no language line linted clean. memqlmigrate reads such a root the same
-// way, which is where it writes the line.
-func TestRun_ADomainDirectoryIsLintedAsItsDomain(t *testing.T) {
+// jsonReport runs the CLI with --json and parses what it prints.
+func jsonReport(t *testing.T, args ...string) (int, Report, string) {
+	t.Helper()
+	code, out := captureRun(t, append([]string{"--json"}, args...))
+	var report Report
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("the --json report does not parse: %v\n%s", err, out)
+	}
+	return code, report, out
+}
+
+// TestRun_ADomainDirectoryChecksItsOwnLanguageLine (memql#5356): pointed at
+// one domain directory -- or a file inside it -- memqllint lints it as the
+// bare root it always did, and checks the domain's OWN memql.toml, which no
+// other pass can see from inside the domain. A missing file is one WARNING
+// that leaves the exit code alone, because whether the directory is a
+// mounted domain depends on the tree it is mounted in; a malformed or newer
+// one is an error with its code. The bundle root still refuses the missing
+// line as an error, as boot does.
+func TestRun_ADomainDirectoryChecksItsOwnLanguageLine(t *testing.T) {
 	bundle := writeTreeAsIs(t, map[string]string{
 		"demo/concepts.memql": testConcepts,
 		"demo/queries.memql":  testQueries,
 	})
 	domainDir := filepath.Join(bundle, "demo")
-	oneLine := func(what string, args ...string) {
-		t.Helper()
-		code, out := captureRun(t, append([]string{"--json"}, args...))
-		if code != 1 {
-			t.Fatalf("%s with no memql.toml: run() = %d, want 1\n%s", what, code, out)
+	for _, target := range []string{domainDir, filepath.Join(domainDir, "queries.memql")} {
+		code, report, out := jsonReport(t, target)
+		if code != 0 || len(report.Errors) != 0 {
+			t.Errorf("%s with no memql.toml: run() = %d, want 0 with no error -- a missing line here is a warning:\n%s", target, code, out)
 		}
-		var report Report
-		if err := json.Unmarshal([]byte(out), &report); err != nil {
-			t.Fatalf("%s: the --json report does not parse: %v\n%s", what, err, out)
+		if len(report.Warnings) != 1 {
+			t.Fatalf("%s: want exactly one warning, got:\n%s", target, out)
 		}
-		if len(report.Errors) != 1 || !strings.Contains(report.Errors[0].Message, "[language_line_missing]") ||
-			!strings.Contains(report.Errors[0].Message, `domain "demo" declares no language line: add demo/memql.toml containing`) {
-			t.Errorf("%s: want exactly the missing line of domain demo, once, got:\n%s", what, out)
+		for _, want := range []string{
+			`domain "demo" declares no language line, and boot refuses a mounted domain without one`,
+			"Add demo/memql.toml containing",
+			"memqlmigrate --rewrite=language-line -w " + bundle,
+			"Linting " + bundle + ", the directory that holds it, checks it exactly as boot does",
+		} {
+			if !strings.Contains(report.Warnings[0].Message, want) {
+				t.Errorf("%s: the warning must say %q, got %q", target, want, report.Warnings[0].Message)
+			}
 		}
 	}
-	oneLine("the domain directory", domainDir)
-	oneLine("a file inside it", filepath.Join(domainDir, "queries.memql"))
+	// The human report prints it once, and exits as before.
+	if code, out := captureRun(t, []string{domainDir}); code != 0 || strings.Count(out, "WARNING:") != 1 {
+		t.Errorf("human output: run() = %d, want 0 with one WARNING line:\n%s", code, out)
+	}
 
-	// Positive control: the line memqlmigrate writes for this root, at the
-	// root, makes both lint clean.
+	// A file that is there is held to the loader's own checks.
+	for text, code := range map[string]string{
+		"memql = \"1.1\"\nedition = \"2026\"\n": "[language_version_newer]",
+		"[language]\n":                          "[language_line_malformed]",
+	} {
+		if err := os.WriteFile(filepath.Join(domainDir, dslfs.ManifestFile), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		exit, report, out := jsonReport(t, domainDir)
+		if exit != 1 || len(report.Errors) != 1 || !strings.Contains(report.Errors[0].Message, code) ||
+			!strings.Contains(report.Errors[0].Message, `domain "demo"`) || len(report.Warnings) != 0 {
+			t.Errorf("memql.toml %q: want exit 1 with one %s error naming demo and no warning, got %d:\n%s", text, code, exit, out)
+		}
+	}
+
+	// Positive control: the line memqlmigrate writes, at the root, is clean.
 	line := dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render()
 	if err := os.WriteFile(filepath.Join(domainDir, dslfs.ManifestFile), []byte(line), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	for _, target := range []string{domainDir, filepath.Join(domainDir, "queries.memql")} {
-		if code, out := captureRun(t, []string{target}); code != 0 {
-			t.Errorf("%s with its line declared: run() = %d, want 0\n%s", target, code, out)
+		if code, report, out := jsonReport(t, target); code != 0 || len(report.Errors) != 0 || len(report.Warnings) != 0 {
+			t.Errorf("%s with its line declared: run() = %d, want 0 with nothing to report:\n%s", target, code, out)
+		}
+	}
+
+	// And the bundle root, which boot mounts, still refuses a missing line.
+	if err := os.Remove(filepath.Join(domainDir, dslfs.ManifestFile)); err != nil {
+		t.Fatal(err)
+	}
+	if code, report, out := jsonReport(t, bundle); code != 1 || len(report.Errors) != 1 ||
+		!strings.Contains(report.Errors[0].Message, "[language_line_missing]") {
+		t.Errorf("the bundle root: want exit 1 with the missing line as the one error, got %d:\n%s", code, out)
+	}
+}
+
+// TestRun_ADirectoryNoMountReadsAsADomainGetsNoLanguageLineCheck: three
+// targets that linted green before this epic, and must again -- with no
+// language-line output at all, because none is a domain a mount would read:
+// a single file inside a sub-namespace of a domain that holds .memql files
+// (dsl/agents/roles), a sub-namespace of a core domain (dsl/shopify/
+// generated), and a pack's dsl/ directory, which carries its own valid line.
+// The last also printed a parity error while the root was mounted under its
+// directory's name: the pack registers that tree as shopifypack, so a guessed
+// name judged its @namespace against "dsl".
+func TestRun_ADirectoryNoMountReadsAsADomainGetsNoLanguageLineCheck(t *testing.T) {
+	for _, target := range []string{
+		filepath.Join("..", "..", "dsl", "agents", "roles", "agriculture.memql"),
+		filepath.Join("..", "..", "dsl", "shopify", "generated"),
+		filepath.Join("..", "..", "examples", "shopifypack", "dsl"),
+	} {
+		code, report, out := jsonReport(t, target)
+		if code != 0 || len(report.Errors) != 0 || len(report.Warnings) != 0 || strings.Contains(out, "language line") ||
+			strings.Contains(out, "language_line") {
+			t.Errorf("%s: run() = %d, want 0 with no language-line output:\n%s", target, code, out)
 		}
 	}
 }

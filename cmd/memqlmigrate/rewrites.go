@@ -26,6 +26,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -163,15 +164,21 @@ func rewriteNames(edition string) []string {
 //     loader reads, however deep beneath it the file sits
 //     (parser.LanguageLineDomainOf), so a domain holding only a sub-namespace
 //     (beta/sub/concepts.memql) is one, and `_`/`.` segments are skipped as
-//     the walkers and mounts skip them. When the root itself directly holds
-//     .memql files (parser.LanguageLineRootIsDomain -- the caller passed
-//     bundle/<domain> rather than bundle/) it is the one domain its directory
-//     is named for, and everything beneath it is part of it;
+//     the walkers and mounts skip them;
 //   - whether the loader reads the domain's line at all: a domain the
 //     embedded tree owns (core.IsCoreDomain, the resolver's CoreTree seam)
 //     speaks the embedded dsl/memql.toml, and every mount skips a directory
 //     that collides with one, so it is given no file. Over the engine's own
 //     dsl/ the rewrite therefore writes nothing.
+//
+// When the root itself directly holds .memql files (parser.
+// LanguageLineRootIsDomain -- the caller passed bundle/<domain> rather than
+// bundle/), it is ONE directory, and everything beneath it belongs to it. It
+// gets a line only when a mount would read it as a domain
+// (parser.MountableDomainRoot, the rule memqllint asks too): not a
+// sub-namespace of its parent, not a `_` or `.` name, not a core domain.
+// `-w bundle/_draft` or `-w dsl/agents/roles` would otherwise write a file no
+// mount reads.
 //
 // A domain that already has a memql.toml is left alone whatever it declares,
 // because moving a declared line is a decision about the tree, not a
@@ -184,7 +191,14 @@ func rewriteLanguageLine(edition string, core langparser.CoreTree) func(root str
 		}
 		dirs := map[string]string{} // domain -> the directory its line goes in ("" = the root)
 		if langparser.LanguageLineRootIsDomain(paths) {
-			dirs[rootDomainName(root)] = ""
+			abs, err := filepath.Abs(root)
+			if err != nil {
+				return nil, err
+			}
+			parent := filepath.Dir(abs)
+			if name := filepath.Base(abs); langparser.MountableDomainRoot(os.DirFS(parent), filepath.Base(parent), name, core) {
+				dirs[name] = ""
+			}
 		} else {
 			for _, p := range paths {
 				if d := langparser.LanguageLineDomainOf(p); d != "" {
@@ -210,13 +224,4 @@ func rewriteLanguageLine(edition string, core langparser.CoreTree) func(root str
 		}
 		return out, nil
 	}
-}
-
-// rootDomainName is the domain a root that is itself one domain directory
-// is: the name of the directory it names.
-func rootDomainName(root string) string {
-	if abs, err := filepath.Abs(root); err == nil {
-		return filepath.Base(abs)
-	}
-	return filepath.Base(root)
 }

@@ -132,15 +132,10 @@ func LanguageLineDomainName(name string) bool {
 		!strings.HasPrefix(name, "_") && !strings.HasPrefix(name, ".")
 }
 
-// LanguageLineRootIsDomain reports whether the root of a tree is itself one
-// domain directory: it directly holds a .memql file a loader reads. paths are
-// the tree's files, root-relative.
-//
-// memqlmigrate and memqllint are handed such a root when an author points
-// them at one domain (bundle/<domain>) rather than at a bundle, and both then
-// read it the way a node receives it: as the domain its directory is named
-// for, whose memql.toml sits at the root. Read as a bare tree instead, its
-// files sit at depth 1, where LanguageLineDomainOf finds no domain at all.
+// LanguageLineRootIsDomain reports whether the root of a tree directly holds
+// a .memql file a loader reads, which makes the root a domain directory
+// rather than a bundle of them. paths are the tree's files, root-relative.
+// Whether a mount would read it as a domain is MountableDomainRoot's question.
 func LanguageLineRootIsDomain(paths []string) bool {
 	for _, p := range paths {
 		if !strings.Contains(p, "/") && strings.HasSuffix(p, ".memql") && !strings.HasPrefix(p, "_") {
@@ -148,6 +143,59 @@ func LanguageLineRootIsDomain(paths []string) bool {
 		}
 	}
 	return false
+}
+
+// MountableDomainRoot reports whether a directory handed to a tool ITSELF --
+// `memqllint bundle/znas`, the directory of one file memqllint lints,
+// `memqlmigrate -w bundle/znas` -- is a domain some mount would read, and so
+// one whose own memql.toml boot asks for. parent is the directory that holds
+// it, parentName that directory's own name, and name the directory's.
+//
+// It is one when all of these hold:
+//
+//   - it directly holds a .memql file a loader reads (LanguageLineRootIsDomain);
+//   - its name is one a mount reads (LanguageLineDomainName: not `_`- or
+//     `.`-prefixed);
+//   - it is not a core domain: every mount skips a directory named after
+//     one, and a core domain speaks the embedded line;
+//   - it is not a sub-namespace: its parent neither directly holds a .memql
+//     file nor is a core domain. Either makes the parent the domain, and this
+//     directory a namespace inside it, which the parent's line governs.
+//
+// It judges a directory seen alone, so a tree laid out otherwise can make it
+// wrong in either direction; linting the directory that holds the domain
+// checks it exactly as boot does. The one rule memqllint and memqlmigrate
+// both ask, so the lint warns about a missing line exactly where the
+// migrator would write one.
+func MountableDomainRoot(parent fs.FS, parentName, name string, core CoreTree) bool {
+	if !LanguageLineDomainName(name) || isCoreDomain(core, name) {
+		return false
+	}
+	dir, err := fs.Sub(parent, name)
+	if err != nil || !holdsMemqlFile(dir) {
+		return false
+	}
+	return !holdsMemqlFile(parent) && !isCoreDomain(core, parentName)
+}
+
+// holdsMemqlFile reports whether the root of fsys directly holds a .memql
+// file a loader reads.
+func holdsMemqlFile(fsys fs.FS) bool {
+	entries, err := fs.ReadDir(fsys, ".")
+	if err != nil {
+		return false
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return LanguageLineRootIsDomain(names)
+}
+
+func isCoreDomain(core CoreTree, name string) bool {
+	return core != nil && core.IsCoreDomain(name)
 }
 
 // loaderOriginPath returns the tree path inside a loader origin -- a
@@ -303,9 +351,20 @@ func resolveDomainLine(tree fs.FS, core CoreTree, domain string) (LanguageLine, 
 	if err != nil {
 		return line, []LanguageLineProblem{malformed(domain, line.Source, err)}
 	}
+	return CheckLanguageLineFile(domain, line.Source, data)
+}
+
+// CheckLanguageLineFile holds one domain's declaration -- the bytes of its
+// memql.toml, read from source -- against this engine, with exactly the
+// checks, messages and codes ResolveLanguageLines gives a domain it finds in
+// a tree: malformed, newer, older, or an edition with no front end. It is
+// for a caller holding the file rather than a tree of domains -- memqllint
+// pointed at one domain directory, whose line nothing else can check.
+func CheckLanguageLineFile(domain, source string, data []byte) (LanguageLine, []LanguageLineProblem) {
+	line := LanguageLine{Domain: domain, Source: source}
 	m, err := dslfs.ParseManifest(data)
 	if err != nil {
-		return line, []LanguageLineProblem{malformed(domain, line.Source, err)}
+		return line, []LanguageLineProblem{malformed(domain, source, err)}
 	}
 	return checkLine(line, m)
 }

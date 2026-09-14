@@ -3,6 +3,7 @@ package parser
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -231,6 +232,70 @@ func TestLanguageLineDomainOf(t *testing.T) {
 	} {
 		if got := LanguageLineDomainOf(path); got != want {
 			t.Errorf("LanguageLineDomainOf(%q) = %q, want %q", path, got, want)
+		}
+	}
+}
+
+// MountableDomainRoot is the one rule memqllint and memqlmigrate ask about a
+// directory handed to them ITSELF: is it a domain a mount would read? Not a
+// `_`/`.` name, not a core domain, not a directory holding no .memql file,
+// and not a sub-namespace -- of a parent holding .memql files (agents/roles),
+// or of a core domain whose files all sit in sub-namespaces
+// (shopify/generated).
+func TestMountableDomainRoot(t *testing.T) {
+	tree := fstest.MapFS{
+		"bundle/znas/concepts.memql":    memqlFile(),
+		"bundle/_draft/concepts.memql":  memqlFile(),
+		"bundle/.hidden/concepts.memql": memqlFile(),
+		"bundle/library/concepts.memql": memqlFile(),
+		"bundle/empty/prompts/x.tmpl":   {Data: []byte("{{.x}}")},
+		"agents/concepts.memql":         memqlFile(),
+		"agents/roles/civic.memql":      memqlFile(),
+		"shopify/generated/order.memql": memqlFile(),
+	}
+	core := currentCore("library", "shopify")
+	for _, tc := range []struct {
+		parent, name string
+		want         bool
+	}{
+		{"bundle", "znas", true},
+		{"bundle", "_draft", false},
+		{"bundle", ".hidden", false},
+		{"bundle", "library", false},
+		{"bundle", "empty", false},
+		{"agents", "roles", false},
+		{"shopify", "generated", false},
+	} {
+		parent, err := fs.Sub(tree, tc.parent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := MountableDomainRoot(parent, tc.parent, tc.name, core); got != tc.want {
+			t.Errorf("MountableDomainRoot(%s/%s) = %v, want %v", tc.parent, tc.name, got, tc.want)
+		}
+	}
+}
+
+// CheckLanguageLineFile holds one file to exactly the checks the resolver
+// runs over a tree: the same problems, codes and messages, for every kind of
+// declaration it refuses, and none for a good one.
+func TestCheckLanguageLineFileIsTheResolversCheck(t *testing.T) {
+	for _, text := range []string{
+		"memql = \"1.0\"\nedition = \"2026\"\n",
+		"memql = \"1.1\"\nedition = \"2026\"\n",
+		"memql = \"0.9\"\nedition = \"2026\"\n",
+		"memql = \"1.0\"\nedition = \"2027\"\n",
+		"memql = \"01.0\"\nedition = \"2026\"\n",
+		"[language]\n",
+		"edition = \"2026\"\n",
+	} {
+		_, want := ResolveLanguageLines(fstest.MapFS{
+			"znas/memql.toml":    manifestFile(text),
+			"znas/queries.memql": memqlFile(),
+		}, currentCore())
+		_, got := CheckLanguageLineFile("znas", "znas/memql.toml", []byte(text))
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("memql.toml %q:\n got %+v\nwant %+v", text, got, want)
 		}
 	}
 }
