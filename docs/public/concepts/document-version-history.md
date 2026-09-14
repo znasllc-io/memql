@@ -64,7 +64,7 @@ content equals v2's, so the history stays linear and complete.
 | `ownerUserId` | Per-row authz key; threaded from the document's owner. |
 
 Per-row authz is **owned**: every read gates on
-`ownerUserId == actor.userId`, so a caller only ever sees their own
+`row.ownerUserId == actor.userId`, so a caller only ever sees their own
 document history.
 
 ## Storage and the time-series choice

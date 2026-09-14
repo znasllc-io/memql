@@ -81,10 +81,10 @@ query todo todos {
   args {
     done  bool
   }
-  filter  ownerUserId==actor.userId && when(args.done) { done==args.done }
+  filter  row => row.ownerUserId == actor.userId && (args.done == nil || row.done == args.done)
 }
 
-@handler(type="query", query="query todos(done: $args.done)")
+@handler(type="query", query="query todos(done: args.done)")
 @executionTime("fast")
 @description("List the caller's to-dos.")
 tool todosList {
@@ -92,7 +92,7 @@ tool todosList {
 }
 ```
 
-`@rowAuthz(owner="ownerUserId")` makes the query's `ownerUserId==actor.userId` filter a load-time-enforced authorization tier, not just a convention — a caller can never read another user's rows through this query. Add mutations or event-driven automations right next to them, in the same file family.
+`@rowAuthz(owner="ownerUserId")` makes the query's `row.ownerUserId == actor.userId` filter a load-time-enforced authorization tier, not just a convention — a caller can never read another user's rows through this query. Add mutations or event-driven automations right next to them, in the same file family.
 
 ---
 
@@ -390,7 +390,7 @@ query activeHumanParticipants(partitionId: "space_123")
 @description("On space creation, auto-join the creator's assistant")
 automation autoJoinSI {
   step run {
-    logic autoJoinSI ( event )
+    logic autoJoinSI(event: event)
   }
 }
 ```
