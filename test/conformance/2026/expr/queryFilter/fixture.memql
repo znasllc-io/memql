@@ -1,0 +1,7 @@
+/// A support ticket, the row every query-filter case here reads.
+concept ticket {
+  title     string
+  status    string
+  priority  int
+  urgent    bool
+}

@@ -1,0 +1,6 @@
+/// Open tickets, newest first.
+query ticket openTickets {
+  filter status == "open"
+  sort "row.createdAt", "desc"
+  paginate 20
+}

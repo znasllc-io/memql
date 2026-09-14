@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "file": "status-is-open.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "payload #>> '{status}' = ?",
+      "note": "A comparison with a string literal pushes down as one JSONB path read with a bound parameter."
+    },
+    {
+      "file": "status-is-open.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open"
+      },
+      "expect": true
+    },
+    {
+      "file": "status-is-open.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "closed"
+      },
+      "expect": false
+    },
+    {
+      "file": "open-or-high-priority.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": " OR ",
+      "note": "A disjunction of two row predicates lowers to one SQL OR rather than two reads."
+    },
+    {
+      "file": "open-or-high-priority.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "closed",
+        "priority": 5
+      },
+      "expect": true
+    },
+    {
+      "file": "filter-in-a-query.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "filter-with-bang.memql",
+      "verdict": "refuse_load",
+      "message": "are only available in logic / collection lambdas (in-memory), not in specs or query filters",
+      "note": "Today a query filter refuses the unary `!`: the filter grammar reads `!(...)` as an expression-led comparison. D9 makes `!` work at every position; dsl-v1-expressions flips this case."
+    }
+  ]
+}

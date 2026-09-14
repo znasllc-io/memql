@@ -1,0 +1,9 @@
+{
+  "cases": [
+    {
+      "file": "unknown-clause.memql",
+      "verdict": "refuse_parse",
+      "message": "unknown struct-query field on line \"project title\""
+    }
+  ]
+}
