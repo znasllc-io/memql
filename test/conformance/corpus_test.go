@@ -607,9 +607,14 @@ func corpusLoadBatch(t *testing.T, runs []*corpusRun) []string {
 		r.loadRan = true
 	}
 
+	byName := corpusDeclaredNames(runs)
 	var unclaimed []string
 	claim := func(file, msg string) {
 		if r, ok := byDomain[corpusDomainOf(file, msg, byDomain)]; ok {
+			r.loadDiags = append(r.loadDiags, msg)
+			return
+		}
+		if r, ok := corpusRunNamed(msg, byName); ok {
 			r.loadDiags = append(r.loadDiags, msg)
 			return
 		}
@@ -697,23 +702,91 @@ func corpusActionProblems(tree fs.FS) []string {
 }
 
 // corpusDomainOf finds the run a diagnostic belongs to: by its file when it
-// names one, else by the first domain the message mentions.
+// names a case's domain, else by the domain its message names (the longest,
+// when one domain's name is a prefix of another's).
+//
+// A message names a domain as a path (`<domain>/case.memql`), inside a
+// canonical id (`v1:<domain>:ticket`), or as the qualifier of a construct
+// name (`<domain>.openTickets`, the form the @requiresRank and
+// @requiresCapability gates print). A diagnostic whose file is not a case's
+// -- the rule loader files an order problem under dsl/rules/rules.memql --
+// is looked for in its message too.
 func corpusDomainOf(file, msg string, byDomain map[string]*corpusRun) string {
 	if file != "" {
 		f := strings.TrimPrefix(file, "unified:")
 		if i := strings.IndexByte(f, '/'); i > 0 {
-			return f[:i]
+			if _, ok := byDomain[f[:i]]; ok {
+				return f[:i]
+			}
 		}
 	}
 	best := ""
 	for d := range byDomain {
-		if strings.Contains(msg, d+"/") || strings.Contains(msg, ":"+d+":") {
+		if strings.Contains(msg, d+"/") || strings.Contains(msg, ":"+d+":") || corpusQualifiedBy(msg, d) {
 			if len(d) > len(best) {
 				best = d
 			}
 		}
 	}
 	return best
+}
+
+// corpusConstructHeader matches a construct declaration and captures its name:
+// `query ticket openTickets {`, `capability fs.list {`, `seed skill a-b {`.
+var corpusConstructHeader = regexp.MustCompile(`(?m)^[ \t]*(?:query|mutate|logic|automation|action|capability|spec|trait|tool|builtin|prompt|provider|shape|policy|rule|seed|concept)[ \t]+(?:[A-Za-z_][\w]*[ \t]+)?([A-Za-z_][\w.-]*)[ \t]*\{`)
+
+// corpusDeclaredNames maps every construct name the runs declare, in their
+// cases and fixtures, to the one run that declares it. A name more than one
+// run declares maps to nil: it cannot say whose a diagnostic is.
+func corpusDeclaredNames(runs []*corpusRun) map[string]*corpusRun {
+	out := map[string]*corpusRun{}
+	for _, r := range runs {
+		for _, src := range []string{r.src, r.fixture} {
+			for _, m := range corpusConstructHeader.FindAllStringSubmatch(src, -1) {
+				if prev, seen := out[m[1]]; seen && prev != r {
+					out[m[1]] = nil
+					continue
+				}
+				out[m[1]] = r
+			}
+		}
+	}
+	return out
+}
+
+var corpusQuoted = regexp.MustCompile(`"([A-Za-z_][\w.-]*)"`)
+
+// corpusRunNamed claims a diagnostic that names no domain -- a whole-tree
+// refusal such as a policy entry that does not expand -- by the first quoted
+// construct name in it that exactly one run declares. Corpus names are unique
+// (README), and a refusal names its subject first.
+func corpusRunNamed(msg string, byName map[string]*corpusRun) (*corpusRun, bool) {
+	for _, m := range corpusQuoted.FindAllStringSubmatch(msg, -1) {
+		if r := byName[m[1]]; r != nil {
+			return r, true
+		}
+	}
+	return nil, false
+}
+
+// corpusQualifiedBy reports whether msg names a construct qualified by domain:
+// `<domain>.<name>`, the domain not itself the tail of a longer word.
+func corpusQualifiedBy(msg, domain string) bool {
+	for i := strings.Index(msg, domain+"."); i >= 0; {
+		if i == 0 || !corpusIdentByte(msg[i-1]) {
+			return true
+		}
+		next := strings.Index(msg[i+1:], domain+".")
+		if next < 0 {
+			break
+		}
+		i += 1 + next
+	}
+	return false
+}
+
+func corpusIdentByte(b byte) bool {
+	return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 func corpusAnyAutomation(runs []*corpusRun) bool {
