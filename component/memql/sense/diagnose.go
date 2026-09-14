@@ -34,12 +34,13 @@ func (s *Service) Diagnose(source string, filePath string) []Diagnostic {
 
 	// Lower struct-form constructs to the procedural form the parser
 	// understands. A failure here is a LOWERING error (e.g. a logic without
-	// its mandatory `body { }` block, an unbalanced brace) -- these carry no
-	// line/column, so anchor the diagnostic on the named construct in the
-	// authored source.
+	// its mandatory `body { }` block, an unbalanced brace, `refine` without
+	// `paginate`); it names the author's text it refuses, placed in the
+	// authored source (parser.PositionRewriteError), and falls back to the
+	// named construct.
 	rewritten, rewriteErr := applyRewriteChain(source)
 	if rewriteErr != nil {
-		return []Diagnostic{rewriteErrorDiagnostic(rewriteErr, source)}
+		return []Diagnostic{rewriteErrorDiagnostic(parser.PositionRewriteError(source, rewriteErr), source)}
 	}
 
 	lm := newLineMap(source, rewritten)
@@ -177,11 +178,12 @@ func rewriteErrorDiagnostic(err error, source string) Diagnostic {
 			pos = p
 		}
 	}
+	rng := Range{Start: pos, End: Position{Line: pos.Line, Column: pos.Column + 1}}
+	if r, ok := failingTokenRange(err, true); ok {
+		rng = r // the refused clause, keyword or field the author wrote
+	}
 	return Diagnostic{
-		Range: Range{
-			Start: pos,
-			End:   Position{Line: pos.Line, Column: pos.Column + 1},
-		},
+		Range:    rng,
 		Severity: SeverityError,
 		Message:  msg,
 		Code:     errorCode(err, "rewrite-error"),

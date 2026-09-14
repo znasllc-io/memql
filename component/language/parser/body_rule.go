@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // body_rule.go enforces Decision 5 of the construct-invocation ADR
@@ -60,9 +61,13 @@ func bodyRuleForbiddenMessage(kind, name string) string {
 // non-logic construct's source text contains a `body { }` block, or nil when
 // none is present. Used by the query / mutation struct-form rewriters, which
 // operate on the construct's raw inner text.
+//
+// The refusal names the `body` keyword (rewrite_errors.go): source is the
+// construct's body, which is what the offset indexes.
 func rejectNonLogicBodyBlock(kind, name, source string) error {
-	if bodyRuleBlockHeader.MatchString(source) {
-		return fmt.Errorf("%s", bodyRuleForbiddenMessage(kind, name))
+	if loc := bodyRuleBlockHeader.FindStringIndex(source); loc != nil {
+		at := loc[0] + strings.Index(source[loc[0]:loc[1]], "body")
+		return refuseAtBody(at, len("body"), fmt.Errorf("%s", bodyRuleForbiddenMessage(kind, name)))
 	}
 	return nil
 }
