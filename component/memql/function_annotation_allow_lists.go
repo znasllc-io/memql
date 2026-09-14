@@ -1,6 +1,8 @@
 package memql
 
 import (
+	"fmt"
+
 	"github.com/znasllc-io/memql/component/language/annotations"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/baseparser"
@@ -53,4 +55,53 @@ func ValidateAutomationAnnotations(source string) error {
 		source = lowered
 	}
 	return baseparser.ValidateConstructAnnotations(source, "automation", allowedAutomationAnnotations)
+}
+
+// fieldAnnotations is the ONE allow-list for a FIELD annotation, wherever the
+// field appears: an args block, a prompt body, a builtin body or a tool body.
+//
+// Before memql#5375 there were three behaviours for one surface. An args
+// field REFUSED an unknown name (#991); a prompt field tolerated it SILENTLY
+// (prompt_converter's default arm was a comment saying so); a builtin field
+// dropped every annotation but @required (BuiltinField.Attributes was
+// documented as "tolerated, not yet acted on"). So `@requred` -- one r -- was
+// a load error in one body, a silently-absent constraint in the second and a
+// silently-absent description in the third, and only the first told the
+// author. D16's last sentence closes that: prompt fields and builtin fields
+// get the allow-list args fields have.
+//
+// @default IS here and is RETIRED on a concept field, which is not a
+// contradiction. A prompt / builtin / tool body IS the JSON schema handed to
+// the model, so `default` is a value the model reads; a concept field's was
+// published as a schema keyword nothing applies.
+var fieldAnnotations = map[string]bool{
+	"required":    true,
+	"description": true,
+	"default":     true,
+	"enum":        true,
+	"maxLength":   true,
+	"pattern":     true,
+	"minimum":     true,
+	"maximum":     true,
+}
+
+// validateFieldAnnotation returns a refusal for a field annotation that is
+// retired or unknown, and nil for one the schema surface accepts.
+//
+// The retirement ledger is consulted FIRST so a retired name gets its
+// migration hint rather than the generic list of supported names -- an author
+// who wrote a name that was correct last release is not making a typo, and
+// telling them the list of valid names does not say which one replaced theirs.
+func validateFieldAnnotation(origin, construct, field, name string) error {
+	if fieldAnnotations[name] {
+		return nil
+	}
+	if hint, retired := baseparser.RetiredFieldAnnotation(name); retired {
+		return fmt.Errorf("%s: %s field %q: @%s is retired -- %s", origin, construct, field, name, hint)
+	}
+	if hint, retired := baseparser.RetiredConstructAnnotation(name); retired {
+		return fmt.Errorf("%s: %s field %q: @%s is retired -- %s", origin, construct, field, name, hint)
+	}
+	return fmt.Errorf("%s: %s field %q: unknown field annotation @%s -- supported: %s",
+		origin, construct, field, name, baseparser.FormatAnnotationAllowList(fieldAnnotations))
 }

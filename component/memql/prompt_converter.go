@@ -164,8 +164,12 @@ func promptFieldToToolField(field *languageParser.PromptField, origin string) (t
 			// Args["values"] depending on grammar -- normalise both.
 			tf.enumValues = enumValuesFromAttr(attr)
 		default:
-			// Unknown field annotation -- tolerated silently. Matches
-			// parsePromptMemQL's "skip args + continue" default.
+			// Was "tolerated silently -- matches parsePromptMemQL's skip
+			// args + continue default" until memql#5375. A prompt body IS
+			// the schema handed to the model, so a swallowed annotation is
+			// a constraint or a description the model never sees, reported
+			// to nobody.
+			return toolField{}, validateFieldAnnotation(origin, "prompt", field.Name, attr.Name)
 		}
 	}
 

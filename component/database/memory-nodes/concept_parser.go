@@ -22,6 +22,7 @@ import (
 
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/baseparser"
 	"github.com/znasllc-io/memql/core/num"
 )
 
@@ -460,12 +461,11 @@ type parsedConcept struct {
 // @maxLength, @minimum, @maximum, @immutable, @secret) and for
 // discriminated-union variants (@variant).
 type parsedProperty struct {
-	name         string
-	typeName     string
-	description  string
-	defaultValue any
-	required     bool
-	enumValues   []string
+	name        string
+	typeName    string
+	description string
+	required    bool
+	enumValues  []string
 	// element is the lowered element type of a WRAPPED property -- the item
 	// type of []T and the value type of map[string]T. Recursive, so
 	// [][]string and map[string]map[string]int lower all the way down.
@@ -484,14 +484,13 @@ type parsedProperty struct {
 	element *parsedProperty
 	nested  []parsedProperty
 	format  string
-	// Phase 3 constraints
-	unique    bool
+	// Phase 3 constraints. @unique and @immutable were fields here until
+	// memql#5375 retired both: neither had a check or a guard behind it.
 	pattern   string
 	minLength *int64
 	maxLength *int64
 	minimum   *float64
 	maximum   *float64
-	immutable bool
 	secret    bool
 	// pii marks the field as personally-identifying data. Surfaces as
 	// the x-pii custom JSON-Schema keyword so the engine's hard-delete
@@ -1147,19 +1146,15 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		}
 		c.version = fmt.Sprintf("v%d", v.Major)
 	case "namespace":
-		// @namespace("foo") or @namespace("foo:bar:baz") -- colon-
-		// separated lowercase identifiers. Validated against the
-		// shared namespace pattern; the engine assembles the
-		// canonical ID via ast.AssembleConceptId during registration.
-		// The value is currently stored implicitly (path-derived
-		// during the transition), so we only validate here.
-		ns := strings.TrimSpace(attrString(attr))
-		if ns == "" {
-			return fmt.Errorf("@namespace requires a string value")
-		}
-		if _, _, err := languageAst.ExtractNamespaceAttribute([]*parser.Attribute{attr}); err != nil {
-			return err
-		}
+		// Retired in memql#5375. AssembleConceptIdFromDeclInDir derives
+		// the namespace from the domain directory, or from that
+		// directory's one-line namespace.pin, so the annotation could only
+		// restate one of those or disagree with it -- and a disagreement
+		// is the moved-file guard firing, not a feature. Every one of the
+		// 69 occurrences in the tree restated a pin or its own directory,
+		// which is why the removal moved no canonical id.
+		hint, _ := baseparser.RetiredConstructAnnotation("namespace")
+		return fmt.Errorf("@namespace is retired -- %s", hint)
 	case "displayCard":
 		// @displayCard(primary="name", secondary="role", tertiary="ownerUserId", status="active")
 		//   -- per-concept rendering hints for concept-agnostic
@@ -1394,16 +1389,8 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 	switch attr.Name {
 	case "required":
 		prop.required = true
-	case "default":
-		v, err := parseTypedDefaultValue(prop.typeName, attrLiteral(attr))
-		if err != nil {
-			return err
-		}
-		prop.defaultValue = v
 	case "description":
 		prop.description = attrString(attr)
-	case "unique":
-		prop.unique = true
 	case "pattern":
 		prop.pattern = attrString(attr)
 	case "minLength":
@@ -1430,8 +1417,6 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 			return fmt.Errorf("@maximum requires a number: %w", err)
 		}
 		prop.maximum = &f
-	case "immutable":
-		prop.immutable = true
 	case "secret":
 		prop.secret = true
 	case "pii":
@@ -1450,6 +1435,26 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 		// can read its discriminator arg.
 		return nil
 	default:
+		// @unique and @immutable reach here (memql#5375). Each was
+		// declared metadata with nothing behind it -- no uniqueness check
+		// (memql#2960) and no write guard -- so each read as a constraint
+		// while constraining nothing, and surfaced as an x- keyword that
+		// promised the storage layer something no storage layer honoured.
+		if hint, retired := baseparser.RetiredFieldAnnotation(attr.Name); retired {
+			return fmt.Errorf("field %q: @%s is retired -- %s", prop.name, attr.Name, hint)
+		}
+		// @default has its own sentence because the retirement is SCOPED
+		// to this receiver. On a concept field it was published as the
+		// JSON-Schema `default` keyword, which no validator applies and no
+		// insert path consults, so a field carrying it did not default --
+		// and an author who wrote @default("true") and believed otherwise
+		// was wrong silently, on every row. On a TOOL, PROMPT or BUILTIN
+		// field it stays: those bodies ARE the schema handed to the model,
+		// where `default` is a value the model reads.
+		if attr.Name == "default" {
+			return fmt.Errorf("field %q: @default on a concept field is retired -- it was never applied on insert, so the field did not default; fill the value with `??` in the mutation that writes it (docs/public/language/authoring-rules.md section 28); %s",
+				prop.name, baseparser.AttributeRewriteHint)
+		}
 		return fmt.Errorf("unknown property annotation @%s on field %q", attr.Name, prop.name)
 	}
 	return nil
@@ -1807,15 +1812,16 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 	if prop.description != "" {
 		schema["description"] = prop.description
 	}
-	if prop.defaultValue != nil {
-		schema["default"] = prop.defaultValue
-	}
-
 	// Phase 3 constraints. These map onto JSON-Schema draft-07
-	// keywords where there's a direct equivalent; @unique /
-	// @immutable / @secret are engine-level semantic flags that
-	// surface as `x-` custom keywords so the schema validator passes
-	// them through to the storage layer.
+	// keywords where there's a direct equivalent; @secret / @pii /
+	// @internal are engine-level semantic flags that surface as `x-`
+	// custom keywords so the schema validator passes them through to the
+	// storage layer.
+	//
+	// x-unique and x-immutable were published here until memql#5375. No
+	// storage layer honoured either, so the schema promised a constraint
+	// that did not exist -- which is the same defect as the `default`
+	// keyword this function also stopped emitting.
 	if prop.pattern != "" {
 		schema["pattern"] = prop.pattern
 	}
@@ -1830,12 +1836,6 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 	}
 	if prop.maximum != nil {
 		schema["maximum"] = *prop.maximum
-	}
-	if prop.unique {
-		schema["x-unique"] = true
-	}
-	if prop.immutable {
-		schema["x-immutable"] = true
 	}
 	if prop.secret {
 		schema["x-secret"] = true

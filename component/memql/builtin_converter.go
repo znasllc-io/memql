@@ -147,6 +147,21 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 	if len(decl.Fields) > 0 {
 		contract.Properties = make(map[string]string, len(decl.Fields))
 		for _, field := range decl.Fields {
+			// BuiltinField.Attributes was "tolerated, not yet acted on"
+			// until memql#5375: @required was read off the typed field and
+			// every other annotation was dropped without a word, so a
+			// @description on a builtin field vanished from the schema both
+			// SDKs generate -- the same annotation that is load-bearing one
+			// construct over. D16 gives this surface the allow-list args
+			// fields have.
+			for _, attr := range field.Attributes {
+				if attr == nil {
+					continue
+				}
+				if err := validateFieldAnnotation(origin, "builtin", field.Name, attr.Name); err != nil {
+					return nil, err
+				}
+			}
 			contract.Properties[field.Name] = field.Type
 			if field.Required {
 				contract.Required = append(contract.Required, field.Name)
