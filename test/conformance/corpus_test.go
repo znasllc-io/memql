@@ -12,27 +12,19 @@ package conformance
 //
 // FIVE VERDICTS, decided by the engine rather than by a copy of it:
 //
-//   - refuse_parse: the edition's front end plus the edition's grammar refuse
-//     the file (corpusParseEdition).
-//   - load_ok / refuse_load: the file parses -- in the grammar the loaders use
-//     (compiler.ParseFileSource) AND in the edition's -- and the engine's own
-//     boot-time validation -- MemQLEngine.Init over the embedded tree with the
+//   - refuse_parse: the edition's front end plus the parser every loader uses
+//     refuse the file (corpusParse).
+//   - load_ok / refuse_load: the file parses (compiler.ParseFileSource, the
+//     loaders' own parse) and the engine's own boot-time validation -- MemQLEngine.Init over the embedded tree with the
 //     case mounted as an overlay domain, via memql.LintUnifiedTree, plus the
 //     automations loader for an automation and the capability catalog and
 //     action loader for a capability or an action (corpusActionProblems) --
 //     accepts it, or refuses it.
 //
-// ONE GRAMMAR, pinned twice. Since the flip, parser.DefaultOptions turns the
-// edition-2026 expression grammar (parser.Options.ExpressionsV1) on, so the
-// loaders read the corpus in the edition it is written in, and refuse the
-// retired spellings (a filter with no lambda header, a spec's `{ return }`
-// body, a raw-text @filter) as the edition does. A case is still parsed both
-// ways -- through compiler.ParseFileSource, which reads DefaultOptions, and
-// through corpusParseEdition, which turns the option on itself -- so while the
-// option exists a default switched back off shows as a load case that no
-// longer parses rather than as cells silently read in the older grammar.
-// When the option is removed, corpusParseEdition becomes
-// compiler.ParseFileSource and the two parses are one.
+// ONE GRAMMAR. The loaders parse only the edition-2026 expression grammar, so
+// they read the corpus in the edition it is written in, and refuse the retired
+// spellings (a filter with no lambda header, a spec's `{ return }` body, a
+// raw-text @filter) as the edition does.
 //   - lower / evaluate: the expression lowers to SQL containing the expected
 //     text, or evaluates against a row to the expected value, through the
 //     adapter in engine_adapter_test.go.
@@ -188,14 +180,9 @@ func TestCorpusVerdicts(t *testing.T) {
 	for _, r := range runs {
 		switch r.c.Verdict {
 		case verdictRefuseParse:
-			r.parseErr = corpusParseEdition(r.line.Edition, r.src)
+			r.parseErr = corpusParse(r.line.Edition, r.src)
 		case verdictLoadOK, verdictRefuseLoad:
 			r.file, r.parseErr = corpusParseFile(r.line.Edition, r.src)
-			if r.parseErr == nil {
-				if err := corpusParseEdition(r.line.Edition, r.src); err != nil {
-					r.parseErr = fmt.Errorf("parses with parser.DefaultOptions, but not in the edition's grammar (parser.Options.ExpressionsV1 on), which the corpus is written in: %w", err)
-				}
-			}
 		}
 	}
 	corpusCheckConstructNames(t, runs)
@@ -318,32 +305,6 @@ func corpusRefusalText(err error) string {
 // parser every loader uses.
 func corpusParse(edition, src string) error {
 	_, err := corpusParseFile(edition, src)
-	return err
-}
-
-// corpusParseEdition parses a file the way the edition reads it: the
-// edition's front end, the struct-form rewrite chain every loader applies
-// (compiler.ParseFileSource's), and the parser with the edition-2026
-// expression grammar on (parser.Options.ExpressionsV1). The option is the
-// loaders' default since the flip, so it differs from corpusParse only if that
-// default changes; when the option is removed it becomes corpusParse.
-func corpusParseEdition(edition, src string) error {
-	fe, err := langparser.FrontEndFor(edition)
-	if err != nil {
-		return err
-	}
-	prepared, err := fe.Prepare(src)
-	if err != nil {
-		return err
-	}
-	if langparser.LooksLikeNonProcedural(prepared) {
-		prepared = langparser.StripNonProceduralBlocks(prepared)
-	}
-	normalised, err := langparser.NormaliseAll(prepared)
-	if err != nil {
-		return err
-	}
-	_, err = langparser.ParseFileWithOptions(normalised, langparser.Options{ExpressionsV1: true})
 	return err
 }
 

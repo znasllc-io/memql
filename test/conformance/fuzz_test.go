@@ -49,6 +49,5 @@ func FuzzParse(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, src string) {
 		_ = corpusParse(langparser.Edition, src)
-		_ = corpusParseEdition(langparser.Edition, src)
 	})
 }

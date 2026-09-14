@@ -524,11 +524,10 @@ var corpusKeylessRewrite = regexp.MustCompile(`write ([A-Za-z_][A-Za-z0-9_]*): (
 // edition 2026 retires, refused: each parser.V1RetiredForms() rule is the code
 // of a refused case whose message names the replacement, and every name the
 // function catalog retires (functions.RetiredFunctions, RetiredMethods) is one
-// of those rules. A refusal is judged by the edition's grammar
-// (corpusParseEdition), which the loaders read by default since the flip, so
-// the four predicate-position forms -- a filter with no lambda header, a spec
-// or trait `{ return ... }` body, a raw-text @filter -- are shown refused like
-// the rest.
+// of those rules. A refusal is judged by the parser every loader uses
+// (corpusParse), which reads only edition 2026, so the four predicate-position
+// forms -- a filter with no lambda header, a spec or trait `{ return ... }`
+// body, a raw-text @filter -- are shown refused like the rest.
 func TestCorpusRefusesEveryRetiredForm(t *testing.T) {
 	runs := discoverCorpus(t)
 	byCode := map[string][]*corpusRun{}
