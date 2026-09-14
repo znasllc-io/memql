@@ -5,8 +5,7 @@
   to the owner as selectable options and answered (the expression shape, the
   logic-versus-automation boundary, loop protection, versioning after 1.0, the corpus
   and its CI standing, the execution approach); the derived decisions follow from those
-  answers and were presented as eight sections, each approved. Issues are filed by the
-  first epic's plan (`superpowers:writing-plans`), not by this record.
+  answers and were presented as eight sections, each approved. Issues were filed on 2026-09-13; the table at the end of section 8 names them.
 - **What it is:** the design for freezing the MemQL DSL at version one so that later
   changes are rare, safe and mechanical: one expression grammar with a named lambda
   parameter at every predicate position and one lowering to SQL checked at load; one
@@ -633,6 +632,28 @@ One PR per epic; the first epic's plan files the issues under `claude` and
 here. Plans are written by the session that picks the epic up and deleted in the
 epic's merge. The recording-and-learning program's construct-authoring epics schedule
 after epics 2 and 3 land.
+
+### Issues, filed 2026-09-13
+
+| Priority | Epic | Repository | Epic issue | Task issues |
+|---|---|---|---|---|
+| P01 | 1 Foundations: the language line, editions, the registry, the corpus scaffold, editor parity | memql | #5356 | #5357-#5362 |
+| P02 | 2 The expression language | memql | #5363 | #5364-#5369 |
+| P03 | 3 The body language | memql | #5370 | #5371-#5374 |
+| P04 | 4 The attribute cleanup | memql | #5375 | #5376-#5379 |
+| P05 | 5 Loop protection | memql | #5380 | #5381-#5384 |
+| P06 | 6 The freeze | memql | #5385 | #5386-#5390 |
+| P01 | Adopt DSL version one (bundle adoption) | memql-project | #57 | #58-#63 |
+| P01 | Adopt DSL version one (bundle adoption) | memql-znas | #112 | #113-#117 |
+| P01 | Adopt DSL version one (bundle adoption) | memql-fylo | #11 | #12-#16 |
+| P01 | Adopt DSL version one (bundle adoption) | memql-casera | #1 | #2-#6 |
+
+Every task is a GitHub sub-issue of its epic; every epic body names its priority, its
+PR grouping, this record and its branch; every task body carries its deliverable,
+acceptance and files and opens with its epic, its PR number and the record section. All
+carry the `claude` label and `epic:<name>`; the priority label `priority:Pnn` orders the
+epics across the repository, lower first, and the DSL freeze epics precede everything
+else, including the app-session recording and learning program (P07 to P11 in `memql`).
 
 ## 9. Out of scope
 
