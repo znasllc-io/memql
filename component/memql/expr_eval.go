@@ -641,9 +641,10 @@ func exprIsUnset(v any) bool {
 }
 
 // exprStrictEqual is typed equality with no absence rules: nil equals only
-// nil. It is what `==` reaches once neither side is absent, what `in` tests
-// membership by (SQL IN never matches NULL, so a blank is not a member of
-// [nil]), and what lists and maps compare their elements by.
+// nil. It is what `==` reaches once neither side is unset, and what lists and
+// maps compare their elements by. `in` does not use it: membership is `==`
+// against each element, unset rule included (exprIn), so an unset value is a
+// member of a list holding "" or nil.
 func exprStrictEqual(a, b any) bool {
 	a, errA := exprNormalize(a)
 	b, errB := exprNormalize(b)

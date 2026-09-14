@@ -74,6 +74,9 @@ func (s *Service) expressionHover(source string, line, col int) (*HoverResult, b
 	if form, ok := retiredAt(toks, idx, col, ctx.Position); ok {
 		return card(retiredCard(form))
 	}
+	if form, example, ok := s.retiredPredicateAt(source, toks, idx); ok {
+		return card(retiredCardWith(form, example))
+	}
 	if f, site, ok := s.catalogEntryAt(toks, idx, line, col, ctx); ok {
 		a := tiers.Admitted
 		if ctx.Position != "" {
@@ -455,6 +458,13 @@ var retiredChoice = regexp.MustCompile(`^(.+?) for (.+?) or (.+?) for (.+)$`)
 // retiredCard renders a retired form's hover card: the replacement, then the
 // retirement and the rewrite that performs it.
 func retiredCard(f parser.RetiredForm) string {
+	return retiredCardWith(f, "")
+}
+
+// retiredCardWith is retiredCard with the author's own construct, as the
+// rewrite writes it, in the code block in place of the table's placeholder
+// form when there is one.
+func retiredCardWith(f parser.RetiredForm, example string) string {
 	spelling := "`" + f.Spelling + "`"
 	if glyph, ok := strings.CutSuffix(f.Spelling, " as a connective"); ok {
 		spelling = "`" + glyph + "` as a connective"
@@ -463,6 +473,9 @@ func retiredCard(f parser.RetiredForm) string {
 	if m := retiredChoice.FindStringSubmatch(f.Replacement); m != nil {
 		code = m[1] + "\n" + m[3]
 		write = fmt.Sprintf("`%s` for %s or `%s` for %s", m[1], m[2], m[3], m[4])
+	}
+	if example != "" {
+		code = example
 	}
 	return fmt.Sprintf("```memql\n%s\n```\n\n%s is retired in edition 2026. Write %s; `%s` rewrites it.",
 		code, spelling, write, migrator)

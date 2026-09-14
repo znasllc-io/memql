@@ -748,9 +748,9 @@ for its hover too.
 | `,` as a connective | `\|\|` |
 | `has` | `<value> in <list>` |
 | `not in` | `!(<value> in <list>)` |
-| `and(...)` | `&&` |
-| `or(...)` | `\|\|` |
-| `not(...)` | `!` |
+| `and(a, b)` | `a && b` |
+| `or(a, b)` | `a \|\| b` |
+| `not(a)` | `!a` |
 | `lt(a, b)` | `a < b` |
 | `gt(a, b)` | `a > b` |
 | `lte(a, b)` | `a <= b` |
@@ -772,6 +772,10 @@ for its hover too.
 | `spec <name>` | `<name>(row)` |
 | `trait <name>` | `<name>(row)` |
 | `.contains(...)` | `v in <list>` for membership, `s.includes(sub)` for a substring |
+| `filter <predicate>` | `filter row => <predicate>` |
+| `spec <bound> <name> { return <predicate> }` | `spec <bound> <name> = row => <predicate>` |
+| `trait <name> { return <predicate> }` | `trait <name> = row => <predicate>` |
+| `@filter(<predicate>)` | `@filter(row => <predicate>)` |
 
 <!-- END GENERATED: retired spellings -->
 
