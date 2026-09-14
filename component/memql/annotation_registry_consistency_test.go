@@ -4,8 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"testing/fstest"
 
-	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/annotations"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
@@ -121,13 +121,28 @@ func runReceiverGate(r annotations.Receiver, src string) error {
 	if !isConceptReceiver(r) {
 		return nil
 	}
+	declared := false
 	for _, def := range file.Definitions {
-		if decl, ok := def.(*languageParser.ConceptDecl); ok {
-			_, err := memoryNodes.BuildConceptFromDecl(decl, "v1:test:probe")
-			return err
+		if _, ok := def.(*languageParser.ConceptDecl); ok {
+			declared = true
 		}
 	}
-	return errors.New("fixture declared no concept")
+	if !declared {
+		return errors.New("fixture declared no concept")
+	}
+	// The PRODUCTION concept path, not a fixed id: BuildUnifiedConcepts reads
+	// @version and @namespace to assemble the id before it builds the
+	// concept, so an annotation it reads first must still be answered by the
+	// registry. The file sits in the directory the @namespace example names.
+	tree := fstest.MapFS{"support/concepts.memql": {Data: []byte(src)}}
+	_, skips, err := BuildUnifiedConcepts(nil, tree)
+	if err != nil {
+		return err
+	}
+	if len(skips) > 0 {
+		return skips[0].Err
+	}
+	return nil
 }
 
 // refusalCode returns the registry code an error carries, or "" when it

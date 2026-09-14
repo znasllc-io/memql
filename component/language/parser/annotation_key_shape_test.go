@@ -57,3 +57,21 @@ func TestKeywordKeyShapeIsChecked(t *testing.T) {
 		})
 	}
 }
+
+// TestArgsFieldRefusalNamesTheConstruct: an args field's refusal names the
+// construct the block belongs to as well as the field -- `args field "x"` alone
+// does not say which of a file's queries it is in.
+func TestArgsFieldRefusalNamesTheConstruct(t *testing.T) {
+	for _, tc := range []struct{ src, want string }{
+		{"query thing probe {\n  args {\n    x string @nope\n  }\n  filter row.id == args.x\n}\n", `query "probe", args field "x": unknown annotation @nope on an args field`},
+		{"action probe {\n  args {\n    x string @nope\n  }\n  capability script(script: args.x)\n}\n", `action "probe", args field "x": unknown annotation @nope on an args field`},
+	} {
+		lowered, err := NormaliseAll(tc.src)
+		if err == nil {
+			_, err = ParseFile(lowered)
+		}
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("want %q, got: %v", tc.want, err)
+		}
+	}
+}

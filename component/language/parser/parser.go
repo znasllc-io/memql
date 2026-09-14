@@ -52,6 +52,13 @@ type Parser struct {
 	// to the resulting FunctionDef and clears the field.
 	pendingArgs *ArgsSchema
 
+	// argsOwner names the construct an args block being parsed belongs to,
+	// for an args-field refusal's subject (`action "x", args field "y"`):
+	// set by the construct parsers whose body holds the block. The block the
+	// rewriter hoists above a function's header leaves it empty, and its
+	// owner is read ahead (hoistedArgsOwner).
+	argsOwner string
+
 	// currentFuncType is the receiver kind of the construct whose body
 	// is being parsed (set in parseGoStyleFunction around the body
 	// switch, restored after). It lets construct-scoped grammar rules
@@ -2490,7 +2497,9 @@ func (p *Parser) parseActionDecl(attrs []*Attribute) (*ActionDecl, error) {
 				return nil, newParseErrorf(&p.current, "action %q declares 'args' more than once", decl.Name)
 			}
 			// parseFileTopArgsBlock consumes the `args` keyword + block.
+			p.argsOwner = fmt.Sprintf("action %q", decl.Name)
 			argsDef, err := p.parseFileTopArgsBlock()
+			p.argsOwner = ""
 			if err != nil {
 				return nil, err
 			}
@@ -2634,7 +2643,9 @@ func (p *Parser) parseCapabilityDecl(attrs []*Attribute) (*CapabilityDecl, error
 				return nil, newParseErrorf(&p.current, "capability %q declares 'args' more than once", decl.Name)
 			}
 			// parseFileTopArgsBlock consumes the `args` keyword + block.
+			p.argsOwner = fmt.Sprintf("capability %q", decl.Name)
 			argsDef, err := p.parseFileTopArgsBlock()
+			p.argsOwner = ""
 			if err != nil {
 				return nil, err
 			}

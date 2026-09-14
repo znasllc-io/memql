@@ -28,6 +28,7 @@ import (
 	"strings"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/annotations"
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/dslfs"
@@ -197,6 +198,7 @@ func BuildUnifiedConcepts(logger *slog.Logger, tree fs.FS) (map[string]*memoryNo
 	for _, cf := range files {
 		for _, decl := range cf.decls {
 			id, idErr := languageAst.AssembleConceptIdFromDeclInDir(decl, cf.dir, namespacePin(tree, cf.dir))
+			idErr = conceptIdRefusal(decl, idErr)
 			if idErr != nil {
 				// The moved-file guard (#2614) and malformed attributes
 				// are load ERRORS, not warn-skips: a silently dropped or
@@ -229,6 +231,23 @@ func BuildUnifiedConcepts(logger *slog.Logger, tree fs.FS) (map[string]*memoryNo
 	}
 
 	return concepts, skips, nil
+}
+
+// conceptIdRefusal answers a failed concept-id assembly with the annotation
+// registry when the registry refuses the concept's own annotations: the
+// assembler reads @version and @namespace BEFORE the concept translator
+// checks them, so `@version(1)` would otherwise be reported in the
+// assembler's uncoded words rather than as an annotation_* refusal naming
+// what to write (memql#5359). An id failure the registry has no complaint
+// about -- a malformed semver, a moved file -- keeps its own error.
+func conceptIdRefusal(decl *languageAst.ConceptDecl, err error) error {
+	if err == nil {
+		return nil
+	}
+	if ref := annotations.CheckAll(annotations.Concept, languageParser.AnnotationUses(decl.Attributes)); ref != nil {
+		return fmt.Errorf("concept %q: %w", decl.Name, ref)
+	}
+	return err
 }
 
 // warnUndeclaredRowAuthz reports every concept that entered the tree

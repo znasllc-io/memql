@@ -545,14 +545,19 @@ func conceptDeclToParsed(decl *parser.ConceptDecl) (*parsedConcept, error) {
 	if ref := annotations.CheckAll(annotations.Concept, parser.AnnotationUses(decl.Attributes)); ref != nil {
 		return nil, ref
 	}
-	var relationshipAttrs []*parser.Attribute
+	var relationships []*parser.RelationshipDecl
+	var relationshipUses []annotations.Use
 	for _, rel := range decl.Relationships {
 		if rel != nil && rel.Attribute != nil {
-			relationshipAttrs = append(relationshipAttrs, rel.Attribute)
+			relationships = append(relationships, rel)
+			relationshipUses = append(relationshipUses, parser.AnnotationUse(rel.Attribute))
 		}
 	}
-	if ref := annotations.CheckAll(annotations.ConceptBody, parser.AnnotationUses(relationshipAttrs)); ref != nil {
-		return nil, ref
+	for i := range relationshipUses {
+		if ref := annotations.CheckAll(annotations.ConceptBody, relationshipUses[:i+1]); ref != nil {
+			// The refusal says "on a concept body"; say which relationship.
+			return nil, fmt.Errorf("the relationship %s: %w", relationshipLabel(relationships[i]), ref)
+		}
 	}
 
 	for _, attr := range decl.Attributes {
@@ -1266,6 +1271,20 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 	return nil
 }
 
+// relationshipLabel names a relationship for a refusal about it: by the field
+// that holds its key, or its domain label, or its target.
+func relationshipLabel(rel *parser.RelationshipDecl) string {
+	switch {
+	case rel.Field != "":
+		return fmt.Sprintf("on field %q", rel.Field)
+	case rel.As != "":
+		return fmt.Sprintf("as %q", rel.As)
+	case rel.Target != "":
+		return fmt.Sprintf("to %q", rel.Target)
+	}
+	return "with no field"
+}
+
 // parseDisplayCardAttr extracts the named args from
 // @displayCard(primary=..., secondary=..., tertiary=..., status=...).
 // Validates that `primary` is non-empty; the argument names are the
@@ -1443,22 +1462,19 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 	return nil
 }
 
-// attrNumeric returns the first likely-numeric value attached to an
-// attribute. Accepts both single-value form (`@minLength(5)`) and
-// named-arg form (`@minLength(value=5)`).
+// attrNumeric returns the number an annotation was written with
+// (`@minLength(5)`). The registry takes these placements as one number only
+// (memql#5359), so the keyword spelling `@minLength(value=5)` the loader used
+// to read -- and read ANY key of -- never reaches here.
 func attrNumeric(attr *parser.Attribute) any {
 	if attr == nil {
 		return nil
 	}
-	if attr.Value != nil {
-		return attr.Value
-	}
-	for _, v := range attr.Args {
-		return v
-	}
-	return nil
+	return attr.Value
 }
 
+// toFloat64 reads an annotation's number. A quoted number (`@minimum("5")`)
+// is refused by the registry before this runs (memql#5359).
 func toFloat64(v any) (float64, error) {
 	switch t := v.(type) {
 	case int:
@@ -1467,25 +1483,20 @@ func toFloat64(v any) (float64, error) {
 		return float64(t), nil
 	case float64:
 		return t, nil
-	case string:
-		return strconv.ParseFloat(t, 64)
 	default:
 		return 0, fmt.Errorf("unsupported type %T", v)
 	}
 }
 
-// attrString extracts the text value of an attribute, preferring the
-// single-string form (`@description("text")`) and falling back to a
-// stringified `value` argument.
+// attrString extracts the text an annotation was written with
+// (`@description("text")`). The keyword spelling `@description(value="...")`
+// the loader used to accept is refused by the registry (memql#5359).
 func attrString(attr *parser.Attribute) string {
 	if attr == nil {
 		return ""
 	}
 	if s, ok := attr.Value.(string); ok {
 		return s
-	}
-	if v, ok := attr.Args["value"]; ok {
-		return fmt.Sprintf("%v", v)
 	}
 	return ""
 }
@@ -1525,9 +1536,6 @@ func attrLiteral(attr *parser.Attribute) string {
 		}
 		return fmt.Sprintf("%v", attr.Value)
 	}
-	if v, ok := attr.Args["value"]; ok {
-		return fmt.Sprintf("%v", v)
-	}
 	// The bare-argument shape, and the reason attrString reports "" for it.
 	// The parser has no value to bind an unquoted token to, so it records the
 	// TOKEN ITSELF AS AN ARGS KEY with a true flag value -- measured, not
@@ -1536,12 +1544,13 @@ func attrLiteral(attr *parser.Attribute) string {
 	//	@default(false)     Value=<nil>    Args=map["false":true]
 	//	@default("false")   Value="false"  Args=map[]
 	//
-	// So the written text is the key. Guarded on exactly one entry carrying a
-	// true flag, which is what a single bare argument produces; a named or
-	// multi-argument attribute is not this shape and falls through.
+	// So the written text is the key. The registry lets exactly one such word
+	// through -- `true` or `false`, the Bool form (memql#5359) -- so any other
+	// bare word, and the keyword spelling `@default(value=...)`, never reach
+	// here.
 	if len(attr.Args) == 1 {
 		for k, v := range attr.Args {
-			if flag, ok := v.(bool); ok && flag {
+			if flag, ok := v.(bool); ok && flag && (k == "true" || k == "false") {
 				return k
 			}
 		}
@@ -1549,8 +1558,9 @@ func attrLiteral(attr *parser.Attribute) string {
 	return ""
 }
 
-// toInt64 coerces an annotation argument value into int64. Accepts
-// actual integers and stringified decimals; anything else is an error.
+// toInt64 coerces an annotation's number into int64. A quoted number
+// (`@maxLength("5")`) is refused by the registry before this runs
+// (memql#5359).
 func toInt64(v any) (int64, error) {
 	switch t := v.(type) {
 	case int:
@@ -1563,8 +1573,6 @@ func toInt64(v any) (int64, error) {
 		// (memql#4779). This is a magnitude, so saturation is the answer that
 		// keeps its order.
 		return num.ClampFloat64ToInt64(t), nil
-	case string:
-		return strconv.ParseInt(t, 10, 64)
 	default:
 		return 0, fmt.Errorf("unsupported type %T", v)
 	}

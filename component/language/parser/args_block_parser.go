@@ -39,12 +39,18 @@ func (p *Parser) parseFileTopArgsBlock() (*ArgsSchema, error) {
 
 	def := &ArgsSchema{Target: "args"}
 
+	// Which construct the block belongs to, for an args-field refusal.
+	owner := p.argsOwner
+	if owner == "" {
+		owner = p.hoistedArgsOwner()
+	}
+
 	for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
 		// Each field is on its own line; tokens are
 		// IDENT IDENT (@IDENT (paren-group)?)* . The lexer collapses
 		// whitespace, so we read one field declaration per loop
 		// iteration, terminating when we hit a `}`.
-		field, err := p.parseArgsBlockField()
+		field, err := p.parseArgsBlockField(owner)
 		if err != nil {
 			return nil, err
 		}
@@ -58,9 +64,32 @@ func (p *Parser) parseFileTopArgsBlock() (*ArgsSchema, error) {
 	return def, nil
 }
 
+// hoistedArgsOwner names the function construct a hoisted args block belongs
+// to -- `query "probe"` -- or "" when none follows. The rewriter emits a
+// function construct's `args { ... }` above its `func (Receiver) name(...)`
+// header, so the owner is the next such header.
+func (p *Parser) hoistedArgsOwner() string {
+	for i := 0; ; i++ {
+		switch p.peekAhead(i).Type {
+		case TokenEOF:
+			return ""
+		case TokenKeywordFunc:
+			if p.peekAhead(i+1).Type != TokenParenOpen || p.peekAhead(i+3).Type != TokenParenClose {
+				return ""
+			}
+			fr, ok := functionReceivers[ReceiverType(p.peekAhead(i+2).Literal)]
+			if !ok {
+				return ""
+			}
+			return fmt.Sprintf("%s %q", fr.keyword, p.peekAhead(i+4).Literal)
+		}
+	}
+}
+
 // parseArgsBlockField parses a single `<name> <type> [@annotations]`
-// line from the args block.
-func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
+// line from the args block. owner names the construct the block belongs to,
+// for a refusal's subject ("" when unknown).
+func (p *Parser) parseArgsBlockField(owner string) (*ArgsField, error) {
 	if !p.check(TokenIdentifier) {
 		return nil, newParseErrorf(&p.current, "expected field name in args block, got %q", p.current.Literal)
 	}
@@ -154,6 +183,9 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 	// and @description (memql#3336: never retained; the `///` doc comment is
 	// the channel) are refused there with their hints.
 	subject := fmt.Sprintf("args field %q", name)
+	if owner != "" {
+		subject = owner + ", " + subject
+	}
 	var uses []annotations.Use
 	for p.check(TokenAt) {
 		at := p.current
