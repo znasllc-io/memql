@@ -74,9 +74,7 @@ has none, nor any `.memql` file.
 Values: `{ "$id": "x" }` is a seeded id, tagged per run and per variant so
 runs share a database safely (`x-<tag>`, or `x` with `{tag}` replaced where
 it holds one, as in an address). `{ "$ago": "PT10M" }` is the instant that long
-before now. A `legacy` entry on a `where` row gives its count under the legacy
-bodies, with the defect that makes it differ. The runner refuses the entry
-once the tree is in statements.
+before now.
 
 A scenario naming an automation or a mutation the tree no longer ships fails,
 with or without a database (`TestScenarioFilesNameShippedConstructs`).

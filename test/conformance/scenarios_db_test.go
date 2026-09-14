@@ -159,18 +159,6 @@ type scenarioRow struct {
 	// History is every version of a row named by id, oldest first, each
 	// holding those fields.
 	History []map[string]any `json:"history"`
-	// Legacy is what the row reads while the tree's bodies are in the retired
-	// forms, where a legacy defect makes it differ from what the body says.
-	// Epic 3's flip moves the tree to statements, and then a Legacy entry is
-	// refused: it is deleted with the defect it records.
-	Legacy *scenarioLegacy `json:"legacy"`
-}
-
-// scenarioLegacy is a row's count under the legacy bodies, and the defect
-// that makes it differ (the logic goldens' legacyDefect, in words).
-type scenarioLegacy struct {
-	Count  *int   `json:"count"`
-	Defect string `json:"defect"`
 }
 
 // scenarioDryRun runs fire Fire through the sandbox. Writes is how many writes
@@ -294,32 +282,6 @@ func checkScenarioShape(t *testing.T, where string, sc scenarioCase, autos map[s
 		}
 		if r.History != nil && r.ID == nil {
 			t.Errorf("%s: expected row %d's history belongs to a row named by id", where, i)
-		}
-		if l := r.Legacy; l != nil && (l.Defect == "" || l.Count == nil || r.Where == nil) {
-			t.Errorf("%s: expected row %d's legacy entry is a where row's count under the legacy bodies, with the defect that explains it", where, i)
-		}
-	}
-	// A scenario's bodies are all in the retired forms or all statements: the
-	// tree migrates in one commit. Once they are statements, a legacy entry
-	// records a defect that no longer exists.
-	statements, legacy := 0, 0
-	for _, f := range sc.Fire {
-		if a := autos[f.Automation]; a != nil {
-			if a.IsStatementBody() {
-				statements++
-			} else {
-				legacy++
-			}
-		}
-	}
-	if statements > 0 && legacy > 0 {
-		t.Errorf("%s: fires %d automations written in statements and %d in the retired forms; the tree migrates in one commit", where, statements, legacy)
-	}
-	if statements > 0 {
-		for i, r := range sc.Expect.Rows {
-			if r.Legacy != nil {
-				t.Errorf("%s: expected row %d still carries a legacy entry, and its automations are statements now: delete it (%s)", where, i, r.Legacy.Defect)
-			}
 		}
 	}
 	isMutation := func(name string) bool {
@@ -489,8 +451,6 @@ type variant struct {
 	// window is how many events the bus had delivered when the step before
 	// the current one began: an event fire takes an event published since.
 	window int
-	// legacy is set while the scenario's automations are in the retired forms.
-	legacy bool
 	// delivered is the event the last fire delivered.
 	delivered *events.Event
 }
@@ -500,11 +460,6 @@ func (r *scenarioRig) variant(t *testing.T, sc scenarioCase, kind string) *varia
 		rig: r, t: t, sc: sc,
 		tag:   r.run + "-" + kind,
 		calls: &scenarioDispatcher{answers: sc.Actions},
-	}
-	for _, f := range sc.Fire {
-		if a := r.autos[f.Automation]; a != nil && !a.IsStatementBody() {
-			v.legacy = true
-		}
 	}
 	t.Cleanup(v.cleanup)
 	return v
@@ -878,10 +833,6 @@ func (v *variant) expectWhere(want scenarioRow) {
 	count := 1
 	if want.Count != nil {
 		count = *want.Count
-	}
-	if l := want.Legacy; l != nil && v.legacy {
-		count = *l.Count
-		v.t.Logf("%s where %s: %d rows under the legacy bodies, not %d: %s", want.Concept, raw, count, *want.Count, l.Defect)
 	}
 	if len(matched) != count {
 		v.t.Errorf("%s where %s: %d rows %v, want %d", want.Concept, raw, len(matched), matched, count)
