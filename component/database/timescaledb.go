@@ -69,10 +69,15 @@ func registerTimescaleMigrations(m *migrate.Migrations, logger *slog.Logger) {
 		panic(err)
 	}
 
-	// The one Go migration in the set, versioned and ordered exactly like
-	// the .sql files above; Go because it has to log what it could not
-	// repair, and pgdriver discards a SQL NOTICE (memql#5292).
+	// The Go migrations in the set, versioned and ordered exactly like the
+	// .sql files above. Go because each does something SQL cannot here: the
+	// restamp logs what it could not repair, and pgdriver discards a SQL
+	// NOTICE (memql#5292); the concept-index pair inspects the catalog before
+	// it trusts an index it did not see built, and builds per chunk only on a
+	// hypertable (memql#5252).
 	registerSiteOwnerRestamp(m, logger)
+	registerMemoryNodesConceptIndex(m, logger)
+	registerMemoryNodesConceptIndexVerified(m, logger)
 }
 
 func timescaleExtensionPostHook(fallbackLogger *slog.Logger) PostMigrationHook {
