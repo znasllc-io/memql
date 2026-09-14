@@ -174,7 +174,7 @@ func TestAuthorizeModuleRoles(t *testing.T) {
 // registration; no loader ever walks it in these tests.
 func testPackTree(t *testing.T) fstest.MapFS {
 	t.Helper()
-	return fstest.MapFS{
+	return withLanguageLine(fstest.MapFS{
 		"concepts.memql": &fstest.MapFile{Data: []byte("// test pack tree\n")},
-	}
+	})
 }

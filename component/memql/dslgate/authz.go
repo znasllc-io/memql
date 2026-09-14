@@ -235,7 +235,7 @@ func classifyConstruct(path string, c construct, opts Options) (Bucket, string) 
 		return BucketAdmin, clause
 	}
 
-	if !UserScopeFieldRe.MatchString(RowSelectionSurface(c.Body)) {
+	if !SelectsByUserScopeField(c.Body) {
 		return BucketOther, clause
 	}
 	if _, exempt := UserScopeSelectionExemptions[path+" "+c.Name]; exempt {

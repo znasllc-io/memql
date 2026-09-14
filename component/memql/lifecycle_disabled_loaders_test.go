@@ -38,7 +38,7 @@ tool liveProbeTool {
 }
 `)}}
 	const domain = "lifecycledisabledtools"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := newToolRegistry()
@@ -80,7 +80,7 @@ tool collidingProbeFn {
 }
 `)}}
 	const domain = "lifecycledisabledtoolresurrect"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	tools := newToolRegistry()
@@ -126,7 +126,7 @@ prompt liveProbePrompt {
 		"live.tmpl": {Data: []byte("live {{.subject}}")},
 	}
 	const domain = "lifecycledisabledprompts"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := newPromptRegistry()
@@ -162,7 +162,7 @@ seed role liveProbeRole {
 }
 `)}}
 	const domain = "lifecycledisabledseeds"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := NewSeedRegistry()

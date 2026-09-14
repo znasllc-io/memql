@@ -38,7 +38,7 @@ func specBodyTree(specs string) fstest.MapFS {
 
 func specBodyErrs(t *testing.T, specs string) []error {
 	t.Helper()
-	tree, err := Load(specBodyTree(specs))
+	tree, err := Load(withLanguageLines(specBodyTree(specs)))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -177,14 +177,14 @@ spec labActor requiresAdminToo {
 // -- a guaranteed false positive on documented, working DSL, with no name
 // collision or product bundle needed (memql#2804 review).
 func TestSpecBodyAcceptsDefaultProjectionShape(t *testing.T) {
-	tree, err := Load(fstest.MapFS{
+	tree, err := Load(withLanguageLines(fstest.MapFS{
 		"lab/concepts.memql": &fstest.MapFile{Data: []byte(
 			"/// A lab widget.\nconcept widget {\n  region string  @description(\"Region.\")\n}\n")},
 		"lab/shapes.memql": &fstest.MapFile{Data: []byte(
 			"/// Default projection of every field.\n@row\nshape widget widgetFull {\n}\n")},
 		"lab/specs.memql": &fstest.MapFile{Data: []byte(
 			"/// Rows in a region.\nspec widgetFull inRegion {\n  return region == \"eu\"\n}\n")},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -236,7 +236,7 @@ spec widget recentWidget {
 // on legal DSL, which is the failure resolveFilterConcept's explicit-import
 // guard exists to prevent.
 func TestSpecBodySkipsExternallySuppliedBinding(t *testing.T) {
-	tree, err := Load(fstest.MapFS{
+	tree, err := Load(withLanguageLines(fstest.MapFS{
 		// A bundle-local shape that happens to share the engine shape's name.
 		"catalog/shapes.memql": &fstest.MapFile{Data: []byte(
 			"/// Unrelated local shape.\n@row\nshape labActor {\n  sku\n  price\n}\n")},
@@ -244,7 +244,7 @@ func TestSpecBodySkipsExternallySuppliedBinding(t *testing.T) {
 			"use common.shapes.{ labActor }\n\n" +
 				"/// Bound to the ENGINE shape, absent from this root.\n" +
 				"spec labActor requiresAdmin {\n  return role == \"admin\"\n}\n")},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestSpecBodySkipsExternallySuppliedBinding(t *testing.T) {
 // here would silence a real typo whenever some unrelated trait shared its
 // spelling (memql#2804 review).
 func TestSpecBodyTypoNotMaskedByUnrelatedConstruct(t *testing.T) {
-	tree, err := Load(fstest.MapFS{
+	tree, err := Load(withLanguageLines(fstest.MapFS{
 		"lab/shapes.memql": &fstest.MapFile{Data: []byte(
 			"/// Actor envelope.\n@actor\nshape labActor {\n  actor.role\n}\n")},
 		// An unrelated trait in another namespace sharing the typo's spelling.
@@ -271,7 +271,7 @@ func TestSpecBodyTypoNotMaskedByUnrelatedConstruct(t *testing.T) {
 		"lab/specs.memql": &fstest.MapFile{Data: []byte(
 			"/// Typo'd envelope key that collides with a trait name.\n" +
 				"spec labActor requiresAdmin {\n  return roles == \"admin\"\n}\n")},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestSpecBodyTypoNotMaskedByUnrelatedConstruct(t *testing.T) {
 // concept from the spec's domain -- which both flags the correct field and
 // admits the wrong one (memql#2804 review, D1).
 func TestSpecBodyResolvesDefaultProjectionInTheShapesScope(t *testing.T) {
-	tree, err := Load(fstest.MapFS{
+	tree, err := Load(withLanguageLines(fstest.MapFS{
 		"core/concepts.memql": &fstest.MapFile{Data: []byte(
 			"/// The real widget.\nconcept widget {\n  region string  @description(\"Region.\")\n}\n")},
 		"catalog/shapes.memql": &fstest.MapFile{Data: []byte(
@@ -303,7 +303,7 @@ func TestSpecBodyResolvesDefaultProjectionInTheShapesScope(t *testing.T) {
 		"orders/specs.memql": &fstest.MapFile{Data: []byte(
 			"use catalog.shapes.{ widgetFull }\n\n" +
 				"/// Reads the SHAPE's concept field.\nspec widgetFull inRegion {\n  return region == \"eu\"\n}\n")},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestSpecBodyResolvesDefaultProjectionInTheShapesScope(t *testing.T) {
 // boot -- the same asymmetry the shape-bound intrinsic rule exists to avoid
 // (memql#2804 review, D2).
 func TestSpecBodyRejectsInternalFieldOnDefaultProjection(t *testing.T) {
-	tree, err := Load(fstest.MapFS{
+	tree, err := Load(withLanguageLines(fstest.MapFS{
 		"lab/concepts.memql": &fstest.MapFile{Data: []byte(
 			"/// A lab widget.\nconcept widget {\n" +
 				"  region string  @description(\"Region.\")\n" +
@@ -329,7 +329,7 @@ func TestSpecBodyRejectsInternalFieldOnDefaultProjection(t *testing.T) {
 			"/// Default projection.\n@row\nshape widget widgetFull {\n}\n")},
 		"lab/specs.memql": &fstest.MapFile{Data: []byte(
 			"/// Reads a server-only field.\nspec widgetFull readsInternal {\n  return secret == \"x\"\n}\n")},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

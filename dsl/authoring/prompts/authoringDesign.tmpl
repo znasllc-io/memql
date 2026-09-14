@@ -56,13 +56,18 @@ Reusable catalog (constructs already available to compose -- prefer these):
 
 - Self-contained `.memql` for ONE construct of the stated kind.
 - Struct form only (no legacy `func (Receiver)` wrapping).
-- Filter/predicate grammar: `&&` / `||` / `!` / parens; `payload.X`
-  for fields, bare names for intrinsics (id, createdAt, createdBy).
+- A query filter is a lambda over the row:
+  `filter row => row.status == args.status`. Every field goes through
+  the parameter (`row.X`, `row.id`, `row.createdAt`, `row.createdBy`);
+  `&&` / `||` / `!` / parens.
+- A spec is `spec <Concept> <name> = row => <predicate>` and a trait
+  `trait <name> = row => <predicate>`; use either as `name(row)`.
 - Caller args: declared in an `args { ... }` block, read as `args.X`.
   Engine values are bare: `now`, `actor.userId`, `partition`.
 - Mutations: exactly one `insert { ... }` or `update { ... }` block.
 - Owner-stamped writes (`createdBy: actor.userId`) and owner-filtered
-  reads (`payload.ownerUserId == actor.userId`) for per-row authz.
+  reads (`filter row => row.ownerUserId == actor.userId`) for per-row
+  authz.
 
 # Multi-phase decomposition (long, sequential duties)
 

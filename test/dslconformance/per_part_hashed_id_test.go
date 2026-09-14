@@ -1,9 +1,6 @@
 package dslconformance
 
 import (
-	"github.com/znasllc-io/memql/dsl"
-	"io"
-	"regexp"
 	"strings"
 	"testing"
 )
@@ -50,32 +47,35 @@ var perPartHashedIdFiles = []string{
 }
 
 // separatorInsideHashConcat matches a `":"` literal used as a concat separator
-// inside a hash(concat(...)) call: a bare `, ":",` sequence.
+// inside a hash(concat(...)) call: a bare `, ":",` sequence, or its edition-2026
+// spelling `+ ":" +` (epic memql#5363) -- concatSeparatorRe reads both.
 //
 // Deliberately narrow. A colon inside a string VALUE (`"v1:cluster:node"`) or
 // in prose is not a separator, and flagging those would make the gate noisy
 // enough to be suppressed -- which is how a rule stops being a rule.
-var separatorInsideHashConcat = regexp.MustCompile(`,\s*":"\s*,`)
+var separatorInsideHashConcat = concatSeparatorRe
 
 func TestConvertedIdDerivationsKeepPerPartHashing(t *testing.T) {
-	var checked int
+	bothCorpora(t, checkConvertedIdDerivationsKeepPerPartHashing)
+}
+
+func checkConvertedIdDerivationsKeepPerPartHashing(t *testing.T, c corpus) {
+	var checked, derivations int
 	for _, path := range perPartHashedIdFiles {
-		fh, err := dsl.Tree().Open(path)
-		if err != nil {
-			t.Fatalf("open %s: %v", path, err)
-		}
-		raw, err := io.ReadAll(fh)
-		fh.Close()
-		if err != nil {
-			t.Fatalf("read %s: %v", path, err)
+		raw, ok := c.files[path]
+		if !ok {
+			t.Fatalf("%s is not in the %s corpus", path, c.name)
 		}
 		checked++
 
-		for i, line := range strings.Split(string(raw), "\n") {
+		for i, line := range strings.Split(raw, "\n") {
 			// Comments explain the OLD form on purpose; the rule is about
 			// authored expressions, not about prose describing them.
 			if strings.HasPrefix(strings.TrimSpace(line), "//") {
 				continue
+			}
+			if strings.Contains(line, "hash(") {
+				derivations++
 			}
 			if !separatorInsideHashConcat.MatchString(line) {
 				continue
@@ -96,6 +96,12 @@ func TestConvertedIdDerivationsKeepPerPartHashing(t *testing.T) {
 		t.Fatalf("checked %d of %d files -- the sweep has stopped resolving them and this gate "+
 			"would now pass vacuously", checked, len(perPartHashedIdFiles))
 	}
+	// And a file that stopped deriving ids reads like one that derives them
+	// correctly. Measured when the floor was set: 2 lines calling hash(), one per file.
+	if derivations < 2 {
+		t.Fatalf("found %d hash() lines in the converted files -- the derivations this pins are gone "+
+			"or moved, and the gate would pass on anything", derivations)
+	}
 }
 
 // The gate must actually fire, or the regex could be wrong in a way that
@@ -107,6 +113,9 @@ func TestPerPartHashingGateMatchesASeparatorAndNotAValue(t *testing.T) {
 		`          args.partitionId, ":",`,
 		`      canonicalId(args.participantId, participant), ":",`,
 		`      shortId(args.deploymentId), ":", args.nodeType`,
+		// Edition 2026 spells the same separator as a `+` operand.
+		`        shortId(args.deploymentId) + ":" +`,
+		`      id: hash(args.partitionId + ":" + args.key)`,
 	} {
 		if !separatorInsideHashConcat.MatchString(bad) {
 			t.Errorf("the gate does not match a separator, so it would report clean forever: %q", bad)
@@ -118,6 +127,8 @@ func TestPerPartHashingGateMatchesASeparatorAndNotAValue(t *testing.T) {
 		`  filter  kind == "v1:cognition:utterance"`,       // a colon inside a VALUE
 		`// was hash(concat(a, ":", b)) before memql#3009`, // prose (also skipped by the comment check)
 		`      hash(canonicalId(args.participantId, participant)),`,
+		`      id: hash(hash(args.partitionId) + hash(args.key))`, // the per-part form, edition 2026
+		`    id: "utt-" + hash(hash(a) + hash(b))`,
 	} {
 		if separatorInsideHashConcat.MatchString(ok) && !strings.HasPrefix(strings.TrimSpace(ok), "//") {
 			t.Errorf("the gate fires on a legitimate line, which is how a gate gets suppressed "+

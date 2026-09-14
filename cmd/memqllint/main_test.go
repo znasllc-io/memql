@@ -5,11 +5,15 @@ package main
 // report, since downstream product CI consumes exactly this surface.
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	langparser "github.com/znasllc-io/memql/component/language/parser"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // captureRun runs the CLI with args while capturing everything it writes to
@@ -36,7 +40,27 @@ func captureRun(t *testing.T, args []string) (int, string) {
 }
 
 // writeTree materializes a DSL fixture under a temp dir and returns its root.
+// Every domain directory declares the engine's own language line unless the
+// fixture writes one itself: a bundle domain must carry its own (memql#5357),
+// and each test here is about the one defect its fixture names.
 func writeTree(t *testing.T, files map[string]string) string {
+	t.Helper()
+	withLines := make(map[string]string, len(files))
+	for rel, content := range files {
+		withLines[rel] = content
+	}
+	for rel := range files {
+		if dir, base, ok := strings.Cut(rel, "/"); ok && !strings.Contains(base, "/") && strings.HasSuffix(base, ".memql") {
+			if _, declared := withLines[dir+"/"+dslfs.ManifestFile]; !declared {
+				withLines[dir+"/"+dslfs.ManifestFile] = dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render()
+			}
+		}
+	}
+	return writeTreeAsIs(t, withLines)
+}
+
+// writeTreeAsIs materializes exactly the files given, language line or not.
+func writeTreeAsIs(t *testing.T, files map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
 	for rel, content := range files {
@@ -59,10 +83,7 @@ concept item {
   status  string  @description("Item status.")
 }`
 
-func TestRun_CleanTreeExitsZero(t *testing.T) {
-	root := writeTree(t, map[string]string{
-		"demo/concepts.memql": testConcepts,
-		"demo/queries.memql": `use demo.concepts.{ item }
+const testQueries = `use demo.concepts.{ item }
 
 @enabled
 @description("A clean query.")
@@ -71,10 +92,73 @@ query item queryItems {
     name  string  @required
   }
   filter  name == args.name
-}`,
+}`
+
+const testShapes = `use demo.concepts.{ item }
+
+@description("An item card.")
+@row
+shape item itemCard {
+  row.id
+  name
+}`
+
+func TestRun_CleanTreeExitsZero(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/queries.memql":  testQueries,
 	})
 	if code := run([]string{root}); code != 0 {
 		t.Errorf("clean tree: run() = %d, want 0", code)
+	}
+}
+
+// TestRun_BundleWithoutLanguageLineExitsOne: memqllint is the pre-boot gate a
+// product bundle has, so a domain the engine would refuse for declaring no
+// language line (memql#5357) must fail the lint with the line to add -- as
+// the domain's ONE diagnostic. The fixture carries a shape and a query bound
+// to the concept, so anything read from the refused domain would cascade
+// ("binds concept ... which does not resolve") and show here.
+func TestRun_BundleWithoutLanguageLineExitsOne(t *testing.T) {
+	files := map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/shapes.memql":   testShapes,
+		"demo/queries.memql":  testQueries,
+	}
+	code, out := captureRun(t, []string{"--json", writeTreeAsIs(t, files)})
+	if code != 1 {
+		t.Fatalf("a bundle domain with no memql.toml: run() = %d, want 1\n%s", code, out)
+	}
+	var report Report
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("the --json report does not parse: %v\n%s", err, out)
+	}
+	if len(report.Errors) != 1 {
+		t.Fatalf("want exactly one diagnostic, the missing line, got %d:\n%s", len(report.Errors), out)
+	}
+	if msg := report.Errors[0].Message; !strings.Contains(msg, "[language_line_missing]") || !strings.Contains(msg, "add demo/memql.toml containing") {
+		t.Errorf("the one diagnostic must be the missing line naming the file to add, got %q", msg)
+	}
+
+	// Positive control: the same bundle declaring its line lints clean, so
+	// the shape and query are constructs that load, and their silence above
+	// is the refused domain being read by no loader.
+	if code, out := captureRun(t, []string{writeTree(t, files)}); code != 0 {
+		t.Errorf("the same bundle with its language line: run() = %d, want 0\n%s", code, out)
+	}
+}
+
+// TestRun_UnreadRootManifestIsReported: a memql.toml at the root of the
+// linted tree is never read -- each domain carries its own -- so memqllint
+// prints it rather than letting an author believe it governs the bundle.
+func TestRun_UnreadRootManifestIsReported(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"memql.toml":          dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render(),
+		"demo/concepts.memql": testConcepts,
+	})
+	code, out := captureRun(t, []string{"--json", root})
+	if code != 1 || !strings.Contains(out, "[language_line_unread]") {
+		t.Errorf("a root-level memql.toml: run() = %d, want 1 with a language_line_unread diagnostic:\n%s", code, out)
 	}
 }
 

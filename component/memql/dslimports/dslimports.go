@@ -19,6 +19,7 @@ import (
 	languageCompiler "github.com/znasllc-io/memql/component/language/compiler"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/dslfs"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // Compile-time guarantee that the ast alias still exists.
@@ -91,7 +92,25 @@ func Load(root fs.FS) (*Tree, error) {
 	var diagnostics []error
 	rawByFile := make(map[string][]dslfs.RawImport, len(paths))
 
+	// Each file is parsed through the front end of the edition its domain
+	// declares (memql#5358), exactly as the engine reads it at boot, so a
+	// tree written in another edition lints as it loads.
+	//
+	// A domain whose language line the engine refuses is read by no loader
+	// at boot, so it is not parsed here either: its files enter the tree
+	// OPAQUE -- present, importing nothing, defining nothing, marked
+	// ImportsOnly -- with no diagnostic of their own. The refusal is the
+	// engine-parity pass's to report, once (memqllint runs both), and an
+	// importer in another domain still resolves the module rather than
+	// cascading a "does not exist" off a file that is merely unread.
+	lines, _ := languageParser.ResolveLanguageLines(root, memqldsl.EmbeddedTree{})
+
 	for _, p := range paths {
+		if line, ok := lines.For(p); ok && line.Refused {
+			tree.Files[p] = &languageAst.File{Path: p}
+			tree.ImportsOnly[p] = true
+			continue
+		}
 		f, openErr := root.Open(p)
 		if openErr != nil {
 			diagnostics = append(diagnostics, fmt.Errorf("%s: open: %w", p, openErr))
@@ -101,6 +120,11 @@ func Load(root fs.FS) (*Tree, error) {
 		f.Close()
 		if readErr != nil {
 			diagnostics = append(diagnostics, fmt.Errorf("%s: read: %w", p, readErr))
+			continue
+		}
+		content, prepErr := lines.Prepare(p, content)
+		if prepErr != nil {
+			diagnostics = append(diagnostics, fmt.Errorf("%s: %w", p, prepErr))
 			continue
 		}
 

@@ -56,6 +56,15 @@ func MountRuntimeDomainsFromEnv(logger *slog.Logger) []string {
 	var mounted []string
 	for _, e := range entries {
 		if !e.IsDir() {
+			// A language line at the ROOT is never read (memql#5357): only
+			// domain directories are mounted, so each carries its own
+			// <domain>/memql.toml. Warned because the author meant something by
+			// it, and every domain without its own is refused at boot.
+			if e.Name() == dslfs.ManifestFile && logger != nil {
+				logger.Warn("MEMQL_DSL_PATH: "+dslfs.ManifestFile+" at the root is never read; declare the language line in each domain directory as <domain>/"+dslfs.ManifestFile,
+					"component", "dsl.runtimeMount",
+					"path", filepath.Join(root, e.Name()))
+			}
 			continue
 		}
 		domain := e.Name()

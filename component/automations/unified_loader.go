@@ -15,6 +15,7 @@ package automations
 // isolation.
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -88,6 +89,10 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 	// list in a single boot attempt rather than peeling them off one per
 	// restart.
 	var problems []automationLoadProblem
+	// This walker reads the tree itself, so it reads each file through the
+	// front end of the edition the file's domain declares (memql#5358), as
+	// baseloader.ReadAll does for every other construct kind.
+	lines, _ := memql.ResolveLanguageLines(tree)
 
 	err := fs.WalkDir(tree, ".", func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -129,6 +134,26 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 			}
 			problems = append(problems, automationLoadProblem{
 				Path: path, Phase: "read", Err: readErr.Error(),
+			})
+			return nil
+		}
+		// Before anything interprets it -- the terse lowering and the slice
+		// extractor below both read the core grammar. A file the front end
+		// refuses is a load problem like any other, and is not read at all.
+		data, prepErr := lines.Prepare(path, data)
+		if errors.Is(prepErr, languageParser.ErrLanguageLineRefused) {
+			// The domain's language line is refused, so none of it is read;
+			// engine Init reports that once, and an automation-level echo
+			// per file would bury it.
+			return nil
+		}
+		if prepErr != nil {
+			if l.logger != nil {
+				l.logger.Warn("unified automation loader: file refused by its edition's front end",
+					"component", ComponentName, "path", path, "error", prepErr)
+			}
+			problems = append(problems, automationLoadProblem{
+				Path: path, Phase: "edition", Err: prepErr.Error(),
 			})
 			return nil
 		}

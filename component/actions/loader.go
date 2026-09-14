@@ -1,8 +1,10 @@
 package actions
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"regexp"
 	"sort"
 	"strings"
@@ -225,6 +227,14 @@ func LoadSource(content, path string) ([]*Action, error) {
 	return out, nil
 }
 
+// warnEditionRefused is the one word a walker of this package says about a
+// file its edition's front end refused (memql#5358). The package has no
+// logger of its own, so it speaks through the process default.
+func warnEditionRefused(component, path string, err error) {
+	slog.Default().Warn("file not read: its edition's front end refused it (engine Init refuses the tree naming it)",
+		"component", component, "file", path, "error", err)
+}
+
 // LoadFromFS walks the given DSL tree, loads every authored action from
 // every (non-underscore) .memql file, and registers the enabled ones.
 // Returns the number registered.
@@ -255,11 +265,29 @@ func (r *Registry) LoadFromFS(tree fs.FS) (int, error) {
 	}
 	sort.Strings(paths)
 
+	// Each file is read through the front end of the edition its domain
+	// declares (memql#5358). A file of a domain whose language line is
+	// refused is left out without a word: that refusal is reported once, by
+	// engine Init. A file the front end itself refuses is not read at all --
+	// under the core grammar its text could mean something else -- and is
+	// WARNED about, not refused: this walker also reads a disabled pack's
+	// files, which boot does not, and a refusal here would let a switched-off
+	// pack refuse boot. For an enabled pack, Init refuses the tree naming it.
+	lines, _ := languageParser.ResolveLanguageLines(tree, memqldsl.EmbeddedTree{})
+
 	total := 0
 	for _, p := range paths {
 		raw, rerr := fs.ReadFile(tree, p)
 		if rerr != nil {
 			return total, fmt.Errorf("actions: read %s: %w", p, rerr)
+		}
+		raw, prepErr := lines.Prepare(p, raw)
+		if errors.Is(prepErr, languageParser.ErrLanguageLineRefused) {
+			continue
+		}
+		if prepErr != nil {
+			warnEditionRefused("actions.loader", p, prepErr)
+			continue
 		}
 		acts, lerr := LoadSource(string(raw), p)
 		if lerr != nil {

@@ -46,6 +46,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/dslclause"
 )
 
 // PredicateInfo is what the rewrite knows about a spec or trait by name.
@@ -66,11 +67,7 @@ type PredicateInfo struct {
 const xmWrapWidth = 110
 
 var (
-	// xmLambdaHead recognises a clause that already opens with a lambda
-	// header. Such a clause is edition 2026 and is left alone, which is what
-	// makes a second run a no-op.
-	xmLambdaHead = regexp.MustCompile(`^(?:[A-Za-z_][A-Za-z0-9_]*|\([ \t]*[A-Za-z_][A-Za-z0-9_]*(?:[ \t]*,[ \t]*[A-Za-z_][A-Za-z0-9_]*)*[ \t]*\))[ \t]*=>`)
-	xmIdent      = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	xmIdent = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 	xmSpecHeader  = regexp.MustCompile(`(?m)^[ \t]*spec[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 	xmTraitHeader = regexp.MustCompile(`(?m)^[ \t]*trait[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
@@ -425,7 +422,7 @@ func (r *xmRewrite) queryFilters(query string, lo, hi int) {
 		}
 		text := body[start:end]
 		if t := strings.TrimSpace(text); t != "" {
-			if acc != "" && (unclosedDelimiters(acc) || endsOnDanglingOperator(acc) || opensWithBinaryOperator(t)) {
+			if acc != "" && dslclause.ContinuesClause(acc, t) {
 				acc += " " + t
 				clause = append(clause, xmLine{start: lo + start, text: text})
 			} else {
@@ -471,8 +468,8 @@ func (r *xmRewrite) filterClause(query string, lines []xmLine) {
 		parts[i] = strings.TrimSpace(l.text)
 	}
 	clause := strings.TrimSpace(strings.TrimPrefix(strings.Join(parts, " "), "filter"))
-	if clause == "" || xmLambdaHead.MatchString(clause) {
-		return
+	if clause == "" || dslclause.OpensLambda(clause) {
+		return // already edition 2026: this is what makes a second run a no-op
 	}
 	if f.hasComment(exprStart, exprEnd) {
 		r.fail(kw, "query %s: filter %q: a comment inside the clause would be lost; move it above the clause and rerun", query, clause)
@@ -582,7 +579,7 @@ func (r *xmRewrite) triggerFilters() {
 func (r *xmRewrite) triggerFilter(open, end int) {
 	f := r.f
 	inner := strings.TrimSpace(f.code[open+1 : end])
-	if inner == "" || xmLambdaHead.MatchString(inner) {
+	if inner == "" || dslclause.OpensLambda(inner) {
 		return
 	}
 	if f.hasComment(open+1, end) {

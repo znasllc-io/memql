@@ -839,3 +839,43 @@ func TestV1StringFieldsAreValueLeaves(t *testing.T) {
 		t.Fatalf("want the legacy value-leaf refusal, got %v", err)
 	}
 }
+
+// TestLegacyAutomationWithALambdaTriggerFilter: the parser accepts the
+// edition-2026 trigger filter in either grammar (a pushdown position no
+// legacy spelling can be mistaken for), so a LEGACY automation can carry
+// `@filter(row => ...)`. It is parsed at load and decided over the triggering
+// row, exactly as in a v1 automation -- never handed to the string evaluator
+// as lambda text.
+func TestLegacyAutomationWithALambdaTriggerFilter(t *testing.T) {
+	const concept = "v1:probe:thing"
+	a, err := NewLoader(LoaderOptions{}).parseJSON([]byte(`{
+		"name": "legacyWithLambdaFilter",
+		"trigger": {"event": "graph.node.created.`+concept+`", "filter": "row => row.status == \"archived\""},
+		"steps": [{"id": "fire", "type": "function", "function": {"name": "fire"}}]
+	}`), "test:legacy")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if a.IsV1() || a.Trigger.FilterLambda == nil {
+		t.Fatalf("v1=%v lambda=%v: want a legacy automation whose filter parsed as a lambda", a.IsV1(), a.Trigger.FilterLambda)
+	}
+	for status, want := range map[string]bool{"archived": true, "active": false} {
+		ev := graphCreatedEvent(concept, "thing-"+status, map[string]any{"status": status})
+		got, err := evaluateTriggerFilter(a, &ev, nil)
+		if err != nil || got != want {
+			t.Fatalf("filter over %q = %v, %v; want %v", status, got, err, want)
+		}
+	}
+	// A legacy filter that is not a lambda stays the string evaluator's.
+	plain, err := NewLoader(LoaderOptions{}).parseJSON([]byte(`{
+		"name": "legacyPlainFilter",
+		"trigger": {"event": "graph.node.created.`+concept+`", "filter": "payload.status == \"archived\""},
+		"steps": [{"id": "fire", "type": "function", "function": {"name": "fire"}}]
+	}`), "test:legacy")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if plain.Trigger.FilterLambda != nil {
+		t.Fatal("a legacy string filter was parsed as a lambda")
+	}
+}

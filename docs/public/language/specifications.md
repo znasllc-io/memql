@@ -13,14 +13,13 @@ owner: znas
 
 ## What Specs Are
 
-Specs are atomic, named boolean predicates declared in struct form. A
-spec **binds exactly one shape XOR concept in its signature** and the
-body **`return`s a boolean** over **bare** field names (epic #2281):
+Specs are atomic, named boolean predicates. A spec **binds exactly one
+shape XOR concept in its signature** (epic #2281), and its body is a
+lambda: one parameter, then one boolean expression that reads what the
+signature binds through that parameter:
 
 ```memql fragment
-spec <boundName> <name> {
-  return <boolean-expression>
-}
+spec <boundName> <name> = row => <boolean expression>
 ```
 
 `<boundName>` resolves through the file-top `use` import (a shape import
@@ -31,29 +30,35 @@ the spec is evaluated:
   compiles into a SQL `WHERE` fragment and pushes down to the database
   for filtering.
 - **Context-specs** -- bind an `@actor` shape (the only gateway to the
-  auth envelope). The expression evaluates in-process against the auth
-  context; named as a bare top-level filter conjunct, or from Go via
-  `engine.EvaluateSpec(ctx, "name")`, for actor-based checks like
-  "is admin", "owns partition", etc.
+  auth envelope). The parameter is spelled `actor` and is the envelope:
+  `spec actorEnvelope requiresOwner = actor => actor.role == "owner"`.
+  The expression evaluates in-process against the auth context; apply
+  it to `actor` in a filter (`requiresOwner(actor)`), or call it from Go
+  with `engine.EvaluateSpec(ctx, "name")`.
 
-A spec body never reads `actor.*` / `row.*` directly -- bind a shape
-that projects it and read the projected key bare. A `trait` is the one
-deliberately-unbound row predicate (bare payload fields, validated at
-the call site).
+The body reads every field through the parameter -- `row.archived`,
+`row.createdAt` -- never as a bare name. A `trait` is the one
+deliberately-unbound row predicate: `trait isActiveRecord = row =>
+row.active == true`, with its fields checked against the concrete
+concept where it is applied.
 
 ## Authoring rules
 
-- Body is a single `return <boolean expression>` over bare field names
-  (no `payload.` prefix -- the binding names the surface).
+- The body is one boolean expression after the lambda header. There is
+  no truthiness: `row => row.title` is refused, because a string is not
+  a condition.
+- A spec or trait is applied to its receiver, like a function:
+  `isArchivedArtifact(row)`, `requiresOwner(actor)`.
 - Side-effect free. Specs cannot call mutation functions or logic
   functions.
 - Named for the predicate they express, with no kind prefix
   (`requiresOwner`, `isActiveRecord`). The `spec` / `trait` keyword
   already marks the kind at the declaration.
-- The `@shape("name")` annotation is removed; the legacy
-  `func (Spec) name(ctx any) bool { ... }` form and the older
-  bare-expression body (no `return`) are retired and rejected with a
-  migration hint.
+- The brace body `spec <boundName> <name> { return <expression> }` is
+  retired in edition 2026: the parser refuses it and names
+  `memqlmigrate --rewrite=expressions`, which writes the lambda form.
+  The `@shape("name")` annotation and the legacy
+  `func (Spec) name(ctx any) bool { ... }` form are retired too.
 
 ## Examples
 
@@ -63,21 +68,16 @@ the call site).
 use library.concepts.{ artifact }
 
 @description("Matches archived artifacts")
-spec artifact isArchivedArtifact {
-  return archived == true
-}
+spec artifact isArchivedArtifact = row => row.archived == true
 
 @description("Archived artifacts filed by system automation")
-spec artifact systemArchivedArtifact {
-  return archived == true && createdBy == "system:automation"
-}
+spec artifact systemArchivedArtifact = row => row.archived == true && row.createdBy == "system:automation"
 ```
 
-Called by bare reference inside a query's `filter` clause. The
-query binds its concept in the signature (`query <Concept> <name>`)
-and pulls cross-file constructs in via file-top `use` imports;
-predicates compose with the Go boolean grammar (`&&` / `||` and parens —
-there is no `!` in a filter or a spec; it is refused at load, memql#3630):
+Applied to the row inside a query's `filter` clause. The query binds its
+concept in the signature (`query <Concept> <name>`) and pulls cross-file
+constructs in via file-top `use` imports; predicates compose with `&&`,
+`||`, `!` and parentheses:
 
 ```memql
 use library.concepts.{ artifact }
@@ -86,13 +86,15 @@ query artifact archivedArtifacts {
   args {
     folderId  string  @required
   }
-  filter  folderId==args.folderId && isArchivedArtifact
+  filter  row => row.folderId == args.folderId && isArchivedArtifact(row)
   shape   artifactFull
 }
 ```
 
-(The legacy `;`-AND / `,`-OR filter separators are retired and
-rejected at parse time -- `&&` / `||` are the only connectives.)
+(The `;`-AND / `,`-OR separators are retired: the parser refuses them
+and names `&&` / `||`. The pre-v1 bare reference `isArchivedArtifact`
+is what `memqlmigrate --rewrite=expressions` rewrites to
+`isArchivedArtifact(row)`.)
 
 ### Context-spec (in-process)
 
@@ -100,9 +102,7 @@ rejected at parse time -- `&&` / `||` are the only connectives.)
 use common.shapes.{ actorEnvelope }
 
 @description("Caller must hold the owner role -- the rollback gate (#1876).")
-spec actorEnvelope requiresOwner {
-  return role == "owner"
-}
+spec actorEnvelope requiresOwner = actor => actor.role == "owner"
 ```
 
 **A ROLE COMPARISON IS THE ONE THING THIS FORM IS NOW WRONG FOR** (epic
@@ -115,12 +115,14 @@ or `@requiresCapability("<verb>", "<resource>")` for a grant; both are validated
 at load and enforced at execution.
 
 (The `actorEnvelope` `@actor` shape is the gateway to the auth envelope;
-the spec reads its projected key -- `role` -- by bare name. The
-signature binding is verified at load: it must resolve to an imported
-shape or concept.)
+the spec reads its projected key -- `role` -- through its `actor`
+parameter. The signature binding is verified at load: it must resolve
+to an imported shape or concept.)
 
-Context-specs are named as a bare top-level filter conjunct or, from Go,
-`engine.EvaluateSpec(ctx, "name")` against the request's auth context.
+A context-spec is applied to `actor` in a filter --
+`filter row => requiresOwner(actor) && row.status == "open"` -- or, from
+Go, evaluated with `engine.EvaluateSpec(ctx, "name")` against the
+request's auth context.
 
 ## CQS interaction
 
@@ -153,6 +155,6 @@ What remains:
   not a predicate surface.
 - Caller-context boolean checks (is admin, owns partition,
   permission gates) are authored as **context-specs** in
-  `dsl/<namespace>/specs.memql` and named as a bare conjunct /
-  `engine.EvaluateSpec`.
+  `dsl/<namespace>/specs.memql` and applied as `name(actor)` /
+  evaluated with `engine.EvaluateSpec`.
 - Risk/scope decision logic lives in Go (`component/safety`).

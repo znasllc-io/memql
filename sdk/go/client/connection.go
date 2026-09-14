@@ -107,6 +107,16 @@ type Connection struct {
 	// predates the field; both mean "render as unknown", so they are not told
 	// apart here.
 	EngineCommit string
+	// Edition, GrammarVersion and EditorRelease name the MemQL language the
+	// node speaks (memql#5362): the edition ("2026"), the grammar version
+	// inside it, and the first release of MemQL for VS Code that carries that
+	// grammar. Empty when the node predates the fields -- "older than this
+	// contract", which a caller renders as "cannot compare", never as a match.
+	// A grammar version is a label: compare two for equality only; the order
+	// comes from EditorRelease, which is a release.
+	Edition        string
+	GrammarVersion string
+	EditorRelease  string
 }
 
 // ConnectConfig configures a new gRPC connection.
@@ -472,11 +482,15 @@ func (c *Connection) handshake(ctx context.Context) error {
 		c.Version = hello.GetVersion()
 		c.EngineVersion = hello.GetEngineVersion()
 		c.EngineCommit = hello.GetEngineCommit()
+		c.Edition = hello.GetEdition()
+		c.GrammarVersion = hello.GetGrammarVersion()
+		c.EditorRelease = hello.GetEditorRelease()
 		if c.logger != nil {
 			c.logger.Info("connected to MemQL node",
 				"nodeId", c.NodeId,
 				"protocolVersion", c.Version,
 				"engineVersion", c.EngineVersion,
+				"grammarVersion", c.GrammarVersion,
 			)
 		}
 	}

@@ -215,6 +215,7 @@ examples/referencepack/
 ├── register_referencepack.go    Go: //go:build referencepack -> init() { Register(Domain) }
 ├── reference_pack_test.go        test: concept load + provider capability + contract gate (exported API)
 └── dsl/
+    ├── memql.toml                the language line the pack's domain is written in (memql = "1.0", edition = "2026")
     ├── concepts.memql            one concept (greeting, owned-tier ownerUserId)
     ├── builtins.memql            one builtin backed by @executor("integration.referencepack.composeGreeting")
     ├── tools.memql               one tool surfacing the builtin to the agent tool loop
@@ -299,7 +300,11 @@ core, and extends both the concept and tool surfaces -- with no database.
 
 ## Build your own pack: the checklist
 
-1. Create a package directory with a `dsl/` subdir for your `.memql` files.
+1. Create a package directory with a `dsl/` subdir for your `.memql` files,
+   and declare the language they are written in with a `dsl/memql.toml`
+   (`memqlmigrate --rewrite=language-line -w dsl/` writes it). The engine
+   refuses to boot a pack domain without one -- see
+   [The language line](../language/memql.md#the-language-line).
 2. Write your concept(s) with `@version` + `@namespace("yourdomain")`; model
    authz with an `ownerUserId` (owned tier) or the granted/admin/public pattern.
 3. Write any builtins (`@executor("integration.yourdomain.<fn>")`), tools, and
@@ -333,6 +338,7 @@ examples/deploypack/
 ├── register_deploypack.go    Go: //go:build deploypack -> init() { Register(Domain) }
 ├── deploy_pack_test.go        test: capability exposure + per-effect routing (exported API)
 └── dsl/
+    ├── memql.toml             the pack domain's language line
     ├── builtins.memql         5 builtins -> @executor("integration.deploypack.{commitOverlay,argoSync,runPromote,recordBack,observeReconciledState}")
     ├── automations.memql      two CDC automations on v1:cluster:deployment status
     └── logic.memql            driveDeploymentInProgress (promote + transition) + recordReconciledState (Model A record-back)

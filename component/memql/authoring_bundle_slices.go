@@ -35,6 +35,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/dslclause"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -187,6 +188,48 @@ func detectUnrecognizedConstructs(source string) []SandboxConstruct {
 			Kind:   unrecognizedConstructKind,
 			Name:   firstLineExcerpt(source[headerStart:]),
 			Source: source[headerStart:end],
+		})
+	}
+	return append(out, detectUnrecognizedBraceLessConstructs(source, scan)...)
+}
+
+// unrecognizedBraceLessHeader matches a top-level declaration in edition
+// 2026's BRACE-LESS form -- `<keyword> <name> = x => ...`, or with a bound
+// name, `<keyword> <bound> <name> = x => ...` (epic memql#5363). The brace
+// pattern above cannot see one (there is no `{`), so a misspelled `triat isX =
+// row => ...` was dropped from the bundle with no diagnostic at all.
+var unrecognizedBraceLessHeader = regexp.MustCompile(
+	`(?m)^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_-]*(?:[ \t]+[A-Za-z_][A-Za-z0-9_-]*)?[ \t]*=[ \t]*(?:[A-Za-z_][A-Za-z0-9_]*|\([^)\n]*\))[ \t]*=>`,
+)
+
+// detectUnrecognizedBraceLessConstructs is detectUnrecognizedConstructs for the
+// brace-less form: a top-level lambda declaration whose keyword the splitter
+// does not slice. Its extent is its expression (dslclause.ClauseExtent), the
+// rule the brace-less spec and trait slicer uses.
+func detectUnrecognizedBraceLessConstructs(source, scan string) []SandboxConstruct {
+	matches := unrecognizedBraceLessHeader.FindAllStringSubmatchIndex(scan, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	lines := strings.Split(scan, "\n")
+	var out []SandboxConstruct
+	for _, m := range matches {
+		headerStart := m[0]
+		if braceDepthBefore(scan, headerStart) != 0 || splitterHandledKeywords[scan[m[2]:m[3]]] {
+			continue
+		}
+		first := strings.Count(scan[:headerStart], "\n")
+		end := headerStart
+		for i, last := first, dslclause.ClauseExtent(lines, first); i <= last; i++ {
+			end += len(lines[i]) + 1
+		}
+		if end > len(source) {
+			end = len(source)
+		}
+		out = append(out, SandboxConstruct{
+			Kind:   unrecognizedConstructKind,
+			Name:   firstLineExcerpt(source[headerStart:]),
+			Source: strings.TrimRight(source[headerStart:end], "\n"),
 		})
 	}
 	return out

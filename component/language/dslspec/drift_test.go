@@ -11,8 +11,9 @@ package dslspec
 //
 // A _test.go file may import component/language/parser and
 // component/language/annotations without a production import cycle:
-// dslspec's PRODUCTION code imports only annotations (a leaf), and the
-// parser does NOT import dslspec. The exported parser vars
+// dslspec's PRODUCTION code imports annotations and, for Edition and
+// GrammarVersion only, the parser; the parser does NOT import dslspec.
+// The exported parser vars
 // (parser.TopLevelDeclKeywords, parser.StructFormKeywords) are the
 // authoritative, introspectable lists the live switch/rewriter
 // reference -- this test compares the spec against THEM, not against a

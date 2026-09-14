@@ -23,6 +23,8 @@ verify anything here.
 | `dslspec/` | The single machine-readable spec of the authoring surface: constructs, keywords, operators, field types, and the legal-next rules that drive completion. Derives annotations FROM `annotations/` rather than re-listing them, and exports as portable JSON (memql#2122-2125). | ~9 files |
 | `dslclause/` | One answer to "which keywords terminate a filter clause", shared by the text-scanning gates so they cannot drift about it (memql#2815). Owns clause EXTRACTION only, not predicate decomposition -- the package comment says why that split is deliberate. | ~5 files |
 | `pagination/` | The pure classifier behind the pagination authoring rule: a list-returning query must carry `paginate`, `sort`, `count`, or `@unbounded("reason")` (memql#1965). Operates on raw source text using line structure only. | ~3 files |
+| `functions/` | The function catalog (D10): every function and method an edition-2026 expression can call, one entry and one spelling each, with its signature, its tier and the retired spellings it replaces, plus the operator table (`Operators()`). The two evaluators, Sense and the generated docs read it. | ~6 files |
+| `tiers/` | The tier manifest (D11): every expression position, whether it pushes down to SQL (P) or runs in process (M), and the node kinds, catalog functions and predicate applications it admits (`Rules()`), plus the M tier's cost limits. | ~6 files |
 | `language.go` | The `Language` component: bundles the parser and compiler submodules under one lifecycle with their own env-configured loggers. Note that the *root* package is thin -- almost every consumer imports a sub-package directly, not this. | 2 files |
 
 ---
@@ -37,21 +39,33 @@ Each stage is a no-op when its detector does not match.
 
 Two consequences that bite:
 
-- **The rewriter is a line-oriented text pass, not a parse.** It scans
-  `filter` / `return` bodies line by line, so a multi-line boolean
-  expression it would accept on one line fails (memql#4123). Nothing in the
-  shipped corpus hits this today; a future formatting-convention change
-  would hit it immediately.
+- **The rewriter is a line-oriented text pass, not a parse.** A struct
+  query's `filter` may continue onto lines that open with a binary operator,
+  or after a line that ends on one (`joinStructQueryContinuations`,
+  memql#4123); any other line starts a new field.
 - **A parse error can come from the rewriter, not the parser**, and will
   point at rewritten source rather than what the author wrote. When an error
   message does not match the file you are looking at, check
   `parser/rewriter.go` first.
 
+In edition 2026 a struct query's filter is a lambda over the row, and the
+rewriter emits it as `concept==<id> && (<lambda>)`. The lambda's body is read
+by the v1 expression grammar in `parser/v1_expr.go` (`ParseV1Expression`,
+`ParseV1Lambda`, and `V1PrecedenceTable`, the precedence the language
+reference publishes); the spellings it retires, and the refusal that names
+each one's replacement, are the table in `parser/v1_refusals.go`
+(`V1RetiredForms`). What each position admits is the tier manifest in
+`tiers/`, and what each function means is the catalog in `functions/`. The
+string the rewriter emits is the engine's internal query form -- also what an
+SDK sends to `Execute` -- and its grammar (`ParseExpression`) does not change.
+
 The retired author-side forms (`func (Query) NAME(ctx any)`, the `@use*`
 annotation family, `@concepts(...)`, `@input { ... }`, `include` in a shape
-body, `;`/`,` filter separators, `has`, `?.`) are refused at parse time with
-a migration hint. They survive only in `dsl/_reference/*.memql` as
-don't-do-this skeletons. Do not restore them when you see one in an old diff.
+body) are refused at parse time with a migration hint. They survive only in
+`dsl/_reference/*.memql` as don't-do-this skeletons. Do not restore them when
+you see one in an old diff. The retired expression spellings (`;`/`,` as
+connectives, `has`, `?.`, `when(...)`, `cond(`, `null`, ...) are refused with
+`memqlmigrate --rewrite=expressions` as the fix.
 
 ---
 
@@ -73,6 +87,13 @@ mistake this layout exists to prevent:
   A drift test introspects both and fails when the spec falls out of
   lockstep.
 - **Filter-clause terminators** live in `dslclause/`.
+- **The expression vocabulary** lives in `functions/` (the catalog and the
+  operator table) and `tiers/` (the manifest); **precedence and the retired
+  spellings** live in `parser/` (`V1PrecedenceTable`, `V1RetiredForms`).
+  `dslspec` projects its builtins and operators from `functions/`; Sense reads
+  the catalog, the manifest and `V1RetiredForms`; and
+  `TestOperatorLevelsAreTheParsersPrecedence` holds the operator table's levels
+  to the parser's table.
 
 ---
 
@@ -85,8 +106,8 @@ sub-packages -- `annotations/`, `ast/`, and `dslclause/` each carry a
 packages are separate modules precisely so a consumer can depend on the
 annotation registry or the AST types without dragging in the parser.
 
-`compiler/`, `dslspec/`, `pagination/`, and `parser/` are **not** separate
-modules -- they are packages inside `component/language`.
+`compiler/`, `dslspec/`, `functions/`, `pagination/`, `parser/` and `tiers/`
+are **not** separate modules -- they are packages inside `component/language`.
 
 ---
 

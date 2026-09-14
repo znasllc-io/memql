@@ -42,6 +42,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/znasllc-io/memql/component/language/dslclause"
 )
 
 // =============================================================================
@@ -810,13 +812,11 @@ func checkRefineClause(q *structQueryBody) error {
 	return nil
 }
 
-// lambdaHeader matches the start of an edition-2026 lambda: `x =>`, `() =>`,
-// `(x) =>`, `(x, y) =>`.
-var lambdaHeader = regexp.MustCompile(`^(?:[A-Za-z_][A-Za-z0-9_]*|\(\s*(?:[A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*\s*,?)?\s*\))\s*=>`)
-
-// opensWithLambdaHeader reports whether a clause value is a lambda.
+// opensWithLambdaHeader reports whether a clause value is a lambda: `x =>`,
+// `() =>`, `(x) =>`, `(x, y) =>`. The rule is dslclause.OpensLambda, the one
+// every gate asks before choosing which grammar to read a clause with.
 func opensWithLambdaHeader(s string) bool {
-	return lambdaHeader.MatchString(strings.TrimSpace(s))
+	return dslclause.OpensLambda(s)
 }
 
 // joinStructQueryContinuations folds a struct-query body's physical lines
@@ -846,6 +846,11 @@ func opensWithLambdaHeader(s string) bool {
 // Anything else starts a new field. A field keyword can therefore never be
 // swallowed: `shape spaceFull` neither leaves a delimiter open nor ends on
 // an operator, so the `sort` line after it starts fresh.
+//
+// The rule itself is dslclause.ContinuesClause, and it lives there rather than
+// here so every gate that reads a clause as text folds lines exactly as this
+// does (epic memql#5363): a gate reading only a filter's first line is blind to
+// every conjunct the codemod wrapped onto the lines below it.
 func joinStructQueryContinuations(raw []string) []string {
 	var out []string
 	var acc string
@@ -862,7 +867,7 @@ func joinStructQueryContinuations(raw []string) []string {
 		if line == "" {
 			continue
 		}
-		if acc != "" && (unclosedDelimiters(acc) || endsOnDanglingOperator(acc) || opensWithBinaryOperator(line)) {
+		if acc != "" && dslclause.ContinuesClause(acc, line) {
 			acc += " " + line
 			continue
 		}
@@ -871,73 +876,6 @@ func joinStructQueryContinuations(raw []string) []string {
 	}
 	flush()
 	return out
-}
-
-// structQueryTrailingOperators are the tokens that cannot END a complete
-// expression, longest first so `<=` is tested before `<`.
-var structQueryTrailingOperators = []string{
-	"??", "&&", "||", "==", "!=", "<=", ">=",
-	"+", "-", "*", "/", "%", ",", "(", "{", "<", ">", "=", ".", ":", "?",
-}
-
-// structQueryLeadingOperators are the tokens a continuation line may OPEN
-// with. `-` is excluded deliberately: it is a legal identifier character in
-// this language, so a line starting `-foo` is not reliably an operator.
-//
-// `?`, `:` and `=>` (memql#5364) are the edition-2026 continuations: a
-// conditional broken before its branches, and a lambda whose arrow starts the
-// next line (`filter row` / `=> row.a == 1`). No clause keyword starts with
-// any of them, so none can swallow the next clause.
-var structQueryLeadingOperators = []string{"??", "&&", "||", "==", "!=", "<=", ">=", ")", "}", ",", ".", "+", "*", "/", "?", ":", "=>"}
-
-func endsOnDanglingOperator(s string) bool {
-	s = strings.TrimSpace(s)
-	for _, op := range structQueryTrailingOperators {
-		if strings.HasSuffix(s, op) {
-			return true
-		}
-	}
-	return false
-}
-
-func opensWithBinaryOperator(s string) bool {
-	s = strings.TrimSpace(s)
-	for _, op := range structQueryLeadingOperators {
-		if strings.HasPrefix(s, op) {
-			return true
-		}
-	}
-	return false
-}
-
-// unclosedDelimiters reports whether s leaves a `(` or `{` open, ignoring
-// anything inside a string literal so a `{` in `@pattern("^a{2}$")` does not
-// read as an opener.
-func unclosedDelimiters(s string) bool {
-	depth := 0
-	var quote byte
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if quote != 0 {
-			if c == '\\' {
-				i++
-				continue
-			}
-			if c == quote {
-				quote = 0
-			}
-			continue
-		}
-		switch c {
-		case '"', '\'', '`':
-			quote = c
-		case '(', '{':
-			depth++
-		case ')', '}':
-			depth--
-		}
-	}
-	return depth > 0
 }
 
 func parseStructQueryBody(body string) (*structQueryBody, error) {

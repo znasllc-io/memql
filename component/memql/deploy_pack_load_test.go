@@ -37,7 +37,7 @@ func TestDeployPackBuiltinsLoad(t *testing.T) {
 	}
 	overlay := fstest.MapFS{"builtins.memql": {Data: builtinSrc}}
 	const domain = "deploypackbuiltinload"
-	memqldsl.RegisterTree(domain, overlay)
+	memqldsl.RegisterTree(domain, withLanguageLine(overlay))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
 
 	registry := newFunctionRegistry()

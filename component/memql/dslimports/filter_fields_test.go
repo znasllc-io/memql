@@ -24,7 +24,7 @@ func filterFieldTree(queries string) fstest.MapFS {
 
 func filterFieldErrs(t *testing.T, queries string) []error {
 	t.Helper()
-	tree, err := Load(filterFieldTree(queries))
+	tree, err := Load(withLanguageLines(filterFieldTree(queries)))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -205,7 +205,7 @@ query widget widgetsMixedCase {
 // which AST node; a last-wins guess reported a real property of one as
 // undeclared on the other's concept.
 func TestFilterFieldsSkipsDuplicateQueryNames(t *testing.T) {
-	tree, err := Load(fstest.MapFS{
+	tree, err := Load(withLanguageLines(fstest.MapFS{
 		"lab/concepts.memql": &fstest.MapFile{Data: []byte(dupConceptsSrc)},
 		"lab/queries.memql": &fstest.MapFile{Data: []byte(`use lab.concepts.{ widget, gadget }
 
@@ -219,7 +219,7 @@ query gadget dup {
   filter  size == "y"
 }
 `)},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -235,7 +235,7 @@ query gadget dup {
 // (supplied externally via MEMQL_DSL_PATH, or reported by lane 2) must not
 // produce speculative field errors on top.
 func TestFilterFieldsSkipsUnresolvableConcept(t *testing.T) {
-	tree, err := Load(fstest.MapFS{
+	tree, err := Load(withLanguageLines(fstest.MapFS{
 		"lab/queries.memql": &fstest.MapFile{Data: []byte(`use cognition.concepts.{ space }
 
 /// Bound to a concept this tree does not carry.
@@ -243,7 +243,7 @@ query space spacesExternal {
   filter  whateverField == "x"
 }
 `)},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -279,7 +279,7 @@ concept gadget {
 // while a same-named concept happens to exist in its own domain. Reporting the
 // engine concept's properties as undeclared is red CI on legal DSL.
 func TestFilterFieldsExplicitImportWinsOverAmbientDomain(t *testing.T) {
-	tree, err := Load(fstest.MapFS{
+	tree, err := Load(withLanguageLines(fstest.MapFS{
 		"acme/concepts.memql": &fstest.MapFile{Data: []byte(
 			"/// A local request, unrelated to the imported one.\nconcept request {\n  localProp  string  @description(\"Local.\")\n}\n")},
 		"acme/queries.memql": &fstest.MapFile{Data: []byte(`use cognition.concepts.{ request }
@@ -289,7 +289,7 @@ query request findRequest {
   filter  channel == args.channel
 }
 `)},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -305,7 +305,7 @@ query request findRequest {
 // coverage guard -- which exists precisely to make silent skips impossible --
 // counted them as covered because it derived the name map independently.
 func TestFilterFieldsReportsDuplicateQueryNames(t *testing.T) {
-	tree, err := Load(fstest.MapFS{
+	tree, err := Load(withLanguageLines(fstest.MapFS{
 		"lab/concepts.memql": &fstest.MapFile{Data: []byte(dupConceptsSrc)},
 		"lab/queries.memql": &fstest.MapFile{Data: []byte(`use lab.concepts.{ widget, gadget }
 
@@ -319,7 +319,7 @@ query gadget dup {
   filter  size == "y"
 }
 `)},
-	})
+	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}

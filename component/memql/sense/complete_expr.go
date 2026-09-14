@@ -67,7 +67,25 @@ func (s *Service) completeAtExpression(ctx CursorContext, source string, line, c
 		}
 		return nil, false
 	}
+	if ctx.Position == tiers.PositionQueryRefine && !ctx.Lambda {
+		// `refine` has no pre-v1 spelling: before its lambda header, the header
+		// is the one thing the clause can take.
+		return refineHeaderItems(ctx.Prefix), true
+	}
 	return s.completeExpression(ctx, source, line, col), true
+}
+
+// refineHeaderItems offers the lambda header a refine clause opens with.
+func refineHeaderItems(prefix string) []CompletionItem {
+	const label = "row => ..."
+	if !strings.HasPrefix(label, prefix) {
+		return nil
+	}
+	return []CompletionItem{{
+		Label: label, Kind: "snippet", Detail: "refine lambda header",
+		Documentation: "Open the clause as a lambda over each row of the page: `refine row => row.title.includes(args.q)`. It runs in process after `paginate` reads the page, so a page can come back with fewer rows.",
+		InsertText:    "row => row.$0", IsSnippet: true, SortPriority: 1,
+	}}
 }
 
 // completeExpression is the bare-name completion set of an expression
@@ -114,7 +132,7 @@ func (s *Service) completeExpression(ctx CursorContext, source string, line, col
 		if seen[r] {
 			continue
 		}
-		def := rootDefs[r]
+		def := rootDefAt(pos, r)
 		add(CompletionItem{
 			Label: r, Kind: "variable", Detail: def.detail,
 			Documentation: def.doc, InsertText: def.insert, SortPriority: 2,
@@ -260,9 +278,16 @@ func (s *Service) completeExpressionMember(ctx CursorContext, source string, lin
 		}
 		return nil, true
 	}
-	if head == "args" && rest != "" && !strings.Contains(rest, ".") {
-		if typ := declaredArgType(source, line, rest); typ != "" {
-			return s.methodItems(ctx, receiverForType(typ), false), true
+	if head == "args" {
+		fields, types := argsAt(ctx, source, line)
+		switch {
+		case rest == "" && ctx.Position == tiers.PositionTriggerFilter:
+			return argsFieldItems(fields, types, ctx.Prefix,
+				"Declared in the automation's args { } block, bound from the triggering event's payload."), true
+		case rest != "" && !strings.Contains(rest, "."):
+			if typ := types[rest]; typ != "" {
+				return s.methodItems(ctx, receiverForType(typ), false), true
+			}
 		}
 	}
 	if rest == "" {
@@ -494,6 +519,8 @@ func paramDocumentation(ctx CursorContext, p LambdaParam) string {
 		return "The actor envelope this predicate reads."
 	case ctx.Position == tiers.PositionTriggerFilter:
 		return "The row whose change fired the trigger."
+	case ctx.Position == tiers.PositionQueryRefine:
+		return "A row of the page the query read."
 	}
 	return "The row this predicate is asked about."
 }
@@ -515,14 +542,28 @@ var rootDefs = map[string]rootDef{
 	"input":  {"the automation input", "The rows the automation's input query loaded.", "input"},
 }
 
+// rootDefAt is a root's completion entry at a position. A trigger filter has
+// no caller: its `args` are the automation's declared args, bound from the
+// triggering event's payload before the filter runs (D15).
+func rootDefAt(pos tiers.Position, root string) rootDef {
+	def := rootDefs[root]
+	if root == "args" && pos == tiers.PositionTriggerFilter {
+		def.detail = "payload arguments"
+		def.doc = "The automation's declared args, bound from the triggering event's payload before the filter runs."
+	}
+	return def
+}
+
 // positionRoots are the reserved roots an expression at each position
 // evaluates with (the in-process scope the evaluator binds, and the plan
 // constants a pushdown position folds). A spec body reads its parameter and
-// the clock; the automation positions add the run's roots.
+// the clock; a query's refine clause reads what its filter reads; the
+// automation positions add the run's roots.
 var positionRoots = map[tiers.Position][]string{
 	tiers.PositionQueryFilter:         {"args", "actor", "now", "config"},
+	tiers.PositionQueryRefine:         {"args", "actor", "now", "config"},
 	tiers.PositionSpecBody:            {"now"},
-	tiers.PositionTriggerFilter:       {"now", "config"},
+	tiers.PositionTriggerFilter:       {"args", "now", "config"},
 	tiers.PositionAutomationCondition: {"args", "actor", "now", "config", "event", "steps", "item", "index", "input"},
 	tiers.PositionLogicBody:           {"args", "actor", "now", "config"},
 	tiers.PositionMutationValue:       {"args", "actor", "now", "config"},
@@ -533,8 +574,33 @@ var positionRoots = map[tiers.Position][]string{
 // argsFieldTypePattern reads one args-block field line: its name and type.
 var argsFieldTypePattern = regexp.MustCompile(`^\s*([A-Za-z_][A-Za-z0-9_]*)\s+(\S+)`)
 
-// declaredArgType returns the declared type of an args field of the construct
-// enclosing the cursor line, or "".
-func declaredArgType(source string, line int, name string) string {
-	return enclosingConstructArgsTypes(source, line)[name]
+// argsAt returns the declared args an expression at the cursor reads as
+// `args`, in order, with each field's type: the enclosing construct's, or --
+// for a trigger filter, an annotation written ABOVE its automation -- the
+// args of the automation the annotation decorates.
+func argsAt(ctx CursorContext, source string, line int) ([]string, map[string]string) {
+	if ctx.Position == tiers.PositionTriggerFilter {
+		return decoratedConstructArgs(source, line)
+	}
+	return constructArgs(source, line, enclosingConstructHeader)
+}
+
+// enclosingHeaderRE is enclosingConstructHeader compiled once.
+var enclosingHeaderRE = regexp.MustCompile(enclosingConstructHeader)
+
+// decoratedConstructArgs returns the args of the construct an annotation on
+// line decorates: the first construct header below it. A line that opens any
+// other construct first means the annotation decorates something without an
+// args block.
+func decoratedConstructArgs(source string, line int) ([]string, map[string]string) {
+	lines := strings.Split(source, "\n")
+	for i := line; i < len(lines); i++ {
+		if enclosingHeaderRE.MatchString(lines[i]) {
+			return constructArgs(source, i+1, enclosingConstructHeader)
+		}
+		if first := firstWord(strings.TrimSpace(lines[i])); first != "" && dslSpec.ConstructByKeyword(first) != nil {
+			return nil, nil
+		}
+	}
+	return nil, nil
 }

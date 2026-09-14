@@ -83,9 +83,10 @@ func TestConstructNameIsDeterministicAndScoped(t *testing.T) {
 	}
 }
 
-// The condition is emitted UNQUOTED inside @filter(...), so a character that
-// closes the annotation does not produce a bad filter -- it produces a
-// different construct. That has to be refused before the text is assembled.
+// The condition is emitted inside @filter(...). It is re-printed from its
+// parse now, so a character that would close the annotation cannot survive
+// into the construct -- but a condition shaped like an injection is still
+// refused before anything reads it, which is the guard this pins.
 func TestConditionCannotEscapeTheAnnotation(t *testing.T) {
 	for _, bad := range []string{
 		`payload.role == "admin") @trigger(event="node.created", concept="v1:identity:user"`,
