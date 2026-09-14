@@ -67,6 +67,63 @@ func scanStatementBodies(files []SourceFile) []Violation {
 		}
 	}
 	var out []Violation
+	eachStatementBody(files, func(f SourceFile, kind, name string, startLine int, body *ast.Body) {
+		report := func(gate Gate, sp ast.Span, detail string) {
+			out = append(out, Violation{Gate: gate, File: f.Path, Line: startLine + sp.Line - 1,
+				Kind: kind, Construct: name, Detail: detail})
+		}
+		ast.WalkBody(body.Statements, func(s ast.BodyStatement) bool {
+			for _, e := range ast.StatementExpressions(s) {
+				ast.WalkV1(e, func(n ast.ExpressionNode) bool {
+					switch x := n.(type) {
+					case *ast.MemberExpr:
+						if root, ok := x.Object.(*ast.IdentExpr); ok && root.Name == "config" {
+							if msg, unknown := config.UnknownKey(x.Field); unknown {
+								report(GateStatementConfigKey, x.Span, msg+" ["+compiler.CodeBodyConfigUnknown+"]")
+							}
+						}
+					case *ast.CallExpr:
+						if x.Kind != "" || x.Receiver != nil {
+							break
+						}
+						if _, fn := functions.Lookup(x.Name); fn || predicates[x.Name] {
+							break
+						}
+						remedy := "call a catalog function or a spec or trait the corpus declares"
+						if k, isConstruct := constructs[x.Name]; isConstruct {
+							remedy = fmt.Sprintf("%s is a %s, which is called with its kind as a statement of its own: `x := %s %s(...)`, then read x",
+								x.Name, k, k, x.Name)
+						}
+						report(GateStatementUnknownCall, x.Span, fmt.Sprintf(
+							"`%s(...)` is not a function or a predicate known here, so the expression fails when it runs: %s [%s]",
+							x.Name, remedy, compiler.CodeBodyCallUnknown))
+					}
+					return true
+				})
+			}
+			return true
+		})
+	})
+	return out
+}
+
+// StatementBodiesRead is the statement-body gates' coverage: "<file> <name>"
+// for every logic and automation in files whose body they read. A body in a
+// retired form, or one the parser refuses, is not read, so a caller that
+// knows which statement bodies the corpus holds compares the two -- a body the
+// gates could not read then cannot pass for one they found clean.
+func StatementBodiesRead(files []SourceFile) []string {
+	var out []string
+	eachStatementBody(files, func(f SourceFile, _, name string, _ int, _ *ast.Body) {
+		out = append(out, f.Path+" "+name)
+	})
+	return out
+}
+
+// eachStatementBody calls visit with every logic and automation in files
+// whose body is written in statements, and the line its declaration starts
+// on. Each declaration is parsed alone, from its keyword to its closing brace.
+func eachStatementBody(files []SourceFile, visit func(f SourceFile, kind, name string, startLine int, body *ast.Body)) {
 	for _, f := range files {
 		if !strings.Contains(f.Content, "logic") && !strings.Contains(f.Content, "automation") {
 			continue
@@ -88,49 +145,12 @@ func scanStatementBodies(files []SourceFile) []Violation {
 				if !ok || fn.Name != name {
 					continue
 				}
-				auto, ok := fn.Body.(*ast.AutomationDef)
-				if !ok || auto.Body == nil {
-					continue
+				if auto, ok := fn.Body.(*ast.AutomationDef); ok && auto.Body != nil {
+					visit(f, kind, name, startLine, auto.Body)
 				}
-				report := func(gate Gate, sp ast.Span, detail string) {
-					out = append(out, Violation{Gate: gate, File: f.Path, Line: startLine + sp.Line - 1,
-						Kind: kind, Construct: name, Detail: detail})
-				}
-				ast.WalkBody(auto.Body.Statements, func(s ast.BodyStatement) bool {
-					for _, e := range ast.StatementExpressions(s) {
-						ast.WalkV1(e, func(n ast.ExpressionNode) bool {
-							switch x := n.(type) {
-							case *ast.MemberExpr:
-								if root, ok := x.Object.(*ast.IdentExpr); ok && root.Name == "config" {
-									if msg, unknown := config.UnknownKey(x.Field); unknown {
-										report(GateStatementConfigKey, x.Span, msg+" ["+compiler.CodeBodyConfigUnknown+"]")
-									}
-								}
-							case *ast.CallExpr:
-								if x.Kind != "" || x.Receiver != nil {
-									break
-								}
-								if _, fn := functions.Lookup(x.Name); fn || predicates[x.Name] {
-									break
-								}
-								remedy := "call a catalog function or a spec or trait the corpus declares"
-								if k, isConstruct := constructs[x.Name]; isConstruct {
-									remedy = fmt.Sprintf("%s is a %s, which is called with its kind as a statement of its own: `x := %s %s(...)`, then read x",
-										x.Name, k, k, x.Name)
-								}
-								report(GateStatementUnknownCall, x.Span, fmt.Sprintf(
-									"`%s(...)` is not a function or a predicate known here, so the expression fails when it runs: %s [%s]",
-									x.Name, remedy, compiler.CodeBodyCallUnknown))
-							}
-							return true
-						})
-					}
-					return true
-				})
 			}
 		}
 	}
-	return out
 }
 
 // closingBraceAt is the index of the `}` closing the `{` at open in a view

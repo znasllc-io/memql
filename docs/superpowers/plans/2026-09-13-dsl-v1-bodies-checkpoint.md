@@ -39,6 +39,11 @@ Since the last rebase onto the epic-2 base:
 | `6707f4ad5` | #5372: an action statement binds its capability's result (`actionStatementValue` unwraps the authored record, a real bug); the automation corpus (`component/automations/steps/automation_v1_corpus_test.go`, 58 goldens, 344 runs) holds every automation's statement form to its legacy runs |
 | `daa0f0d99` | #5371: memql-10's three load gaps: a `trace` read (CheckBody, `body_unknown_name`), a `config.<key>` outside the allow-list (dslgate `statement-config-key`, `body_config_unknown`, shown by Sense too), and an unknown bare call (dslgate `statement-unknown-call`, `body_call_unknown`) |
 
+The migrated tree passes the two statement-body gates, and the gates read
+all 85 of its bodies (58 automations, 27 logic):
+`TestMigratedTreePassesTheStatementBodyGates`, with `dslgate.StatementBodiesRead`
+as the gates' coverage.
+
 Verified: the DB-free tree (`go test -count=1 github.com/znasllc-io/memql/...`)
 at `6707f4ad5`; for the load gaps, `component/config`, `component/memql/dslgate`,
 `component/memql/sense` and `component/language/compiler`, plus the db-gated
@@ -81,19 +86,13 @@ Negative controls were run on each new check and restored.
 
 ## Next, in order
 
-1. **Hold the migrated tree to the two new dslgate checks now, before the flip.**
-   Run `dslgate.ScanFiles` over `migratedTree`'s files in
-   `migrated_tree_load_test.go` and require zero `statement-config-key` or
-   `statement-unknown-call` violations. Today they pass over every legacy body,
-   so the migrated tree has never been through them. A violation found now is
-   cheap; found at the flip, it refuses the boot.
-2. **The switch-step name** (memql-10's note, above).
-3. **Rebase** when memql-10's flip SHA arrives (command above). Expect conflicts
+1. **The switch-step name** (memql-10's note, above).
+2. **Rebase** when memql-10's flip SHA arrives (command above). Expect conflicts
    where their flip deletes legacy halves this branch also touched: the logic
    runner, the automation generator, the rewriter's dispatch, the logic corpus
    test and Sense completion. Take their deletion, then re-apply this branch's
    additions. Then run the build, the DB-free tree and the db-gated trees.
-4. **Task 13, the flip.** Steps 1-9 are in the plan, with the "As built, before
+3. **Task 13, the flip.** Steps 1-9 are in the plan, with the "As built, before
    the flip" bullets. This session adds:
    - Automation corpus: delete the legacy arm, `automationLegacyDefects` and
      the legacy half of `compareAutomationRuns`, and keep the goldens as the
@@ -108,10 +107,10 @@ Negative controls were run on each new check and restored.
      anything once the parser refuses the retired forms. Replace it with the
      parser's refusal, or delete it. The comments in `statement_bodies.go` and
      Sense's `diagnose_body_scope.go` that say "until the flip" change with it.
-5. **Task 12 step 4:** the scenario suites, after the flip. Include the two
+4. **Task 12 step 4:** the scenario suites, after the flip. Include the two
    deletion reminders and `onDelegationCreated`, which the flip moves into
    automations.
-6. **Tasks 14, 15 and 16:** the gates port, the docs, then ship. Open the PR
+5. **Tasks 14, 15 and 16:** the gates port, the docs, then ship. Open the PR
    only after epics 1 and 2 merge, with one `Closes #n` line per issue.
 
 ## Facts not in the code

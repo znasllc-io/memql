@@ -123,3 +123,27 @@ func TestStatementBodiesPassOverARetiredForm(t *testing.T) {
 		t.Fatalf("reported a retired form:\n%s", strings.Join(got, "\n"))
 	}
 }
+
+// TestStatementBodiesReadIsTheGatesCoverage: the coverage names each body the
+// gates read, and not one they passed over.
+func TestStatementBodiesReadIsTheGatesCoverage(t *testing.T) {
+	src := `logic native {
+  return 1
+}
+
+logic legacy {
+  body {
+    return 1
+  }
+}
+
+@trigger(schedule="0 0 * * * *")
+automation nativeToo {
+  builtin note(v: 1)
+}
+`
+	got := StatementBodiesRead([]SourceFile{{"probe/logic.memql", src}})
+	if want := []string{"probe/logic.memql native", "probe/logic.memql nativeToo"}; strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("read %q, want %q", got, want)
+	}
+}
