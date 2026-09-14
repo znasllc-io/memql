@@ -1,0 +1,2 @@
+go test fuzz v1
+string("row => {s: row.status}.s == \"open\"")

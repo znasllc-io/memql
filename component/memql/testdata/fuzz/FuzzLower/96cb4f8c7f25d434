@@ -1,0 +1,2 @@
+go test fuzz v1
+string("row => ids(t => t.status == \"open\")")

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("row => row.urgent == true ? row.priority > 1 : row.priority > 3")

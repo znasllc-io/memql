@@ -1,0 +1,2 @@
+go test fuzz v1
+string("row => sbIsOpen(row) && row.tags.any(t => t == \"urgent\")")

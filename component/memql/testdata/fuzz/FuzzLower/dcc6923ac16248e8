@@ -1,0 +1,2 @@
+go test fuzz v1
+string("row => row.closedAt < (now ?? \"9999-12-31T00:00:00Z\")")
