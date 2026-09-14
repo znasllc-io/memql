@@ -709,21 +709,30 @@ concept packageDeployment {
 
 /// One node's verdict on one module (design record 2026-09-06-configuration-readiness, section
 /// 4.4). Rewritten as a new version of the same id, v1:platform:moduleReadiness:<module>--<nodeId>,
-/// on every boot and after a providers reload or an integration configure, so a read collapses to
-/// the latest. Carries presence and source only, never a value.
+/// when this node's verdict changes and at least every ten minutes, so a read collapses to the
+/// latest. Carries presence and source only, never a value.
 ///
 /// TIER: public, requiresIdentity. Any signed-in person reads it -- the setup surface has to tell a
 /// viewer "not set up" as honestly as it tells an owner -- and nobody anonymous does. The write is
 /// the engine's alone: recordModuleReadiness is @serverOnly.
+///
+/// `unknown` (design record 2026-09-14-readiness-convergence, D1) is the node's word for "I could
+/// not evaluate this": a resolver the verdict depends on errored. It is never a vote in the fold
+/// and is never written over a known row; `reason` names which resolver, from a closed vocabulary
+/// (fleetReadFailed, integrationProbeFailed), never an error string. ADDITIVE on purpose: dropping
+/// an enum value bricks stored rows (root CLAUDE.md). A lane's optional `scope: "cluster"` marks one
+/// computed from cluster rows alone; the fold sets aside a row whose cluster-scoped lanes lag the
+/// freshest row's (memql#5259).
 @rowAuthz(public, requiresIdentity)
 @displayCard(primary="module", secondary="nodeId", tertiary="nodeType", status="state")
 concept moduleReadiness {
   module      string!  @description("The readiness module id from the env manifest's modules block: ai, storage, email, githubApp, campaigns, workbench, localApps.")
   nodeId      string!  @description("The reporting node's MEMQL_NODE_ID.")
   nodeType    string!  @description("The reporting node's type.")
-  state       enum("configured", "partial", "unconfigured", "notApplicable")!  @description("This node's verdict; notApplicable means the node does not host the module.")
+  state       enum("configured", "partial", "unconfigured", "notApplicable", "unknown")!  @description("This node's verdict; notApplicable means the node does not host the module; unknown means the node could not evaluate it (see reason) and casts no vote.")
+  reason      string   @description("Why the state is unknown, from a closed vocabulary: fleetReadFailed, integrationProbeFailed. Empty for every other state.")
   core        bool     @description("Whether the module is one the first-run wizard walks.")
-  lanes       []object @description("One entry per lane: { name, configurableFrom, complete, slots: [{ name, present, source, optional }] }. Presence and source only.")
+  lanes       []object @description("One entry per lane: { name, configurableFrom, scope, complete, slots: [{ name, present, source, optional }] }. Presence and source only; scope is the word cluster for a lane computed from cluster rows alone, and absent for a node-scoped one.")
   reportedAt  datetime!  @description("When this node evaluated, RFC3339.")
 }
 
@@ -737,10 +746,12 @@ concept moduleReadiness {
 @displayCard(primary="module", secondary="state", tertiary="core")
 concept moduleVerdict {
   module        string!  @description("The module id.")
-  state         enum("configured", "partial", "unconfigured", "unreported")!  @description("Worst state across live reporting nodes; partial with disagreement when they differ; unreported when no live node reported.")
+  state         enum("configured", "partial", "unconfigured", "unreported")!  @description("Worst state across the live reporting nodes that vote; partial with disagreement when they differ; unreported when no live node voted.")
   core          bool     @description("Whether the module is core.")
-  disagreement  []string @description("nodeId=state for every live reporter when they disagree, worst first; empty otherwise.")
-  nodes         []object @description("Per live reporting node: { nodeId, nodeType, state, reportedAt }.")
+  disagreement  []string @description("nodeId=state for every voting reporter when they disagree, worst first; empty otherwise.")
+  nodes         []object @description("Per voting reporter: { nodeId, nodeType, state, reportedAt }. A stale or unknown row is not a vote and is not listed here.")
+  unknown       []string @description("Live nodes whose row says they could not evaluate the module, sorted. Set aside, never counted.")
+  stale         []string @description("Live nodes whose row read the cluster before the freshest evaluation did -- their cluster-scoped lanes disagree with it -- sorted. Set aside until they re-evaluate (memql#5259).")
 }
 
 /// Virtual, never persisted: what readinessRecompute answers -- how many modules this node just
@@ -748,8 +759,9 @@ concept moduleVerdict {
 /// node rather than describing a set.
 @displayCard(primary="nodeId", secondary="written")
 concept readinessRecomputeResult {
-  nodeId   string!  @description("The node that re-evaluated.")
-  written  int!     @description("How many moduleReadiness rows were written.")
+  nodeId   string!   @description("The node that re-evaluated.")
+  written  int!      @description("How many moduleReadiness rows were written. Zero is an answer: an unchanged verdict younger than the restatement floor is not rewritten.")
+  unknown  []string  @description("Modules this pass could not evaluate, as module=reason with the closed-vocabulary reason; empty when every module was evaluated. The node's recompute loop retries them on its own.")
 }
 
 // ---- Measurement and evidence (epic memql#5146, D3 and D5) ------------------

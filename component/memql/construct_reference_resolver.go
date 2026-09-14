@@ -189,6 +189,11 @@ func (r *referenceRewriter) rewriteExpression(expr ExpressionNode) {
 		r.rewriteExpression(node.Target)
 	case *PaginateExpression:
 		r.rewriteExpression(node.Target)
+	case *RefineExpression:
+		// The target. The refine lambda's predicate names stay bare: EvalExpr
+		// resolves them through the spec registry, whose bare-name floor
+		// answers for them, and they are v1 AST, not IR this pass rewrites.
+		r.rewriteExpression(node.Target)
 	case *SelectExpression:
 		r.rewriteExpression(node.Target)
 	case *TimestampExpression:

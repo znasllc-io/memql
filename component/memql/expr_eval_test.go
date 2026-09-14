@@ -174,10 +174,11 @@ func TestEvalExprAbsenceTable(t *testing.T) {
 	notColl := errCode("operand_type")
 
 	columns := []absenceColumn{
-		// `== nil` / `!= nil` are the PRESENCE test: the lowering emits IS NULL
-		// / IS NOT NULL, so a blank string is PRESENT. That is why the codemod
-		// rewrites `exists(x)` -- which also treated a blank as absent -- to
-		// `(x != nil && x != "")` rather than to `x != nil`.
+		// `== nil` / `!= nil` follow the one unset rule (D8, 2026-09-13): an
+		// absent key, JSON null and "" are all unset, so `x == nil` is true and
+		// `x != nil` false for a blank string too -- the blank rule `exists(x)`
+		// had, which is why the codemod rewrites `exists(x)` to `x != nil`. The
+		// SQL twin compares COALESCE(x, '') with '', not IS NULL.
 		//              absent null  ""   " "  0    false "é"  nested
 		{func(x ast.ExpressionNode) ast.ExpressionNode { return xbin("==", x, xnil()) },
 			[]any{T, T, T, F, F, F, F, T}},

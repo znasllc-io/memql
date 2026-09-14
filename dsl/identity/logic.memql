@@ -347,13 +347,13 @@ logic onDelegationCreated {
     topic: "delegation.created",
     payload: {
       delegationId: args.event.payload.id,
-      args.event.payload.identityId,
-      args.event.payload.identitySubject,
-      args.event.payload.identityType,
-      args.event.payload.agentId,
-      args.event.payload.roleCeiling,
-      args.event.payload.scopes,
-      args.event.payload.createdBySubject,
+      identityId: args.event.payload.identityId,
+      identitySubject: args.event.payload.identitySubject,
+      identityType: args.event.payload.identityType,
+      agentId: args.event.payload.agentId,
+      roleCeiling: args.event.payload.roleCeiling,
+      scopes: args.event.payload.scopes,
+      createdBySubject: args.event.payload.createdBySubject,
       timestamp: now
     }
   )

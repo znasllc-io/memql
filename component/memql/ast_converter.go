@@ -27,6 +27,21 @@ type ASTConverter struct {
 	// query filters (which share this converter) reject the surface at
 	// load; the logic-body loader opts in via WithCollectionMethods().
 	allowCollectionMethods bool
+	// lowerPredicate lowers an edition-2026 predicate lambda met as an
+	// operand -- the v1 filter a struct-form query joins onto its concept
+	// binding, `concept==<id> && (row => ...)` (memql#5366). Nil everywhere
+	// but the query loader, which alone knows the bound concept and the
+	// declared arguments Lower needs; without it a v1 lambda in a filter is
+	// refused, as a legacy lambda outside a collection method always was.
+	lowerPredicate func(*languageParser.LambdaExpr) (ExpressionNode, error)
+}
+
+// WithPredicateLowering routes a v1 predicate lambda met as an operand to
+// lower -- Lower, with the env of the construct being loaded (memql#5366).
+func WithPredicateLowering(lower func(*languageParser.LambdaExpr) (ExpressionNode, error)) ASTConverterOption {
+	return func(c *ASTConverter) {
+		c.lowerPredicate = lower
+	}
 }
 
 // ASTConverterOption configures the ASTConverter.
@@ -133,7 +148,14 @@ func (c *ASTConverter) ConvertExpression(expr languageParser.ExpressionNode) (Ex
 	case *languageParser.DotAccessExpr:
 		return c.convertDotAccessExpr(node)
 	case *languageParser.LambdaExpr:
+		// An edition-2026 predicate: the one lowering, not the collection
+		// method's in-memory lambda (memql#5366).
+		if c.lowerPredicate != nil && !c.allowCollectionMethods {
+			return c.lowerPredicate(node)
+		}
 		return c.convertLambdaExpr(node)
+	case *languageParser.RefineExpr:
+		return c.convertRefineExpr(node)
 	case *languageParser.BuiltinFunctionExpr:
 		return c.convertBuiltinFunctionExpr(node)
 	case *languageParser.SpecReferenceExpr:
