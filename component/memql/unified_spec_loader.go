@@ -53,18 +53,26 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry, report ...*Lo
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", origin, err)
 		}
-		spec, err := specDeclToSpec(decl, origin)
+		spec, disabled, err := convertSpecDecl(decl, origin)
 		if err != nil {
 			return nil, err
 		}
+		if spec != nil {
+			spec.Uses = usesByPath[unifiedOriginPath(origin, decl.Name)]
+		}
 		// nil, nil = @disabled (the intentional-skip contract). Reserve
 		// the name: promotion guards refuse it and diagnostics say
-		// "disabled" instead of "not found" (#2607).
-		if spec == nil {
+		// "disabled" instead of "not found" (#2607). An edition-2026 body
+		// comes back whole and is kept for the Init pass to lower, never
+		// registered: disabling a spec must not ship a body that does not
+		// lower, or re-enabling it bricks boot (SpecRegistry.disabledBodies).
+		if disabled {
 			registry.MarkDisabled(decl.Name)
+			if spec != nil && spec.Lambda != nil {
+				registry.addDisabledBody(spec)
+			}
 			return nil, nil
 		}
-		spec.Uses = usesByPath[unifiedOriginPath(origin, decl.Name)]
 		return spec, nil
 	}
 

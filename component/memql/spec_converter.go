@@ -33,8 +33,37 @@ import (
 // specDeclToSpec converts a langparser SpecDecl into the engine's
 // *Spec registry type. Returns an error matching the retired parser's
 // surface so the loader's diagnostic messages stay identical across
-// the migration.
+// the migration. A @disabled declaration converts to nil, nil -- the
+// baseloader's intentional-skip contract -- once its body has been
+// validated as far as this conversion can.
 func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error) {
+	spec, disabled, err := convertSpecDecl(decl, origin)
+	if err != nil || disabled {
+		return nil, err
+	}
+	return spec, nil
+}
+
+// convertSpecDecl is specDeclToSpec reporting @disabled rather than dropping
+// it: for a @disabled edition-2026 declaration it returns the spec it would
+// have registered, because that body is validated by Lower at Init, not
+// here, and the loader keeps it for that (SpecRegistry.disabledBodies). A
+// @disabled legacy declaration is validated below and returned as nil.
+func convertSpecDecl(decl *languageParser.SpecDecl, origin string) (*Spec, bool, error) {
+	spec, err := convertSpecDeclBody(decl, origin)
+	if err != nil {
+		return nil, false, err
+	}
+	disabled := false
+	for _, attr := range decl.Attributes {
+		if attr.Name == ast.AttrDisabled {
+			disabled = true
+		}
+	}
+	return spec, disabled, nil
+}
+
+func convertSpecDeclBody(decl *languageParser.SpecDecl, origin string) (*Spec, error) {
 	if decl == nil {
 		return nil, fmt.Errorf("spec decl is nil")
 	}
@@ -82,9 +111,9 @@ func specDeclToSpec(decl *languageParser.SpecDecl, origin string) (*Spec, error)
 		if len(decl.Lambda.Params) != 1 {
 			return nil, fmt.Errorf("%s: %s %q takes a lambda of one parameter, the row: = row => <predicate>", origin, kindLabel, decl.Name)
 		}
-		if disabled {
-			return nil, nil
-		}
+		// A @disabled edition-2026 spec is returned whole: convertSpecDecl
+		// reports it disabled, and the loader keeps it for the Init pass to
+		// lower -- the edition-2026 half of "validate before the gate" below.
 		return &Spec{
 			Name:        decl.Name,
 			Description: languageParser.EffectiveDescription(decl.DocComment, description),

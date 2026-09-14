@@ -47,6 +47,13 @@ type SpecRegistry struct {
 
 	disabledMu sync.RWMutex
 	disabled   map[string]bool
+	// disabledBodies are the @disabled edition-2026 specs and traits the
+	// unified loader skipped, kept ONLY so the Init pass can lower them:
+	// a legacy body is validated before the @disabled gate (specDeclToSpec),
+	// and an edition-2026 body is validated by Lower, which runs at Init.
+	// Without this a disabled spec whose body does not lower loads green,
+	// and re-enabling it bricks boot. Never registered, never callable.
+	disabledBodies []*Spec
 }
 
 func newSpecRegistry() *SpecRegistry {
@@ -85,6 +92,30 @@ func (r *SpecRegistry) UnmarkDisabled(name string) {
 	r.disabledMu.Lock()
 	delete(r.disabled, name)
 	r.disabledMu.Unlock()
+}
+
+// addDisabledBody records a @disabled edition-2026 spec or trait for the
+// Init pass to validate (see disabledBodies). The name is reserved by
+// MarkDisabled as for any @disabled construct.
+func (r *SpecRegistry) addDisabledBody(spec *Spec) {
+	if spec == nil {
+		return
+	}
+	r.disabledMu.Lock()
+	r.disabledBodies = append(r.disabledBodies, spec)
+	r.disabledMu.Unlock()
+}
+
+// DisabledBodies returns clones of the @disabled edition-2026 specs and
+// traits the loader skipped, for validation only.
+func (r *SpecRegistry) DisabledBodies() []*Spec {
+	r.disabledMu.RLock()
+	defer r.disabledMu.RUnlock()
+	out := make([]*Spec, 0, len(r.disabledBodies))
+	for _, s := range r.disabledBodies {
+		out = append(out, s.clone())
+	}
+	return out
 }
 
 // IsDisabled reports whether the name was skipped as @disabled at load.
