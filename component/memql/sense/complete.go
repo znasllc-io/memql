@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
+	"github.com/znasllc-io/memql/component/language/dslspec"
 	"github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -89,6 +90,9 @@ func (s *Service) completeTopLevel(prefix string) []CompletionItem {
 
 // completeAnnotation returns annotation name completions after @.
 func (s *Service) completeAnnotation(ctx CursorContext) []CompletionItem {
+	if receivers := fieldAnnotationReceivers(ctx.Enclosing); len(receivers) > 0 {
+		return fieldAnnotationItems(receivers, ctx.Prefix, "", 1)
+	}
 	validAnnotations := annotationsForConstruct(ctx.Enclosing)
 
 	receiver := receiverOfConstruct(ctx.Enclosing)
@@ -209,6 +213,18 @@ func (s *Service) completeFuncBody(prefix string, enc EnclosingConstruct, source
 					Documentation: specClauseDoc(blk), InsertText: blk + " ",
 					SortPriority: 2,
 				})
+				continue
+			}
+			// A named block (`step <name> { ... }`) needs its name before the
+			// brace -- a nameless one is refused -- so the keyword is inserted
+			// with a space and the snippet puts the name first.
+			if parser.IsNamedBlock(blk) {
+				items = append(items, CompletionItem{
+					Label: blk, Kind: "keyword", Detail: enc.Keyword + " block",
+					Documentation: specClauseDoc(blk), InsertText: blk + " ",
+					SortPriority: 2,
+				})
+				items = append(items, namedBlockSnippet(blk, enc.Keyword))
 				continue
 			}
 			items = append(items, CompletionItem{
@@ -632,14 +648,67 @@ func (s *Service) completeConceptDef(prefix string) []CompletionItem {
 			})
 		}
 	}
-	// Field-level annotations: the registry's concept-field receiver, the
-	// set the concept translator checks a field against (memql#5359).
-	for _, ann := range annotations.ByReceiver[string(annotations.ConceptField)] {
-		items = append(items, CompletionItem{
-			Label: "@" + ann, Kind: "annotation", Detail: "field annotation",
-			Documentation: AnnotationDocs[ann], InsertText: "@" + ann,
-			SortPriority: 5,
-		})
+	// Field-level annotations and the body's own @relationship: the
+	// registry's concept-field and concept-body receivers, the sets the
+	// concept translator checks against, each with the paren it needs
+	// (memql#5359).
+	items = append(items, fieldAnnotationItems([]annotations.Receiver{annotations.ConceptField, annotations.ConceptBody}, "", "@", 5)...)
+	return items
+}
+
+// fieldAnnotationReceivers returns the registry receivers of the field an `@`
+// at the cursor is written on, or nil when the cursor is not in a field list
+// -- in a construct's preamble, where the construct's own set applies. A
+// concept body takes its fields' annotations and its own @relationship (a
+// nested object or variant block, its fields' only); a tool / prompt /
+// builtin body its fields'; an args block its fields'. Before memql#5359 an
+// `@` after a field's type offered the CONSTRUCT's annotations, every one of
+// which the field refuses.
+func fieldAnnotationReceivers(enc EnclosingConstruct) []annotations.Receiver {
+	if enc.Keyword == "" || enc.Preamble {
+		return nil
+	}
+	body := dslspec.BodyFieldReceiver(enc.Keyword)
+	if n := len(enc.Blocks); n > 0 {
+		switch {
+		case enc.Blocks[n-1] == "args":
+			return []annotations.Receiver{annotations.ArgsField}
+		case body == annotations.ConceptField:
+			return []annotations.Receiver{annotations.ConceptField}
+		}
+		return nil
+	}
+	switch body {
+	case "":
+		return nil
+	case annotations.ConceptField:
+		return []annotations.Receiver{annotations.ConceptField, annotations.ConceptBody}
+	}
+	return []annotations.Receiver{body}
+}
+
+// fieldAnnotationItems renders the annotations of the given receivers that
+// start with prefix, each once, inserting lead + the name and the `(` when its
+// placement cannot be written bare.
+func fieldAnnotationItems(receivers []annotations.Receiver, prefix, lead string, priority int) []CompletionItem {
+	var items []CompletionItem
+	seen := map[string]bool{}
+	for _, r := range receivers {
+		for _, name := range AnnotationsByReceiver[string(r)] {
+			if seen[name] || !strings.HasPrefix(name, prefix) {
+				continue
+			}
+			seen[name] = true
+			insert := lead + name
+			if annotationTakesArgs(string(r), name) {
+				insert += "("
+			}
+			items = append(items, CompletionItem{
+				Label: "@" + name, Kind: "annotation", Detail: "field annotation",
+				Documentation: AnnotationDocs[name], InsertText: insert,
+				SortPriority: priority,
+			})
+		}
 	}
 	return items
 }

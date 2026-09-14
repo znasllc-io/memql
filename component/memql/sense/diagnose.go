@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
 	"github.com/znasllc-io/memql/component/language/parser"
@@ -66,7 +67,11 @@ func (s *Service) Diagnose(source string, filePath string) []Diagnostic {
 	ast, parseErr := p.Parse()
 	if parseErr != nil && !errors.Is(parseErr, parser.ErrEmptyInput) {
 		for _, d := range parserDiagnostics(parseErr) {
-			diagnostics = append(diagnostics, lm.remap(d))
+			d = lm.remap(d)
+			if d.Code == "invalid-annotation" {
+				d.Range = annotationSpan(source, d.Range)
+			}
+			diagnostics = append(diagnostics, d)
 		}
 		// Continue with semantic analysis on a partial AST if one survives.
 	}
@@ -218,6 +223,28 @@ func lexerDiagnostic(err error) Diagnostic {
 }
 
 // parserDiagnostics converts parser errors to diagnostics.
+// annotationSpan narrows a refused annotation's diagnostic to the annotation
+// it refuses: the parser reports a registry refusal at the annotation's `@`
+// (memql#5359), so the range runs from there over `@name`. A start that does
+// not land on an `@` in the authored source keeps its range.
+func annotationSpan(source string, r Range) Range {
+	lines := strings.Split(source, "\n")
+	if r.Start.Line < 1 || r.Start.Line > len(lines) {
+		return r
+	}
+	line := []rune(lines[r.Start.Line-1])
+	at := r.Start.Column - 1
+	if at < 0 || at >= len(line) || line[at] != '@' {
+		return r
+	}
+	end := at + 1
+	for end < len(line) && (line[end] == '_' || unicode.IsLetter(line[end]) || unicode.IsDigit(line[end])) {
+		end++
+	}
+	r.End = Position{Line: r.Start.Line, Column: end + 1}
+	return r
+}
+
 func parserDiagnostics(err error) []Diagnostic {
 	if err == nil {
 		return nil

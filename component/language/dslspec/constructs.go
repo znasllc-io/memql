@@ -98,6 +98,22 @@ func fieldReceiverFor(c Construct) annotations.Receiver {
 	return ""
 }
 
+// BodyFieldReceiver names the registry receiver of the fields a construct's
+// body IS -- a concept's, or the field list that is a tool / prompt / builtin
+// body -- and "" for a construct whose body is clauses (an args block's
+// fields sit one block down, on annotations.ArgsField). The editor reads it to
+// offer, at an `@` after a field's type, what that field takes.
+func BodyFieldReceiver(keyword string) annotations.Receiver {
+	for _, c := range constructs() {
+		if c.Keyword == keyword {
+			if r := fieldReceiverFor(c); r != annotations.ArgsField {
+				return r
+			}
+		}
+	}
+	return ""
+}
+
 // constructCatalog is the hand-authored part of the construct table, in
 // display order: the category, doc, annotation receiver and signature shape
 // of each construct keyword. BodyBlocks, FieldAnnotations and RegistryBacked
