@@ -40,8 +40,9 @@ import (
 // meaning where the record decided a new one:
 //
 //   - there is no truthiness (D8): a condition is a bool, or absent (false),
-//     or it is refused as condition_not_boolean. IsTruthy's reading of "false"
-//     and "0" as false is not consulted anywhere here;
+//     or -- a value read from a stored row -- not true, or it is refused as
+//     condition_not_boolean. IsTruthy's reading of "false" and "0" as false is
+//     not consulted anywhere here;
 //   - equality is typed: `1 == "1"` is false, numbers compare numerically
 //     across every Go number kind, strings compare verbatim;
 //   - absence has ONE table (D8), written out at exprEqual;
@@ -234,16 +235,13 @@ func EvalExpr(ctx context.Context, n ast.ExpressionNode, scope ExprScope, opts E
 	return exprResolveObject(v), nil
 }
 
-// EvalCondition evaluates n and requires a boolean: absent is false, and any
-// other value is condition_not_boolean naming its type and its text. There is
-// no truthiness (D8) -- the string "yes" is not a condition.
+// EvalCondition evaluates n as a condition: a bool is itself, absent is false,
+// a value read from a stored row that is not a bool is not true, and any other
+// value is condition_not_boolean naming its type and its text. There is no
+// truthiness (D8) -- the string "yes" is not a condition.
 func EvalCondition(ctx context.Context, n ast.ExpressionNode, scope ExprScope, opts EvalOptions) (bool, error) {
 	ev := newExprEvaluator(ctx, scope, opts)
-	v, err := ev.eval(n, ev.root)
-	if err != nil {
-		return false, err
-	}
-	return ev.condition(v, n, "the condition")
+	return ev.evalCondition(n, ev.root, "the condition")
 }
 
 // exprMaxPredicateDepth bounds how deeply predicate applications may nest. A
@@ -291,15 +289,8 @@ func newExprEvaluator(ctx context.Context, scope ExprScope, opts EvalOptions) *e
 // the budget, so the budget counts node evaluations exactly: a node skipped by
 // a short circuit or an untaken ternary branch costs nothing.
 func (ev *exprEvaluator) eval(n ast.ExpressionNode, scope ExprScope) (any, error) {
-	ev.steps++
-	if ev.steps > ev.budget {
-		return nil, exprErr(n, "expression_budget_exceeded",
-			"the expression needed more than %d evaluation steps (tiers.DefaultStepBudget, or the caller's budget)", ev.budget)
-	}
-	if ev.steps&1023 == 0 {
-		if err := ev.ctx.Err(); err != nil {
-			return nil, err
-		}
+	if err := ev.step(n); err != nil {
+		return nil, err
 	}
 	switch e := n.(type) {
 	case *ast.IdentExpr:
@@ -335,11 +326,7 @@ func (ev *exprEvaluator) eval(n ast.ExpressionNode, scope ExprScope) (any, error
 		}
 	case *ast.TernaryExpr:
 		if e != nil {
-			c, err := ev.eval(e.Condition, scope)
-			if err != nil {
-				return nil, err
-			}
-			ok, err := ev.condition(c, e.Condition, "the condition of ?:")
+			ok, err := ev.evalCondition(e.Condition, scope, "the condition of ?:")
 			if err != nil {
 				return nil, err
 			}
@@ -379,6 +366,20 @@ func (ev *exprEvaluator) eval(n ast.ExpressionNode, scope ExprScope) (any, error
 		return nil, &ExprError{Code: "unsupported_node", Message: "there is no expression to evaluate"}
 	}
 	return nil, exprErr(n, "unsupported_node", "%T is not an edition-2026 expression node", n)
+}
+
+// step counts one node evaluation against the budget, and every 1024th asks
+// the context whether the call is still wanted.
+func (ev *exprEvaluator) step(n ast.ExpressionNode) error {
+	ev.steps++
+	if ev.steps > ev.budget {
+		return exprErr(n, "expression_budget_exceeded",
+			"the expression needed more than %d evaluation steps (tiers.DefaultStepBudget, or the caller's budget)", ev.budget)
+	}
+	if ev.steps&1023 == 0 {
+		return ev.ctx.Err()
+	}
+	return nil
 }
 
 // ident resolves a bare name: the scope first (lambda parameters shadow the
@@ -473,21 +474,23 @@ func exprIndexOf(field string, n int) (int, bool) {
 // ---------------------------------------------------------------------------
 
 func (ev *exprEvaluator) unary(e *ast.UnaryExpr, scope ExprScope) (any, error) {
+	if e.Op == "!" {
+		// `!x`: x is a condition. Absent is false, so `!absent` is TRUE --
+		// the SQL twin is NOT COALESCE((x), FALSE), which makes every lowered
+		// predicate two-valued and `!(x == v)` exactly `x != v` (D8) -- and so
+		// is a stored value that is not a bool: it is not true, so its
+		// negation is.
+		ok, err := ev.evalCondition(e.Operand, scope, "the operand of !")
+		if err != nil {
+			return nil, err
+		}
+		return !ok, nil
+	}
 	v, err := ev.eval(e.Operand, scope)
 	if err != nil {
 		return nil, err
 	}
 	switch e.Op {
-	case "!":
-		// `!x`: x must be a bool or absent. Absent is false, so `!absent`
-		// is TRUE -- the SQL twin is NOT COALESCE((x), FALSE), which makes
-		// every lowered predicate two-valued and `!(x == v)` exactly
-		// `x != v` (D8).
-		ok, err := ev.condition(v, e.Operand, "the operand of !")
-		if err != nil {
-			return nil, err
-		}
-		return !ok, nil
 	case "-":
 		nv, err := exprNormalize(v)
 		if err != nil {
@@ -511,26 +514,17 @@ func (ev *exprEvaluator) unary(e *ast.UnaryExpr, scope ExprScope) (any, error) {
 func (ev *exprEvaluator) binary(e *ast.BinaryExpr, scope ExprScope) (any, error) {
 	switch e.Op {
 	case "&&", "||":
-		// Short-circuit, and booleans only: each operand is a bool or
-		// absent (false); anything else is refused rather than read for
-		// truthiness (D8). The right operand is never evaluated when the
-		// left decides.
-		l, err := ev.eval(e.Left, scope)
-		if err != nil {
-			return nil, err
-		}
-		lb, err := ev.condition(l, e.Left, "the left operand of "+e.Op)
+		// Short-circuit, and each operand a condition (evalCondition): never
+		// a value read for truthiness (D8). The right operand is never
+		// evaluated when the left decides.
+		lb, err := ev.evalCondition(e.Left, scope, "the left operand of "+e.Op)
 		if err != nil {
 			return nil, err
 		}
 		if (e.Op == "&&" && !lb) || (e.Op == "||" && lb) {
 			return lb, nil
 		}
-		r, err := ev.eval(e.Right, scope)
-		if err != nil {
-			return nil, err
-		}
-		return ev.condition(r, e.Right, "the right operand of "+e.Op)
+		return ev.evalCondition(e.Right, scope, "the right operand of "+e.Op)
 	case "??":
 		// Rule 30: `a ?? b` is b when a is absent, nil, or a string that is
 		// empty or whitespace-only; false, 0, [] and {} are values and are
@@ -942,11 +936,55 @@ func exprOverflow(e *ast.BinaryExpr, x, y int64) *ExprError {
 	return exprErr(e, "arithmetic_overflow", "%d %s %d does not fit a 64-bit integer", x, e.Op, y)
 }
 
-// condition reads v as a boolean: a bool is itself, absent (missing or nil)
-// is false, and anything else is condition_not_boolean naming the value's
-// type and the source text that produced it. There is no truthiness (D8):
-// neither "false" nor "" nor 0 nor [] is a condition.
-func (ev *exprEvaluator) condition(v any, node ast.ExpressionNode, role string) (bool, error) {
+// evalCondition evaluates n in CONDITION position -- the whole condition, an
+// operand of && || and !, a ternary's condition, a predicate's or a predicate
+// lambda's body -- and reads it as a boolean (condition). A ternary there puts
+// its branches in condition position too, and a parenthesis is transparent,
+// exactly as Lower's pred reads the same tree: `c ? row.flag : false` decides
+// row.flag as a condition, not as a value handed back.
+func (ev *exprEvaluator) evalCondition(n ast.ExpressionNode, scope ExprScope, role string) (bool, error) {
+	switch e := n.(type) {
+	case *ast.ParenExpr:
+		if e != nil {
+			if err := ev.step(n); err != nil {
+				return false, err
+			}
+			return ev.evalCondition(e.Inner, scope, role)
+		}
+	case *ast.TernaryExpr:
+		if e != nil {
+			if err := ev.step(n); err != nil {
+				return false, err
+			}
+			ok, err := ev.evalCondition(e.Condition, scope, "the condition of ?:")
+			if err != nil {
+				return false, err
+			}
+			if ok {
+				return ev.evalCondition(e.Then, scope, role)
+			}
+			return ev.evalCondition(e.Else, scope, role)
+		}
+	}
+	v, err := ev.eval(n, scope)
+	if err != nil {
+		return false, err
+	}
+	return ev.condition(v, n, scope, role)
+}
+
+// condition reads v, the value node produced in scope, as a boolean. There is
+// no truthiness (D8): neither "false" nor "" nor 0 nor [] is a condition.
+//
+//   - a bool is itself, and absent (missing or nil) is false;
+//   - a value READ FROM A STORED ROW (exprStoredRead) that is not a bool is
+//     NOT TRUE: the pushdown reads a bare field as `x == true` (barePred), and
+//     SQL can only answer about a row, never refuse it, so one corrupt row
+//     cannot fail a whole read (expr_stored.go);
+//   - anything else is condition_not_boolean naming the value's type and the
+//     source text that produced it: a value the expression computed is the
+//     author's to type.
+func (ev *exprEvaluator) condition(v any, node ast.ExpressionNode, scope ExprScope, role string) (bool, error) {
 	nv, err := exprNormalize(v)
 	if err == nil {
 		switch b := nv.(type) {
@@ -957,6 +995,9 @@ func (ev *exprEvaluator) condition(v any, node ast.ExpressionNode, role string) 
 		}
 	} else {
 		nv = v
+	}
+	if exprStoredRead(node, scope) {
+		return false, nil
 	}
 	return false, exprErr(node, "condition_not_boolean", "%s `%s` is %s; a condition must be boolean",
 		role, ast.FormatExpr(node), exprTypeName(nv))
@@ -1334,12 +1375,8 @@ func (ev *exprEvaluator) applyPredicate(e *ast.CallExpr, param string, body ast.
 	}
 	ev.predDepth++
 	defer func() { ev.predDepth-- }()
-	v, err := ev.eval(body, &exprLambdaScope{parent: ev.root, names: []string{param}, values: []any{arg},
-		stored: []bool{exprStoredRead(e.Args[0], scope)}})
-	if err != nil {
-		return nil, err
-	}
-	return ev.condition(v, body, "the body of predicate "+e.Name)
+	return ev.evalCondition(body, &exprLambdaScope{parent: ev.root, names: []string{param}, values: []any{arg},
+		stored: []bool{exprStoredRead(e.Args[0], scope)}}, "the body of predicate "+e.Name)
 }
 
 // constructCall is `query q(a: 1)` and its siblings: the caller's hook runs
@@ -1856,14 +1893,11 @@ func (b *exprBoundLambda) apply(el any) (any, error) {
 	return b.ev.eval(b.body, &b.scope)
 }
 
-// test applies a predicate lambda: its body must answer a bool (absent is
-// false), never a value read for truthiness.
+// test applies a predicate lambda: its body is a condition (evalCondition),
+// never a value read for truthiness.
 func (b *exprBoundLambda) test(el any) (bool, error) {
-	v, err := b.apply(el)
-	if err != nil {
-		return false, err
-	}
-	return b.ev.condition(v, b.body, "the lambda body of ."+b.method+"()")
+	b.scope.values[0] = el
+	return b.ev.evalCondition(b.body, &b.scope, "the lambda body of ."+b.method+"()")
 }
 
 // exprLambdaScope binds lambda (or predicate) parameters over a parent scope.

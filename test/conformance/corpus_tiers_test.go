@@ -36,6 +36,7 @@ package conformance
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -501,6 +502,26 @@ var corpusRetiredMethodRules = map[string]string{
 	"list.contains": "retired_contains_method",
 }
 
+// corpusWrittenOutReplacements holds the retired forms whose refusal writes
+// the replacement out for the author's own text instead of quoting the
+// placeholder form (parser.V1RetiredForms says which): the message names the
+// rewrite of the case's entry, so the placeholder text never appears in it.
+// Each is matched by the shape of that rewrite.
+var corpusWrittenOutReplacements = map[string]func(message string) bool{
+	// `{ args.x.y }` -> `{ y: args.x.y }`: the entry's key is the last segment
+	// of its path.
+	"retired_keyless_map_entry": func(message string) bool {
+		for _, m := range corpusKeylessRewrite.FindAllStringSubmatch(message, -1) {
+			if m[1] == m[3] {
+				return true
+			}
+		}
+		return false
+	},
+}
+
+var corpusKeylessRewrite = regexp.MustCompile(`write ([A-Za-z_][A-Za-z0-9_]*): ((?:[A-Za-z_][A-Za-z0-9_]*\.)+)([A-Za-z_][A-Za-z0-9_]*)`)
+
 // TestCorpusRefusesEveryRetiredForm holds the corpus to showing every spelling
 // edition 2026 retires, refused: each parser.V1RetiredForms() rule is the code
 // of a refused case whose message names the replacement, and every name the
@@ -529,7 +550,11 @@ func TestCorpusRefusesEveryRetiredForm(t *testing.T) {
 		}
 		shown++
 		for _, r := range cases {
-			if !strings.Contains(r.c.Message, f.Replacement) {
+			names := strings.Contains(r.c.Message, f.Replacement)
+			if writtenOut, ok := corpusWrittenOutReplacements[f.Rule]; ok {
+				names = writtenOut(r.c.Message)
+			}
+			if !names {
 				t.Errorf("%s pins rule %s, but its message does not name the replacement %q", r.rel, f.Rule, f.Replacement)
 			}
 		}

@@ -282,7 +282,8 @@
       "file": "tags-count.memql",
       "verdict": "lower",
       "concept": "ticket",
-      "sql": "COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(payload->'tags') = 'array' THEN payload->'tags' END), 0) > ?"
+      "sql": "(CASE jsonb_typeof(payload->'tags') WHEN 'array' THEN jsonb_array_length(payload->'tags') WHEN 'string' THEN char_length(payload #>> '{tags}') ELSE 0 END) > ?",
+      "note": "count() dispatches on what is stored: an array's length, a string's characters, zero for anything else."
     },
     {
       "file": "tags-count.memql",
@@ -295,6 +296,27 @@
         ]
       },
       "expect": true
+    },
+    {
+      "file": "tags-count.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": "abc"
+      },
+      "expect": true,
+      "note": "count() counts what is stored, whatever the field declares: a list field holding a corrupt string counts its characters, in SQL and in process alike."
+    },
+    {
+      "file": "tags-count.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": {
+          "k": "a"
+        }
+      },
+      "expect": false
     },
     {
       "file": "parenthesised-or.memql",
@@ -658,6 +680,66 @@
       "verdict": "refuse_load",
       "message": "does not lower in a query filter: a query result is an unbounded source",
       "note": "A construct call has no place in a predicate: over the row it would run a query for every row, and its result is an unbounded source a pushdown position cannot scan."
+    },
+    {
+      "file": "urgent-flag.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "CASE WHEN jsonb_typeof(payload->'urgent') = 'boolean' THEN (payload #>> '{urgent}')::boolean = ? ELSE FALSE END",
+      "note": "A bare boolean field is `== true`, guarded by the stored type: anything but a stored boolean is not true."
+    },
+    {
+      "file": "urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": true
+      },
+      "expect": true,
+      "note": "A boolean field used as a condition is true exactly when it holds true."
+    },
+    {
+      "file": "urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": "true"
+      },
+      "expect": false,
+      "note": "A stored value that is not a boolean is not true: the row is not selected, and the read goes on."
+    },
+    {
+      "file": "urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false
+    },
+    {
+      "file": "not-urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": "true"
+      },
+      "expect": true,
+      "note": "A stored value that is not a boolean is not true, so its negation is."
+    },
+    {
+      "file": "not-urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": true
+      },
+      "expect": false
+    },
+    {
+      "file": "not-urgent-flag.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true
     }
   ]
 }
