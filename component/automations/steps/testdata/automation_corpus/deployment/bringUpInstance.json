@@ -49,7 +49,6 @@
         },
         "rows": 0
       },
-      "legacyDefect": "a sub-automation call hands over each argument's reference text rather than its value -- the legacy step passed its args unresolved, which memql#5367 closed for a v1 step -- so provisionInstance and installInstance receive their own argument names",
       "outcome": {
         "calls": [
           {
@@ -144,7 +143,6 @@
         },
         "rows": 2
       },
-      "legacyDefect": "a sub-automation call hands over each argument's reference text rather than its value -- the legacy step passed its args unresolved, which memql#5367 closed for a v1 step -- so provisionInstance and installInstance receive their own argument names",
       "outcome": {
         "calls": [
           {
@@ -239,7 +237,6 @@
         },
         "rows": 0
       },
-      "legacyDefect": "a sub-automation call hands over each argument's reference text rather than its value -- the legacy step passed its args unresolved, which memql#5367 closed for a v1 step -- so provisionInstance and installInstance receive their own argument names",
       "outcome": {
         "calls": [
           {
@@ -334,7 +331,6 @@
         },
         "rows": 2
       },
-      "legacyDefect": "a sub-automation call hands over each argument's reference text rather than its value -- the legacy step passed its args unresolved, which memql#5367 closed for a v1 step -- so provisionInstance and installInstance receive their own argument names",
       "outcome": {
         "calls": [
           {

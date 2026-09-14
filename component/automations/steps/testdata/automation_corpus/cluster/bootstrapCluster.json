@@ -123,7 +123,6 @@
         },
         "rows": 0
       },
-      "legacyDefect": "`?? []` and `?? 5432` fall back to the text `()` and the string \"5432\": the legacy argument renderer writes an empty list's source and quotes the number, so createDatabase and createIdentityProvider are handed text",
       "outcome": {
         "calls": [
           {
@@ -211,7 +210,6 @@
         },
         "rows": 2
       },
-      "legacyDefect": "`?? []` and `?? 5432` fall back to the text `()` and the string \"5432\": the legacy argument renderer writes an empty list's source and quotes the number, so createDatabase and createIdentityProvider are handed text",
       "outcome": {
         "calls": [
           {

@@ -5,7 +5,6 @@
       "input": {
         "rows": 0
       },
-      "legacyDefect": "the event payload's expressions -- `rows.count()`, `retentionDays.first().payload.value ?? \"90\"` and `now` -- compile to strings the event step publishes as text",
       "outcome": {
         "calls": [
           {
@@ -38,7 +37,6 @@
       "input": {
         "rows": 2
       },
-      "legacyDefect": "the event payload's expressions -- `rows.count()`, `retentionDays.first().payload.value ?? \"90\"` and `now` -- compile to strings the event step publishes as text",
       "outcome": {
         "calls": [
           {

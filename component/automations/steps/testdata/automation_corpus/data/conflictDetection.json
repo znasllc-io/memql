@@ -76,7 +76,6 @@
         },
         "rows": 2
       },
-      "legacyDefect": "the condition `! matchingConfirmed.empty()` evaluates false with matches in hand, so the conflict event is never published (and its payload's `matchingConfirmed.count()`, `.nodes()` and `now` compile to text)",
       "outcome": {
         "calls": [
           {
@@ -209,7 +208,6 @@
         },
         "rows": 2
       },
-      "legacyDefect": "the condition `! matchingConfirmed.empty()` evaluates false with matches in hand, so the conflict event is never published (and its payload's `matchingConfirmed.count()`, `.nodes()` and `now` compile to text)",
       "outcome": {
         "calls": [
           {

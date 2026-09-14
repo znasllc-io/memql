@@ -30,7 +30,6 @@
         },
         "rows": 0
       },
-      "legacyDefect": "`now` in the event payload compiles to the text `timestamp()`, which the event step publishes as text",
       "outcome": {
         "calls": [
           {
@@ -85,7 +84,6 @@
         },
         "rows": 2
       },
-      "legacyDefect": "`now` in the event payload compiles to the text `timestamp()`, which the event step publishes as text",
       "outcome": {
         "calls": [
           {
@@ -140,7 +138,6 @@
         },
         "rows": 0
       },
-      "legacyDefect": "`now` in the event payload compiles to the text `timestamp()`, which the event step publishes as text",
       "outcome": {
         "calls": [
           {
@@ -195,7 +192,6 @@
         },
         "rows": 2
       },
-      "legacyDefect": "`now` in the event payload compiles to the text `timestamp()`, which the event step publishes as text",
       "outcome": {
         "calls": [
           {

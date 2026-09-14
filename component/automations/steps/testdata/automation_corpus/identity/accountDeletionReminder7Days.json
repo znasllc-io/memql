@@ -21,7 +21,6 @@
       "input": {
         "rows": 2
       },
-      "legacyDefect": "the 7-day window condition compiles to one the string evaluator reads as false, so no reminder is published (and the payload's `now` compiles to the text `timestamp()`)",
       "outcome": {
         "calls": [
           {

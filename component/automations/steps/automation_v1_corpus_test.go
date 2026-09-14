@@ -782,119 +782,13 @@ type automationDefect struct {
 }
 
 // automationLegacyDefects are the legacy defects the migration corrects, by
-// automation. The first seven are the logic corpus's (logicLegacyDefects) as
-// the automation that calls each shows them: every one sits in the calls and
-// events the logic makes, which the moved statements make alike; the halves in
-// a logic's return value do not apply, since that output is not compared.
-var automationLegacyDefects = map[string]automationDefect{
-	"onDelegationCreated": {
-		why:     logicLegacyDefects["onDelegationCreated"].why,
-		applies: func(automationFixture) bool { return true },
-		mend: func(_ automationFixture, legacy, other *logicRecord) error {
-			return mendEventField(legacy, other, "delegation.created", "timestamp", isInstant)
-		},
-	},
-	"purgeExpiredSafetyClassifications": fromLogicDefect("purgeExpiredSafetyClassifications"),
-	"purgeExpiredOutputScreenings":      fromLogicDefect("purgeExpiredOutputScreenings"),
-	"auditEventRetentionSweep":          fromLogicDefect("auditEventRetentionSweep"),
-	"accountDeletionReminder7Days":      fromLogicDefect("accountDeletionReminder7Days"),
-	"accountDeletionReminder25Days":     fromLogicDefect("accountDeletionReminder25Days"),
-	"conflictDetection": {
-		why:     logicLegacyDefects["conflictDetection"].why,
-		applies: func(fx automationFixture) bool { return fx.Event != nil && fx.Rows > 0 },
-		mend: func(fx automationFixture, legacy, other *logicRecord) error {
-			const topic = "data.conflicts.detected"
-			if eventCall(legacy, topic) != nil {
-				return fmt.Errorf("the legacy run published the conflict event")
-			}
-			ev := eventCall(other, topic)
-			if ev == nil {
-				return fmt.Errorf("the statement run did not publish the conflict event")
-			}
-			if n, _ := ev.Args["matchCount"].(float64); int(n) != fx.Rows {
-				return fmt.Errorf("the statement run's event counts %v matches, want %d", ev.Args["matchCount"], fx.Rows)
-			}
-			if matches, _ := ev.Args["matches"].([]any); len(matches) != fx.Rows {
-				return fmt.Errorf("the statement run's event carries %d matches, want %d", len(matches), fx.Rows)
-			}
-			other.Calls = withoutEvent(other.Calls, topic)
-			return nil
-		},
-	},
-	"bootstrapCluster": {
-		why: "`?? []` and `?? 5432` fall back to the text `()` and the string \"5432\": the legacy argument renderer writes an empty list's " +
-			"source and quotes the number, so createDatabase and createIdentityProvider are handed text",
-		// Only a bff node refreshes the rows those two calls write.
-		applies: func(fx automationFixture) bool { return fx.Label == "event bff" },
-		mend: func(_ automationFixture, legacy, other *logicRecord) error {
-			fields := map[string]map[string]struct{ legacy, other any }{
-				"createDatabase":         {"extensions": {"()", []any{}}, "port": {"5432", float64(5432)}},
-				"createIdentityProvider": {"acceptedAudiences": {"()", []any{}}},
-			}
-			found := 0
-			for name, want := range fields {
-				lc, oc := lastCall(legacy, name), lastCall(other, name)
-				if lc == nil || oc == nil {
-					continue // a run that does not refresh the rows makes no such call
-				}
-				for field, w := range want {
-					if jsonText(lc.Args[field]) != jsonText(w.legacy) || jsonText(oc.Args[field]) != jsonText(w.other) {
-						return fmt.Errorf("%s.%s is %v in the legacy run and %v in the statement run", name, field, lc.Args[field], oc.Args[field])
-					}
-					delete(lc.Args, field)
-					delete(oc.Args, field)
-					found++
-				}
-			}
-			if found == 0 {
-				return fmt.Errorf("neither run refreshed the database or identity provider row")
-			}
-			return nil
-		},
-	},
-	"bringUpInstance": {
-		why: "a sub-automation call hands over each argument's reference text rather than its value -- the legacy step passed its " +
-			"args unresolved, which memql#5367 closed for a v1 step -- so provisionInstance and installInstance receive their own " +
-			"argument names",
-		applies: func(fx automationFixture) bool { return fx.Event != nil },
-		mend: func(_ automationFixture, legacy, other *logicRecord) error {
-			found := 0
-			for i, lc := range legacy.Calls {
-				if lc.Kind != "automation" || i >= len(other.Calls) || other.Calls[i].Kind != "automation" || other.Calls[i].Name != lc.Name {
-					continue
-				}
-				oc := other.Calls[i]
-				for field, v := range lc.Args {
-					s, isText := v.(string)
-					if !isText || s != field || jsonText(oc.Args[field]) == jsonText(v) {
-						return fmt.Errorf("the legacy %s.%s is %v, not the argument's own name", lc.Name, field, v)
-					}
-					delete(lc.Args, field)
-					delete(oc.Args, field)
-					found++
-				}
-			}
-			if found == 0 {
-				return fmt.Errorf("the legacy run made no sub-automation call")
-			}
-			return nil
-		},
-	},
-}
-
-// fromLogicDefect is a logic's legacy defect as the automation that calls it
-// shows it, for a defect whose mend reads only the calls and the row count.
-func fromLogicDefect(logic string) automationDefect {
-	d := logicLegacyDefects[logic]
-	asLogic := func(fx automationFixture) logicFixture { return logicFixture{Name: logic, Rows: fx.Rows} }
-	return automationDefect{
-		why:     d.why,
-		applies: func(fx automationFixture) bool { return d.applies(asLogic(fx)) },
-		mend: func(fx automationFixture, legacy, other *logicRecord) error {
-			return d.mend(asLogic(fx), legacy, other)
-		},
-	}
-}
+// automation. It is empty: epic 2's flip (memql#5363) fixed every defect this
+// corpus recorded -- the argument renderer's `?? []` text, the seven the
+// logic corpus names for the logic these automations call, bringUpInstance's
+// -- so the legacy arm runs every automation as its statement form does. It
+// stays until the flip deletes the legacy arm, so a defect found in the
+// meantime has a place to be named.
+var automationLegacyDefects = map[string]automationDefect{}
 
 // compareAutomationRuns compares two runs of one fixture; when exactly one is
 // the legacy arm's and the automation has a legacy defect that applies, the

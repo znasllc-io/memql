@@ -93,13 +93,6 @@
           },
           {
             "args": {
-              "runId": "v1:probe:thing:1"
-            },
-            "kind": "builtin",
-            "name": "workbenchTeardownDirectory"
-          },
-          {
-            "args": {
               "reason": "run_terminal",
               "workspaceId": "v1:probe:row:workspaceForRun-1"
             },
@@ -113,6 +106,13 @@
             },
             "kind": "mutation",
             "name": "releaseWorkspace"
+          },
+          {
+            "args": {
+              "runId": "v1:probe:thing:1"
+            },
+            "kind": "builtin",
+            "name": "workbenchTeardownDirectory"
           }
         ],
         "result": {
@@ -213,13 +213,6 @@
           },
           {
             "args": {
-              "runId": "v1:probe:thing:1"
-            },
-            "kind": "builtin",
-            "name": "workbenchTeardownDirectory"
-          },
-          {
-            "args": {
               "reason": "run_terminal",
               "workspaceId": "v1:probe:row:workspaceForRun-1"
             },
@@ -233,6 +226,13 @@
             },
             "kind": "mutation",
             "name": "releaseWorkspace"
+          },
+          {
+            "args": {
+              "runId": "v1:probe:thing:1"
+            },
+            "kind": "builtin",
+            "name": "workbenchTeardownDirectory"
           }
         ],
         "result": {
