@@ -392,10 +392,13 @@ The refusals this task pins (the message prefixes are the contract):
 - Create: `component/language/compiler/body_scope.go`, `component/language/compiler/body_scope_test.go`
 
 **Interfaces:**
-- Consumes: Task 1, Task 2 (`ParseV1File` for tests).
+- Consumes: Task 1. (Built before Task 2 on hand-made bodies, so it does not wait for the parser; Task 2's parse tests add source-level cases through `CheckBody`.)
 - Produces:
 
 ```go
+// BodyProblemCodes lists every code CheckBody can return (the corpus gate reads it).
+func BodyProblemCodes() []string
+
 // BodyProblem is a load-time refusal of a body. Error() ends with " [<Code>]".
 type BodyProblem struct {
 	Code      string
