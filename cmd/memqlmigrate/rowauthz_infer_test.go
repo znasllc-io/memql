@@ -40,7 +40,7 @@ func TestInferOwnedFromCallerScopedFilter(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"notes/concepts.memql": "concept note {\n  ownerUserId string\n}\n",
 		"notes/queries.memql": `query note myNotes {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   noteFull
 }
 `,
@@ -55,7 +55,7 @@ func TestInferClusterOwnerFromAdminGate(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"telephony/concepts.memql": "concept call {\n  fromE164 string\n}\n",
 		"telephony/queries.memql": `query call allCalls {
-  filter  actor.isClusterOwner==true
+  filter  row => actor.isClusterOwner == true
   shape   callFull
 }
 `,
@@ -83,7 +83,7 @@ query user userById {
   args {
     id  string!
   }
-  filter  row.id==args.id
+  filter  row => row.id == args.id
   shape   userFull
 }
 `,
@@ -105,7 +105,7 @@ func TestServerOnlyQueryAbstains(t *testing.T) {
 		"identity/concepts.memql": "concept user {\n  ownerUserId string\n}\n",
 		"identity/queries.memql": `@serverOnly
 query user resolveUser {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   userFull
 }
 `,
@@ -121,7 +121,7 @@ func TestPermissiveDisjunctDoesNotInferOwned(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"library/concepts.memql": "concept artifact {\n  ownerUserId string\n  visibility string\n}\n",
 		"library/queries.memql": `query artifact artifacts {
-  filter  ownerUserId==actor.userId || visibility=="public"
+  filter  row => row.ownerUserId == actor.userId || row.visibility == "public"
   shape   artifactFull
 }
 `,
@@ -144,7 +144,7 @@ func TestOwnedTermUnderATopLevelDisjunctionDoesNotCount(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"library/concepts.memql": "concept artifact {\n  ownerUserId string\n  kind string\n  shared boolean\n}\n",
 		"library/queries.memql": `query artifact artifacts {
-  filter  ownerUserId==actor.userId && kind=="doc" || shared==true
+  filter  row => row.ownerUserId == actor.userId && row.kind == "doc" || row.shared == true
   shape   artifactFull
 }
 `,
@@ -160,7 +160,7 @@ func TestConjunctAlongsideDisjunctionStillInfersOwned(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"library/concepts.memql": "concept artifact {\n  ownerUserId string\n  kind string\n}\n",
 		"library/queries.memql": `query artifact artifacts {
-  filter  (kind=="doc" || kind=="sheet") && ownerUserId==actor.userId
+  filter  row => (row.kind == "doc" || row.kind == "sheet") && row.ownerUserId == actor.userId
   shape   artifactFull
 }
 `,
@@ -183,12 +183,12 @@ func TestAnUnscopedQueryBlocksTheTier(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"planner/concepts.memql": "concept plan {\n  ownerUserId string\n  spaceId string\n}\n",
 		"planner/queries.memql": `query plan myPlans {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   planFull
 }
 
 query plan plansForSpace {
-  filter  spaceId==args.spaceId
+  filter  row => row.spaceId == args.spaceId
   shape   planFull
 }
 `,
@@ -208,7 +208,7 @@ func TestAnUnfilteredQueryBlocksTheTier(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"notes/concepts.memql": "concept note {\n  ownerUserId string\n}\n",
 		"notes/queries.memql": `query note myNotes {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   noteFull
 }
 
@@ -232,13 +232,13 @@ func TestAPublicQueryBlocksAnOwnedTier(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"library/concepts.memql": "concept artifact {\n  ownerUserId string\n}\n",
 		"library/queries.memql": `query artifact myArtifacts {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   artifactFull
 }
 
 @public
 query artifact workspaceLiveSources {
-  filter  ownerUserId==""
+  filter  row => row.ownerUserId == ""
   shape   artifactFull
 }
 `,
@@ -259,13 +259,13 @@ func TestServerOnlyQueryDoesNotBlock(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"identity/concepts.memql": "concept user {\n  ownerUserId string\n}\n",
 		"identity/queries.memql": `query user myUser {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   userFull
 }
 
 @serverOnly
 query user userById {
-  filter  row.id==args.id
+  filter  row => row.id == args.id
   shape   userFull
 }
 `,
@@ -284,7 +284,7 @@ func TestACommentCannotManufactureATier(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"notes/concepts.memql": "concept note {\n  ownerUserId string\n  a string\n}\n",
 		"notes/queries.memql": `query note sneaky {
-  filter  a=="b" // && ownerUserId==actor.userId
+  filter  row => row.a == "b" // && row.ownerUserId == actor.userId
   shape   noteFull
 }
 `,
@@ -300,12 +300,12 @@ func TestABraceInAStringDoesNotMergeBodies(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"notes/concepts.memql": "concept note {\n  ownerUserId string\n  pattern string\n}\n",
 		"notes/queries.memql": `query note first {
-  filter  pattern=="{"
+  filter  row => row.pattern == "{"
   shape   noteFull
 }
 
 query note second {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   noteFull
 }
 `,
@@ -333,7 +333,7 @@ func TestAMultiLineStringDoesNotTruncateABody(t *testing.T) {
     label  string  @description("a label
 } that wraps")
   }
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   noteFull
 }
 `
@@ -361,7 +361,7 @@ func TestAMutationNeitherVotesNorBlocks(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"notes/concepts.memql": "concept note {\n  ownerUserId string\n}\n",
 		"notes/queries.memql": `query note myNotes {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   noteFull
 }
 `,
@@ -397,12 +397,12 @@ func TestClassifyConstructVerdicts(t *testing.T) {
 	}{
 		{"mutation stamping the actor", "mutate", "", "{\n  insert {\n    ownerUserId: actor.userId\n  }\n}", verdictExempt},
 		{"mutation updating by arg", "mutate", "", "{\n  update {\n    id: args.noteId\n  }\n}", verdictExempt},
-		{"serverOnly query", "query", "@serverOnly\n", "{\n  filter  row.id==args.id\n}", verdictExempt},
-		{"public query", "query", "@public\n", "{\n  filter  active==true\n}", verdictBlocks},
+		{"serverOnly query", "query", "@serverOnly\n", "{\n  filter  row => row.id == args.id\n}", verdictExempt},
+		{"public query", "query", "@public\n", "{\n  filter  row => row.active == true\n}", verdictBlocks},
 		{"query with no filter", "query", "", "{\n  shape noteFull\n}", verdictBlocks},
-		{"unscoped query", "query", "", "{\n  filter  spaceId==args.spaceId\n}", verdictBlocks},
-		{"caller-scoped query", "query", "", "{\n  filter  ownerUserId==actor.userId\n}", verdictVote},
-		{"admin-gated query", "query", "", "{\n  filter  actor.isClusterOwner==true\n}", verdictVote},
+		{"unscoped query", "query", "", "{\n  filter  row => row.spaceId == args.spaceId\n}", verdictBlocks},
+		{"caller-scoped query", "query", "", "{\n  filter  row => row.ownerUserId == actor.userId\n}", verdictVote},
+		{"admin-gated query", "query", "", "{\n  filter  row => actor.isClusterOwner == true\n}", verdictVote},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -431,14 +431,14 @@ func TestPreambleReachesPastACommentLine(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"identity/concepts.memql": "concept user {\n  ownerUserId string\n}\n",
 		"identity/queries.memql": `query user myUser {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   userFull
 }
 
 @serverOnly
 // Resolves sub -> user before an actor exists.
 query user userById {
-  filter  row.id==args.id
+  filter  row => row.id == args.id
   shape   userFull
 }
 `,
@@ -456,12 +456,12 @@ func TestNestedFilesAreWalked(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"notes/concepts.memql": "concept note {\n  ownerUserId string\n  kind string\n}\n",
 		"notes/queries.memql": `query note myNotes {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   noteFull
 }
 `,
 		"notes/extra/more.memql": `query note allNotesByKind {
-  filter  kind==args.kind
+  filter  row => row.kind == args.kind
   shape   noteFull
 }
 `,
@@ -482,7 +482,7 @@ func TestAbstentionReasonQuotesTheAuthorsText(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"telephony/concepts.memql": "concept consent {\n  status string\n}\n",
 		"telephony/queries.memql": `query consent optedOut {
-  filter  status=="opted_out"
+  filter  row => row.status == "opted_out"
   shape   consentFull
 }
 `,
@@ -509,7 +509,7 @@ use identity.concepts.{ thing }
 */
 
 query thing unscoped {
-  filter  kind==args.kind
+  filter  row => row.kind == args.kind
   shape   thingFull
 }
 `,
@@ -550,12 +550,12 @@ func TestDisagreeingQueriesAbstainWithAReason(t *testing.T) {
 	got := inferOne(t, map[string]string{
 		"authoring/concepts.memql": "concept bundle {\n  ownerUserId string\n}\n",
 		"authoring/queries.memql": `query bundle mine {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   bundleFull
 }
 
 query bundle all {
-  filter  actor.isClusterOwner==true
+  filter  row => actor.isClusterOwner == true
   shape   bundleFull
 }
 `,
@@ -584,7 +584,7 @@ func TestImportedConceptResolvesToItsDeclaringDomain(t *testing.T) {
 		"library/queries.memql": `use identity.concepts.{ user }
 
 query user myUser {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   userFull
 }
 `,
@@ -633,7 +633,7 @@ func TestRewriteAppliesTheInferredTier(t *testing.T) {
 	root := writeDSLTree(t, map[string]string{
 		"notes/concepts.memql": "concept note {\n  ownerUserId string\n}\n",
 		"notes/queries.memql": `query note myNotes {
-  filter  ownerUserId==actor.userId
+  filter  row => row.ownerUserId == actor.userId
   shape   noteFull
 }
 `,
@@ -668,10 +668,11 @@ func TestRewriteAppliesTheInferredTier(t *testing.T) {
 	}
 }
 
-// TestClassifyConstructReadsTheWholeClauseInBothEditions: the edition-2026
-// forms the expressions codemod writes (epic memql#5363), and a wrapped clause
-// in either edition -- which a first-line read saw as one conjunct of several.
-func TestClassifyConstructReadsTheWholeClauseInBothEditions(t *testing.T) {
+// TestClassifyConstructReadsTheWholeClause: an edition-2026 filter is read as a
+// tree, wrapped lines included -- a first-line read saw one conjunct of
+// several -- and a clause in the pre-2026 spelling, which the engine refuses,
+// evidences nothing and blocks.
+func TestClassifyConstructReadsTheWholeClause(t *testing.T) {
 	cases := []struct {
 		name  string
 		body  string
@@ -679,16 +680,16 @@ func TestClassifyConstructReadsTheWholeClauseInBothEditions(t *testing.T) {
 		tier  langparser.RowAuthzTier
 		owner string
 	}{
-		{"v1 caller-scoped", "{\n  filter  row => row.ownerUserId == actor.userId\n}", verdictVote, langparser.RowAuthzOwned, "ownerUserId"},
-		{"v1 reversed operands", "{\n  filter  row => actor.userId == row.userId && row.active == true\n}", verdictVote, langparser.RowAuthzOwned, "userId"},
-		{"v1 owner on a wrapped line", "{\n  filter  row => row.status == \"open\"\n          && row.ownerUserId == actor.userId\n  shape   noteFull\n}", verdictVote, langparser.RowAuthzOwned, "ownerUserId"},
-		{"legacy owner on a wrapped line", "{\n  filter  status==\"open\" &&\n    ownerUserId==actor.userId\n  shape   noteFull\n}", verdictVote, langparser.RowAuthzOwned, "ownerUserId"},
-		{"v1 admin gate", "{\n  filter  row => row.targetId == args.targetId && actor.isClusterOwner == true\n}", verdictVote, langparser.RowAuthzClusterOwner, ""},
+		{"caller-scoped", "{\n  filter  row => row.ownerUserId == actor.userId\n}", verdictVote, langparser.RowAuthzOwned, "ownerUserId"},
+		{"reversed operands", "{\n  filter  row => actor.userId == row.userId && row.active == true\n}", verdictVote, langparser.RowAuthzOwned, "userId"},
+		{"owner on a wrapped line", "{\n  filter  row => row.status == \"open\"\n          && row.ownerUserId == actor.userId\n  shape   noteFull\n}", verdictVote, langparser.RowAuthzOwned, "ownerUserId"},
+		{"admin gate", "{\n  filter  row => row.targetId == args.targetId && actor.isClusterOwner == true\n}", verdictVote, langparser.RowAuthzClusterOwner, ""},
 		// Blocks: nothing guarantees the caller.
-		{"v1 unscoped", "{\n  filter  row => row.spaceId == args.spaceId\n}", verdictBlocks, "", ""},
-		{"v1 owner widened by a disjunct", "{\n  filter  row => row.ownerUserId == actor.userId || row.visibility == \"public\"\n}", verdictBlocks, "", ""},
-		{"v1 owner behind a guard", "{\n  filter  row => (args.mine == nil || row.ownerUserId == actor.userId)\n}", verdictBlocks, "", ""},
-		{"v1 nested payload path is not an owner field", "{\n  filter  row => row.credentials.userId == actor.userId\n}", verdictBlocks, "", ""},
+		{"unscoped", "{\n  filter  row => row.spaceId == args.spaceId\n}", verdictBlocks, "", ""},
+		{"owner widened by a disjunct", "{\n  filter  row => row.ownerUserId == actor.userId || row.visibility == \"public\"\n}", verdictBlocks, "", ""},
+		{"owner behind a guard", "{\n  filter  row => (args.mine == nil || row.ownerUserId == actor.userId)\n}", verdictBlocks, "", ""},
+		{"nested payload path is not an owner field", "{\n  filter  row => row.credentials.userId == actor.userId\n}", verdictBlocks, "", ""},
+		{"pre-2026 clause", "{\n  filter  ownerUserId==actor.userId\n}", verdictBlocks, "", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -703,6 +704,9 @@ func TestClassifyConstructReadsTheWholeClauseInBothEditions(t *testing.T) {
 				t.Fatal("a blocking verdict must carry a reason")
 			}
 		})
+	}
+	if got := classifyConstruct("query", "", "{\n  filter  ownerUserId==actor.userId\n}", "{\n  filter  ownerUserId==actor.userId\n}"); !strings.Contains(got.Reason, "pre-2026") {
+		t.Errorf("a pre-2026 clause blocks with reason %q; want it to say the clause is pre-2026", got.Reason)
 	}
 }
 
@@ -797,18 +801,19 @@ query note myNotes {
 `,
 }
 
-// TestRowAuthzInferenceIsEditionIndependent runs the inference over a tree in
-// the legacy grammar and over that tree as the expressions codemod leaves it
-// (epic memql#5363), and requires the same verdict for every concept: the
-// same tier where one is inferred, an abstention where one is not.
+// TestRowAuthzInferenceReadsAMigratedBundle: a bundle that has not run the
+// expressions codemod yet -- legacyEvidenceTree -- gets its tiers inferred once
+// it has, and none before.
 //
-// It used to take dsl/ itself as the legacy tree. dsl/ is edition 2026 now
-// (memql#5368), so the legacy tree is legacyEvidenceTree above -- a bundle
-// that has not run the codemod yet is exactly such a tree, and inferring its
-// tiers must not depend on which edition it is written in -- and
-// TestRowAuthzInferenceReadsTheMigratedTree keeps the tree-scale positive
-// over dsl/ as it is.
-func TestRowAuthzInferenceIsEditionIndependent(t *testing.T) {
+// The inference reads edition 2026 only. A legacy clause is one the engine
+// refuses, so it evidences nothing: every concept a legacy query reads is
+// blocked, with a reason naming the codemod, and no tier is inferred from text
+// the engine would not load. Once migrated, the same tree yields the verdicts
+// the fixture was written to produce -- the reachable positive over every kind
+// of evidence the inference reads, since a tree it could no longer read would
+// infer nothing at all. TestRowAuthzInferenceReadsTheMigratedTree holds the
+// tree-scale positive over dsl/.
+func TestRowAuthzInferenceReadsAMigratedBundle(t *testing.T) {
 	files := map[string][]byte{}
 	for p, src := range legacyEvidenceTree {
 		files[p] = []byte(src)
@@ -818,7 +823,7 @@ func TestRowAuthzInferenceIsEditionIndependent(t *testing.T) {
 		t.Fatalf("expressions rewrite: %v", err)
 	}
 	// Every file carrying a predicate must come out rewritten, or the
-	// comparison below is the legacy spelling against itself.
+	// migrated tree below is still the legacy one.
 	for p := range legacyEvidenceTree {
 		if !strings.HasSuffix(p, "/queries.memql") && p != "common/traits.memql" {
 			continue
@@ -835,42 +840,11 @@ func TestRowAuthzInferenceIsEditionIndependent(t *testing.T) {
 		}
 	}
 
-	legacy := inferOne(t, legacyEvidenceTree)
-	v1 := inferOne(t, migrated)
-	for domain, tiers := range legacy.Tiers {
-		for name, want := range tiers {
-			got, ok := v1.Tiers[domain][name]
-			if !ok || got != want {
-				t.Errorf("%s.%s: infers %+v from the legacy tree and %+v (found %v) once migrated", domain, name, want, got, ok)
-			}
-		}
-	}
-	for domain, tiers := range v1.Tiers {
-		for name, got := range tiers {
-			if _, ok := legacy.Tiers[domain][name]; !ok {
-				t.Errorf("%s.%s: infers %+v only once migrated", domain, name, got)
-			}
-		}
-	}
-	for key := range legacy.Abstained {
-		if _, ok := v1.Abstained[key]; !ok {
-			t.Errorf("%v: abstains over the legacy tree and not once migrated", key)
-		}
-	}
-	for key := range v1.Abstained {
-		if _, ok := legacy.Abstained[key]; !ok {
-			t.Errorf("%v: abstains only once migrated", key)
-		}
-	}
-
-	// The reachable positive: the verdicts the fixture was written to
-	// produce, in the legacy edition (and so, by the comparison above, in
-	// both). A tree the inference could no longer read would agree with
-	// itself too -- by inferring nothing.
+	got := inferOne(t, migrated)
 	owned := func(owner string) langparser.RowAuthzDecl {
 		return langparser.RowAuthzDecl{Tier: langparser.RowAuthzOwned, Owner: owner}
 	}
-	for _, want := range []struct {
+	wantTiers := []struct {
 		domain, name string
 		decl         langparser.RowAuthzDecl
 	}{
@@ -878,9 +852,10 @@ func TestRowAuthzInferenceIsEditionIndependent(t *testing.T) {
 		{"telephony", "call", langparser.RowAuthzDecl{Tier: langparser.RowAuthzClusterOwner}},
 		{"tasks", "task", owned("ownerUserId")},
 		{"notes", "note", owned("authorUserId")},
-	} {
-		if got := legacy.Tiers[want.domain][want.name]; got != want.decl {
-			t.Errorf("%s.%s: the legacy tree infers %+v, want %+v (abstained: %q)", want.domain, want.name, got, want.decl, legacy.Abstained[conceptKey{Domain: want.domain, Name: want.name}])
+	}
+	for _, want := range wantTiers {
+		if decl := got.Tiers[want.domain][want.name]; decl != want.decl {
+			t.Errorf("%s.%s: the migrated tree infers %+v, want %+v (abstained: %q)", want.domain, want.name, decl, want.decl, got.Abstained[conceptKey{Domain: want.domain, Name: want.name}])
 		}
 	}
 	for _, key := range []conceptKey{
@@ -888,16 +863,32 @@ func TestRowAuthzInferenceIsEditionIndependent(t *testing.T) {
 		{Domain: "library", Name: "artifact"},
 		{Domain: "flags", Name: "flag"},
 	} {
-		if _, ok := legacy.Abstained[key]; !ok {
-			t.Errorf("%v: the legacy tree infers %+v, want an abstention", key, legacy.Tiers[key.Domain][key.Name])
+		if _, ok := got.Abstained[key]; !ok {
+			t.Errorf("%v: the migrated tree infers %+v, want an abstention", key, got.Tiers[key.Domain][key.Name])
+		}
+	}
+
+	// The same bundle before the codemod: nothing is inferred, and each
+	// concept the migrated tree gave a tier to is blocked by name.
+	legacy := inferOne(t, legacyEvidenceTree)
+	for domain, tiers := range legacy.Tiers {
+		for name, decl := range tiers {
+			t.Errorf("%s.%s: inferred %+v from a pre-2026 filter the engine refuses", domain, name, decl)
+		}
+	}
+	for _, want := range wantTiers {
+		key := conceptKey{Domain: want.domain, Name: want.name}
+		if reason := legacy.Abstained[key]; !strings.Contains(reason, "memqlmigrate --rewrite=expressions") {
+			t.Errorf("%v: the legacy tree abstains with %q; want the reason to name the codemod", key, reason)
 		}
 	}
 }
 
-// TestRowAuthzInferenceReadsTheMigratedTree is the tree-scale positive the
-// edition test used to carry: over dsl/ as it is -- edition 2026 since
-// memql#5368 -- the inference still reads its evidence. Measured when the
-// floor was set: 57 inferred tiers, identical in both editions then.
+// TestRowAuthzInferenceReadsTheMigratedTree is the tree-scale positive: over
+// dsl/ as it is -- edition 2026 since memql#5368 -- the inference still reads
+// its evidence, and blocks nothing for being pre-2026. Measured when the floor
+// was set: 57 inferred tiers and 104 abstentions, the same numbers the legacy
+// tree gave.
 func TestRowAuthzInferenceReadsTheMigratedTree(t *testing.T) {
 	got, err := inferRowAuthz(filepath.Join("..", "..", "dsl"))
 	if err != nil {
@@ -909,6 +900,11 @@ func TestRowAuthzInferenceReadsTheMigratedTree(t *testing.T) {
 	}
 	if inferred < 40 {
 		t.Errorf("inferred %d tiers over dsl/ -- the inference has stopped reading evidence", inferred)
+	}
+	for key, reason := range got.Abstained {
+		if strings.Contains(reason, "pre-2026") {
+			t.Errorf("%v abstains on a pre-2026 clause in the migrated tree: %s", key, reason)
+		}
 	}
 	t.Logf("%d tiers and %d abstentions over dsl/", inferred, len(got.Abstained))
 }

@@ -154,16 +154,18 @@ query widget widgetsLocalSpec {
 	}
 }
 
-// TestFilterFieldsWalksRelationshipExpr pins memql#2795-review F2. The engine's
-// rewriteFilterFieldRefs walks RelationshipExpression, so a bare property under
-// childOf(...) IS payload-prefixed -- omitting the node from the lint walker
-// left the lane blind to the exact defect it exists to catch.
+// TestFilterFieldsWalksRelationshipExpr pins memql#2795-review F2: a field of
+// the row read INSIDE a traversal is still the row's field, and the lane must
+// reach it -- omitting the traversal from the lint walker left the lane blind
+// to the exact defect it exists to catch. In edition 2026 the traversal takes a
+// lambda over the related row (`childOf(p => ...)`), whose own fields belong to
+// the related concept; the bound row's typo under it is `row.bogusUnderRel`.
 func TestFilterFieldsWalksRelationshipExpr(t *testing.T) {
 	errs := filterFieldErrs(t, `use lab.concepts.{ widget }
 
 /// Typo hidden under a relationship wrapper.
 query widget widgetsRelated {
-  filter  region != "" && childOf(bogusUnderRel == "x")
+  filter  row => row.region != "" && childOf(p => p.id == row.bogusUnderRel)
 }
 `)
 	if len(errs) != 1 {

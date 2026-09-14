@@ -40,10 +40,21 @@ func TestAutomationCondition_MigratedPatternsAreFindings(t *testing.T) {
     }
   }
 }`, "automation-condition-vocabulary"},
-		{"coalesce default in @filter", `@filter(coalesce(payload.kind, "regular") == "daily")
+		{"`??` default in @filter", `@filter(row => (row.kind ?? "regular") == "daily")
 automation probe {
   step run { logic f ( event ) }
 }`, "automation-condition-builtin"},
+		{"`+` concat in an if", `automation probe {
+  step apply {
+    if "role:" + event.node.payload.role == "role:admin" {
+      mutation m ( id: id )
+    }
+  }
+}`, "automation-condition-builtin"},
+		{"vocabulary in a lambda @filter", `@filter(row => row.status == "running" || row.status == "compiling")
+automation probe {
+  step run { logic f ( event ) }
+}`, "automation-condition-vocabulary"},
 		{"vocabulary in forEach where", `automation probe {
   step fan {
     forEach nt in engineNodeTypes where nt == "voice" || nt == "bff" {
@@ -105,90 +116,16 @@ automation probe {
     }
   }
 }`},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if fs := automationFindings(t, tc.src); len(fs) != 0 {
-				t.Fatalf("sanctioned shape must produce zero findings, got %v", fs)
-			}
-		})
-	}
-}
-
-// TestAutomationCondition_EditionTwentySix: the same rule in the forms the
-// edition-2026 codemod writes (epic memql#5363). coalesce and concat become
-// the `??` and `+` operators, and a trigger filter becomes a lambda -- which
-// opens a group at once, so a condition read to the first `)` stops inside it.
-func TestAutomationCondition_EditionTwentySix(t *testing.T) {
-	catches := []struct {
-		name string
-		src  string
-		rule string
-	}{
-		{"`??` default in a lambda @filter", `@filter(row => (row.kind ?? "regular") == "daily")
+		{"relevance lambda @filter on the row", `@filter(row => row.preferences.computerUseEnabled == false)
 automation probe {
   step run { logic f ( event ) }
-}`, "automation-condition-builtin"},
-		{"date math with `+` and `??` in an if", `automation probe {
-  step apply {
-    forEach item in decide.result {
-      if addDuration(item.createdAt, "P" + (window.first().payload.value ?? "30") + "D") < now {
-        mutation expire ( id: item.id )
-      }
-    }
-  }
-}`, "automation-condition-builtin"},
-		{"`+` concat in an if", `automation probe {
-  step apply {
-    if "role:" + event.node.payload.role == "role:admin" {
-      mutation m ( id: id )
-    }
-  }
-}`, "automation-condition-builtin"},
-		{"vocabulary in a lambda @filter", `@filter(row => row.status == "running" || row.status == "compiling")
-automation probe {
-  step run { logic f ( event ) }
-}`, "automation-condition-vocabulary"},
-		// The legacy form, past the first `)`: the old capture read
-		// `exists(event.node.id` and nothing after it.
-		{"a builtin after a call in a legacy @filter", `@filter(exists(event.node.id) && concat(event.node.payload.a, "x") == "yx")
-automation probe {
-  step run { logic f ( event ) }
-}`, "automation-condition-builtin"},
-	}
-	for _, tc := range catches {
-		t.Run(tc.name, func(t *testing.T) {
-			for _, f := range automationFindings(t, tc.src) {
-				if f.Rule == tc.rule {
-					return
-				}
-			}
-			t.Fatalf("expected a %s finding, got %v", tc.rule, automationFindings(t, tc.src))
-		})
-	}
-
-	passes := []struct {
-		name string
-		src  string
-	}{
-		{"relevance lambda @filter", `@filter(row => row.preferences.computerUseEnabled == false)
-automation probe {
-  step run { logic f ( event ) }
-}`},
-		{"nil presence and a decided gate", `automation probe {
-  step decide { logic decideThing ( event ) }
-  step teardown {
-    if steps.decide.result == true && event.node.id != nil {
-      builtin teardown ( planId: event.node.id )
-    }
-  }
 }`},
 		{"a group inside a lambda @filter", `@filter(row => (row.kind == "file" && row.archived == true))
 automation probe {
   step run { logic f ( event ) }
 }`},
 	}
-	for _, tc := range passes {
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if fs := automationFindings(t, tc.src); len(fs) != 0 {
 				t.Fatalf("sanctioned shape must produce zero findings, got %v", fs)

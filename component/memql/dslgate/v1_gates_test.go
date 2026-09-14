@@ -3,14 +3,12 @@ package dslgate
 // v1_gates_test.go -- every contract gate against the edition-2026 forms
 // (epic memql#5363, task memql#5368).
 //
-// Each gate gets a v1 fixture it must still CATCH and one it must PASS, beside
-// the legacy fixtures its own tests already carry. The catch half is the one
-// that matters: a gate that stops recognising a construct fails OPEN, and the
-// codemod rewrites every construct in the tree at once -- so a gate blind to
-// the new spelling would go silent tree-wide on one commit and report a clean
-// corpus. The pass half keeps the catch half honest: a fixture that trips a
-// gate for a reason other than the one under test (a parse failure, say)
-// would otherwise read as the gate working.
+// Each gate gets a fixture it must CATCH and one it must PASS. The catch half
+// is the one that matters: a gate that stops recognising a construct fails
+// OPEN -- it finds nothing and reports a clean corpus. The pass half keeps the
+// catch half honest: a fixture that trips a gate for a reason other than the
+// one under test (a parse failure, say) would otherwise read as the gate
+// working.
 
 import (
 	"strings"
@@ -98,21 +96,24 @@ func TestV1UserScopeSelectionUnparseableFailsClosed(t *testing.T) {
 	}
 }
 
-func TestV1ClassifiesLikeLegacy(t *testing.T) {
-	for _, tc := range []struct{ legacy, v1 string }{
-		{`ownerUserId==actor.userId && when(args.x) { status==args.x }`, `row => row.ownerUserId == actor.userId && (args.x == nil || row.status == args.x)`},
-		{`actorUserId==args.x && actor.isClusterOwner==true`, `row => row.actorUserId == args.x && actor.isClusterOwner == true`},
-		{`ownerUserId==args.x`, `row => row.ownerUserId == args.x`},
-		{`when(args.x) { ownerUserId==actor.userId } && userId==args.x`, `row => (args.x == nil || row.ownerUserId == actor.userId) && row.userId == args.x`},
-		{`status==args.x`, `row => row.status == args.x`},
+// TestV1Classification: each bucket from a clause's boolean structure. The
+// guard is conditional -- an owner check behind `(args.x == nil || ...)`
+// admits every row when the argument is absent -- so it scopes nothing.
+func TestV1Classification(t *testing.T) {
+	for _, tc := range []struct {
+		clause string
+		want   Bucket
+	}{
+		{`row => row.ownerUserId == actor.userId && (args.x == nil || row.status == args.x)`, BucketOwned},
+		{`row => row.actorUserId == args.x && actor.isClusterOwner == true`, BucketAdmin},
+		{`row => row.ownerUserId == args.x`, BucketFlagged},
+		{`row => (args.x == nil || row.ownerUserId == actor.userId) && row.userId == args.x`, BucketFlagged},
+		{`row => row.status == args.x`, BucketOther},
 	} {
-		legacy := ClassifySource("gadgets/queries.memql", v1Query(tc.legacy), Options{})
-		v1 := ClassifySource("gadgets/queries.memql", v1Query(tc.v1), Options{})
-		if len(legacy) != 1 || len(v1) != 1 {
-			t.Fatalf("expected one construct each, got %v / %v", legacy, v1)
-		}
-		if legacy[0].Bucket != v1[0].Bucket {
-			t.Errorf("%q classifies %s, its migrated form %q classifies %s", tc.legacy, legacy[0].Bucket, tc.v1, v1[0].Bucket)
+		mustParseV1(t, tc.clause)
+		got := ClassifySource("gadgets/queries.memql", v1Query(tc.clause), Options{})
+		if len(got) != 1 || got[0].Bucket != tc.want {
+			t.Errorf("%q classifies %v, want %s", tc.clause, got, tc.want)
 		}
 	}
 }
@@ -189,18 +190,19 @@ func TestV1RetiredOperators(t *testing.T) {
 	}
 }
 
-// TestRetiredOperatorOnALegacyContinuationLine is the same hole in the legacy
-// half: since memql#4123 a clause may wrap, and the gate read its first line.
-func TestRetiredOperatorOnALegacyContinuationLine(t *testing.T) {
-	src := v1Query("ownerUserId==actor.userId &&\n    (title==args.x, visibility==\"public\")")
-	got := gateHits(ScanSource("gadgets/queries.memql", src, Options{}), GateRetiredOperator)
-	if len(got) != 1 || !strings.Contains(got[0].Detail, "`,` OR separator") {
-		t.Fatalf("a retired `,` on a continuation line was not reported: %v", got)
-	}
-	// And a `//` inside a string no longer truncates the clause.
-	src = v1Query(`url=="http://x" && (title==args.x, visibility=="public")`)
-	if got := gateHits(ScanSource("gadgets/queries.memql", src, Options{}), GateRetiredOperator); len(got) != 1 {
-		t.Fatalf("a retired `,` after a URL literal was not reported: %v", got)
+// TestAClauseWithoutALambdaIsTheRetiredForm: a filter with no lambda header is
+// itself the retired `filter <predicate>` form, reported once, with the whole
+// clause -- continuation lines included, and not truncated at a `//` inside a
+// string.
+func TestAClauseWithoutALambdaIsTheRetiredForm(t *testing.T) {
+	for _, clause := range []string{
+		"ownerUserId==actor.userId &&\n    (title==args.x, visibility==\"public\")",
+		`url=="http://x" && (title==args.x, visibility=="public")`,
+	} {
+		got := gateHits(ScanSource("gadgets/queries.memql", v1Query(clause), Options{}), GateRetiredOperator)
+		if len(got) != 1 || !strings.Contains(got[0].Detail, "retired_filter_without_lambda") || !strings.Contains(got[0].Detail, `visibility=="public"`) || got[0].Line != 8 {
+			t.Errorf("filter %q: got %v, want one retired_filter_without_lambda finding on line 8 naming the whole clause", clause, got)
+		}
 	}
 }
 
@@ -254,17 +256,5 @@ func TestV1CrossNamespaceImport(t *testing.T) {
 	})
 	if len(got) != 0 {
 		t.Errorf("a row field named like a trait was read as a reference to it: %v", got)
-	}
-}
-
-// TestCrossNamespaceBareConjunctOnALegacyContinuationLine: the legacy half's
-// bare-conjunct read was one line long too.
-func TestCrossNamespaceBareConjunctOnALegacyContinuationLine(t *testing.T) {
-	got := gateOn(t, map[string]string{
-		"common/traits.memql":   "trait isActiveRecord = row => row.active == true\n",
-		"gadgets/queries.memql": v1Query("ownerUserId==actor.userId\n    && isActiveRecord"),
-	})
-	if len(got) != 1 {
-		t.Fatalf("violations = %v, want 1: a bare trait conjunct on a wrapped line crosses a namespace", got)
 	}
 }

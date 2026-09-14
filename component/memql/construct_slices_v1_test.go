@@ -5,9 +5,9 @@ package memql
 //
 // A brace-less spec or trait (`spec agent isX = row => ...`) has no brace for
 // a header regexp to anchor on, so every slicer that required one lost every
-// spec and trait of a migrated tree in silence: the loader, the duplicate
-// detector, the construct catalog and the authoring bundle splitter slice
-// through constructDeclarationSlices, and the language server locates the same
+// spec and trait of the tree in silence: the loader, the duplicate detector,
+// the construct catalog and the authoring bundle splitter slice through
+// constructDeclarationSlices, and the language server locates the same
 // declarations by walking tokens. These pin both halves -- that the
 // declarations are FOUND, and that the two sides cut them at the same bytes,
 // the parity the construct source hash rests on (memql#3758).
@@ -17,11 +17,14 @@ import (
 	"strings"
 	"testing"
 
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 	"github.com/znasllc-io/memql/component/memql/sense"
 )
 
+// braceLessFixture keeps one spec in the retired braced form on purpose: the
+// slicer still cuts it, so its parse refuses it with the retired-form message
+// rather than the construct silently not existing (constructDeclarationSlices).
+// memqlmigrate:keep
 const braceLessFixture = `use agents.concepts.{ agent }
 
 /// Assistants only.
@@ -32,8 +35,10 @@ spec agent isAssistant = row => row.role == "assistant"
 /// Rows marked active.
 trait isActiveRecord = row => row.active == true
 
-/// A braced spec beside them.
-spec agent isLegacy = row => row.role == "x"
+/// A braced spec beside them, in the retired form.
+spec agent isLegacy {
+  return role == "x"
+}
 
 /// Reads active assistants.
 @unbounded("fixture")
@@ -106,39 +111,27 @@ func TestConstructHashParityOnBraceLessPredicates(t *testing.T) {
 }
 
 // TestConstructHashParityOnTheMigratedCorpus is the corpus parity gate over
-// the embedded tree as the expressions codemod leaves it, migrated in memory
-// with the codemod's own engine: every construct, in every file, cut at the
-// same bytes by both sides.
+// the embedded tree: every construct, in every file, cut at the same bytes by
+// both sides. Before the flip the tree was migrated in memory with the
+// expressions codemod first; since the flip the tree IS edition 2026, so the
+// gate reads its files as they are, and the codemod has nothing left to
+// rewrite in them.
 func TestConstructHashParityOnTheMigratedCorpus(t *testing.T) {
 	files := baseloader.ReadAll(nil)
-	in := make(map[string][]byte, len(files))
+	predicates := 0
 	for _, f := range files {
-		in[f.Path] = []byte(f.Content)
-	}
-	preds, err := languageParser.CollectPredicates(in)
-	if err != nil {
-		t.Fatalf("CollectPredicates: %v", err)
-	}
-	predicates, migrated := 0, 0
-	for _, f := range files {
-		next, err := languageParser.RewriteExpressions([]byte(f.Content), preds)
-		if err != nil {
-			t.Fatalf("%s: RewriteExpressions: %v", f.Path, err)
-		}
-		if string(next) != f.Content {
-			migrated++
-		}
-		mismatches, n := constructHashParityOf(string(next))
+		mismatches, n := constructHashParityOf(f.Content)
 		predicates += n
 		for _, m := range mismatches {
-			t.Errorf("%s: %s: the engine and the language server cut this construct differently once migrated", f.Path, m)
+			t.Errorf("%s: %s: the engine and the language server cut this construct differently", f.Path, m)
 		}
 	}
 	// Measured when the floor was set: 39 specs and traits over 126 migrated
-	// files. Without the brace-less arms both sides see zero of them and
-	// agree -- which is why the count, not the agreement, is the floor.
-	if predicates < 30 || migrated < 100 {
-		t.Errorf("compared %d spec/trait declarations over %d migrated files -- the migration or the scan has stopped reaching them", predicates, migrated)
+	// files; after the flip, 39 over the tree's 308 files. Without the
+	// brace-less arms both sides see zero of them and agree -- which is why
+	// the count, not the agreement, is the floor.
+	if predicates < 30 || len(files) < 100 {
+		t.Errorf("compared %d spec/trait declarations over %d files -- the scan has stopped reaching them", predicates, len(files))
 	}
-	t.Logf("%d spec/trait declarations cut identically by both sides over %d migrated files", predicates, migrated)
+	t.Logf("%d spec/trait declarations cut identically by both sides over %d files", predicates, len(files))
 }

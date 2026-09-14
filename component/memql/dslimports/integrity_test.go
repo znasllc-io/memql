@@ -549,19 +549,16 @@ shape item helperItemQueryDoc {
 func TestVerify_SpecBoundNameMissing(t *testing.T) {
 	tree := loadTree(t, fstest.MapFS{
 		"demo/concepts.memql": file(demoConcepts),
+		// The binding is dangling on purpose. memqlmigrate:keep
 		"demo/specs.memql": file(`use demo.concepts.{ item }
 
 @enabled
 @description("A healthy concept-bound spec.")
-spec item specIsActive {
-  return status == "active"
-}
+spec item specIsActive = row => row.status == "active"
 
 @enabled
 @description("Binds a shape/concept that exists nowhere.")
-spec ghostShape specIsGhost {
-  return status == "ghost"
-}`),
+spec ghostShape specIsGhost = row => row.status == "ghost"`),
 	})
 	assertFindings(t, tree,
 		`demo/specs.memql: spec "specIsGhost" binds "ghostShape", which is not declared as a shape or concept anywhere in the DSL root`)

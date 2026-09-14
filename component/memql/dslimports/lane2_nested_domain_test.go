@@ -199,7 +199,7 @@ query widget deploymentWidgets {
   args {
     label  string  @required
   }
-  filter  label == args.label
+  filter  row => row.label == args.label
 }`),
 	}
 }

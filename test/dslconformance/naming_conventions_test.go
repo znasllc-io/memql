@@ -220,9 +220,9 @@ type declaration struct {
 
 // TestNoKindPrefixInConstructNames is the gate.
 func TestNoKindPrefixInConstructNames(t *testing.T) {
-	// Both editions: edition 2026's specs and traits carry no brace (epic
-	// memql#5363), and every one of them must still be scanned.
-	bothCorpora(t, checkNoKindPrefixInConstructNames)
+	// A spec or trait carries no brace (epic memql#5363), and every one of
+	// them must still be scanned.
+	onTree(t, checkNoKindPrefixInConstructNames)
 }
 
 func checkNoKindPrefixInConstructNames(t *testing.T, c corpus) {
@@ -264,10 +264,10 @@ func checkNoKindPrefixInConstructNames(t *testing.T, c corpus) {
 	t.Logf("scanned %d declarations across %d kinds (%s), %d prefixed",
 		len(decls), len(perKeyword), strings.Join(parts, " "), len(offenders))
 
-	// Every kind the corpus declares must be reached, in both editions. The
-	// brace-less kinds are the ones a brace-anchored scan loses, and it loses
-	// them without a sound. Measured when the floors were set: 32 traits, 7
-	// specs, 529 queries and 418 mutations, identically in both editions.
+	// Every kind the corpus declares must be reached. The brace-less kinds are
+	// the ones a brace-anchored scan loses, and it loses them without a sound.
+	// Measured when the floors were set: 32 traits, 7 specs, 529 queries and
+	// 418 mutations.
 	for kw, floor := range map[string]int{"trait": 25, "spec": 5, "query": 400, "mutate": 300} {
 		if perKeyword[kw] < floor {
 			t.Errorf("scanned %d %s declarations -- the scan has stopped reaching them", perKeyword[kw], kw)
@@ -483,12 +483,15 @@ func declarationsIn(path, src string) ([]declaration, error) {
 			continue
 		}
 		name, skip := "", 0
+		// A spec or trait has no brace: its `{ return ... }` body is retired
+		// and refused at parse, so the braced arms are every other kind's.
+		predicate := tokens[i].Literal == "spec" || tokens[i].Literal == "trait"
 		switch {
-		case i+2 < len(tokens) &&
+		case !predicate && i+2 < len(tokens) &&
 			tokens[i+1].Type == languageParser.TokenIdentifier &&
 			tokens[i+2].Type == languageParser.TokenBraceOpen:
 			name, skip = tokens[i+1].Literal, 1
-		case i+3 < len(tokens) &&
+		case !predicate && i+3 < len(tokens) &&
 			tokens[i+1].Type == languageParser.TokenIdentifier &&
 			tokens[i+2].Type == languageParser.TokenIdentifier &&
 			tokens[i+3].Type == languageParser.TokenBraceOpen:
@@ -513,17 +516,17 @@ func declarationsIn(path, src string) ([]declaration, error) {
 			tokens[i+2].Type == languageParser.TokenAt:
 			name, skip = tokens[i+1].Literal, 1
 
-		// Edition 2026's BRACE-LESS predicates (epic memql#5363) have no body
-		// either: `trait isActiveRecord = row => ...` and `spec agent isX =
-		// row => ...`. The same defect as the terse automation above, one
-		// grammar change later -- without these arms every spec and trait of
-		// a migrated tree is invisible to the naming gates.
-		case (tokens[i].Literal == "spec" || tokens[i].Literal == "trait") &&
+		// The BRACE-LESS predicates (epic memql#5363) have no body either:
+		// `trait isActiveRecord = row => ...` and `spec agent isX = row =>
+		// ...`. The same defect as the terse automation above, one grammar
+		// change later -- without these arms every spec and trait is invisible
+		// to the naming gates.
+		case predicate &&
 			i+2 < len(tokens) &&
 			tokens[i+1].Type == languageParser.TokenIdentifier &&
 			isAssignToken(tokens[i+2]):
 			name, skip = tokens[i+1].Literal, 1
-		case (tokens[i].Literal == "spec" || tokens[i].Literal == "trait") &&
+		case predicate &&
 			i+3 < len(tokens) &&
 			tokens[i+1].Type == languageParser.TokenIdentifier &&
 			tokens[i+2].Type == languageParser.TokenIdentifier &&
