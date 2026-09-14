@@ -4,7 +4,7 @@
 // fields bare, and compile into a SQL WHERE fragment. Neither is an
 // authorization predicate -- authorization in this domain is the
 // @rowAuthz(owner="ownerUserId") tier on every concept plus the
-// ownerUserId==actor.userId conjunct every query names, and both of those are
+// `row.ownerUserId == actor.userId` conjunct every query names, and both of those are
 // deliberately written at the call site rather than hidden inside a spec, so
 // the per-row-authz classifier can see them.
 //

@@ -1879,7 +1879,7 @@ Tools are AI-callable tool definitions — the AI-facing surface of queries, mut
 
 ```memql
 /// Search for users
-@handler(type="query", query="concept==v1:memql:backend:user")
+@handler(type="query", query="paginate(query searchUsers(active: args.active), args.limit)")
 @executionTime("fast")
 tool searchUsers {
   active  boolean  @description("Filter by active status")
@@ -1887,7 +1887,17 @@ tool searchUsers {
 }
 ```
 
-The tool loop binds tool-call args to handler args and forwards. A query handler reads each tool argument as `args.<name>`, as in `@handler(type="query", query="query findEvents(title: args.title)")`; the `$args.<name>` text substitution is retired. The legacy `func (Tool)` form is retired; the parser rejects it with a migration hint.
+The tool loop binds tool-call args to handler args and forwards. A query handler is one construct call -- a query, mutation, logic, builtin or automation -- or that call inside `paginate(...)`, as above, and it is parsed when the tool loads: a handler that is not a call, such as a raw filter, refuses the load. It reads each tool argument as `args.<name>`, as in `@handler(type="query", query="query findEvents(title: args.title)")`, and the call is rendered from the arguments' values, so a caller's text is data whatever it contains; an argument the caller did not supply is left out of the call. The `$args.<name>` text substitution is retired: `$args.x`, bare or quoted as `"$args.x"`, refuses the load -- write `args.x` (`memqlmigrate --rewrite=expressions` rewrites both spellings). The legacy `func (Tool)` form is retired; the parser rejects it with a migration hint.
+
+A webhook handler, `@handler(type="webhook", url=..., method=...)`, is written the same way. Its url is one expression over the tool's arguments: a fixed address is a quoted string, and a caller's value is joined with `+`, as in `url="\"https://api.example.com/items/\" + args.id"`. A bare address refuses the load, and the refusal shows it quoted. With no body template the request body is the tool's arguments as JSON; a body template (a tool registered from Go can carry one) is a map whose string leaves are expressions over `args`, fixed text quoted, and an argument the caller did not supply omits its key. `$args.` is refused in a url or a body leaf exactly as in a query handler, with the same replacement.
+
+```memql
+/// Tell the on-call channel
+@handler(type="webhook", url="\"https://hooks.example.com/notify\"", method="post")
+tool notifyOnCall {
+  message  string  @required @description("What to tell the on-call channel")
+}
+```
 
 ## Automations
 

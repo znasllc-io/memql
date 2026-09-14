@@ -13,40 +13,40 @@ func TestBareRowIntrinsicRuleFlagsFilters(t *testing.T) {
 		src  string
 		want string // the intrinsic that should be flagged, "" for no diagnostic
 	}{
-		{"bare id", "query widget q {\n  filter row => row.id == args.widgetId\n}\n", "id"},
-		{"bare id tight", "query widget q {\n  filter row => row.id == args.widgetId\n}\n", "id"},
-		{"bare createdAt", "query widget q {\n  filter row => row.createdAt < args.before\n}\n", "createdAt"},
-		{"inside a when guard", "query widget q {\n  filter row => args.x == nil || row.id == args.x\n}\n", "id"},
-		{"conjunction", "query widget q {\n  filter row => row.ownerUserId == actor.userId && row.id == args.x\n}\n", "id"},
+		// Edition 2026 reads every field through the lambda parameter, so a bare
+		// intrinsic in a filter is `id` written where `row.id` was meant. The
+		// load refuses the name; this rule names the fix at the token.
+		{"bare id", "query widget q {\n  filter row => id == args.widgetId\n}\n", "id"},
+		{"bare id tight", "query widget q {\n  filter row => id==args.widgetId\n}\n", "id"},
+		{"bare createdAt", "query widget q {\n  filter row => createdAt < args.before\n}\n", "createdAt"},
+		{"inside an optional-argument guard", "query widget q {\n  filter row => args.x == nil || id == args.x\n}\n", "id"},
+		{"conjunction", "query widget q {\n  filter row => row.ownerUserId == actor.userId && id == args.x\n}\n", "id"},
 
-		// Already namespaced -- the canonical form.
+		// Read through the parameter -- the canonical form.
 		{"row.id", "query widget q {\n  filter row => row.id == args.widgetId\n}\n", ""},
 		{"row.createdAt", "query widget q {\n  filter row => row.createdAt < args.before\n}\n", ""},
-		// Other namespaces and payload properties must not flag.
+		// Other namespaces, and names that are not intrinsics, must not flag.
 		{"args field", "query widget q {\n  filter row => row.ownerUserId == args.id\n}\n", ""},
 		{"actor field", "query widget q {\n  filter row => row.ownerUserId == actor.userId\n}\n", ""},
-		{"payload prop ending in id", "query widget q {\n  filter row => row.threadId == args.threadId\n}\n", ""},
-		{"payload prop named region", "query widget q {\n  filter row => row.region == args.region\n}\n", ""},
-		// A spec/trait body reads bound fields bare and REJECTS row.* (#2281);
-		// this rule must not reach it.
-		{"spec return body", "spec widget isSeeded = row => row.createdBy == \"seed\"\n", ""},
+		{"name ending in id", "query widget q {\n  filter row => threadId == args.threadId\n}\n", ""},
+		{"name that is not an intrinsic", "query widget q {\n  filter row => region == args.region\n}\n", ""},
+		// A spec or trait body is not a filter clause; this rule does not reach it.
+		{"spec body", "spec widget isSeeded = row => createdBy == \"seed\"\n", ""},
 		// Commented-out code is not authored code.
-		{"comment", "query widget q {\n  // filter id == args.x\n  filter row => row.region == args.r\n}\n", ""},
+		{"comment", "query widget q {\n  // filter row => id == args.x\n  filter row => row.region == args.r\n}\n", ""},
 		// Reviewer-found holes (memql#2780 review): boolean shape must not
 		// hide a bare intrinsic, and a string literal must not manufacture one.
-		{"or-joined", "query widget q {\n  filter row => row.ownerUserId == actor.userId || row.id == args.x\n}\n", "id"},
-		{"parenthesized", "query widget q {\n  filter row => row.id == args.x\n}\n", "id"},
-		{"negated", "query widget q {\n  filter row => !(row.id == args.x)\n}\n", "id"},
-		{"in operator", "query widget q {\n  filter row => row.id in args.ids\n}\n", "id"},
-		{"lowercase intrinsic", "query widget q {\n  filter row => row.createdAt < args.x\n}\n", "createdAt"},
-		{"provenance leaf", "query widget q {\n  filter row => row.provenance.kind == \"automation\"\n}\n", "provenance.kind"},
-		// A filter clause SPANS LINES. This case once asserted the opposite, on
-		// the ground that parseStructQueryBody hard-errored on a continuation
-		// line; memql#4123 made the normaliser fold them, so `id==args.x` below
-		// reaches the engine as a payload read and must be flagged. The
-		// edition-2026 codemod wraps every long filter this way.
-		{"continuation line is part of the clause", "query widget q {\n  filter row => row.ownerUserId == actor.userId\n             && row.id == args.x\n}\n", "id"},
-		{"leading-operator continuation", "query widget q {\n  filter row => row.ownerUserId == actor.userId\n             && row.id == args.x\n}\n", "id"},
+		{"or-joined", "query widget q {\n  filter row => row.ownerUserId == actor.userId || id == args.x\n}\n", "id"},
+		{"parenthesized", "query widget q {\n  filter row => (id == args.x)\n}\n", "id"},
+		{"negated", "query widget q {\n  filter row => !(id == args.x)\n}\n", "id"},
+		{"in operator", "query widget q {\n  filter row => id in args.ids\n}\n", "id"},
+		{"lowercase intrinsic", "query widget q {\n  filter row => createdat < args.x\n}\n", "createdAt"},
+		{"provenance leaf", "query widget q {\n  filter row => provenance.kind == \"automation\"\n}\n", "provenance.kind"},
+		// A filter clause SPANS LINES (memql#4123): the normaliser folds a
+		// continuation line into the clause, so a bare intrinsic there is flagged.
+		// The edition-2026 codemod wraps every long filter this way.
+		{"continuation line is part of the clause", "query widget q {\n  filter row => row.ownerUserId == actor.userId &&\n    id == args.x\n}\n", "id"},
+		{"leading-operator continuation", "query widget q {\n  filter row => row.ownerUserId == actor.userId\n             && id == args.x\n}\n", "id"},
 		// ...but the clause ends where the normaliser ends it.
 		{"clause ends at the next keyword", "query widget q {\n  filter row => row.ownerUserId == actor.userId\n  shape x\n}\n", ""},
 		// Edition 2026: a row intrinsic is a member of the parameter, and a
@@ -57,10 +57,10 @@ func TestBareRowIntrinsicRuleFlagsFilters(t *testing.T) {
 		// Leafless `provenance` has no push-down and `row.provenance` is
 		// rejected outright, so flagging it would name a spelling nothing
 		// accepts.
-		{"leafless provenance is not flagged", "query widget q {\n  filter row => row.provenance == \"x\"\n}\n", ""},
+		{"leafless provenance is not flagged", "query widget q {\n  filter row => provenance == \"x\"\n}\n", ""},
 		// Commented-out code in a block comment is not authored code.
-		{"block comment", "query widget q {\n  /* filter id == args.x */\n  filter row => row.region == args.r\n}\n", ""},
-		{"url literal does not truncate", "query widget q {\n  filter row => row.url == \"http://x\" && row.id == args.a\n}\n", "id"},
+		{"block comment", "query widget q {\n  /* filter row => id == args.x */\n  filter row => row.region == args.r\n}\n", ""},
+		{"url literal does not truncate", "query widget q {\n  filter row => row.url == \"http://x\" && id == args.a\n}\n", "id"},
 		// A string literal containing what looks like a predicate is not one.
 		{"intrinsic inside a string literal", "query widget q {\n  filter row => row.name == \"a id==b\"\n}\n", ""},
 	}
@@ -81,7 +81,7 @@ func TestBareRowIntrinsicRuleFlagsFilters(t *testing.T) {
 				t.Errorf("message must name the replacement `row.%s`, got: %s", tc.want, got[0].Message)
 			}
 			if got[0].Severity != SeverityWarning {
-				t.Errorf("Severity = %v, want Warning (the engine still resolves bare intrinsics; only the gates retired them)", got[0].Severity)
+				t.Errorf("Severity = %v, want Warning (the load's refusal is the error; this is the edit-time pointer to the fix)", got[0].Severity)
 			}
 			if got[0].Code != "bare-row-intrinsic" {
 				t.Errorf("Code = %q, want bare-row-intrinsic", got[0].Code)
@@ -94,7 +94,7 @@ func TestBareRowIntrinsicRuleFlagsFilters(t *testing.T) {
 // the offending token, not on the line start, or the quick-fix has nothing to
 // replace.
 func TestBareRowIntrinsicRuleAnchorsOnTheIntrinsic(t *testing.T) {
-	src := "query widget q {\n  filter row => row.id == args.widgetId\n}\n"
+	src := "query widget q {\n  filter row => id == args.widgetId\n}\n"
 	got := bareRowIntrinsicRule(src)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 diagnostic, got %d", len(got))

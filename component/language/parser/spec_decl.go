@@ -79,7 +79,7 @@ func (p *Parser) parseSpecDecl(attrs []*ast.Attribute, isTrait bool) (*ast.SpecD
 	} else {
 		decl.Name = first
 		if !isTrait {
-			return nil, newParseErrorf(&p.current, "spec %q must bind a shape or concept in its signature: `spec <BoundName> %s { return <bool> }` (the bound name resolves via the file-top `use` import). A spec with no binding is no longer valid", first, first)
+			return nil, newParseErrorf(&p.current, "spec %q must bind a shape or concept in its signature: `spec <BoundName> %s = row => <predicate>` (the bound name resolves via the file-top `use` import). A spec with no binding is no longer valid", first, first)
 		}
 	}
 
@@ -97,6 +97,9 @@ func (p *Parser) parseSpecDecl(attrs []*ast.Attribute, isTrait bool) (*ast.SpecD
 			return nil, err
 		}
 		if err := p.refuseCommaAfterLambda(); err != nil {
+			return nil, err
+		}
+		if err := p.refuseAfterPredicate("the predicate of " + keyword + " " + strconv.Quote(decl.Name)); err != nil {
 			return nil, err
 		}
 		decl.Lambda = lam

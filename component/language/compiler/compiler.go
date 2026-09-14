@@ -21,8 +21,6 @@ type (
 		Indent string
 		// IncludeComments preserves comments from source in output (where possible)
 		IncludeComments bool
-		// StrictWarnings treats linter warnings as compile errors.
-		StrictWarnings bool
 	}
 )
 
@@ -59,15 +57,9 @@ func (c *Compiler) CompileFile(file *parser.File) (*CompileResult, error) {
 		return nil, err
 	}
 
-	warnings := LintFile(file)
-	if c.config.StrictWarnings && len(warnings) > 0 {
-		return nil, &LintError{Warnings: warnings}
-	}
-
 	result := &CompileResult{
 		Automations: []AutomationOutput{},
 		Functions:   []FunctionOutput{},
-		Warnings:    warnings,
 	}
 
 	for _, def := range file.Definitions {
@@ -98,7 +90,6 @@ func (c *Compiler) CompileFile(file *parser.File) (*CompileResult, error) {
 type CompileResult struct {
 	Automations []AutomationOutput
 	Functions   []FunctionOutput
-	Warnings    []Warning
 }
 
 func collectFunctionDefs(file *parser.File) []*parser.FunctionDef {

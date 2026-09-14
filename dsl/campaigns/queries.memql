@@ -22,7 +22,7 @@
 // a list. The list reads all declare sort + paginate.
 
 /// The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by
-/// (ownerUserId==actor.userId || actor.isClusterOwner==true) server-side, so cross-operator reads are impossible. Optional status
+/// `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` server-side, so cross-operator reads are impossible. Optional status
 /// filter narrows to one lifecycle bucket; omit it to see everything.
 @actor
 query campaign campaigns {
@@ -36,7 +36,7 @@ query campaign campaigns {
   shape     campaignFull
 }
 
-/// One campaign by id, gated to its owner. Backs the campaign editor. Owned: (ownerUserId==actor.userId || actor.isClusterOwner==true)
+/// One campaign by id, gated to its owner. Backs the campaign editor. Owned: `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)`
 /// is the load-bearing guard, so a caller cannot read another operator's campaign even with its id.
 @actor
 query campaign campaignById {
@@ -158,7 +158,7 @@ query delivery deliveriesForCampaign {
 //
 // The two OWNED reads (audienceRosterForSend / deliveryLedgerForCampaign) are
 // issued by that same worker under the CAMPAIGN OWNER'S actor -- so they gate
-// on (ownerUserId==actor.userId || actor.isClusterOwner==true) like every other read in this domain, and the
+// on `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` like every other read in this domain, and the
 // worker gets exactly the owner's authority and no more. That is why the
 // engine needs no bypass anywhere: it borrows an identity rather than
 // out-ranking one.
@@ -191,7 +191,7 @@ query sendJob recentSendJobs {
 /// ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner
 /// gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due"
 /// is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned
-/// tier injects (ownerUserId==actor.userId || actor.isClusterOwner==true) into every read with no cluster-owner bypass. That is why
+/// tier injects `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` into every read with no cluster-owner bypass. That is why
 /// the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
 ///
 /// It deliberately does NOT filter on the due time. The authority on when a send fires is the
@@ -355,7 +355,7 @@ query warmupState warmupStateForIdentity {
 
 /// Consent event stream for one subscriber, newest first. Export answers
 /// status/date/source from these rows: current status is the latest kind.
-/// Owned: (ownerUserId==actor.userId || actor.isClusterOwner==true) is a top-level conjunct.
+/// Owned: `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)` is a top-level conjunct.
 @actor
 query consentEvent consentEventsBySubscriber {
   args {

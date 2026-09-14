@@ -23,8 +23,8 @@ use common.traits.{ isActiveRecord, isNotArchived, isNotDeleted, statusIsActive,
 //   - name: Variable name
 //   - value: Variable value (typically string or boolean)
 //
-// Usage:
-//   globalVariable({name: "MEMQL_AUTO_PROVISION_USERS"})
+// Usage, as the string a client sends to Execute:
+//   globalVariable(name: "MEMQL_AUTO_PROVISION_USERS")
 //
 
 /// Get a single instance-wide configuration variable by name (v1:platform:globalVariable)
@@ -55,8 +55,8 @@ query globalVariable globalVariable {
 //   - name: Variable name
 //   - value: Variable value
 //
-// Usage:
-//   globalVariables({names: ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME"]})
+// Usage, as the string a client sends to Execute:
+//   globalVariables(names: ["MEMQL_DEFAULT_USER_ROLE", "MEMQL_DEFAULT_USER_THEME"])
 //
 
 /// Get multiple instance-wide configuration variables by name list (v1:platform:globalVariable)
@@ -105,7 +105,7 @@ query globalVariable globalVariables {
 //   clients. (It formerly carried @internal, retired under 2026.08 --
 //   #2620 ruling / #2708; the annotation only hid it from discovery.)
 //
-// Usage:
+// Usage, as the string a client sends to Execute:
 //   userDefaults()  // Returns all user provisioning variables
 //
 
@@ -249,7 +249,7 @@ query site siteByHostname {
 /// ARCHIVED ROWS ARE EXCLUDED HERE and listed by sitesArchived instead (epic memql#4794, D10). The
 /// exclusion is written out rather than folded into a trait, because it is the one conjunct whose
 /// counterpart query deliberately inverts it -- and a reader comparing the two needs to see the same
-/// term in both -- here `isNotArchived`, there `statusIsArchived`. The trait is `status != "archived"`
+/// term in both -- here `isNotArchived`, there `statusIsArchived`. The trait is `row.status != "archived"`
 /// rather than an allow-list of the other three: status is required, so every row carries one, and
 /// != is null-safe against a non-empty literal (memql#1685) -- while an allow-list would silently
 /// drop a row the day a fifth value is added.
@@ -261,7 +261,7 @@ query site siteByHostname {
 /// tier `@rowAuthz(owner="ownerUserId", clusterOwner, account="accountId")` is the whole answer for
 /// every caller -- their own rows, every row for a cluster owner, and the rows tied to an account
 /// whose group they are in. This read used to restate the tier's first two arms as
-/// `(ownerUserId==actor.userId || actor.isClusterOwner==true)`, and an AND with that conjunct can
+/// `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)`, and an AND with that conjunct can
 /// never be widened by the third: a member of Acme's group was admitted to Acme's sites by the tier
 /// and then filtered back out by the query, so the list showed the tie to nobody. The engine ANDs
 /// the tier in from the declaration; tierDecidesTheRead (component/memql) records this construct as
@@ -303,7 +303,7 @@ query site siteById {
 //
 // THE EDGE READ IS THE ONE TO BE CAREFUL WITH. `liveCustomDomainByHostname` is
 // what turns a client's own Host header into one of this cluster's sites, so it
-// filters on `status=="live"` and nothing looser: a `pending_dns` row is a
+// filters on `row.status == "live"` and nothing looser: a `pending_dns` row is a
 // hostname somebody typed into a form, and resolving it would let anyone serve
 // a site at any name they could spell. The removal path is covered by the same
 // conjunct -- `removing` and `removed` both stop resolving the moment the
@@ -312,7 +312,7 @@ query site siteById {
 /// Resolve a request Host to the site a LIVE custom domain binds it to (design D8). The edge's one
 /// extra resolution step, asked only after siteByHostname misses.
 ///
-/// `status=="live"` is the whole security property of this read. A row reaches `live` only after
+/// `row.status == "live"` is the whole security property of this read. A row reaches `live` only after
 /// both DNS checks passed AND the certificate came back Ready, so a hostname answering here is one
 /// whose owner proved control of the name and whose traffic this cluster can actually terminate
 /// TLS for. Every other status resolves to nothing, which is why a removal takes effect at the
@@ -406,7 +406,7 @@ query customDomain customDomainById {
 /// label spelled once. A denormalized appHost column would be a second spelling that drifts the
 /// first time the label changes, and the symptom would be every client's door resolving to nothing.
 ///
-/// `status=="live"` carries the whole security property, liveCustomDomainByHostname's reasoning one
+/// `row.status == "live"` carries the whole security property, liveCustomDomainByHostname's reasoning one
 /// domain over: a door reaches `live` only after all three of its hosts pointed at this cluster AND
 /// its certificate came back Ready. Every other status resolves to nothing, so a teardown takes
 /// effect at the speed of a row write rather than at the speed of an Ingress deletion.
@@ -609,7 +609,7 @@ query syncState syncStatesAll {
 // that tier is the whole answer for every caller: own rows, every row for a
 // cluster owner, and the rows tied to an account whose group the caller is in.
 // These reads used to restate the first two arms as
-// `(ownerUserId==actor.userId || actor.isClusterOwner==true)`, exactly as
+// `(row.ownerUserId == actor.userId || actor.isClusterOwner == true)`, exactly as
 // v1:platform:site's did (memql#4344) -- and an AND with that conjunct cannot
 // be widened by the third arm, so a package tied to the cluster's own account
 // was admitted by the tier and filtered out by the query, for everyone but its
@@ -909,7 +909,7 @@ query sourceCredential githubAppGrantByExternalId {
 /// credential was named -- a person who has connected GitHub should not have to say which grant,
 /// because there is one.
 ///
-/// Revoked grants are excluded by the trait rather than by a bare `status=="active"`, and the
+/// Revoked grants are excluded by the trait rather than by a bare `row.status == "active"`, and the
 /// exclusion is the point: a disconnected grant must read as ABSENT here, so the surface offers
 /// Connect rather than a picker that would refuse every repository in it.
 ///

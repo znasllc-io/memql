@@ -8,7 +8,7 @@
 // manages on the user's behalf (via the `notes` skill).
 //
 // Per-row authz tier: owned. Every read filters on
-// payload.ownerUserId==actor.userId; every write stamps ownerUserId
+// `row.ownerUserId == actor.userId`; every write stamps ownerUserId
 // from actor.userId server-side so a caller can never create or
 // mutate another user's notes.
 
@@ -17,7 +17,7 @@ use identity.concepts.{ user }
 /// A user-owned standalone note: an optional title, a body, and tags, plus an updatedAt watermark.
 /// The standalone notebook concept -- distinct from the product pack's canvas-state note caption
 /// field. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write and every
-/// read gates on ownerUserId==actor.userId.
+/// read gates on `row.ownerUserId == actor.userId`.
 @displayCard(primary="title", secondary="body", tertiary="updatedAt")
 @rowAuthz(owner="ownerUserId")
 concept note {

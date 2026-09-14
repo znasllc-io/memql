@@ -24,10 +24,10 @@
 //       addDuration(item.createdAt, "P{retention}D") < now
 /// Pure decide for the worker-invocation retention sweep (#2369, cluster pruneStaleClusterNodes
 /// pattern): reads WORKER_INVOCATION_RETENTION_DAYS (default 90), computes cutoff = now - window
-/// via addDuration with a negative ISO duration, and returns
-/// expiredWorkerInvocations({createdBefore: cutoff}).nodes() -- rows past retention, filtered by
-/// QUERY PUSHDOWN. The retention policy lives entirely here; the calling automation's forEach
-/// soft-deletes each unconditionally.
+/// via addDuration with a negative ISO duration, reads
+/// `query expiredWorkerInvocations(createdBefore: cutoff)` and returns its nodes() -- rows past
+/// retention, filtered by QUERY PUSHDOWN. The retention policy lives entirely here; the calling
+/// automation's forEach soft-deletes each unconditionally.
 logic workerInvocationRetentionSweep {
   args {
     event object!

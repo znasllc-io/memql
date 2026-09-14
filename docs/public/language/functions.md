@@ -749,7 +749,9 @@ Tool body fields take `@required`, `@default("...")`, `@enum`, and
 `@description`. (Tool fields are the one place `@default` is valid --
 it is rejected on query / mutation `args` fields.) The legacy
 `func (Tool)` form is retired; the parser rejects it with a migration
-hint.
+hint. What a query handler's call and a webhook's url may be written
+as, and the retired `$args.` placeholder, are in
+[the language reference](memql.md#tools).
 
 ---
 

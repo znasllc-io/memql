@@ -272,20 +272,26 @@ func TestDeadHandlerTargetIsDetected(t *testing.T) {
 }
 
 // The query-handler forms the corpus actually uses, so the extractor is pinned
-// against the shapes it has to read rather than only the simple one.
+// against the shapes it has to read rather than only the simple one. The
+// target is read from the handler's parse (tool_handler_v1.go): a tool built
+// in Go, like these, is parsed here, and one that is not a handler -- a raw
+// filter, the retired `$args.` placeholder -- names no target, because it
+// cannot run; its call refuses.
 func TestQueryHandlerTargetsAreExtractedFromEveryCorpusShape(t *testing.T) {
 	for _, tc := range []struct {
 		query string
 		want  []string
 	}{
-		{`query todos(done: $args.done)`, []string{"todos"}},
-		{`mutation updateNote(noteId: "$args.noteId")`, []string{"updateNote"}},
-		{`builtin help(name: "$args.name")`, []string{"help"}},
-		{`paginate(query searchUsers(active: $args.active), $args.limit)`, []string{"searchUsers"}},
+		{`query todos(done: args.done)`, []string{"todos"}},
+		{`mutation updateNote(noteId: args.noteId)`, []string{"updateNote"}},
+		{`builtin help(name: args.name)`, []string{"help"}},
+		{`paginate(query searchUsers(active: args.active), args.limit)`, []string{"searchUsers"}},
 		{`query activeProjects()`, []string{"activeProjects"}},
 		// A raw filter expression names no construct; there is nothing to
 		// resolve and nothing is invented.
 		{`concept==v1:memql:backend:user`, nil},
+		// memqlmigrate:keep -- the retired placeholder is the subject.
+		{`query todos(done: $args.done)`, nil},
 	} {
 		got := toolHandlerTargets(&Tool{
 			Name:    "zzProbe",

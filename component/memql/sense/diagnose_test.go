@@ -211,7 +211,7 @@ func TestDiagnose_InjectedErrors(t *testing.T) {
 				"\n" + //                                  2
 				"@enabled\n" + //                          3
 				"query node goodA {\n" + //                4
-				"  filter health != \"stopped\"\n" + //    5
+				"  filter row => row.health != \"stopped\"\n" + // 5
 				"}\n" + //                                 6
 				"\n" + //                                  7
 				"%%%garbage%%%\n" + //                     8  <- stray token

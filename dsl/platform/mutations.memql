@@ -647,7 +647,7 @@ mutate customDomain createCustomDomain {
 /// script, and `markCustomDomainRemoved` closes the walk.
 ///
 /// THE HOSTNAME STOPS RESOLVING AT THIS WRITE, not at the Ingress deletion: `liveCustomDomainByHostname`
-/// filters `status=="live"`, so the edge stops answering the moment this lands. That ordering is the
+/// filters `row.status == "live"`, so the edge stops answering the moment this lands. That ordering is the
 /// point -- an operator removing a binding because it is being abused should not have to wait for
 /// kubectl.
 @requiresCapability("execute", "app:deployables/domains")

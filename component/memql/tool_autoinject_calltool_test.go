@@ -44,7 +44,7 @@ func TestExecuteToolAppliesContextToolDefaults(t *testing.T) {
 		AutoInjectedFields: []string{"ownerUserId", "partitionId"},
 		Handler: &ToolHandler{
 			Type:   "webhook",
-			URL:    srv.URL + "/produce",
+			URL:    fixedURL(srv.URL + "/produce"),
 			Method: "POST",
 		},
 	}
@@ -95,7 +95,7 @@ func TestExecuteToolAutoInjectedDropsForgedValue(t *testing.T) {
 		AutoInjectedFields: []string{"ownerUserId"},
 		Handler: &ToolHandler{
 			Type:   "webhook",
-			URL:    srv.URL + "/x",
+			URL:    fixedURL(srv.URL + "/x"),
 			Method: "POST",
 		},
 	}

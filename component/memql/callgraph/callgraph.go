@@ -427,8 +427,8 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 		// Conditions (if gates, forEach where clauses, @filter) may gate on
 		// step results, presence, and single-value fan-out equality -- but
 		// POLICY in a condition is a finding: a same-field string-literal
-		// ||-vocabulary (role/status sets), date-math or default-injecting
-		// builtins (addDuration / coalesce / concat), each of which belongs
+		// ||-vocabulary (role/status sets), date math or a default or a join
+		// (addDuration, `??`, `+`), each of which belongs
 		// in a pure decide logic (or a query pushdown / @filter relevance
 		// check). This is the rule whose ABSENCE let 13 policy sites
 		// accumulate invisibly after the #2235 burn-down.
@@ -462,10 +462,12 @@ var (
 	// (`@filter(row => (row.kind ?? "x") == "y")`) opens a group at once.
 	automationFilterRE = regexp.MustCompile(`@filter\s*\(`)
 
-	// Policy smells inside a condition. exists() is the sanctioned presence
-	// guard and is deliberately NOT in this list. Edition 2026 spells two of
-	// the three as operators -- `a ?? b` for coalesce, `a + b` for concat --
-	// which conditionPolicyOp reads off the parsed condition.
+	// Policy smells inside a condition, read off the text of one that does not
+	// parse in edition 2026 -- which is how a retired call spelling arrives.
+	// Edition 2026 spells two of the three as operators, `a ?? b` for coalesce
+	// and `a + b` for concat, and conditionPolicyOp reads those off the parsed
+	// condition. The presence guard is `x != nil`, a comparison and never a
+	// smell; it used to be exists(), which this list deliberately left out.
 	conditionBuiltinRE = regexp.MustCompile(`\b(addDuration|coalesce|concat)\s*\(`)
 	// Every `<ident> == "<literal>"` atom in a condition; two on the SAME
 	// identifier joined by || form a vocabulary (checked in Go -- RE2 has no

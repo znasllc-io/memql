@@ -33,7 +33,7 @@ query node clusterNodes {
 // state), mirroring staleClusterNodes -- so this returns the live
 // membership of the deployment, not every historical liveness row.
 //
-// Authz: no user-scope field is referenced (filters on payload.deploymentId,
+// Authz: no user-scope field is referenced (filters on row.deploymentId,
 // infrastructure topology), so this lands in the conformance "other" bucket
 // alongside clusterNodes / staleClusterNodes -- no caller-check
 // needed (per-row-authz-audit.md).
@@ -60,10 +60,11 @@ query node nodesForDeployment {
 // consumer and passed in). `asOf latest` -> current state per node so a
 // node that has since re-registered under the current deployment drops out.
 //
-// Authz: filters on payload.deploymentId only (infrastructure topology, no
+// Authz: filters on row.deploymentId only (infrastructure topology, no
 // user-scope field) -> conformance "other" bucket, same as clusterNodes.
 
-/// Latest-per-id cluster nodes whose deploymentId != the supplied current deployment -- orphans
+/// Latest-per-id cluster nodes outside the supplied current deployment
+/// (`row.deploymentId != args.deploymentId`) -- orphans
 /// from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight). #1873.
 @unbounded("nodes outside a deployment -- a bounded topology set for drain/cutover, consumed whole")
 query node nodesNotInDeployment {
@@ -157,7 +158,7 @@ query node staleClusterNodes {
 /// note exists to prevent.
 ///
 /// `requiresOwner` is the DECISION, named. The owner ask was "only the owners (role) may cut a new
-/// version", and this spec (`role == "owner"`) is the same predicate the builtin's Go wall applies
+/// version", and this spec (`actor.role == "owner"`) is the same predicate the builtin's Go wall applies
 /// as `AccessContext.IsClusterOwner`. Naming it here is what makes the double wall legible: the
 /// read and the write visibly agree about who may do this.
 ///
