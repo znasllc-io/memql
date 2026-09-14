@@ -240,8 +240,10 @@
     },
     {
       "file": "reads-the-actor.memql",
-      "verdict": "load_ok",
-      "note": "An edition-2026 spec body reads the caller's envelope as a plan constant, evaluated once per call (Lower). Before edition 2026 it was refused (\"a spec body may not read actor.* directly\")."
+      "verdict": "refuse_load",
+      "code": "lower_actor_in_row_predicate",
+      "message": "a spec or trait over rows does not read the actor -- an ownership test belongs in the query filter, where row-authz reads it, and an actor question binds an @actor shape. Compare in the query filter (`row.ownerUserId == actor.userId`), or bind an @actor shape",
+      "note": "A spec or trait over rows is the same predicate for every caller -- applied in any query, cached, composed -- and the ownership test is what the row-authz classifier looks for in a QUERY FILTER; hidden in a spec it is invisible there. So its body does not read the `actor` root (authoring rule 26): an actor question binds an @actor shape, whose parameter is the envelope (actor-spec.memql). Refused at load by Lower, which would otherwise have read the root as a plan constant."
     }
   ]
 }

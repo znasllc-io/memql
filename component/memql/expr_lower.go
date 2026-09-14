@@ -157,6 +157,11 @@ const (
 	// LowerCodeNotBoolean: a condition whose type is known and is not
 	// boolean (D8).
 	LowerCodeNotBoolean = "lower_not_boolean"
+	// LowerCodeActorInRowPredicate: a spec or trait over rows reads the
+	// `actor` root (authoring rule 26). An actor question binds an @actor
+	// shape; an ownership test belongs in the query filter, where row-authz
+	// reads it.
+	LowerCodeActorInRowPredicate = "lower_actor_in_row_predicate"
 )
 
 // RuleCode is the refusal's stable rule id: its Code, or LowerCodeRefused
@@ -301,6 +306,25 @@ func (l *lowerer) refuse(n ast.ExpressionNode, reason, fix string) error {
 // refuseAs builds a LowerError for n of the kind code names.
 func (l *lowerer) refuseAs(code string, n ast.ExpressionNode, reason, fix string) error {
 	return &LowerError{Node: ast.FormatExpr(n), Position: l.env.Position, Reason: reason, Fix: fix, Code: code, Span: nodeSpan(n)}
+}
+
+// actorInRowPredicateRefusal refuses a read of the `actor` root in a spec or
+// trait body over rows (authoring rule 26) -- `actor.userId`, `actor` passed
+// to a context spec, the root anywhere in the body. Only a spec over an @actor
+// shape reads the envelope, and there the envelope is its parameter, spelled
+// `actor`, which is in scope and never reaches this refusal.
+//
+// Two reasons, and both are why it is refused rather than lowered as the plan
+// constant it would otherwise be. A row predicate is the same predicate for
+// every caller: it may be applied inside any query, cached, and composed, and
+// an actor read makes it silently caller-dependent. And the ownership test is
+// what the row-authz classifier looks for in a QUERY FILTER
+// (`row.ownerUserId == actor.userId`, the owned tier's conjunct); hidden in a
+// spec it is invisible there, and the classifier reports the read unscoped.
+func (l *lowerer) actorInRowPredicateRefusal(n ast.ExpressionNode) error {
+	return l.refuseAs(LowerCodeActorInRowPredicate, n,
+		"a spec or trait over rows does not read the actor -- an ownership test belongs in the query filter, where row-authz reads it, and an actor question binds an @actor shape",
+		"Compare in the query filter (`row.ownerUserId == actor.userId`), or bind an @actor shape: `spec actorEnvelope <name> = actor => actor.role == \"owner\"`")
 }
 
 // rowParam is the parameter of this lowerer's row.
@@ -1469,6 +1493,10 @@ func (l *lowerer) predicateApplication(e *ast.CallExpr) (ExpressionNode, error) 
 	} else if arg.Name != "actor" {
 		return nil, l.refuse(e, fmt.Sprintf("`%s` is neither the row nor the actor", arg.Name),
 			"Apply it to the row, `"+e.Name+"("+l.rowParam()+")`, or to the actor, `"+e.Name+"(actor)`")
+	} else if l.env.Position == tiers.PositionSpecBody {
+		// The actor root, applied to from a spec or trait over rows: the
+		// same read as `actor.x` in its body, one predicate removed.
+		return nil, l.actorInRowPredicateRefusal(e)
 	}
 	if l.env.Predicate != nil {
 		spec, found := l.env.Predicate(e.Name)
@@ -1649,6 +1677,8 @@ func (l *lowerer) walkPlanConstant(n ast.ExpressionNode, local map[string]bool, 
 			if l.env.Args == nil && l.env.Position == tiers.PositionSpecBody {
 				*errp = l.refuse(e, "a spec or trait takes no arguments", "Read the row's fields, or move the comparison into the query that applies the predicate")
 			}
+		case e.Name == "actor" && l.env.Position == tiers.PositionSpecBody:
+			*errp = l.actorInRowPredicateRefusal(e)
 		case lowerPlanConstantRoots[e.Name]:
 		default:
 			fix := "A predicate reads its parameter (" + l.rowParam() + "), args, actor, now and config"
@@ -1675,6 +1705,10 @@ func (l *lowerer) walkPlanConstant(n ast.ExpressionNode, local map[string]bool, 
 				}
 				return
 			case "actor":
+				if l.env.Position == tiers.PositionSpecBody {
+					*errp = l.actorInRowPredicateRefusal(e)
+					return
+				}
 				if _, ok := auth.ActorEnvelopeCanonicalName(path[0]); !ok || len(path) > 1 {
 					*errp = l.refuseAs(LowerCodeUnknownField, e, fmt.Sprintf("`actor.%s` is not a field of the actor envelope", strings.Join(path, ".")),
 						"Read one of: "+auth.ActorEnvelopeValidNames())

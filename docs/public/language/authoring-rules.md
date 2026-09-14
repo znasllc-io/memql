@@ -2477,6 +2477,9 @@ Declared-but-unused is legal. A spec or trait body does not read the
 `actor` root: a spec that asks about the actor binds an `@actor` shape,
 and its lambda parameter, spelled `actor`, is the envelope
 (`spec actorEnvelope requiresOwner = actor => actor.role == "owner"`).
+A spec or trait over rows that reads it is refused at load
+(`lower_actor_in_row_predicate`): an ownership test belongs in the query
+filter, `row.ownerUserId == actor.userId`, where row-authz reads it.
 Shapes use `@actor` as their kind marker; the seed-file
 `@actor("system")` is a different construct. An unknown member (`actor.displayName`) is likewise a load
 error and an `actor-unknown-property` squiggle (#2625): the envelope is
