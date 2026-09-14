@@ -194,18 +194,22 @@ func RetiredFunctions() map[string]string {
 		"coalesce": "a ?? b",
 		// exists(x) also read a blank string as absent; the migrator writes
 		// `(x != nil && x != "")` at the call sites that relied on it.
-		"exists":    "x != nil",
-		"len":       "x.count()",
-		"count":     "x.count()",
-		"and":       "a && b",
-		"or":        "a || b",
-		"not":       "!a",
-		"lt":        "a < b",
-		"gt":        "a > b",
-		"lte":       "a <= b",
-		"gte":       "a >= b",
-		"first":     "x.first()",
-		"last":      "x.last()",
+		"exists": "x != nil",
+		"len":    "x.count()",
+		"count":  "x.count()",
+		"and":    "a && b",
+		"or":     "a || b",
+		"not":    "!a",
+		"lt":     "a < b",
+		"gt":     "a > b",
+		"lte":    "a <= b",
+		"gte":    "a >= b",
+		"first":  "x.first()",
+		"last":   "x.last()",
+		// mean() was an automation-evaluator operand the tree never used;
+		// it retires to the one averaging spelling rather than vanishing
+		// into an "unknown function".
+		"mean":      "x.avg()",
 		"timestamp": "now",
 		"now":       "now",
 	}
@@ -517,8 +521,7 @@ func entries() []Function {
 		{
 			Name:     "first",
 			Receiver: TypeList,
-			Doc:      "Returns the first element of the list, or with pred the first element pred holds for. An empty or absent list, or no match, yields an absent value.",
-			Params:   []Param{{Name: "pred", Type: TypeLambda, Optional: true}},
+			Doc:      "Returns the first element of the list. An empty or absent list yields an absent value; to take the first match, filter first: `xs.where(x => p).first()`.",
 			Returns:  TypeAny,
 			Tier:     TierM,
 			Retired:  []string{"first(x)"},
@@ -534,8 +537,7 @@ func entries() []Function {
 		{
 			Name:     "single",
 			Receiver: TypeList,
-			Doc:      "Returns the one element of the list, or with pred the one element pred holds for. Any other number of matches, none included, is an error.",
-			Params:   []Param{{Name: "pred", Type: TypeLambda, Optional: true}},
+			Doc:      "Returns the one element of the list. Any other number of elements, none included, is an error; to take the one match, filter first: `xs.where(x => p).single()`.",
 			Returns:  TypeAny,
 			Tier:     TierM,
 		},

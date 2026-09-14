@@ -127,7 +127,7 @@ func TestSignatureRendering(t *testing.T) {
 		{func() (Function, bool) { return Lookup("ids") }, "ids(match lambda) rows"},
 		{func() (Function, bool) { return Method(TypeList, "any") }, "list.any(pred lambda) bool"},
 		{func() (Function, bool) { return Method(TypeList, "count") }, "list.count() number"},
-		{func() (Function, bool) { return Method(TypeList, "first") }, "list.first(pred? lambda) any"},
+		{func() (Function, bool) { return Method(TypeList, "first") }, "list.first() any"},
 		{func() (Function, bool) { return Method(TypeList, "take") }, "list.take(n number) list"},
 		{func() (Function, bool) { return Method(TypeList, "reduce") }, "list.reduce(seed any, fn lambda) any"},
 		{func() (Function, bool) { return Method(TypeString, "includes") }, "string.includes(sub string) bool"},
@@ -174,7 +174,7 @@ func TestRetiredMapsNameReplacements(t *testing.T) {
 	sort.Strings(keys)
 	want := []string{
 		"and", "coalesce", "concat", "cond", "count", "exists", "first", "gt", "gte",
-		"last", "len", "lt", "lte", "not", "now", "or", "timestamp",
+		"last", "len", "lt", "lte", "mean", "not", "now", "or", "timestamp",
 	}
 	if strings.Join(keys, ",") != strings.Join(want, ",") {
 		t.Errorf("RetiredFunctions() keys = %v, want %v", keys, want)
