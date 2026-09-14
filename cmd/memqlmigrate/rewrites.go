@@ -96,6 +96,9 @@ var registry = []rewrite{
 	{name: "language-line", edition: "2026", epic: "dsl-v1-foundations",
 		doc:  "declare memql = \"" + langparser.LanguageVersion + "\" and edition = \"2026\" in every domain that has no " + dslfs.ManifestFile,
 		tree: rewriteLanguageLine("2026")},
+	{name: "expressions", edition: "2026", epic: "dsl-v1-expressions",
+		doc:  "filters, spec and trait bodies and @filter -> lambdas (filter row => ...); cond / concat / exists / null -> ? : / + / != nil / nil; $args.x in query tool handlers -> args.x",
+		tree: rewriteExpressions},
 }
 
 // rewritesFor returns the rewrites registered for an edition, sorted by name.
