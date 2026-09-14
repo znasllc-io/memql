@@ -34,9 +34,11 @@ shape candidate candidateFull {
 		wantLine int
 		wantCol  int
 	}{
-		// `concept candidate {` is line 4 (after two annotations and the doc
-		// comment); "concept " is 8 chars, so the name starts at column 9.
-		{"candidate", "actions/concepts.memql", "concept", 4, 9},
+		// `concept candidate {` is line 3: one annotation and the doc comment
+		// above it. It was line 4 until epic memql#5375 retired @namespace and
+		// the fixture lost that line. "concept " is 8 chars, so the name starts
+		// at column 9.
+		{"candidate", "actions/concepts.memql", "concept", 3, 9},
 		// `shape candidate candidateFull {` is line 2; "shape candidate " is
 		// 16 chars, so candidateFull starts at column 17.
 		{"candidateFull", "actions/shapes.memql", "shape", 2, 17},
@@ -82,8 +84,10 @@ concept plan {
 		t.Errorf("sites = %+v, want them sorted by file", sites)
 	}
 	for _, s := range sites {
-		if s.Line != 3 || s.Column != 9 {
-			t.Errorf("%s position = %d:%d, want 3:9", s.File, s.Line, s.Column)
+		// Line 2, not 3: the fixtures carried an @namespace line above the
+		// concept until epic memql#5375 retired the annotation.
+		if s.Line != 2 || s.Column != 9 {
+			t.Errorf("%s position = %d:%d, want 2:9", s.File, s.Line, s.Column)
 		}
 	}
 }

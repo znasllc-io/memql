@@ -32,7 +32,7 @@ func TestUseCompletion_Namespaces(t *testing.T) {
 		}
 	}
 	// Not a dump: no construct keywords / concepts leak in.
-	for _, never := range []string{"order", "concepts", "mutate", "query"} {
+	for _, never := range []string{"order", "concepts", "mutation", "query"} {
 		if got[never] {
 			t.Errorf("`use ` must not offer %q (dumped)", never)
 		}

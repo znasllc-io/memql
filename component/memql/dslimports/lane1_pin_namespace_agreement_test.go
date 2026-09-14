@@ -28,10 +28,11 @@ import (
 // and boot reports the name as ambiguous against other/'s widget.
 func pinnedDirWithUnannotatedDeclTree() fstest.MapFS {
 	return fstest.MapFS{
-		// The pin is present but does nothing for an un-annotated decl.
+		// The pin IS the namespace for every decl in this directory
+		// (epic memql#5375).
 		"deploy/namespace.pin": file("cluster\n"),
 		"deploy/concepts.memql": file(`@version("1.0.0")
-@description("Pinned directory, but this decl carries no @namespace.")
+@description("Pinned directory, so this decl assembles under the pin.")
 concept widget {
   label  string  @required @description("Label.")
 }`),
@@ -57,24 +58,28 @@ query widget deployWidgets {
 	}
 }
 
-// The regression guard. A pin file alone must not enrol a declaration into a
-// namespace it does not assemble under.
-func TestLane1_PinDoesNotEnrolUnannotatedDecls(t *testing.T) {
+// THE RULE REVERSED, and the test with it.
+//
+// A namespace.pin used to PERMIT an explicit @namespace without APPLYING one,
+// so a decl in a pinned directory assembled under the DIRECTORY and an import
+// naming the pin was a binding boot refused. Epic memql#5375 retired
+// @namespace, which left the pin as the only way to express a divergence at
+// all -- so ast.AssembleConceptIdFromDeclInDir now APPLIES it, and this decl
+// genuinely is in the cluster namespace.
+//
+// What the guard is worth keeping FOR is the direction that did not change:
+// lane 1 must agree with boot. It accepted what boot refused before; it must
+// now accept what boot accepts, and the fixture is the same one either way.
+func TestLane1_PinAppliesToEveryDeclInItsDirectory(t *testing.T) {
 	tree := loadTree(t, pinnedDirWithUnannotatedDeclTree())
 
-	var got string
 	for _, err := range tree.VerifyReferentialIntegrity() {
 		if strings.Contains(err.Error(), "use cluster.concepts") {
-			got = err.Error()
+			t.Fatalf("lane 1 REFUSED `use cluster.concepts.{ widget }` for a decl in a directory "+
+				"pinned to cluster. The pin APPLIES since epic memql#5375, so this decl assembles "+
+				"v1:cluster:widget and boot accepts the binding -- a lint that refuses what boot "+
+				"accepts sends an author to fix a spelling that is correct.\n  got: %v", err)
 		}
-	}
-	if got == "" {
-		t.Fatal("lane 1 accepted `use cluster.concepts.{ widget }` for a decl that assembles " +
-			"v1:deploy:widget. A namespace.pin PERMITS an explicit @namespace, it does not APPLY " +
-			"one, so this decl is not in the cluster namespace and boot refuses the binding " +
-			"(\":cluster:\" matches neither v1:deploy:widget nor v1:other:widget -- boot reports " +
-			"the name ambiguous). A lint that accepts what boot refuses is worse than the bug " +
-			"#2945 fixed: it is green CI over a tree that fails at boot.")
 	}
 }
 

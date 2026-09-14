@@ -206,6 +206,12 @@ func (Query) a(_ any) (any, error) { return nil, nil }`)},
 // is the unified loader).
 func TestResolveSymbol_PinnedDivergenceKeepsExplicitId(t *testing.T) {
 	root := fstest.MapFS{
+		// The PIN carries the divergence. It was an explicit
+		// @namespace("cluster") on the declaration until epic memql#5375
+		// retired the annotation and made the pin the derivation -- so the
+		// divergence this test is about is still expressible, in the one way
+		// that is left.
+		"deployment/namespace.pin":  {Data: []byte("cluster\n")},
 		"deployment/concepts.memql": {Data: []byte("concept deployment {\n  name string\n}\n")},
 		"caller.memql":              {Data: []byte("import (\n\t\"./deployment/concepts\" as dep\n)\nquery deployment queryX {\n}\n")},
 	}
@@ -218,6 +224,6 @@ func TestResolveSymbol_PinnedDivergenceKeepsExplicitId(t *testing.T) {
 		t.Fatalf("ResolveSymbol: %v", err)
 	}
 	if res.ConceptId != "v1:cluster:deployment" {
-		t.Errorf("ConceptId = %q, want the explicit-annotation assembly (pin-blind best effort must not erase it)", res.ConceptId)
+		t.Errorf("ConceptId = %q, want the PINNED assembly -- the pin is the derivation since epic memql#5375, so a pin-blind resolver erases a divergence that is now the only way to express one", res.ConceptId)
 	}
 }

@@ -97,7 +97,7 @@ func TestAllSnippetItemsWellFormed(t *testing.T) {
 		"mutation todo createTodo {\n  ",
 		"logic compute {\n  ",
 		"@trigger(event=\"x.y\")\nautomation onThing {\n  ",
-		"mutate ",
+		"mutation ",
 	}
 	for _, src := range sources {
 		lines := strings.Split(src, "\n")

@@ -79,14 +79,14 @@ const (
 )
 
 // TestConstructConceptAfterMutateOffersConcept verifies the headline path:
-// after `mutate ` the bound concept's SHORT name `space` is offered (not the
+// after `mutation ` the bound concept's SHORT name `space` is offered (not the
 // canonical id the registry stores). `mutate` is the declaration keyword
 // (memql#2041); `mutation` is the invocation-step prefix only.
 func TestConstructConceptAfterMutateOffersConcept(t *testing.T) {
 	rp := &fakeRegistry{concepts: []string{cidSpace}}
-	items := completionLabels(t, rp, "mutate ")
+	items := completionLabels(t, rp, "mutation ")
 	if !hasLabel(items, "space") {
-		t.Fatalf("after `mutate ` expected short concept `space` offered; got %v", labelsOf(items))
+		t.Fatalf("after `mutation ` expected short concept `space` offered; got %v", labelsOf(items))
 	}
 	if hasLabel(items, cidSpace) {
 		t.Errorf("should offer the SHORT name `space`, not the canonical id %q", cidSpace)
@@ -110,7 +110,7 @@ func TestConstructConceptAfterQueryOffersConcept(t *testing.T) {
 // TestConstructConceptPrefixFilter confirms the partial SHORT name filters.
 func TestConstructConceptPrefixFilter(t *testing.T) {
 	rp := &fakeRegistry{concepts: []string{cidSpace, cidAgent}}
-	items := completionLabels(t, rp, "mutate sp")
+	items := completionLabels(t, rp, "mutation sp")
 	if !hasLabel(items, "space") {
 		t.Fatalf("prefix `sp` should offer `space`; got %v", labelsOf(items))
 	}
@@ -123,7 +123,7 @@ func TestConstructConceptPrefixFilter(t *testing.T) {
 // fires with the DOMAIN-qualified path when the concept is NOT imported.
 func TestConstructConceptImportSuggestedWhenMissing(t *testing.T) {
 	rp := &fakeRegistry{concepts: []string{cidSpace}}
-	items := completionLabels(t, rp, "mutate ")
+	items := completionLabels(t, rp, "mutation ")
 	if !hasLabel(items, "use cognition.concepts.{ space }") {
 		t.Fatalf("expected a domain-qualified import suggestion for un-imported `space`; got %v", labelsOf(items))
 	}
@@ -133,7 +133,7 @@ func TestConstructConceptImportSuggestedWhenMissing(t *testing.T) {
 // suggestion is suppressed when the concept's SHORT name is already in scope.
 func TestConstructConceptImportSuppressedWhenImported(t *testing.T) {
 	rp := &fakeRegistry{concepts: []string{cidSpace}}
-	src := "use cognition.concepts.{ space }\nmutate "
+	src := "use cognition.concepts.{ space }\nmutation "
 	items := completionLabels(t, rp, src)
 	if !hasLabel(items, "space") {
 		t.Fatalf("concept `space` should still be offered; got %v", labelsOf(items))
@@ -162,7 +162,7 @@ func TestConstructConceptQueryImportToggle(t *testing.T) {
 // NOT hijack completion inside a body where these words mean something else.
 func TestConstructConceptNotFiredInBody(t *testing.T) {
 	// Inside an unmatched brace -- should not be ContextConstructConcept.
-	ctx := analyzeCursorContext("mutation space mk {\n  mutate ", 2, 9)
+	ctx := analyzeCursorContext("mutation space mk {\n  mutation ", 2, 9)
 	if ctx.Kind == ContextConstructConcept {
 		t.Errorf("construct-concept context must not fire inside a body block")
 	}
@@ -184,7 +184,7 @@ func labelsOf(items []CompletionItem) []string {
 func TestConstructConceptImportSuppressedForSameDomain(t *testing.T) {
 	rp := &fakeRegistry{concepts: []string{"v1:planner:plan", "v1:cognition:space"}}
 	s := New(rp)
-	src := "mutate pla"
+	src := "mutation pla"
 	items := s.Complete(src, 1, len(src)+1, "dsl/planner/mutations.memql")
 	for _, it := range items {
 		if it.Kind == "snippet" && it.Label == "use planner.concepts.{ plan }" {
@@ -192,7 +192,7 @@ func TestConstructConceptImportSuppressedForSameDomain(t *testing.T) {
 		}
 	}
 
-	src = "mutate spa"
+	src = "mutation spa"
 	items = s.Complete(src, 1, len(src)+1, "dsl/planner/mutations.memql")
 	found := false
 	for _, it := range items {

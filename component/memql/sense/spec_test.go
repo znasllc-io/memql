@@ -13,7 +13,7 @@ func TestCompleteTopLevelOffersLiveConstructs(t *testing.T) {
 		labels[it.Label] = true
 	}
 	for _, kw := range []string{
-		"concept", "query", "mutate", "logic", "automation", "action",
+		"concept", "query", "mutation", "logic", "automation", "action",
 		"capability", "spec", "trait", "shape", "tool", "prompt", "provider",
 		"builtin", "policy", "seed", "use",
 	} {

@@ -174,7 +174,7 @@ func TestDiagnose_InjectedErrors(t *testing.T) {
 			name: "bad-token-in-query-body",
 			src: "use cluster.concepts.{ node }\n" + // 1
 				"\n" + //                                2
-				"" + //                        3
+				"\n" + //                               3
 				"@description(\"bad\")\n" + //            4
 				"query node badBody {\n" + //            5  <- construct header
 				"  filter  health != @@@bogus@@@\n" + // 6  <- offending body line
@@ -207,14 +207,14 @@ func TestDiagnose_InjectedErrors(t *testing.T) {
 			name: "stray-top-level-token",
 			src: "use cluster.concepts.{ node }\n" + //   1
 				"\n" + //                                  2
-				"" + //                          3
+				"\n" + //                                3
 				"query node goodA {\n" + //                4
 				"  filter health != \"stopped\"\n" + //    5
 				"}\n" + //                                 6
 				"\n" + //                                  7
 				"%%%garbage%%%\n" + //                     8  <- stray token
 				"\n" + //                                  9
-				"" + //                          10
+				"\n" + //                                10
 				"query node goodB {\n" + //                11
 				"}\n", //                                   12
 			wantLine: 8,

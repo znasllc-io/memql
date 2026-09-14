@@ -10,9 +10,9 @@ import (
 	"testing"
 )
 
-// a valid mutate body; %s is the signature concept.
+// a valid mutation body; %s is the signature concept.
 func mutateOn(concept string) string {
-	return "mutate " + concept + " setThing {\n  args {\n    id  string!\n  }\n  update {\n    id: args.id\n  }\n}\n"
+	return "mutation " + concept + " setThing {\n  args {\n    id  string!\n  }\n  update {\n    id: args.id\n  }\n}\n"
 }
 
 func TestSignatureConcept_MissingFlaggedError(t *testing.T) {

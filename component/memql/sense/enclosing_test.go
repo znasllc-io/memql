@@ -26,7 +26,7 @@ func TestResolveEnclosingConstruct(t *testing.T) {
 			src:        "query todo todos {\n  args {\n    ",
 		},
 		{
-			name: "mutate insert stamp chain", wantKeyword: "mutate", wantReceiver: "Mutation",
+			name: "mutation insert stamp chain", wantKeyword: "mutation", wantReceiver: "Mutation",
 			wantBlocks: []string{"insert", "stamp"},
 			src:        "mutation todo createTodo {\n  insert {\n    stamp {\n      ",
 		},

@@ -126,7 +126,7 @@ var openCapabilityNamespaces = map[string]bool{
 // by a two-identifier construct signature. Kept in sync by
 // TestSignatureConceptRegexMatchesBootLoader.
 var signatureConceptRe = regexp.MustCompile(
-	`(?m)^[ \t]*(?:query|mutate|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`,
+	`(?m)^[ \t]*(?:query|mutation|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`,
 )
 
 // useDeclRe matches a full Form B use declaration, including a brace list

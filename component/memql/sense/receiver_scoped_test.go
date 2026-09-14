@@ -87,7 +87,7 @@ func TestConstructScopedBodyCompletion(t *testing.T) {
 			want: []string{"args", "filter", "shape"}, absent: []string{"insert", "update", "body"},
 		},
 		{
-			name: "mutate body offers write blocks",
+			name: "mutation body offers write blocks",
 			src:  "mutation todo createTodo {\n  ",
 			want: []string{"args", "insert", "update"}, absent: []string{"filter", "shape", "body"},
 		},
