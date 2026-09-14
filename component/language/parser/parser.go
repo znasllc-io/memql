@@ -454,7 +454,11 @@ func (p *Parser) parseImportBlock() ([]*ImportDecl, error) {
 // parseImportEntry parses a single `"./path" [as alias]` entry.
 func (p *Parser) parseImportEntry() (*ImportDecl, error) {
 	if !p.check(TokenString) {
-		return nil, newParseErrorf(&p.current, "expected import path string, got %q", p.current.Literal)
+		// The `import (...)` block is retired (memql#5375): `use` is the
+		// import form, and no .memql file used the block. The old message
+		// said "expected import path string", which reads as though the
+		// block were valid with different contents.
+		return nil, newParseErrorf(&p.current, "`import (...)` is retired -- declare dependencies with a file-top `use <domain>.<construct>.{ names }` import (memql#5375). %s (got %q)", baseparser.AttributeRewriteHint, p.current.Literal)
 	}
 	path := p.current.Literal
 	p.advance()
@@ -5096,7 +5100,16 @@ func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
 		return nil, nil
 	}
 
-	for (!p.suppressCommaOr && p.check(TokenComma)) || p.check(TokenPipePipe) {
+	// `,` as OR is retired (memql#5375, D17), the twin of `;` as AND.
+	//
+	// suppressCommaOr is still consulted: where it is SET the comma is an
+	// argument or list separator and this level must not look at it at all,
+	// so the refusal has to sit inside the same guard the fold did. Refusing
+	// unconditionally would reject every multi-argument call site.
+	if !p.suppressCommaOr && p.check(TokenComma) {
+		return nil, newParseErrorf(&p.current, "`,` as OR is retired -- write `||`. One boolean grammar, so precedence reads the same everywhere (memql#5375); a comma stays a separator in an argument list, a field list and an @enum. %s", baseparser.AttributeRewriteHint)
+	}
+	for p.check(TokenPipePipe) {
 		p.advance()
 		right, err := p.parseLogicalAnd()
 		if err != nil {
@@ -5109,6 +5122,9 @@ func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
 			Op:    LogicalOr,
 			Left:  left,
 			Right: right,
+		}
+		if !p.suppressCommaOr && p.check(TokenComma) {
+			return nil, newParseErrorf(&p.current, "`,` as OR is retired -- write `||`. One boolean grammar, so precedence reads the same everywhere (memql#5375); a comma stays a separator in an argument list, a field list and an @enum. %s", baseparser.AttributeRewriteHint)
 		}
 	}
 
@@ -5158,7 +5174,39 @@ func (p *Parser) parseNullCoalesce() (ExpressionNode, error) {
 	return &CoalesceExpr{Args: args}, nil
 }
 
-// parseLogicalAnd parses semicolon-separated or &&-separated (AND) expressions.
+// semicolonIsAConnective reports whether the `;` at the cursor is being used
+// as the retired AND connective rather than as a permitted TRAILING
+// semicolon.
+//
+// The distinction is the whole reason this is a function. `;` had two jobs:
+// a synonym for `&&` between two predicates, which memql#5375 retires, and a
+// tolerated statement terminator before EOF or a closing brace, which stays --
+// the internal procedural form the rewriter emits carries one. Refusing every
+// `;` reached at the AND level takes the terminator with the connective, and
+// the failure lands on the lowering rather than on anything an author wrote.
+//
+// A `;` is a connective only when something that could START a predicate
+// follows it. Runs of semicolons and a `;` before EOF or `}` are terminators.
+func (p *Parser) semicolonIsAConnective() bool {
+	if !p.check(TokenSemicolon) {
+		return false
+	}
+	for i := 1; ; i++ {
+		next := p.peekAhead(i)
+		switch next.Type {
+		case TokenSemicolon:
+			continue
+		case TokenEOF, TokenBraceClose, TokenParenClose, TokenBracketClose, TokenComma:
+			return false
+		default:
+			return true
+		}
+	}
+}
+
+// parseLogicalAnd parses &&-separated (AND) expressions. `;` as a synonym
+// for `&&` is retired (memql#5375); see semicolonIsAConnective above for why
+// a trailing semicolon is a different thing and still tolerated.
 func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
 	left, err := p.parseComparisonLevel()
 	if err != nil {
@@ -5168,7 +5216,15 @@ func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
 		return nil, nil
 	}
 
-	for p.check(TokenSemicolon) || p.check(TokenAmpAmp) {
+	// `;` as AND is retired (memql#5375, D17). It was a second spelling of
+	// `&&` in the same position, so one boolean grammar read two ways and a
+	// reader had to know both to grep for either -- and the two do not share
+	// precedence intuitions, which is how a filter comes to mean something
+	// other than it looks like.
+	if p.semicolonIsAConnective() {
+		return nil, newParseErrorf(&p.current, "`;` as AND is retired -- write `&&`. One boolean grammar, so precedence reads the same everywhere (memql#5375). %s", baseparser.AttributeRewriteHint)
+	}
+	for p.check(TokenAmpAmp) {
 		p.advance()
 		right, err := p.parseComparisonLevel()
 		if err != nil {
@@ -5181,6 +5237,9 @@ func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
 			Op:    LogicalAnd,
 			Left:  left,
 			Right: right,
+		}
+		if p.semicolonIsAConnective() {
+			return nil, newParseErrorf(&p.current, "`;` as AND is retired -- write `&&`. One boolean grammar, so precedence reads the same everywhere (memql#5375). %s", baseparser.AttributeRewriteHint)
 		}
 	}
 

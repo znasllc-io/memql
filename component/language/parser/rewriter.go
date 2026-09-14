@@ -994,7 +994,20 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 func buildStructQueryExpr(conceptId, filter, shape, sort, paginate, asOf string, count bool) string {
 	base := "concept==" + conceptId
 	if filter != "" {
-		base += ";" + filter
+		// `&&`, not `;` (memql#5375). This was the ONE remaining producer
+		// of `;`-as-AND, and it is machine-generated glue rather than an
+		// authored form -- which is why retiring the author-facing spelling
+		// had to reach in here as well, or the lowering would have refused
+		// every query in the tree while the tree itself was clean.
+		//
+		// PARSE-IDENTICAL: `;` and `&&` sit at the same level
+		// (parseLogicalAnd consumed both), so `concept==X && f || g` groups
+		// exactly as `concept==X;f || g` did. That grouping is worth
+		// noticing on the way past -- it is `(concept==X && f) || g`, so
+		// the concept term does not cover an OR-ed filter -- but it is the
+		// grouping this has always produced, and changing it is a
+		// different change from renaming the operator.
+		base += "&&" + filter
 	}
 	if asOf != "" {
 		base = fmt.Sprintf("asOf(%s, %s)", base, asOf)
