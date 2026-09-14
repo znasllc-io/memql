@@ -156,6 +156,40 @@ func TestLanguageLineDeclaresEveryUndeclaredDomain(t *testing.T) {
 	}
 }
 
+// A domain is what the loader calls one (parser.LanguageLineDomainOf): the
+// first segment of a .memql file however deep, so a domain holding only a
+// sub-namespace (beta/sub/concepts.memql) gets its line -- the loader refuses
+// it without one. `_`/`.` segments stay skipped, as the loader skips them.
+func TestLanguageLineDeclaresASubNamespaceOnlyDomain(t *testing.T) {
+	root := t.TempDir()
+	for rel, content := range map[string]string{
+		"beta/sub/concepts.memql":    "concept widget {\n  id string\n}\n",
+		"gamma/_wip/concepts.memql":  "concept draft {\n  id string\n}\n",
+		".attic/old/concepts.memql":  "concept old {\n  id string\n}\n",
+		"delta/sub/_draft.memql":     "concept d {\n  id string\n}\n",
+		"delta/sub/prompts/one.tmpl": "hello\n",
+	} {
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := runMigrate(t, "--rewrite=language-line", "-w", root); err != nil {
+		t.Fatalf("-w: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "beta", dslfs.ManifestFile)); err != nil {
+		t.Errorf("beta holds only a sub-namespace, which the loader reads as domain beta, but it got no manifest: %v", err)
+	}
+	for _, absent := range []string{"beta/sub/", "gamma/", ".attic/", "delta/", "delta/sub/", ""} {
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(absent), dslfs.ManifestFile)); err == nil {
+			t.Errorf("%s%s was written, but the loader reads no domain there", absent, dslfs.ManifestFile)
+		}
+	}
+}
+
 // Passed a domain directory rather than the bundle root, the rewrite treats
 // the root as the one domain.
 func TestLanguageLineOnADomainDirectory(t *testing.T) {

@@ -78,6 +78,7 @@ func TestThePlanFingerprintIgnoresTheSourceVersionAndNothingElseThatMatters(t *t
 	t.Run("an added MemQL domain", func(t *testing.T) {
 		tree := spaOnlyPackage()
 		tree["dsl/acme/concepts.memql"] = file(validConcepts)
+		tree["dsl/acme/memql.toml"] = file(languageLine)
 		changed, aerr := Analyze(tree, Options{SourceVersion: "sha-aaa"})
 		if aerr != nil {
 			t.Fatalf("analyze: %v", aerr)

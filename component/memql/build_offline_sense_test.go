@@ -16,6 +16,7 @@ import (
 // non-core namespace. Its assembled id is v1:gadgets:gadget (only the major
 // version enters the prefix).
 var gadgetOverlay = fstest.MapFS{
+	"gadgets/memql.toml": languageLineFile(),
 	"gadgets/concepts.memql": {Data: []byte(`@version("1.0.0")
 @namespace("gadgets")
 @description("A gadget for offline-sense overlay testing.")
@@ -129,6 +130,9 @@ func TestBuildOfflineSense_OverlayVisibleToServiceButRestoredGlobally(t *testing
 // real working trees.
 var repoShapedOverlay = fstest.MapFS{
 	"dsl/test.memql": {Data: []byte("// a scratch file an author left in the tree\n")},
+	// Each domain below the resolved dsl/ root declares its own line.
+	"dsl/gadgets/memql.toml": languageLineFile(),
+	"dsl/widgets/memql.toml": languageLineFile(),
 	"dsl/gadgets/concepts.memql": {Data: []byte(`@version("1.0.0")
 @namespace("gadgets")
 @description("A gadget for offline-sense overlay testing.")

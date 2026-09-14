@@ -8,7 +8,9 @@ import (
 	"github.com/tliron/commonlog"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/sense"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 func TestCompletionKindMapping(t *testing.T) {
@@ -94,6 +96,13 @@ func TestCompletion_RegistryRefreshCrossFile(t *testing.T) {
 	}
 	if hasGadget() {
 		t.Fatal("gadget concept should not exist before file A is written")
+	}
+
+	// The domain declares its language line, as a real bundle domain must
+	// (memql#5357); without it the engine refuses the domain's concepts.
+	line := dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}
+	if err := os.WriteFile(filepath.Join(dir, "gadgets", dslfs.ManifestFile), []byte(line.Render()), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
 	// File A defines the concept; the save-driven rebuild picks it up.

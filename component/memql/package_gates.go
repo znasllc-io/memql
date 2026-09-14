@@ -94,6 +94,7 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 	}
 	if err != nil {
 		result.Diagnostics = append(result.Diagnostics, LintDiagnostic{Message: err.Error()})
+		result.Diagnostics = withUnreadRootManifest(result.Diagnostics, root)
 		sortDiagnostics(result.Diagnostics)
 		return result, nil
 	}
@@ -108,10 +109,7 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 
 	if eng.loadReport != nil {
 		for _, s := range eng.loadReport.Skipped {
-			result.Diagnostics = append(result.Diagnostics, LintDiagnostic{
-				File:    s.File,
-				Message: s.Keyword + " " + s.Name + " (" + s.Phase + "): " + s.Err,
-			})
+			result.Diagnostics = append(result.Diagnostics, LintDiagnostic{File: s.File, Message: skipDiagnostic(s)})
 		}
 		for _, d := range eng.loadReport.Duplicates {
 			result.Diagnostics = append(result.Diagnostics, LintDiagnostic{Message: "duplicate construct: " + d.String()})
@@ -125,8 +123,12 @@ func AnalyzePackageDSL(logger *slog.Logger, root fs.FS) (PackageDSLResult, error
 	if initErr != nil && !strings.Contains(initErr.Error(), "strict DSL boot refused") {
 		result.Diagnostics = append(result.Diagnostics, LintDiagnostic{Message: initErr.Error()})
 	}
+	result.Diagnostics = withUnreadRootManifest(result.Diagnostics, root)
 
 	sortDiagnostics(result.Diagnostics)
+	// The concept build and Init both refuse a domain whose language line the
+	// engine will not read (memql#5357); the package author reads it once.
+	result.Diagnostics = dedupeDiagnostics(result.Diagnostics)
 	return result, nil
 }
 

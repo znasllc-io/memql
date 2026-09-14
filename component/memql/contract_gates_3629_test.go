@@ -85,11 +85,11 @@ const (
 func mountGateFixture(t *testing.T, queries string) (*MemQLEngine, concept.Registry) {
 	t.Helper()
 
-	memqldsl.RegisterTree(gateFixtureDomain, fstest.MapFS{
+	memqldsl.RegisterTree(gateFixtureDomain, withLanguageLine(fstest.MapFS{
 		"concepts.memql": {Data: []byte(gateFixtureConcepts)},
 		"shapes.memql":   {Data: []byte(gateFixtureShapes)},
 		"queries.memql":  {Data: []byte(queries)},
-	})
+	}))
 	t.Cleanup(func() {
 		memqldsl.UnregisterTree(gateFixtureDomain)
 		concept.ReplaceAll(nil)

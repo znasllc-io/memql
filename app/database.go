@@ -60,14 +60,18 @@ func (a *App) databaseAndConcepts() {
 			detail = append(detail, "  - "+s.File+": "+s.String())
 		}
 		joined := strings.Join(detail, "\n")
+		// The heading names what was found: a domain whose language line the
+		// engine refuses (memql#5357) is not a malformed concept, and the
+		// operator's fix differs.
+		heading := memql.ConceptSkipsHeading(skips)
 		if !memql.DSLAllowSkips() {
-			a.fatal("strict DSL boot refused: malformed concept(s)",
+			a.fatal("strict DSL boot refused: "+heading,
 				"skipped", len(skips),
 				"loaded", loaded,
 				"breakGlass", memql.AllowSkipsEnvVar+"=1",
 				"detail", "\n"+joined)
 		}
-		a.Logger.Error(memql.AllowSkipsEnvVar+" set: booting despite dropped concept(s) (operator break-glass)",
+		a.Logger.Error(memql.AllowSkipsEnvVar+" set: booting despite "+heading+" (operator break-glass)",
 			"skipped", len(skips), "loaded", loaded, "detail", "\n"+joined)
 	}
 
