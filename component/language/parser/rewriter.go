@@ -796,6 +796,10 @@ func unboundedReason(preamble string) (string, bool, error) {
 // "page" is the whole matching set, which is the silent client-side scan the
 // pushdown tier exists to refuse. It never combines with count, which reads no
 // page at all.
+//
+// That the clause IS a lambda is the parser's to say (parseRefineFunction):
+// the text passes through to it verbatim, and a refusal there lands on the
+// author's token, where one here could only name the construct.
 func checkRefineClause(q *structQueryBody) error {
 	if q.refine == "" {
 		return nil
@@ -806,17 +810,7 @@ func checkRefineClause(q *structQueryBody) error {
 	if q.paginate == "" {
 		return fmt.Errorf("`refine` requires `paginate`: it runs in process over the page paginate reads, and without one that page is the whole matching set -- add `paginate <n>` (refine may then return fewer than n rows)")
 	}
-	if !opensWithLambdaHeader(q.refine) {
-		return fmt.Errorf("`refine` takes a lambda: refine row => <predicate>, got %q", q.refine)
-	}
 	return nil
-}
-
-// opensWithLambdaHeader reports whether a clause value is a lambda: `x =>`,
-// `() =>`, `(x) =>`, `(x, y) =>`. The rule is dslclause.OpensLambda, the one
-// every gate asks before choosing which grammar to read a clause with.
-func opensWithLambdaHeader(s string) bool {
-	return dslclause.OpensLambda(s)
 }
 
 // joinStructQueryContinuations folds a struct-query body's physical lines

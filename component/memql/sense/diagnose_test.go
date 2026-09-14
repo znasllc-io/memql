@@ -300,8 +300,12 @@ func TestDiagnose_RetiredFormCarriesItsRule(t *testing.T) {
 		{"trait body", "trait isOpen {\n  return status == \"open\"\n}\n", "retired_trait_return_body"},
 		{"cond call", "logic doIt {\n  args {\n    x string\n  }\n  body {\n    return cond(args.x == \"a\", 1, 2)\n  }\n}\n", "retired_cond_call"},
 		{"null", "logic doIt {\n  args {\n    x string\n  }\n  body {\n    return args.x == null\n  }\n}\n", "retired_null"},
-		// Not a retired form: the plain code stays.
-		{"key-less map entry", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a: 1, args.x.y }\n  }\n}\n", "parse-error"},
+		// The legacy object literal's key-less entry is a retired form: its
+		// refusal writes the entry out, the fix the codemod makes.
+		{"key-less map entry", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a: 1, args.x.y }\n  }\n}\n", "retired_keyless_map_entry"},
+		// Not a retired form: the plain code stays. A dotted KEY is refused
+		// with "nest a map", which no rewrite performs.
+		{"dotted map key", "logic doIt {\n  args {\n    x object\n  }\n  body {\n    return { a.b: 1 }\n  }\n}\n", "parse-error"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			errs := errorDiags(svc.Diagnose(tc.src, "test.memql"))

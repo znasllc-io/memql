@@ -772,6 +772,7 @@ for its hover too.
 | `spec <name>` | `<name>(row)` |
 | `trait <name>` | `<name>(row)` |
 | `.contains(...)` | `v in <list>` for membership, `s.includes(sub)` for a substring |
+| `{ args.x.y }` | `{ y: args.x.y }` |
 | `filter <predicate>` | `filter row => <predicate>` |
 | `spec <bound> <name> { return <predicate> }` | `spec <bound> <name> = row => <predicate>` |
 | `trait <name> { return <predicate> }` | `trait <name> = row => <predicate>` |

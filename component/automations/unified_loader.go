@@ -190,6 +190,7 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 			})
 			return nil
 		}
+		authoredFile := source
 		source = lowered
 		slices, unextracted := extractAutomationSlicesReporting(source)
 		for _, name := range unextracted {
@@ -204,7 +205,7 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 		}
 		for _, slice := range slices {
 			origin := "unified:" + path + ":" + slice.Name
-			automation, compileErr := l.compileMemQL(slice.Source, origin)
+			automation, compileErr := l.compileMemQL(anchoredAutomationSlice(authoredFile, slice.Source), origin)
 			if compileErr != nil {
 				// EVERY compile error is a hard problem -- there is no
 				// by-design skip left to carve out. The old code exempted
@@ -592,3 +593,18 @@ var _ = io.ReadAll
 // silenceUnused keeps the data_lifecycle import in scope if a
 // future revision needs it.
 var _ = fs.ValidPath
+
+// anchoredAutomationSlice places a slice on its line of the file as the author
+// wrote it (languageParser.AnchorSource), so a parse error inside the
+// automation names the file's line, not the slice's (memql#5364). A longhand
+// automation's slice is the author's text verbatim and is found in the file;
+// a terse one's is the lowering's longhand, found nowhere in it, and keeps
+// positions relative to itself -- as does a slice the file holds twice, where
+// either line would be a guess.
+func anchoredAutomationSlice(authoredFile, slice string) string {
+	i := strings.Index(authoredFile, slice)
+	if i < 0 || (i > 0 && authoredFile[i-1] != '\n') || strings.Contains(authoredFile[i+1:], slice) {
+		return slice
+	}
+	return languageParser.AnchorSource(slice, 1+strings.Count(authoredFile[:i], "\n"))
+}

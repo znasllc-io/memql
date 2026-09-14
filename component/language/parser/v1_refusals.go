@@ -71,6 +71,7 @@ const (
 	ruleSpecReference       = "retired_spec_reference"
 	ruleTraitReference      = "retired_trait_reference"
 	ruleContainsMethod      = "retired_contains_method"
+	ruleKeylessMapEntry     = "retired_keyless_map_entry"
 
 	// The predicate positions' legacy forms. Refused only with
 	// Options.ExpressionsV1 on: until the tree flips, both spellings of a
@@ -124,6 +125,11 @@ var v1RetiredFormTable = []RetiredForm{
 	// The parser cannot know the receiver's type, so the method's refusal
 	// names both of the forms it used to stand for.
 	{Spelling: ".contains(...)", Replacement: "v in <list> for membership or s.includes(sub) for a substring", Rule: ruleContainsMethod},
+	// The legacy object literal read an entry with no key as the entry keyed
+	// by its last segment: `{ args.x.y }` was `{ y: args.x.y }`, and a lone
+	// `{ x }` was `{ x: x }`. The refusal names the entry written out, so its
+	// message is the concrete rewrite rather than this placeholder form.
+	{Spelling: "{ args.x.y }", Replacement: "{ y: args.x.y }", Rule: ruleKeylessMapEntry},
 
 	// The predicate positions (D1): every predicate is a lambda naming the
 	// row it reads. Refused only with Options.ExpressionsV1 on.
@@ -208,12 +214,22 @@ func v1FormByRule(rule string) (RetiredForm, bool) {
 // ParseError.Error appends a `(got "...")` suffix when it is set, and every v1
 // message already says what it found, so the suffix would only repeat it.
 func v1ParseErrorAt(tok Token, msg string) *ParseError {
-	return &ParseError{Message: msg, Pos: tok.Pos, Line: tok.Line, Column: tok.Column}
+	e := &ParseError{Message: msg}
+	e.setToken(tok)
+	return e
 }
 
 // v1Errorf is v1ParseErrorAt with a format.
 func v1Errorf(tok Token, format string, args ...any) error {
 	return v1ParseErrorAt(tok, fmt.Sprintf(format, args...))
+}
+
+// v1Where names where tok is, for a message that points back at an opener
+// ("the `(` at line 3, column 9"): in the author's coordinates, as the
+// refusal's own position is.
+func v1Where(tok Token) string {
+	line, col := tok.At()
+	return fmt.Sprintf("line %d, column %d", line, col)
 }
 
 // v1Describe names a token the way a message quotes it.
@@ -315,7 +331,10 @@ func v1ColonError(tok Token) error {
 	lit := strings.TrimPrefix(tok.Literal, ".")
 	msg := "a canonical id in an expression is written as a string: " + ast.QuoteString(lit)
 	if strings.Count(lit, ":") == 1 {
-		key, value, _ := strings.Cut(lit, ":")
+		// The split keeps the token's leading '.': a `.a:b` tail after a call
+		// is the member `.a`, then the value, so the fix to write in its place
+		// is `.a: b` -- dropping the dot would detach the member from its call.
+		key, value, _ := strings.Cut(tok.Literal, ":")
 		msg += fmt.Sprintf(" -- or, if the ':' separates a name from a value, put a space after it: %s: %s", key, value)
 	}
 	return v1Errorf(tok, "%s", msg)
@@ -329,6 +348,57 @@ func v1ColonError(tok Token) error {
 // the two KEY positions (a named argument, a map key) it stays legal, because
 // a key is never an expression and cannot be read as a subtraction.
 func v1KebabError(tok Token) error {
-	fix := strings.TrimSpace(strings.ReplaceAll(tok.Literal, "-", " - "))
-	return v1Errorf(tok, "`%s` reads as one name; write `%s` (spaces) for subtraction", tok.Literal, fix)
+	return v1Errorf(tok, "`%s` reads as one name; write `%s` (spaces) for subtraction", tok.Literal, v1KebabFix(tok.Literal))
+}
+
+// v1KebabFix spells the subtraction a hyphen-glued name most likely meant.
+// Every operand after the first is read as a sibling of the first, so the
+// object path is repeated: `row.total-used` is `row.total - row.used`, never
+// `row.total - used`, whose bare `used` edition 2026 refuses in turn. A piece
+// that names its own object (`args.a-args.b`) or is a number (`row.n-1`) is
+// kept as written, and a `.a-b` tail after a call has no object text to
+// repeat.
+func v1KebabFix(lit string) string {
+	pieces := strings.Split(lit, "-")
+	prefix := ""
+	if i := strings.LastIndex(pieces[0], "."); i > 0 {
+		prefix = pieces[0][:i+1]
+	}
+	for i := 1; i < len(pieces); i++ {
+		piece := pieces[i]
+		if prefix == "" || piece == "" || strings.Contains(piece, ".") || isDigit(rune(piece[0])) {
+			continue
+		}
+		pieces[i] = prefix + piece
+	}
+	return strings.TrimSpace(strings.Join(pieces, " - "))
+}
+
+// v1KeylessEntry judges a map entry that is a name or a path with no `key:`
+// after it -- the legacy object literal's shorthand, which keyed the entry by
+// its last segment: `{ args.event.payload.identityId }` meant
+// `{ identityId: args.event.payload.identityId }`. The refusal writes that
+// entry out, so the fix it names is the one the codemod makes. nil when the
+// entry is a pun the position admits (a construct call's arguments in map
+// clothing, where `{ x }` is `{ x: x }`), or a `.a` tail, which the caller's
+// key checks name.
+//
+// A hyphenated entry is refused as the hyphen, not as the missing key: as a
+// value the name reads as one identifier, and a key written in front of it
+// would only move that refusal one token right.
+func v1KeylessEntry(tok Token, allowPuns bool) error {
+	lit := tok.Literal
+	if strings.HasPrefix(lit, ".") {
+		return nil
+	}
+	if strings.Contains(lit, "-") {
+		return v1KebabError(tok)
+	}
+	if allowPuns && !strings.Contains(lit, ".") {
+		return nil
+	}
+	key := lit[strings.LastIndex(lit, ".")+1:]
+	form, _ := v1FormByRule(ruleKeylessMapEntry)
+	msg := fmt.Sprintf("a map entry needs a key: write %s: %s (%s rewrites it)", key, lit, v1Migrator)
+	return &RetiredFormError{Form: form, Parse: v1ParseErrorAt(tok, msg)}
 }
