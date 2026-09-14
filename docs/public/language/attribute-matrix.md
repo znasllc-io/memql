@@ -791,7 +791,7 @@ On a query: marks the query as time-dependent because it reads `asOf latest` (th
 | [prompt](#prompt) | one string | `@level("fast")` |
 | [rule](#rule) | one string | `@level("strong")` |
 
-- On a prompt: How much intelligence the call needs: fast, strong, reasoning or embeddings. Required on every prompt; the router's rules branch on it, so a prompt never names a model (epic memql#5127).
+- On a prompt: How much intelligence the call needs: fast, strong, reasoning or embeddings. The router's rules branch on it, so a prompt never names a model (epic memql#5127). Every prompt should declare one; a prompt without one is not yet refused at load (memql#5426).
 - On a rule: The level to resolve the call at: fast, strong, reasoning or embeddings, OVERRIDING what the call declared.
 
 ### @locked
@@ -887,7 +887,7 @@ Model identifier (e.g., "gpt-5.4-mini", "claude-sonnet-4-6").
 | [seed](#seed) | one string | `@namespace("agents")` |
 
 - On a concept: Concept namespace. DEFAULTS to the containing dsl/&lt;domain>/ directory (#2614) -- write it only for a colon-scoped sub-namespace ("cognition:client:tool") or a pinned divergence (namespace.pin). An explicit value must equal the directory, extend it as &lt;dir>:..., or match the domain pin; any other mismatch is a load error (the moved-file guard: file location is id-bearing, so moving a .memql file between domains changes canonical ids).
-- On a seed: The namespace the seeded row's concept is resolved in, when it differs from the file's domain.
+- On a seed: Accepted, and read by nothing yet: the seeded row's concept is resolved from the seed's signature (`seed <Concept> <name>`, through the file's use imports), never from this annotation (memql#5426).
 
 ### @nocache
 
