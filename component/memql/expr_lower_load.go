@@ -268,7 +268,7 @@ func (e *MemQLEngine) lowerAllPushdownPositions(report *LoadReport, specs *SpecR
 		}
 		problems = append(problems, fmt.Errorf("%s %q: %w", keyword, name, f.err))
 		if report != nil {
-			report.AddSkip(baseloader.Skip{Component: "memql.lower", Keyword: keyword, Name: name, File: origin, Phase: f.phase, Err: f.err.Error()})
+			report.AddSkip(baseloader.SkipFor("memql.lower", keyword, name, origin, f.phase, f.err))
 		}
 	}
 	for _, spec := range specList {
@@ -309,7 +309,7 @@ func (e *MemQLEngine) lowerDisabledSpecBodies(report *LoadReport, specs *SpecReg
 		err := fmt.Errorf("@disabled, and its body does not lower -- re-enabling it would refuse boot: %w", f.err)
 		problems = append(problems, fmt.Errorf("%s %q: %w", keyword, f.spec.Name, err))
 		if report != nil {
-			report.AddSkip(baseloader.Skip{Component: "memql.lower", Keyword: keyword, Name: f.spec.Name, File: f.spec.Origin, Phase: f.phase, Err: err.Error()})
+			report.AddSkip(baseloader.SkipFor("memql.lower", keyword, f.spec.Name, f.spec.Origin, f.phase, err))
 		}
 	}
 	return problems

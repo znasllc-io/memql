@@ -255,7 +255,14 @@ func corpusJudge(r *corpusRun) string {
 		if len(r.loadDiags) == 0 {
 			return "the engine loaded the file; the case says it is refused"
 		}
-		return corpusMatchRefusal(r.c, r.loadDiags)
+		if msg := corpusMatchRefusal(r.c, r.loadDiags); msg != "" {
+			return msg
+		}
+		// The rule a parse refusal answers to, at load (D24): a refusal that
+		// carries a rule id must have it named in code.
+		if rule := corpusLoadRule(r.c.Message, r.loadDiags); rule != "" && r.c.Code == "" {
+			return fmt.Sprintf("the refusal carries the rule id %q; name it in code -- the id is the part of the contract a reworded message keeps", rule)
+		}
 	case verdictLower:
 		if r.gotErr != nil {
 			return "did not lower: " + r.gotErr.Error()
@@ -292,6 +299,26 @@ func corpusMatchRefusal(c corpusCase, diags []string) string {
 		want = fmt.Sprintf("code %q and %s", c.Code, want)
 	}
 	return fmt.Sprintf("refused, but no diagnostic carries %s; the diagnostics were:\n    %s", want, strings.Join(diags, "\n    "))
+}
+
+// corpusLoadRuleRe is a rule id as a load diagnostic prints it: last, in
+// brackets -- the convention the annotation registry's refusals and the
+// lowering's (LowerError) share, so a caller that prefixes context leaves the
+// code findable.
+var corpusLoadRuleRe = regexp.MustCompile(`\[([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\]\s*$`)
+
+// corpusLoadRule is the rule id the load diagnostic carrying message ends
+// with, or "" when it carries none.
+func corpusLoadRule(message string, diags []string) string {
+	for _, d := range diags {
+		if !strings.Contains(d, message) {
+			continue
+		}
+		if m := corpusLoadRuleRe.FindStringSubmatch(d); m != nil {
+			return m[1]
+		}
+	}
+	return ""
 }
 
 // corpusRefusalRule is the stable rule id a parse refusal carries -- today the

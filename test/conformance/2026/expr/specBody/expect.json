@@ -204,6 +204,7 @@
     {
       "file": "args-in-a-spec.memql",
       "verdict": "refuse_load",
+      "code": "lower_refused",
       "message": "a spec or trait takes no arguments",
       "note": "A spec body reads its parameter and the clock; args belong to the query that applies it."
     },

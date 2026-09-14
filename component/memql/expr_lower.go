@@ -97,15 +97,21 @@ type LowerEnv struct {
 	Predicate func(name string) (*Spec, bool)
 }
 
-// LowerError is a lowering refusal. Its three parts are the contract the
-// corpus pins: Node is the refused node as written (ast.FormatExpr), Position
-// the position it sits in, and Fix the nearest pushdown spelling -- a sentence
-// carrying the rewritten expression in backticks.
+// LowerError is a lowering refusal. Its parts are the contract the corpus
+// pins (D24: every refusal names the construct, the position, the rule id and
+// the replacement): Node is the refused node as written (ast.FormatExpr),
+// Position the position it sits in, Code the stable rule id, and Fix the
+// nearest pushdown spelling -- a sentence carrying the rewritten expression in
+// backticks.
 type LowerError struct {
 	Node     string
 	Position tiers.Position
 	Reason   string
 	Fix      string
+	// Code is the stable rule id of the refusal's kind (the LowerCode*
+	// constants). Empty reads as LowerCodeRefused, the generic kind, so every
+	// refusal carries one (RuleCode).
+	Code string
 	// Span locates the refused node where the author wrote it, when the node
 	// carries one (a v1 node the parser built): the parser positions a
 	// lowered construct's tokens at the author's coordinates
@@ -117,11 +123,60 @@ type LowerError struct {
 	Span ast.Span
 }
 
-// Error prints the refusal as one sentence:
+// The rule ids of the lowering's refusals (D24). The message may be reworded;
+// the code may not -- the conformance corpus keys on it (a case asserting a
+// refusal that carries one must name it in `code`), and a tool can act on a
+// refusal by its code without parsing prose. One code per KIND of refusal,
+// not per sentence: the generic kind covers every node that simply has no
+// form at its position, and the specific kinds are the mistakes an author
+// (or a model) makes often enough to deserve their own name.
+const (
+	// LowerCodeRefused: the node has no form at its position -- an
+	// in-process function or arithmetic over the row, a construct call in a
+	// predicate, a node kind the tier manifest refuses there, and every other
+	// refusal without a kind of its own.
+	LowerCodeRefused = "lower_refused"
+	// LowerCodeUnknownName: a name the position does not bind -- a bare
+	// identifier (the pre-2026 bare payload field), an argument the args
+	// block does not declare, a predicate or function nothing registers.
+	LowerCodeUnknownName = "lower_unknown_name"
+	// LowerCodeUnknownField: a field the bound concept, shape or actor
+	// envelope does not declare.
+	LowerCodeUnknownField = "lower_unknown_field"
+	// LowerCodeOptionalHop: a read through an optional object written with
+	// `.` where edition 2026 asks for `.?`.
+	LowerCodeOptionalHop = "lower_optional_hop"
+	// LowerCodeContextSpecOnRow: a context spec (over the actor) applied to
+	// the row.
+	LowerCodeContextSpecOnRow = "lower_context_spec_on_row"
+	// LowerCodeRowPredicateOnActor: a row spec or trait applied to the actor.
+	LowerCodeRowPredicateOnActor = "lower_row_predicate_on_actor"
+	// LowerCodeCostOverBudget: a static cost estimate above
+	// tiers.MaxStaticCost.
+	LowerCodeCostOverBudget = "lower_cost_over_budget"
+	// LowerCodeNotBoolean: a condition whose type is known and is not
+	// boolean (D8).
+	LowerCodeNotBoolean = "lower_not_boolean"
+)
+
+// RuleCode is the refusal's stable rule id: its Code, or LowerCodeRefused
+// when it was built without one. A consumer that finds the code on an error
+// chain (errors.As to an interface with this method) needs no knowledge of
+// this type -- the load report and the authoring diagnostics read it that way.
+func (e *LowerError) RuleCode() string {
+	if e == nil || e.Code == "" {
+		return LowerCodeRefused
+	}
+	return e.Code
+}
+
+// Error prints the refusal as one sentence, its rule id last in brackets --
+// the annotation registry's convention, so a caller that prefixes context (a
+// construct name, a file) leaves the code findable at the end:
 //
 //	`lower(row.email)` does not lower in a query filter: `lower` runs in
 //	process and reads the row. Compare against a computed value instead:
-//	`row.email == lower("x")`
+//	`row.email == lower("x")` [lower_refused]
 func (e *LowerError) Error() string {
 	var b strings.Builder
 	b.WriteString("`")
@@ -134,6 +189,9 @@ func (e *LowerError) Error() string {
 		b.WriteString(". ")
 		b.WriteString(e.Fix)
 	}
+	b.WriteString(" [")
+	b.WriteString(e.RuleCode())
+	b.WriteString("]")
 	return b.String()
 }
 
@@ -235,9 +293,14 @@ func newLowerer(env LowerEnv, outer []string) (*lowerer, error) {
 	return l, nil
 }
 
-// refuse builds a LowerError for n.
+// refuse builds a LowerError for n, of the generic kind (LowerCodeRefused).
 func (l *lowerer) refuse(n ast.ExpressionNode, reason, fix string) error {
-	return &LowerError{Node: ast.FormatExpr(n), Position: l.env.Position, Reason: reason, Fix: fix, Span: nodeSpan(n)}
+	return l.refuseAs(LowerCodeRefused, n, reason, fix)
+}
+
+// refuseAs builds a LowerError for n of the kind code names.
+func (l *lowerer) refuseAs(code string, n ast.ExpressionNode, reason, fix string) error {
+	return &LowerError{Node: ast.FormatExpr(n), Position: l.env.Position, Reason: reason, Fix: fix, Code: code, Span: nodeSpan(n)}
 }
 
 // rowParam is the parameter of this lowerer's row.
@@ -419,12 +482,12 @@ func (l *lowerer) pred(n ast.ExpressionNode) (ExpressionNode, error) {
 		case "??":
 			return nil, l.coalesceConditionRefusal(e)
 		default:
-			return nil, l.refuse(e, fmt.Sprintf("`%s` is arithmetic over the row: it runs in process, and a number is not a condition", e.Op),
+			return nil, l.refuseAs(LowerCodeNotBoolean, e, fmt.Sprintf("`%s` is arithmetic over the row: it runs in process, and a number is not a condition", e.Op),
 				"Compare the field with a value instead, as in `"+ast.FormatExpr(e.Left)+" > 0`")
 		}
 	case *ast.UnaryExpr:
 		if e.Op != "!" {
-			return nil, l.refuse(e, "a negated number is not a condition", "Compare the field with a value, as in `"+ast.FormatExpr(e.Operand)+" < 0`")
+			return nil, l.refuseAs(LowerCodeNotBoolean, e, "a negated number is not a condition", "Compare the field with a value, as in `"+ast.FormatExpr(e.Operand)+" < 0`")
 		}
 		target, err := l.pred(e.Operand)
 		if err != nil {
@@ -441,12 +504,12 @@ func (l *lowerer) pred(n ast.ExpressionNode) (ExpressionNode, error) {
 	case *ast.MemberExpr, *ast.IdentExpr:
 		return l.barePred(n)
 	case *ast.LambdaExpr:
-		return nil, l.refuse(e, "a lambda is an argument -- of a traversal or a collection method -- not a condition",
+		return nil, l.refuseAs(LowerCodeNotBoolean, e, "a lambda is an argument -- of a traversal or a collection method -- not a condition",
 			"Apply it through a method, as in `row.tags.any("+ast.FormatExpr(e)+")`")
 	case *ast.ListExpr:
-		return nil, l.refuse(e, "a list is not a condition", "Test membership instead: `row.status in "+ast.FormatExpr(e)+"`")
+		return nil, l.refuseAs(LowerCodeNotBoolean, e, "a list is not a condition", "Test membership instead: `row.status in "+ast.FormatExpr(e)+"`")
 	case *ast.MapExpr:
-		return nil, l.refuse(e, "a map is not a condition", "Compare a field with a value instead, as in `row.status == \"open\"`")
+		return nil, l.refuseAs(LowerCodeNotBoolean, e, "a map is not a condition", "Compare a field with a value instead, as in `row.status == \"open\"`")
 	}
 	return nil, l.refuse(n, fmt.Sprintf("%T has no pushdown form", n), "Write a comparison, as in `row.status == \"open\"`")
 }
@@ -508,17 +571,17 @@ func (l *lowerer) barePred(n ast.ExpressionNode) (ExpressionNode, error) {
 		}
 		return &PlanConstExpression{Expr: n}, nil
 	case operandRow:
-		return nil, l.refuse(n, fmt.Sprintf("`%s` is the row itself, not a condition", ast.FormatExpr(n)),
+		return nil, l.refuseAs(LowerCodeNotBoolean, n, fmt.Sprintf("`%s` is the row itself, not a condition", ast.FormatExpr(n)),
 			"Compare one of its fields, as in `"+ast.FormatExpr(n)+".status == \"open\"`, or apply a predicate to it: `isActiveRecord("+ast.FormatExpr(n)+")`")
 	}
-	return nil, l.refuse(n, "it is not a condition", "Write a comparison, as in `"+ast.FormatExpr(n)+" == true`")
+	return nil, l.refuseAs(LowerCodeNotBoolean, n, "it is not a condition", "Write a comparison, as in `"+ast.FormatExpr(n)+" == true`")
 }
 
 // notBooleanRefusal is D8's refusal: a condition whose type is known and is
 // not boolean, naming the type and the comparison that was probably meant.
 func (l *lowerer) notBooleanRefusal(n ast.ExpressionNode, typ string) error {
 	text := ast.FormatExpr(n)
-	return l.refuse(n, fmt.Sprintf("`%s` is a %s, and a condition must be boolean", text, typ), notBooleanFix(text, typ))
+	return l.refuseAs(LowerCodeNotBoolean, n, fmt.Sprintf("`%s` is a %s, and a condition must be boolean", text, typ), notBooleanFix(text, typ))
 }
 
 // notBooleanFix is the comparison a non-boolean used as a condition probably
@@ -549,7 +612,7 @@ func notBooleanFix(text, typ string) string {
 func (l *lowerer) ternaryPred(e *ast.TernaryExpr) (ExpressionNode, error) {
 	for _, branch := range []ast.ExpressionNode{e.Then, e.Else} {
 		if t := l.branchType(branch); t != "" && t != "bool" {
-			return nil, l.refuse(e, "a value ternary over the row runs in process, and its branches are not conditions",
+			return nil, l.refuseAs(LowerCodeNotBoolean, e, "a value ternary over the row runs in process, and its branches are not conditions",
 				"Write the boolean form, with each branch a comparison: `"+ast.FormatExpr(&ast.BinaryExpr{Op: "||",
 					Left:  &ast.BinaryExpr{Op: "&&", Left: e.Condition, Right: &ast.BinaryExpr{Op: "==", Left: e.Then, Right: &ast.IdentExpr{Name: "v"}}},
 					Right: &ast.BinaryExpr{Op: "&&", Left: &ast.UnaryExpr{Op: "!", Operand: e.Condition}, Right: &ast.BinaryExpr{Op: "==", Left: e.Else, Right: &ast.IdentExpr{Name: "v"}}}})+"`")
@@ -930,7 +993,7 @@ func (l *lowerer) shapeField(e *ast.MemberExpr, segs []memberSeg) (lowOperand, e
 	key := segs[0].name
 	path, ok := l.env.ShapeKeys[key]
 	if !ok {
-		return lowOperand{}, l.refuse(e, fmt.Sprintf("`%s` is not a projected key of the bound shape (keys: %s)", key, sortedShapeKeys(l.env.ShapeKeys)),
+		return lowOperand{}, l.refuseAs(LowerCodeUnknownField, e, fmt.Sprintf("`%s` is not a projected key of the bound shape (keys: %s)", key, sortedShapeKeys(l.env.ShapeKeys)),
 			"Read one of its keys, or bind a shape that projects it")
 	}
 	if len(segs) > 1 {
@@ -1410,20 +1473,20 @@ func (l *lowerer) predicateApplication(e *ast.CallExpr) (ExpressionNode, error) 
 	if l.env.Predicate != nil {
 		spec, found := l.env.Predicate(e.Name)
 		if !found || spec == nil {
-			return nil, l.refuse(e, fmt.Sprintf("`%s` is not a spec, trait or catalog function known here", e.Name),
+			return nil, l.refuseAs(LowerCodeUnknownName, e, fmt.Sprintf("`%s` is not a spec, trait or catalog function known here", e.Name),
 				"Check the name and the file-top `use` import of the spec or trait")
 		}
 		isContext := spec.Kind == SpecKindContext
 		switch {
 		case appliedToRow && isContext:
-			return nil, l.refuse(e, fmt.Sprintf("`%s` is a context spec over the actor, not a predicate over rows", e.Name),
+			return nil, l.refuseAs(LowerCodeContextSpecOnRow, e, fmt.Sprintf("`%s` is a context spec over the actor, not a predicate over rows", e.Name),
 				"Apply it to the actor: `"+e.Name+"(actor)`")
 		case !appliedToRow && !isContext:
 			kind := "row spec"
 			if spec.IsTrait {
 				kind = "trait"
 			}
-			return nil, l.refuse(e, fmt.Sprintf("`%s` is a %s, a predicate over rows, not over the actor", e.Name, kind),
+			return nil, l.refuseAs(LowerCodeRowPredicateOnActor, e, fmt.Sprintf("`%s` is a %s, a predicate over rows, not over the actor", e.Name, kind),
 				"Apply it to the row: `"+e.Name+"("+l.rowParam()+")`")
 		}
 	}
@@ -1438,7 +1501,7 @@ func (l *lowerer) methodPred(e *ast.CallExpr) (ExpressionNode, error) {
 	case "includes":
 		return l.includes(e)
 	case "count":
-		return nil, l.refuse(e, "`.count()` is a number, and a condition must be boolean",
+		return nil, l.refuseAs(LowerCodeNotBoolean, e, "`.count()` is a number, and a condition must be boolean",
 			"Compare it: `"+ast.FormatExpr(e)+" > 0`")
 	}
 	if _, onList := functions.Method(functions.TypeList, e.Name); onList {
@@ -1594,7 +1657,7 @@ func (l *lowerer) walkPlanConstant(n ast.ExpressionNode, local map[string]bool, 
 				// mechanical, so the refusal carries it (D24).
 				fix = "A payload field is read through the parameter: write `" + l.rowParam() + "." + e.Name + "`"
 			}
-			*errp = l.refuse(e, fmt.Sprintf("`%s` is not defined here", e.Name), fix)
+			*errp = l.refuseAs(LowerCodeUnknownName, e, fmt.Sprintf("`%s` is not defined here", e.Name), fix)
 		}
 	case *ast.MemberExpr:
 		if root, path, ok := simpleRootPath(e); ok && !local[root] {
@@ -1607,13 +1670,13 @@ func (l *lowerer) walkPlanConstant(n ast.ExpressionNode, local map[string]bool, 
 					return
 				}
 				if _, declared := l.env.Args[path[0]]; !declared {
-					*errp = l.refuse(e, fmt.Sprintf("`args.%s` is not a declared argument", path[0]),
+					*errp = l.refuseAs(LowerCodeUnknownName, e, fmt.Sprintf("`args.%s` is not a declared argument", path[0]),
 						"Declare it in the query's args block: `args { "+path[0]+" string }`")
 				}
 				return
 			case "actor":
 				if _, ok := auth.ActorEnvelopeCanonicalName(path[0]); !ok || len(path) > 1 {
-					*errp = l.refuse(e, fmt.Sprintf("`actor.%s` is not a field of the actor envelope", strings.Join(path, ".")),
+					*errp = l.refuseAs(LowerCodeUnknownField, e, fmt.Sprintf("`actor.%s` is not a field of the actor envelope", strings.Join(path, ".")),
 						"Read one of: "+auth.ActorEnvelopeValidNames())
 				}
 				return
@@ -1627,7 +1690,7 @@ func (l *lowerer) walkPlanConstant(n ast.ExpressionNode, local map[string]bool, 
 			return
 		case e.Receiver == nil:
 			if _, ok := functions.Lookup(e.Name); !ok {
-				*errp = l.refuse(e, fmt.Sprintf("`%s` is not a catalog function", e.Name), "See the function catalog for the functions a condition may call")
+				*errp = l.refuseAs(LowerCodeUnknownName, e, fmt.Sprintf("`%s` is not a catalog function", e.Name), "See the function catalog for the functions a condition may call")
 				return
 			}
 		default:

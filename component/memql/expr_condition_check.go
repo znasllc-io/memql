@@ -90,7 +90,7 @@ func CheckConditionFields(lam *ast.LambdaExpr, concept *memoryNodes.Concept, pos
 		text := ast.FormatExpr(n)
 		refusal = &LowerError{Node: text, Position: position,
 			Reason: fmt.Sprintf("`%s` is a %s (%s), and a condition must be boolean", text, typ, source),
-			Fix:    notBooleanFix(text, typ), Span: nodeSpan(n)}
+			Fix:    notBooleanFix(text, typ), Code: LowerCodeNotBoolean, Span: nodeSpan(n)}
 	}
 	visit(lam.Body)
 	return refusal

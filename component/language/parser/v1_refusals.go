@@ -184,6 +184,11 @@ type RetiredFormError struct {
 
 func (e *RetiredFormError) Error() string { return e.Parse.Error() }
 
+// RuleCode is the retired form's stable rule id, as the conformance corpus
+// pins it. A load report reads it through this method
+// (baseloader.CodedRefusal).
+func (e *RetiredFormError) RuleCode() string { return e.Form.Rule }
+
 // Unwrap returns the positioned parse error, which itself unwraps to
 // ErrInvalidSyntax.
 func (e *RetiredFormError) Unwrap() error { return e.Parse }
