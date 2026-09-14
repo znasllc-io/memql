@@ -799,12 +799,11 @@ type Attribute struct {
 	Name  string         // e.g., "enabled", "trigger", "description"
 	Value any            // Single value (string, bool, etc.) or nil for flag attributes
 	Args  map[string]any // Named args: key=value pairs
-	// Spelling records how the argument list was written, for the three
+	// Spelling records how the argument list was written, for the two
 	// spellings Value and Args cannot tell apart (memql#5359): `@when()` and
-	// `@when` both leave Value and Args empty; `@filter(a == b)` and
-	// `@filter("a == b")` both leave the text in Value; `@x(!"a")` and
-	// `@x("!a")` both store "!a". The annotation registry's check reads it,
-	// because a placement may take one spelling and not the other.
+	// `@when` both leave Value and Args empty; `@x(!"a")` and `@x("!a")` both
+	// store "!a". The annotation registry's check reads it, because a
+	// placement may take one spelling and not the other.
 	Spelling ArgSpelling
 	// ArgKeys records the keyword arguments in the order they were written,
 	// and which were written BARE (`clusterOwner`) rather than with a value
@@ -829,9 +828,6 @@ const (
 	ArgsAsParsed ArgSpelling = iota
 	// ArgsEmptyParens: written `@name()`.
 	ArgsEmptyParens
-	// ArgsRawExpression: `@filter(<expr>)`; Value holds the expression text
-	// verbatim rather than a quoted string.
-	ArgsRawExpression
 	// ArgsExclusion: `@name(!"a", !"b")`; Value holds "!a" or {"!a", "!b"}.
 	ArgsExclusion
 )

@@ -34,7 +34,7 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@disabled`](#disabled) | flag | flag | flag | flag |
 | [`@enabled`](#enabled) | flag | flag | flag | flag |
 | [`@eventField`](#eventfield) |  |  | strings |  |
-| [`@filter`](#filter) |  |  |  | string or expression |
+| [`@filter`](#filter) |  |  |  | expression |
 | [`@latestMode`](#latestmode) | flag |  |  |  |
 | [`@mcp`](#mcp) | flag | flag |  | flag |
 | [`@mergeFields`](#mergefields) |  | strings |  |  |
@@ -211,7 +211,7 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@description`](#description) | one string | `@description("On a new ticket, notify its owner.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
 | [`@enabled`](#enabled) | no arguments | `@enabled` |
-| [`@filter`](#filter) | one string or an expression | `@filter(row => row.status == "open")` |
+| [`@filter`](#filter) | an expression | `@filter(row => row.status == "open")` |
 | [`@mcp`](#mcp) | no arguments | `@mcp` |
 | [`@schedule`](#schedule) | one string or keyword arguments | `@schedule(cron="0 0 * * * *")` |
 | [`@template`](#template) | no arguments | `@template` |
@@ -738,9 +738,9 @@ On a policy: an entry tried when the ones before it cannot serve the call. Repea
 
 | On | Written as | Example |
 |---|---|---|
-| [automation](#automation) | one string or an expression | `@filter(row => row.status == "open")` |
+| [automation](#automation) | an expression | `@filter(row => row.status == "open")` |
 
-Filter expression for automation triggers.
+Filter for automation triggers: a lambda of one parameter over the triggering row, as in @filter(row => row.status == "open").
 
 ### @handler
 
@@ -1236,7 +1236,7 @@ On an automation: this is a work-spine TEMPLATE, invoked by a v1:work:run that n
 | `concept` | string | Concept id the triggering event targets; required by the structured node.* event kinds. |
 | `partition` | string | Partition selector, e.g. "*" for all partitions. Required while the event topic carries a partition segment (#56 phase 8). |
 | `schedule` | string | Cron schedule with a leading seconds field, e.g. "0 0 * * * *". |
-| `filter` | string | The trigger filter as a keyword; the standalone @filter(...) annotation is the usual spelling and sets the same filter. |
+| `filter` | expression | The trigger filter as a keyword: a lambda of one parameter over the triggering row, filter=row => &lt;predicate>. The standalone @filter(...) annotation is the usual spelling and sets the same filter. |
 | `on` | string | A synonym for event=: on=&lt;concept>.&lt;created\|updated\|deleted>, with the concept named through the file's `use` import, folds to the same graph.node.&lt;action>.&lt;concept> pattern event= names (resolved by the automation loader and the concept resolver). A later epic retires the synonyms (D15/D17). |
 
 Event trigger for automations. Format: @trigger(event="graph.node.created.*.v1:ns:concept") or @trigger(schedule="0 0 * * * *").

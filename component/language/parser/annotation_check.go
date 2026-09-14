@@ -29,9 +29,6 @@ func AnnotationUse(attr *ast.Attribute) annotations.Use {
 	case ast.ArgsEmptyParens:
 		u.Form = annotations.FormEmpty
 		return u
-	case ast.ArgsRawExpression:
-		u.Form = annotations.FormExpression
-		return u
 	case ast.ArgsExclusion:
 		u.Form = annotations.FormExclude
 		return u

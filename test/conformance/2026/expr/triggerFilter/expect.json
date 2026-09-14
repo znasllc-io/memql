@@ -241,7 +241,7 @@
       "file": "empty-parentheses.memql",
       "verdict": "refuse_parse",
       "code": "annotation_form",
-      "message": "@filter on an automation takes one string or an expression",
+      "message": "@filter on an automation takes an expression",
       "note": "An @filter with nothing in it is refused by its form. The lambda in a filled one is parsed at load, and a raw-text predicate is the retired spelling."
     }
   ]

@@ -186,10 +186,13 @@ func keyShapeRefusal(p Placement, spec ArgSpec) *Refusal {
 }
 
 // valuedSpelling renders a valued key the way it is written:
-// `maxCalls=<number>`, `ttl="..."`.
+// `maxCalls=<number>`, `filter=row => <predicate>`, `ttl="..."`.
 func valuedSpelling(k ArgSpec) string {
-	if k.Type == "int" || k.Type == "number" {
+	switch k.Type {
+	case "int", "number":
 		return k.Name + "=<number>"
+	case "expression":
+		return k.Name + "=row => <predicate>"
 	}
 	return k.Name + `="..."`
 }

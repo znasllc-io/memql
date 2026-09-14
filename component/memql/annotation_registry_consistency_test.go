@@ -179,9 +179,11 @@ func wrongFormText(p annotations.Placement) (string, annotations.Form) {
 		{annotations.FormBool, "@" + p.Name + "(true)"},
 	}
 	for _, c := range candidates {
-		// @filter captures anything that is not a string or an object as an
-		// expression, so a number or a list never reaches the check as one.
-		if p.Name == "filter" && c.form != annotations.FormFlag && c.form != annotations.FormString && c.form != annotations.FormEmpty {
+		// @filter parses a lambda, and written bare or with empty parentheses
+		// it reaches the check; any other argument is refused at parse as the
+		// retired raw-text filter (retired_filter_annotation), before the
+		// registry sees it.
+		if p.Name == "filter" && c.form != annotations.FormFlag && c.form != annotations.FormEmpty {
 			continue
 		}
 		if p.Forms&c.form == 0 {

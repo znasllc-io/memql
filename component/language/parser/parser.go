@@ -3602,9 +3602,8 @@ func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Att
 			if v := getAttrArgString(attr, "event"); v != "" {
 				d.Trigger.Event = v
 			}
-			if v := getAttrArgString(attr, "filter"); v != "" {
-				d.Trigger.Filter = v
-			}
+			// filter=row => ... (memql#5364), the keyword spelling of
+			// @filter; the parser refuses any other value.
 			if lam, ok := attr.Args["filter"].(*LambdaExpr); ok {
 				d.Trigger.Filter = formatV1(lam)
 				d.Trigger.FilterLambda = lam
@@ -3623,17 +3622,11 @@ func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Att
 				d.Trigger = &TriggerDef{}
 			}
 			// @filter(row => ...) (memql#5364): the canonical source in
-			// Filter, the lambda beside it.
+			// Filter, the lambda beside it. It is @filter's one form; the
+			// parser refuses any other argument.
 			if lam, ok := attr.Value.(*LambdaExpr); ok {
 				d.Trigger.Filter = formatV1(lam)
 				d.Trigger.FilterLambda = lam
-				continue
-			}
-			// Accept @filter("expression") or @filter(expression)
-			if v := getAttrString(attr); v != "" {
-				d.Trigger.Filter = v
-			} else if v := getAttrArgString(attr, ""); v != "" {
-				d.Trigger.Filter = v
 			}
 		}
 	}
