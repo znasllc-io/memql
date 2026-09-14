@@ -203,6 +203,8 @@ func TestV1ParseErrors(t *testing.T) {
 		{`a -5`, []string{"`-5` directly after an operand", "`- 5`"}},
 		{`5-3`, []string{"directly after an operand"}},
 		{`a ?.b`, []string{"optional member access is written `.?`"}},
+		{`args.items.0(x)`, []string{"`0` is not a method name"}},
+		{`٣(x)`, []string{"is not a function name"}},
 		{`a b`, []string{"unexpected `b` after the expression"}},
 		{`"a" "b"`, []string{"unexpected"}},
 		{`.x == 1`, []string{"a member needs an object"}},

@@ -608,6 +608,9 @@ func (p *Parser) parseV1Name() (v1Expr, error) {
 func (p *Parser) parseV1FunctionCall() (v1Expr, error) {
 	nameTok := p.v1Take()
 	name := nameTok.Literal
+	if !v1IsCallableName(name) {
+		return v1Expr{}, v1Errorf(nameTok, "`%s` is not a function name: a function name starts with a letter", name)
+	}
 	lower := strings.ToLower(name)
 	if rule, retired := v1RetiredCalls[lower]; retired {
 		return v1Expr{}, v1Retired(nameTok, rule)

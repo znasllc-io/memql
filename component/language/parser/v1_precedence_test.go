@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 )
 
 // TestV1PrecedenceTableIsPublished: the reference's `### Operator precedence`
@@ -40,7 +41,7 @@ func TestV1PrecedenceTableIsPublished(t *testing.T) {
 // readPublishedPrecedence reads the first markdown table under the heading
 // `### Operator precedence`: the level from the first column, the operators
 // from the code spans of the second (a table cell escapes `|` as `\|`), and
-// the associativity from the first word of the third.
+// the associativity from the leading word of the third.
 func readPublishedPrecedence(t *testing.T, path string) []PrecedenceLevel {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -89,10 +90,69 @@ func readPublishedPrecedence(t *testing.T, path string) []PrecedenceLevel {
 		for _, m := range span.FindAllStringSubmatch(cells[1], -1) {
 			ops = append(ops, m[1])
 		}
-		assoc := strings.ToLower(strings.Fields(cells[2] + " ?")[0])
-		out = append(out, PrecedenceLevel{Level: level, Operators: ops, Assoc: assoc})
+		out = append(out, PrecedenceLevel{Level: level, Operators: ops, Assoc: leadingWord(cells[2])})
 	}
 	return out
+}
+
+// leadingWord is the run of letters a cell starts with, lowercased: the
+// associativity cell may go on to explain itself ("left (folds n-ary)",
+// "right; the body extends as far as it can").
+func leadingWord(cell string) string {
+	end := strings.IndexFunc(cell, func(r rune) bool { return !unicode.IsLetter(r) })
+	if end < 0 {
+		end = len(cell)
+	}
+	return strings.ToLower(cell[:end])
+}
+
+// TestReadPublishedPrecedenceReadsTheReferenceShape proves the reader that
+// TestV1PrecedenceTableIsPublished rests on, while that test is skipped: fed the
+// plan's own table, in the markdown the reference will carry, it returns
+// V1PrecedenceTable. Without this the docs gate would first run on the day the
+// skip is removed, and a reader that silently parsed nothing would pass.
+func TestReadPublishedPrecedenceReadsTheReferenceShape(t *testing.T) {
+	doc := strings.Join([]string{
+		"## Operators",
+		"",
+		"### Operator precedence",
+		"",
+		"Tightest first.",
+		"",
+		"| Level | Operators | Associativity |",
+		"|---|---|---|",
+		"| 1 | `.f` `.?f` `f(...)` `.m(...)` | left |",
+		"| 2 | `!` `-` (unary) | right |",
+		"| 3 | `*` `/` `%` | left |",
+		"| 4 | `+` `-` | left |",
+		"| 5 | `??` | left (folds n-ary) |",
+		"| 6 | `==` `!=` `<` `<=` `>` `>=` `in` `startsWith` | none (`a < b < c` refuses) |",
+		"| 7 | `&&` | left |",
+		"| 8 | `\\|\\|` | left |",
+		"| 9 | `c ? a : b` | right |",
+		"| 10 | `x => body`, `(x, y) => body` | right; the body extends as far as it can |",
+		"",
+		"### The next section",
+		"",
+		"| a | b | c |",
+		"|---|---|---|",
+		"| 99 | `x` | left |",
+	}, "\n")
+	path := t.TempDir() + "/memql.md"
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := readPublishedPrecedence(t, path)
+	want := V1PrecedenceTable()
+	if len(got) != len(want) {
+		t.Fatalf("read %d rows, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i].Level != want[i].Level || got[i].Assoc != want[i].Assoc ||
+			strings.Join(got[i].Operators, " ") != strings.Join(want[i].Operators, " ") {
+			t.Errorf("row %d: read %+v, want %+v", i+1, got[i], want[i])
+		}
+	}
 }
 
 // splitMarkdownRow splits one table row on its unescaped pipes.

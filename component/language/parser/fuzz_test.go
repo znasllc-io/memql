@@ -52,6 +52,15 @@ var v1FuzzSeeds = []string{
 	`"esc \" \\ \n \t"`,
 	`x.?0 . b[0]`,
 	`p?a:b`,
+	// The spellings the printer rewrites: a spaced minus folds into the
+	// literal it negates (`- 0` is what the fuzzer found when that fold was
+	// switched off as a negative control), and the two places the printer
+	// adds parentheses the source did not have.
+	`- 0`,
+	`- 5.x * 2`,
+	`--5`,
+	`p ? q ? a : b : c`,
+	`a && x => x || b`,
 }
 
 // FuzzLexer: tokenising any input returns tokens or an error; it never
