@@ -1,0 +1,11 @@
+{
+  "cases": [
+    {
+      "file": "import-block.memql",
+      "verdict": "refuse_load",
+      "code": "construct_unknown",
+      "message": "the import ( ... ) block is retired: a construct is imported with a file-top use line, use <domain>.<file>.{ names }",
+      "note": "The file-top import block loaded on the engine before epic memql#5356, and no loader ever read it. The construct-keyword gate refuses it at load, by name, naming the use line that replaced it. The parser still reads the block (dslimports builds its import graph from it), so the refusal is at load, not at parse."
+    }
+  ]
+}

@@ -148,6 +148,72 @@ func TestRun_BundleWithoutLanguageLineExitsOne(t *testing.T) {
 	}
 }
 
+// TestRun_AMistypedKeywordIsOneRefusal: a top-level statement opened by a
+// word no construct is spelled with is refused twice over -- by the parser,
+// which Load runs over the whole file, and by the construct-keyword gate the
+// parity pass runs at Init (memql#5356). memqllint printed both, with two
+// keyword lists that disagreed: the parser's listed the internal `func`, the
+// gate's listed `use`. The parser now raises the gate's own refusal from the
+// one table (ConstructKeywords), and memqllint prints it once: the gate's
+// copy, which carries the authored line. The retired `import ( ... )` block
+// is the same statement-level refusal, naming its replacement.
+func TestRun_AMistypedKeywordIsOneRefusal(t *testing.T) {
+	cases := []struct {
+		name, queries string
+		want          []string
+	}{
+		{
+			name:    "a typo'd construct keyword",
+			queries: strings.Replace(testQueries, "query item queryItems", "qurey item queryItems", 1),
+			want: []string{
+				"demo/queries.memql:", "line 5: qurey is not a construct keyword: did you mean query?",
+				"The constructs are: " + strings.Join(langparser.ConstructKeywords(), ", ") + " [construct_unknown]",
+			},
+		},
+		{
+			name:    "the retired import block",
+			queries: "import (\n\t\"./concepts\"\n)\n\n" + testQueries,
+			want: []string{
+				"demo/queries.memql:", "line 1: the import ( ... ) block is retired: a construct is imported with a file-top use line",
+				"[construct_unknown]",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			code, out := captureRun(t, []string{"--json", writeTree(t, map[string]string{
+				"demo/concepts.memql": testConcepts,
+				"demo/queries.memql":  tc.queries,
+			})})
+			if code != 1 {
+				t.Fatalf("run() = %d, want 1\n%s", code, out)
+			}
+			var report Report
+			if err := json.Unmarshal([]byte(out), &report); err != nil {
+				t.Fatalf("the --json report does not parse: %v\n%s", err, out)
+			}
+			if len(report.Errors) != 1 {
+				t.Fatalf("one statement must be one refusal, got %d:\n%s", len(report.Errors), out)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(report.Errors[0].Message, w) {
+					t.Errorf("the refusal must carry %q, got %q", w, report.Errors[0].Message)
+				}
+			}
+		})
+	}
+
+	// Positive control: the same query, spelled right and with no import
+	// block, lints clean -- so the refusals above are the statement, and not
+	// a fixture that fails for some other reason.
+	if code, out := captureRun(t, []string{writeTree(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/queries.memql":  testQueries,
+	})}); code != 0 {
+		t.Errorf("the control: run() = %d, want 0\n%s", code, out)
+	}
+}
+
 // TestRun_RefusedLineOutsideTheParityMountIsStillReported: boot mounts every
 // domain directory, but the parity pass mounts only one that directly holds a
 // .memql file (MountOverlayDomains) -- so a domain holding only a

@@ -95,6 +95,18 @@ package parser
 // a description (`@minLength(value=5)`), a quoted number (`@minimum("5")`), and
 // a bare word other than true/false as a @default (`@default(open)`).
 //
+// One more narrowing happens at LOAD, in the construct-keyword gate
+// (FindUnknownConstructKeywords, construct_unknown), so the digest cannot
+// record it either: the file-top `import ( ... )` block. It loaded on the
+// engine before this epic (8a063ec3f) -- no loader ever read it -- and is
+// refused now, by name, naming its replacement, a file-top
+// `use <domain>.<file>.{ names }` line. This path still parses the block
+// (dslimports builds its import graph from it), which is why the corpus case
+// test/conformance/2026/negative/use/import-block.memql pins it as
+// refuse_load. No rewrite mode ships: the tree has no usage, and a `use` line
+// names constructs where the block named files, so the replacement is not
+// mechanical.
+//
 // # Narrowings the 2026.08 bump covered
 //
 // The constant last moved in cb62512c (2026-07-21). Everything below reshaped an
