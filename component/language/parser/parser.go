@@ -5100,16 +5100,20 @@ func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
 		return nil, nil
 	}
 
-	// `,` as OR is retired (memql#5375, D17), the twin of `;` as AND.
+	// `,` as OR is DEFERRED to epic memql#5363 (the expression language),
+	// not retired here, and the reason belongs beside the code.
 	//
-	// suppressCommaOr is still consulted: where it is SET the comma is an
-	// argument or list separator and this level must not look at it at all,
-	// so the refusal has to sit inside the same guard the fold did. Refusing
-	// unconditionally would reject every multi-argument call site.
-	if !p.suppressCommaOr && p.check(TokenComma) {
-		return nil, newParseErrorf(&p.current, "`,` as OR is retired -- write `||`. One boolean grammar, so precedence reads the same everywhere (memql#5375); a comma stays a separator in an argument list, a field list and an @enum. %s", baseparser.AttributeRewriteHint)
-	}
-	for p.check(TokenPipePipe) {
+	// D17 lists it next to `;` as AND, and the two turned out not to be
+	// alike. `;` had no live producer left once the four machine-generated
+	// ones were fixed. `,` has one: it is how two filter expressions fold
+	// into ONE argument at a traversal call --
+	// `parentOf(concept==v1:rel:hub, concept==v1:rel:space)` -- and
+	// parseOrPipeOnly's comment below calls `(a, b)` a "still-supported OR
+	// form" in as many words. Its codemod is `--rewrite=expressions`, which
+	// memql#5363 owns along with the lambda parameter this position also
+	// changes, so retiring it here would ship a refusal whose migration does
+	// not exist yet.
+	for (!p.suppressCommaOr && p.check(TokenComma)) || p.check(TokenPipePipe) {
 		p.advance()
 		right, err := p.parseLogicalAnd()
 		if err != nil {
@@ -5122,9 +5126,6 @@ func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
 			Op:    LogicalOr,
 			Left:  left,
 			Right: right,
-		}
-		if !p.suppressCommaOr && p.check(TokenComma) {
-			return nil, newParseErrorf(&p.current, "`,` as OR is retired -- write `||`. One boolean grammar, so precedence reads the same everywhere (memql#5375); a comma stays a separator in an argument list, a field list and an @enum. %s", baseparser.AttributeRewriteHint)
 		}
 	}
 
