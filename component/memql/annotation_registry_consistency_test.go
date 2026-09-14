@@ -205,6 +205,21 @@ func TestEveryReceiverGateReadsTheRegistry(t *testing.T) {
 				if got := refusalCode(err); got != annotations.CodeKey {
 					t.Errorf("%s on %s: code %q, want %q\nerror: %v", keyed, p.Receiver, got, annotations.CodeKey, err)
 				}
+				// A key written in the wrong SHAPE: a flag given a value, a
+				// valued key written bare. The parser stores a bare key as
+				// `true`, so a reader that only looked at the key's NAME let
+				// `@rateLimit(maxCalls, periodSeconds)` register a tool with
+				// no limit at all.
+				for _, k := range p.Keys {
+					shaped := "@" + p.Name + "(" + k.Name + ")"
+					if k.Type == "flag" {
+						shaped = "@" + p.Name + "(" + k.Name + `="zz")`
+					}
+					err := runReceiverGate(p.Receiver, receiverFixture(p.Receiver, p.Name, shaped))
+					if got := refusalCode(err); got != annotations.CodeKey {
+						t.Errorf("%s on %s (key %s is %s): code %q, want %q\nerror: %v", shaped, p.Receiver, k.Name, k.Type, got, annotations.CodeKey, err)
+					}
+				}
 			}
 		})
 	}

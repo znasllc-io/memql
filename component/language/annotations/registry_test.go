@@ -1,7 +1,6 @@
 package annotations
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -51,13 +50,14 @@ func useFromText(t *testing.T, text string) Use {
 	case inner == "true" || inner == "false":
 		return Use{Name: name, Form: FormBool}
 	}
-	var keys []string
+	var keys []WrittenKey
 	for _, part := range splitTopLevel(inner) {
 		key := strings.TrimSpace(part)
+		bare := true
 		if i := strings.IndexAny(key, "=:"); i >= 0 {
-			key = strings.TrimSpace(key[:i])
+			key, bare = strings.TrimSpace(key[:i]), false
 		}
-		keys = append(keys, key)
+		keys = append(keys, WrittenKey{Name: key, Bare: bare})
 	}
 	return Use{Name: name, Form: FormKeywords, Keys: keys}
 }
@@ -132,7 +132,7 @@ func TestEveryPlacementRefusesAWrongForm(t *testing.T) {
 		}
 		u := Use{Name: p.Name, Form: f}
 		if f == FormKeywords {
-			u.Keys = []string{"zz"}
+			u.Keys = []WrittenKey{{Name: "zz"}}
 		}
 		r := Check(p.Receiver, u)
 		if r == nil || r.Code != CodeForm {
@@ -149,7 +149,7 @@ func TestEveryPlacementRefusesAWrongForm(t *testing.T) {
 		if p.Forms&FormKeywords == 0 {
 			continue
 		}
-		bad := Use{Name: p.Name, Form: FormKeywords, Keys: []string{"zzUnknownKey"}}
+		bad := Use{Name: p.Name, Form: FormKeywords, Keys: []WrittenKey{{Name: "zzUnknownKey"}}}
 		r = Check(p.Receiver, bad)
 		if r == nil || r.Code != CodeKey {
 			t.Errorf("%s @%s with key zzUnknownKey: got %v, want %s", p.Receiver, p.Name, r, CodeKey)
@@ -266,7 +266,7 @@ func TestRetiredNamesRefuseWithTheirHint(t *testing.T) {
 
 	// The retired @use* family is a prefix rule, not a list.
 	for _, name := range []string{"useConcept", "useShape", "useQuery", "useAnythingNew"} {
-		ref := Check(Query, Use{Name: name, Form: FormKeywords, Keys: []string{"x"}})
+		ref := Check(Query, Use{Name: name, Form: FormKeywords, Keys: []WrittenKey{{Name: "x", Bare: true}}})
 		if ref == nil || ref.Code != CodeRetired || !strings.Contains(ref.Message, "file-top `use") {
 			t.Errorf("@%s: got %v, want the retired @use* hint", name, ref)
 		}
@@ -316,6 +316,95 @@ func TestRepeatedAnnotationIsRefused(t *testing.T) {
 	}
 	if ref := CheckAll(Query, nil); ref != nil {
 		t.Errorf("no uses: got %v", ref)
+	}
+}
+
+// TestMisplacedRefusalShowsAnExampleFromTheSameKindOfPlace: a misplaced name
+// is shown written where it IS accepted, and in the same kind of place as
+// where it was written -- an author who put @default on a builtin field is
+// shown a field's `@default("...")`, not the provider's bare `@default` flag,
+// which would teach a spelling every field refuses.
+func TestMisplacedRefusalShowsAnExampleFromTheSameKindOfPlace(t *testing.T) {
+	ref := Check(BuiltinField, Use{Name: "default", Form: FormString})
+	if ref == nil || ref.Code != CodeMisplaced {
+		t.Fatalf("@default on a builtin field: got %v, want %s", ref, CodeMisplaced)
+	}
+	if !strings.Contains(ref.Message, `as in @default("open")`) {
+		t.Errorf("a field is shown a field's example: %s", ref.Message)
+	}
+	ref = Check(Tool, Use{Name: "default", Form: FormFlag})
+	if ref == nil || ref.Code != CodeMisplaced {
+		t.Fatalf("@default on a tool: got %v, want %s", ref, CodeMisplaced)
+	}
+	if !strings.HasSuffix(ref.Message, "as in @default") {
+		t.Errorf("a construct is shown a construct's example (the provider's @default): %s", ref.Message)
+	}
+	// A name accepted only in the other kind of place still shows an example.
+	ref = Check(Query, Use{Name: "pii", Form: FormFlag})
+	if ref == nil || ref.Code != CodeMisplaced || !strings.Contains(ref.Message, "as in @pii") {
+		t.Errorf("@pii on a query: got %v, want a misplaced refusal showing @pii", ref)
+	}
+}
+
+// TestKeyShapeIsRefused: a flag key is written bare and every other key with
+// a value; a key written in the other shape is refused with annotation_key,
+// naming the key and how to write it. The parser stores a bare key as `true`,
+// so a check that compared key NAMES only let `@rateLimit(maxCalls,
+// periodSeconds)` through, and the tool registered with no rate limit at all.
+func TestKeyShapeIsRefused(t *testing.T) {
+	cases := []struct {
+		name string
+		r    Receiver
+		use  Use
+		want []string
+	}{
+		{
+			name: "a valued key written bare",
+			r:    Tool,
+			use:  Use{Name: "rateLimit", Form: FormKeywords, Keys: []WrittenKey{{Name: "maxCalls", Bare: true}, {Name: "periodSeconds", Bare: true}}},
+			want: []string{"@rateLimit on a tool: maxCalls takes a value", "write maxCalls=<number>", "as in @rateLimit(maxCalls=10, periodSeconds=60)"},
+		},
+		{
+			name: "a string key written bare",
+			r:    Query,
+			use:  Use{Name: "cache", Form: FormKeywords, Keys: []WrittenKey{{Name: "ttl", Bare: true}}},
+			want: []string{"@cache on a query: ttl takes a value", `write ttl="..."`},
+		},
+		{
+			name: "a flag key given a value",
+			r:    Concept,
+			use:  Use{Name: "rowAuthz", Form: FormKeywords, Keys: []WrittenKey{{Name: "owner"}, {Name: "clusterOwner"}}},
+			want: []string{"@rowAuthz on a concept: clusterOwner is a flag and takes no value", "write it bare (clusterOwner)", `as in @rowAuthz(owner="ownerUserId", clusterOwner)`},
+		},
+		{
+			// The first offending key AS WRITTEN is the one named -- not the
+			// first in some other order.
+			name: "the first offending key in written order",
+			r:    Automation,
+			use:  Use{Name: "trigger", Form: FormKeywords, Keys: []WrittenKey{{Name: "schedule", Bare: true}, {Name: "concept", Bare: true}}},
+			want: []string{"@trigger on an automation: schedule takes a value"},
+		},
+	}
+	for _, tc := range cases {
+		ref := Check(tc.r, tc.use)
+		if ref == nil || ref.Code != CodeKey {
+			t.Errorf("%s: got %v, want %s", tc.name, ref, CodeKey)
+			continue
+		}
+		for _, w := range tc.want {
+			if !strings.Contains(ref.Message, w) {
+				t.Errorf("%s: the refusal must say %q: %s", tc.name, w, ref.Message)
+			}
+		}
+	}
+	// Every key of every keyword placement is accepted in its own shape.
+	for _, p := range Placements() {
+		for _, k := range p.Keys {
+			u := Use{Name: p.Name, Form: FormKeywords, Keys: []WrittenKey{{Name: k.Name, Bare: k.Type == "flag"}}}
+			if ref := Check(p.Receiver, u); ref != nil {
+				t.Errorf("%s @%s: key %s written in its own shape is refused: %v", p.Receiver, p.Name, k.Name, ref)
+			}
+		}
 	}
 }
 
@@ -491,5 +580,4 @@ func TestFormsHaveWords(t *testing.T) {
 			t.Errorf("two forms read the same: %q", names[i])
 		}
 	}
-	_ = fmt.Sprint(FormFlag)
 }

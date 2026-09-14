@@ -7,13 +7,22 @@ import (
 
 // Use is one written annotation, as the parser saw it: the name, the ONE form
 // its arguments were written in, and -- for keyword arguments -- the keys, in
-// the order written. The conversion from the parser's attribute lives in
-// component/language/parser (AnnotationUse), because this package imports
-// nothing.
+// the order written, each with its shape. The conversion from the parser's
+// attribute lives in component/language/parser (AnnotationUse), because this
+// package imports nothing.
 type Use struct {
 	Name string
 	Form Form
-	Keys []string
+	Keys []WrittenKey
+}
+
+// WrittenKey is one keyword key as written: its name, and whether it was
+// written bare (`clusterOwner`) rather than with a value (`owner="x"`). A
+// placement's key has a shape too -- a "flag" key is written bare, any other
+// with a value -- and Check refuses a key written in the other one.
+type WrittenKey struct {
+	Name string
+	Bare bool
 }
 
 // The refusal codes. They are the stable part of a refusal: the message may
@@ -65,8 +74,12 @@ func Check(r Receiver, u Use) *Refusal {
 	}
 	if form == FormKeywords {
 		for _, key := range u.Keys {
-			if !p.hasKey(key) {
-				return keyRefusal(p, key)
+			spec, ok := p.key(key.Name)
+			if !ok {
+				return keyRefusal(p, key.Name)
+			}
+			if flag := spec.Type == "flag"; flag != key.Bare {
+				return keyShapeRefusal(p, spec)
 			}
 		}
 	}
@@ -105,8 +118,18 @@ func refuseName(r Receiver, name string) *Refusal {
 		for _, p := range elsewhere {
 			phrases = append(phrases, p.Receiver.Phrase())
 		}
+		// The example comes from the same kind of place the name was written
+		// in when one accepts it: a field is shown a field's `@default("...")`,
+		// not the provider's bare `@default`, which every field refuses.
+		example := elsewhere[0].Example
+		for _, p := range elsewhere {
+			if p.Receiver.isField() == r.isField() {
+				example = p.Example
+				break
+			}
+		}
 		msg := "@" + name + " is not valid on " + r.Phrase() + " -- it is accepted on " +
-			joinWords(phrases) + ", as in " + elsewhere[0].Example
+			joinWords(phrases) + ", as in " + example
 		if hint, ok := misplacedHints[name]; ok {
 			msg += ". " + hint
 		}
@@ -148,14 +171,37 @@ func keyRefusal(p Placement, key string) *Refusal {
 	return &Refusal{Code: CodeKey, Message: msg}
 }
 
-// hasKey reports whether the placement declares the keyword key.
-func (p Placement) hasKey(key string) bool {
+// keyShapeRefusal explains a key the placement has, written in the other
+// shape: a flag given a value, or a valued key written bare. The second is
+// the dangerous one -- the parser stores a bare key as `true`, and a reader
+// wanting the key's value reads "" and carries on.
+func keyShapeRefusal(p Placement, spec ArgSpec) *Refusal {
+	head := "@" + p.Name + " on " + p.Receiver.Phrase() + ": " + spec.Name
+	if spec.Type == "flag" {
+		return &Refusal{Code: CodeKey, Message: head + " is a flag and takes no value -- write it bare (" +
+			spec.Name + "), as in " + p.Example}
+	}
+	return &Refusal{Code: CodeKey, Message: head + " takes a value -- write " + valuedSpelling(spec) +
+		", as in " + p.Example}
+}
+
+// valuedSpelling renders a valued key the way it is written:
+// `maxCalls=<number>`, `ttl="..."`.
+func valuedSpelling(k ArgSpec) string {
+	if k.Type == "int" || k.Type == "number" {
+		return k.Name + "=<number>"
+	}
+	return k.Name + `="..."`
+}
+
+// key returns the placement's keyword key named name.
+func (p Placement) key(name string) (ArgSpec, bool) {
 	for _, k := range p.Keys {
-		if k.Name == key {
-			return true
+		if k.Name == name {
+			return k, true
 		}
 	}
-	return false
+	return ArgSpec{}, false
 }
 
 // atList renders names as `@a, @b and @c`, sorted.

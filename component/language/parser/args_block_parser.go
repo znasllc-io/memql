@@ -164,8 +164,7 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 		}
 		ann := p.current.Literal
 		p.advance()
-		form, keys := p.peekAnnotationArgs(ann)
-		uses = append(uses, annotations.Use{Name: ann, Form: form, Keys: keys})
+		uses = append(uses, p.peekAnnotationUse(ann))
 		if ref := annotations.CheckAll(annotations.ArgsField, uses); ref != nil {
 			return nil, annotationRefusalError(at, subject, ref)
 		}
@@ -265,53 +264,69 @@ func (p *Parser) parseArgsBlockField() (*ArgsField, error) {
 	return field, nil
 }
 
-// peekAnnotationArgs classifies the argument list after an annotation's name
-// without consuming it, reading the same forms parseAttribute distinguishes
-// (plus the leading `-` of a negative number, which the args block parses and
-// parseAttribute does not). The args block reads its annotations' arguments
-// itself, so the registry check needs this to see the form BEFORE the
-// per-annotation parsing reports a narrower error about it.
-func (p *Parser) peekAnnotationArgs(name string) (annotations.Form, []string) {
+// peekAnnotationUse classifies the argument list after an annotation's name
+// without consuming it, into the Use AnnotationUse would make of the same
+// annotation parsed by parseAttribute -- the same forms, and for keyword
+// arguments the keys in written order with their shapes. The args block reads
+// its annotations' arguments itself, so the registry check needs this to see
+// the form BEFORE the per-annotation parsing reports a narrower error about
+// it. The two readings are pinned to each other by
+// TestArgsBlockAndAttributeClassifiersAgree, over every form parseAttribute
+// produces; the one spelling only this one reads is a negative number whose
+// minus is separated from its digits (`@minimum(- 1)`), which parseAttribute
+// refuses.
+func (p *Parser) peekAnnotationUse(name string) annotations.Use {
+	u := annotations.Use{Name: name}
 	if !p.check(TokenParenOpen) {
-		return annotations.FormFlag, nil
+		u.Form = annotations.FormFlag
+		return u
 	}
 	first := p.peekAhead(1)
 	switch {
 	case first.Type == TokenParenClose:
-		return annotations.FormEmpty, nil
+		u.Form = annotations.FormEmpty
 	case name == "filter" && first.Type != TokenString && first.Type != TokenBraceOpen:
-		return annotations.FormExpression, nil
+		u.Form = annotations.FormExpression
 	case first.Type == TokenBraceOpen:
-		return annotations.FormObject, nil
+		u.Form = annotations.FormObject
 	case first.Type == TokenBang:
-		return annotations.FormExclude, nil
+		u.Form = annotations.FormExclude
 	case first.Type == TokenString:
+		u.Form = annotations.FormString
 		if p.peekAhead(2).Type == TokenComma {
-			return annotations.FormStrings, nil
+			u.Form = annotations.FormStrings
 		}
-		return annotations.FormString, nil
 	case first.Type == TokenNumber:
-		return annotations.FormNumber, nil
+		u.Form = annotations.FormNumber
 	case first.Literal == "-" && p.peekAhead(2).Type == TokenNumber:
-		return annotations.FormNumber, nil
+		u.Form = annotations.FormNumber
 	case (first.Literal == "true" || first.Literal == "false") && p.peekAhead(2).Type == TokenParenClose:
-		return annotations.FormBool, nil
+		u.Form = annotations.FormBool
+	default:
+		u.Form = annotations.FormKeywords
+		u.Keys = p.peekKeywordKeys()
 	}
-	// Keyword arguments: every identifier that opens an argument (after the
-	// `(` or a `,` at the top level of the list).
-	var keys []string
+	return u
+}
+
+// peekKeywordKeys reads the keys of the keyword argument list that opens at
+// the current `(`, without consuming it: every identifier that opens an
+// argument (after the `(` or a `,` at the top level of the list), bare unless
+// an `=` or `:` follows it.
+func (p *Parser) peekKeywordKeys() []annotations.WrittenKey {
+	var keys []annotations.WrittenKey
 	depth := 0
 	opensArg := true
 	for i := 1; ; i++ {
 		tok := p.peekAhead(i)
 		switch tok.Type {
 		case TokenEOF:
-			return annotations.FormKeywords, keys
+			return keys
 		case TokenParenOpen, TokenBraceOpen, TokenBracketOpen:
 			depth++
 		case TokenParenClose, TokenBraceClose, TokenBracketClose:
 			if depth == 0 {
-				return annotations.FormKeywords, keys
+				return keys
 			}
 			depth--
 		case TokenComma:
@@ -321,7 +336,9 @@ func (p *Parser) peekAnnotationArgs(name string) (annotations.Form, []string) {
 			}
 		default:
 			if opensArg && depth == 0 && (tok.Type == TokenIdentifier || isKeywordTokenForAttribute(tok.Type)) {
-				keys = append(keys, tok.Literal)
+				next := p.peekAhead(i + 1)
+				valued := next.Type == TokenOperator && (next.Literal == "=" || next.Literal == ":")
+				keys = append(keys, annotations.WrittenKey{Name: tok.Literal, Bare: !valued})
 			}
 		}
 		opensArg = false
@@ -337,10 +354,11 @@ var reservedArgsNames = map[string]bool{
 // parseNumericArgsAnnotation reads the `( <number> )` group shared by
 // @minimum and @maximum and returns the bound.
 //
-// A leading `-` is consumed separately because the lexer scans a number from
-// its first DIGIT (scanNumber): a negative bound therefore arrives as the
-// operator token followed by the magnitude, and reading only TokenNumber would
-// reject `@minimum(-1)` with an error naming the wrong thing.
+// A leading `-` is consumed separately: the lexer folds a minus written
+// against the digits into the number (`-1` is one TokenNumber), but a minus
+// separated from them (`- 1`) arrives as the operator token followed by the
+// magnitude, and reading only TokenNumber would reject that with an error
+// naming the wrong thing.
 func (p *Parser) parseNumericArgsAnnotation(ann, name string) (float64, error) {
 	if err := p.expect(TokenParenOpen); err != nil {
 		return 0, err

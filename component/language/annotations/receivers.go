@@ -88,6 +88,17 @@ func (r Receiver) Phrase() string {
 	return "a " + string(r)
 }
 
+// isField reports whether r is a field receiver -- a field of a concept, an
+// args block, or a tool / prompt / builtin body -- rather than a construct or
+// the concept body.
+func (r Receiver) isField() bool {
+	switch r {
+	case ConceptField, ArgsField, ToolField, PromptField, BuiltinField:
+		return true
+	}
+	return false
+}
+
 // receiverIndex is each receiver's position in receiverOrder.
 var receiverIndex = func() map[Receiver]int {
 	out := make(map[Receiver]int, len(receiverOrder))

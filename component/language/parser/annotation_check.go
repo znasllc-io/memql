@@ -16,7 +16,9 @@ import (
 
 // AnnotationUse converts one parsed annotation into the Use the registry
 // checks: its name, the one argument form it was written in, and -- for
-// keyword arguments -- the keys, sorted (the parser keeps them in a map).
+// keyword arguments -- the keys in the order written, each with its shape
+// (bare or with a value), so a refusal names the first offending key as the
+// author wrote it.
 //
 // A single bare `true` or `false` is FormBool, not a keyword argument named
 // "false": the parser stores a bare word as a flag key, so without this
@@ -57,20 +59,40 @@ func AnnotationUse(attr *ast.Attribute) annotations.Use {
 		u.Form = annotations.FormFlag
 		return u
 	}
-	if len(attr.Args) == 1 {
-		for k, v := range attr.Args {
-			if b, isBool := v.(bool); isBool && b && (k == "true" || k == "false") {
-				u.Form = annotations.FormBool
-				return u
-			}
-		}
+	keys := writtenKeys(attr)
+	if len(keys) == 1 && keys[0].Bare && (keys[0].Name == "true" || keys[0].Name == "false") {
+		u.Form = annotations.FormBool
+		return u
 	}
 	u.Form = annotations.FormKeywords
-	for k := range attr.Args {
-		u.Keys = append(u.Keys, k)
-	}
-	sort.Strings(u.Keys)
+	u.Keys = keys
 	return u
+}
+
+// writtenKeys returns the attribute's keyword keys in the order written, each
+// with its shape. The parser records both (ast.Attribute.ArgKeys). An
+// attribute built in Go carries only the Args map: its keys come back sorted,
+// and a key whose value is the flag `true` counts as bare -- the parser's own
+// reading of a bare key.
+func writtenKeys(attr *ast.Attribute) []annotations.WrittenKey {
+	if len(attr.ArgKeys) > 0 {
+		out := make([]annotations.WrittenKey, 0, len(attr.ArgKeys))
+		for _, k := range attr.ArgKeys {
+			out = append(out, annotations.WrittenKey{Name: k.Name, Bare: k.Bare})
+		}
+		return out
+	}
+	names := make([]string, 0, len(attr.Args))
+	for k := range attr.Args {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	out := make([]annotations.WrittenKey, 0, len(names))
+	for _, k := range names {
+		flag, isBool := attr.Args[k].(bool)
+		out = append(out, annotations.WrittenKey{Name: k, Bare: isBool && flag})
+	}
+	return out
 }
 
 // AnnotationUses converts a declaration's annotations, skipping nil entries.

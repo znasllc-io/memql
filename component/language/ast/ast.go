@@ -788,6 +788,18 @@ type Attribute struct {
 	// `@x("!a")` both store "!a". The annotation registry's check reads it,
 	// because a placement may take one spelling and not the other.
 	Spelling ArgSpelling
+	// ArgKeys records the keyword arguments in the order they were written,
+	// and which were written BARE (`clusterOwner`) rather than with a value
+	// (`owner="x"`) -- Args is a map, so it keeps neither, and a bare key lands
+	// in it as `true`, the same entry `key=true` makes (memql#5359). The
+	// parser fills it; an attribute built in Go may leave it nil.
+	ArgKeys []ArgKey
+}
+
+// ArgKey is one keyword argument as it was written.
+type ArgKey struct {
+	Name string
+	Bare bool // written without a value: `@rowAuthz(clusterOwner)`
 }
 
 // ArgSpelling is how an attribute's arguments were written, where Value and

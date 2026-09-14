@@ -951,8 +951,10 @@ func (p *Parser) parseAttributeArgs() (*Attribute, error) {
 
 			// Expect = or :
 			if !p.check(TokenOperator) || (p.current.Literal != "=" && p.current.Literal != ":") {
-				// Just a name without value (flag)
+				// Just a name without value (flag). ArgKeys keeps that it was
+				// written bare: in Args it is the same `true` a `key=true` makes.
 				attr.Args[argName] = true
+				attr.ArgKeys = append(attr.ArgKeys, ast.ArgKey{Name: argName, Bare: true})
 			} else {
 				p.advance() // consume = or :
 				val, err := p.parseValue()
@@ -960,6 +962,7 @@ func (p *Parser) parseAttributeArgs() (*Attribute, error) {
 					return nil, err
 				}
 				attr.Args[argName] = val
+				attr.ArgKeys = append(attr.ArgKeys, ast.ArgKey{Name: argName})
 			}
 
 			if p.check(TokenComma) {
