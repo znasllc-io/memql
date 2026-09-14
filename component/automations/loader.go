@@ -1058,58 +1058,31 @@ func extractConceptFromTopic(topic string) string {
 	return concept
 }
 
-// extractConceptFromFilter extracts the concept from a filter like "concept==v1:cognition:participant;...".
-// Returns empty string if no concept filter is found.
-//
-// An edition-2026 trigger filter (`@filter(row => ...)`, epic memql#5363)
-// reaches here as its canonical source, and is read as a tree: a top-level
-// conjunct `<param>.concept == "<id>"`. The text scan below looks for a part
-// that STARTS with `concept==`, which the v1 spelling never does, so this
-// warning went silent for every migrated automation.
+// extractConceptFromFilter extracts the concept a trigger filter narrows to:
+// a top-level conjunct `<param>.concept == "<id>"` of the filter's lambda
+// (`@filter(row => ...)`), read as a tree. Returns "" when there is none, and
+// for a filter that is not a one-parameter lambda -- which PrepareExpressions
+// refuses, so no loaded automation carries one (memql#5367).
 func extractConceptFromFilter(filter string) string {
-	if filter == "" {
+	if filter == "" || !dslclause.OpensLambda(filter) {
 		return ""
 	}
-	if dslclause.OpensLambda(filter) {
-		lam, err := languageParser.ParseV1Lambda(filter)
-		if err != nil || len(lam.Params) != 1 {
-			return ""
-		}
-		for _, c := range ast.Conjuncts(lam.Body) {
-			b, ok := c.(*ast.BinaryExpr)
-			if !ok || b.Op != "==" {
-				continue
-			}
-			root, fields, isPath := ast.MemberPath(ast.Unparen(b.Left))
-			lit, isLit := ast.Unparen(b.Right).(*ast.LiteralExpr)
-			if isPath && isLit && root == lam.Params[0] && len(fields) == 1 && fields[0] == "concept" {
-				if s, ok := lit.Value.(string); ok {
-					return s
-				}
-			}
-		}
+	lam, err := languageParser.ParseV1Lambda(filter)
+	if err != nil || len(lam.Params) != 1 {
 		return ""
 	}
-
-	// Split by semicolons (AND) and commas (OR), and by `&&`: the unified
-	// grammar's AND (memql#977). Without the last, `concept==X && y` read its
-	// value as "X && y" and warned of a contradiction that was not there.
-	// Look for concept== patterns
-	for _, part := range strings.FieldsFunc(filter, func(r rune) bool {
-		return r == ';' || r == ','
-	}) {
-		for _, conjunct := range strings.Split(part, "&&") {
-			conjunct = strings.TrimSpace(conjunct)
-
-			// Check for concept== pattern
-			if strings.HasPrefix(conjunct, "concept==") {
-				value := strings.TrimSpace(strings.TrimPrefix(conjunct, "concept=="))
-				// Remove quotes if present
-				value = strings.Trim(value, `"'`)
-				return value
+	for _, c := range ast.Conjuncts(lam.Body) {
+		b, ok := c.(*ast.BinaryExpr)
+		if !ok || b.Op != "==" {
+			continue
+		}
+		root, fields, isPath := ast.MemberPath(ast.Unparen(b.Left))
+		lit, isLit := ast.Unparen(b.Right).(*ast.LiteralExpr)
+		if isPath && isLit && root == lam.Params[0] && len(fields) == 1 && fields[0] == "concept" {
+			if s, ok := lit.Value.(string); ok {
+				return s
 			}
 		}
 	}
-
 	return ""
 }
