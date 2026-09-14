@@ -18,6 +18,12 @@
 // rewrite's own doc comment says exactly what it changes and what it leaves
 // alone.
 //
+// A TREE rewrite cannot decide a file from that file alone, so it takes a
+// directory and refuses a file argument: `language-line` (a domain's
+// manifest) and `expressions` (edition 2026's lambda forms, whose predicate
+// uses are resolved against every spec and trait in the tree) are the two
+// today.
+//
 // Flags:
 //
 //	--edition=EDITION          the edition whose rewrites to run (default: the engine's)
