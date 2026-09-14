@@ -340,3 +340,22 @@ func TestAuthoringLower_AnUnloweredSessionSpecIsRefusedByNameNeverInlinedAsNothi
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "has no lowered body")
 }
+
+func TestAuthoringLower_ADanglingImportKeepsTheReferenceDiagnostic(t *testing.T) {
+	eng := bootAuthoringEngine(t)
+	var rep SandboxReport
+	withExpressionsV1(t, func() {
+		rep = SandboxCompileBundleWithEngine([]SandboxConstruct{{
+			Kind: "spec",
+			Name: "danglingSpec",
+			Source: `use lowerinit.shapes.{ ghostShape }
+
+/// A spec over a shape nothing declares.
+spec ghostShape danglingSpec = row => row.status == "open"`,
+		}}, eng)
+	})
+	require.False(t, rep.OK)
+	d := diagnosticFor(t, rep.Diagnostics, "spec", "danglingSpec")
+	require.Contains(t, d.Error, "unresolved reference", "the reference check names the import to fix; the lowering runs after it")
+	require.Contains(t, d.Error, "ghostShape")
+}
