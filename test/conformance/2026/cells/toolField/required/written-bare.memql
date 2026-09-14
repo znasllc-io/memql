@@ -1,0 +1,5 @@
+/// List the open tickets.
+@handler(type="query", query="query ticketsToListRequired()")
+tool listTicketsRequired {
+  limit  integer  @required  @description("The most tickets to return.")
+}

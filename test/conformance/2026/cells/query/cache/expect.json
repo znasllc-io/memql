@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "file": "a-number.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-quoted-number.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@cache on a query takes one number or keyword arguments"
+    }
+  ]
+}

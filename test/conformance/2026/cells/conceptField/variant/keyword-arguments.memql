@@ -1,0 +1,15 @@
+/// A support ticket.
+concept ticket {
+  title    string
+  status   string
+  channel  object  @variant(discriminator="kind") {
+    email {
+      kind     string
+      address  string
+    }
+    phone {
+      kind    string
+      number  string
+    }
+  }
+}

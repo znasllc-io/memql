@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "file": "keyword-arguments.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_form",
+      "message": "@relationship on a concept body takes keyword arguments"
+    },
+    {
+      "file": "a-domain-verb-in-the-type-slot.memql",
+      "verdict": "refuse_load",
+      "message": "relationship type \"assignedTo\" is invalid",
+      "note": "The natural mistake the type/as split exists for (memql#3652, memql#3655): type is what the engine does with the edge, from a closed set; the refusal names the rewrite, type=\"references\", as=\"assignedTo\"."
+    }
+  ]
+}

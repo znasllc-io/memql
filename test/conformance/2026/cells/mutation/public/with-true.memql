@@ -1,0 +1,12 @@
+/// Retitle one ticket. Deliberately callable with no caller check: the queue is public.
+@public(true)
+mutate ticket retitleTicketPublic {
+  args {
+    ticketId  string!
+    title     string!
+  }
+  update {
+    id: args.ticketId
+    title: args.title
+  }
+}

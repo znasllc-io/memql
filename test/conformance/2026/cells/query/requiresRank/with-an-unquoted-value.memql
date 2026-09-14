@@ -1,0 +1,7 @@
+/// The open tickets, newest first, for developers and anyone ranked above them.
+@requiresRank(developer)
+query ticket openTicketsRequiresRank {
+  filter status == "open"
+  sort "row.createdAt", "desc"
+  paginate 20
+}

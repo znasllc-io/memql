@@ -1,0 +1,10 @@
+/// Assign a ticket to the caller, reading the actor without declaring it.
+mutate ticket takeTicketActorUndeclared {
+  args {
+    ticketId  string!
+  }
+  update {
+    id: args.ticketId
+    ownerUserId: actor.userId
+  }
+}

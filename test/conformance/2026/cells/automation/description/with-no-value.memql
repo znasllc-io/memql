@@ -1,0 +1,7 @@
+@trigger(event="node.created", concept="v1:cluster:node", partition="*")
+@description
+automation welcomeNodeDescription {
+  step raise {
+    mutation raiseTicketDescription (title: "A node joined the cluster")
+  }
+}

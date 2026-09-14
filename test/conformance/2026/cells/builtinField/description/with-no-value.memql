@@ -1,0 +1,6 @@
+/// Today's date key in a timezone, for naming a daily ticket.
+@executor("integration.timeutil.dateKeyInTimezone")
+builtin dailyTicketKeyDescription {
+  timezone  string  @description
+  now       string  @description("The instant to key, RFC3339.")
+}

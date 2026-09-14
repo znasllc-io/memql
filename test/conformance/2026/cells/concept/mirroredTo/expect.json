@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-an-unquoted-value.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_form",
+      "message": "@mirroredTo on a concept takes one or more strings"
+    },
+    {
+      "file": "beside-an-external-origin.memql",
+      "verdict": "refuse_load",
+      "message": "@mirroredTo is not valid on a concept whose @origin is \"shopify\"",
+      "note": "A mirror that also publishes is a second origin wearing the first one's badge (epic memql#4378)."
+    }
+  ]
+}

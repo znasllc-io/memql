@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "written-bare.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-true.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@template on an automation takes no arguments"
+    },
+    {
+      "file": "with-a-trigger-too.memql",
+      "verdict": "refuse_load",
+      "message": "is declared @template but also carries a trigger or a schedule"
+    }
+  ]
+}

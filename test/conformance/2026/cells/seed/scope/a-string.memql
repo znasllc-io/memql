@@ -1,0 +1,5 @@
+/// Every user's own queue of the tickets they raised, seeded once per user.
+@scope("perUser")
+seed personalQueue myTickets {
+  name: "My tickets"
+}

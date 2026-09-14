@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "file": "keyword-arguments.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_load",
+      "code": "annotation_form",
+      "message": "@variant on a concept field takes keyword arguments"
+    }
+  ]
+}

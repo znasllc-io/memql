@@ -1,0 +1,6 @@
+/// Open a support ticket; it answers quickly.
+@handler(type="function", name="openTicketExecutionTime")
+@executionTime("fast")
+tool openSupportTicketExecutionTime {
+  title  string!  @description("The ticket's one-line title.")
+}

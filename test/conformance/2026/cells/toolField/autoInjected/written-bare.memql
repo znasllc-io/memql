@@ -1,0 +1,5 @@
+/// List the open tickets.
+@handler(type="query", query="query ticketsToListAutoInjected()")
+tool listTicketsAutoInjected {
+  requestedBy  string  @autoInjected  @description("The agent asking; stamped by the runtime, never by the model.")
+}

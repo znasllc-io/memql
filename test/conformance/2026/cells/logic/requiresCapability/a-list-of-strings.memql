@@ -1,0 +1,10 @@
+/// The headline a ticket shows, for a caller holding execute on app:deployables/deploy.
+@requiresCapability("execute", "app:deployables/deploy")
+logic ticketHeadlineRequiresCapability {
+  args {
+    title  string
+  }
+  body {
+    return args.title ?? "(untitled)"
+  }
+}

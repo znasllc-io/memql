@@ -1,0 +1,7 @@
+/// A ticket card that also projects the caller, without declaring the actor kind.
+@row
+shape ticket ticketCardForCaller {
+  row.id
+  title
+  actor.userId
+}

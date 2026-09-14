@@ -1,0 +1,7 @@
+/// The open tickets, newest first. Deliberately callable with no caller check: the queue is public.
+@public(true)
+query ticket openTicketsPublic {
+  filter status == "open"
+  sort "row.createdAt", "desc"
+  paginate 20
+}

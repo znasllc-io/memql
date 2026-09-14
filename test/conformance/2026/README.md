@@ -15,8 +15,8 @@ examples a model is shown, so a case that loads is a form an author may copy.
 | Directory | Holds |
 |---|---|
 | `manifest.json` | The edition and language line every case here is written in, and the corpus status (`draft` until the freeze). |
-| `cells/<receiver>/<annotation>/` | One directory per place an annotation can be written, from the annotation registry. Each holds at least one case that loads and one that is refused. |
-| `expr/<position>/` | One directory per expression position, from `component/language/tiers`. Each holds at least one case that loads and one that is refused. |
+| `cells/<receiver>/<annotation>/` | One directory per place an annotation can be written, from the annotation registry (`annotations.Placements()`): the receiver lower-camel-cased (`query`, `conceptField`), the annotation as written (`createOnly`). Each holds at least one case that loads and one that is refused. |
+| `expr/<position>/` | One directory per expression position, from `component/language/tiers`. Each holds at least one case that loads and one that is refused at that position. |
 | `negative/<construct>/` | One fault per file, the file named after the fault. |
 | `scenarios/<domain>/` | Whole automations as the product ships them, loaded together. |
 | `fuzz/` | Inputs that once broke the parser. |
@@ -38,15 +38,17 @@ domains declare is ambiguous to every lookup by bare name (a tool's handler, an
 automation's step). A cell's constructs carry the annotation's name for that
 reason (`openTicketsCache`, `retitleTicketServerOnly`).
 
+`cells/query/cache/expect.json`:
+
 ```json
 {
   "cases": [
-    { "file": "cache-seconds.memql", "verdict": "load_ok" },
+    { "file": "a-number.memql", "verdict": "load_ok" },
     {
-      "file": "cache-with-a-string.memql",
+      "file": "with-a-quoted-number.memql",
       "verdict": "refuse_parse",
       "code": "annotation_form",
-      "message": "@cache on a query takes"
+      "message": "@cache on a query takes one number or keyword arguments"
     }
   ]
 }
@@ -87,3 +89,36 @@ go test -count=1 -run TestCorpusVerdicts ./test/conformance/
 A failure names the file, the verdict it expected and what the engine did
 instead. A bug in the language is not fixed until the case that shows it is
 here.
+
+## The completeness gates
+
+Two gates (`test/conformance/corpus_gates_test.go`) hold the corpus to the
+language, reading it through the runner's own reader:
+
+- `TestCorpusCoversEveryRegistryCell`: every placement in the annotation
+  registry has its cell, with a case that loads (`load_ok`, `lower` or
+  `evaluate`) and one that is refused (`refuse_parse` or `refuse_load`); a
+  directory under `cells/` that no placement names fails too.
+- `TestCorpusCoversEveryTierPosition`: every `tiers.Position` has a case that
+  loads and one that is refused under `expr/<position>/`.
+
+Each fails once, listing every gap. A new placement or position is therefore a
+new cell or seed in the same change. To start one:
+
+```bash
+go test ./test/conformance -run TestScaffoldCorpusCells -scaffold
+```
+
+writes a skeleton for every placement with no cell -- a fixture, the
+placement's accepted form, a form the registry refuses, and the refusal's code
+and opening words. It never touches a cell that exists. A skeleton that loads
+is not yet a case: read what it wrote as an author would, and give the cell
+the refusals that show what the annotation means as well as how it is spelled.
+
+A cell's first refusal is its FORM (an annotation written with arguments it
+does not take). Where the engine has a load-time rule for what the annotation
+MEANS, the cell pins that too: `@actor` on a body that reads the actor,
+`@eventField` against the fields a logic reads, `@template` beside a trigger,
+`@type("collection")` with nothing it contains. A cell whose accepted form
+cannot load as a mounted domain carries the nearest honest case and a `note`
+saying why (`cells/rule/locked`).

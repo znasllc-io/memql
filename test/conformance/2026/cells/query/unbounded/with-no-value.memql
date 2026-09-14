@@ -1,0 +1,5 @@
+/// Every open ticket at once, with no page.
+@unbounded
+query ticket openTicketsUnbounded {
+  filter status == "open"
+}

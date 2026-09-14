@@ -1,0 +1,5 @@
+/// List the open tickets.
+@handler(type="query", query="query ticketsToListDescription()")
+tool listTicketsDescription {
+  limit  integer  @description
+}

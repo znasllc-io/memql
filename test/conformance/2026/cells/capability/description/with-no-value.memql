@@ -1,0 +1,7 @@
+@sideEffect("read")
+@description
+capability fs.list {
+  args {
+    path  string!
+  }
+}

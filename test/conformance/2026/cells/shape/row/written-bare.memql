@@ -1,0 +1,7 @@
+/// A ticket as a card: its title and status.
+@row
+shape ticket ticketCardRow {
+  row.id
+  title
+  status
+}

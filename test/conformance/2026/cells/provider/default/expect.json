@@ -1,0 +1,15 @@
+{
+  "cases": [
+    {
+      "file": "written-bare.memql",
+      "verdict": "load_ok",
+      "note": "Loads in a bundle. The shipped registry may not declare one (TestNoPaidDefault, arm 2): the shipped default rule is the default, and a registry default is a routing decision no decision record can explain."
+    },
+    {
+      "file": "with-true.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@default on a provider takes no arguments"
+    }
+  ]
+}

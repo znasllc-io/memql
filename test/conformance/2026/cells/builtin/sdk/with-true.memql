@@ -1,0 +1,7 @@
+/// Today's date key in a timezone, for naming a daily ticket; generated into the SDKs.
+@executor("integration.timeutil.dateKeyInTimezone")
+@sdk(true)
+builtin ticketDateKeySdk {
+  timezone  string  @description("An IANA timezone; UTC when empty.")
+  now       string  @description("The instant to key, RFC3339.")
+}

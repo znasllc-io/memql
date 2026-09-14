@@ -1,0 +1,6 @@
+/// Background calls resolve through the local-first chain. A mounted domain cannot lock a rule;
+/// it takes its place in the order with @precedence, which every rule is compared by.
+@when(tag="background")
+@policy("localFirst")
+@precedence(16)
+rule backgroundLocalByOrder { }

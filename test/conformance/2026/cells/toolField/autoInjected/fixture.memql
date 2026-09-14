@@ -1,0 +1,13 @@
+/// A support ticket: the row this cell's cases read and write.
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}
+
+/// The open tickets, newest first.
+query ticket ticketsToListAutoInjected {
+  filter status == "open"
+  sort "row.createdAt", "desc"
+  paginate 20
+}

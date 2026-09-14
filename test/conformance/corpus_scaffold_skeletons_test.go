@@ -441,7 +441,8 @@ func scaffoldSkeleton(p annotations.Placement, ann string) (fixture, src string,
 		return "", "use identity.concepts.{ user }\n\n/// A support ticket, owned by the user who raised it.\nconcept ticket {\n  ownerUserId  string\n  title        string\n\n  " + ann + "\n}\n", nil
 
 	case annotations.ConceptField:
-		return "", "/// A support ticket.\nconcept ticket {\n  title   string\n  status  string\n  " + scaffoldConceptField(p.Name, ann) + "\n}\n", nil
+		name, rest := scaffoldConceptField(p.Name, ann)
+		return "", "/// A support ticket.\nconcept ticket {\n" + scaffoldColumns("  ", [][2]string{{"title", "string"}, {"status", "string"}, {name, rest}}) + "}\n", nil
 
 	case annotations.ArgsField:
 		arg, filter := [2]string{"status", "string  " + ann}, "status == args.status"
@@ -599,7 +600,7 @@ func scaffoldSeed(p annotations.Placement, line string) (string, string, map[str
 		sets.WriteString(fmt.Sprintf("    %s: args.%s\n", f[0], f[0]))
 	}
 	fixture := "/// The row this cell's seed writes.\nconcept " + c.concept + " {\n" + scaffoldColumns("  ", conceptFields) + "}\n\n" +
-		"/// Create a " + c.concept + ": the mutation the seed materializer writes through (create<Concept>).\n" +
+		"/// The mutation the seed materializer writes this concept's rows through: create<Concept>.\n" +
 		"mutate " + c.concept + " create" + upperFirst(c.concept) + " {\n" + scaffoldArgs(createArgs...) + "  insert {\n" + sets.String() + "  }\n}\n"
 	var body strings.Builder
 	for _, b := range c.body {
@@ -612,29 +613,30 @@ func scaffoldSeed(p annotations.Placement, line string) (string, string, map[str
 	return fixture, scaffoldDoc(p, "") + line + "seed " + c.concept + " " + c.seed + " {\n" + body.String() + "}\n", side
 }
 
-// scaffoldConceptField is a field the annotation means something on.
-func scaffoldConceptField(name, ann string) string {
+// scaffoldConceptField is a field the annotation means something on, as its
+// name and the rest of its line.
+func scaffoldConceptField(name, ann string) (string, string) {
 	switch name {
 	case "default":
-		return "priority  string  " + ann
+		return "priority", "string  " + ann
 	case "immutable", "unique":
-		return "ticketNumber  string  " + ann
+		return "ticketNumber", "string  " + ann
 	case "internal":
-		return "triageScore  int  " + ann
+		return "triageScore", "int  " + ann
 	case "maximum", "minimum":
-		return "progress  int  " + ann
+		return "progress", "int  " + ann
 	case "open":
-		return "details  object  " + ann + " {\n    source  string\n  }"
+		return "details", "object  " + ann + " {\n    source  string\n  }"
 	case "pattern":
-		return "slug  string  " + ann
+		return "slug", "string  " + ann
 	case "pii":
-		return "reporterEmail  string  " + ann
+		return "reporterEmail", "string  " + ann
 	case "secret":
-		return "webhookToken  string  " + ann
+		return "webhookToken", "string  " + ann
 	case "serverSet":
-		return "closedAt  datetime  " + ann
+		return "closedAt", "datetime  " + ann
 	case "variant":
-		return "channel  object  " + ann + " {\n    email {\n      kind     string\n      address  string\n    }\n    phone {\n      kind    string\n      number  string\n    }\n  }"
+		return "channel", "object  " + ann + " {\n    email {\n      kind     string\n      address  string\n    }\n    phone {\n      kind    string\n      number  string\n    }\n  }"
 	}
-	return "summary  string  " + ann
+	return "summary", "string  " + ann
 }

@@ -1,0 +1,6 @@
+@description
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}

@@ -1,0 +1,12 @@
+/// Attach files to a ticket, keeping the ones already attached.
+@appendFields(attachmentIds)
+mutate ticket attachToTicketAppendFields {
+  args {
+    ticketId       string!
+    attachmentIds  []string!
+  }
+  update {
+    id: args.ticketId
+    attachmentIds: args.attachmentIds
+  }
+}

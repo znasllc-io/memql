@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "file": "keyword-arguments.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@when on a rule takes empty parentheses or keyword arguments"
+    },
+    {
+      "file": "an-unknown-key.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_key",
+      "message": "@when on a rule has no key stage -- did you mean tag?"
+    }
+  ]
+}

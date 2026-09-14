@@ -1,0 +1,7 @@
+/// The open tickets, newest first, read live on every call.
+@nocache(true)
+query ticket openTicketsNocache {
+  filter status == "open"
+  sort "row.createdAt", "desc"
+  paginate 20
+}
