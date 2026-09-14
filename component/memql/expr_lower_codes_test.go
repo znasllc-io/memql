@@ -206,8 +206,7 @@ query ticket titleAsFilter {
 
 	eng := bootAuthoringEngine(t)
 	var res SessionDefineResult
-	withExpressionsV1(t, func() {
-		res, err = eng.DefineSessionBundle(NewAuthoredRuntimeRegistry(), "owner-1", `use lowerinit.concepts.{ ticket }
+	res, err = eng.DefineSessionBundle(NewAuthoredRuntimeRegistry(), "owner-1", `use lowerinit.concepts.{ ticket }
 
 /// Refused: title is a string, and a filter is a condition.
 query ticket sessionTitleAsFilter {
@@ -215,7 +214,6 @@ query ticket sessionTitleAsFilter {
   paginate 20
 }
 `, "")
-	})
 	require.Error(t, err)
 	d := diagnosticFor(t, res.Diagnostics, "query", "sessionTitleAsFilter")
 	require.Equal(t, LowerCodeNotBoolean, d.Code, d.Error)
