@@ -120,10 +120,28 @@ func (f Function) Key() string {
 	return f.Receiver + "." + f.Name
 }
 
+// String renders the parameter the way a signature spells it: "value string",
+// an optional one "label? string", a variadic one "parts ...string" -- the
+// house style dslspec already uses. Signature help highlights a parameter by
+// finding this text inside the signature, so the two are built from the one
+// function.
+func (p Param) String() string {
+	var b strings.Builder
+	b.WriteString(p.Name)
+	if p.Optional {
+		b.WriteByte('?')
+	}
+	b.WriteByte(' ')
+	if p.Variadic {
+		b.WriteString("...")
+	}
+	b.WriteString(p.Type)
+	return b.String()
+}
+
 // Signature renders the entry for hover and signature help:
 // "addDuration(ts datetime, dur duration) datetime", "list.any(pred lambda)
-// bool". An optional parameter is written `name? type` and a variadic one
-// `name ...type`, the house style dslspec already uses.
+// bool". Each parameter is spelled by Param.String.
 func (f Function) Signature() string {
 	var b strings.Builder
 	b.WriteString(f.Key())
@@ -132,15 +150,7 @@ func (f Function) Signature() string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(p.Name)
-		if p.Optional {
-			b.WriteByte('?')
-		}
-		b.WriteByte(' ')
-		if p.Variadic {
-			b.WriteString("...")
-		}
-		b.WriteString(p.Type)
+		b.WriteString(p.String())
 	}
 	b.WriteByte(')')
 	if f.Returns != "" {

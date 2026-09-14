@@ -42,6 +42,16 @@ func (s *Service) Hover(source string, line, col int, filePath string) *HoverRes
 		return &HoverResult{Contents: contents, Range: tokenRange}
 	}
 
+	// 0.5 The v1 expression vocabulary (memql#5365): an operator, a retired
+	// spelling, or a catalog function or method, each as a card whose
+	// where-it-runs and legality lines depend on the cursor's position. It
+	// sits above the keyword step because `in`, `startsWith`, `not` and `when`
+	// are keywords too, and their keyword docs describe the word, not the
+	// operator or the retirement.
+	if res, ok := s.expressionHover(source, line, col); ok {
+		return res
+	}
+
 	// 1. Keyword.
 	if doc, ok := KeywordDocs[token]; ok {
 		return &HoverResult{

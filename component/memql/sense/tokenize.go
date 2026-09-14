@@ -188,12 +188,17 @@ func markSignatureConcept(tokens []parser.Token, kw int, conceptPos map[int]bool
 }
 
 // mapTokenType maps a parser token to a semantic token. Keyword coloring is
-// SoT-driven: reserved words (use, in, if, return, ...) color via the lexer's
-// TokenKeyword* set, and lowercase construct keywords color via constructKeywords
-// (projected from dslspec) -- but only in the keyword POSITIONS resolved by
-// classifyConstructPositions. The retired-operator audit item ("import"/"has"
-// coloring) no longer applies -- imports are `use` (colored) and `has` was
-// removed with the single `in` membership operator.
+// SoT-driven: reserved words (use, in, if, return, import, ...) color via the
+// lexer's TokenKeyword* set, and lowercase construct keywords color via
+// constructKeywords (projected from dslspec) -- but only in the keyword
+// POSITIONS resolved by classifyConstructPositions.
+//
+// Every operator token the lexer produces colors as an operator (memql#5365).
+// `||` did not: it fell through to the default and rendered as an identifier,
+// beside an `&&` that colored -- and so did the `.` of `.?` and the retired
+// `has`. `has` is an operator word, so it colors as one; it is NOT a keyword,
+// because membership is `in` alone (#971, pinned by
+// TestTokenize_RetiredHasNotKeyword).
 func mapTokenType(pt parser.Token, isKeywordPos, isConceptPos bool) Token {
 	var tokenType string
 	switch pt.Type {
@@ -208,7 +213,8 @@ func mapTokenType(pt parser.Token, isKeywordPos, isConceptPos bool) Token {
 		parser.TokenKeywordIn, parser.TokenKeywordNot, parser.TokenKeywordStartsWith,
 		parser.TokenKeywordQuery, parser.TokenKeywordMutation,
 		parser.TokenKeywordAutomation, parser.TokenKeywordSpec,
-		parser.TokenKeywordTool, parser.TokenKeywordBuiltin:
+		parser.TokenKeywordTool, parser.TokenKeywordBuiltin,
+		parser.TokenKeywordImport:
 		tokenType = "keyword"
 
 	case parser.TokenString:
@@ -218,8 +224,9 @@ func mapTokenType(pt parser.Token, isKeywordPos, isConceptPos bool) Token {
 		tokenType = "number"
 
 	case parser.TokenOperator,
-		parser.TokenDefine, parser.TokenAmpAmp, parser.TokenBang,
-		parser.TokenQuestion, parser.TokenQuestionDot, parser.TokenQuestionQuestion:
+		parser.TokenDefine, parser.TokenAmpAmp, parser.TokenPipePipe, parser.TokenBang,
+		parser.TokenQuestion, parser.TokenQuestionDot, parser.TokenQuestionQuestion,
+		parser.TokenDot, parser.TokenKeywordHas:
 		tokenType = "operator"
 
 	case parser.TokenAt:

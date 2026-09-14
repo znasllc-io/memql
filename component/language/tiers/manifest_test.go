@@ -197,6 +197,38 @@ func TestManifestNamesOnlyKnownKinds(t *testing.T) {
 	}
 }
 
+// The operator table (functions.Operators) names each operator's node kind as a
+// plain string so the functions package stays a leaf. This is where that string
+// is held to the AST: every Kind is a kind ast.AllNodeKinds() lists -- so a hover
+// can look an operator's admission up with KindAdmission -- and every kind that
+// IS an operator's node has at least one row, so an operator kind cannot land
+// without the prose that explains it.
+func TestOperatorKindsAreNodeKinds(t *testing.T) {
+	known := map[ast.NodeKind]bool{}
+	for _, k := range ast.AllNodeKinds() {
+		known[k] = true
+	}
+	covered := map[ast.NodeKind]bool{}
+	for _, op := range functions.Operators() {
+		k := ast.NodeKind(op.Kind)
+		if !known[k] {
+			t.Errorf("operator %s names kind %q, which ast.AllNodeKinds() does not list", op.Name, op.Kind)
+		}
+		covered[k] = true
+	}
+	// The kinds that are not operators: names, calls, literals, collections and
+	// grouping. Everything else is the node some operator builds.
+	notOperators := map[ast.NodeKind]bool{
+		ast.KindIdent: true, ast.KindCall: true, ast.KindMethodCall: true, ast.KindConstructCall: true,
+		ast.KindList: true, ast.KindMap: true, ast.KindLiteral: true, ast.KindNil: true, ast.KindParen: true,
+	}
+	for _, k := range ast.AllNodeKinds() {
+		if !notOperators[k] && !covered[k] {
+			t.Errorf("node kind %q is an operator's node, but no row of functions.Operators() carries it", k)
+		}
+	}
+}
+
 func TestExactAdmissions(t *testing.T) {
 	kindCases := []struct {
 		p    Position

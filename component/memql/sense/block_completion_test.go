@@ -24,7 +24,7 @@ func TestBlockSpecificCompletion(t *testing.T) {
 			t.Errorf("args block must offer field type %q, got %v", want, args)
 		}
 	}
-	for _, never := range []string{"coalesce", "cond", "filter", "accept", "payload"} {
+	for _, never := range []string{"lower", "hash", "filter", "accept", "payload"} {
 		if args[never] {
 			t.Errorf("args block must not offer %q", never)
 		}

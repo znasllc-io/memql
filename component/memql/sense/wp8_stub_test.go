@@ -1,12 +1,15 @@
 package sense
 
+import "sort"
+
 // stubRegistry is a configurable RegistryProvider for the WP8 tests (signature
-// help + hover). It reads from the maps/slices the test populates and returns
-// zero values elsewhere. (construct_concept_test.go's fakeRegistry is fixed;
-// this one is driven by the test.)
+// help + hover) and the v1 expression tests. It reads from the maps/slices the
+// test populates and returns zero values elsewhere. (construct_concept_test.go's
+// fakeRegistry is fixed; this one is driven by the test.)
 type stubRegistry struct {
 	functions map[string]*FunctionInfo
 	concepts  map[string]*ConceptInfo
+	specs     map[string]*SpecInfo
 	providers []string
 	shapes    []string
 }
@@ -33,7 +36,18 @@ func (r *stubRegistry) ConceptGet(name string) (*ConceptInfo, bool) {
 	c, ok := r.concepts[name]
 	return c, ok
 }
-func (r *stubRegistry) SpecNames() []string                      { return nil }
+func (r *stubRegistry) SpecNames() []string {
+	names := make([]string, 0, len(r.specs))
+	for n := range r.specs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
+}
+func (r *stubRegistry) SpecGet(name string) (*SpecInfo, bool) {
+	s, ok := r.specs[name]
+	return s, ok
+}
 func (r *stubRegistry) ToolNames() []string                      { return nil }
 func (r *stubRegistry) ToolGet(string) (*ToolInfo, bool)         { return nil, false }
 func (r *stubRegistry) PromptNames() []string                    { return nil }
