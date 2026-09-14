@@ -202,8 +202,8 @@ func RetiredFunctions() map[string]string {
 		"cond":     "p ? a : b",
 		"concat":   "a + b",
 		"coalesce": "a ?? b",
-		// exists(x) also read a blank string as absent; the migrator writes
-		// `(x != nil && x != "")` at the call sites that relied on it.
+		// exists(x) also read a blank string as absent, and so does
+		// `x != nil`: absent, null, nil and "" are one unset value.
 		"exists": "x != nil",
 		"len":    "x.count()",
 		"count":  "x.count()",
