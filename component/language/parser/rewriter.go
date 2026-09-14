@@ -1327,6 +1327,10 @@ var idFieldMatcher = regexp.MustCompile(`^id\s*:\s*([\s\S]+)$`)
 // object-literal form the engine's `insert()` / `update()` accept.
 // The `id:` line is hoisted to a positional `id=<expr>` argument and
 // dropped from the payload.
+//
+// Every field it emits is an explicit `key: value` entry: the bare-mirror
+// shorthand is expanded here (expandBareMirror), so the payload is a map
+// literal in both grammars -- the edition-2026 map refuses a key-less entry.
 func translateInsertBody(raw string) (idExpr string, payload string, err error) {
 	fields, err := splitInsertFields(raw)
 	if err != nil {
@@ -1334,6 +1338,9 @@ func translateInsertBody(raw string) (idExpr string, payload string, err error) 
 	}
 	var keep []string
 	for _, f := range fields {
+		if f, err = expandBareMirror(f); err != nil {
+			return "", "", err
+		}
 		if m := idFieldMatcher.FindStringSubmatch(f); m != nil {
 			if idExpr != "" {
 				return "", "", fmt.Errorf("duplicate `id:` line in insert body")
@@ -1347,6 +1354,36 @@ func translateInsertBody(raw string) (idExpr string, payload string, err error) 
 		return idExpr, "{}", nil
 	}
 	return idExpr, "{ " + strings.Join(keep, ", ") + " }", nil
+}
+
+// bareArgsPathRe matches a key-less write-block field that is a dotted
+// `args.` path of any depth; bareMirrorRe (acceptstamp_migrate.go) is its
+// one-segment case, the only one authoring rule 15 admits.
+var bareArgsPathRe = regexp.MustCompile(`^args(?:\.[A-Za-z_][A-Za-z0-9_]*)+$`)
+
+// expandBareMirror expands authoring rule 15's bare-mirror shorthand: a
+// write-block line that is only `args.name` means `name: args.name`.
+//
+// The shorthand is write-block SYNTAX, not an expression, so it is resolved
+// here, where the block is still a list of lines, and never reaches an
+// expression parser. The string half used to resolve it inside its object
+// literal parser (mutation_templates.go's tryParseShorthandCtx); the
+// edition-2026 map literal has no key-less entry, and a key cannot be
+// dotted, so under Options.ExpressionsV1 the line would be refused. Expanding
+// it here gives both grammars the same explicit entry -- the one the string
+// half's shorthand produced -- and gives rule 15's constraint a message
+// instead of a vague object-literal failure: a multi-segment path has no
+// single key to infer, so `args.user.id` is refused, naming the explicit
+// spelling. Any other field passes through untouched.
+func expandBareMirror(field string) (string, error) {
+	if m := bareMirrorRe.FindStringSubmatch(field); m != nil {
+		return m[1] + ": " + field, nil
+	}
+	if bareArgsPathRe.MatchString(field) {
+		key := field[strings.LastIndex(field, ".")+1:]
+		return "", fmt.Errorf("`%s` has no key, and the bare-mirror shorthand takes a single-segment arg (authoring rule 15): write `%s: %s`", field, key, field)
+	}
+	return field, nil
 }
 
 // splitInsertFields walks the raw body and returns each

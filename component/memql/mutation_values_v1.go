@@ -12,6 +12,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/config"
 	"github.com/znasllc-io/memql/component/language/ast"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/language/tiers"
 )
 
@@ -181,6 +182,53 @@ func newMutationTemplateV1(kind ast.MutationKind, concept string, block ast.Expr
 		tmpl.PayloadOverlayTemplate = layout
 	}
 	return tmpl, nil
+}
+
+// mutationTemplateFromStmtV1 builds the template of a mutation parsed with
+// the edition-2026 grammar (parser.Options.ExpressionsV1): the statement's
+// PayloadExpr is the block and its four slot templates are the call-level
+// values, all parsed nodes. The loader calls it for a FunctionDef marked
+// ExpressionsV1; a slot that is not a v1 node means the statement was not
+// parsed that way, and is refused rather than rendered by the wrong half.
+func mutationTemplateFromStmtV1(stmt *languageParser.MutationStmt, concept string) (*FunctionMutationTemplate, error) {
+	var slots mutationSlotsV1
+	for _, s := range []struct {
+		name string
+		v    any
+		dst  *ast.ExpressionNode
+	}{
+		{"id", stmt.IDTemplate, &slots.ID},
+		{"createdAt", stmt.CreatedAtTemplate, &slots.CreatedAt},
+		{"parent", stmt.ParentTemplate, &slots.Parent},
+		{"aliasOf", stmt.AliasOfTemplate, &slots.AliasOf},
+	} {
+		if s.v == nil {
+			continue
+		}
+		n, ok := s.v.(ast.ExpressionNode)
+		if !ok || n == nil || ast.KindOf(n) == ast.KindUnknown {
+			return nil, fmt.Errorf("%s= holds a %T, not an edition-2026 expression: the mutation was not parsed with the edition-2026 grammar", s.name, s.v)
+		}
+		*s.dst = n
+	}
+	return newMutationTemplateV1(stmt.Kind, concept, stmt.PayloadExpr, slots)
+}
+
+// mutationBlockFieldsV1 is a v1 template's block fields as C5
+// (validateMutationCallerArgs) reads them: the laid-out payload when it is a
+// field map rather than a splat, and the overlay. The id and createdAt keys
+// were hoisted into their slots and are not concept fields.
+func mutationBlockFieldsV1(t *FunctionMutationTemplate) map[string]any {
+	out := map[string]any{}
+	if m, ok := t.PayloadTemplate.(map[string]any); ok {
+		for k, v := range m {
+			out[k] = v
+		}
+	}
+	for k, v := range t.PayloadOverlayTemplate {
+		out[k] = v
+	}
+	return out
 }
 
 // mutationSlotTemplate stores a slot node in the template's `any` field,
