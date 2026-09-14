@@ -2,12 +2,13 @@
 //
 // Authz tier: COMPOSITE (memql#4820). Every filter over an operator-facing
 // concept names the owner-or-cluster-owner disjunction as a TOP-LEVEL
-// conjunct, never inside a when() guard and never as one arm of a wider ||.
-// That placement is the whole gate: a guarded conjunct vanishes when its
-// argument is absent, which is how a query that looks scoped comes to return
-// the whole table (memql#2883). No argument here can widen the row set past
-// the caller's own rows -- the only thing that widens it is BEING the cluster
-// owner, which is a fact about the actor and not about the call.
+// conjunct, never inside an optional-argument guard (`args.x == nil || ...`)
+// and never as one arm of a wider ||. That placement is the whole gate: a
+// guarded conjunct vanishes when its argument is unset, which is how a query
+// that looks scoped comes to return the whole table (memql#2883). No argument
+// here can widen the row set past the caller's own rows -- the only thing
+// that widens it is BEING the cluster owner, which is a fact about the actor
+// and not about the call.
 //
 // THE PARENTHESES ARE NOT STYLE. && binds tighter than ||, so an unparenthesized
 // `a && b || c` reads as `(a && b) || c` and the cluster-owner arm would satisfy

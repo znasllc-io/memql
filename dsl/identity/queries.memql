@@ -311,7 +311,7 @@ query user usersForSeedSweep {
 // Pagination (epic #1964 / memql#1975): this query declares ONLY `sort`
 // (deterministic, keyset-eligible createdAt-desc order) and NO inner
 // `paginate`. The dynamic page window is applied by the searchUsers tool
-// handler's OUTER paginate($args.limit) wrapper (dsl/memql/tools.memql). The
+// handler's OUTER paginate(..., args.limit) wrapper (dsl/memql/tools.memql). The
 // inner query must NOT also declare `paginate` -- two nested paginate()
 // directives are rejected by the engine ("multiple paginate() directives are
 // not supported"), which broke the searchUsers tool for every call after the
@@ -323,11 +323,11 @@ query user usersForSeedSweep {
 /// users alike; pass true to return only active users or false for only deactivated ones.
 /// Developer-or-above only. Backs the searchUsers tool.
 ///
-/// memql#2883: `when(args.active)` is DROPPED when the arg is absent (authoring rules), so before
-/// this gate `searchUsers()` with no arguments applied no predicate at all and returned every user
-/// in the cluster in userFull -- every @pii field plus the cluster-wide auth role. It is also on the
-/// agent tool surface (dsl/memql/tools.memql), so a prompt-injected or over-eager agent could pull
-/// the whole user table.
+/// memql#2883: the `args.active == nil || ...` guard folds away when the arg is unset (authoring
+/// rules), so before this gate `searchUsers()` with no arguments applied no predicate at all and
+/// returned every user in the cluster in userFull -- every @pii field plus the cluster-wide auth
+/// role. It is also on the agent tool surface (dsl/memql/tools.memql), so a prompt-injected or
+/// over-eager agent could pull the whole user table.
 ///
 /// A ROLE GATE rather than @serverOnly, because unlike its three siblings this one has a genuine
 /// client caller: the MCP tool. Gating by origin would delete the tool; gating by role keeps it
@@ -1024,8 +1024,9 @@ query delegation expiredActiveDelegations {
 // FALSE -- the filter restriction is on function calls, not arg-cutoff
 // comparisons, and addDuration takes negative ISO durations (the
 // cluster stale-node prune has shipped that shape since #1642). The
-// clean pattern is cutoff-in-logic + a when(args.cutoff) filter here,
-// as expiredPendingAccessRequests now does.
+// clean pattern is cutoff-in-logic + an optional cutoff guard in the
+// filter here, `(args.cutoff == nil || ...)`, as
+// expiredPendingAccessRequests now does.
 //
 // Note: as of writing, MemQL has no row-removal mutation -- the AST
 // defines only Insert and Update. The retention sweep can soft-mark
@@ -1657,14 +1658,15 @@ query auditEvent recentAuditEvents {
 /// already have, so no id enumeration was needed. userByIdSystem returns the
 /// identical shape and was gated by #2860; this one was missed (memql#2881).
 ///
-/// It is NOT the worst reader of this shape, and saying so here because the
-/// next person to gate one should start from the right end: searchUsers,
+/// It was NOT the worst reader of this shape, and this note said so because
+/// the next person to gate one should start from the right end: searchUsers,
 /// activeUsers, usersScheduledForDeletion and usersInDeletionCooldown all
-/// return userFull and are all reachable from the wire today. searchUsers is
-/// the extreme -- its only predicate is `when(args.active) { ... }`, which is
-/// DROPPED when the arg is absent, so calling it with no arguments returns
+/// returned userFull and were all reachable from the wire. searchUsers was
+/// the extreme -- its only predicate was `when(args.active) { ... }`, which
+/// dropped when the arg was absent, so calling it with no arguments returned
 /// every user in the cluster, and it is exposed to agents as an MCP tool.
-/// Tracked in memql#2883.
+/// Tracked in memql#2883. All four are gated now: searchUsers by
+/// `@requiresRank("developer")`, the other three by @serverOnly.
 @serverOnly
 @unbounded("user by unique primaryEmail -- bounded to a single row")
 query user userByEmail {

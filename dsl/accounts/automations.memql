@@ -50,7 +50,7 @@ automation seedSelfAccount {
   // (D7). `configuredAt` is left unwritten and that absence IS the card.
   //
   // `domain` comes from MEMQL_DOMAIN, forwarded onto the startup payload by
-  // app/cluster.go. Every field binds an explicit key + coalesce, mirroring
+  // app/cluster.go. Every field binds an explicit key + a `??` fallback, mirroring
   // bootstrapCluster: a multi-segment path evaluates to nil when absent, and a
   // nil argument for a required arg trips validation.
   step selfAccount {

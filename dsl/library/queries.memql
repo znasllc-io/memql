@@ -83,9 +83,10 @@ query artifact libraryArtifactsByKind {
 }
 
 /// List the caller's Library rows carrying a given label -- backs the label facet filter. Owned:
-/// ownerUserId==actor.userId gates the row set as a top-level, unguarded conjunct (it must hold even
-/// when args.label is absent); the when() membership predicate narrows to rows whose labels include
-/// the given value.
+/// `row.ownerUserId == actor.userId` gates the row set as a top-level, unguarded conjunct (it must
+/// hold even when args.label is unset); the guarded membership predicate,
+/// `(args.label == nil || args.label in row.labels)`, narrows to rows whose labels include the
+/// given value.
 @actor
 query artifact libraryArtifactsByLabel {
   args {

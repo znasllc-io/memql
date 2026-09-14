@@ -1000,11 +1000,14 @@ query modelEvidence recentModelEvidence {
   args {
     week  string
   }
-  // The cluster-owner conjunct comes FIRST and outside the guard. A `when()`
-  // block is invisible to the implication analyzer, so a filter that opened
-  // with one would be undecidable rather than merely strict -- and an
-  // undecidable read is one the enforcement gate cannot pass whatever it
-  // actually does.
+  // The cluster-owner conjunct stays outside the guard, as a top-level
+  // conjunct: that is the term the implication analyzer reads. It used to
+  // have to come FIRST as well, when the guard was a `when()` block the
+  // analyzer could not see past, so a filter that opened with one was
+  // undecidable rather than merely strict -- and an undecidable read is one
+  // the enforcement gate cannot pass whatever it actually does. The
+  // `(args.week == nil || ...)` guard is an ordinary conjunct, and order no
+  // longer matters.
   filter   row => actor.isClusterOwner == true && (args.week == nil || row.week == args.week)
   sort     "foldedAt", "desc"
   paginate 200
