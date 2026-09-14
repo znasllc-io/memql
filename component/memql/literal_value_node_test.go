@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/language/ast"
 )
 
 // literal_value_node_test.go is the reproduction + fix guard for memql#1705:
@@ -117,6 +118,16 @@ func allExpressionNodeImplementers() map[string]ExpressionNode {
 		"ConditionalFilterExpression": &ConditionalFilterExpression{ArgPath: "x"},
 		"LiteralValueNode":            &LiteralValueNode{Value: 1},
 		"DotAccessExpression":         &DotAccessExpression{Object: &LiteralValueNode{Value: map[string]any{"x": 1}}, Field: "x"},
+		// The edition-2026 IR (memql#5366). expr_ir_walkers_test.go carries
+		// the full per-walker checklist for them; this map only asserts the
+		// clone half, like every other entry.
+		"NotExpression": &NotExpression{Target: &ComparisonExpression{Field: FieldReference{Parts: []string{"payload", "x"}}, Operator: OpEq, Value: "v"}},
+		"ArrayPredicateExpression": &ArrayPredicateExpression{
+			Field:  FieldReference{Raw: "payload.tags", Parts: []string{"payload", "tags"}},
+			Method: ArrayMethodAny,
+			Pred:   &ComparisonExpression{Field: FieldReference{Parts: []string{arrayElementRoot}}, Operator: OpEq, Value: "a"},
+		},
+		"PlanConstExpression": &PlanConstExpression{Expr: &ast.IdentExpr{Name: "now"}},
 	}
 }
 

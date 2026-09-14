@@ -1660,7 +1660,11 @@ func (e *MemQLEngine) fetchNodesByJSONFieldValues(ctx context.Context, conceptNa
 	// Two branches rather than containment alone: jsonb_exists_any also
 	// matches an OBJECT's top-level keys and does not match a numeric scalar,
 	// so gating it on jsonb_typeof keeps the scalar path exactly as it was.
-	// Same shape the `in` operator compiles to for payload fields.
+	// This is a RELATIONSHIP lookup and deliberately element-wise; the payload
+	// `in` operator used to compile to the same shape and no longer does
+	// (memql#5366: `in` is typed equality against each list element, so a
+	// payload array never "overlaps" a list there -- its in-process twin never
+	// admitted one, and the combined path always intersected the two).
 	expr := fmt.Sprintf(
 		"(concept = ? AND ((jsonb_typeof(%s) = 'array' AND jsonb_exists_any(%s, ?::text[])) OR (%s IN (?))))",
 		jsonbExpr, jsonbExpr, pathExpr,

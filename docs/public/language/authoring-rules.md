@@ -2346,13 +2346,17 @@ a closed set, and both layers read the same canonical table.
 ## 27. `!=` matches rows where the field is ABSENT (#1685 / #2783)
 
 **Rule.** A `!=` predicate is null-safe: a row whose payload lacks the
-field **matches**. A `==` predicate does not. The one exception is
-`!= ""`, which excludes absent fields.
+field **matches**. A `==` predicate does not. And there is ONE notion
+of unset (memql#5366): a missing key, a JSON null, `nil` and the empty
+string are one value to `==`, `!=` and `in`, so `== ""` and `== nil`
+both match an absent field and `!= ""` and `!= nil` both exclude one. A
+whitespace-only string is a value, not unset.
 
 ```memql fragment
 filter deleted != true      // matches rows with NO `deleted` key
 filter status == "active"   // does NOT match rows with no `status` key
 filter consumedAt != ""     // does NOT match rows with no `consumedAt` key
+filter revokedAt == ""      // DOES match rows with no `revokedAt` key
 ```
 
 **Why.** Both directions were bugs before they were rules:
@@ -2360,18 +2364,33 @@ filter consumedAt != ""     // does NOT match rows with no `consumedAt` key
 - Plain SQL `<>` yields NULL, not true, when the field is missing, so
   `deleted != true` silently DROPPED every row that never had a
   `deleted` key -- the concept `@default` is not always stamped
-  (#1685). Hence `IS DISTINCT FROM`.
+  (#1685). So `!=` is the exact negation of `==`: absent is not equal to
+  `true`, so `!= true` is true for it.
 - An absent string field is logically equal to `""` -- both mean "not
   set" -- and `!= ""` is the canonical *is set* idiom
   (`deletionScheduledAt != ""`, `consumedAt != ""`). Under the bare
-  #1685 rule those returned every unset row (#1708 / #1714). Hence the
-  `COALESCE(expr, '') <> ''` carve-out.
+  #1685 rule those returned every unset row (#1708 / #1714).
+- `== ""`, the *is NOT set* idiom, is the same fact read the other way,
+  and until memql#5366 it disagreed with it: a plain `=` against a
+  missing key is NULL, so `revokedAt == ""` excluded every session that
+  had never been revoked -- no writer stamps `revokedAt` until a
+  revocation does. The push-down now spells every unset test
+  `COALESCE(expr, '') = ''` (or `<> ''`), for `""` and `nil` alike.
 
-The SQL push-down and the in-process post-filter implement both rules
+**Comparisons are typed (memql#5366).** A literal compares only with a
+stored value of its own JSON type: a stored `"1"` is not equal to `1`, a
+stored `1` is not equal to `"1"`, and a stored `"true"` is not `true`.
+The push-down guards each comparison on the stored type, so a mistyped
+or malformed stored value is simply not equal, not ordered and not a
+member -- where it used to be cast, and `'abc'::numeric` failed the
+whole read with a Postgres error. `in` is `==` against each member, so
+`status in ["", "open"]` also matches an unset `status`.
+
+The SQL push-down and the in-process post-filter implement all of this
 identically, and must continue to: a combined-filter query scans in SQL
 and then re-filters in process, so any disagreement means the rows you
-get depend on which path ran. `absent_field_comparison_test.go` pins
-all of it, including that agreement.
+get depend on which path ran. `absent_field_comparison_test.go` and
+`present_field_comparison_test.go` pin it, including that agreement.
 
 **The trap this creates.** A misspelled property in a `!=` predicate is
 ABSENT, so it matches **every row**:
@@ -2385,10 +2404,16 @@ returns zero rows and someone notices immediately; in `!=` on an
 authorization- or deletion-scoped filter it quietly serves rows that
 were meant to be excluded.
 
-Note the rule is specific to `!=`. `not in` and the ordered
-comparisons (`<`, `>`, `<=`, `>=`) all treat an absent field as a
-NON-match, on both paths -- so `deleted not in [true]` does NOT behave
-like `deleted != true`.
+Note the null-safety is specific to `!=` (and to the unset tests
+`== ""` / `== nil`). `not in` and the ordered comparisons (`<`, `>`,
+`<=`, `>=`) all treat an absent field as a NON-match, on both paths --
+so `deleted not in [true]` does NOT behave like `deleted != true`.
+
+String orderings compare BYTES on both paths: the push-down emits
+`COLLATE "C"` for a string `<` / `<=` / `>` / `>=` (memql#5366), so
+`"E" < "a"` whatever the database's default collation, exactly as the
+in-process evaluator orders Go strings. RFC 3339 UTC timestamps order
+correctly under it, which is what the expiry sweeps rely on.
 
 **What to do about it.** Prefer the trait over an inline predicate --
 `isNotDeleted` rather than `deleted != true`. The conformance gate

@@ -205,6 +205,13 @@ func rewriteSpecFields(expr ExpressionNode, mapper func(FieldReference) (FieldRe
 	}
 	switch node := expr.(type) {
 	case *ComparisonExpression:
+		// A comparison on a collection ELEMENT reads the element, not the
+		// bound surface: `$elem.qty` is not a field of the bound concept or
+		// shape, and mapping it would either refuse a valid body or prefix it
+		// into a payload path no row has.
+		if isArrayElementField(node.Field) {
+			return nil
+		}
 		newRef, err := mapper(node.Field)
 		if err != nil {
 			return err
@@ -223,6 +230,20 @@ func rewriteSpecFields(expr ExpressionNode, mapper func(FieldReference) (FieldRe
 			return err
 		}
 		return rewriteSpecFields(node.Right, mapper)
+	case *NotExpression:
+		return rewriteSpecFields(node.Target, mapper)
+	case *ArrayPredicateExpression:
+		// The ARRAY is a field of the bound surface and maps like any other;
+		// a nested predicate's array is under the enclosing element and does
+		// not.
+		if !isArrayElementField(node.Field) {
+			newRef, err := mapper(node.Field)
+			if err != nil {
+				return err
+			}
+			node.Field = newRef
+		}
+		return rewriteSpecFields(node.Pred, mapper)
 	case *RelationshipExpression:
 		return rewriteSpecFields(node.Target, mapper)
 	default:

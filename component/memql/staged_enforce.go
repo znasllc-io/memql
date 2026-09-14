@@ -313,6 +313,14 @@ func cloneStagedPredicate(expr ExpressionNode) ExpressionNode {
 			Left:  cloneStagedPredicate(node.Left),
 			Right: cloneStagedPredicate(node.Right),
 		}
+	case *NotExpression:
+		// The staged predicate renders no negation today; the copy recurses
+		// anyway, because rewriteFilterFieldRefs mutates what it reaches and
+		// a shared operand would carry that mutation into the cache.
+		if node == nil {
+			return nil
+		}
+		return &NotExpression{Target: cloneStagedPredicate(node.Target)}
 	default:
 		return expr
 	}

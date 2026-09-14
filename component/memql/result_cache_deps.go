@@ -65,6 +65,15 @@ func collectConceptLiterals(expr ExpressionNode, add func(string)) {
 	case *LogicalExpression:
 		collectConceptLiterals(node.Left, add)
 		collectConceptLiterals(node.Right, add)
+	case *NotExpression:
+		// Descended, and it over-approximates on purpose: `!(concept == X)`
+		// adds X, a concept whose writes cannot change this result. An extra
+		// dependency costs an eviction; a missing one serves a stale result,
+		// so the walk errs toward more -- the same treatment a `concept != X`
+		// comparison already gets below, which also adds X.
+		collectConceptLiterals(node.Target, add)
+	case *ArrayPredicateExpression:
+		collectConceptLiterals(node.Pred, add)
 	case *RelationshipExpression:
 		collectConceptLiterals(node.Target, add)
 	case *SortExpression:

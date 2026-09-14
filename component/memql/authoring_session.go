@@ -468,6 +468,20 @@ func expandSpecReferencesWithOverlay(expr ExpressionNode, overlay map[string]*Sp
 			return nil, err
 		}
 		return &RelationshipExpression{Function: node.Function, Target: target, Label: node.Label}, nil
+	case *NotExpression:
+		target, err := expandSpecReferencesWithOverlay(node.Target, overlay, resolving)
+		if err != nil {
+			return nil, err
+		}
+		return &NotExpression{Target: target}, nil
+	case *ArrayPredicateExpression:
+		pred, err := expandSpecReferencesWithOverlay(node.Pred, overlay, resolving)
+		if err != nil {
+			return nil, err
+		}
+		copied := cloneExpressionNode(node).(*ArrayPredicateExpression)
+		copied.Pred = pred
+		return copied, nil
 	default:
 		// Comparisons, builtins, literals, etc. carry no nested spec refs.
 		return cloneExpressionNode(expr), nil

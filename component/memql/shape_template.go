@@ -406,19 +406,31 @@ func (g *shapeGraph) evaluateComparisonCondition(ctx context.Context, nodeId str
 
 // evaluateExprAgainstPayload evaluates a spec expression against a node's payload.
 func evaluateExprAgainstPayload(expr ExpressionNode, payload map[string]any) (bool, error) {
+	return evaluateExprAgainstPayloadIn(expr, payload, nil)
+}
+
+// evaluateExprAgainstPayloadIn is evaluateExprAgainstPayload with the
+// collection element in scope (nil at the payload's top level), so a spec
+// holding a collection predicate reads its element predicate here with the
+// same element rules the executor's twin uses (evalArrayPredicate,
+// elementMatchesComparison).
+func evaluateExprAgainstPayloadIn(expr ExpressionNode, payload map[string]any, elem *arrayElementFrame) (bool, error) {
 	if expr == nil {
 		return true, nil
 	}
 
 	switch node := expr.(type) {
 	case *ComparisonExpression:
+		if isArrayElementField(node.Field) {
+			return elementMatchesComparison(elem, node)
+		}
 		return evaluateComparisonAgainstPayload(node, payload)
 	case *LogicalExpression:
-		left, err := evaluateExprAgainstPayload(node.Left, payload)
+		left, err := evaluateExprAgainstPayloadIn(node.Left, payload, elem)
 		if err != nil {
 			return false, err
 		}
-		right, err := evaluateExprAgainstPayload(node.Right, payload)
+		right, err := evaluateExprAgainstPayloadIn(node.Right, payload, elem)
 		if err != nil {
 			return false, err
 		}
@@ -430,6 +442,32 @@ func evaluateExprAgainstPayload(expr ExpressionNode, payload map[string]any) (bo
 		default:
 			return false, fmt.Errorf("unsupported logical operator %q", node.Op)
 		}
+	case *NotExpression:
+		match, err := evaluateExprAgainstPayloadIn(node.Target, payload, elem)
+		if err != nil {
+			return false, err
+		}
+		return !match, nil
+	case *constantBoolExpression:
+		return node.value, nil
+	case *ArrayPredicateExpression:
+		var value any
+		present := false
+		if isArrayElementField(node.Field) {
+			if elem == nil {
+				return false, fmt.Errorf("%q names a collection element outside a collection predicate", planConstantFieldLabel(node.Field))
+			}
+			v, exists := elementValueAt(elem.value, node.Field.Parts[1:])
+			value, present = v, exists && v != nil
+		} else {
+			value = getPayloadFieldValue(node.Field, payload)
+			present = value != nil
+		}
+		return evalArrayPredicate(node, value, present, func(item any) (bool, error) {
+			return evaluateExprAgainstPayloadIn(node.Pred, payload, &arrayElementFrame{value: item})
+		})
+	case *PlanConstExpression:
+		return false, errPlanConstantUnevaluated(node)
 	case *RelationshipExpression:
 		// Relationship expressions in specs cannot be evaluated against a single node's payload
 		// They require graph traversal which is not available in match() context

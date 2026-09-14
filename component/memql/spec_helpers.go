@@ -48,6 +48,10 @@ func detectAIUsage(expr ExpressionNode) bool {
 		return true
 	case *LogicalExpression:
 		return detectAIUsage(node.Left) || detectAIUsage(node.Right)
+	case *NotExpression:
+		return detectAIUsage(node.Target)
+	case *ArrayPredicateExpression:
+		return detectAIUsage(node.Pred)
 	case *RelationshipExpression:
 		return detectAIUsage(node.Target)
 	default:

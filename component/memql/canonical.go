@@ -57,6 +57,20 @@ func canonicalExpression(expr ExpressionNode) string {
 		// evaluateExpressionSet -- long after planCacheSignature has read
 		// plan.Root.
 		return fmt.Sprintf("const(%t)", node.value)
+	case *NotExpression:
+		// Part of the query's IDENTITY for the reason the constant above is:
+		// a node the default arm renders as "" would give `!p` and `p` one
+		// result-cache signature, and each would be served the other's rows.
+		return fmt.Sprintf("!(%s)", canonicalExpression(node.Target))
+	case *ArrayPredicateExpression:
+		return canonicalArrayPredicate(node)
+	case *PlanConstExpression:
+		// Rendered by SOURCE. An expanded plan never carries one (expansion
+		// replaces it with its value, and the value is what the signature
+		// then shows, so two calls whose constants evaluate differently get
+		// two signatures); this arm covers a spec body or a registered tree
+		// printed before expansion, where the source is its identity.
+		return canonicalPlanConstant(node)
 	case *SpecReferenceExpression:
 		return fmt.Sprintf("spec(%s)", strings.ToLower(strings.TrimSpace(node.Name)))
 	case *AIExpression:
@@ -150,8 +164,35 @@ func canonicalField(field FieldReference) string {
 	return strings.Join(parts, ".")
 }
 
+// canonicalArrayPredicate renders a collection predicate as its field, the
+// method and the element predicate: `payload.tags.any($elem=="a")`,
+// `payload.tags.count()>2`. The lambda's parameter name is NOT rendered --
+// `t => t == "a"` and `x => x == "a"` are one predicate, and the element
+// predicate already reads the element through the one pseudo-root.
+func canonicalArrayPredicate(node *ArrayPredicateExpression) string {
+	if node == nil {
+		return ""
+	}
+	field := canonicalField(node.Field)
+	method := strings.ToLower(strings.TrimSpace(node.Method))
+	if method == ArrayMethodCount {
+		return fmt.Sprintf("%s.count()%s%s", field, string(node.CountOp), canonicalValue(node.CountValue))
+	}
+	return fmt.Sprintf("%s.%s(%s)", field, method, canonicalExpression(node.Pred))
+}
+
+// canonicalPlanConstant renders a plan constant by its v1 source.
+func canonicalPlanConstant(node *PlanConstExpression) string {
+	return fmt.Sprintf("planConst(%s)", formatPlanConstant(node))
+}
+
 func canonicalValue(value any) string {
 	switch v := value.(type) {
+	case *PlanConstExpression:
+		// Without this arm the default below would print the pointer, and a
+		// signature carrying a memory address is a different signature on
+		// every load.
+		return canonicalPlanConstant(v)
 	case string:
 		return strconv.Quote(v)
 	case bool:

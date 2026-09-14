@@ -12,10 +12,10 @@ import (
 // memql#2783: how a comparison against an ABSENT payload field behaves.
 //
 // The direction is deliberate, not accidental, and it has been refined
-// twice -- but nothing pinned it, so a future change could flip it
+// three times -- but nothing pinned it, so a future change could flip it
 // silently in either direction and re-break a shipped bug:
 //
-//   - #1685 chose IS DISTINCT FROM for `!=` so an absent field MATCHES.
+//   - #1685 chose null-safe inequality for `!=` so an absent field MATCHES.
 //     The bug it fixed was the opposite: plain SQL `<>` yields NULL (not
 //     true) when the field is missing, so `isNotDeleted`
 //     (`deleted != true`) silently DROPPED every row that never had a
@@ -25,6 +25,16 @@ import (
 //     canonical "is set" idiom across the DSL
 //     (`deletionScheduledAt != ""`, `consumedAt != ""`), which under the
 //     bare #1685 rule was matching every unset row.
+//   - Edition 2026 (memql#5366) makes both carve-outs one rule: ONE NOTION
+//     OF UNSET. An absent key, JSON null, `nil` and "" are one value to
+//     `==` and `!=`, so `== ""` and `== nil` both MATCH an absent field
+//     (the "is NOT set" idiom now agrees with the "is set" one), and the
+//     two spellings compile to one fragment. Before, `revokedAt == ""`
+//     excluded a row that had never been stamped with the key -- the
+//     never-stamped row #1685 was about, excluded by the other operator.
+//     Comparisons are also TYPED now (a literal compares only with a stored
+//     value of its own JSON type), and `!=` is the exact two-valued negation
+//     of `==`, which is what keeps #1685's direction.
 //
 // The cost of that choice is the fail-open direction #2783 records: a
 // MISSPELLED property resolves to "absent" and therefore matches EVERY
@@ -67,15 +77,15 @@ func absentFieldCases() []absentFieldCase {
 			name:      "!= concrete value matches an absent field",
 			op:        OpNe,
 			value:     true,
-			wantSQL:   `((payload #>> '{deleted}')::boolean IS DISTINCT FROM ?)`,
+			wantSQL:   `(NOT COALESCE(((CASE WHEN jsonb_typeof(payload->'deleted') = 'boolean' THEN (payload #>> '{deleted}')::boolean = ? ELSE FALSE END)), FALSE))`,
 			wantMatch: true,
-			why:       "#1685: absent IS DISTINCT FROM a concrete value, so deleted != true keeps rows with no deleted key",
+			why:       "#1685: absent is not equal to a concrete value, so deleted != true keeps rows with no deleted key -- `!=` is the two-valued negation of `==`",
 		},
 		{
 			name:      "!= non-empty string matches an absent field",
 			op:        OpNe,
 			value:     "revoked",
-			wantSQL:   `(payload #>> '{deleted}' IS DISTINCT FROM ?)`,
+			wantSQL:   `(NOT COALESCE(((jsonb_typeof(payload->'deleted') = 'string' AND payload #>> '{deleted}' = ?)), FALSE))`,
 			wantMatch: true,
 			why:       "#1685 applies to strings too, as long as the operand is not the empty string",
 		},
@@ -83,7 +93,7 @@ func absentFieldCases() []absentFieldCase {
 			name:      `!= "" does NOT match an absent field`,
 			op:        OpNe,
 			value:     "",
-			wantSQL:   `(COALESCE(payload #>> '{deleted}', '') <> ?)`,
+			wantSQL:   `(COALESCE(payload #>> '{deleted}', '') <> '')`,
 			wantMatch: false,
 			why:       `#1708/#1714: an absent string field IS "" (not set), so the "is set" idiom must exclude it`,
 		},
@@ -91,17 +101,49 @@ func absentFieldCases() []absentFieldCase {
 			name:      "== concrete value does not match an absent field",
 			op:        OpEq,
 			value:     true,
-			wantSQL:   `((payload #>> '{deleted}')::boolean = ?)`,
+			wantSQL:   `(CASE WHEN jsonb_typeof(payload->'deleted') = 'boolean' THEN (payload #>> '{deleted}')::boolean = ? ELSE FALSE END)`,
 			wantMatch: false,
 			why:       "absent is correctly NOT equal to a concrete value -- an == typo returns zero rows, which is visible",
 		},
 		{
-			name:      `== "" does not match an absent field`,
+			// THE REVERSAL (memql#5366). This row used to read `== "" does
+			// not match an absent field`, with the SQL a plain `=` and the
+			// reason "NULL = '' is NULL, not true". That reasoning was about
+			// SQL, not about the language: it made the "is NOT set" idiom
+			// disagree with the "is set" one above about the very rows both
+			// are written for.
+			name:      `== "" MATCHES an absent field`,
 			op:        OpEq,
 			value:     "",
-			wantSQL:   `(payload #>> '{deleted}' = ?)`,
+			wantSQL:   `(COALESCE(payload #>> '{deleted}', '') = '')`,
+			wantMatch: true,
+			why:       `one notion of unset: an absent string field IS "" (not set), so the "is not set" idiom must include it`,
+		},
+		{
+			// The unset rule is for the EMPTY string only. A whitespace-only
+			// string is a value, and absent is not equal to a value.
+			name:      `== " " (not empty) does not match an absent field`,
+			op:        OpEq,
+			value:     " ",
+			wantSQL:   `(jsonb_typeof(payload->'deleted') = 'string' AND payload #>> '{deleted}' = ?)`,
 			wantMatch: false,
-			why:       "NULL = '' is NULL, not true, so absent is excluded; == must never be made null-safe",
+			why:       `only "" is unset; a single space is a value`,
+		},
+		{
+			name:      "== nil matches an absent field, with the SAME fragment as == \"\"",
+			op:        OpMissing,
+			value:     nil,
+			wantSQL:   `(COALESCE(payload #>> '{deleted}', '') = '')`,
+			wantMatch: true,
+			why:       "one notion of unset: `== nil` and `== \"\"` are one question",
+		},
+		{
+			name:      "!= nil does not match an absent field, with the SAME fragment as != \"\"",
+			op:        OpNotMissing,
+			value:     nil,
+			wantSQL:   `(COALESCE(payload #>> '{deleted}', '') <> '')`,
+			wantMatch: false,
+			why:       "one notion of unset: `!= nil` and `!= \"\"` are one question",
 		},
 	}
 }
@@ -156,8 +198,38 @@ func TestAbsentPayloadField_SQLPushdownSemantics(t *testing.T) {
 	}
 }
 
+// splitBinaryFragment splits `((A) OP (B))` -- a fragment whose body is two
+// parenthesised operands joined by AND or OR -- into its parts. ok is false
+// for any other shape. The fragments this file models carry no parentheses
+// inside quoted text, so counting parentheses is exact.
+func splitBinaryFragment(fragment string) (string, string, string, bool) {
+	if !strings.HasPrefix(fragment, "((") || !strings.HasSuffix(fragment, ")") {
+		return "", "", "", false
+	}
+	body := fragment[1 : len(fragment)-1]
+	depth := 0
+	for i, r := range body {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				rest := body[i+1:]
+				for _, op := range []string{" AND ", " OR "} {
+					if strings.HasPrefix(rest, op) {
+						return body[:i+1], strings.TrimSpace(op), rest[len(op):], true
+					}
+				}
+				return "", "", "", false
+			}
+		}
+	}
+	return "", "", "", false
+}
+
 // sqlMatchesAbsentRow computes whether an emitted fragment matches a row
-// whose extraction is SQL NULL.
+// whose extraction is SQL NULL (jsonb_typeof of it is NULL too).
 //
 // It recognises exactly the shapes the push-down emits and FAILS on
 // anything else, deliberately: an earlier version inferred the answer
@@ -166,41 +238,32 @@ func TestAbsentPayloadField_SQLPushdownSemantics(t *testing.T) {
 // `COALESCE(x, ”) = ?` fragment (matching a NULL row in real Postgres)
 // was scored as non-matching and the divergence went unnoticed
 // (memql#2783 review, finding 2).
-func sqlMatchesAbsentRow(t *testing.T, fragment string, operand any) bool {
+func sqlMatchesAbsentRow(t *testing.T, fragment string) bool {
 	t.Helper()
-	switch {
-	// COALESCE FIRST. It rewrites the NULL away, so the operator that
-	// follows applies to '' rather than to NULL -- which means this arm
-	// must win even when the fragment also contains IS DISTINCT FROM.
-	// `COALESCE(NULL,'') IS DISTINCT FROM ''` is FALSE, the opposite of
-	// the bare IS DISTINCT FROM answer, so checking that arm first would
-	// report a divergence that does not exist.
-	case strings.HasPrefix(fragment, "(COALESCE("):
-		// COALESCE(NULL, '') -> ''. Apply the fragment's own operator.
-		s, ok := operand.(string)
-		require.True(t, ok, "a COALESCE fragment compares strings; got %T", operand)
-		switch {
-		case strings.Contains(fragment, "<> ?"):
-			return s != ""
-		case strings.Contains(fragment, "IS DISTINCT FROM ?"):
-			return s != ""
-		case strings.Contains(fragment, "= ?") && !strings.Contains(fragment, ">= ?") && !strings.Contains(fragment, "<= ?"):
-			return s == ""
+	if left, op, right, ok := splitBinaryFragment(fragment); ok {
+		l, r := sqlMatchesAbsentRow(t, left), sqlMatchesAbsentRow(t, right)
+		if op == "AND" {
+			return l && r
 		}
-		t.Fatalf("unrecognised operator in COALESCE fragment %q", fragment)
+		return l || r
+	}
+	switch {
+	// The two-valued negation: the operand's verdict for the absent row,
+	// COALESCEd to false and negated. This is what makes `!=` null-safe.
+	case strings.HasPrefix(fragment, "(NOT COALESCE((") && strings.HasSuffix(fragment, "), FALSE))"):
+		inner := strings.TrimSuffix(strings.TrimPrefix(fragment, "(NOT COALESCE(("), "), FALSE))")
+		return !sqlMatchesAbsentRow(t, inner)
 
-	case strings.Contains(fragment, "IS DISTINCT FROM ?"):
-		// NULL IS DISTINCT FROM <non-null operand> -> TRUE.
+	// The unset test: COALESCE(NULL, '') is the empty text.
+	case strings.HasPrefix(fragment, "(COALESCE(") && strings.HasSuffix(fragment, " <> '')"):
+		return false
+	case strings.HasPrefix(fragment, "(COALESCE(") && strings.HasSuffix(fragment, " = '')"):
 		return true
 
-	// Every remaining shape compares NULL directly, which yields NULL --
-	// never true -- so the row is not returned. Guarding `= ?` against
-	// the compound operators keeps `>=` / `<=` from being read as
-	// equality even though the answer happens to coincide.
-	case strings.Contains(fragment, "= ?"),
-		strings.Contains(fragment, "> ?"),
-		strings.Contains(fragment, "< ?"),
-		strings.Contains(fragment, "IN (?)"):
+	// A typed comparison: jsonb_typeof(NULL) = '<type>' is NULL, so a CASE
+	// takes its ELSE FALSE and an AND is NULL -- neither returns the row.
+	case strings.HasPrefix(fragment, "(CASE WHEN jsonb_typeof("),
+		strings.HasPrefix(fragment, "(jsonb_typeof("):
 		return false
 	}
 	t.Fatalf("unrecognised SQL shape %q -- extend sqlMatchesAbsentRow deliberately "+
@@ -221,7 +284,7 @@ func TestAbsentPayloadField_SQLAndPostFilterAgree(t *testing.T) {
 
 			compiled, err := compilePayloadComparison([]string{"deleted"}, tc.op, tc.value)
 			require.NoError(t, err)
-			sqlMatch := sqlMatchesAbsentRow(t, compiled.sql, tc.value)
+			sqlMatch := sqlMatchesAbsentRow(t, compiled.sql)
 
 			require.Equal(t, post, sqlMatch,
 				"SQL push-down and in-process post-filter disagree about an absent field for %v %v; "+
@@ -232,14 +295,17 @@ func TestAbsentPayloadField_SQLAndPostFilterAgree(t *testing.T) {
 	}
 }
 
-// The null-safe rule is specific to `!=`. `not in` and the ordered
+// The null-safe rule is specific to `!=`. `not in`, `in` and the ordered
 // comparisons treat an absent field as a NON-match, so
 // `deleted not in [true]` does NOT behave like `deleted != true` -- an
 // asymmetry an author can reasonably get wrong, and one the authoring
-// rules now state, so it is pinned here too.
+// rules state, so it is pinned here too.
 //
-// SQL agrees by construction: NOT IN / IN / `>` against a NULL
-// extraction all yield NULL, which does not return the row.
+// The fragments are asserted exactly and then JUDGED by the model rather
+// than probed for tokens. The old version of this test asserted that no
+// fragment here contained COALESCE; edition 2026's `not in` carries the
+// unset test on purpose -- the COALESCE "is set" conjunct is precisely what
+// EXCLUDES the absent row -- so the token was never the property.
 func TestAbsentPayloadField_OnlyNotEqualsIsNullSafe(t *testing.T) {
 	node := absentFieldNode()
 	for _, tc := range []struct {
@@ -248,21 +314,16 @@ func TestAbsentPayloadField_OnlyNotEqualsIsNullSafe(t *testing.T) {
 		value   any
 		wantSQL string
 	}{
-		{"not in", OpOut, []any{true}, `((payload #>> '{deleted}')::boolean NOT IN (?))`},
-		{"in", OpIn, []any{true}, `((payload #>> '{deleted}')::boolean IN (?))`},
-		{"greater than", OpGt, 5, `((payload #>> '{deleted}')::numeric > ?)`},
-		// A STRING collection compiles to an entirely different shape
-		// (jsonb_typeof / jsonb_exists_any, to support array-valued
-		// payload fields). It must reach the same answer for an absent
-		// field: jsonb_typeof(NULL) is NULL, so neither disjunct holds.
-		{
-			"in, string collection", OpIn, []any{"a", "b"},
-			`((jsonb_typeof(payload->'deleted') = 'array' AND jsonb_exists_any(payload->'deleted', ?::text[])) OR (payload #>> '{deleted}' IN (?)))`,
-		},
-		{
-			"not in, string collection", OpOut, []any{"a", "b"},
-			`((jsonb_typeof(payload->'deleted') = 'array' AND NOT jsonb_exists_any(payload->'deleted', ?::text[])) OR (jsonb_typeof(payload->'deleted') != 'array' AND payload #>> '{deleted}' NOT IN (?)))`,
-		},
+		{"not in", OpOut, []any{true},
+			`((COALESCE(payload #>> '{deleted}', '') <> '') AND (NOT COALESCE(((CASE WHEN jsonb_typeof(payload->'deleted') = 'boolean' THEN (payload #>> '{deleted}')::boolean IN (?) ELSE FALSE END)), FALSE)))`},
+		{"in", OpIn, []any{true},
+			`(CASE WHEN jsonb_typeof(payload->'deleted') = 'boolean' THEN (payload #>> '{deleted}')::boolean IN (?) ELSE FALSE END)`},
+		{"greater than", OpGt, 5,
+			`(CASE WHEN jsonb_typeof(payload->'deleted') = 'number' THEN (payload #>> '{deleted}')::numeric > ? ELSE FALSE END)`},
+		{"in, string collection", OpIn, []any{"a", "b"},
+			`(jsonb_typeof(payload->'deleted') = 'string' AND payload #>> '{deleted}' IN (?))`},
+		{"not in, string collection", OpOut, []any{"a", "b"},
+			`((COALESCE(payload #>> '{deleted}', '') <> '') AND (NOT COALESCE(((jsonb_typeof(payload->'deleted') = 'string' AND payload #>> '{deleted}' IN (?))), FALSE)))`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			match, err := nodeMatchesComparison(node, absentFieldComparison(tc.op, tc.value), map[string]map[string]any{})
@@ -273,10 +334,40 @@ func TestAbsentPayloadField_OnlyNotEqualsIsNullSafe(t *testing.T) {
 			compiled, err := compilePayloadComparison([]string{"deleted"}, tc.op, tc.value)
 			require.NoError(t, err)
 			require.Equal(t, tc.wantSQL, compiled.sql)
-			require.NotContains(t, compiled.sql, "IS DISTINCT FROM",
-				"%s must not acquire null-safe semantics", tc.name)
-			require.NotContains(t, compiled.sql, "COALESCE",
-				"%s must not acquire the empty-string carve-out", tc.name)
+			require.False(t, sqlMatchesAbsentRow(t, compiled.sql),
+				"%s must not return the absent row in SQL either", tc.name)
+		})
+	}
+}
+
+// `in` is `==` against each member (memql#5366), so a list that names an
+// UNSET member -- "" or nil -- admits the unset rows, and a list that does not
+// never does.
+func TestAbsentPayloadField_InAListWithAnUnsetMember(t *testing.T) {
+	node := absentFieldNode()
+	for _, tc := range []struct {
+		name    string
+		value   any
+		wantSQL string
+		want    bool
+	}{
+		{"an empty-string member", []any{"", "a"},
+			`((COALESCE(payload #>> '{deleted}', '') = '') OR (jsonb_typeof(payload->'deleted') = 'string' AND payload #>> '{deleted}' IN (?)))`, true},
+		{"a nil member", []any{nil, "a"},
+			`((COALESCE(payload #>> '{deleted}', '') = '') OR (jsonb_typeof(payload->'deleted') = 'string' AND payload #>> '{deleted}' IN (?)))`, true},
+		{"only unset members", []any{nil, ""},
+			`(COALESCE(payload #>> '{deleted}', '') = '')`, true},
+		{"no unset member", []any{"a"},
+			`(jsonb_typeof(payload->'deleted') = 'string' AND payload #>> '{deleted}' IN (?))`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			compiled, err := compilePayloadComparison([]string{"deleted"}, OpIn, tc.value)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantSQL, compiled.sql)
+			require.Equal(t, tc.want, sqlMatchesAbsentRow(t, compiled.sql))
+			match, err := nodeMatchesComparison(node, absentFieldComparison(OpIn, tc.value), map[string]map[string]any{})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, match)
 		})
 	}
 }
@@ -306,7 +397,7 @@ func TestAbsentPayloadField_MisspelledNotEqualsMatchesEveryRow(t *testing.T) {
 	match, err = nodeMatchesComparison(deleted, typo, map[string]map[string]any{})
 	require.NoError(t, err)
 	require.True(t, match,
-		"documented fail-open (memql#2783): a typo'd property is ABSENT, absent is DISTINCT FROM true, "+
+		"documented fail-open (memql#2783): a typo'd property is ABSENT, absent is not equal to true, "+
 			"so the predicate matches a row it was written to exclude. Mitigation is field-existence "+
 			"validation (memql#2781), not a change of comparison semantics -- reversing this would "+
 			"re-break #1685.")
