@@ -236,12 +236,40 @@ func TestLanguageLineDomainOf(t *testing.T) {
 	}
 }
 
+// TestADomainNameMayCarryAColon: a tree path can carry a colon of its own --
+// a pack domain may be named "shop:v2", since ValidatePackDomain refuses only
+// "/". Only the loaders' own prefix, "unified:", marks a loader origin. Read
+// as an origin, "shop:v2/queries.memql" put the file in a domain "v2", which
+// refused boot with language_line_missing for a domain that declares its line.
+func TestADomainNameMayCarryAColon(t *testing.T) {
+	lines, problems := ResolveLanguageLines(fstest.MapFS{
+		"shop:v2/memql.toml":    manifestFile("memql = \"1.0\"\nedition = \"2026\"\n"),
+		"shop:v2/queries.memql": memqlFile(),
+	}, currentCore())
+	if len(problems) != 0 {
+		t.Fatalf("a domain named shop:v2 that declares its line must resolve with no problem, got %+v", problems)
+	}
+	want := LanguageLine{Domain: "shop:v2", Source: "shop:v2/memql.toml", Language: "1.0", Edition: "2026"}
+	if len(lines) != 1 || lines["shop:v2"] != want {
+		t.Fatalf("want exactly the line of shop:v2, %+v; got %+v", want, lines)
+	}
+	// The same file named by its path and by either loader origin.
+	for _, p := range []string{"shop:v2/queries.memql", "unified:shop:v2/queries.memql", "unified:shop:v2/queries.memql:listOrders"} {
+		if got := LanguageLineDomainOf(p); got != "shop:v2" {
+			t.Errorf("LanguageLineDomainOf(%q) = %q, want shop:v2", p, got)
+		}
+		if line, ok := lines.For(p); !ok || line != want {
+			t.Errorf("For(%q) = %+v, %v; want the line of shop:v2", p, line, ok)
+		}
+	}
+}
+
 // MountableDomainRoot is the one rule memqllint and memqlmigrate ask about a
 // directory handed to them ITSELF: is it a domain a mount would read? Not a
 // `_`/`.` name, not a core domain, not a directory holding no .memql file,
 // and not a sub-namespace -- of a parent holding .memql files (agents/roles),
-// or of a core domain whose files all sit in sub-namespaces
-// (shopify/generated).
+// of a parent carrying a memql.toml (beta/sub), or of a core domain whose
+// files all sit in sub-namespaces (shopify/generated).
 func TestMountableDomainRoot(t *testing.T) {
 	tree := fstest.MapFS{
 		"bundle/znas/concepts.memql":    memqlFile(),
@@ -251,6 +279,8 @@ func TestMountableDomainRoot(t *testing.T) {
 		"bundle/empty/prompts/x.tmpl":   {Data: []byte("{{.x}}")},
 		"agents/concepts.memql":         memqlFile(),
 		"agents/roles/civic.memql":      memqlFile(),
+		"beta/memql.toml":               manifestFile("memql = \"1.0\"\nedition = \"2026\"\n"),
+		"beta/sub/concepts.memql":       memqlFile(),
 		"shopify/generated/order.memql": memqlFile(),
 	}
 	core := currentCore("library", "shopify")
@@ -264,6 +294,7 @@ func TestMountableDomainRoot(t *testing.T) {
 		{"bundle", "library", false},
 		{"bundle", "empty", false},
 		{"agents", "roles", false},
+		{"beta", "sub", false},
 		{"shopify", "generated", false},
 	} {
 		parent, err := fs.Sub(tree, tc.parent)

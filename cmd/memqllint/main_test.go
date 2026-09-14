@@ -256,10 +256,11 @@ query item queryByStatus {
 // domain directory, but the parity pass mounts only one that directly holds a
 // .memql file (MountOverlayDomains) -- so a domain holding only a
 // sub-namespace refuses boot without its line and is Load's alone to report.
-// memqllint drops Load's copy of a refusal only when the parity pass carries
-// the same one, never merely because the parity pass ran: here it reports
-// demo's (mounted, refused by both passes, printed once) and beta's (Load's
-// alone), and a dedupe that dropped every Load refusal would lose beta's.
+// memqllint prints a refusal both passes make once, keeping Load's copy and
+// dropping the parity pass's echo of it: here it reports demo's (mounted,
+// refused by both passes, printed once) and beta's (Load's alone). A dedupe
+// that kept both copies would print demo's twice, and one that dropped Load's
+// copies whenever the parity pass ran would lose beta's.
 func TestRun_RefusedLineOutsideTheParityMountIsStillReported(t *testing.T) {
 	files := map[string]string{
 		"demo/concepts.memql":     testConcepts,
@@ -401,6 +402,31 @@ func TestRun_ADirectoryNoMountReadsAsADomainGetsNoLanguageLineCheck(t *testing.T
 			strings.Contains(out, "language_line") {
 			t.Errorf("%s: run() = %d, want 0 with no language-line output:\n%s", target, code, out)
 		}
+	}
+}
+
+// TestRun_ASubNamespaceOfADeclaredDomainGetsNoLanguageLineCheck: beta carries
+// the memql.toml and keeps its files one level down, in beta/sub, a namespace
+// of beta. Linting beta/sub -- or a file in it -- must not ask for the line of
+// a domain "sub" that no mount reads: the parent's memql.toml makes the
+// parent the domain.
+func TestRun_ASubNamespaceOfADeclaredDomainGetsNoLanguageLineCheck(t *testing.T) {
+	bundle := writeTreeAsIs(t, map[string]string{
+		"beta/memql.toml":         dslfs.Manifest{Language: langparser.LanguageVersion, Edition: langparser.Edition}.Render(),
+		"beta/sub/concepts.memql": "/// A widget.\nconcept widget {\n  label  string\n}\n",
+	})
+	sub := filepath.Join(bundle, "beta", "sub")
+	for _, target := range []string{sub, filepath.Join(sub, "concepts.memql")} {
+		code, report, out := jsonReport(t, target)
+		if code != 0 || len(report.Errors) != 0 || len(report.Warnings) != 0 || strings.Contains(out, "language line") ||
+			strings.Contains(out, "language_line") {
+			t.Errorf("%s: run() = %d, want 0 with no language-line output:\n%s", target, code, out)
+		}
+	}
+	// Positive control: the bundle, which mounts beta, reads it as boot does,
+	// and it is clean -- so the silence above is not a tree that fails to load.
+	if code, report, out := jsonReport(t, bundle); code != 0 || len(report.Errors) != 0 {
+		t.Errorf("the bundle: run() = %d, want 0 with no error:\n%s", code, out)
 	}
 }
 
