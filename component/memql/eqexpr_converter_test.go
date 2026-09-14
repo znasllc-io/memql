@@ -1,6 +1,7 @@
 package memql
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -15,12 +16,17 @@ import (
 // converts-through a bang negation (boolean inversion) and keeps the scope
 // gate.
 
-// The fylo#44 live-mount law, at the loader altitude: a nested cond whose
-// predicate compares a coalesce (either spelling) to a literal must load.
+// The fylo#44 live-mount law, at the loader altitude: a nested conditional
+// whose predicate compares a coalesced value to a literal must load -- and,
+// since edition 2026 evaluates the returned expression with EvalExpr on the
+// LogicRunner, it must answer the branch the predicate picks. cond() and
+// coalesce() are retired; the one spelling is `? :` over `??`, and `??` binds
+// tighter than `==`, so the unparenthesised predicate compares the coalesced
+// value exactly as the parenthesised one does.
 func TestLogicNestedCondCoalescePredicate_Loads(t *testing.T) {
 	for name, predicate := range map[string]string{
-		"coalesce-spelling": `coalesce(args.b, "") == "y"`,
 		"operator-spelling": `args.b ?? "" == "y"`,
+		"parenthesised":     `(args.b ?? "") == "y"`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			src := strings.Join([]string{
@@ -31,17 +37,31 @@ func TestLogicNestedCondCoalescePredicate_Loads(t *testing.T) {
 				"    b string",
 				"  }",
 				"  body {",
-				"    return cond(args.a == \"x\", cond(" + predicate + ", \"1\", \"2\"), \"3\")",
+				"    return args.a == \"x\" ? (" + predicate + " ? \"1\" : \"2\") : \"3\"",
 				"  }",
 				"}",
 			}, "\n")
 
 			fn, err := tryParseNewFunctionSyntax("logicNestedCondProbe", "logic", src, "common.logic.memql", dotAccessLoadRegistry())
 			if err != nil {
-				t.Fatalf("nested cond with a %s predicate must load: %v", name, err)
+				t.Fatalf("nested conditional with a %s predicate must load: %v", name, err)
 			}
-			if fn == nil || fn.Expr == nil {
-				t.Fatalf("expected fn.Expr to be set")
+			pc, ok := fn.Expr.(*PlanConstExpression)
+			if !ok {
+				t.Fatalf("fn.Expr = %T, want the returned expression as a *PlanConstExpression", fn.Expr)
+			}
+			for _, tc := range []struct {
+				args map[string]any
+				want string
+			}{
+				{map[string]any{"a": "x", "b": "y"}, "1"},
+				{map[string]any{"a": "x"}, "2"},
+				{map[string]any{"a": "z", "b": "y"}, "3"},
+			} {
+				got, err := EvalExpr(context.Background(), pc.Expr, MapScope{"args": tc.args}, EvalOptions{})
+				if err != nil || got != tc.want {
+					t.Errorf("args %v: %#v, %v; want %q", tc.args, got, err, tc.want)
+				}
 			}
 		})
 	}
