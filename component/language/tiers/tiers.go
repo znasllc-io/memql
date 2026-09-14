@@ -1,13 +1,15 @@
-// Package tiers names the positions an expression can be written in.
+// Package tiers names the positions an expression can be written in, and says
+// what each of them admits.
 //
 // It is the tier manifest of D11 in
-// docs/superpowers/specs/2026-09-13-dsl-v1-language-freeze-program-design.md,
-// and this is its seed: the positions only. The epic that owns the expression
-// language (dsl-v1-expressions) adds, per position, the node kinds and
-// functions allowed there and the tier each belongs to (P, pushed down to SQL;
-// M, evaluated in process). Until then the conformance corpus's second
-// completeness gate reads Positions() alone and asks each position for one
-// case that loads and one that is refused (test/conformance/2026/expr/).
+// docs/superpowers/specs/2026-09-13-dsl-v1-language-freeze-program-design.md.
+// This file holds the positions. manifest.go holds, per position, the tier it
+// evaluates in (P, pushed down to SQL; M, evaluated in process), the node
+// kinds and catalog functions it admits, and whether a spec or trait may be
+// applied there; the functions themselves are catalogued in
+// component/language/functions. The conformance corpus's second completeness
+// gate reads Positions() and asks each position for one case that loads and
+// one that is refused (test/conformance/2026/expr/).
 //
 // A position's value is also the name of its corpus directory, so the values
 // are part of the corpus layout and do not change once cases are written
