@@ -609,3 +609,151 @@ spec item hasStatus = row => row.status != null`
 		}
 	}
 }
+
+// lintProbeTrigger is the trigger the automation cases fire on.
+const lintProbeTrigger = "@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\n"
+
+var lintRewriteRefusalCases = []struct {
+	name   string
+	src    string
+	needle string
+	nth    int
+	want   string
+}{
+	// Query clauses.
+	{"refine without paginate", "query thing q {\n  filter row => row.a == 1\n  refine row => row.b == 2\n}\n", "refine", 1, "`refine` requires `paginate`"},
+	{"refine with count", "query thing q {\n  filter row => row.a == 1\n  refine row => row.b == 2\n  count\n}\n", "refine", 1, "`refine` cannot be combined with `count`"},
+	{"count with shape", "query thing q {\n  filter row => row.a == 1\n  shape thingCard\n  count\n}\n", "count", 1, "`count` and `shape` are mutually exclusive"},
+	{"count with paginate", "query thing q {\n  filter row => row.a == 1\n  count\n  paginate 10\n}\n", "count", 1, "`count` cannot be combined with `sort` or `paginate`"},
+	{"@unbounded with no reason", "@unbounded\nquery thing q {\n  filter row => row.a == 1\n}\n", "@unbounded", 1, "`@unbounded` requires a reason string"},
+	{"@unbounded with an empty reason", "@unbounded(\"  \")\nquery thing q {\n  filter row => row.a == 1\n}\n", "@unbounded", 1, "requires a non-empty reason string"},
+	{"@unbounded with paginate", "@unbounded(\"every one\")\nquery thing q {\n  filter row => row.a == 1\n  paginate 10\n}\n", "@unbounded", 1, "cannot be combined with `paginate` or `sort`"},
+	{"@unbounded with count", "@unbounded(\"every one\")\nquery thing q {\n  filter row => row.a == 1\n  count\n}\n", "@unbounded", 1, "cannot be combined with `count`"},
+	{"an inline concept line", "query thing q {\n  concept thing\n  filter row => row.a == 1\n}\n", "concept", 1, "inline `concept` line is no longer supported"},
+	{"an unknown clause", "query thing q {\n  filter row => row.a == 1\n  limit 10\n}\n", "limit", 1, "unknown struct-query field"},
+	{"a body block in a query", "query thing q {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
+	{"a query with no concept", "query listThings {\n  filter row => row.a == 1\n}\n", "listThings", 1, "missing concept binding"},
+	{"an unclosed query", "query thing q {\n  filter row => row.a == 1\n", "{", 1, "missing closing brace"},
+
+	// Mutation blocks and fields.
+	{"two write blocks", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n  }\n  update {\n    id: args.id\n  }\n}\n", "update", 1, "exactly one write block"},
+	{"a write block restating its concept", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert thing {\n    id: args.id\n  }\n}\n", "insert", 1, "is retired -- drop the restated concept"},
+	{"an unknown block", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n  }\n  extra {\n    a: 1\n  }\n}\n", "extra", 1, "unexpected `extra { ... }` block"},
+	{"a field outside the write block", "mutate thing m {\n  args {\n    id string @required\n  }\n  status: \"x\"\n  insert {\n    id: args.id\n  }\n}\n", "status: \"x\"", 1, "unexpected field"},
+	{"a second nested accept", "mutate thing m {\n  args {\n    id string @required\n    name string\n  }\n  insert {\n    accept { id }\n    accept { name }\n  }\n}\n", "accept", 2, "more than one nested `accept"},
+	{"a field beside a nested accept", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert {\n    accept { id }\n    status: \"x\"\n  }\n}\n", "status: \"x\"", 1, "carries the field"},
+	{"an accept entry that is a key: value", "mutate thing m {\n  args {\n    id string @required\n  }\n  accept { id, status: \"active\" }\n}\n", "status: \"active\"", 1, "looks like a `key: value` pair"},
+	{"an accepted field with no arg", "mutate thing m {\n  args {\n    id string @required\n  }\n  accept { id, name }\n}\n", "name", 1, "has no matching arg"},
+	{"an empty accept", "mutate thing m {\n  args {\n    id string @required\n  }\n  accept { }\n}\n", "accept", 1, "block is empty"},
+	{"a top-level accept beside an insert", "mutate thing m {\n  args {\n    id string @required\n  }\n  accept { id }\n  insert {\n    id: args.id\n  }\n}\n", "accept", 1, "cannot mix the accept/stamp form with an explicit"},
+	{"a second id", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n    id: args.id\n  }\n}\n", "id:", 2, "duplicate `id:` line"},
+	{"a bare mirror of a path", "mutate thing m {\n  args {\n    id string @required\n    user object\n  }\n  insert {\n    id: args.id\n    args.user.id\n  }\n}\n", "args.user.id", 1, "has no key"},
+	{"an update with no id", "mutate thing m {\n  args {\n    name string\n  }\n  update {\n    name: args.name\n  }\n}\n", "update", 1, "update block requires an `id: <expr>` line"},
+	{"a body block in a mutation", "mutate thing m {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
+
+	// Logic.
+	{"a logic with no body block", "logic noBody {\n  args {\n    a string\n  }\n}\n", "noBody", 1, "must wrap its procedural code in a `body { }` block"},
+	{"a logic body with no return", "logic noReturn {\n  args {\n    a string\n  }\n  body {\n    x := f(a: args.a)\n  }\n}\n", "x :=", 1, "must end with a `return <expr>` terminator"},
+
+	// Automation steps.
+	{"an empty step", lintProbeTrigger + "automation a {\n  step first {\n  }\n}\n", "step", 1, "body is empty"},
+	{"a forEach with no in", lintProbeTrigger + "automation a {\n  step loop {\n    forEach t of event.payload.items {\n      logic touch(x: t)\n    }\n  }\n}\n", "forEach", 1, "expected `in`"},
+	{"a conditional step with no body", lintProbeTrigger + "automation a {\n  step s {\n    if event.payload.a == 1\n  }\n}\n", "if", 1, "expected `{` after the if condition"},
+	{"an automation with no steps", lintProbeTrigger + "automation noSteps {\n  args {\n    x string\n  }\n}\n", "noSteps", 1, "at least one `step` is required"},
+	{"a body block in an automation", lintProbeTrigger + "automation a {\n  body {\n    x := 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
+
+	// A terse automation.
+	{"an args block before a terse automation", "args {\n  x string\n}\nautomation onThing @trigger(event=\"node.created\", concept=\"v1:probe:thing\") => logic noteThing\n", "args", 1, "must not be preceded by an `args { ... }` block"},
+
+	// Text the stages before moved: a spec StripNonProceduralBlocks folds to
+	// one line, and a query the query stage lowers to fewer lines.
+	{"a refine below a stripped spec and a lowered query", `use probe.concepts.{ thing }
+
+spec thing isOpen {
+  return status == "open"
+}
+
+query thing first {
+  args {
+    a string @required
+  }
+  filter row => row.a == args.a
+  sort "row.createdAt", "desc"
+  paginate 10
+}
+
+query thing second {
+  filter row => row.a == "x"
+  refine row => row.b == 2
+}
+`, "refine", 1, "`refine` requires `paginate`"},
+}
+
+// TestRun_RewriteRefusalNamesTheAuthorsLineAndColumn: memqllint reports each
+// refusal the struct-form rewriter makes of authored text at the file's line
+// and column of that text -- `refine` without `paginate` at the refine clause,
+// a second write block at its keyword, an empty step at its `step` -- where it
+// used to print no position at all (memql#5364). Every case is its own file,
+// since a file's rewrite stops at its first refusal; the table is the parser's
+// (component/language/parser/rewrite_errors_test.go).
+func TestRun_RewriteRefusalNamesTheAuthorsLineAndColumn(t *testing.T) {
+	files := map[string]string{
+		"probe/concepts.memql": `@version("1.0.0")
+@namespace("probe")
+@description("A probe thing.")
+concept thing {
+  a       string  @description("A.")
+  b       string  @description("B.")
+  name    string  @description("Name.")
+  status  string  @description("Status.")
+}`,
+	}
+	for i, c := range lintRewriteRefusalCases {
+		files["probe/case"+strconv.Itoa(i)+".memql"] = c.src
+	}
+	root := writeTree(t, files)
+	code, out := captureRun(t, []string{root})
+	if code != 1 {
+		t.Fatalf("run() = %d, want 1; output:\n%s", code, out)
+	}
+	parity := 0
+	for i, c := range lintRewriteRefusalCases {
+		off, from := -1, 0
+		for n := 0; n < c.nth; n++ {
+			j := strings.Index(c.src[from:], c.needle)
+			if j < 0 {
+				t.Fatalf("%s: %q occurs fewer than %d times", c.name, c.needle, c.nth)
+			}
+			off, from = from+j, from+j+1
+		}
+		lineStart := strings.LastIndex(c.src[:off], "\n") + 1
+		line, col := 1+strings.Count(c.src[:off], "\n"), 1+utf8.RuneCountInString(c.src[lineStart:off])
+		file := "probe/case" + strconv.Itoa(i) + ".memql: "
+		at := "rewrite error at line " + strconv.Itoa(line) + ", column " + strconv.Itoa(col) + ": "
+		want := file + "parse: " + at
+		idx := strings.Index(out, want)
+		if idx < 0 {
+			t.Errorf("%s: the report does not carry %q", c.name, want)
+			continue
+		}
+		if rest := out[idx:]; !strings.Contains(rest[:strings.IndexByte(rest+"\n", '\n')], c.want) {
+			t.Errorf("%s: the refusal at %d:%d is not the one the case makes (%q): %s", c.name, line, col, c.want, rest[:strings.IndexByte(rest+"\n", '\n')])
+		}
+		// The engine-parity pass, which compiles each construct from its own
+		// slice of the file, names the same place.
+		for _, l := range strings.Split(out, "\n") {
+			if strings.Contains(l, file) && strings.Contains(l, "(parse): ") {
+				parity++
+				if !strings.Contains(l, "(parse): "+at) {
+					t.Errorf("%s: the parity pass places it elsewhere: %s", c.name, l)
+				}
+			}
+		}
+	}
+	if parity == 0 {
+		t.Error("no case reached the engine-parity pass: the assertion on its positions checked nothing")
+	}
+	if t.Failed() {
+		t.Logf("output:\n%s", out)
+	}
+}

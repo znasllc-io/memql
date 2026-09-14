@@ -186,7 +186,7 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 					"component", ComponentName, "path", path, "error", lerr)
 			}
 			problems = append(problems, automationLoadProblem{
-				Path: path, Phase: "terseLowering", Err: lerr.Error(),
+				Path: path, Phase: "terseLowering", Err: languageParser.PositionRewriteError(source, lerr).Error(),
 			})
 			return nil
 		}
@@ -205,7 +205,7 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 		}
 		for _, slice := range slices {
 			origin := "unified:" + path + ":" + slice.Name
-			automation, compileErr := l.compileMemQL(anchoredAutomationSlice(authoredFile, slice.Source), origin)
+			automation, compileErr := l.compileUnifiedSlice(authoredFile, slice, origin)
 			if compileErr != nil {
 				// EVERY compile error is a hard problem -- there is no
 				// by-design skip left to carve out. The old code exempted
@@ -594,17 +594,31 @@ var _ = io.ReadAll
 // future revision needs it.
 var _ = fs.ValidPath
 
-// anchoredAutomationSlice places a slice on its line of the file as the author
-// wrote it (languageParser.AnchorSource), so a parse error inside the
-// automation names the file's line, not the slice's (memql#5364). A longhand
-// automation's slice is the author's text verbatim and is found in the file;
-// a terse one's is the lowering's longhand, found nowhere in it, and keeps
-// positions relative to itself -- as does a slice the file holds twice, where
-// either line would be a guess.
-func anchoredAutomationSlice(authoredFile, slice string) string {
-	i := strings.Index(authoredFile, slice)
-	if i < 0 || (i > 0 && authoredFile[i-1] != '\n') || strings.Contains(authoredFile[i+1:], slice) {
-		return slice
+// compileUnifiedSlice compiles one automation slice of the terse-lowered file,
+// reporting positions against what the author wrote in authoredFile.
+func (l *Loader) compileUnifiedSlice(authoredFile string, slice automationSlice, origin string) (*Automation, error) {
+	return l.compileMemQLFrom(authoredAutomationText(authoredFile, slice), slice.Source, origin)
+}
+
+// authoredAutomationText is what the author wrote for the automation a slice
+// of the terse-lowered file holds, placed on its line of the file
+// (languageParser.AnchorSource), for compileMemQLFrom to report positions
+// against (memql#5364). A longhand automation's slice is the author's text
+// verbatim and is found in the file. A terse one's is the lowering's longhand,
+// found nowhere in it, so the text is the terse header the author wrote, with
+// its preamble: the position markers align the longhand's tokens with it, and
+// a refusal inside the header's @filter lands on the author's token. A slice
+// the file holds twice, where either line would be a guess, keeps positions
+// relative to itself.
+func authoredAutomationText(authoredFile string, slice automationSlice) string {
+	if i := strings.Index(authoredFile, slice.Source); i >= 0 {
+		if (i > 0 && authoredFile[i-1] != '\n') || strings.Contains(authoredFile[i+1:], slice.Source) {
+			return slice.Source
+		}
+		return languageParser.AnchorSource(slice.Source, 1+strings.Count(authoredFile[:i], "\n"))
 	}
-	return languageParser.AnchorSource(slice, 1+strings.Count(authoredFile[:i], "\n"))
+	if text, start, ok := languageParser.TerseAutomationSource(authoredFile, slice.Name); ok {
+		return languageParser.AnchorSource(text, 1+strings.Count(authoredFile[:start], "\n"))
+	}
+	return slice.Source
 }

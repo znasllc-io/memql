@@ -43,9 +43,13 @@ Three consequences that bite:
   query's `filter` may continue onto lines that open with a binary operator,
   or after a line that ends on one (`joinStructQueryContinuations`,
   memql#4123); any other line starts a new field.
-- **A parse error can come from the rewriter, not the parser.** A rewriter
-  refusal carries no position (Sense anchors it on the construct's header);
-  when a message names no line, check `parser/rewriter.go` first.
+- **A parse error can come from the rewriter, not the parser.** Its message
+  leads with `rewrite error at line L, column C:` rather than `parse error`:
+  a rewriter refusal names the authored text it refuses (a `*RewriteError`,
+  `parser/rewrite_errors.go`), and a site that reports it places it with
+  `parser.PositionRewriteError(authored, err)`. A new refusal in the rewriter
+  should say which text it refuses (`refuseAtBody`, `refuseClause`, ...);
+  one that does not falls back to the construct's name.
 - **The author's line and column survive the rewrite only because every
   parse site marks the lowering** (memql#5364): `parser.PositionLowering(
   authored, lowered)` writes position markers -- block comments the lexer
