@@ -101,8 +101,9 @@ clock has one answer on every run.
 A `load_ok` verdict is only evidence if the engine read the case, so the
 runner rules out the two ways a load can raise no problem having read nothing:
 
-- **A construct name two files declare** fails the corpus, naming both. The
-  engine's registries are flat, and the second declaration would never load.
+- **A construct name two files declare** fails the corpus, naming both. Two
+  domains declaring one name make every bare lookup of it ambiguous, so the
+  load would say nothing about which declaration a call reaches.
 - **A declaration the engine did not register** fails the case: the runner
   boots the cases that loaded a second time and looks each declared query,
   mutation, logic, spec, trait, tool and concept up. A construct form no loader

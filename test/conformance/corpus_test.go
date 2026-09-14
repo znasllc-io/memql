@@ -679,10 +679,11 @@ func corpusAutomationProblems(t *testing.T, tree fs.FS) []string {
 
 // A load_ok verdict is only evidence if the engine read the case. Two ways it
 // can pass having read nothing are ruled out here: a construct name another
-// file already took (the engine's registries are flat and keep the first
-// declaration, silently), and a construct no loader picked up at all -- a
-// declaration form the loaders' slicers do not recognise raises no problem,
-// because nothing ever parsed it.
+// file already took (two domains declaring one name make every bare lookup of
+// it ambiguous, and the load says nothing about which declaration a call
+// reaches), and a construct no loader picked up at all -- a declaration form
+// the loaders' slicers do not recognise raises no problem, because nothing
+// ever parsed it.
 
 // corpusDeclGroup names the registry a declaration lands in, "" for a
 // declaration this check does not track. Concepts are not tracked: their ids
@@ -720,7 +721,7 @@ func corpusCheckConstructNames(t *testing.T, runs []*corpusRun) {
 			}
 			key := group + " " + name
 			if prev, taken := owner[key]; taken && prev != file {
-				t.Errorf("%s %q is declared by both %s and %s: the engine's registries keep the first declaration and drop the other silently, so a case could pass having loaded nothing -- rename one", group, name, prev, file)
+				t.Errorf("%s %q is declared by both %s and %s: two domains declaring one name make every bare lookup of it ambiguous, so a case could pass without the engine reading the declaration it names -- rename one", group, name, prev, file)
 				continue
 			}
 			owner[key] = file
