@@ -547,28 +547,39 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				return nil, fmt.Errorf("function %q mutation body must be an insert() statement, got %T", expectedName, funcDef.Body)
 			}
 
-			payloadObj, err := parsePayloadRawToTemplate(stmt.PayloadRaw)
-			if err != nil {
-				return nil, fmt.Errorf("function %q: parse payload: %w", expectedName, err)
+			// If the mutation body didn't specify a concept (implicit from
+			// use), fill it from BoundConcept. It is also the concept C5
+			// checks the fields of.
+			mutationConcept := stmt.Concept
+			if mutationConcept == "" && boundConcept != "" {
+				mutationConcept = boundConcept
 			}
 
-			// C5 (memql#2035): a caller-supplied arg can never write a
-			// field the concept marks @internal or @serverSet -- those
-			// are server-only / server-stamped. This gate makes the
-			// accept/stamp sugar safe (an `accept { internalField }`
-			// desugars to `internalField: args.internalField`, which is
-			// rejected here) AND catches a hand-written `insert` that
-			// binds a sensitive field straight from caller args. The
-			// concept is resolved from the signature/use binding; an
-			// unannotated concept (today's whole tree) has no sensitive
-			// fields, so this is a no-op until concepts adopt the
-			// annotations.
-			sensitiveConcept := stmt.Concept
-			if sensitiveConcept == "" {
-				sensitiveConcept = boundConcept
-			}
-			if err := validateMutationCallerArgs(registry, sensitiveConcept, expectedName, payloadObj); err != nil {
-				return nil, err
+			// The values. Parsed with the edition-2026 grammar
+			// (Options.ExpressionsV1), the statement carries parsed nodes --
+			// PayloadExpr and the four slots -- and newMutationTemplateV1
+			// builds, checks and lays them out (mutation_values_v1.go);
+			// otherwise the string half reads PayloadRaw's text. Everything
+			// after this block is the same for both.
+			var tmpl *FunctionMutationTemplate
+			if funcDef.ExpressionsV1 {
+				v1, err := mutationTemplateFromStmtV1(stmt, mutationConcept)
+				if err != nil {
+					return nil, fmt.Errorf("function %q: %w", expectedName, err)
+				}
+				// C5 (below, for the string half) reads the block's
+				// fields; for a v1 template those are its laid-out payload
+				// and overlay, with parsed nodes at the leaves.
+				if err := validateMutationCallerArgs(registry, mutationConcept, expectedName, mutationBlockFieldsV1(v1)); err != nil {
+					return nil, err
+				}
+				tmpl = v1
+			} else {
+				legacy, err := mutationTemplateFromStmtLegacy(stmt, mutationConcept, registry, expectedName)
+				if err != nil {
+					return nil, err
+				}
+				tmpl = legacy
 			}
 
 			mergeFields, err := mutationMergeFields(funcDef, stmt.Kind)
@@ -610,69 +621,14 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
 			}
 
-			// Handle object-literal syntax: insert("concept", { id: ..., payload: {...} })
-			// If the payloadObj includes an id or payload key, normalize them.
-			var idTemplate any = stmt.IDTemplate
-			var createdAtTemplate any = stmt.CreatedAtTemplate
-			var payloadTemplate any = payloadObj
-			var payloadOverlay map[string]any
-			if payloadObj != nil {
-				if idVal, ok := payloadObj["id"]; ok && idTemplate == nil {
-					idTemplate = idVal
-				}
-				if createdAtVal, ok := payloadObj["createdAt"]; ok && createdAtTemplate == nil {
-					createdAtTemplate = createdAtVal
-				}
-				payloadVal, hasPayloadKey := payloadObj["payload"]
-				if hasPayloadKey {
-					// payload can itself be an expression (e.g., args.payload) that evaluates to an object at runtime.
-					payloadTemplate = payloadVal
-				}
-				// Remove id if it was embedded inside the object literal.
-				delete(payloadObj, "id")
-				delete(payloadObj, "createdAt")
-				delete(payloadObj, "payload")
-				// If we didn't have an explicit payload wrapper, payloadTemplate remains the entire object.
-				if payloadTemplate == nil {
-					payloadTemplate = payloadObj
-				} else if hasPayloadKey && len(payloadObj) > 0 {
-					// The insert block mixed `args.payload` (the splat) with
-					// explicit fields like `ownerUserId: actor.userId`. Keep
-					// the explicit fields as an overlay -- renderMutationTemplate
-					// evaluates the splat first, then overlays these, so an
-					// authz-relevant server-side stamp wins over any caller-
-					// supplied value in the splat payload (memql#401). Without
-					// this branch the explicit fields were silently dropped.
-					payloadOverlay = payloadObj
-				}
-			}
-
-			parentTemplate := stmt.ParentTemplate
-			aliasOfTemplate := stmt.AliasOfTemplate
-
-			// If the mutation body didn't specify a concept (implicit from use),
-			// fill it from BoundConcept.
-			mutationConcept := stmt.Concept
-			if mutationConcept == "" && boundConcept != "" {
-				mutationConcept = boundConcept
-			}
-			fn.MutationTemplate = &FunctionMutationTemplate{
-				Kind:                   stmt.Kind,
-				Concept:                mutationConcept,
-				IDTemplate:             idTemplate,
-				CreatedAtTemplate:      createdAtTemplate,
-				PayloadTemplate:        payloadTemplate,
-				PayloadOverlayTemplate: payloadOverlay,
-				ParentTemplate:         parentTemplate,
-				AliasOfTemplate:        aliasOfTemplate,
-				MergeFields:            mergeFields,
-				AppendFields:           appendFields,
-				AddToSetFields:         addToSetFields,
-				RemoveFromSetFields:    removeFromSetFields,
-				CreateOnlyFields:       createOnlyFields,
-				NoUnsetFields:          noUnsetFields,
-				ScrubPii:               scrubPii,
-			}
+			tmpl.MergeFields = mergeFields
+			tmpl.AppendFields = appendFields
+			tmpl.AddToSetFields = addToSetFields
+			tmpl.RemoveFromSetFields = removeFromSetFields
+			tmpl.CreateOnlyFields = createOnlyFields
+			tmpl.NoUnsetFields = noUnsetFields
+			tmpl.ScrubPii = scrubPii
+			fn.MutationTemplate = tmpl
 			fn.ExprSource = extractExpressionFromContent(content)
 
 		case languageParser.FunctionTypeLogic:
@@ -1712,6 +1668,83 @@ func convertArgsField(field *languageParser.ArgsField) (*FunctionArgsField, erro
 	}
 
 	return result, nil
+}
+
+// mutationTemplateFromStmtLegacy builds a mutation's template from the string
+// half's reading of its statement: PayloadRaw's object-literal text, laid out
+// by parsePayloadRawToTemplate and hoisted here, and the four slots as the
+// parser left them. C5 runs on the block's fields before the hoist, where it
+// always has. The annotation fields are the caller's to attach. The flip
+// deletes this with the string half; mutationTemplateFromStmtV1 is its
+// edition-2026 counterpart.
+func mutationTemplateFromStmtLegacy(stmt *languageParser.MutationStmt, concept string, registry memoryNodes.Registry, expectedName string) (*FunctionMutationTemplate, error) {
+	payloadObj, err := parsePayloadRawToTemplate(stmt.PayloadRaw)
+	if err != nil {
+		return nil, fmt.Errorf("function %q: parse payload: %w", expectedName, err)
+	}
+
+	// C5 (memql#2035): a caller-supplied arg can never write a
+	// field the concept marks @internal or @serverSet -- those
+	// are server-only / server-stamped. This gate makes the
+	// accept/stamp sugar safe (an `accept { internalField }`
+	// desugars to `internalField: args.internalField`, which is
+	// rejected here) AND catches a hand-written `insert` that
+	// binds a sensitive field straight from caller args. The
+	// concept is resolved from the signature/use binding; an
+	// unannotated concept (today's whole tree) has no sensitive
+	// fields, so this is a no-op until concepts adopt the
+	// annotations.
+	if err := validateMutationCallerArgs(registry, concept, expectedName, payloadObj); err != nil {
+		return nil, err
+	}
+
+	// Handle object-literal syntax: insert("concept", { id: ..., payload: {...} })
+	// If the payloadObj includes an id or payload key, normalize them.
+	var idTemplate any = stmt.IDTemplate
+	var createdAtTemplate any = stmt.CreatedAtTemplate
+	var payloadTemplate any = payloadObj
+	var payloadOverlay map[string]any
+	if payloadObj != nil {
+		if idVal, ok := payloadObj["id"]; ok && idTemplate == nil {
+			idTemplate = idVal
+		}
+		if createdAtVal, ok := payloadObj["createdAt"]; ok && createdAtTemplate == nil {
+			createdAtTemplate = createdAtVal
+		}
+		payloadVal, hasPayloadKey := payloadObj["payload"]
+		if hasPayloadKey {
+			// payload can itself be an expression (e.g., args.payload) that evaluates to an object at runtime.
+			payloadTemplate = payloadVal
+		}
+		// Remove id if it was embedded inside the object literal.
+		delete(payloadObj, "id")
+		delete(payloadObj, "createdAt")
+		delete(payloadObj, "payload")
+		// If we didn't have an explicit payload wrapper, payloadTemplate remains the entire object.
+		if payloadTemplate == nil {
+			payloadTemplate = payloadObj
+		} else if hasPayloadKey && len(payloadObj) > 0 {
+			// The insert block mixed `args.payload` (the splat) with
+			// explicit fields like `ownerUserId: actor.userId`. Keep
+			// the explicit fields as an overlay -- renderMutationTemplate
+			// evaluates the splat first, then overlays these, so an
+			// authz-relevant server-side stamp wins over any caller-
+			// supplied value in the splat payload (memql#401). Without
+			// this branch the explicit fields were silently dropped.
+			payloadOverlay = payloadObj
+		}
+	}
+
+	return &FunctionMutationTemplate{
+		Kind:                   stmt.Kind,
+		Concept:                concept,
+		IDTemplate:             idTemplate,
+		CreatedAtTemplate:      createdAtTemplate,
+		PayloadTemplate:        payloadTemplate,
+		PayloadOverlayTemplate: payloadOverlay,
+		ParentTemplate:         stmt.ParentTemplate,
+		AliasOfTemplate:        stmt.AliasOfTemplate,
+	}, nil
 }
 
 // valueReferencesCallerArg reports whether a parsed payload-template
