@@ -81,6 +81,54 @@ A `bff/` with a `go.mod` is **detected, reported and deferred**: it appears in
 the report saying where Go delivery happens today (engine images built by CI),
 and every other half of the package deploys around it.
 
+## Upgrading to an engine that reads the language line
+
+Every DSL domain a package ships declares the language it is written in, in
+its own `dsl/<domain>/memql.toml`
+([the language line](../language/memql.md#the-language-line)):
+
+```toml
+memql = "1.0"
+edition = "2026"
+```
+
+An engine that reads the language line refuses to boot on a domain without
+one, and strict boot refuses the node rather than skipping the domain. An
+engine from before the language line ignores the file. So a package written
+before the line needs the file, and needs it on the cluster before the engine
+that reads it.
+
+`memqlmigrate` writes the file into every domain that has none. Run it on the
+package's `dsl/` directory:
+
+```bash
+memqlmigrate --rewrite=language-line -w dsl/
+```
+
+Or write the two lines by hand in each `dsl/<domain>/memql.toml`.
+
+Do it in this order:
+
+1. Add `memql.toml` to every domain, in the package's repository.
+2. Redeploy every package whose DSL is staged on the cluster. A node reads the
+   staged copy of a domain, never the repository, so a line that exists only
+   in the repository is a line no node sees. Staging copies every file of a
+   domain, `memql.toml` included, and the engine still running ignores it.
+3. Roll the engine.
+
+If the engine rolled first and the DSL-consuming nodes crash-loop on
+`language_line_missing`, recover in three steps:
+
+1. Set the break-glass, `MEMQL_DSL_ALLOW_SKIPS=1`. It is a bootstrap variable,
+   a key on the `memql-secrets` Secret ([env-vars.md](env-vars.md)), so the
+   pods see it when they restart. The nodes then boot, and each refused domain
+   is skipped whole: its constructs are missing until the next step.
+2. Redeploy the packages, now carrying the file. The deploy's roll restarts
+   the nodes onto the new staged copies.
+3. Remove the break-glass and restart the nodes. While it is set, a construct
+   that fails to load is logged and dropped instead of refusing boot, so keep
+   it set only as long as the recovery takes.
+
 ## What the analysis checks, and what it refuses
 
 The analysis runs **offline**, before anything is fetched to a workbench or
