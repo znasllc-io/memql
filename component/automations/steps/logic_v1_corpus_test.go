@@ -82,6 +82,7 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/bodymigrate"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
@@ -188,6 +189,10 @@ type corpusSource struct {
 	// V1 is the file in edition 2026: Current once the tree is migrated,
 	// and the expressions codemod's rewrite of it before.
 	V1 string
+	// Bodies is V1 with its bodies written in statements (epic memql#5370):
+	// V1 carried by the bodies rewrite (withBodies), which leaves a tree
+	// already in statements unchanged.
+	Bodies string
 }
 
 // logicFixture is one run: a logic construct, the arguments it is called
@@ -218,7 +223,7 @@ func logicCorpusSources(t *testing.T) []*corpusSource {
 		for _, f := range files {
 			out = append(out, &corpusSource{Path: f.Path, Current: f.Content, V1: f.Content})
 		}
-		return out
+		return withBodies(t, out)
 	}
 	byPath := make(map[string][]byte, len(files))
 	for _, f := range files {
@@ -230,6 +235,27 @@ func logicCorpusSources(t *testing.T) []*corpusSource {
 		migrated, err := languageParser.RewriteExpressions([]byte(f.Content), preds)
 		require.NoErrorf(t, err, "the codemod refuses %s", f.Path)
 		out = append(out, &corpusSource{Path: f.Path, Current: f.Content, V1: string(migrated)})
+	}
+	return withBodies(t, out)
+}
+
+// withBodies sets every source's Bodies the way `memqlmigrate
+// --rewrite=bodies` writes it: one rewrite over the whole tree's V1 text, its
+// bare calls resolved over the tree. The tree is the engine's embedded one,
+// so the index needs nothing beyond it.
+func withBodies(t *testing.T, out []*corpusSource) []*corpusSource {
+	t.Helper()
+	files := make(map[string][]byte, len(out))
+	for _, f := range out {
+		files[f.Path] = []byte(f.V1)
+	}
+	changed, err := bodymigrate.RewriteTree(files, bodymigrate.IndexFiles(files))
+	require.NoError(t, err, "the bodies rewrite refuses the tree")
+	for _, f := range out {
+		f.Bodies = f.V1
+		if b, ok := changed[f.Path]; ok {
+			f.Bodies = string(b)
+		}
 	}
 	return out
 }
@@ -355,6 +381,10 @@ type logicArm struct {
 	legacy bool
 	source func(*corpusSource) string
 	run    func(ctx context.Context, src, path, name string, args map[string]any, probe *logicProbe) (any, error)
+	// moved reports a logic the arm's source no longer declares, because the
+	// bodies rewrite moved it into the one automation that calls it (a logic
+	// may not publish, D14). The arm has no run of it to compare.
+	moved func(path, name string) bool
 }
 
 // todayArm runs the tree through today's runners: one engine per arm, booted
@@ -365,6 +395,28 @@ type logicArm struct {
 // construct's call -- so the engine picks fn.Expr or fn.LogicSteps as it does
 // in production.
 func todayArm(t *testing.T, name string, v1 bool, sources []*corpusSource) logicArm {
+	t.Helper()
+	pick := func(f *corpusSource) string { return f.Current }
+	if v1 {
+		pick = func(f *corpusSource) string { return f.V1 }
+	}
+	return engineArm(t, name, v1, false, pick, sources)
+}
+
+// bodiesArm runs the tree with its bodies in statements (corpusSource.Bodies):
+// every logic builds to a statement body (fn.LogicBody) and each run reaches
+// the LogicRunner's RunLogicBody through the engine, the dispatch production
+// takes. Before the flip it holds the statement runtime to the goldens run for
+// run; after it, the tree is its own statement source and this arm is the v1
+// arm.
+func bodiesArm(t *testing.T, sources []*corpusSource) logicArm {
+	t.Helper()
+	return engineArm(t, "bodies", true, true, func(f *corpusSource) string { return f.Bodies }, sources)
+}
+
+// engineArm is an arm through the engine: todayArm's and bodiesArm's.
+// statements requires every logic to build as a statement body.
+func engineArm(t *testing.T, name string, v1, statements bool, pick func(*corpusSource) string, sources []*corpusSource) logicArm {
 	t.Helper()
 	eng := bootEmbeddedEngine(t)
 	// A lazy handle satisfies engine.Execute's setup; port 1 makes any
@@ -382,11 +434,6 @@ func todayArm(t *testing.T, name string, v1 bool, sources []*corpusSource) logic
 		if fn != nil {
 			kinds[fn.Name] = strings.ToLower(strings.TrimSpace(fn.FunctionKind))
 		}
-	}
-
-	pick := func(f *corpusSource) string { return f.Current }
-	if v1 {
-		pick = func(f *corpusSource) string { return f.V1 }
 	}
 
 	// build builds one logic construct from a file's source in the arm's
@@ -413,9 +460,25 @@ func todayArm(t *testing.T, name string, v1 bool, sources []*corpusSource) logic
 		if fn.LogicSteps != nil && fn.LogicSteps.ExpressionsV1 != v1 {
 			return nil, fmt.Errorf("%s arm: %s did not build in the arm's grammar", name, logic)
 		}
+		if statements && fn.LogicBody == nil {
+			return nil, fmt.Errorf("%s arm: %s did not build as a statement body", name, logic)
+		}
 		cache[key] = builtEntry{src: src, fn: fn}
 		return fn, nil
 	}
+
+	// The logic the arm's source still declares: the bodies rewrite moves a
+	// publishing logic into its automation, and the arm has nothing to run
+	// for it.
+	declared := map[string]bool{}
+	for _, f := range sources {
+		for _, slice := range memql.ExtractFunctionSlices(pick(f)) {
+			if slice.Kind == languageParser.FunctionTypeLogic {
+				declared[f.Path+" "+slice.Name] = true
+			}
+		}
+	}
+	moved := func(path, logic string) bool { return !declared[path+" "+logic] }
 
 	// Every logic construct of the tree builds, up front: a construct that
 	// does not is the arm's failure, not one fixture's, and the builds name
@@ -424,7 +487,7 @@ func todayArm(t *testing.T, name string, v1 bool, sources []*corpusSource) logic
 	var failures []string
 	for _, f := range sources {
 		for _, slice := range memql.ExtractFunctionSlices(f.Current) {
-			if slice.Kind != languageParser.FunctionTypeLogic {
+			if slice.Kind != languageParser.FunctionTypeLogic || moved(f.Path, slice.Name) {
 				continue
 			}
 			fn, err := build(pick(f), f.Path, slice.Name)
@@ -458,6 +521,7 @@ func todayArm(t *testing.T, name string, v1 bool, sources []*corpusSource) logic
 			defer func() { reg.probe, fakes.probe = nil, nil }()
 			return eng.Execute(ctx, logic+"("+renderV1NamedArgs(args)+")")
 		},
+		moved: moved,
 	}
 }
 
@@ -1311,10 +1375,13 @@ func TestLogicCorpusRuns(t *testing.T) {
 	sources := logicCorpusSources(t)
 	// The first arm is the one the others are compared with. The flip deletes
 	// the legacy arm's line: the tree then has no legacy source, and the v1
-	// arm against the goldens is the whole test.
+	// arm against the goldens is the whole test. The bodies arm runs the
+	// statement form of every body (epic memql#5370) until the bodies flip
+	// makes it the v1 arm's own.
 	arms := []logicArm{
 		todayArm(t, "legacy", false, sources),
 		todayArm(t, "v1", true, sources),
+		bodiesArm(t, sources),
 	}
 	legacyRuns := false
 	golden := -1 // the arm an -update writes the goldens from
@@ -1342,15 +1409,24 @@ func TestLogicCorpusRuns(t *testing.T) {
 	taken := map[string]bool{}
 	mended := map[string]int{}
 	constructs := map[string]bool{}
+	moved := map[string]map[string]string{} // arm -> golden file -> the construct it has no run of
 	matched, refused := 0, 0
 	var diffs []string
 	for _, fx := range fixtures {
 		ctx := auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "user-corpus", Role: auth.Role(fx.Role)}))
 		records := make([]logicRecord, len(arms))
+		ran := make([]bool, len(arms))
 		for i, arm := range arms {
+			if arm.moved != nil && arm.moved(fx.File.Path, fx.Name) {
+				if moved[arm.name] == nil {
+					moved[arm.name] = map[string]string{}
+				}
+				moved[arm.name][goldenFileFor(fx)] = fx.Key
+				continue
+			}
 			probe := &logicProbe{rows: fx.Rows, now: now}
 			res, err := arm.run(ctx, arm.source(fx.File), fx.File.Path, fx.Name, fx.Args, probe)
-			records[i] = newLogicRecord(res, err, probe.calls)
+			records[i], ran[i] = newLogicRecord(res, err, probe.calls), true
 		}
 		file, key := goldenFileFor(fx), goldenRunKey(fx)
 		where := fmt.Sprintf("%s [%s]", fx.Key, key)
@@ -1358,6 +1434,9 @@ func TestLogicCorpusRuns(t *testing.T) {
 
 		agreed := true
 		for i := 1; i < len(arms); i++ {
+			if !ran[0] || !ran[i] {
+				continue
+			}
 			m, err := compareRuns(fx, arms[0].legacy, records[0], arms[i].legacy, records[i])
 			if m {
 				mended[fx.Name]++
@@ -1411,6 +1490,9 @@ func TestLogicCorpusRuns(t *testing.T) {
 			refused++
 		}
 		for i, arm := range arms {
+			if !ran[i] {
+				continue
+			}
 			m, err := compareRuns(fx, arm.legacy, records[i], false, want)
 			if m {
 				mended[fx.Name]++
@@ -1432,6 +1514,16 @@ func TestLogicCorpusRuns(t *testing.T) {
 				}
 			}
 		}
+		// An arm skips only a logic the bodies rewrite moved into its
+		// automation, and the rewrite moves only a logic that publishes: its
+		// goldens publish in some run.
+		for arm, files := range moved {
+			for file, k := range files {
+				if !goldensPublish(goldens[file]) {
+					diffs = append(diffs, fmt.Sprintf("%s: the %s arm has no run of it, and no golden run of it publishes: the rewrite moved a logic that may stay one", k, arm))
+				}
+			}
+		}
 	}
 	sort.Strings(diffs)
 	require.Emptyf(t, diffs, "%d runs differ:\n%s", len(diffs), strings.Join(diffs, "\n"))
@@ -1448,6 +1540,29 @@ func TestLogicCorpusRuns(t *testing.T) {
 		return
 	}
 	t.Logf("%d arm runs match the goldens over %d logic constructs and %d fixtures (%d refused, %d legacy-defect mends)", matched, len(constructs), len(fixtures), refused, sumInts(mended))
+	for _, arm := range arms {
+		if files := moved[arm.name]; len(files) > 0 {
+			keys := make([]string, 0, len(files))
+			for _, k := range files {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			t.Logf("the %s arm has no run of %d logic the bodies rewrite moved into their automations: %s", arm.name, len(keys), strings.Join(keys, ", "))
+		}
+	}
+}
+
+// goldensPublish reports whether one construct's golden runs publish an event
+// in any run.
+func goldensPublish(runs map[string]map[string]any) bool {
+	for _, run := range runs {
+		for _, c := range recordOf(run["outcome"]).Calls {
+			if c.Kind == "event" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func sumInts(m map[string]int) int {

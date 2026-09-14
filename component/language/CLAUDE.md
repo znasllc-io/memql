@@ -25,6 +25,7 @@ verify anything here.
 | `pagination/` | The pure classifier behind the pagination authoring rule: a list-returning query must carry `paginate`, `sort`, `count`, or `@unbounded("reason")` (memql#1965). Operates on raw source text using line structure only. | ~3 files |
 | `functions/` | The function catalog (D10): every function and method an edition-2026 expression can call, one entry and one spelling each, with its signature, its tier and the retired spellings it replaces, plus the operator table (`Operators()`). The two evaluators, Sense and the generated docs read it. | ~6 files |
 | `tiers/` | The tier manifest (D11): every expression position, whether it pushes down to SQL (P) or runs in process (M), and the node kinds, catalog functions and predicate applications it admits (`Rules()`), plus the M tier's cost limits. | ~6 files |
+| `bodymigrate/` | The bodies rewrite, `memqlmigrate --rewrite=bodies` (epic memql#5370): the retired body forms carried into edition-2026 statements, with its own reader of those forms so it outlives the engine's. A library, as the expressions rewrite is (`parser.RewriteExpressions`), so the CLI, its Go-fixture mode and the logic corpus's run-time check all run one rewrite. Its declaration index covers only the files it is given; memqlmigrate adds the embedded tree. | ~3 files |
 | `language.go` | The `Language` component: bundles the parser and compiler submodules under one lifecycle with their own env-configured loggers. Note that the *root* package is thin -- almost every consumer imports a sub-package directly, not this. | 2 files |
 
 ---
@@ -123,8 +124,9 @@ sub-packages -- `annotations/`, `ast/`, and `dslclause/` each carry a
 packages are separate modules precisely so a consumer can depend on the
 annotation registry or the AST types without dragging in the parser.
 
-`compiler/`, `dslspec/`, `functions/`, `pagination/`, `parser/` and `tiers/`
-are **not** separate modules -- they are packages inside `component/language`.
+`bodymigrate/`, `compiler/`, `dslspec/`, `functions/`, `pagination/`,
+`parser/` and `tiers/` are **not** separate modules -- they are packages
+inside `component/language`.
 
 ---
 

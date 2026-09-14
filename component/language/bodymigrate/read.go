@@ -1,13 +1,13 @@
-package main
+package bodymigrate
 
-// bodies_read.go -- reading the retired body forms into statements (epic
+// read.go -- reading the retired body forms into statements (epic
 // memql#5370, task memql#5373).
 //
 // The reader turns each retired body into lstmt values already shaped like
 // the edition-2026 statements they become, keeping every comment attached to
 // the statement or argument it sat above. It decides NOTHING about names,
-// kinds or order: references are rewritten by bodies_refs.go, kinds come from
-// the declaration index, and order from bodies_order.go.
+// kinds or order: references are rewritten by refs.go, kinds come from
+// the declaration index, and order from order.go.
 
 import (
 	"fmt"

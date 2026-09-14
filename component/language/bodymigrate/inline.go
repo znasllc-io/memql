@@ -1,6 +1,6 @@
-package main
+package bodymigrate
 
-// bodies_inline.go -- the parts of the bodies rewrite that cross constructs or
+// inline.go -- the parts of the bodies rewrite that cross constructs or
 // files (epic memql#5370, task memql#5373; D2, D13, D14, D15).
 //
 //   - The terse header `automation N @trigger(...) => logic L` expands to the

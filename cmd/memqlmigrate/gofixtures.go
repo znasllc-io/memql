@@ -9,15 +9,15 @@ package main
 // declaration stops loading at the same moment. memqlmigrate's tree run cannot
 // reach them: they are Go string literals, not .memql files. This mode is the
 // same rewrite for them -- the expressions epic's
-// scripts/migrations/expressions_go_fixtures, with this rewrite, which lives
-// here because the migrator's own reader of the retired forms must outlive
-// the engine's.
+// scripts/migrations/expressions_go_fixtures, with this rewrite
+// (component/language/bodymigrate), whose own reader of the retired forms
+// outlives the engine's.
 //
 // Per *_test.go file:
 //
 //   - every string literal, raw or interpreted, whose text declares an
 //     automation, a logic or a `mutate`, or writes a @trigger, is run through
-//     the bodies rewrite as a tree of one file (migrateBodiesSource), its
+//     the bodies rewrite as a tree of one file (bodymigrate.RewriteSource), its
 //     calls resolved against the engine's embedded tree plus the file's own
 //     literals -- a fixture that declares a logic in one literal and calls it
 //     from another resolves it;
@@ -32,8 +32,8 @@ package main
 // on a literal's line or the line above keeps that literal, and
 // `memqlmigrate:keep-file` anywhere keeps the file -- the markers the
 // expressions tool reads. --exclude=PREFIX[,...] leaves paths alone; the
-// defaults are this command's own tests and the migration scripts', whose
-// inputs are the retired forms on purpose.
+// defaults are this command's own tests, the bodies rewrite's and the
+// migration scripts', whose inputs are the retired forms on purpose.
 
 import (
 	"bytes"
@@ -51,11 +51,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/bodymigrate"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // goFixtureDefaultExcludes are the tests whose literals are retired on purpose.
-var goFixtureDefaultExcludes = []string{"cmd/memqlmigrate/", "scripts/migrations/"}
+var goFixtureDefaultExcludes = []string{"cmd/memqlmigrate/", "component/language/bodymigrate/", "scripts/migrations/"}
 
 const (
 	goFixtureKeep     = "memqlmigrate:keep"
@@ -70,18 +72,6 @@ var (
 	// retired in it.
 	goFixtureRetired = regexp.MustCompile(`(?m)^[ \t]*(?:step[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{|body[ \t]*\{)`)
 )
-
-// migrateBodiesSource is the bodies rewrite over one source that stands
-// alone: the tree run, over a tree of one file, with the declaration index
-// given. A construct it cannot carry fails the call, as it fails the tree.
-func migrateBodiesSource(src string, ix *declIndex) (string, error) {
-	const name = "fixture/fixture.memql"
-	rw := &bodiesRewrite{ix: ix, cur: map[string]string{name: src}}
-	if err := rw.run(); err != nil {
-		return "", err
-	}
-	return rw.cur[name], nil
-}
 
 type goFixtureOptions struct {
 	write    bool
@@ -213,7 +203,7 @@ func goFixtureFiles(paths, excludes []string) ([]string, error) {
 var errGoFixtureNotGo = errors.New("does not parse as Go")
 
 // goFixtureProcess rewrites one test file's literals.
-func goFixtureProcess(p string, src []byte, base *declIndex) (goFixtureFile, error) {
+func goFixtureProcess(p string, src []byte, base *bodymigrate.Index) (goFixtureFile, error) {
 	rep := goFixtureFile{path: p}
 	lits, keepFile, err := goFixtureLiterals(p, src)
 	if err != nil {
@@ -221,7 +211,7 @@ func goFixtureProcess(p string, src []byte, base *declIndex) (goFixtureFile, err
 	}
 	var dsl []goFixtureLiteral
 	for _, l := range lits {
-		mask := codeView(l.text)
+		mask := langparser.BlankCommentsAndStrings(l.text)
 		if goFixtureHeader.MatchString(mask) || goFixtureRetired.MatchString(mask) {
 			dsl = append(dsl, l)
 		}
@@ -236,14 +226,9 @@ func goFixtureProcess(p string, src []byte, base *declIndex) (goFixtureFile, err
 		return rep, nil
 	}
 	// The file's own declarations resolve its calls, over the engine's.
-	ix := newDeclIndex()
-	for name, kinds := range base.kinds {
-		for k := range kinds {
-			ix.add(name, k)
-		}
-	}
+	ix := base.Clone()
 	for _, l := range dsl {
-		ix.addSource(l.text)
+		ix.AddSource(l.text)
 	}
 
 	var edits []goFixtureEdit
@@ -311,18 +296,18 @@ func goFixtureLiterals(p string, src []byte) ([]goFixtureLiteral, bool, error) {
 }
 
 // goFixtureRewrite runs the bodies rewrite over one literal.
-func goFixtureRewrite(l goFixtureLiteral, ix *declIndex) goFixtureResult {
+func goFixtureRewrite(l goFixtureLiteral, ix *bodymigrate.Index) goFixtureResult {
 	if l.kept {
 		return goFixtureResult{lit: l, outcome: goFixtureKept, reason: goFixtureKeep}
 	}
-	next, err := migrateBodiesSource(l.text, ix)
+	next, err := bodymigrate.RewriteSource(l.text, ix)
 	if err != nil {
 		return goFixtureResult{lit: l, outcome: goFixtureRefused, reason: strings.Join(strings.Fields(err.Error()), " ")}
 	}
 	if next != l.text {
 		return goFixtureResult{lit: l, outcome: goFixtureChanged, newText: next}
 	}
-	mask := codeView(l.text)
+	mask := langparser.BlankCommentsAndStrings(l.text)
 	if goFixtureRetired.MatchString(mask) && !goFixtureHeader.MatchString(mask) {
 		return goFixtureResult{lit: l, outcome: goFixtureFragment,
 			reason: "a retired body form with no automation or logic header in this literal (the construct is split across literals)"}

@@ -1,6 +1,6 @@
-package main
+package bodymigrate
 
-// bodies_emit.go -- writing a read body back as edition-2026 statements (epic
+// emit.go -- writing a read body back as edition-2026 statements (epic
 // memql#5370, task memql#5373).
 //
 // Every call gets its kind, every expression passes through the reference
@@ -17,7 +17,7 @@ import (
 
 // emitter writes statements into lines.
 type emitter struct {
-	ix    *declIndex
+	ix    *Index
 	lines []string
 	// inLogic makes a publish an error: a logic that publishes is inlined
 	// into its automation before it is written, or refused.

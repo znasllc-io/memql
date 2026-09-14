@@ -1,6 +1,6 @@
-package main
+package bodymigrate
 
-// bodies_scan.go -- the text scanning the bodies rewrite reads the retired
+// scan.go -- the text scanning the bodies rewrite reads the retired
 // body forms with (epic memql#5370, task memql#5373).
 //
 // THE REWRITE READS TEXT, NOT THE ENGINE'S PARSE. The retired forms are the

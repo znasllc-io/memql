@@ -1,15 +1,16 @@
-package main
+package bodymigrate
 
-// bodies_index.go -- which construct a bare call names (epic memql#5370, task
+// index.go -- which construct a bare call names (epic memql#5370, task
 // memql#5373).
 //
 // Edition 2026 writes every call with its kind (D13): `mutation
 // expireAccessRequest(...)`, never `expireAccessRequest { ... }`. The retired
 // forms left the kind off wherever the runtime could resolve the bare name, so
 // the rewrite has to decide it -- and it decides the way the runtime did, by
-// looking the name up among the declarations. The index covers the tree being
-// rewritten AND the engine's embedded tree, because a bundle calls core
-// mutations and builtins it does not declare.
+// looking the name up among the declarations. The index must cover the tree
+// being rewritten AND the engine's embedded tree, because a bundle calls core
+// mutations and builtins it does not declare: IndexFiles indexes the files it
+// is given, and the caller adds the embedded tree (memqlmigrate does).
 //
 // A name declared as two kinds is refused rather than guessed: the runtime's
 // flat registry answered by load order, and a rewrite that picked one would be
@@ -17,17 +18,14 @@ package main
 
 import (
 	"fmt"
-	"io/fs"
 	"path"
 	"regexp"
 	"sort"
 	"strings"
-
-	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
-// declIndex maps a construct name to the kinds it is declared as.
-type declIndex struct {
+// Index maps a construct name to the kinds it is declared as.
+type Index struct {
 	kinds map[string]map[string]bool
 }
 
@@ -42,11 +40,11 @@ var declKindOf = map[string]string{
 	"automation": "automation", "builtin": "builtin", "action": "action", "capability": "capability",
 }
 
-// newDeclIndex returns an empty index.
-func newDeclIndex() *declIndex { return &declIndex{kinds: map[string]map[string]bool{}} }
+// NewIndex returns an empty index.
+func NewIndex() *Index { return &Index{kinds: map[string]map[string]bool{}} }
 
-// addSource records every declaration in one .memql source.
-func (ix *declIndex) addSource(src string) {
+// AddSource records every declaration in one .memql source.
+func (ix *Index) AddSource(src string) {
 	view := codeView(src)
 	for _, re := range []*regexp.Regexp{declTwoIdent, declOneIdent} {
 		for _, m := range re.FindAllStringSubmatch(view, -1) {
@@ -55,39 +53,34 @@ func (ix *declIndex) addSource(src string) {
 	}
 }
 
-func (ix *declIndex) add(name, kind string) {
+func (ix *Index) add(name, kind string) {
 	if ix.kinds[name] == nil {
 		ix.kinds[name] = map[string]bool{}
 	}
 	ix.kinds[name][kind] = true
 }
 
-// buildDeclIndex indexes files plus the engine's embedded tree.
-func buildDeclIndex(files map[string][]byte) (*declIndex, error) {
-	ix := newDeclIndex()
+// IndexFiles indexes the .memql files among files.
+func IndexFiles(files map[string][]byte) *Index {
+	ix := NewIndex()
 	for p, b := range files {
 		if path.Ext(p) == ".memql" {
-			ix.addSource(string(b))
+			ix.AddSource(string(b))
 		}
 	}
-	err := fs.WalkDir(memqldsl.Tree(), ".", func(p string, d fs.DirEntry, werr error) error {
-		if werr != nil {
-			return werr
+	return ix
+}
+
+// Clone is a copy of the index that sources can be added to without
+// changing it.
+func (ix *Index) Clone() *Index {
+	out := NewIndex()
+	for name, kinds := range ix.kinds {
+		for k := range kinds {
+			out.add(name, k)
 		}
-		if d.IsDir() || path.Ext(p) != ".memql" || strings.HasPrefix(path.Base(path.Dir(p)), "_") {
-			return nil
-		}
-		b, rerr := fs.ReadFile(memqldsl.Tree(), p)
-		if rerr != nil {
-			return rerr
-		}
-		ix.addSource(string(b))
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("index the embedded tree: %w", err)
 	}
-	return ix, nil
+	return out
 }
 
 // bareCallKinds are the kinds a BARE call could reach: the runtime resolved a
@@ -98,7 +91,7 @@ func buildDeclIndex(files map[string][]byte) (*declIndex, error) {
 var bareCallKinds = map[string]bool{"query": true, "mutation": true, "logic": true, "builtin": true}
 
 // kindOf returns the one call kind a bare name resolved to.
-func (ix *declIndex) kindOf(name string) (string, error) {
+func (ix *Index) kindOf(name string) (string, error) {
 	ks := ix.kinds[name]
 	var list, other []string
 	for k := range ks {
@@ -122,7 +115,7 @@ func (ix *declIndex) kindOf(name string) (string, error) {
 }
 
 // has reports whether name is declared as kind.
-func (ix *declIndex) has(name, kind string) bool { return ix.kinds[name][kind] }
+func (ix *Index) has(name, kind string) bool { return ix.kinds[name][kind] }
 
 // exprFunctions are the names a bare call means as an expression, not a
 // construct: the expression catalog, retired spellings included, since the

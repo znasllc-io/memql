@@ -1,6 +1,6 @@
-package main
+package bodymigrate
 
-// bodies_order.go -- which order the migrated statements run in, and the
+// order.go -- which order the migrated statements run in, and the
 // comment every move carries (epic memql#5370, task memql#5373; D6 and the
 // "failure modes" of section 4 epic 3).
 //
@@ -442,7 +442,7 @@ func nearest(n int, deps []map[int]bool, prio []int) []int {
 }
 
 // sideEffecting reports whether a statement writes, acts or publishes.
-func sideEffecting(st *lstmt, ix *declIndex) bool {
+func sideEffecting(st *lstmt, ix *Index) bool {
 	switch st.form {
 	case formPublish:
 		return true
@@ -508,7 +508,7 @@ func joinAnd(items []string) string {
 }
 
 // planOrder decides the order to write a body's top-level statements in.
-func planOrder(stmts []*lstmt, ix *declIndex) orderPlan {
+func planOrder(stmts []*lstmt, ix *Index) orderPlan {
 	n := len(stmts)
 	plan := orderPlan{comments: map[int][]string{}}
 	source := make([]int, n)

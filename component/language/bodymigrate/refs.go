@@ -1,6 +1,6 @@
-package main
+package bodymigrate
 
-// bodies_refs.go -- rewriting the references inside a body's expressions
+// refs.go -- rewriting the references inside a body's expressions
 // (epic memql#5370, task memql#5373).
 //
 // A name is its value in edition 2026 (D12), so every spelling that reached a

@@ -1,4 +1,4 @@
-package main
+package bodymigrate
 
 import (
 	"strings"
@@ -16,7 +16,7 @@ func orderOf(t *testing.T, src string) ([]*lstmt, orderPlan) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return lb.stmts, planOrder(lb.stmts, newDeclIndex())
+	return lb.stmts, planOrder(lb.stmts, NewIndex())
 }
 
 func names(stmts []*lstmt, order []int) string {

@@ -1,6 +1,6 @@
-package main
+package bodymigrate
 
-// bodies_order_legacy_parity_test.go -- the rewrite's copy of the retired
+// order_legacy_parity_test.go -- the rewrite's copy of the retired
 // compiler's step order, held to the compiler itself (epic memql#5370, task
 // memql#5373).
 //
@@ -34,7 +34,7 @@ import (
 )
 
 func TestLegacyOrderMatchesTheCompiler(t *testing.T) {
-	roots := []string{"../../dsl", "../../examples", "../../deploy/fleet/dsl"}
+	roots := []string{"../../../dsl", "../../../examples", "../../../deploy/fleet/dsl"}
 	checked := 0
 	for _, root := range roots {
 		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {

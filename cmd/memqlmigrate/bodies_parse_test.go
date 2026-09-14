@@ -62,7 +62,7 @@ func checkStatementBodies(t *testing.T, file string, src []byte) int {
 	for _, m := range statementHeader.FindAllStringSubmatchIndex(view, -1) {
 		kind, name := text[m[2]:m[3]], text[m[4]:m[5]]
 		open := m[1] - 1
-		closeAt := matchClose(view, open)
+		closeAt := closingBrace(view, open)
 		if closeAt < 0 {
 			t.Errorf("%s: %s %s: no closing brace", file, kind, name)
 			continue
@@ -101,6 +101,24 @@ func checkStatementBodies(t *testing.T, file string, src []byte) int {
 		}
 	}
 	return checked
+}
+
+// closingBrace is the index of the `}` closing the `{` at open in a view with
+// comments and strings blanked, or -1.
+func closingBrace(view string, open int) int {
+	depth := 0
+	for i := open; i < len(view); i++ {
+		switch view[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 // preambleStart walks back over the annotation, doc-comment and comment lines
