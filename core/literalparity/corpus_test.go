@@ -12,7 +12,8 @@ import (
 // wrong:
 //
 //	the "~5,000x" parse margin, wrong by two orders of magnitude, twice
-//	"all three copies agree", false on 7 of 16 rows
+//	"all three copies agree", false on 7 of 16 rows (three, before the load
+//	copy was deleted at the edition-2026 flip)
 //	the divergent-row count, stated in a doc comment and checked by nothing
 //
 // A number in a comment is a claim, and this package's whole purpose is that
@@ -65,7 +66,7 @@ func TestAcceptedAgreesWithTheRecordedValues(t *testing.T) {
 	for _, c := range Cases {
 		for _, v := range []struct {
 			copyName, value string
-		}{{"memql", c.MemQL}, {"compiler", c.Compiler}, {"steps", c.Steps}} {
+		}{{"compiler", c.Compiler}, {"steps", c.Steps}} {
 			if Accepted(v.value) != (v.value != "ERR") {
 				t.Errorf("Accepted(%q) disagrees with the recorded value for %s on %q",
 					v.value, v.copyName, c.Src)
@@ -74,25 +75,25 @@ func TestAcceptedAgreesWithTheRecordedValues(t *testing.T) {
 	}
 }
 
-// TestEveryRowRecordsAllThreeCopies guards the shape: a row missing a column
-// would silently assert the empty string, which no parser produces, so it would
-// red confusingly at the call site instead of here.
-func TestEveryRowRecordsAllThreeCopies(t *testing.T) {
+// TestEveryRowRecordsEveryCopy guards the shape: a row missing a column would
+// silently assert the empty string, which no parser produces, so it would red
+// confusingly at the call site instead of here.
+func TestEveryRowRecordsEveryCopy(t *testing.T) {
 	for _, c := range Cases {
 		if c.Src == "" {
 			t.Error("a row has no Src")
 		}
-		for _, v := range []string{c.MemQL, c.Compiler, c.Steps} {
+		for _, v := range []string{c.Compiler, c.Steps} {
 			if v != "ERR" && !json.Valid([]byte(v)) {
 				t.Errorf("row %q records %q, which is not valid JSON. A corrupted value would "+
 					"otherwise surface as a confusing divergent-count failure rather than here.",
 					c.Src, v)
 			}
 		}
-		if c.MemQL == "" || c.Compiler == "" || c.Steps == "" {
-			t.Errorf("row %q is missing a recorded value (memql=%q compiler=%q steps=%q); "+
-				"every row must record all three, and \"ERR\" is how a rejection is spelled",
-				c.Src, c.MemQL, c.Compiler, c.Steps)
+		if c.Compiler == "" || c.Steps == "" {
+			t.Errorf("row %q is missing a recorded value (compiler=%q steps=%q); "+
+				"every row must record every copy, and \"ERR\" is how a rejection is spelled",
+				c.Src, c.Compiler, c.Steps)
 		}
 	}
 }

@@ -1,7 +1,6 @@
 package memql
 
 import (
-	"context"
 	"testing"
 )
 
@@ -10,8 +9,10 @@ import (
 // The ruling that made the strings "false" and "0" falsy did NOT only change
 // cond. It changed every construct that asks whether a value is true, because
 // there is deliberately one rule for all of them: the collection lambdas
-// (.filter / .where / .any() / .all() / .count()), the logical operators
-// && / || / !, and the mutation-template conditionals.
+// (.filter / .where / .any() / .all() / .count()) and the logical operators
+// && / || / !. The mutation-template conditionals were the third surface; a
+// mutation value has no truthiness since the flip (D8), and
+// TestMutationValuesV1BooleanIsNotTruthy pins that it refuses these inputs.
 //
 // This file exists because that was measured and found untested. Reverting
 // IsTruthy's string arm to the old permissive spelling produced EXACTLY ONE
@@ -107,45 +108,6 @@ func TestTruthinessBlastRadius_CollectionAnyAll(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-// The mutation-template conditional path. This is the arm that carried its own
-// rule until memql#2963's landing review -- no numeric, slice or map case at
-// all, so 0 / [] / {} read TRUE there and FALSE under IsTruthy, on the path a
-// bare-predicate cond() in a mutation insert template actually takes.
-func TestTruthinessBlastRadius_MutationTemplateConditional(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		in   any
-		want bool
-	}{
-		{`the string "false"`, "false", false},
-		{`the string "0"`, "0", false},
-		{"zero", 0, false},
-		{"zero float", 0.0, false},
-		{"empty list", []any{}, false},
-		{"empty object", map[string]any{}, false},
-		{"true", true, true},
-		{"non-empty string", "nonempty", true},
-		{"one", 1, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			eval := &mutationTemplateEvaluator{args: map[string]any{"allowed": tc.in}}
-			got, err := eval.evalCondition(context.Background(), "args.allowed")
-			if err != nil {
-				t.Fatalf("evalCondition(args.allowed=%#v): %v", tc.in, err)
-			}
-			if got != tc.want {
-				t.Errorf("mutation-template cond predicate on %#v = %v, want %v.\n\n"+
-					"This arm carried its OWN rule until memql#2963's landing review: with no "+
-					"numeric, slice or map case it fell to `ev != nil`, so 0 / [] / {} read TRUE "+
-					"here and FALSE under IsTruthy -- on the path a bare-predicate cond() in a "+
-					"mutation insert template actually takes (dsl/cognition/mutations.memql:570). "+
-					"It now delegates to IsTruthy; the non-string rows are exactly the ones the "+
-					"local rule got wrong.", tc.in, got, tc.want)
-			}
-		})
 	}
 }
 

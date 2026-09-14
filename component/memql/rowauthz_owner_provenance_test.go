@@ -56,9 +56,9 @@ func TestSplatWithoutOverlayIsCallerWritable(t *testing.T) {
 		BoundConcept: "v1:probe:thing",
 		MutationTemplate: &FunctionMutationTemplate{
 			Concept:    "v1:probe:thing",
-			IDTemplate: "args.thingId",
+			IDTemplate: v1Expr(t, `args.thingId`),
 			// A bare expression, not a map: the whole-object splat.
-			PayloadTemplate: "args.payload",
+			PayloadTemplate: v1Expr(t, `args.payload`),
 			// EMPTY -- this is the defect.
 			PayloadOverlayTemplate: map[string]any{},
 		},
@@ -101,10 +101,9 @@ func TestSplatWithoutOverlayIsCallerWritable(t *testing.T) {
 // than asserted against a mutation that is now correct. The live pair is
 // preserved in TestLibraryOwnerFieldsAreServerStamped (the fix).
 //
-// The value is a lowered `*ArgRefExpr`, not the source text: that is the
-// form the loader actually produces for a bare `args.X` line, and
-// memql#2840's trap was precisely an analyzer that classified the
-// printed form instead.
+// The value is a parsed node, not the source text: that is the form the
+// loader produces for a bare `args.X` line, and memql#2840's trap was
+// precisely an analyzer that classified the printed form instead.
 func TestBareArgsMirrorIsCallerWritable(t *testing.T) {
 	reg := newFunctionRegistry()
 	if err := reg.Upsert(&Function{
@@ -113,12 +112,12 @@ func TestBareArgsMirrorIsCallerWritable(t *testing.T) {
 		BoundConcept: "v1:probe:thingVersion",
 		MutationTemplate: &FunctionMutationTemplate{
 			Concept:    "v1:probe:thingVersion",
-			IDTemplate: "args.versionId",
+			IDTemplate: v1Expr(t, `args.versionId`),
 			// A longhand insert: an object literal with a bare
 			// `args.ownerUserId` mirror and no accept block anywhere.
 			PayloadTemplate: map[string]any{
-				"thingId":     &langparser.ArgRefExpr{Path: "thingId"},
-				"ownerUserId": &langparser.ArgRefExpr{Path: "ownerUserId"},
+				"thingId":     v1Expr(t, `args.thingId`),
+				"ownerUserId": v1Expr(t, `args.ownerUserId`),
 			},
 			PayloadOverlayTemplate: map[string]any{},
 		},
@@ -307,7 +306,7 @@ func TestGenuinelyStampedOwnerFieldPasses(t *testing.T) {
 // ---- classifier unit tests (clause 5, and the fold rules) ----
 
 // Clause 5, forward-looking: the tree has no compound owner write
-// today, so a whole-string prefix test happens to give the right answer
+// today, so a whole-value test happens to give the right answer
 // everywhere. It is one authored `args.X ?? actor.userId` away from
 // silently passing a forgeable field, which is exactly the shape an
 // author reaches for when one mutation must serve two call paths.
@@ -317,16 +316,19 @@ func TestClassifierFoldsCompoundExpressionsToCallerControlled(t *testing.T) {
 		v    any
 		want valueProvenance
 	}{
-		{"pure stamp", "actor.userId", provStamp},
-		{"pure accept", "args.ownerUserId", provAccept},
-		{"ctx alias", "ctx.ownerUserId", provAccept},
-		{"literal", `"predefined"`, provNone},
-		{"coalesce, caller first", "args.ownerUserId ?? actor.userId", provAccept},
-		{"coalesce, actor first", "actor.userId ?? args.ownerUserId", provAccept},
-		{"nested map with a caller leaf", map[string]any{"a": "actor.userId", "b": "args.x"}, provAccept},
-		{"nested map all stamped", map[string]any{"a": "actor.userId"}, provStamp},
-		{"array with a caller leaf", []any{"now", "args.x"}, provAccept},
-		{"prose mentioning args inside a literal", `"set from args.userId by the handler"`, provNone},
+		{"pure stamp", v1Expr(t, `actor.userId`), provStamp},
+		{"pure accept", v1Expr(t, `args.ownerUserId`), provAccept},
+		{"literal", v1Expr(t, `"predefined"`), provNone},
+		{"coalesce, caller first", v1Expr(t, `args.ownerUserId ?? actor.userId`), provAccept},
+		{"coalesce, actor first", v1Expr(t, `actor.userId ?? args.ownerUserId`), provAccept},
+		{"nested map with a caller leaf", map[string]any{"a": v1Expr(t, `actor.userId`), "b": v1Expr(t, `args.x`)}, provAccept},
+		{"nested map all stamped", map[string]any{"a": v1Expr(t, `actor.userId`)}, provStamp},
+		{"array with a caller leaf", []any{v1Expr(t, `now`), v1Expr(t, `args.x`)}, provAccept},
+		// A quoted literal is a literal: a description string mentioning
+		// "args." cannot flip a verdict.
+		{"prose mentioning args inside a literal", v1Expr(t, `"set from args.userId by the handler"`), provNone},
+		// The retired ctx root reads nothing this analyzer can place.
+		{"a name it cannot place", v1Expr(t, `ctx.ownerUserId`), provUnknown},
 		{"nil", nil, provNone},
 	}
 	for _, tc := range cases {
@@ -338,27 +340,12 @@ func TestClassifierFoldsCompoundExpressionsToCallerControlled(t *testing.T) {
 	}
 }
 
-// A quoted literal must not be read as a reference, or a description
-// string silently flips a verdict.
-func TestStripQuotedLiteralsPreservesLength(t *testing.T) {
-	for _, s := range []string{
-		`actor.userId`,
-		`"args.x"`,
-		`a ?? "quoted \" args.y" ?? actor.userId`,
-		`"unterminated args.z`,
-	} {
-		if got := stripQuotedLiterals(s); len(got) != len(s) {
-			t.Fatalf("stripQuotedLiterals(%q) changed length %d -> %d", s, len(s), len(got))
-		}
-	}
-}
-
 // isPayloadSplat separates an object literal from a whole-object splat.
 func TestIsPayloadSplat(t *testing.T) {
-	if isPayloadSplat(map[string]any{"ownerUserId": "actor.userId"}) {
+	if isPayloadSplat(map[string]any{"ownerUserId": v1Expr(t, `actor.userId`)}) {
 		t.Fatal("an object literal is not a splat")
 	}
-	if !isPayloadSplat("args.payload") {
+	if !isPayloadSplat(v1Expr(t, `args.payload`)) {
 		t.Fatal("a bare args.payload expression is a splat")
 	}
 	if isPayloadSplat(nil) {
@@ -442,30 +429,37 @@ func TestUpdateCalendarEventReStampsTheOwner(t *testing.T) {
 // neither StampedBy nor WritableBy, and let a sibling stamping mutation
 // carry the concept to a PASS.
 //
-// Not hypothetical: IDTemplate is a lowered node for most mutations
-// today, evalValue has an explicit ExpressionNode arm, and memql#2840
-// was an actor reference landing in exactly such a slot.
+// Every template value is a parsed node now, and memql#2840 was an actor
+// reference landing in exactly such a slot: the node is read, never its
+// print.
 func TestLoweredAstNodesAreClassifiedNotRenderedToText(t *testing.T) {
-	caller := &langparser.ArgRefExpr{Path: "ownerUserId"}
+	caller := v1Expr(t, `args.ownerUserId`)
 	if got := classifyTemplateValue(caller); got != provAccept {
-		t.Fatalf("classifyTemplateValue(*ArgRefExpr{ownerUserId}) = %v, want provAccept. "+
+		t.Fatalf("classifyTemplateValue(args.ownerUserId) = %v, want provAccept. "+
 			"Sprintf renders it as %q, which is why text classification failed open here.",
 			got, fmtValue(caller))
 	}
-	actor := &langparser.ArgRefExpr{Path: "actor.userId"}
+	actor := v1Expr(t, `actor.userId`)
 	if got := classifyTemplateValue(actor); got != provStamp {
-		t.Fatalf("classifyTemplateValue(*ArgRefExpr{actor.userId}) = %v, want provStamp -- the "+
-			"parser routes BOTH args.X and actor.X through ArgRefExpr, so the prefix is the only "+
-			"discriminator (memql#2840)", got)
+		t.Fatalf("classifyTemplateValue(actor.userId) = %v, want provStamp (memql#2840)", got)
+	}
+	// A node of the internal query form has no place in a template, and one
+	// that reached it anyway -- the ArgRefExpr the retired evaluator read
+	// both roots through -- is not guessed at.
+	if got := classifyTemplateValue(&langparser.ArgRefExpr{Path: "actor.userId"}); got != provUnknown {
+		t.Fatalf("classifyTemplateValue(*ArgRefExpr) = %v, want provUnknown: a value this analyzer "+
+			"does not read must fail closed", got)
 	}
 }
 
 // An unrecognised value must fail CLOSED. This is clause 5, and it was
 // unreachable while the default arm rendered to text: every input
-// produced a non-empty string and landed on provNone.
+// produced a non-empty string and landed on provNone. Text itself is one
+// of them now -- a template holds parsed nodes, and a string in one is a
+// value nothing built.
 func TestUnrecognisedValueFailsClosed(t *testing.T) {
 	type unknownShape struct{ X int }
-	for _, v := range []any{unknownShape{1}, &unknownShape{2}, uint(3), float32(4)} {
+	for _, v := range []any{unknownShape{1}, &unknownShape{2}, uint(3), float32(4), "args.ownerUserId", "actor.userId"} {
 		if got := classifyTemplateValue(v); got != provUnknown {
 			t.Fatalf("classifyTemplateValue(%#v) = %v, want provUnknown. Anything this analyzer "+
 				"cannot classify must fail closed -- treating it as 'no reference' is how a "+
@@ -483,7 +477,7 @@ func TestAstNodeForgeryIsVisibleBesideAStampingSibling(t *testing.T) {
 			Name: "zzStampThing", FunctionKind: "mutation", BoundConcept: "v1:probe:thing",
 			MutationTemplate: &FunctionMutationTemplate{
 				Concept:         "v1:probe:thing",
-				PayloadTemplate: map[string]any{"ownerUserId": "actor.userId"},
+				PayloadTemplate: map[string]any{"ownerUserId": v1Expr(t, `actor.userId`)},
 			},
 		},
 		{
@@ -491,7 +485,7 @@ func TestAstNodeForgeryIsVisibleBesideAStampingSibling(t *testing.T) {
 			MutationTemplate: &FunctionMutationTemplate{
 				Concept: "v1:probe:thing",
 				PayloadTemplate: map[string]any{
-					"ownerUserId": &langparser.ArgRefExpr{Path: "ownerUserId"},
+					"ownerUserId": v1Expr(t, `args.ownerUserId`),
 				},
 			},
 		},
@@ -502,7 +496,7 @@ func TestAstNodeForgeryIsVisibleBesideAStampingSibling(t *testing.T) {
 	}
 	got := provenanceOf(t, reg, "v1:probe:thing", "ownerUserId")
 	if got.ServerStamped {
-		t.Fatal("a caller reference in a lowered AST node was invisible, and a stamping sibling " +
+		t.Fatal("a caller reference in a parsed node was invisible, and a stamping sibling " +
 			"carried the concept to a pass. That is the fail-open shape this analyzer shipped with.")
 	}
 	if len(got.WritableBy) != 1 || got.WritableBy[0] != "zzForgeThing" {
