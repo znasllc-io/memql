@@ -133,13 +133,11 @@ var grammarSurfaceCorpus = []struct {
   accept { name }
   stamp { createdAt: now }
 }`},
-	{"logic: args + body + return", true, `logic probe {
+	{"logic: args + statements + return", true, `logic probe {
   args {
-    x string @required
+    x string!
   }
-  body {
-    return x
-  }
+  return args.x
 }`},
 	{"shape: @row path list", true, `@row
 shape probe {
@@ -168,40 +166,34 @@ concept probe {
 	{"automation: @filter lambda", true, `@filter(row => row.status == "x")
 @trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
-  step run {
-    logic probe(x: 1)
-  }
+  logic probe(x: 1)
 }`},
-	{"terse automation: inline @filter lambda", true, `automation probe @trigger(event="node.created", concept="v1:probe:thing") @filter(row => row.a != nil) => logic probe`},
 	{"struct query: refine without paginate", false, `query thing probe {
   filter row => row.id != ""
   refine row => row.title.includes("x")
 }`},
 	// Edition-2026 in-process positions (memql#5364, the flip): a logic
-	// statement, a mutation value, and a step's arguments and condition parse
-	// the v1 grammar -- `+` joins strings, `??` and `p ? a : b` choose, a
-	// method reads a collection, a named argument is `name: value`, and a
-	// step's right-hand side may be any expression, a literal included.
+	// statement, a mutation value, and a call's arguments and an if's
+	// condition parse the v1 grammar -- `+` joins strings, `??` and
+	// `p ? a : b` choose, a method reads a collection, a named argument is
+	// `name: value`, and an assignment's right-hand side may be any
+	// expression, a literal included.
 	{"logic: edition-2026 statements", true, `logic probe {
   args {
-    items []object @required
+    items []object!
     name string
   }
-  body {
-    head := args.items.first()
-    label := args.name ?? "none"
-    note := head != nil ? "has " + label : label
-    return query probeQuery(label: note)
-  }
+  head := args.items.first()
+  label := args.name ?? "none"
+  note := head != nil ? "has " + label : label
+  return query probeQuery(label: note)
 }`},
-	{"logic: a literal step right-hand side", true, `logic probe {
+	{"logic: a literal assignment right-hand side", true, `logic probe {
   args {
-    x string @required
+    x string!
   }
-  body {
-    n := 5
-    return args.x + n
-  }
+  n := 5
+  return args.x + n
 }`},
 	{"struct mutation: edition-2026 values", true, `mutate thing probe {
   args {
@@ -213,12 +205,58 @@ automation probe {
     name: args.name ?? "unnamed"
   }
 }`},
-	{"automation: conditional step with named arguments", true, `@trigger(event="node.created", concept="v1:probe:thing")
+	{"automation: an if block with named arguments", true, `@trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
-  step run {
-    if event.payload.x != nil && !(event.payload.kind in ["a", "b"]) {
-      logic probe(x: event.payload.x)
+  args {
+    kind any
+    x    any
+  }
+  if args.x != nil && !(args.kind in ["a", "b"]) {
+    logic probe(x: args.x)
+  }
+}`},
+	// The edition-2026 statement body (memql#5370): every construct kind is
+	// called by name as a statement of its own, a loop filters with a
+	// trailing `if`, a switch takes literal case labels, a parallel's
+	// branches join at the block, and the trailing clauses come after the
+	// call they qualify.
+	{"automation: every call kind as a statement", true, `automation probe {
+  rows := query activeThings(status: "active")
+  written := mutation touchThing(id: rows.first().id)
+  decided := logic decide(n: rows.count())
+  sized := builtin measure(rows: rows)
+  sub := automation sweep(limit: 10)
+  released := action applyRelease(version: "1.2.3")
+}`},
+	{"automation: for, switch and parallel blocks", true, `automation probe {
+  args {
+    items []object!
+    mode  string
+  }
+  for item in args.items if item.active == true {
+    mutation touchThing(id: item.id)
+  }
+  switch args.mode {
+    case "a", "b" {
+      logic handleA(x: 1)
     }
+    default {
+      logic handleD(x: 2)
+    }
+  }
+  parallel {
+    branch left {
+      builtin measure(side: "left")
+    }
+    branch right {
+      builtin measure(side: "right")
+    }
+  } wait any
+}`},
+	{"automation: retry, on error and publish", true, `automation probe {
+  fetched := query activeThings(status: "active") retry(3) on error continue
+  if fetched != nil {
+    publish "probe.fetched" { count: fetched.count() }
   }
 }`},
 
@@ -239,9 +277,7 @@ automation probe {
   args {
     at string
   }
-  body {
-    return year(at)
-  }
+  return year(args.at)
 }`},
 	{"inline `concept` line in a struct query", false, `query thing probe {
   concept v1:probe:thing
@@ -296,9 +332,7 @@ action probe {
 }`},
 	{"unknown keyword key on @trigger (memql#5359)", false, `@trigger(evnt="node.created")
 automation probe {
-  step run {
-    mutation createThing (id: "x")
-  }
+  mutation createThing(id: "x")
 }`},
 	{"a non-repeatable annotation written twice (memql#5359)", false, `@description("one")
 @description("two")
@@ -318,25 +352,19 @@ tool probe {
 }`},
 	{"the @trigger(on=...) synonym for event= (memql#5359)", true, `@trigger(on=participant.created)
 automation probe {
-  step run {
-    mutation createThing (id: "x")
-  }
+  mutation createThing(id: "x")
 }`},
 	// Logic, automation and mutation bodies refuse a clause they do not
 	// take; each emitter kept what it recognised and dropped the rest.
 	{"an unlisted clause in an automation body (memql#5359)", false, `automation probe {
   filter row.id != ""
-  step run {
-    mutation createThing (id: "x")
-  }
+  mutation createThing(id: "x")
 }`},
 	{"an unlisted block in a logic body (memql#5359)", false, `logic probe {
-  step s {
-    mutation createThing (id: "x")
+  precondition ready {
+    check: 1 == 1
   }
-  body {
-    return 1
-  }
+  return 1
 }`},
 	{"a stray top-level line in a mutation body (memql#5359)", false, `mutate thing probe {
   insert {
@@ -344,16 +372,13 @@ automation probe {
   }
   filter row.id != ""
 }`},
-	// The named block written without its name, beside a named one (so the
-	// refusal is the missing name, not the missing step), and an unnamed
-	// block written twice.
-	{"a step block without its name (memql#5359)", false, `automation probe {
-  step {
-    mutation createThing (id: "x")
+	// The named block written without its name, and an unnamed block written
+	// twice.
+	{"a precondition block without its name (memql#5359)", false, `automation probe {
+  precondition {
+    check: 1 == 1
   }
-  step run {
-    mutation createThing (id: "y")
-  }
+  mutation createThing(id: "y")
 }`},
 	{"a second args block in a logic body (memql#5359)", false, `logic probe {
   args {
@@ -362,9 +387,7 @@ automation probe {
   args {
     y string
   }
-  body {
-    return args.x
-  }
+  return args.x
 }`},
 
 	// ---- the edition-2026 flip (memql#5364, memql#5368) --------------------
@@ -405,47 +428,35 @@ automation probe {
 	{"automation: raw-text @filter (retired_filter_annotation)", false, `@filter(payload.status == "x")
 @trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
-  step run {
-    logic probe(x: 1)
-  }
+  logic probe(x: 1)
 }`},
 	{"automation: @trigger filter= string (retired_filter_annotation)", false, `@trigger(event="node.created", concept="v1:probe:thing", filter="payload.status == 1")
 automation probe {
-  step run {
-    logic probe(x: 1)
-  }
+  logic probe(x: 1)
 }`},
 	{"logic: cond(p, a, b) (retired_cond_call)", false, `logic probe {
   args {
-    x string @required
+    x string!
   }
-  body {
-    return cond(args.x == "a", 1, 2)
-  }
+  return cond(args.x == "a", 1, 2)
 }`},
 	{"logic: coalesce(a, b) (retired_coalesce_call)", false, `logic probe {
   args {
     x string
   }
-  body {
-    return coalesce(args.x, "none")
-  }
+  return coalesce(args.x, "none")
 }`},
 	{"logic: first(x) (retired_first_call)", false, `logic probe {
   args {
-    items []object @required
+    items []object!
   }
-  body {
-    return first(args.items)
-  }
+  return first(args.items)
 }`},
 	{"logic: null (retired_null)", false, `logic probe {
   args {
     x string
   }
-  body {
-    return args.x == null
-  }
+  return args.x == null
 }`},
 	{"struct mutation: concat(a, b) value (retired_concat_call)", false, `mutate thing probe {
   args {
@@ -464,11 +475,80 @@ automation probe {
     meta: {"source": "probe"}
   }
 }`},
-	{"automation: a name=value step argument", false, `@trigger(event="node.created", concept="v1:probe:thing")
+	{"automation: a name=value call argument", false, `@trigger(event="node.created", concept="v1:probe:thing")
+automation probe {
+  args {
+    x any
+  }
+  logic probe(x=args.x)
+}`},
+
+	// ---- the edition-2026 bodies (memql#5370) ------------------------------
+	// Legal until the tree's migration made the statement body the only
+	// body grammar; each is now refused by the statement parser, by name,
+	// naming its replacement and memqlmigrate --rewrite=bodies.
+	{"logic: a `body { }` block (body_block_retired)", false, `logic probe {
+  args {
+    x string!
+  }
+  body {
+    return args.x
+  }
+}`},
+	{"automation: a `step` block (body_step_retired)", false, `@trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
   step run {
-    logic probe(x=event.payload.x)
+    logic probe(x: 1)
   }
+}`},
+	{"automation: the terse header (body_terse_retired)", false, `automation probe @trigger(event="node.created", concept="v1:probe:thing") @filter(row => row.a != nil) => logic probe`},
+	{"automation: a steps.<id> read (body_steps_reference_retired)", false, `automation probe {
+  first := query activeThings(status: "active")
+  mutation touchThing(id: steps.first.result)
+}`},
+	{"automation: forEach (body_foreach_retired)", false, `automation probe {
+  args {
+    items []object!
+  }
+  forEach item in args.items {
+    mutation touchThing(id: item.id)
+  }
+}`},
+	{"automation: for x := range (body_for_range_retired)", false, `automation probe {
+  args {
+    items []object!
+  }
+  for item := range args.items {
+    mutation touchThing(id: item.id)
+  }
+}`},
+	{"automation: x := if (body_conditional_assign_retired)", false, `automation probe {
+  args {
+    ready bool
+  }
+  x := if args.ready {
+    query activeThings(status: "active")
+  }
+}`},
+	{"automation: publishEvent(...) (body_publish_event_retired)", false, `automation probe {
+  publishEvent(topic: "probe.done", payload: {})
+}`},
+	{"automation: a call with no kind (body_call_kind_missing)", false, `automation probe {
+  touchThing(id: "x")
+}`},
+	{"automation: the argument pun (body_positional_argument)", false, `automation probe {
+  args {
+    event any
+  }
+  logic probe(event)
+}`},
+	{"automation: @trigger partition= (trigger_partition_retired)", false, `@trigger(event="node.created", concept="v1:probe:thing", partition="*")
+automation probe {
+  logic probe(x: 1)
+}`},
+	{"automation: @schedule (trigger_schedule_synonym_retired)", false, `@schedule(cron="0 * * * * *")
+automation probe {
+  logic probe(x: 1)
 }`},
 
 	// NOT in this corpus: the retired procedural `func (Query) name(ctx any)`

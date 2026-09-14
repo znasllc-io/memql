@@ -6,10 +6,11 @@ import (
 )
 
 // Story 6 / memql#2327 -- enforcement of the body rule (construct-invocation
-// ADR Decision 5): `body { }` is FORBIDDEN on every construct but `logic`, and
-// on `logic` it is the wrapper epic memql#5370 retires (a logic without it is
-// the statement form). These tests pin the parser half of that enforcement
-// (the whole-tree gate half lives in component/memql/callgraph).
+// ADR Decision 5): `body { }` is FORBIDDEN on every construct. On a logic and
+// an automation it is the wrapper epic memql#5370 retired -- their statements
+// follow the args block directly -- and the refusal names it. These tests pin
+// the parser half of that enforcement (the whole-tree gate half lives in
+// component/memql/callgraph).
 
 // rewriteAndParse runs the struct-form rewriter (NormaliseAll) and then parses
 // the result, mirroring the real loader pipeline. Logic/query/mutation/
@@ -24,12 +25,11 @@ func rewriteAndParse(t *testing.T, src string) (*File, error) {
 	return ParseFile(rewritten)
 }
 
-// A logic WITHOUT a `body { }` block is the edition-2026 statement form (epic
-// memql#5370; the owner's answer of 2026-09-13 retired the wrapper, and with it
-// the logic half of ADR Decision 5). The rewriter leaves it as written and the
-// parser reads its statements natively. `body { }` stays forbidden on every
-// other construct; on a logic it is the retired form, refused once the tree
-// is migrated (body_block_retired).
+// A logic's statements follow its args block directly (epic memql#5370; the
+// owner's answer of 2026-09-13 retired the `body { }` wrapper, and with it the
+// logic half of ADR Decision 5). The parser reads them as written. `body { }`
+// is forbidden on every construct; on a logic and an automation it is the
+// retired form, refused by name (body_block_retired).
 func TestBodyRule_LogicWithoutBodyIsTheStatementForm(t *testing.T) {
 	src := `/// no wrapper
 logic decideThing {
@@ -38,13 +38,6 @@ logic decideThing {
   }
   return args.x
 }`
-	rewritten, err := NormaliseLogicSource(src)
-	if err != nil {
-		t.Fatalf("the rewriter refused a statement-form logic: %v", err)
-	}
-	if rewritten != src {
-		t.Fatalf("the rewriter changed a statement-form logic:\n%s", rewritten)
-	}
 	file, err := rewriteAndParse(t, src)
 	if err != nil {
 		t.Fatalf("a statement-form logic should parse cleanly, got: %v", err)
@@ -56,37 +49,6 @@ logic decideThing {
 	auto, ok := fn.Body.(*AutomationDef)
 	if !ok || auto.Body == nil || len(auto.Body.Statements) != 1 {
 		t.Fatalf("the logic's body was not read as statements: %#v", fn.Body)
-	}
-}
-
-// A logic WITH a `body { }` block (even a one-liner) is accepted and parses to
-// a FunctionDef of logic kind.
-func TestBodyRule_LogicWithBody_Accepted(t *testing.T) {
-	src := `@description("has body")
-logic decideThing {
-  args {
-    x string @required
-  }
-  body {
-    return x
-  }
-}`
-	file, err := rewriteAndParse(t, src)
-	if err != nil {
-		t.Fatalf("logic with a body block should parse cleanly, got: %v", err)
-	}
-	if len(file.Definitions) != 1 {
-		t.Fatalf("expected 1 definition, got %d", len(file.Definitions))
-	}
-	fn, ok := file.Definitions[0].(*FunctionDef)
-	if !ok {
-		t.Fatalf("expected *FunctionDef, got %T", file.Definitions[0])
-	}
-	if fn.Type != FunctionTypeLogic {
-		t.Errorf("Type = %v, want logic", fn.Type)
-	}
-	if fn.Name != "decideThing" {
-		t.Errorf("Name = %q, want decideThing", fn.Name)
 	}
 }
 
@@ -179,18 +141,16 @@ action tagRelease {
 	}
 }
 
-// An automation carrying a `body { }` block is rejected: an automation is
-// `step ...` blocks, never a procedural body.
-func TestBodyRule_AutomationWithBody_Rejected(t *testing.T) {
-	src := `@enabled
-@trigger(event="system.startup")
-automation onStartup {
-  body {
-    step run { logic doThing { event: event } }
-  }
-}`
-	_, err := rewriteAndParse(t, src)
-	if err == nil {
-		t.Fatal("expected an error for an automation with a `body { }` block, got nil")
+// A logic or an automation carrying a `body { }` block is refused by name:
+// its statements follow its args block directly.
+func TestBodyRule_LogicAndAutomationWithBody_Rejected(t *testing.T) {
+	for _, src := range []string{
+		"logic decideThing {\n  args {\n    x string!\n  }\n  body {\n    return args.x\n  }\n}",
+		"@trigger(event=\"system.startup\")\nautomation onStartup {\n  body {\n    run := logic doThing(event: event)\n  }\n}",
+	} {
+		_, err := rewriteAndParse(t, src)
+		if err == nil || !strings.Contains(err.Error(), "body_block_retired") {
+			t.Errorf("want the body_block_retired refusal, got %v:\n%s", err, src)
+		}
 	}
 }

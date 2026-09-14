@@ -29,6 +29,12 @@
       "verdict": "refuse_parse",
       "code": "body_publish_event_retired",
       "message": "`publishEvent(...)` is retired in edition 2026: write `publish \"<topic>\" { ... }` in an automation"
+    },
+    {
+      "file": "body-block.memql",
+      "verdict": "refuse_parse",
+      "code": "body_block_retired",
+      "message": "`body { }` is retired in edition 2026: a logic's statements follow its args block directly"
     }
   ]
 }

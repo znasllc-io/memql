@@ -2,10 +2,11 @@ package parser
 
 // body_clauses.go -- the clauses each construct's body accepts (memql#5359).
 //
-// The struct-form rewriter (parseStructQueryBody, parseStructMutationBody,
-// emitLogic, emitAutomation) and the construct parsers (parseActionDecl,
-// parseCapabilityDecl, parseProviderDecl) each accept a fixed set of body
-// clauses. That set used to be restated by hand in dslspec, which is how the
+// The struct-form rewriter (parseStructQueryBody, parseStructMutationBody),
+// the statement parser (parseV1Definition: the blocks a logic's or an
+// automation's statements follow) and the construct parsers
+// (parseActionDecl, parseCapabilityDecl, parseProviderDecl) each accept a
+// fixed set of body clauses. That set used to be restated by hand in dslspec, which is how the
 // editor came to offer `body { }` inside an automation (it has none) and
 // never offered `sort`, `paginate`, `asOf` or `count` on a query. It is
 // stated once here instead: dslspec projects it as Construct.BodyBlocks, and
@@ -24,8 +25,8 @@ package parser
 var bodyClauseTable = map[string][]string{
 	"query":      {"args", "filter", "refine", "shape", "sort", "paginate", "asOf", "count"},
 	"mutate":     {"args", "insert", "update", "accept", "stamp"},
-	"logic":      {"args", "body"},
-	"automation": {"args", "step", "precondition"},
+	"logic":      {"args"},
+	"automation": {"args", "precondition"},
 	"action":     {"args"},
 	"capability": {"args"},
 	"provider":   {"params", "auth"},
@@ -38,10 +39,10 @@ var lineClauses = map[string]bool{
 }
 
 // namedBlocks are the body clauses whose block carries a name
-// (`step <name> { ... }`, `precondition <name> { ... }`) -- the name is part
-// of the clause, and a nameless block is refused.
+// (`precondition <name> { ... }`) -- the name is part of the clause, and a
+// nameless block is refused.
 var namedBlocks = map[string]bool{
-	"step": true, "precondition": true,
+	"precondition": true,
 }
 
 // BodyClauses returns the clauses the construct keyword's body accepts, in
@@ -58,7 +59,7 @@ func IsLineClause(clause string) bool {
 }
 
 // IsNamedBlock reports whether a body clause's block carries a name:
-// `step <name> { ... }` rather than `args { ... }`.
+// `precondition <name> { ... }` rather than `args { ... }`.
 func IsNamedBlock(clause string) bool {
 	return namedBlocks[clause]
 }

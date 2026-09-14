@@ -3679,12 +3679,6 @@ func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Att
 		// in #2712); the #2712 load gate rejects them on automations, so this
 		// fold is now dead. Deleted with those fields (#2724). They remain live
 		// on functions via processFunctionAttributes.
-		case AttrSchedule:
-			if v := getAttrArgString(attr, "cron"); v != "" {
-				d.Schedule = v
-			} else {
-				d.Schedule = getAttrString(attr)
-			}
 		case AttrTrigger:
 			if d.Trigger == nil {
 				d.Trigger = &TriggerDef{}
@@ -3698,11 +3692,8 @@ func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Att
 				d.Trigger.Filter = formatV1(lam)
 				d.Trigger.FilterLambda = lam
 			}
-			// @trigger(schedule="0 0 0 * * *") -- accepted as a synonym for
-			// @schedule(cron="..."). Historically the scheduler silently
-			// dropped this form; any automation using it never ran. Kept
-			// working because event-triggered and schedule-triggered
-			// automations coexist on the same AutomationDef.
+			// @trigger(schedule="0 0 0 * * *"): a scheduled automation.
+			// Event and schedule triggers share the one AutomationDef.
 			if v := getAttrArgString(attr, "schedule"); v != "" {
 				d.Schedule = v
 			}

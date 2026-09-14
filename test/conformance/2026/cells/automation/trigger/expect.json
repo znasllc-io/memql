@@ -5,6 +5,10 @@
       "verdict": "load_ok"
     },
     {
+      "file": "a-schedule.memql",
+      "verdict": "load_ok"
+    },
+    {
       "file": "with-a-positional-value.memql",
       "verdict": "refuse_parse",
       "code": "annotation_form",
@@ -20,6 +24,12 @@
       "verdict": "refuse_parse",
       "code": "annotation_key",
       "message": "@trigger on an automation has no key evnt -- did you mean event?"
+    },
+    {
+      "file": "an-invalid-cron.memql",
+      "verdict": "refuse_load",
+      "message": "invalid cron schedule \"0 * * * *\": expected exactly 6 fields, found 5",
+      "note": "MemQL crons carry a leading seconds field; the refusal names the six-field spelling of the same schedule."
     }
   ]
 }

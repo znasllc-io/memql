@@ -12,8 +12,7 @@ import (
 // v1BodyCases are the sources the statement parser must accept. Each is a
 // whole file, parsed the way the loaders parse one (NormaliseAll, then
 // ParseFile); want is the body rendered by renderBody, one statement per line,
-// blocks indented two spaces. TestTransitionalDispatchIsExact reads this table
-// too: every source here must take the native path.
+// blocks indented two spaces.
 var v1BodyCases = []struct {
 	name string
 	src  string

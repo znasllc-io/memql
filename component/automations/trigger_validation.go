@@ -71,10 +71,10 @@ func (l *Loader) validateTriggerWiring(automation *Automation) error {
 	// careful about, and it would look like a template that works.
 	if automation.IsTemplate() {
 		if scheduled || evented {
-			return fmt.Errorf("automation %q is declared @template but also carries a trigger or a schedule. "+
+			return fmt.Errorf("automation %q is declared @template but also carries a trigger. "+
 				"A template is invoked by the work run that names it; adding a trigger would make it run BOTH ways -- "+
 				"once per matching event AND once per run -- which presents as a template that works. "+
-				"Remove the @trigger/@schedule, or drop @template and let it be an ordinary automation",
+				"Remove the @trigger, or drop @template and let it be an ordinary automation",
 				automation.Name)
 		}
 		return nil
@@ -83,9 +83,9 @@ func (l *Loader) validateTriggerWiring(automation *Automation) error {
 	if !scheduled && !evented {
 		return fmt.Errorf("automation %q has neither an event trigger nor a schedule, so nothing can ever run it. "+
 			"Add one of:\n"+
-			"  @trigger(event=\"node.created\", concept=\"v1:<ns>:<concept>\", partition=\"*\")   graph CDC\n"+
-			"  @trigger(event=\"<topic>\")                                                  a published topic\n"+
-			"  @trigger(schedule=\"0 */10 * * * *\")                                        cron (6 fields)\n"+
+			"  @trigger(event=\"node.created\", concept=\"v1:<ns>:<concept>\")   graph CDC\n"+
+			"  @trigger(event=\"<topic>\")                                  a published topic\n"+
+			"  @trigger(schedule=\"0 */10 * * * *\")                        cron (6 fields)\n"+
 			"A misspelled kwarg reads as no trigger at all -- `event=` and `schedule=` are the only two that wire anything",
 			automation.Name)
 	}

@@ -50,6 +50,7 @@ var retiredOn = map[retiredKey]string{
 	{Shape, "concepts"}:        "bind the concept in the signature instead: `shape <Concept> <name> { ... }`, with the concept imported by a file-top `use` line",
 	{Shape, "caller"}:          "use @actor (#221); the field accessor was renamed at the same time (caller.X -> actor.X)",
 	{Concept, "scope"}:         "remove the annotation; every concept lives in the default partition post-#56",
+	{Automation, "schedule"}:   "a scheduled automation is written @trigger(schedule=\"<cron>\"), the one spelling (D15, epic memql#5370); memqlmigrate --rewrite=bodies rewrites it",
 	{Concept, "cache"}:         "a concept carries no cache setting -- a read caches, so set the TTL on the query that reads the concept (@cache(300)); a write to the concept evicts every cached read of it",
 	{ArgsField, "default"}:     "it is never applied; write `args.<field> ?? <default>` in the body (a concept-field @default is not a substitute -- it is never applied on insert either)",
 	{ArgsField, "description"}: "it was never retained (no AST slot); document the field with a `///` doc comment on the line above it (memql#3336)",

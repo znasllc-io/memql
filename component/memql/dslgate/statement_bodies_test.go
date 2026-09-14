@@ -110,9 +110,10 @@ func TestStatementBodiesRefuseAnUnknownBareCall(t *testing.T) {
 	}
 }
 
-// TestStatementBodiesPassOverARetiredForm: a body still in a retired form is
-// the rewriter's until the flip, and its expressions the legacy grammar's.
-func TestStatementBodiesPassOverARetiredForm(t *testing.T) {
+// TestStatementBodiesPassOverARefusedBody: a body the parser refuses -- here
+// a retired form, body_block_retired -- is the loader's to report; the gates
+// pass over it rather than reporting a read they could not make.
+func TestStatementBodiesPassOverARefusedBody(t *testing.T) {
 	// memqlmigrate:keep -- the retired form is the case.
 	src := `logic legacy {
   body {
@@ -121,14 +122,14 @@ func TestStatementBodiesPassOverARetiredForm(t *testing.T) {
 }
 `
 	if got := statementGates(SourceFile{"probe/logic.memql", src}); len(got) != 0 {
-		t.Fatalf("reported a retired form:\n%s", strings.Join(got, "\n"))
+		t.Fatalf("reported a refused body:\n%s", strings.Join(got, "\n"))
 	}
 }
 
 // TestStatementBodiesReadIsTheGatesCoverage: the coverage names each body the
 // gates read, and not one they passed over.
 func TestStatementBodiesReadIsTheGatesCoverage(t *testing.T) {
-	// memqlmigrate:keep -- the legacy construct is the one the coverage must not name.
+	// memqlmigrate:keep -- the refused construct is the one the coverage must not name.
 	src := `logic native {
   return 1
 }

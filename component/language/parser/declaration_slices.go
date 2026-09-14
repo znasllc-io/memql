@@ -104,61 +104,6 @@ func ExtractDeclarationSlices(source string, headerRe *regexp.Regexp) []Declarat
 	return out
 }
 
-// ExtractTerseAutomationSlices returns every terse single-step automation in
-// source, as AUTHORED:
-//
-//	automation NAME @trigger(schedule="0 0 2 * * *") => logic targetLogic
-//
-// It is a separate entry point from ExtractDeclarationSlices because that
-// function's whole extent rule is "match a header ending in `{`, then find the
-// matching `}`", and this form has no braces at all: the declaration ends with
-// its line. Passing it a brace-less header regexp would not narrow the result,
-// it would return nothing.
-//
-// # Why the catalog needs its own extractor rather than the loader's
-//
-// ExtractAutomationSlices (component/memql) already finds these, but it finds
-// them by LOWERING the terse form to longhand first and then slicing the
-// lowered text -- and it prepends the file's `use` declarations so the slice
-// re-parses standalone. That is exactly right for a loader, whose job is to
-// produce something parseable, and exactly wrong for a content hash, whose job
-// is to be a function of what the author actually wrote. Hashing the lowered
-// text would make the engine and the language server disagree about all ten of
-// these automations (memql#3758), and reformatting the lowering would silently
-// re-hash every one of them.
-//
-// Comment safety and the preamble walk follow the same three rules as
-// ExtractDeclarationSlices: detect on the comment-blanked view so a
-// commented-out declaration stays invisible, cut from the original so authored
-// comments survive into the slice, and walk the preamble on the original.
-func ExtractTerseAutomationSlices(source string) []DeclarationSlice {
-	scan := BlankComments(source)
-	matches := terseAutomationMatches(scan)
-	if len(matches) == 0 {
-		return nil
-	}
-
-	var out []DeclarationSlice
-	for _, m := range matches {
-		// The header regexp is `(?m)^...$`, so the match spans the whole line
-		// from its indentation to just before the newline -- which IS the
-		// declaration's extent for this form.
-		lineStart, lineEnd := m[0], m[1]
-		if BraceDepthBefore(scan, lineStart) != 0 {
-			continue
-		}
-		preambleStart := PreambleStartOf(source, lineStart)
-		// Capture group 2 is the automation's name.
-		out = append(out, DeclarationSlice{
-			Source: source[preambleStart:lineEnd],
-			Name:   source[m[4]:m[5]],
-			Start:  preambleStart,
-			End:    lineEnd,
-		})
-	}
-	return out
-}
-
 // predicateDeclHeaderRe matches the header of an edition-2026 BRACE-LESS
 // predicate declaration, up to and including its `=`: `spec <Bound> <Name> =`
 // or `trait <Name> =` (memql#5364). Group 1 is the keyword, group 2 the name.
@@ -170,10 +115,9 @@ var predicateDeclHeaderRe = regexp.MustCompile(`(?m)^[ \t]*(spec|trait)[ \t]+(?:
 //	spec agent isAssistant = row => row.role == "assistant"
 //	trait isActiveRecord = row => row.active == true
 //
-// It is a separate entry point from ExtractDeclarationSlices for the reason
-// ExtractTerseAutomationSlices is: that function's extent rule is "match a
-// header ending in `{`, then find the matching `}`", and this form has no
-// braces. Its extent is its EXPRESSION -- the header line plus every
+// It is a separate entry point from ExtractDeclarationSlices because that
+// function's extent rule is "match a header ending in `{`, then find the
+// matching `}`", and this form has no braces. Its extent is its EXPRESSION -- the header line plus every
 // continuation line dslclause.ClauseExtent folds into it, which is how a spec
 // the codemod wrapped at its top-level `&&` stays one declaration -- and the
 // slice ends at the expression's last character, trailing comment excluded,

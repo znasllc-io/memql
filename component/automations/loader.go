@@ -393,31 +393,15 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 	return &automation, nil
 }
 
-// parseAutomationFile lowers an automation slice's struct forms and parses it,
-// with the author's positions (authored) carried in the tokens. It is the
-// parse half of parseResolveCompile, shared with the step-order gate, which
-// reads the step order the compiler is handed. file is nil when the source
-// parses to something other than a file; lowered is the lowered source.
+// parseAutomationFile parses an automation slice, with the author's positions
+// (authored) carried in the tokens. It is the parse half of
+// parseResolveCompile. An automation is read as written -- the parser reads
+// its statement body natively and refuses a retired form by name (epic
+// memql#5370) -- so lowered is source itself. file is nil when the source
+// parses to something other than a file.
 func parseAutomationFile(authored, source string) (file *languageParser.File, lowered string, err error) {
-	// Apply struct-form rewriters before tokenisation. The automation
-	// loader bypasses compiler.CompileSource (so it can interleave
-	// concept resolution between parse and compile), which means it
-	// also has to run the rewriters that CompileSource normally fires.
-	if languageParser.LooksLikeStructLogic(source) {
-		rewritten, err := languageParser.NormaliseLogicSource(source)
-		if err != nil {
-			return nil, "", languageParser.PositionRewriteError(authored, fmt.Errorf("logic rewrite: %w", err))
-		}
-		source = rewritten
-	}
-	if languageParser.LooksLikeStructAutomation(source) {
-		rewritten, err := languageParser.NormaliseAutomationSource(source)
-		if err != nil {
-			return nil, "", languageParser.PositionRewriteError(authored, fmt.Errorf("automation rewrite: %w", err))
-		}
-		source = rewritten
-	} else if languageParser.LooksLikeLegacyAutomation(source) {
-		return nil, "", fmt.Errorf("automation source: `func (Automation) NAME(...)` is retired -- author the struct form: `automation NAME { step <name> { logic <bareName> { ... } } }`. See dsl/v1/automations/v1/identity/expireDelegations/automation.memql for a worked example.")
+	if err := languageParser.RejectLegacyProceduralAuthorForm(source); err != nil {
+		return nil, "", languageParser.PositionRewriteError(authored, err)
 	}
 
 	// Tokenize the lowering with the author's positions carried in it, so a

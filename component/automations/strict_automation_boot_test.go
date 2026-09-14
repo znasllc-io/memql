@@ -233,22 +233,16 @@ func TestStrictAutomationBoot_MalformedAutomationRefusesBoot(t *testing.T) {
 	})
 }
 
-// TestStrictAutomationBoot_TerseLoweringRejectionRefusesBoot covers the OTHER
-// newly-gated phase. A terse-lowering rejection drops the WHOLE FILE, not one
-// automation, so it is the most destructive silent drop of the three -- and it
-// was equally silent before the gate.
-//
-// The trigger is a real authoring violation (a file-top `args { }` block ahead
-// of a terse `=> logic` automation, forbidden by the event-payload-binding
-// ADR): the terse form forwards the event payload and declares no args.
-func TestStrictAutomationBoot_TerseLoweringRejectionRefusesBoot(t *testing.T) {
-	const domain = "s2830fixturetersereject"
+// TestStrictAutomationBoot_TerseHeaderRefusesBoot: the retired terse header,
+// `automation NAME @trigger(...) => logic L`, matches neither automation
+// header the slicer looks for, so without a slicing of its own it would be
+// absent from the load without a word (memql#2830). It is sliced as its line,
+// and the parser refuses it by name (body_terse_retired, epic memql#5370).
+func TestStrictAutomationBoot_TerseHeaderRefusesBoot(t *testing.T) {
+	const domain = "s2830fixtureterseheader"
 	fixture := fstest.MapFS{
 		"automations.memql": {Data: []byte(
-			"args {\n" +
-				"  node any\n" +
-				"}\n\n" +
-				"automation fixtureTerseRejected @trigger(event=\"system.startup\") => logic logicSomething\n")},
+			"automation fixtureTerse @trigger(event=\"system.startup\") => logic logicSomething\n")},
 	}
 	memqldsl.RegisterTree(domain, withLanguageLine(fixture))
 	t.Cleanup(func() { memqldsl.UnregisterTree(domain) })
@@ -259,10 +253,10 @@ func TestStrictAutomationBoot_TerseLoweringRejectionRefusesBoot(t *testing.T) {
 
 		_, err := loader.LoadAll()
 		if err == nil {
-			t.Fatal("a terse-lowering rejection drops the whole file; it must refuse boot, not vanish with a WARN")
+			t.Fatal("a retired terse header must refuse boot, not vanish")
 		}
-		if !strings.Contains(err.Error(), "terseLowering") {
-			t.Fatalf("the refusal must identify the failing phase, got: %v", err)
+		if !strings.Contains(err.Error(), "body_terse_retired") {
+			t.Fatalf("the refusal must name the retired form, got: %v", err)
 		}
 		if !strings.Contains(err.Error(), domain) {
 			t.Fatalf("the refusal must name the offending file, got: %v", err)

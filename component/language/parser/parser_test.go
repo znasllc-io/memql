@@ -1377,49 +1377,6 @@ func (Query) activeUsers(args any) (any, error) {
 	}
 }
 
-func TestParser_GoStyleSchedule(t *testing.T) {
-	input := `
-@enabled
-@schedule(cron="*/30 * * * *")
-func (Automation) scheduledTask(_ any) {
-  doWork := query {
-    concept==v1:task
-  }
-  return doWork
-}
-`
-	lexer := NewLexer(input)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Lexer error: %v", err)
-	}
-
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parser error: %v", err)
-	}
-
-	file, ok := ast.(*File)
-	if !ok {
-		t.Fatalf("Expected File, got %T", ast)
-	}
-
-	funcDef, ok := file.Definitions[0].(*FunctionDef)
-	if !ok {
-		t.Fatalf("Expected FunctionDef, got %T", file.Definitions[0])
-	}
-
-	automation, ok := funcDef.Body.(*AutomationDef)
-	if !ok {
-		t.Fatalf("Expected AutomationDef body, got %T", funcDef.Body)
-	}
-
-	if automation.Schedule != "*/30 * * * *" {
-		t.Errorf("Expected schedule '*/30 * * * *', got %q", automation.Schedule)
-	}
-}
-
 func TestParser_GoStyleDefaultEnabled(t *testing.T) {
 	// Without any annotation, a function is enabled by default. @disabled
 	// is the explicit opt-out.

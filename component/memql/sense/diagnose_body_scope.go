@@ -12,9 +12,8 @@ package sense
 // say. It runs the boot gate's config check too (component/memql/dslgate, with
 // component/config.UnknownKey's text), which needs the allow-list and nothing
 // of the workspace; the gate's other check, a bare call's callee, needs every
-// spec and trait loaded and stays at boot. A body still written in the retired
-// forms is the rewriter's until the flip and carries no statement body to
-// check.
+// spec and trait loaded and stays at boot. A body in a retired form is
+// refused at parse and carries no statement body to check.
 
 import (
 	"strings"

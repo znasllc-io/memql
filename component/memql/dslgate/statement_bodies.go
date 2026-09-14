@@ -21,9 +21,9 @@
 // alone. Like the sub-automation gate, "declared nowhere" is the violation,
 // so this gate is right only over the merged corpus ScanFiles is given.
 //
-// A body still in a retired form (a logic's `body { }`, an automation's step
-// blocks) does not parse as statements and is passed over: until the flip the
-// rewriter reads it, and its expressions are the legacy grammar's.
+// A body the parser refuses (a retired form among them) is passed over: the
+// loader reports the refusal, and StatementBodiesRead names only the bodies
+// the gates read.
 package dslgate
 
 import (
@@ -108,8 +108,8 @@ func scanStatementBodies(files []SourceFile) []Violation {
 }
 
 // StatementBodiesRead is the statement-body gates' coverage: "<file> <name>"
-// for every logic and automation in files whose body they read. A body in a
-// retired form, or one the parser refuses, is not read, so a caller that
+// for every logic and automation in files whose body they read. A body the
+// parser refuses is not read, so a caller that
 // knows which statement bodies the corpus holds compares the two -- a body the
 // gates could not read then cannot pass for one they found clean.
 func StatementBodiesRead(files []SourceFile) []string {
@@ -138,7 +138,7 @@ func eachStatementBody(files []SourceFile, visit func(f SourceFile, kind, name s
 			kind, name := f.Content[loc[2]:loc[3]], f.Content[loc[4]:loc[5]]
 			pf, err := languageParser.ParseFile(f.Content[loc[0] : closeAt+1])
 			if err != nil {
-				continue // a retired form, or a refusal the loader reports
+				continue // a refusal the loader reports
 			}
 			for _, d := range pf.Definitions {
 				fn, ok := d.(*ast.FunctionDef)

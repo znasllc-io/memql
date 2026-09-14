@@ -48,7 +48,6 @@ import (
 	"sort"
 	"strings"
 
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
 	"github.com/znasllc-io/memql/component/memql/sense"
 	memqldsl "github.com/znasllc-io/memql/dsl"
@@ -935,22 +934,12 @@ func forEachConstructSource(content string, fn func(kind, name, source string)) 
 		// constructDeclarationSlices, not the brace slicer alone: an
 		// edition-2026 spec or trait has no brace, and without its own
 		// extent rule it was catalogued with an empty source hash and no
-		// origin path (epic memql#5363) -- the terse-automation defect
-		// below, for another brace-less form.
+		// origin path (epic memql#5363) -- a construct that reads as
+		// `drifted` forever, because no edit can make an empty hash match a
+		// real one (memql#3758).
 		for _, slice := range constructDeclarationSlices(content, keyword) {
 			fn(kind, slice.Name, slice.Source)
 		}
-	}
-
-	// The terse single-step automation form has no braces, so the header
-	// regexp above -- which is anchored on the declaration's opening `{` --
-	// cannot see it. Ten automations in the tree are authored that way, and
-	// without this they were catalogued with an EMPTY source hash while the
-	// language server computed a real one for the same line: a construct
-	// that reads as `drifted` forever, because no edit can make an empty
-	// hash match a real one (memql#3758, caught by the corpus parity gate).
-	for _, slice := range languageParser.ExtractTerseAutomationSlices(content) {
-		fn(ConstructKindAutomation, slice.Name, slice.Source)
 	}
 }
 

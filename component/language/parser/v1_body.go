@@ -159,7 +159,12 @@ func (p *Parser) parseV1Definition(attrs []*Attribute, attrToks []Token) (*Funct
 		}
 	}
 
+	// The body's kind, for the checks that depend on it: an `asOf` is a
+	// query-only clause (asOfOutsideQuery).
+	prevFuncType := p.currentFuncType
+	p.currentFuncType = FunctionType(kind)
 	stmts, err := p.parseV1Statements(kind, construct)
+	p.currentFuncType = prevFuncType
 	if err != nil {
 		return nil, err
 	}

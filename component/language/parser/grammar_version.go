@@ -190,6 +190,38 @@ package parser
 // spelling stops recompiling at this version; the inverted stamp guard names
 // the stale stamp as the reason, and memqlmigrate --rewrite=expressions is
 // the way back.
+//
+// # 2026.09-dsl-v1-bodies (memql#5370)
+//
+// A logic's and an automation's body is a list of statements, read by the
+// statement parser (v1_body.go) as written: the struct-form rewriter no longer
+// lowers either construct. The tree used every retired form below and was
+// migrated in the same change, so this bump ships its rewrite mode,
+// memqlmigrate --rewrite=bodies (--go-fixtures for Go test fixtures).
+//
+// NARROWINGS. Each parsed before and is refused now by name, with the code in
+// brackets, naming its replacement and the migrator:
+//
+//   - a logic's `body { }` wrapper and an automation's `body { }` block
+//     [body_block_retired]; a `step NAME { ... }` block
+//     [body_step_retired]; the terse `automation X @trigger(...) => logic Y`
+//     header [body_terse_retired];
+//   - inside a body: `steps.<id>...` [body_steps_reference_retired],
+//     `forEach` [body_foreach_retired], `for x := range`
+//     [body_for_range_retired], `x := if <cond> { <call> }`
+//     [body_conditional_assign_retired], `publishEvent(...)`
+//     [body_publish_event_retired], a call with no construct kind
+//     [body_call_kind_missing] and an argument without a name, the pun
+//     included [body_positional_argument];
+//   - on a trigger: `partition=` [trigger_partition_retired] and the
+//     `@schedule(...)` synonym [trigger_schedule_synonym_retired];
+//     `@trigger(schedule=...)` is the one spelling.
+//
+// WIDENINGS. The statements themselves: `if` / `else if` / `else`, `for x in
+// <source> if <filter>`, `switch` with literal `case` labels, `parallel`
+// branches with `wait any`, `publish "<topic>" { ... }` in an automation, and
+// the trailing `retry(n)`, `on error continue` and `on surface(...)`
+// clauses. A name bound in an if or switch block is readable after it.
 
 import (
 	"crypto/sha256"
@@ -204,7 +236,7 @@ import (
 // The digest suffix is not decoration: TestGrammarVersionCarriesTheSurfaceDigest
 // recomputes it and requires this string to end with it, which is what makes a
 // grammar move impossible to land without editing this line (memql#3089).
-const GrammarVersion = "2026.09-dsl-v1-expressions-52d9aeb1"
+const GrammarVersion = "2026.09-dsl-v1-bodies-c863e266"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test

@@ -20,6 +20,7 @@ import (
 	"io"
 	"io/fs"
 	"regexp"
+	"sort"
 	"strings"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
@@ -63,6 +64,13 @@ var automationStructHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-
 // trailing comment leaves whitespace and still satisfies `$`.
 var automationLooseHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*(?:\{|$)`)
 
+// automationTerseHeader matches the retired terse header, `automation NAME
+// @trigger(...) => logic L`: an annotation on the header line itself. Neither
+// header above matches it, so it would be absent from the load without a
+// word (#2830). It is sliced as its line instead, and the parser refuses it
+// by name (body_terse_retired, epic memql#5370).
+var automationTerseHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+@`)
+
 // LoadFromUnifiedTree walks dsl.Tree() looking for
 // `<domain>/automations.memql` files, extracts every
 // `automation NAME { ... }` block, and compiles each via the
@@ -74,7 +82,7 @@ var automationLooseHeader = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Z
 // header to gather the @-attribute + comment preamble.
 //
 // Returns the list of compiled automations. EVERY load problem, across all
-// four phases -- read, terse-lowering, extract, compile -- is collected and,
+// three phases -- read, extract, compile -- is collected and,
 // unless the MEMQL_DSL_ALLOW_SKIPS break-glass is set, returned as an error,
 // so the node refuses to boot half-loaded rather than running silently
 // without the automation (memql#2830).
@@ -144,9 +152,9 @@ func (l *Loader) LoadFromTree(tree fs.FS) ([]*Automation, error) {
 			})
 			return nil
 		}
-		// Before anything interprets it -- the terse lowering and the slice
-		// extractor below both read the core grammar. A file the front end
-		// refuses is a load problem like any other, and is not read at all.
+		// Before anything interprets it -- the slice extractor below reads
+		// the core grammar. A file the front end refuses is a load problem
+		// like any other, and is not read at all.
 		data, prepErr := lines.Prepare(path, data)
 		if errors.Is(prepErr, languageParser.ErrLanguageLineRefused) {
 			// The domain's language line is refused, so none of it is read;
@@ -176,29 +184,7 @@ func (l *Loader) LoadFromTree(tree fs.FS) ([]*Automation, error) {
 				"component", ComponentName, "path", path, "line", line,
 				"effect", "every automation below this line is commented out and will not load")
 		}
-		// Lower terse single-step automations (memql#2215) to their longhand
-		// block form so the slice extractor below (which keys off `automation
-		// NAME {`) discovers them. compileMemQL re-runs the rewriter, so this is
-		// idempotent for already-longhand sources.
-		//
-		// A non-nil error is a hard authoring violation (G1 / memql#2363: a
-		// file-top `args { }` block preceding a terse automation, which the
-		// terse form forbids). Previously terse lowering could never error, so
-		// the error path is new -- surface it loudly and skip the file rather
-		// than silently loading the un-lowered (and thus un-discovered) source.
-		lowered, lerr := languageParser.NormaliseTerseAutomationSource(source)
-		if lerr != nil {
-			if l.logger != nil {
-				l.logger.Warn("unified automation loader: terse lowering rejected",
-					"component", ComponentName, "path", path, "error", lerr)
-			}
-			problems = append(problems, automationLoadProblem{
-				Path: path, Phase: "terseLowering", Err: languageParser.PositionRewriteError(source, lerr).Error(),
-			})
-			return nil
-		}
 		authoredFile := source
-		source = lowered
 		slices, unextracted := extractAutomationSlicesReporting(source)
 		for _, name := range unextracted {
 			if l.logger != nil {
@@ -324,7 +310,7 @@ func (l *Loader) LoadFromTree(tree fs.FS) ([]*Automation, error) {
 type automationLoadProblem struct {
 	Path  string // automations.memql file in the DSL tree
 	Name  string // automation name (empty for whole-file problems)
-	Phase string // "read" | "terseLowering" | "extract" | "compile"
+	Phase string // "read" | "extract" | "compile"
 	Err   string
 }
 
@@ -385,9 +371,9 @@ func extractAutomationSlices(source string) []automationSlice {
 // Two classes are detected:
 //   - a matched header whose `{` never closes (findMatchingBrace fails);
 //   - a bare `automation NAME` header the strict struct regex does not match,
-//     which is almost always the `{`-on-the-next-line spelling. Terse
-//     `automation NAME @trigger(...) => logic X` declarations are lowered to
-//     longhand BEFORE extraction, so they do not reach here as bare headers.
+//     which is almost always the `{`-on-the-next-line spelling. A retired
+//     terse `automation NAME @trigger(...) => logic X` header is sliced as
+//     its line (automationTerseHeader), and the parser refuses it by name.
 func extractAutomationSlicesReporting(source string) ([]automationSlice, []string) {
 	var unextracted []string
 
@@ -422,20 +408,31 @@ func extractAutomationSlicesReporting(source string) ([]automationSlice, []strin
 		}
 	}
 
-	if len(matches) == 0 {
+	// Every header, in source order, with the index of the construct's last
+	// byte: a block's closing brace (-1 when it has none), or a terse
+	// header's line end.
+	type automationHeader struct{ start, nameStart, nameEnd, end int }
+	var headers []automationHeader
+	for _, m := range matches {
+		headers = append(headers, automationHeader{m[0], m[2], m[3], findMatchingBrace(scan, m[1]-1)})
+	}
+	for _, m := range automationTerseHeader.FindAllStringSubmatchIndex(scan, -1) {
+		end := len(source) - 1
+		if nl := strings.IndexByte(source[m[0]:], '\n'); nl >= 0 {
+			end = m[0] + nl - 1
+		}
+		headers = append(headers, automationHeader{m[0], m[2], m[3], end})
+	}
+	if len(headers) == 0 {
 		return nil, unextracted
 	}
+	sort.Slice(headers, func(i, j int) bool { return headers[i].start < headers[j].start })
 
 	var out []automationSlice
-	for _, m := range matches {
-		headerStart := m[0]
-		headerEnd := m[1]
-		nameStart := m[2]
-		nameEnd := m[3]
-		name := source[nameStart:nameEnd]
-
-		openIdx := headerEnd - 1 // position of `{`
-		closeIdx := findMatchingBrace(scan, openIdx)
+	for _, h := range headers {
+		headerStart := h.start
+		name := source[h.nameStart:h.nameEnd]
+		closeIdx := h.end
 		if closeIdx < 0 {
 			unextracted = append(unextracted, name)
 			continue
@@ -601,31 +598,22 @@ var _ = io.ReadAll
 // future revision needs it.
 var _ = fs.ValidPath
 
-// compileUnifiedSlice compiles one automation slice of the terse-lowered file,
-// reporting positions against what the author wrote in authoredFile.
+// compileUnifiedSlice compiles one automation slice, reporting positions
+// against the file it was cut from.
 func (l *Loader) compileUnifiedSlice(authoredFile string, slice automationSlice, origin string) (*Automation, error) {
 	return l.compileMemQLFrom(authoredAutomationText(authoredFile, slice), slice.Source, origin)
 }
 
-// authoredAutomationText is what the author wrote for the automation a slice
-// of the terse-lowered file holds, placed on its line of the file
+// authoredAutomationText is a slice placed on its line of the file
 // (languageParser.AnchorSource), for compileMemQLFrom to report positions
-// against (memql#5364). A longhand automation's slice is the author's text
-// verbatim and is found in the file. A terse one's is the lowering's longhand,
-// found nowhere in it, so the text is the terse header the author wrote, with
-// its preamble: the position markers align the longhand's tokens with it, and
-// a refusal inside the header's @filter lands on the author's token. A slice
-// the file holds twice, where either line would be a guess, keeps positions
-// relative to itself.
+// against (memql#5364). A slice the file holds twice, where either line
+// would be a guess, keeps positions relative to itself.
 func authoredAutomationText(authoredFile string, slice automationSlice) string {
 	if i := strings.Index(authoredFile, slice.Source); i >= 0 {
 		if (i > 0 && authoredFile[i-1] != '\n') || strings.Contains(authoredFile[i+1:], slice.Source) {
 			return slice.Source
 		}
 		return languageParser.AnchorSource(slice.Source, 1+strings.Count(authoredFile[:i], "\n"))
-	}
-	if text, start, ok := languageParser.TerseAutomationSource(authoredFile, slice.Name); ok {
-		return languageParser.AnchorSource(text, 1+strings.Count(authoredFile[:start], "\n"))
 	}
 	return slice.Source
 }

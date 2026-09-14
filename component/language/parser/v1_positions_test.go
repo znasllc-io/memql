@@ -118,7 +118,7 @@ func queryBase(n ast.ExpressionNode) ast.ExpressionNode {
 	}
 }
 
-// automationBody returns the file's one automation or logic body.
+// automationBody returns the file's one automation.
 func automationBody(t *testing.T, f *File) *ast.AutomationDef {
 	t.Helper()
 	fn := onlyFunction(t, f)
@@ -127,46 +127,6 @@ func automationBody(t *testing.T, f *File) *ast.AutomationDef {
 		t.Fatalf("want an AutomationDef body, got %T", fn.Body)
 	}
 	return auto
-}
-
-// stepByID finds a step by id, searching forEach bodies and switch cases.
-func stepByID(t *testing.T, steps []ast.StepDef, id string) *ast.StepDef {
-	t.Helper()
-	var find func([]ast.StepDef) *ast.StepDef
-	find = func(ss []ast.StepDef) *ast.StepDef {
-		for i := range ss {
-			if ss[i].ID == id {
-				return &ss[i]
-			}
-			switch cfg := ss[i].Config.(type) {
-			case *ast.ForEachStepConfig:
-				if s := find(cfg.Do); s != nil {
-					return s
-				}
-			case *ast.SwitchStepConfig:
-				for _, c := range cfg.Cases {
-					if s := find(c.Steps); s != nil {
-						return s
-					}
-				}
-				if cfg.Default != nil {
-					if s := find(cfg.Default.Steps); s != nil {
-						return s
-					}
-				}
-			}
-		}
-		return nil
-	}
-	if s := find(steps); s != nil {
-		return s
-	}
-	var ids []string
-	for _, s := range steps {
-		ids = append(ids, s.ID)
-	}
-	t.Fatalf("no step %q among %v", id, ids)
-	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -356,7 +316,7 @@ func TestSpecAndTraitLambdaForm(t *testing.T) {
 // raw-text @filter is refused.
 func TestFilterAnnotationLambda(t *testing.T) {
 	automation := func(filter string) string {
-		return filter + "\n@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  step first {\n    logic other(x: 1)\n  }\n}"
+		return filter + "\n@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  logic other(x: 1)\n}"
 	}
 	auto := automationBody(t, mustParseV1Authored(t, automation(`@filter(row => row.status == "x" && row.a != nil)`)))
 	if auto.Trigger == nil || auto.Trigger.FilterLambda == nil {
@@ -373,12 +333,12 @@ func TestFilterAnnotationLambda(t *testing.T) {
 	wantRetired(t, err, "retired_filter_annotation")
 
 	// The filter= argument of @trigger takes the same lambda.
-	viaTrigger := "@trigger(event=\"node.created\", concept=\"v1:probe:thing\", filter=row => row.a == 1)\nautomation probe {\n  step first {\n    logic other(x: 1)\n  }\n}"
+	viaTrigger := "@trigger(event=\"node.created\", concept=\"v1:probe:thing\", filter=row => row.a == 1)\nautomation probe {\n  logic other(x: 1)\n}"
 	auto = automationBody(t, mustParseV1Authored(t, viaTrigger))
 	if auto.Trigger == nil || auto.Trigger.FilterLambda == nil || auto.Trigger.Filter != "row => row.a == 1" {
 		t.Fatalf("@trigger(filter=<lambda>): %+v", auto.Trigger)
 	}
-	legacyTrigger := "@trigger(event=\"node.created\", concept=\"v1:probe:thing\", filter=\"payload.a == 1\")\nautomation probe {\n  step first {\n    logic other(x: 1)\n  }\n}"
+	legacyTrigger := "@trigger(event=\"node.created\", concept=\"v1:probe:thing\", filter=\"payload.a == 1\")\nautomation probe {\n  logic other(x: 1)\n}"
 	_, err = parseV1Authored(t, legacyTrigger)
 	wantRetired(t, err, "retired_filter_annotation")
 
@@ -388,209 +348,10 @@ func TestFilterAnnotationLambda(t *testing.T) {
 	}
 }
 
-// TestTerseAutomationWithFilterLambda: the terse header's arrow is the LAST
-// top-level `=>` after the annotations, so a lambda inside @filter -- on the
-// header line or on its own line above it -- does not confuse the lowering.
-// The second case is dsl/data/automations.memql migrated.
-func TestTerseAutomationWithFilterLambda(t *testing.T) {
-	cases := map[string]string{
-		"inline": `automation conflictDetection @trigger(event="node.created", concept="v1:data:record", partition="*") @filter(row => row.naturalKeyValue != nil) => logic conflictDetection`,
-		"dsl/data/automations.memql migrated": `/// Detects conflicts between new data records and existing confirmed records.
-@filter(row => row.naturalKeyValue != nil)
-automation conflictDetection @trigger(event="node.created", concept="v1:data:record", partition="*") => logic conflictDetection`,
-	}
-	for name, src := range cases {
-		t.Run(name, func(t *testing.T) {
-			if !LooksLikeTerseAutomation(src) {
-				t.Fatal("not recognised as a terse automation")
-			}
-			slices := ExtractTerseAutomationSlices(src)
-			if len(slices) != 1 || slices[0].Name != "conflictDetection" {
-				t.Fatalf("ExtractTerseAutomationSlices = %+v", slices)
-			}
-			auto := automationBody(t, mustParseV1Authored(t, src))
-			if auto.Trigger == nil || auto.Trigger.FilterLambda == nil {
-				t.Fatalf("trigger %+v", auto.Trigger)
-			}
-			if auto.Trigger.Filter != "row => row.naturalKeyValue != nil" {
-				t.Errorf("Filter = %q", auto.Trigger.Filter)
-			}
-			run := stepByID(t, auto.Steps, "run")
-			if cfg, ok := run.Config.(*ast.FunctionStepConfig); !ok || cfg.Name != "conflictDetection" {
-				t.Errorf("the lowered step is %+v", run.Config)
-			}
-		})
-	}
-	// The pre-existing terse shape is unchanged.
-	plain := `automation registerNode @trigger(event="system.startup") => logic registerNode`
-	if !LooksLikeTerseAutomation(plain) {
-		t.Fatal("the plain terse form is no longer recognised")
-	}
-	lowered, err := NormaliseTerseAutomationSource(plain)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "@trigger(event=\"system.startup\")\nautomation registerNode {\n  step run {\n    logic registerNode { event: event }\n  }\n}"
-	if lowered != want {
-		t.Errorf("plain terse lowering changed:\n got %q\nwant %q", lowered, want)
-	}
-}
-
 // ---------------------------------------------------------------------------
-// In-process positions.
+// In-process positions. A logic's and an automation's statements are the
+// statement parser's (v1_body_test.go); a mutation value is here.
 // ---------------------------------------------------------------------------
-
-const v1LogicSource = `logic probe {
-  args {
-    items []object
-    mode string
-  }
-  body {
-    total := query countThings(mode: args.mode)
-    if args.mode == "a" && total != nil {
-      marked := markThing(id: args.mode, n: total)
-    } else {
-      other := markOther(id: args.mode)
-    }
-    for item := range args.items if item.active == true {
-      touched := touchThing(id: item.id)
-    }
-    switch args.mode {
-    case "a":
-      sa := stepA(x: 1)
-    default:
-      sd := stepD(x: 2)
-    }
-    return total + 1
-  }
-}`
-
-// TestInProcessPositionsV1: each in-process position parses the v1 grammar --
-// the string field holds canonical v1 source and the *Expr field (or the value
-// map) holds the node.
-func TestInProcessPositionsV1(t *testing.T) {
-	on := automationBody(t, mustParseV1Authored(t, v1LogicSource))
-
-	// A construct call on a step RHS: named v1 nodes in the Args map.
-	total := stepByID(t, on.Steps, "total")
-	fcfg, ok := total.Config.(*ast.FunctionStepConfig)
-	if !ok || fcfg.Name != "countThings" {
-		t.Fatalf("total: %+v", total.Config)
-	}
-	if n, ok := fcfg.Args["mode"].(ast.ExpressionNode); !ok || ast.FormatExpr(n) != "args.mode" {
-		t.Errorf("total's mode arg is %#v", fcfg.Args["mode"])
-	}
-
-	// if / else: the condition stamps, then negates, as v1 nodes.
-	marked := stepByID(t, on.Steps, "marked")
-	if want := `args.mode == "a" && total != nil`; marked.Condition != want || marked.ConditionExpr == nil || ast.FormatExpr(marked.ConditionExpr) != want {
-		t.Errorf("marked condition %q / %v, want %q", marked.Condition, marked.ConditionExpr, want)
-	}
-	if n, ok := marked.Config.(*ast.FunctionStepConfig).Args["n"].(ast.ExpressionNode); !ok || ast.FormatExpr(n) != "total" {
-		t.Errorf("marked's n arg is %#v", marked.Config.(*ast.FunctionStepConfig).Args["n"])
-	}
-	other := stepByID(t, on.Steps, "other")
-	if want := `!(args.mode == "a" && total != nil)`; other.Condition != want || other.ConditionExpr == nil {
-		t.Errorf("else-branch condition %q, want %q", other.Condition, want)
-	}
-
-	// for: source and filter.
-	var loop *ast.ForEachStepConfig
-	for _, s := range on.Steps {
-		if cfg, ok := s.Config.(*ast.ForEachStepConfig); ok {
-			loop = cfg
-		}
-	}
-	if loop == nil {
-		t.Fatal("no forEach step")
-	}
-	if loop.Source != "args.items" || loop.SourceExpr == nil || loop.Filter != "item.active == true" || loop.FilterExpr == nil {
-		t.Errorf("forEach %+v", loop)
-	}
-
-	// switch: the subject.
-	var sw *ast.SwitchStepConfig
-	for _, s := range on.Steps {
-		if cfg, ok := s.Config.(*ast.SwitchStepConfig); ok {
-			sw = cfg
-		}
-	}
-	if sw == nil || sw.Expression != "args.mode" || sw.ExpressionExpr == nil {
-		t.Fatalf("switch %+v", sw)
-	}
-
-	// return: a v1 node.
-	ret := stepByID(t, on.Steps, "_return")
-	q, ok := ret.Config.(*ast.QueryStepConfig)
-	if !ok || ast.KindOf(q.Query) != ast.KindArithmetic || ast.FormatExpr(q.Query) != "total + 1" {
-		t.Errorf("return %+v", ret.Config)
-	}
-}
-
-// TestAutomationStepsV1: the struct-form automation's steps -- a construct
-// call with a pun, a gated call, a forEach with a where filter, a switch.
-func TestAutomationStepsV1(t *testing.T) {
-	src := `@trigger(event="node.created", concept="v1:probe:thing")
-automation probe {
-  step first {
-    logic runIt(status, mode: "x")
-  }
-  step second {
-    if steps.first.result == true && event.payload.y != nil {
-      builtin doIt(id: event.payload.id)
-    }
-  }
-  step loop {
-    forEach t in first.nodes() where t.active == true {
-      touch { id: t.id }
-    }
-  }
-  step pick {
-    switch event.payload.kind {
-      case "a" {
-        logic handleA(x: 1)
-      }
-      default {
-        logic handleD(x: 2)
-      }
-    }
-  }
-}`
-	auto := automationBody(t, mustParseV1Authored(t, src))
-	first := stepByID(t, auto.Steps, "first").Config.(*ast.FunctionStepConfig)
-	if first.Name != "runIt" || ast.FormatExpr(first.Args["status"].(ast.ExpressionNode)) != "status" || ast.FormatExpr(first.Args["mode"].(ast.ExpressionNode)) != `"x"` {
-		t.Errorf("first %+v", first)
-	}
-	second := stepByID(t, auto.Steps, "second")
-	if second.Condition != "steps.first.result == true && event.payload.y != nil" || second.ConditionExpr == nil {
-		t.Errorf("second condition %q", second.Condition)
-	}
-	if cfg := second.Config.(*ast.FunctionStepConfig); cfg.Name != "doIt" {
-		t.Errorf("second %+v", cfg)
-	}
-	var loop *ast.ForEachStepConfig
-	for _, s := range auto.Steps {
-		if cfg, ok := s.Config.(*ast.ForEachStepConfig); ok {
-			loop = cfg
-		}
-	}
-	if loop == nil || loop.Source != "first.nodes()" || loop.Filter != "item.active == true" || loop.SourceExpr == nil || loop.FilterExpr == nil {
-		t.Fatalf("forEach %+v", loop)
-	}
-	touch := stepByID(t, auto.Steps, "loop_do1").Config.(*ast.FunctionStepConfig)
-	if ast.FormatExpr(touch.Args["id"].(ast.ExpressionNode)) != "item.id" {
-		t.Errorf("touch %+v", touch)
-	}
-	var sw *ast.SwitchStepConfig
-	for _, s := range auto.Steps {
-		if cfg, ok := s.Config.(*ast.SwitchStepConfig); ok {
-			sw = cfg
-		}
-	}
-	if sw == nil || sw.Expression != "event.payload.kind" || sw.ExpressionExpr == nil {
-		t.Fatalf("switch %+v", sw)
-	}
-}
 
 // TestMutationValuesV1: insert/update values parse v1.
 func TestMutationValuesV1(t *testing.T) {
@@ -625,14 +386,15 @@ func TestMutationValuesV1(t *testing.T) {
 }
 
 // TestRetiredSpellingsInProcessPositions: `cond(`, `concat(`, `exists(` and
-// `coalesce(` are refused in every in-process position.
+// `coalesce(` are refused in every in-process position: a statement's
+// expression, a call argument and a mutation value.
 func TestRetiredSpellingsInProcessPositions(t *testing.T) {
 	cases := map[string]struct{ src, rule string }{
-		"cond in a return":             {"logic probe {\n  args {\n    a bool\n  }\n  body {\n    return cond(args.a, 1, 2)\n  }\n}", "retired_cond_call"},
-		"concat on a step":             {"logic probe {\n  args {\n    a string\n  }\n  body {\n    x := concat(args.a, \"b\")\n    return x\n  }\n}", "retired_concat_call"},
-		"exists in an if":              {"logic probe {\n  args {\n    a string\n  }\n  body {\n    if exists(args.a) {\n      x := f(a: args.a)\n    }\n    return args.a\n  }\n}", "retired_exists_call"},
+		"cond in a return":             {"logic probe {\n  args {\n    a bool\n  }\n  return cond(args.a, 1, 2)\n}", "retired_cond_call"},
+		"concat in an assignment":      {"logic probe {\n  args {\n    a string\n  }\n  x := concat(args.a, \"b\")\n  return x\n}", "retired_concat_call"},
+		"exists in an if":              {"logic probe {\n  args {\n    a string\n  }\n  if exists(args.a) {\n    x := logic f(a: args.a)\n  }\n  return args.a\n}", "retired_exists_call"},
 		"coalesce in a mutation value": {"mutate thing probe {\n  args {\n    id string @required\n    a string\n  }\n  insert {\n    id: args.id\n    a: coalesce(args.a, \"x\")\n  }\n}", "retired_coalesce_call"},
-		"cond in a step argument":      {"@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  step first {\n    logic other(x: cond(true, 1, 2))\n  }\n}", "retired_cond_call"},
+		"cond in a call argument":      {"@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  logic other(x: cond(true, 1, 2))\n}", "retired_cond_call"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -654,7 +416,7 @@ func TestEveryEntryParsesEdition2026(t *testing.T) {
 	_, err = ParseFile(legacySpec)
 	wantRetired(t, err, "retired_spec_return_body")
 
-	logic, err := NormaliseAll("logic probe {\n  args {\n    a bool\n  }\n  body {\n    return cond(args.a, 1, 2)\n  }\n}")
+	logic, err := NormaliseAll("logic probe {\n  args {\n    a bool\n  }\n  return cond(args.a, 1, 2)\n}")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1012,7 +1012,10 @@ const (
 	// Auditing
 	AttrAudit = "audit"
 
-	// Triggers (automation only)
+	// Triggers (automation only). AttrSchedule is the retired `@schedule`
+	// spelling, named so the statement parser can refuse it
+	// (trigger_schedule_synonym_retired): @trigger(schedule=...) is the one
+	// spelling.
 	AttrTrigger  = "trigger"
 	AttrFilter   = "filter"
 	AttrSchedule = "schedule"

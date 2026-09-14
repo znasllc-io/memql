@@ -48,15 +48,6 @@ var statementRetiredOnlyIn = map[string]string{
 	"body_terse_retired":               "automation",
 }
 
-// statementRetiredAtTheFlip are the retired forms the transitional dispatch
-// still sends to the legacy rewriter (TestTransitionalDispatchIsExact): they
-// load until the tree is migrated, so their refusals cannot be cells yet.
-// The flip (plan Task 13) deletes the dispatch and empties this map.
-var statementRetiredAtTheFlip = map[string][]string{
-	"automation": {"body_step_retired", "body_terse_retired"},
-	"logic":      {"body_block_retired"},
-}
-
 func TestStatementCellsCoverEveryForm(t *testing.T) {
 	var missing []string
 	top, err := os.ReadDir(statementCells)
@@ -111,12 +102,8 @@ func TestStatementCellsCoverEveryForm(t *testing.T) {
 		}
 
 		retired := statementCases(t, path.Join(base, "retired"))
-		deferred := map[string]bool{}
-		for _, code := range statementRetiredAtTheFlip[construct] {
-			deferred[code] = true
-		}
 		for _, code := range statementRetiredCodes() {
-			if only, ok := statementRetiredOnlyIn[code]; (ok && only != construct) || deferred[code] {
+			if only, ok := statementRetiredOnlyIn[code]; ok && only != construct {
 				continue
 			}
 			if !retired.refusedWith(code) {

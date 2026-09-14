@@ -47,6 +47,18 @@
       "verdict": "refuse_parse",
       "code": "body_block_retired",
       "message": "`body { }` is retired in edition 2026: an automation's statements follow its args block directly"
+    },
+    {
+      "file": "step-block.memql",
+      "verdict": "refuse_parse",
+      "code": "body_step_retired",
+      "message": "`step run { ... }` is retired in edition 2026: write the step's call as a statement, `run := <call>`"
+    },
+    {
+      "file": "terse.memql",
+      "verdict": "refuse_parse",
+      "code": "body_terse_retired",
+      "message": "the terse `automation terseHeader @trigger(...) => logic L` form is retired in edition 2026: write @trigger(...) above `automation terseHeader { logic L(event: event) }`"
     }
   ]
 }

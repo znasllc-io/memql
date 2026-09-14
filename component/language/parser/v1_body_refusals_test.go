@@ -3,26 +3,20 @@ package parser
 import (
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/language/ast"
-	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // memqlmigrate:keep-file -- every fixture here is written to be refused, the
 // retired body forms among them; carried across by the bodies rewrite, a case
 // would parse and stop testing its refusal.
 
-// v1BodyRefusalCases are parsed with ParseFile directly, without the
-// struct-form rewriter: that is how every file parses once the tree is
-// migrated, and until then the rewriter still expands the retired forms these
-// cases write (the transitional dispatch), so the parser half is tested here.
+// v1BodyRefusalCases are parsed with ParseFile directly: the struct-form
+// rewriter leaves a logic and an automation as written, so the statement
+// parser is what refuses each of these.
 var v1BodyRefusalCases = []struct {
 	name string
 	code string
@@ -274,63 +268,5 @@ func TestBodyCallKindsAreEachCalled(t *testing.T) {
 		if !called[k] {
 			t.Errorf("no case in v1BodyCases calls a %s, which BodyCallKinds lists", k)
 		}
-	}
-}
-
-// nativeHeader finds a logic or automation header the rewriter left standing.
-var nativeHeader = regexp.MustCompile(`(?m)^(logic|automation)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
-
-// TestTransitionalDispatchIsExact pins the per-construct dispatch while it
-// still exists: the tree is migrated (epic memql#5370), so every logic and
-// automation in it takes the native path -- NormaliseAll leaves every
-// `logic NAME {` and `automation NAME {` header standing and finds no terse
-// header -- and every case in v1BodyCases does too (TestV1BodyParses requires
-// a statement body). DELETED WITH THE REWRITER'S STAGES in the flip, when the
-// parser refuses what the dispatch sent to the rewriter.
-func TestTransitionalDispatchIsExact(t *testing.T) {
-	constructs := 0
-	for _, root := range []string{"../../../dsl", "../../../examples", "../../../deploy/fleet/dsl"} {
-		err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if d.IsDir() {
-				if repowalk.SkipDir(d.Name()) || (strings.HasPrefix(d.Name(), "_") && p != root) {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-			if !strings.HasSuffix(p, ".memql") {
-				return nil
-			}
-			b, rerr := os.ReadFile(p)
-			if rerr != nil {
-				return rerr
-			}
-			src := string(b)
-			before := len(nativeHeader.FindAllString(BlankComments(src), -1))
-			constructs += before
-			if terse := terseAutomationMatches(src); len(terse) > 0 {
-				t.Errorf("%s: %d terse automation header(s); the tree is migrated to statements", p, len(terse))
-			}
-			out, nerr := NormaliseAll(src)
-			if nerr != nil {
-				t.Errorf("%s: the rewriter refused it: %v", p, nerr)
-				return nil
-			}
-			if after := len(nativeHeader.FindAllString(BlankComments(out), -1)); after != before {
-				t.Errorf("%s: %d of %d logic and automation headers took the rewriter's path; the tree is migrated, so every one is native", p, before-after, before)
-			}
-			return nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	// A reachable positive: the tree holds well over a hundred logic and
-	// automation constructs; a walk that found few is a walk that looked
-	// nowhere.
-	if constructs < 100 {
-		t.Fatalf("found %d logic and automation constructs; the walk is not reaching the tree", constructs)
 	}
 }
