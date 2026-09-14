@@ -271,6 +271,28 @@ automation probe {
   }
   filter row.id != ""
 }`},
+	// The named block written without its name, beside a named one (so the
+	// refusal is the missing name, not the missing step), and an unnamed
+	// block written twice.
+	{"a step block without its name (memql#5359)", false, `automation probe {
+  step {
+    mutation createThing (id: "x")
+  }
+  step run {
+    mutation createThing (id: "y")
+  }
+}`},
+	{"a second args block in a logic body (memql#5359)", false, `logic probe {
+  args {
+    x string
+  }
+  args {
+    y string
+  }
+  body {
+    return args.x
+  }
+}`},
 
 	// NOT in this corpus: the retired procedural `func (Query) name(ctx any)`
 	// author-side form. It is refused, but NOT by NormaliseAll + ParseFile --
