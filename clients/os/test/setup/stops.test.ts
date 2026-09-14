@@ -18,7 +18,7 @@ import type { Verdict } from "../../src/system/readinessFold";
 // all -- is this function over four facts.
 
 function verdict(module: string, state: Verdict["state"], core = true): Verdict {
-  return { module, state, core, disagreement: [], nodes: [], lanes: [] };
+  return { module, state, core, disagreement: [], nodes: [], lanes: [], unknown: [], stale: [], aside: [] };
 }
 
 function readiness(loaded: boolean, verdicts: Verdict[]): Readiness {
@@ -94,6 +94,34 @@ describe("stopsFor: what each stop says", () => {
     const s = stopsFor(facts({ readiness: core("unreported", "configured", "configured") }));
     expect(s.find((x) => x.id === "ai")).toMatchObject({ state: "waiting", answer: "Not reported" });
     expect(coreIsConfigured(s)).toBe(false);
+  });
+
+  // THE RAIL SPEAKS THE KIT'S WORDS (memql#5259). Nodes that differ are "Set
+  // up on some nodes", and nodes that answered and could not finish the check
+  // are "Could not check" -- neither is a half-filled form, and the second is
+  // never "Not reported", because somebody did answer.
+  it("names nodes that differ, and a check that failed, in the kit's words", () => {
+    const differ = verdict("ai", "partial");
+    differ.nodes = [
+      { nodeId: "agent-a", nodeType: "agent", state: "configured", reportedAt: "" },
+      { nodeId: "bff-a", nodeType: "bff", state: "unconfigured", reportedAt: "" },
+    ];
+    const failed = verdict("storage", "unreported");
+    failed.unknown = ["bff-a"];
+    const s = stopsFor(facts({ readiness: readiness(true, [differ, failed, verdict("email", "configured")]) }));
+    expect(s.find((x) => x.id === "ai")).toMatchObject({ state: "waiting", answer: "Set up on some nodes" });
+    expect(s.find((x) => x.id === "storage")).toMatchObject({ state: "waiting", answer: "Could not check" });
+    expect(coreIsConfigured(s)).toBe(false);
+  });
+
+  // A NODE BEHIND THE CLUSTER DOES NOT KEEP A STOP OPEN. The fold set it
+  // aside, the verdict is configured, and the rail says so -- which is the
+  // whole of memql#5259 from the person's side of the screen.
+  it("reads a configured module as done however many nodes are catching up", () => {
+    const behind = verdict("ai", "configured");
+    behind.stale = ["edge-a", "bff-product-a"];
+    const s = stopsFor(facts({ readiness: readiness(true, [behind, verdict("storage", "configured"), verdict("email", "configured")]) }));
+    expect(s.find((x) => x.id === "ai")).toMatchObject({ state: "done", answer: "Set up" });
   });
 });
 

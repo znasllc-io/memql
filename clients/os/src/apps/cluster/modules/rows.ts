@@ -1,6 +1,7 @@
 import type { Module, ModuleEnvVar } from "@znasllc-io/memql-sdk-core/client";
 
 import type { ChipTone } from "../../../kit";
+import { formatFreshness } from "../../../kit/format";
 import type { Readiness } from "../../../live/readiness";
 import { isModuleId } from "../../../system/modules";
 import type { Verdict } from "../../../system/readinessFold";
@@ -197,4 +198,82 @@ export function readinessForModule(
 ): Verdict | null {
   if (!readiness || !readiness.loaded || !isModuleId(module.name)) return null;
   return readiness.of(module.name);
+}
+
+/**
+ * One live node's line in a module's reading across the cluster.
+ *
+ * `counted` is the whole distinction this list exists to draw (memql#5259):
+ * a node that voted, and a node the fold SET ASIDE -- behind the cluster, or
+ * unable to check -- whose row is shown so an operator can see which node and
+ * since when, and drawn quieter so it never reads as a vote.
+ */
+export interface ReadinessNodeLine {
+  nodeId: string;
+  nodeType: string;
+  words: string;
+  note: string;
+  counted: boolean;
+}
+
+/**
+ * Every live node behind a verdict, voters first in the fold's own order
+ * (worst state first), then the nodes catching up, then the ones that could
+ * not check.
+ *
+ * The words are the node's OWN answer, in the vocabulary the rest of the
+ * shell uses; the note says how fresh that answer is, or why it does not
+ * count. A stale node's note names what it will do about it -- re-check on its
+ * own -- because an operator reading "behind" without that is an operator who
+ * goes and restarts a pod that needed nothing.
+ */
+export function readinessNodeLines(v: Verdict, now: Date): ReadinessNodeLine[] {
+  const lines: ReadinessNodeLine[] = v.nodes.map((n) => ({
+    nodeId: n.nodeId,
+    nodeType: n.nodeType,
+    words: nodeStateWords(n.state),
+    note: `checked ${formatFreshness(n.reportedAt, now)}`,
+    counted: true,
+  }));
+  for (const a of v.aside) {
+    if (a.why === "stale") {
+      lines.push({
+        nodeId: a.nodeId,
+        nodeType: a.nodeType,
+        words: "Catching up",
+        note: `last checked ${formatFreshness(a.reportedAt, now)}, before the last change; it re-checks on its own`,
+        counted: false,
+      });
+      continue;
+    }
+    lines.push({
+      nodeId: a.nodeId,
+      nodeType: a.nodeType,
+      words: "Could not check",
+      note: `${unknownReasonWords(a.reason)}; it retries on its own`,
+      counted: false,
+    });
+  }
+  return lines;
+}
+
+/** A single node's state, in the Set up vocabulary. */
+function nodeStateWords(state: string): string {
+  if (state === "configured") return "Set up";
+  if (state === "partial") return "Partly set up";
+  if (state === "unconfigured") return "Not set up";
+  // A state this build does not know is rendered verbatim rather than mapped
+  // to the nearest thing -- the same refusal moduleStateTone makes.
+  return state;
+}
+
+/**
+ * The closed reason vocabulary (component/memql/readiness), in words. An
+ * unrecognised reason says only that the check failed: the row never carries
+ * an error string, so there is nothing more specific to render.
+ */
+export function unknownReasonWords(reason: string | undefined): string {
+  if (reason === "fleetReadFailed") return "the fleet could not be read";
+  if (reason === "integrationProbeFailed") return "the integration's status check failed";
+  return "the check did not finish";
 }

@@ -38,8 +38,10 @@ export {
   gateFor,
   markToneFor,
   moduleActFor,
+  setAsideLabel,
   stateWords,
   useAppReach,
+  verdictDetail,
   type Gate,
   type ModuleAct,
 } from "./ReadinessStates";
