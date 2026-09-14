@@ -68,7 +68,7 @@ import (
 // ===========================================================================
 // WHY GO AND NOT SQL
 // ===========================================================================
-// The neighbouring migrations are .sql files and this one is registered in the
+// Most neighbouring migrations are .sql files and this one is registered in the
 // SAME bun set under the same 14-digit version, ordered with them. It is Go
 // because the repair must LOG: the count it changed and, by id, every row it
 // could not resolve -- a cloud operator has no other way to learn that a site

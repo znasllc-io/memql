@@ -41,15 +41,25 @@ export interface Readiness {
   reseed(): void;
 }
 
-function reportFromRow(row: Row): NodeReport | null {
+/**
+ * One feed row to a report. A MISSING STATE IS "unknown", never
+ * "unconfigured" (the 2026-09-14 readiness-convergence record, D1): the fold
+ * sets unknown aside, while unconfigured is a vote that holds the core gate
+ * and sends a person to a form -- the one direction a default must never take
+ * over a row that said nothing. Exported for its own test; the feed is the
+ * only production caller.
+ */
+export function reportFromRow(row: Row): NodeReport | null {
   const r = row as Record<string, unknown>;
   const module = typeof r.module === "string" ? r.module : "";
   if (module === "") return null;
+  const reason = typeof r.reason === "string" && r.reason !== "" ? r.reason : undefined;
   return {
     module,
     nodeId: String(r.nodeId ?? ""),
     nodeType: String(r.nodeType ?? ""),
-    state: String(r.state ?? "unconfigured") as NodeReport["state"],
+    state: String(r.state ?? "unknown") as NodeReport["state"],
+    ...(reason !== undefined ? { reason } : {}),
     core: r.core === true,
     lanes: Array.isArray(r.lanes) ? (r.lanes as NodeReport["lanes"]) : [],
     reportedAt: String(r.reportedAt ?? ""),

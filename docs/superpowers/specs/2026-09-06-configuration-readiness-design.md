@@ -374,6 +374,13 @@ concept moduleReadiness {
 
 ### 4.5 The fold
 
+> **AMENDED on 2026-09-14.** The fold now sets two kinds of row aside before
+> the worst state wins: a row whose node could not evaluate (`unknown`, named
+> in `unknown`), and a row whose cluster-scoped lanes lag the freshest row's
+> (named in `stale`). See `2026-09-14-readiness-convergence-design.md`, D1 and
+> S1; rows are also restated on change and by a safety-net pass (its D2), not
+> only at boot and after a providers reload or configure.
+
 > **AMENDED on 2026-09-07.** This record and the plan both placed the package
 > at `component/readiness`, in the ROOT module, on the reasoning that its one
 > importer "already depends on the root". IT DOES NOT: the root requires
@@ -596,7 +603,8 @@ The email configure hook runs the `readinessRecompute` builtin through the
 integration's existing writer; the builtin carries no `@sdk` and refuses any
 origin that is not internal or a cluster owner. It therefore admits an
 owner and refuses a developer, whose write still lands and whose mark
-catches up on the next providers reload or restart -- the recompute gate
+catches up on the next providers reload or restart (since 2026-09-14, on the
+node's next safety-net pass at the latest) -- the recompute gate
 exists so no signed-in person can make every node rewrite rows in a loop,
 and widening it to fit one caller would trade that away for a mark that
 refreshes sooner.

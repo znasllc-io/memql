@@ -111,6 +111,7 @@ export function CoreGate({ onSignOut, children }: { onSignOut: () => void; child
   // assertion at the one place a wrong answer would be silent. Non-null is
   // safe here and nowhere else: the line above returned unless `of` answered.
   const feed = readiness!;
+  const couldNotCheck = feed.of("ai")?.unknown.length ?? 0;
 
   if (!canConfigure(role)) return <ToldVariant onSignOut={onSignOut} />;
 
@@ -149,6 +150,18 @@ export function CoreGate({ onSignOut, children }: { onSignOut: () => void; child
           MemQL needs a way to reach a model before anyone can use it. The other steps can wait
           &mdash; this screen goes as soon as inference is set up.
         </p>
+        {/* THE ONE THING THE VERDICT CANNOT SAY FOR ITSELF (memql#5259). The
+            nodes that voted found no door; a node that could not read the
+            fleet did not vote, and an owner looking at a held gate deserves to
+            know the answer is not every node's. One quiet line, no node ids --
+            the Cluster app's Modules detail names them -- and never on a gate
+            the voters opened. */}
+        {couldNotCheck > 0 ? (
+          <p className="os-core-gate-note" data-os-core-gate-unknown>
+            {couldNotCheck === 1 ? "One node" : `${couldNotCheck} nodes`} could not read the fleet
+            just now, so this may change on its own.
+          </p>
+        ) : null}
         {drawn.length > 0 ? (
           <Rail
             stops={drawn}
