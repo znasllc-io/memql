@@ -1,0 +1,63 @@
+{
+  "cases": [
+    {
+      "file": "default-limit.memql",
+      "verdict": "load_ok",
+      "note": "A tool field's @default is a literal; edition 2026 does not change it."
+    },
+    {
+      "file": "default-arithmetic.memql",
+      "verdict": "refuse_parse",
+      "message": "expected ')' after numeric attribute value in @default",
+      "note": "arithmetic"
+    },
+    {
+      "file": "default-comparison.memql",
+      "verdict": "refuse_parse",
+      "message": "expected ')' after numeric attribute value in @default",
+      "note": "comparison"
+    },
+    {
+      "file": "default-in.memql",
+      "verdict": "refuse_parse",
+      "message": "expected ')' after numeric attribute value in @default",
+      "note": "in"
+    },
+    {
+      "file": "default-starts-with.memql",
+      "verdict": "refuse_parse",
+      "message": "expected ')'",
+      "note": "startsWith"
+    },
+    {
+      "file": "default-and.memql",
+      "verdict": "refuse_parse",
+      "message": "expected ')'",
+      "note": "and"
+    },
+    {
+      "file": "default-or.memql",
+      "verdict": "refuse_parse",
+      "message": "expected ')'",
+      "note": "or"
+    },
+    {
+      "file": "default-ternary.memql",
+      "verdict": "refuse_parse",
+      "message": "expected ')'",
+      "note": "ternary"
+    },
+    {
+      "file": "default-coalesce.memql",
+      "verdict": "refuse_parse",
+      "message": "expected ')'",
+      "note": "coalesce"
+    },
+    {
+      "file": "default-method-call.memql",
+      "verdict": "refuse_parse",
+      "message": "expected ')'",
+      "note": "methodCall"
+    }
+  ]
+}

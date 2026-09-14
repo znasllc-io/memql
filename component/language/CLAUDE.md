@@ -37,16 +37,24 @@ The author surface (`query NAME { args, filter, shape }`, `mutate`, `logic`,
 construct into the older procedural form, and only then does the lexer run.
 Each stage is a no-op when its detector does not match.
 
-Two consequences that bite:
+Three consequences that bite:
 
 - **The rewriter is a line-oriented text pass, not a parse.** A struct
   query's `filter` may continue onto lines that open with a binary operator,
   or after a line that ends on one (`joinStructQueryContinuations`,
   memql#4123); any other line starts a new field.
-- **A parse error can come from the rewriter, not the parser**, and will
-  point at rewritten source rather than what the author wrote. When an error
-  message does not match the file you are looking at, check
-  `parser/rewriter.go` first.
+- **A parse error can come from the rewriter, not the parser.** A rewriter
+  refusal carries no position (Sense anchors it on the construct's header);
+  when a message names no line, check `parser/rewriter.go` first.
+- **The author's line and column survive the rewrite only because every
+  parse site marks the lowering** (memql#5364): `parser.PositionLowering(
+  authored, lowered)` writes position markers -- block comments the lexer
+  reads like `#line` -- so tokens, `ParseError`s and v1 `Span`s carry the
+  author's position (`Token.Authored*`, `ParseError.Position`). A new site
+  that lexes a lowering and reports a position must call it, as the LAST
+  step before `NewLexer`: text transforms that read the lowering (the engine
+  loader's payload translation) run before it, never after. A slice parsed
+  on its own is placed in its file with `parser.AnchorSource`.
 
 In edition 2026 a struct query's filter is a lambda over the row, and the
 rewriter emits it as `concept==<id> && (<lambda>)`. The lambda's body is read

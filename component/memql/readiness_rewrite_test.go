@@ -24,6 +24,17 @@ func TestReadinessRewriteNeeded(t *testing.T) {
 		{"identical and fresh is skipped", fresh, same, false},
 		{"a changed state writes", fresh, func() readiness.NodeReport { n := same; n.State = readiness.State("degraded"); return n }(), true},
 		{"a changed core flag writes", fresh, func() readiness.NodeReport { n := same; n.Core = false; return n }(), true},
+		// An unknown row names WHICH resolver could not answer, and a different
+		// resolver failing is a different fact for the operator reading it.
+		{"a changed reason writes", func() *readiness.NodeReport {
+			p := *fresh
+			p.State, p.Reason = readiness.Unknown, readiness.ReasonFleetReadFailed
+			return &p
+		}(), func() readiness.NodeReport {
+			n := same
+			n.State, n.Reason = readiness.Unknown, readiness.ReasonIntegrationProbeFailed
+			return n
+		}(), true},
 		{"changed lanes write", fresh, func() readiness.NodeReport {
 			n := same
 			n.Lanes = []readiness.LaneReport{{Name: "anthropic"}}

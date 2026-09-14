@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -94,21 +95,60 @@ func TestASleepingMachineIsConfiguredAndNotLive(t *testing.T) {
 	}
 }
 
-// A read that FAILS leaves every door SHUT. The core gate branches on this,
-// and "we could not ask" reported as an open door sends somebody into a
-// console whose every feature then refuses.
-func TestAFailedRegistrationReadShutsEveryDoor(t *testing.T) {
+// A READ THAT FAILS IS UNKNOWN, NOT UNCONFIGURED (D1 of the 2026-09-14
+// readiness-convergence record).
+//
+// This test used to pin the opposite -- every door shut on a failed read --
+// on the argument that "we could not ask" reported as an open door sends
+// somebody into a console whose features refuse. That is the right direction
+// for the GATE and the wrong one for a PERSISTED row: the row outlives the
+// failure, is folded against other nodes' correct rows, and read "Partly set
+// up" on the owner's cluster for a whole deploy (2026-09-13). Unknown is set
+// aside by the fold and never persisted over a known row, so the gate still
+// never opens on a read that broke -- it simply stops closing on one.
+func TestAFailedRegistrationReadIsUnknownNotUnconfigured(t *testing.T) {
 	r := readinessResolvers{
 		Registrations: func(context.Context) ([]readiness.RegistrationFacts, error) {
 			return nil, errors.New("the read did not land")
 		},
 	}
 	got := evaluateModule(context.Background(), r, aiModule(), "bff-1", "bff", inferenceNow)
-	if got.State != readiness.Unconfigured {
-		t.Fatalf("a failed read produced %s, want unconfigured", got.State)
+	if got.State != readiness.Unknown {
+		t.Fatalf("a failed read produced %s, want unknown", got.State)
 	}
-	if len(got.Lanes) != 3 {
-		t.Errorf("a failed read still reports the three doors, all shut: %+v", got.Lanes)
+	if got.Reason != readiness.ReasonFleetReadFailed {
+		t.Errorf("reason %q, want %q -- the row must say WHICH resolver could not answer", got.Reason, readiness.ReasonFleetReadFailed)
+	}
+	if len(got.Lanes) != 0 {
+		t.Errorf("a failed read reported %d lanes; there is no lane evidence to report: %+v", len(got.Lanes), got.Lanes)
+	}
+	// A CLOSED VOCABULARY: the error text never reaches the report, which is
+	// broadcast to every signed-in reader.
+	raw, _ := json.Marshal(got)
+	if strings.Contains(string(raw), "the read did not land") {
+		t.Errorf("the error string leaked into the report: %s", raw)
+	}
+}
+
+// THE FLEET LANES ARE CLUSTER-SCOPED AND FEDERATION IS NOT (memql#5259).
+// The fold judges staleness by the scoped lanes alone, so this is the fact
+// that keeps a replica deployed without federation reading `partial` rather
+// than being set aside as merely behind.
+func TestTheFleetLanesAreClusterScopedAndFederationIsNot(t *testing.T) {
+	got := evaluateModule(context.Background(), rowsResolver(), aiModule(), "bff-1", "bff", inferenceNow)
+	scopes := map[string]string{}
+	for _, lane := range got.Lanes {
+		scopes[lane.Name] = lane.Scope
+	}
+	want := map[string]string{
+		readiness.InferenceLaneLocal:      readiness.LaneScopeCluster,
+		readiness.InferenceLaneApp:        readiness.LaneScopeCluster,
+		readiness.InferenceLaneFederation: "",
+	}
+	for name, scope := range want {
+		if got, ok := scopes[name]; !ok || got != scope {
+			t.Errorf("lane %s has scope %q (present %v), want %q", name, got, ok, scope)
+		}
 	}
 }
 
@@ -353,14 +393,10 @@ func TestAnotherPersonsMachineStillConfiguresInference(t *testing.T) {
 	}
 }
 
-// A FLEET READ THAT BROKE IS NOT A CLUSTER WITH NO DOOR (memql#5118).
-//
-// Both produce `unconfigured`, and they have to: a read that failed cannot be
-// reported as an open door, or the gate lifts and every feature behind it then
-// refuses. But the two have completely different repairs -- one is "set up
-// inference", the other is "readiness could not read the fleet" -- and the
-// verdict has no room to say which. The log line is the only place the
-// difference survives, so its absence is the defect this pins.
+// A FLEET READ THAT BROKE IS SAID OUT LOUD (memql#5118), and the verdict now
+// says it too: the row reads `unknown` with a reason. The log line still
+// carries what the row may not -- the error itself and the node -- because the
+// repair is an operator's, not a person's.
 func TestAFailedFleetReadIsLoggedRatherThanSilentlyShut(t *testing.T) {
 	var buf strings.Builder
 	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
@@ -373,15 +409,13 @@ func TestAFailedFleetReadIsLoggedRatherThanSilentlyShut(t *testing.T) {
 
 	got := evaluateModule(context.Background(), broken, aiModule(), "bff-1", "bff", inferenceNow)
 
-	// THE VERDICT IS STILL SHUT, and that half must not change: a door we
-	// could not ask about is not a door we may walk through.
-	if got.State != readiness.Unconfigured {
-		t.Errorf("a failed fleet read reported %s -- an unaskable door must read shut", got.State)
+	if got.State != readiness.Unknown {
+		t.Errorf("a failed fleet read reported %s -- an unaskable door is unknown, never a verdict", got.State)
 	}
 	line := buf.String()
 	if line == "" {
-		t.Fatal("a failed fleet read produced no log line at all: an operator sees the same " +
-			"'set up inference' screen a fresh cluster gets, with nothing anywhere saying the read broke")
+		t.Fatal("a failed fleet read produced no log line at all: an operator sees an `unknown` row " +
+			"with nothing anywhere saying why the read broke")
 	}
 	// The error itself, and enough to find the node it happened on.
 	for _, want := range []string{"registration read refused", "bff-1", "ai"} {
@@ -398,7 +432,7 @@ func TestAResolverSetWithNoLoggerStillEvaluates(t *testing.T) {
 			return nil, errors.New("boom")
 		},
 	}, aiModule(), "bff-1", "bff", inferenceNow)
-	if got.State != readiness.Unconfigured {
-		t.Errorf("state %s", got.State)
+	if got.State != readiness.Unknown || got.Reason != readiness.ReasonFleetReadFailed {
+		t.Errorf("state %s reason %q", got.State, got.Reason)
 	}
 }

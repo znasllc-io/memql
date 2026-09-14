@@ -1,0 +1,8 @@
+/// Tickets by title, lowercased row by row: an in-process function over the row.
+query ticket qfLoweredTitle {
+  args {
+    title  string  @required
+  }
+  filter row => lower(row.title) == args.title
+  paginate 20
+}

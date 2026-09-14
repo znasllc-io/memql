@@ -1,0 +1,2 @@
+/// Low-priority tickets.
+spec ticket sbLt = row => lt(row.priority, 2)

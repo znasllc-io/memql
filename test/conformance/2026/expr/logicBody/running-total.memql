@@ -1,0 +1,1 @@
+args.scores.reduce(0, (acc, s) => acc + s)

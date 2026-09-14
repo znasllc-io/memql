@@ -39,9 +39,8 @@ var protoSeamAllowlist = map[string]string{
 	"client.Dispatcher.SendAndWait":    "sends a wire message and returns the correlated wire reply; the typed packages adapt it",
 	"client.Dispatcher.Events":         "the shared channel of uncorrelated server messages, consumed and adapted by callers",
 	"client.Dispatcher.RegisterStream": "session-keyed channel of server messages for the streaming protocols",
-	"worker.Connection.Stream":         "returns the underlying WorkerService bidi stream the caller drives",
-	"worker.Connection.Send":           "documented pass-through to Stream().Send",
-	"worker.Connection.Recv":           "documented pass-through to Stream().Recv",
+	"worker.Connection.Send":           "sends one wire message on the worker stream under the connection's send lock -- the message IS the argument",
+	"worker.Connection.Recv":           "returns the next wire message from the worker stream; the protocol above it is the caller's",
 }
 
 // TestSDKPublicSurfaceHasNoProtoLeak walks every non-test .go file under

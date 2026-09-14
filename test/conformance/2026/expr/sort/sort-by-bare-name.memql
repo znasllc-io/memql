@@ -1,0 +1,5 @@
+/// Tickets sorted by a key written as a bare name.
+query ticket soBareName {
+  sort title
+  paginate 20
+}

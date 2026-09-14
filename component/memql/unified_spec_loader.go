@@ -17,6 +17,7 @@ package memql
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
@@ -61,7 +62,7 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry, report ...*Lo
 		"memql.unifiedSpecLoader",
 		"spec",
 		files,
-		extractAdapter,
+		anchoredExtractAdapter,
 		parse,
 		registry.add,
 		sink,
@@ -76,11 +77,27 @@ func LoadUnifiedSpecs(logger *slog.Logger, registry *SpecRegistry, report ...*Lo
 		"memql.unifiedSpecLoader",
 		"trait",
 		files,
-		extractAdapter,
+		anchoredExtractAdapter,
 		parse,
 		registry.add,
 		sink,
 	)
 	rep.FoldSink("specs", traits, sink)
 	return specs + traits, err
+}
+
+// anchoredExtractAdapter is extractAdapter with every slice anchored at its
+// line in the file (languageParser.AnchorSource): ParseSpecDecl lexes the
+// slice alone, and without the anchor a refusal inside a spec's lambda names
+// the line within the slice -- line 2 for a spec whose doc comment is line 1
+// -- instead of the file's (memql#5364). Only the parse sees the anchor; the
+// registry keeps nothing of the slice's text.
+func anchoredExtractAdapter(content, keyword string) []baseloader.Slice {
+	src := constructDeclarationSlices(content, keyword)
+	out := make([]baseloader.Slice, len(src))
+	for i, s := range src {
+		line := 1 + strings.Count(content[:s.Start], "\n")
+		out[i] = baseloader.Slice{Name: s.Name, Source: languageParser.AnchorSource(s.Source, line)}
+	}
+	return out
 }

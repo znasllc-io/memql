@@ -787,6 +787,11 @@ func TestRetiredHoverIsTheParsersTable(t *testing.T) {
 		// A comma also separates arguments and list elements. The parser tells
 		// a connective by where the expression ends, which a token scan cannot.
 		"retired_comma_connective": "a comma is also a separator",
+		// A name or path with no `key:` inside braces is the retired entry in a
+		// map literal, but a pun in a step's args and authoring rule 15's bare
+		// mirror in an insert or update block -- braces a token scan cannot
+		// tell apart from a map's.
+		"retired_keyless_map_entry": "braces that are not a map legally hold a key-less name",
 	}
 
 	forms := parser.V1RetiredForms()

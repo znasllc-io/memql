@@ -1,0 +1,237 @@
+{
+  "cases": [
+    {
+      "file": "closed-goal.memql",
+      "verdict": "load_ok",
+      "note": "A trigger filter is a lambda over the triggering row."
+    },
+    {
+      "file": "filter-without-lambda.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_filter_annotation",
+      "message": "@filter(<predicate>) is retired in edition 2026: write @filter(row => <predicate>)",
+      "note": "Refused by the edition's grammar (parser.Options.ExpressionsV1); the loaders still read it until the tree flips."
+    },
+    {
+      "file": "cond-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_cond_call",
+      "message": "cond(p, a, b) is retired in edition 2026: write p ? a : b"
+    },
+    {
+      "file": "concat-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_concat_call",
+      "message": "concat(a, b) is retired in edition 2026: write a + b"
+    },
+    {
+      "file": "coalesce-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_coalesce_call",
+      "message": "coalesce(a, b) is retired in edition 2026: write a ?? b"
+    },
+    {
+      "file": "contains-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_contains_call",
+      "message": "contains(s, sub) is retired in edition 2026: write s.includes(sub)"
+    },
+    {
+      "file": "now-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_now_call",
+      "message": "now() is retired in edition 2026: write now"
+    },
+    {
+      "file": "timestamp-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_timestamp_call",
+      "message": "timestamp() is retired in edition 2026: write now"
+    },
+    {
+      "file": "archived.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "archived"
+      },
+      "expect": true
+    },
+    {
+      "file": "archived.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open"
+      },
+      "expect": false
+    },
+    {
+      "file": "archived.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false
+    },
+    {
+      "file": "planned.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "lineage": {
+          "planId": "p1"
+        }
+      },
+      "expect": true
+    },
+    {
+      "file": "planned.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "lineage": {}
+      },
+      "expect": false
+    },
+    {
+      "file": "planned.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "lineage": null
+      },
+      "expect": false,
+      "note": "A null intermediate reads as absent through `.?`."
+    },
+    {
+      "file": "lowered-title.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "title": "OUTAGE"
+      },
+      "expect": true
+    },
+    {
+      "file": "tags-any.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": [
+          "urgent"
+        ]
+      },
+      "expect": true
+    },
+    {
+      "file": "not-open-or-held.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "archived"
+      },
+      "expect": true
+    },
+    {
+      "file": "negated-priority.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "priority": 5
+      },
+      "expect": true
+    },
+    {
+      "file": "doubled-priority.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "priority": 3
+      },
+      "expect": true
+    },
+    {
+      "file": "coalesced-title.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true
+    },
+    {
+      "file": "coalesced-title.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "title": "Disk full"
+      },
+      "expect": false
+    },
+    {
+      "file": "code-prefix.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "code": "INC-9"
+      },
+      "expect": true
+    },
+    {
+      "file": "code-prefix.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "code": "inc-9"
+      },
+      "expect": false,
+      "note": "startsWith compares bytes: case is part of the prefix."
+    },
+    {
+      "file": "urgent-or-high.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": true,
+        "priority": 0
+      },
+      "expect": true
+    },
+    {
+      "file": "ternary-threshold.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": false,
+        "priority": 3
+      },
+      "expect": false
+    },
+    {
+      "file": "map-literal-member.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "archived"
+      },
+      "expect": true
+    },
+    {
+      "file": "predicate-applied.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "archived",
+        "urgent": true
+      },
+      "expect": true
+    },
+    {
+      "file": "open-without-plan.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "held"
+      },
+      "expect": true
+    }
+  ]
+}

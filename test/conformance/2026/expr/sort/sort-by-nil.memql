@@ -1,0 +1,5 @@
+/// Tickets sorted by nil.
+query ticket soNil {
+  sort nil
+  paginate 20
+}

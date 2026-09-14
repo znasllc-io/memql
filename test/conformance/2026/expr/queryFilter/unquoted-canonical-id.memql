@@ -1,0 +1,5 @@
+/// Tickets whose concept is written as a bare canonical id rather than a string.
+query ticket qfUnquotedId {
+  filter row => row.concept == v1:crm:lead
+  paginate 20
+}

@@ -90,6 +90,13 @@ const (
 //
 // Tokenize() populates the End* fields after each scan; the
 // individual scan functions don't have to stamp them themselves.
+//
+// The Authored* fields are the token's extent in the AUTHOR's source when
+// the lexed text is a struct-form lowering carrying position markers
+// (PositionLowering, position_markers.go); zero when the text carries none.
+// Line and Column stay the lexed text's own coordinates, which is what the
+// parser's line-sensitive rules must read. At and EndAt pick the one to show
+// an author.
 type Token struct {
 	Type    TokenType
 	Literal string
@@ -99,6 +106,28 @@ type Token struct {
 	EndPos  int
 	EndLine int
 	EndCol  int
+
+	AuthoredLine    int
+	AuthoredCol     int
+	AuthoredEndLine int
+	AuthoredEndCol  int
+}
+
+// At is where the token starts in the author's source: the authored position
+// when the lexed text carried markers, the lexed one otherwise.
+func (t Token) At() (line, col int) {
+	if t.AuthoredLine > 0 {
+		return t.AuthoredLine, t.AuthoredCol
+	}
+	return t.Line, t.Column
+}
+
+// EndAt is At for the first position after the token.
+func (t Token) EndAt() (line, col int) {
+	if t.AuthoredLine > 0 {
+		return t.AuthoredEndLine, t.AuthoredEndCol
+	}
+	return t.EndLine, t.EndCol
 }
 
 // String returns a human-readable representation of the token.
@@ -245,6 +274,9 @@ type Lexer struct {
 	// the design's ruling 1 (docs/internal/design/
 	// doc-comments-description-source.md).
 	commentLines map[int]bool
+	// origin maps a lexed position back to the author's source when the
+	// input is a lowering carrying position markers (position_markers.go).
+	origin lexOrigin
 }
 
 // DocCommentBlock is a run of consecutive /// lines. Lines hold each
@@ -320,9 +352,19 @@ func (l *Lexer) Tokenize() ([]Token, error) {
 				delete(l.commentLines, i)
 			}
 		}
+		// Every token is stamped, since the positions before a lowering's
+		// first marker are the identity; a text that turns out to carry no
+		// marker has the stamps cleared below.
+		l.origin.stamp(&tok)
 		tokens = append(tokens, tok)
 		if tok.Type == TokenEOF {
 			break
+		}
+	}
+	if !l.origin.marked {
+		for i := range tokens {
+			tokens[i].AuthoredLine, tokens[i].AuthoredCol = 0, 0
+			tokens[i].AuthoredEndLine, tokens[i].AuthoredEndCol = 0, 0
 		}
 	}
 	return tokens, nil
@@ -460,9 +502,10 @@ func (l *Lexer) NextToken() (Token, error) {
 			return makeToken(TokenDotQuestion, ".?"), nil
 		}
 		if l.hasNext() && isDigit(l.peekNext()) {
+			line, col := l.origin.at(startLine, startColumn)
 			return Token{}, fmt.Errorf(
 				"a number cannot start with '.' at line %d, column %d: a decimal literal needs a leading digit (write \"0.5\", not \".5\")",
-				startLine, startColumn)
+				line, col)
 		}
 		if l.hasNext() && (unicode.IsLetter(l.peekNext()) || l.peekNext() == '_') {
 			return l.scanIdentifier(start, startLine, startColumn)
@@ -1021,11 +1064,19 @@ func (l *Lexer) skipBlockComment() error {
 	}
 	l.advance() // consume '/'
 	l.advance() // consume '*'
+	bodyStart := l.pos
 
 	for !l.eof() {
 		if l.peek() == '*' && l.hasNext() && l.peekNext() == '/' {
+			body := l.input[bodyStart:l.pos]
 			l.advance() // consume '*'
 			l.advance() // consume '/'
+			// A position marker (position_markers.go) is a comment like any
+			// other, and also tells the lexer where the text after it sits in
+			// the author's source.
+			if len(body) > 0 && body[0] == '@' {
+				l.origin.read(string(body), l.line, l.column)
+			}
 			return nil
 		}
 		if l.peek() == '\n' {
@@ -1039,7 +1090,9 @@ func (l *Lexer) skipBlockComment() error {
 	// sense's lexerDiagnostic scans for exactly that shape to place the
 	// squiggle. Without it the diagnostic defaults to 1:1 and points at the
 	// top of the file instead of at the `/*` that swallowed the rest of it.
-	return fmt.Errorf("unterminated block comment at line %d, column %d (missing '*/')", startLine, startColumn)
+	// The position is the author's, as every position a marked text reports.
+	line, col := l.origin.at(startLine, startColumn)
+	return fmt.Errorf("unterminated block comment at line %d, column %d (missing '*/')", line, col)
 }
 
 // Helper methods

@@ -1,0 +1,1 @@
+args.labels.where(l => l startsWith "team-").select(l => upper(l))

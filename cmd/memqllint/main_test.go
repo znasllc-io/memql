@@ -9,8 +9,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/dslfs"
@@ -540,4 +542,70 @@ concept mirrored {
 				"must load. If this fails the refusals above prove nothing about connector names; output:\n%s", code, out)
 		}
 	})
+}
+
+// TestRun_V1RefusalNamesTheAuthorsLineAndColumn: memqllint reports a refusal
+// inside a construct the rewriter lowered at the file's line and column --
+// from the parse pass and from the engine-parity pass alike, for a construct
+// that is not the file's first (memql#5364). Both passes used to print the
+// lowered text's coordinates, and the parity pass's were relative to the
+// construct's slice besides.
+func TestRun_V1RefusalNamesTheAuthorsLineAndColumn(t *testing.T) {
+	queries := `use demo.concepts.{ item }
+
+@enabled
+@description("A clean query.")
+query item queryItems {
+  args {
+    name  string  @required
+  }
+  filter  name == args.name
+}
+
+@enabled
+@description("Items missing a status, written with the retired null.")
+query item unstatusedItems {
+  args {
+    name  string  @required
+  }
+  filter row => row.name == args.name && row.status == null
+  paginate 10
+}`
+	specs := `use demo.concepts.{ item }
+
+@enabled
+@description("An item with a name.")
+spec item isNamed {
+  return name != ""
+}
+
+@enabled
+@description("An item with a status, written with the retired null.")
+spec item hasStatus = row => row.status != null`
+	root := writeTree(t, map[string]string{
+		"demo/concepts.memql": testConcepts,
+		"demo/queries.memql":  queries,
+		"demo/specs.memql":    specs,
+	})
+	code, out := captureRun(t, []string{root})
+	if code != 1 {
+		t.Fatalf("run() = %d, want 1; output:\n%s", code, out)
+	}
+	// at is the refusal of the `null` that ends the comparison cmp, at the
+	// line and column it has in src as written.
+	at := func(src, cmp string) string {
+		off := strings.Index(src, cmp) + len(cmp) - len("null")
+		lineStart := strings.LastIndex(src[:off], "\n") + 1
+		return "parse error at line " + strconv.Itoa(1+strings.Count(src[:off], "\n")) + ", column " + strconv.Itoa(1+utf8.RuneCountInString(src[lineStart:off])) + ": null is retired"
+	}
+	for _, want := range []string{
+		"demo/queries.memql: parse: parser error: " + at(queries, "row.status == null"),
+		`demo/queries.memql: query "unstatusedItems" (parse): ` + at(queries, "row.status == null"),
+		"demo/specs.memql: parse: parser error: " + at(specs, "row.status != null"),
+		`demo/specs.memql: spec "hasStatus" (parse): unified:demo/specs.memql:hasStatus: ` + at(specs, "row.status != null"),
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the report does not carry %q; output:\n%s", want, out)
+		}
+	}
 }

@@ -103,13 +103,13 @@ func resolveOneSpecBinding(spec *Spec, shapes *ShapeRegistry, concepts memoryNod
 		// shapes vs concepts at authoring time; here a name lookup against
 		// the shape registry first, then concepts, is sufficient for the
 		// functional rewrite).
-		if shape, ok := shapeLookup(shapes, spec.BoundName); ok {
+		if shape, ok := specBindingShape(shapes, spec); ok {
 			kind = shapeSpecKind(shape)
 			mapper, bindErr = shapeFieldMapper(spec.BoundName, shape)
 			if bindErr != nil {
 				return bindErr
 			}
-		} else if concept, err := resolveConceptByTrailingSegment(concepts, spec.BoundName); err == nil && concept != nil {
+		} else if concept, err := specBindingConcept(concepts, spec); err == nil && concept != nil {
 			kind = SpecKindRow
 			mapper = conceptFieldMapper(concept)
 		} else {
@@ -151,6 +151,54 @@ func shapeLookup(shapes *ShapeRegistry, name string) (*ShapeDefinition, bool) {
 		return nil, false
 	}
 	return shapes.Get(name)
+}
+
+// specBindingShape and specBindingConcept resolve a spec's bound name in the
+// spec's OWN domain first -- a shape the domain declares, a concept of the
+// domain's namespace -- the way a query's signature concept resolves
+// ambiently (resolveBareConceptNameWithNamespace), and only then across the
+// whole tree. Without the first step a bound name two domains both declare
+// resolves to neither: two domains with a `ticket` concept each loaded their
+// queries over it, and refused every spec bound to it as "resolves to neither
+// an imported shape nor a concept" (memql#5369, found by the conformance
+// corpus, whose every case domain declares one).
+func specBindingShape(shapes *ShapeRegistry, spec *Spec) (*ShapeDefinition, bool) {
+	if shapes == nil || spec == nil {
+		return nil, false
+	}
+	if ns := ConstructNamespaceForOrigin(spec.Origin); ns != "" {
+		if shape, ok := shapes.Get(QualifyConstruct(ns, spec.BoundName)); ok {
+			return shape, true
+		}
+	}
+	return shapeLookup(shapes, spec.BoundName)
+}
+
+// specBindingConcept is specBindingShape's concept half.
+func specBindingConcept(concepts memoryNodes.Registry, spec *Spec) (*memoryNodes.Concept, error) {
+	if spec == nil {
+		return nil, fmt.Errorf("no spec to resolve a binding for")
+	}
+	if concepts == nil {
+		return nil, fmt.Errorf("no concept registry to resolve binding %q in", spec.BoundName)
+	}
+	if ns := strings.ReplaceAll(ConstructNamespaceForOrigin(spec.Origin), "/", ":"); ns != "" {
+		var own *memoryNodes.Concept
+		found := 0
+		for _, c := range concepts.List() {
+			if c == nil || idNamespace(c.Name) != ns {
+				continue
+			}
+			if i := strings.LastIndex(c.Name, ":"); i >= 0 && c.Name[i+1:] == spec.BoundName {
+				own = c
+				found++
+			}
+		}
+		if found == 1 {
+			return own, nil
+		}
+	}
+	return resolveConceptByTrailingSegment(concepts, spec.BoundName)
 }
 
 // shapeFieldMapper builds the bare-field -> underlying-path rewriter for

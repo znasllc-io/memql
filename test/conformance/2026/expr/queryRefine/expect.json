@@ -1,0 +1,1232 @@
+{
+  "cases": [
+    {
+      "file": "refine-after-paginate.memql",
+      "verdict": "load_ok",
+      "note": "refine evaluates in process over the page paginate read, and may return fewer rows than the page."
+    },
+    {
+      "file": "refine-without-paginate.memql",
+      "verdict": "refuse_parse",
+      "message": "`refine` requires `paginate`",
+      "note": "Without a page, refine would scan the whole matching set in process."
+    },
+    {
+      "file": "mean-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_mean_call",
+      "message": "mean(x) is retired in edition 2026: write x.avg()"
+    },
+    {
+      "file": "first-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_first_call",
+      "message": "first(x) is retired in edition 2026: write x.first()"
+    },
+    {
+      "file": "last-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_last_call",
+      "message": "last(x) is retired in edition 2026: write x.last()"
+    },
+    {
+      "file": "contains-method.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_contains_method",
+      "message": ".contains(...) is retired in edition 2026: write v in <list> for membership or s.includes(sub) for a substring"
+    },
+    {
+      "file": "value-equals-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false,
+      "note": "The absence table, `x == v` with v set: an unset x (absent, null, empty) equals no set value. Strings compare verbatim: no case folding, no accent folding."
+    },
+    {
+      "file": "value-equals-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": null
+      },
+      "expect": false
+    },
+    {
+      "file": "value-equals-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": ""
+      },
+      "expect": false
+    },
+    {
+      "file": "value-equals-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": " "
+      },
+      "expect": false
+    },
+    {
+      "file": "value-equals-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 0
+      },
+      "expect": false
+    },
+    {
+      "file": "value-equals-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": false
+      },
+      "expect": false
+    },
+    {
+      "file": "value-equals-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "é"
+      },
+      "expect": false
+    },
+    {
+      "file": "value-equals-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "E"
+      },
+      "expect": false
+    },
+    {
+      "file": "value-equals-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "e"
+      },
+      "expect": true
+    },
+    {
+      "file": "value-equals-blank.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true,
+      "note": "`x == \"\"`: absent, null and the empty string are ONE value, unset; a single space is a value."
+    },
+    {
+      "file": "value-equals-blank.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": null
+      },
+      "expect": true
+    },
+    {
+      "file": "value-equals-blank.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": ""
+      },
+      "expect": true
+    },
+    {
+      "file": "value-equals-blank.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": " "
+      },
+      "expect": false
+    },
+    {
+      "file": "value-equals-blank.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 0
+      },
+      "expect": false
+    },
+    {
+      "file": "value-equals-blank.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": false
+      },
+      "expect": false
+    },
+    {
+      "file": "value-equals-blank.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "é"
+      },
+      "expect": false
+    },
+    {
+      "file": "value-is-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true,
+      "note": "`x == nil` is `x == \"\"`: one notion of unset."
+    },
+    {
+      "file": "value-is-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": null
+      },
+      "expect": true
+    },
+    {
+      "file": "value-is-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": ""
+      },
+      "expect": true
+    },
+    {
+      "file": "value-is-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": " "
+      },
+      "expect": false
+    },
+    {
+      "file": "value-is-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 0
+      },
+      "expect": false
+    },
+    {
+      "file": "value-is-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": false
+      },
+      "expect": false
+    },
+    {
+      "file": "value-not-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true,
+      "note": "`x != v` is the exact negation of `==`: null-safe, true on an unset x."
+    },
+    {
+      "file": "value-not-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": null
+      },
+      "expect": true
+    },
+    {
+      "file": "value-not-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": ""
+      },
+      "expect": true
+    },
+    {
+      "file": "value-not-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": " "
+      },
+      "expect": true
+    },
+    {
+      "file": "value-not-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 0
+      },
+      "expect": true
+    },
+    {
+      "file": "value-not-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": false
+      },
+      "expect": true
+    },
+    {
+      "file": "value-not-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "e"
+      },
+      "expect": false
+    },
+    {
+      "file": "value-is-set.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false,
+      "note": "`x != \"\"` is the \"is set\" idiom: false on every spelling of unset, true on 0 and false."
+    },
+    {
+      "file": "value-is-set.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": null
+      },
+      "expect": false
+    },
+    {
+      "file": "value-is-set.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": ""
+      },
+      "expect": false
+    },
+    {
+      "file": "value-is-set.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": " "
+      },
+      "expect": true
+    },
+    {
+      "file": "value-is-set.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 0
+      },
+      "expect": true
+    },
+    {
+      "file": "value-is-set.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": false
+      },
+      "expect": true
+    },
+    {
+      "file": "value-not-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false
+    },
+    {
+      "file": "value-not-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": ""
+      },
+      "expect": false
+    },
+    {
+      "file": "value-not-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 0
+      },
+      "expect": true
+    },
+    {
+      "file": "value-before-f.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false,
+      "note": "Ordering is false against an absent or null x and across types; strings order by byte, so \"E\" and \"e\" sort before \"f\" and \"é\" (two bytes, the first 0xC3) after it. The empty string is unset only to == and !=: it is a string, and orders first."
+    },
+    {
+      "file": "value-before-f.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": null
+      },
+      "expect": false
+    },
+    {
+      "file": "value-before-f.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": ""
+      },
+      "expect": true
+    },
+    {
+      "file": "value-before-f.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": " "
+      },
+      "expect": true
+    },
+    {
+      "file": "value-before-f.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 0
+      },
+      "expect": false
+    },
+    {
+      "file": "value-before-f.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": false
+      },
+      "expect": false
+    },
+    {
+      "file": "value-before-f.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "é"
+      },
+      "expect": false
+    },
+    {
+      "file": "value-before-f.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "E"
+      },
+      "expect": true
+    },
+    {
+      "file": "value-before-f.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "e"
+      },
+      "expect": true
+    },
+    {
+      "file": "value-below-one.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 0
+      },
+      "expect": true,
+      "note": "Numbers order numerically; a string never orders against a number."
+    },
+    {
+      "file": "value-below-one.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 1.5
+      },
+      "expect": false
+    },
+    {
+      "file": "value-below-one.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "0"
+      },
+      "expect": false
+    },
+    {
+      "file": "value-below-one.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false
+    },
+    {
+      "file": "value-equals-one.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 1
+      },
+      "expect": true,
+      "note": "Typed equality: numbers compare numerically across int and float, and `1 == \"1\"` is false."
+    },
+    {
+      "file": "value-equals-one.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 1.0
+      },
+      "expect": true
+    },
+    {
+      "file": "value-equals-one.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "1"
+      },
+      "expect": false
+    },
+    {
+      "file": "value-equals-one.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": true
+      },
+      "expect": false
+    },
+    {
+      "file": "value-equals-text-one.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "1"
+      },
+      "expect": true
+    },
+    {
+      "file": "value-equals-text-one.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 1
+      },
+      "expect": false
+    },
+    {
+      "file": "value-in-blank-or-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true,
+      "note": "`x in list` is `==` against each element: an unset x is a member only of a list that holds an unset element."
+    },
+    {
+      "file": "value-in-blank-or-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": null
+      },
+      "expect": true
+    },
+    {
+      "file": "value-in-blank-or-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": ""
+      },
+      "expect": true
+    },
+    {
+      "file": "value-in-blank-or-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": " "
+      },
+      "expect": false
+    },
+    {
+      "file": "value-in-blank-or-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "a"
+      },
+      "expect": true
+    },
+    {
+      "file": "value-in-blank-or-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 0
+      },
+      "expect": false
+    },
+    {
+      "file": "value-in-blank-or-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": false
+      },
+      "expect": false
+    },
+    {
+      "file": "value-in-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false
+    },
+    {
+      "file": "value-in-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "a"
+      },
+      "expect": true
+    },
+    {
+      "file": "value-in-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "A"
+      },
+      "expect": false
+    },
+    {
+      "file": "value-in-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true
+    },
+    {
+      "file": "value-in-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": ""
+      },
+      "expect": true
+    },
+    {
+      "file": "value-in-nil.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "a"
+      },
+      "expect": false
+    },
+    {
+      "file": "a-in-tags.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false,
+      "note": "`v in x` with x absent is false: an absent list has no members."
+    },
+    {
+      "file": "a-in-tags.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": null
+      },
+      "expect": false
+    },
+    {
+      "file": "a-in-tags.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": []
+      },
+      "expect": false
+    },
+    {
+      "file": "a-in-tags.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": [
+          "a"
+        ]
+      },
+      "expect": true
+    },
+    {
+      "file": "a-in-tags.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": [
+          "b"
+        ]
+      },
+      "expect": false
+    },
+    {
+      "file": "value-starts-with-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false,
+      "note": "startsWith is false on an absent or non-string subject, and compares bytes."
+    },
+    {
+      "file": "value-starts-with-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": ""
+      },
+      "expect": false
+    },
+    {
+      "file": "value-starts-with-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": " "
+      },
+      "expect": false
+    },
+    {
+      "file": "value-starts-with-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "abc"
+      },
+      "expect": true
+    },
+    {
+      "file": "value-starts-with-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "Abc"
+      },
+      "expect": false
+    },
+    {
+      "file": "value-starts-with-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 0
+      },
+      "expect": false
+    },
+    {
+      "file": "value-starts-with-a.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": false
+      },
+      "expect": false
+    },
+    {
+      "file": "value-starts-with-blank.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "abc"
+      },
+      "expect": false,
+      "note": "A blank prefix matches nothing (rule 32): a selection is never a pass-through."
+    },
+    {
+      "file": "value-starts-with-blank.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": ""
+      },
+      "expect": false
+    },
+    {
+      "file": "value-includes-b.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false,
+      "note": "includes() is false on an absent or non-string receiver."
+    },
+    {
+      "file": "value-includes-b.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": ""
+      },
+      "expect": false
+    },
+    {
+      "file": "value-includes-b.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "abc"
+      },
+      "expect": true
+    },
+    {
+      "file": "value-includes-b.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "ABC"
+      },
+      "expect": false
+    },
+    {
+      "file": "value-includes-b.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 0
+      },
+      "expect": false
+    },
+    {
+      "file": "value-includes-b.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": false
+      },
+      "expect": false
+    },
+    {
+      "file": "value-includes-blank.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "a b"
+      },
+      "expect": false,
+      "note": "A blank needle matches nothing, as a blank prefix does."
+    },
+    {
+      "file": "not-value-equals-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true,
+      "note": "`!` negates exactly: `!(x == v)` is `x != v`, true on an unset x."
+    },
+    {
+      "file": "not-value-equals-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": null
+      },
+      "expect": true
+    },
+    {
+      "file": "not-value-equals-e.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "e"
+      },
+      "expect": false
+    },
+    {
+      "file": "not-urgent.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true,
+      "note": "An absent condition is false, so its negation is true."
+    },
+    {
+      "file": "not-urgent.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": false
+      },
+      "expect": true
+    },
+    {
+      "file": "not-urgent.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": true
+      },
+      "expect": false
+    },
+    {
+      "file": "value-or-default.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true,
+      "note": "`a ?? b` is b when a is absent, null, empty or whitespace-only (rule 30); 0 and false are values and are kept."
+    },
+    {
+      "file": "value-or-default.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": null
+      },
+      "expect": true
+    },
+    {
+      "file": "value-or-default.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": ""
+      },
+      "expect": true
+    },
+    {
+      "file": "value-or-default.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": " "
+      },
+      "expect": true
+    },
+    {
+      "file": "value-or-default.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": 0
+      },
+      "expect": false
+    },
+    {
+      "file": "value-or-default.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": false
+      },
+      "expect": false
+    },
+    {
+      "file": "value-or-default.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "x"
+      },
+      "expect": false
+    },
+    {
+      "file": "tags-count-zero.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true,
+      "note": "count() of an absent list is zero."
+    },
+    {
+      "file": "tags-count-zero.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": null
+      },
+      "expect": true
+    },
+    {
+      "file": "tags-count-zero.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": []
+      },
+      "expect": true
+    },
+    {
+      "file": "tags-count-zero.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": [
+          "a"
+        ]
+      },
+      "expect": false
+    },
+    {
+      "file": "value-one-character.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "é"
+      },
+      "expect": true,
+      "note": "A string's count() counts characters, not bytes: \"é\" is one."
+    },
+    {
+      "file": "value-one-character.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": "ab"
+      },
+      "expect": false
+    },
+    {
+      "file": "value-one-character.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "value": ""
+      },
+      "expect": false
+    },
+    {
+      "file": "value-one-character.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false
+    },
+    {
+      "file": "lineage-plan-p.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false,
+      "note": "`.?` reads through an absent or null object as absent."
+    },
+    {
+      "file": "lineage-plan-p.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "lineage": null
+      },
+      "expect": false
+    },
+    {
+      "file": "lineage-plan-p.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "lineage": {}
+      },
+      "expect": false
+    },
+    {
+      "file": "lineage-plan-p.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "lineage": {
+          "planId": "p"
+        }
+      },
+      "expect": true
+    },
+    {
+      "file": "lineage-plan-unset.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": true
+    },
+    {
+      "file": "lineage-plan-unset.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "lineage": {}
+      },
+      "expect": true
+    },
+    {
+      "file": "lineage-plan-unset.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "lineage": {
+          "planId": ""
+        }
+      },
+      "expect": true
+    },
+    {
+      "file": "lineage-plan-unset.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "lineage": {
+          "planId": "p"
+        }
+      },
+      "expect": false
+    },
+    {
+      "file": "lowered-title.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "title": "Disk Full"
+      },
+      "expect": true
+    },
+    {
+      "file": "open-and-urgent.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open",
+        "urgent": true
+      },
+      "expect": true
+    },
+    {
+      "file": "open-and-urgent.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open"
+      },
+      "expect": false
+    },
+    {
+      "file": "negated-priority.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "priority": 5
+      },
+      "expect": true
+    },
+    {
+      "file": "doubled-priority.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "priority": 3
+      },
+      "args": {
+        "floor": 5
+      },
+      "expect": true
+    },
+    {
+      "file": "urgent-or-high.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": false,
+        "priority": 5
+      },
+      "expect": true
+    },
+    {
+      "file": "ternary-threshold.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": true,
+        "priority": 2
+      },
+      "expect": true
+    },
+    {
+      "file": "map-literal-member.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open"
+      },
+      "expect": true
+    },
+    {
+      "file": "open-or-held-and-urgent.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "held",
+        "urgent": true
+      },
+      "expect": true
+    },
+    {
+      "file": "owned-by-the-caller.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "ownerUserId": "u1"
+      },
+      "actor": {
+        "userId": "u1"
+      },
+      "expect": true
+    },
+    {
+      "file": "owned-by-the-caller.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "ownerUserId": "u2"
+      },
+      "actor": {
+        "userId": "u1"
+      },
+      "expect": false
+    },
+    {
+      "file": "tags-any-urgent.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "tags": [
+          "urgent"
+        ]
+      },
+      "expect": true
+    }
+  ]
+}

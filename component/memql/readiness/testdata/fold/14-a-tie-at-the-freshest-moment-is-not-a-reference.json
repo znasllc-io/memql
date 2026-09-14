@@ -1,0 +1,29 @@
+{
+  "name": "two rows evaluated in the same second disagree about the fleet: recency cannot choose, so nothing is set aside",
+  "now": "2026-09-13T12:01:00Z",
+  "reports": [
+    {"module": "ai", "nodeId": "agent-a", "nodeType": "agent", "state": "configured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": true, "slots": [{"name": "live", "present": true}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-13T12:00:00Z"},
+    {"module": "ai", "nodeId": "bff-a", "nodeType": "bff", "state": "unconfigured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-13T12:00:00Z"},
+    {"module": "ai", "nodeId": "edge-a", "nodeType": "edge", "state": "unconfigured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-13T11:00:00Z"}
+  ],
+  "nodes": [
+    {"nodeId": "agent-a", "health": "healthy", "lastSeen": "2026-09-13T12:00:40Z"},
+    {"nodeId": "bff-a", "health": "healthy", "lastSeen": "2026-09-13T12:00:40Z"},
+    {"nodeId": "edge-a", "health": "healthy", "lastSeen": "2026-09-13T12:00:40Z"}
+  ],
+  "expect": [
+    {"module": "ai", "state": "partial", "disagreement": ["bff-a=unconfigured", "edge-a=unconfigured", "agent-a=configured"], "unknown": [], "stale": []}
+  ]
+}

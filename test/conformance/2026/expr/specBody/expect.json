@@ -1,0 +1,211 @@
+{
+  "cases": [
+    {
+      "file": "urgent-spec.memql",
+      "verdict": "load_ok",
+      "note": "A spec over a concept is a lambda naming the row."
+    },
+    {
+      "file": "trait.memql",
+      "verdict": "load_ok",
+      "note": "A trait is the one unbound predicate. Waits as urgent-spec.memql does."
+    },
+    {
+      "file": "actor-spec.memql",
+      "verdict": "load_ok",
+      "note": "A spec over an @actor shape names its parameter `actor`, and the parameter IS the actor envelope. Waits as urgent-spec.memql does."
+    },
+    {
+      "file": "urgent.memql",
+      "verdict": "lower",
+      "concept": "ticket",
+      "sql": "CASE WHEN jsonb_typeof(payload->'urgent') = 'boolean' THEN (payload #>> '{urgent}')::boolean = ? ELSE FALSE END",
+      "note": "A boolean field compares only where the stored value is a boolean: the string \"true\" is not true."
+    },
+    {
+      "file": "urgent.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": true
+      },
+      "expect": true
+    },
+    {
+      "file": "urgent.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false
+    },
+    {
+      "file": "optional-plan.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "lineage": {
+          "planId": "p1"
+        }
+      },
+      "expect": true
+    },
+    {
+      "file": "optional-plan.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {},
+      "expect": false
+    },
+    {
+      "file": "open-and-tagged.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open",
+        "tags": [
+          "urgent"
+        ]
+      },
+      "expect": true
+    },
+    {
+      "file": "not-closed.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "held"
+      },
+      "expect": true
+    },
+    {
+      "file": "negated-plan-constant.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "priority": 0
+      },
+      "expect": true,
+      "note": "A negation that reads no row is a plan constant."
+    },
+    {
+      "file": "coalesced-plan-constant.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "closedAt": "2026-01-01T00:00:00Z"
+      },
+      "expect": true,
+      "note": "`??` has no SQL form over the row; over plan constants it folds before SQL."
+    },
+    {
+      "file": "map-plan-constant.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "closed"
+      },
+      "expect": true
+    },
+    {
+      "file": "code-prefix-or-high.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "code": "INC-1",
+        "priority": 0
+      },
+      "expect": true
+    },
+    {
+      "file": "ternary-over-the-row.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "urgent": false,
+        "priority": 4
+      },
+      "expect": true
+    },
+    {
+      "file": "closed-before-tomorrow.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "closedAt": "2026-01-02T10:00:00Z"
+      },
+      "expect": true
+    },
+    {
+      "file": "no-close-time.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "closedAt": ""
+      },
+      "expect": true,
+      "note": "The empty string is unset to `==`, as absent and null are."
+    },
+    {
+      "file": "lt-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_lt_call",
+      "message": "lt(a, b) is retired in edition 2026: write a < b"
+    },
+    {
+      "file": "gt-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_gt_call",
+      "message": "gt(a, b) is retired in edition 2026: write a > b"
+    },
+    {
+      "file": "lte-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_lte_call",
+      "message": "lte(a, b) is retired in edition 2026: write a <= b"
+    },
+    {
+      "file": "gte-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_gte_call",
+      "message": "gte(a, b) is retired in edition 2026: write a >= b"
+    },
+    {
+      "file": "exists-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_exists_call",
+      "message": "exists(x) is retired in edition 2026: write x != nil"
+    },
+    {
+      "file": "len-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_len_call",
+      "message": "len(x) is retired in edition 2026: write x.count()"
+    },
+    {
+      "file": "count-call.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_count_call",
+      "message": "count(x) is retired in edition 2026: write x.count()"
+    },
+    {
+      "file": "spec-return-body.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_spec_return_body",
+      "message": "spec <bound> <name> { return <predicate> } is retired in edition 2026: write spec <bound> <name> = row => <predicate>",
+      "note": "Refused by the edition's grammar (parser.Options.ExpressionsV1); the loaders still read it until the tree flips."
+    },
+    {
+      "file": "trait-return-body.memql",
+      "verdict": "refuse_parse",
+      "code": "retired_trait_return_body",
+      "message": "trait <name> { return <predicate> } is retired in edition 2026: write trait <name> = row => <predicate>",
+      "note": "Refused by the edition's grammar (parser.Options.ExpressionsV1); the loaders still read it until the tree flips."
+    },
+    {
+      "file": "args-in-a-spec.memql",
+      "verdict": "refuse_load",
+      "message": "a spec or trait takes no arguments",
+      "note": "A spec body reads its parameter and the clock; args belong to the query that applies it."
+    }
+  ]
+}

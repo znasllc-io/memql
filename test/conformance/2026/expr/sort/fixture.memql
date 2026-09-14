@@ -1,0 +1,6 @@
+/// A support ticket: the row a sorted query here reads.
+concept ticket {
+  title     string
+  status    string
+  priority  int
+}

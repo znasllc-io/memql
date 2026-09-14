@@ -1,0 +1,2 @@
+/// High-priority tickets.
+spec ticket sbGt = row => gt(row.priority, 3)

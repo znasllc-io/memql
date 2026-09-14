@@ -27,7 +27,10 @@ func parseV1Authored(t *testing.T, src string, o Options) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseFileWithOptions(normalised, o)
+	// Lexed with the author's positions carried in it, as every parse site
+	// that lowers does (position_markers.go): a refusal names src's line and
+	// column.
+	return ParseFileWithOptions(PositionLowering(src, normalised), o)
 }
 
 func mustParseV1Authored(t *testing.T, src string, o Options) *File {
@@ -326,7 +329,7 @@ func TestRefineClause(t *testing.T) {
 	for name, c := range map[string]struct{ src, want string }{
 		"without paginate": {"query thing probe {\n  filter row => row.a == 1\n  refine row => row.b == 2\n}", "`refine` requires `paginate`"},
 		"with count":       {"query thing probe {\n  filter row => row.a == 1\n  refine row => row.b == 2\n  count\n}", "`refine` cannot be combined with `count`"},
-		"not a lambda":     {"query thing probe {\n  filter row => row.a == 1\n  paginate 5\n  refine b == 2\n}", "`refine` takes a lambda"},
+		"not a lambda":     {"query thing probe {\n  filter row => row.a == 1\n  paginate 5\n  refine b == 2\n}", "parse error at line 4, column 10: refine takes a lambda of one parameter, as in row => <predicate>; got `b == 2`"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := parseV1Authored(t, c.src, v1Off)

@@ -149,5 +149,5 @@ func dispatchPerConstructParser(slice FunctionSlice, origin string, conceptRegis
 			return nil, fmt.Errorf("%s: %w", origin, err)
 		}
 	}
-	return tryParseNewFunctionSyntax(slice.Name, string(slice.Kind), slice.Source, origin, conceptRegistry)
+	return tryParseFunctionSlice(slice.Name, string(slice.Kind), slice.Source, origin, conceptRegistry, slice.Line, slice.BodyOffset)
 }

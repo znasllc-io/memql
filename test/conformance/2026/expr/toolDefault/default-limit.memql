@@ -1,0 +1,16 @@
+/// A support ticket: the rows the tool here pages through.
+concept tdTicket {
+  title  string
+}
+
+/// Every ticket, newest first.
+query tdTicket tdTickets {
+  sort "row.createdAt", "desc"
+  paginate 50
+}
+
+/// List the tickets, a page at a time.
+@handler(type="query", query="paginate(query tdTickets(), args.limit)")
+tool tdListTickets {
+  limit  integer  @default("10") @description("How many tickets to return.")
+}

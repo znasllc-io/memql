@@ -219,6 +219,7 @@ func invokedLogicNames(a *Automation) []string {
 //   - Can have supporting queries (helpers)
 //   - Cannot have mutations (mutations go in functions/ directory)
 func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
+	authored := source
 	// Close the annotation silent-tolerance gap (#2712): automations reach
 	// this dedicated loader instead of the function slicer's gate, so an
 	// unknown / dead / retired annotation would otherwise be silently
@@ -282,8 +283,10 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 		return nil, fmt.Errorf("parsing automation preconditions: %w", err)
 	}
 
-	// Parse, resolve concept references, then compile
-	result, err := l.parseResolveCompile(source, path)
+	// Parse, resolve concept references, then compile. The text compileMemQL
+	// was handed is what the author wrote (or its slice): parse positions are
+	// reported against it, not against the precondition-stripped lowering.
+	result, err := l.parseResolveCompile(authored, source, path)
 	if err != nil {
 		return nil, fmt.Errorf("compiling .memql: %w", err)
 	}
@@ -390,7 +393,10 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 
 // parseResolveCompile parses source, runs concept resolution on the AST, then compiles.
 // This replaces compiler.CompileSource to insert the resolution step.
-func (l *Loader) parseResolveCompile(source, path string) (*compiler.CompileResult, error) {
+//
+// authored is the text source was derived from; parse positions are reported
+// against it (languageParser.PositionLowering, memql#5364).
+func (l *Loader) parseResolveCompile(authored, source, path string) (*compiler.CompileResult, error) {
 	// Apply struct-form rewriters before tokenisation. The automation
 	// loader bypasses compiler.CompileSource (so it can interleave
 	// concept resolution between parse and compile), which means it
@@ -412,8 +418,10 @@ func (l *Loader) parseResolveCompile(source, path string) (*compiler.CompileResu
 		return nil, fmt.Errorf("automation source: `func (Automation) NAME(...)` is retired -- author the struct form: `automation NAME { step <name> { logic <bareName> { ... } } }`. See dsl/v1/automations/v1/identity/expireDelegations/automation.memql for a worked example.")
 	}
 
-	// Tokenize
-	lexer := languageParser.NewLexer(source)
+	// Tokenize the lowering with the author's positions carried in it, so a
+	// refusal names the author's line and column; source itself stays
+	// unmarked for the fallback compile below.
+	lexer := languageParser.NewLexer(languageParser.PositionLowering(authored, source))
 	tokens, err := lexer.Tokenize()
 	if err != nil {
 		return nil, fmt.Errorf("lexer error: %w", err)

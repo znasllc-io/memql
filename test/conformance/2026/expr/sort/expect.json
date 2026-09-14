@@ -1,0 +1,91 @@
+{
+  "cases": [
+    {
+      "file": "sort-by-created-at.memql",
+      "verdict": "load_ok",
+      "note": "A sort key is a string literal naming a field, then an optional direction; edition 2026 does not change it."
+    },
+    {
+      "file": "sort-by-two-keys.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "sort-by-bare-name.memql",
+      "verdict": "refuse_parse",
+      "message": "sort field must be a string literal (e.g. \"createdAt\" or \"payload.title\")",
+      "note": "ident: a sort key is not an expression."
+    },
+    {
+      "file": "sort-by-member-path.memql",
+      "verdict": "refuse_parse",
+      "message": "sort field must be a string literal (e.g. \"createdAt\" or \"payload.title\")",
+      "note": "member"
+    },
+    {
+      "file": "sort-by-optional-member.memql",
+      "verdict": "refuse_parse",
+      "message": "sort field must be a string literal (e.g. \"createdAt\" or \"payload.title\")",
+      "note": "optionalMember"
+    },
+    {
+      "file": "sort-by-a-call.memql",
+      "verdict": "refuse_parse",
+      "message": "sort field must be a string literal (e.g. \"createdAt\" or \"payload.title\")",
+      "note": "call"
+    },
+    {
+      "file": "sort-by-parenthesised-key.memql",
+      "verdict": "refuse_parse",
+      "message": "sort field must be a string literal (e.g. \"createdAt\" or \"payload.title\")",
+      "note": "paren"
+    },
+    {
+      "file": "sort-by-nil.memql",
+      "verdict": "refuse_parse",
+      "message": "sort field must be a string literal (e.g. \"createdAt\" or \"payload.title\")",
+      "note": "nil"
+    },
+    {
+      "file": "sort-by-a-list.memql",
+      "verdict": "refuse_parse",
+      "message": "sort field must be a string literal (e.g. \"createdAt\" or \"payload.title\")",
+      "note": "list"
+    },
+    {
+      "file": "sort-by-a-map.memql",
+      "verdict": "refuse_parse",
+      "message": "sort field must be a string literal (e.g. \"createdAt\" or \"payload.title\")",
+      "note": "map"
+    },
+    {
+      "file": "sort-by-negation.memql",
+      "verdict": "refuse_parse",
+      "message": "sort field must be a string literal (e.g. \"createdAt\" or \"payload.title\")",
+      "note": "not"
+    },
+    {
+      "file": "sort-by-unary-minus.memql",
+      "verdict": "refuse_parse",
+      "message": "sort field must be a string literal (e.g. \"createdAt\" or \"payload.title\")",
+      "note": "negate"
+    },
+    {
+      "file": "sort-by-a-lambda.memql",
+      "verdict": "refuse_parse",
+      "message": "sort field must be a string literal (e.g. \"createdAt\" or \"payload.title\")",
+      "note": "lambda"
+    },
+    {
+      "file": "sort-by-a-construct-call.memql",
+      "verdict": "refuse_parse",
+      "message": "sort field must be a string literal (e.g. \"createdAt\" or \"payload.title\")",
+      "note": "constructCall"
+    },
+    {
+      "file": "sort-by-concatenation.memql",
+      "verdict": "refuse_parse",
+      "message": "expected ',' before sort field",
+      "note": "arithmetic: the key is the literal, and what follows it is not a direction."
+    }
+  ]
+}

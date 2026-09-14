@@ -1,0 +1,6 @@
+/// Summarize a ticket in the house style.
+@level("fast")
+@templateFile("piSummarize.tmpl")
+prompt piSummarize {
+  style  string  @default(query piStyles()) @description("The tone of the summary.")
+}

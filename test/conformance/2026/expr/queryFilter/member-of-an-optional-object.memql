@@ -1,0 +1,8 @@
+/// Tickets for a plan, read through an object that may be absent with `.` instead of `.?`.
+query ticket qfPlainMemberOfOptional {
+  args {
+    planId  string  @required
+  }
+  filter row => row.lineage.planId == args.planId
+  paginate 20
+}

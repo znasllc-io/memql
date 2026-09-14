@@ -1,0 +1,388 @@
+{
+  "cases": [
+    {
+      "file": "count-the-tickets.memql",
+      "verdict": "load_ok",
+      "note": "A logic body binds a construct call's result to a name and reads it."
+    },
+    {
+      "file": "object-literal-call-args.memql",
+      "verdict": "refuse_parse",
+      "message": "object-literal call args are removed; pass named args directly",
+      "note": "A construct call's arguments are named: `lbTickets(status: args.status)`."
+    },
+    {
+      "file": "query-result-count.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "calls": {
+        "query lbTickets": [
+          {
+            "id": "t1"
+          },
+          {
+            "id": "t2"
+          }
+        ]
+      },
+      "expect": 2,
+      "note": "The corpus boots no database: the case gives the call's answer, and the expression is held to what it does with it."
+    },
+    {
+      "file": "query-result-first-title.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "calls": {
+        "query lbTickets": []
+      },
+      "expect": "none",
+      "note": "first() of an empty result is absent, and `??` falls through on absent."
+    },
+    {
+      "file": "full-name.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "first": "Ada",
+        "last": "Lovelace"
+      },
+      "expect": "Ada Lovelace"
+    },
+    {
+      "file": "full-name.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "first": "Ada"
+      },
+      "expect": "Ada ",
+      "note": "An absent operand of a string join contributes the empty string, as concat() did."
+    },
+    {
+      "file": "positive-quantities.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "items": [
+          {
+            "qty": 1
+          },
+          {
+            "qty": 0
+          },
+          {
+            "qty": 3
+          }
+        ]
+      },
+      "expect": 2
+    },
+    {
+      "file": "item-names.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "items": [
+          {
+            "name": "disk"
+          },
+          {
+            "name": "fan"
+          }
+        ]
+      },
+      "expect": [
+        "disk",
+        "fan"
+      ]
+    },
+    {
+      "file": "cheapest-first.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "items": [
+          {
+            "name": "disk",
+            "price": 90
+          },
+          {
+            "name": "fan",
+            "price": 15
+          }
+        ]
+      },
+      "expect": "fan"
+    },
+    {
+      "file": "dearest-first.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "items": [
+          {
+            "name": "disk",
+            "price": 90
+          },
+          {
+            "name": "fan",
+            "price": 15
+          }
+        ]
+      },
+      "expect": "disk"
+    },
+    {
+      "file": "last-and-single.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "items": [
+          {
+            "name": "disk"
+          },
+          {
+            "name": "fan"
+          }
+        ],
+        "one": [
+          "only"
+        ]
+      },
+      "expect": [
+        "fan",
+        "only"
+      ]
+    },
+    {
+      "file": "score-summary.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "scores": [
+          1,
+          2,
+          3
+        ]
+      },
+      "expect": {
+        "avg": 2,
+        "max": 3,
+        "min": 1,
+        "sum": 6
+      }
+    },
+    {
+      "file": "running-total.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "scores": [
+          1,
+          2,
+          3
+        ]
+      },
+      "expect": 6
+    },
+    {
+      "file": "grouped-by-kind.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "items": [
+          {
+            "kind": "a"
+          },
+          {
+            "kind": "b"
+          },
+          {
+            "kind": "a"
+          }
+        ]
+      },
+      "expect": 2
+    },
+    {
+      "file": "distinct-kinds.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "items": [
+          {
+            "kind": "a"
+          },
+          {
+            "kind": "b"
+          },
+          {
+            "kind": "a"
+          }
+        ]
+      },
+      "expect": [
+        "a",
+        "b"
+      ]
+    },
+    {
+      "file": "window.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "scores": [
+          1,
+          2,
+          3,
+          4
+        ]
+      },
+      "expect": [
+        2,
+        3
+      ]
+    },
+    {
+      "file": "empty-list.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "scores": [
+          1
+        ]
+      },
+      "expect": [
+        true,
+        false
+      ],
+      "note": "An absent list is empty."
+    },
+    {
+      "file": "result-nodes.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "result": {
+          "nodes": [
+            {
+              "id": "a"
+            },
+            {
+              "id": "b"
+            }
+          ]
+        }
+      },
+      "expect": 2
+    },
+    {
+      "file": "ids.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "goalId": "g1"
+      },
+      "expect": {
+        "canonical": "v1:work:goal:g1",
+        "hash": "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+        "short": "g1"
+      }
+    },
+    {
+      "file": "text.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "expect": [
+        "INC",
+        "disk",
+        "42",
+        5
+      ],
+      "note": "A string's count() counts characters, not bytes."
+    },
+    {
+      "file": "dates.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "expect": {
+        "days": 2,
+        "tomorrow": "2026-01-03T03:04:05Z"
+      },
+      "note": "`now` is 2026-01-02T03:04:05Z in every corpus case."
+    },
+    {
+      "file": "error-untaken.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "x": "given"
+      },
+      "expect": "given",
+      "note": "Only the chosen branch of `? :` is evaluated, so error() in the other never raises."
+    },
+    {
+      "file": "negated-and-not.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "delta": 2,
+        "archived": false
+      },
+      "expect": [
+        -2,
+        true
+      ]
+    },
+    {
+      "file": "optional-source.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {},
+      "expect": "manual"
+    },
+    {
+      "file": "optional-source.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "meta": {
+          "source": "import"
+        }
+      },
+      "expect": "import"
+    },
+    {
+      "file": "membership-and-prefix.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "status": "held",
+        "code": "INC-1"
+      },
+      "expect": [
+        true,
+        true
+      ]
+    },
+    {
+      "file": "open-and-urgent.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "args": {
+        "ticket": {
+          "status": "open"
+        },
+        "urgent": false,
+        "priority": 5
+      },
+      "expect": true
+    },
+    {
+      "file": "nil-value.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "expect": null
+    }
+  ]
+}

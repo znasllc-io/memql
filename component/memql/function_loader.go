@@ -127,6 +127,22 @@ func withRewriteCause(parseErr, rewriteErr error) error {
 //   - Unlimited queries per file
 //   - Automations should be in automations/ directory, not queries/mutations
 func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin string, registry memoryNodes.Registry) (*Function, error) {
+	return tryParseFunctionSlice(expectedName, expectedKind, content, origin, registry, 0, 0)
+}
+
+// tryParseFunctionSlice is tryParseNewFunctionSyntax for a slice cut from a
+// file: the declaration text starting at bodyOffset of content sits on line
+// `line` of that file (FunctionSlice.Line / BodyOffset), so every position a
+// parse error reports is the file's (memql#5364). line 0 leaves positions
+// relative to content.
+func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, registry memoryNodes.Registry, line, bodyOffset int) (*Function, error) {
+	// What the author wrote, placed in the file when the slice's line is
+	// known: the positions the lexer reports below come from here.
+	authored := content
+	if line > 0 && bodyOffset >= 0 && bodyOffset <= len(content) {
+		authored = content[:bodyOffset] + languageParser.AnchorSource(content[bodyOffset:], line)
+	}
+
 	// Author-facing retirement (memql#303): reject the legacy
 	// procedural form `func (Receiver) name(ctx any) ...` before any
 	// rewriting runs. The internal IR is still procedural (the
@@ -222,8 +238,13 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		content = resolved
 	}
 
-	// Try parsing with the full parser
-	lexer := languageParser.NewLexer(content)
+	// Try parsing with the full parser. The text lexed carries the author's
+	// positions (languageParser.PositionLowering), marked after every text
+	// transform above so none of them reads a marker: a refusal names the
+	// author's line and column, not the lowered text's. content itself stays
+	// unmarked for the text-reading validators below.
+	lexed := languageParser.PositionLowering(authored, content)
+	lexer := languageParser.NewLexer(lexed)
 	tokens, err := lexer.Tokenize()
 	if err != nil {
 		return nil, withRewriteCause(err, rewriteErr)
@@ -233,8 +254,8 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	p.SetDocComments(lexer.DocComments())
 	// Record the (fully-rewritten) source so a collection-chain logic step
 	// RHS can be sliced back to its exact span during parsing (#2317). The
-	// tokens were lexed from this same `content`, so the rune offsets line up.
-	p.SetSource(content)
+	// tokens were lexed from this same text, so the rune offsets line up.
+	p.SetSource(lexed)
 	ast, err := p.Parse()
 	if err != nil {
 		return nil, withRewriteCause(err, rewriteErr)
@@ -670,6 +691,21 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				retExpr, err := extractLogicReturnExpression(auto)
 				if err != nil {
 					return nil, fmt.Errorf("function %q: %w", expectedName, err)
+				}
+				// An edition-2026 body (memql#5367) is bridged onto the same
+				// two runners by logic_body_v1.go; everything below is the
+				// legacy conversion, unchanged.
+				if funcDef.ExpressionsV1 {
+					engineExpr, onRunner, err := loadLogicBodyV1(auto, retExpr)
+					if err != nil {
+						return nil, fmt.Errorf("function %q body: %w", expectedName, err)
+					}
+					fn.Expr = engineExpr
+					fn.ExprSource = extractExpressionFromContent(content)
+					if onRunner {
+						fn.LogicSteps = auto
+					}
+					break
 				}
 				// Logic bodies admit the Story 4 collection-method + lambda
 				// surface (ADR §2.2). Specs and query filters use the default

@@ -1,0 +1,10 @@
+/// Note a goal, with the call's arguments wrapped in an object literal.
+@trigger(event="node.updated", concept="v1:work:goal")
+automation saObjectLiteralCall {
+  args {
+    id  string
+  }
+  step note {
+    mutation saNoteGoal({ goalId: args.id })
+  }
+}

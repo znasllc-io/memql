@@ -1,6 +1,6 @@
 /// Open tickets, newest first.
-query ticket openTickets {
-  filter status == "open"
+query ticket qfOpenTickets {
+  filter row => row.status == "open"
   sort "row.createdAt", "desc"
   paginate 20
 }

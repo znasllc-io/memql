@@ -1,0 +1,2 @@
+go test fuzz v1
+string("row => row.irS == \"a\" || row.irN > 0")

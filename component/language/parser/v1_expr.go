@@ -256,7 +256,7 @@ func (p *Parser) parseV1Ternary() (v1Expr, error) {
 		return v1Expr{}, err
 	}
 	if !p.check(TokenColon) {
-		return v1Expr{}, p.v1Expected(fmt.Sprintf("`:` in the conditional whose `?` is at line %d, column %d (p ? a : b)", q.Line, q.Column))
+		return v1Expr{}, p.v1Expected(fmt.Sprintf("`:` in the conditional whose `?` is at %s (p ? a : b)", v1Where(q)))
 	}
 	colon := p.v1Take()
 	if err := p.v1ExpectOperand(colon); err != nil {
@@ -383,7 +383,8 @@ func (p *Parser) parseV1UngluedNegative() (v1Expr, error) {
 	if err != nil {
 		return v1Expr{}, err
 	}
-	litSp := ast.Span{Line: tok.Line, Col: tok.Column + 1, EndLine: tok.EndLine, EndCol: tok.EndCol}
+	litSp := v1TokenSpan(tok)
+	litSp.Col++ // past the sign
 	operand, err := p.parseV1PostfixFrom(v1Expr{n: &ast.LiteralExpr{Value: magnitude}, sp: litSp})
 	if err != nil {
 		return v1Expr{}, err
@@ -677,7 +678,7 @@ func (p *Parser) parseV1CallArgs(callee, kind string, bare bool) ([]ast.Expressi
 	seen := map[string]any{}
 	for !p.check(TokenParenClose) {
 		if p.check(TokenEOF) {
-			return nil, nil, Token{}, p.v1Expected(fmt.Sprintf("`)` to close the argument list of %s(...) opened at line %d, column %d", callee, open.Line, open.Column))
+			return nil, nil, Token{}, p.v1Expected(fmt.Sprintf("`)` to close the argument list of %s(...) opened at %s", callee, v1Where(open)))
 		}
 		tok := p.current
 		switch {
@@ -891,7 +892,7 @@ func (p *Parser) parseV1Paren() (v1Expr, error) {
 		// A comma inside a group separates nothing: it is the retired `,`.
 		return v1Expr{}, v1Retired(p.current, ruleCommaConnective)
 	}
-	return v1Expr{}, p.v1Expected(fmt.Sprintf("`)` to close the `(` at line %d, column %d", open.Line, open.Column))
+	return v1Expr{}, p.v1Expected(fmt.Sprintf("`)` to close the `(` at %s", v1Where(open)))
 }
 
 // parseV1List parses `[a, b, ...]`, a trailing comma allowed.
@@ -900,7 +901,7 @@ func (p *Parser) parseV1List() (v1Expr, error) {
 	var elems []ast.ExpressionNode
 	for !p.check(TokenBracketClose) {
 		if p.check(TokenEOF) {
-			return v1Expr{}, p.v1Expected(fmt.Sprintf("`]` to close the list opened at line %d, column %d", open.Line, open.Column))
+			return v1Expr{}, p.v1Expected(fmt.Sprintf("`]` to close the list opened at %s", v1Where(open)))
 		}
 		el, err := p.parseV1Ternary()
 		if err != nil {
@@ -912,7 +913,7 @@ func (p *Parser) parseV1List() (v1Expr, error) {
 			continue
 		}
 		if !p.check(TokenBracketClose) {
-			return v1Expr{}, p.v1Expected(fmt.Sprintf("`,` or `]` in the list opened at line %d, column %d", open.Line, open.Column))
+			return v1Expr{}, p.v1Expected(fmt.Sprintf("`,` or `]` in the list opened at %s", v1Where(open)))
 		}
 	}
 	closeTok := p.v1Take()
@@ -940,14 +941,22 @@ func (p *Parser) parseV1MapWith(allowPuns bool) (v1Expr, error) {
 		keyTok := p.current
 		switch {
 		case keyTok.Type == TokenEOF:
-			return v1Expr{}, p.v1Expected(fmt.Sprintf("`}` to close the map opened at line %d, column %d", open.Line, open.Column))
+			return v1Expr{}, p.v1Expected(fmt.Sprintf("`}` to close the map opened at %s", v1Where(open)))
 		case keyTok.Type == TokenString:
 			return v1Expr{}, v1Errorf(keyTok, "map keys are unquoted names (authoring rule 18): write %s: ..., not %s: ...", keyTok.Literal, ast.QuoteString(keyTok.Literal))
 		case !v1IsNameToken(keyTok):
 			return v1Expr{}, v1Errorf(keyTok, "expected a map key (an unquoted name), got %s", v1Describe(keyTok))
 		case strings.Contains(keyTok.Literal, ":"):
 			return v1Expr{}, v1ColonError(keyTok)
-		case strings.Contains(keyTok.Literal, "."):
+		}
+		if next := p.peekAhead(1); keyTok.Type == TokenIdentifier && (next.Type == TokenComma || next.Type == TokenBraceClose) {
+			if err := v1KeylessEntry(keyTok, allowPuns); err != nil {
+				return v1Expr{}, err
+			}
+		}
+		if strings.Contains(keyTok.Literal, ".") {
+			// Followed by `:`, so the author wrote a dotted KEY, and nesting is
+			// the fix; a dotted VALUE with no key was refused just above.
 			return v1Expr{}, v1Errorf(keyTok, "a map key is one name, got `%s`: nest a map for a path", keyTok.Literal)
 		}
 		key := keyTok.Literal
@@ -965,6 +974,8 @@ func (p *Parser) parseV1MapWith(allowPuns bool) (v1Expr, error) {
 				continue
 			}
 			if p.check(TokenComma) || p.check(TokenBraceClose) {
+				// Only a keyword gets here: an identifier with no `key:` was
+				// refused as a key-less entry above.
 				return v1Expr{}, v1Errorf(keyTok, "a map entry is written key: value (write %s: %s)", key, key)
 			}
 			if p.check(TokenOperator) && p.current.Literal == "=" {
@@ -986,7 +997,7 @@ func (p *Parser) parseV1MapWith(allowPuns bool) (v1Expr, error) {
 			continue
 		}
 		if !p.check(TokenBraceClose) {
-			return v1Expr{}, p.v1Expected(fmt.Sprintf("`,` or `}` in the map opened at line %d, column %d", open.Line, open.Column))
+			return v1Expr{}, p.v1Expected(fmt.Sprintf("`,` or `}` in the map opened at %s", v1Where(open)))
 		}
 	}
 	closeTok := p.v1Take()
@@ -1000,16 +1011,15 @@ func (p *Parser) parseV1MapWith(allowPuns bool) (v1Expr, error) {
 
 // v1Seg is one segment of a fused dotted identifier, with its own extent: the
 // token is on one line (an identifier cannot contain a newline), so each
-// segment's columns follow from the rune lengths before it.
+// segment's columns follow from the rune lengths before it -- in the lexed
+// text and, when the identifier carries one, in the author's source.
 type v1Seg struct {
 	text string
-	pos  int
+	tok  Token
 	sp   ast.Span
 }
 
-func (s v1Seg) token() Token {
-	return Token{Type: TokenIdentifier, Literal: s.text, Pos: s.pos, Line: s.sp.Line, Column: s.sp.Col, EndLine: s.sp.EndLine, EndCol: s.sp.EndCol}
-}
+func (s v1Seg) token() Token { return s.tok }
 
 // v1PathSegments splits an identifier token -- possibly fused, possibly the
 // `.a.b` tail the lexer emits after `)` -- into its segments, refusing a
@@ -1022,11 +1032,10 @@ func v1PathSegments(tok Token) ([]v1Seg, error) {
 	if strings.Contains(lit, "-") {
 		return nil, v1KebabError(tok)
 	}
-	col, pos := tok.Column, tok.Pos
+	off := 0 // runes from the token's start to the segment's
 	if strings.HasPrefix(lit, ".") {
 		lit = lit[1:]
-		col++
-		pos++
+		off = 1
 	}
 	parts := strings.Split(lit, ".")
 	segs := make([]v1Seg, 0, len(parts))
@@ -1035,9 +1044,14 @@ func v1PathSegments(tok Token) ([]v1Seg, error) {
 			return nil, v1Errorf(tok, "`%s` has an empty member name", tok.Literal)
 		}
 		n := utf8.RuneCountInString(part)
-		segs = append(segs, v1Seg{text: part, pos: pos, sp: ast.Span{Line: tok.Line, Col: col, EndLine: tok.Line, EndCol: col + n}})
-		col += n + 1
-		pos += n + 1
+		st := Token{Type: TokenIdentifier, Literal: part, Pos: tok.Pos + off, Line: tok.Line, Column: tok.Column + off,
+			EndPos: tok.Pos + off + n, EndLine: tok.Line, EndCol: tok.Column + off + n}
+		if tok.AuthoredLine > 0 {
+			st.AuthoredLine, st.AuthoredCol = tok.AuthoredLine, tok.AuthoredCol+off
+			st.AuthoredEndLine, st.AuthoredEndCol = tok.AuthoredLine, tok.AuthoredCol+off+n
+		}
+		segs = append(segs, v1Seg{text: part, tok: st, sp: v1TokenSpan(st)})
+		off += n + 1
 	}
 	return segs, nil
 }
@@ -1132,8 +1146,13 @@ func v1Binary(op string, l, r v1Expr) v1Expr {
 	return v1Expr{n: &ast.BinaryExpr{Op: op, Left: l.n, Right: r.n, Span: sp}, sp: sp}
 }
 
+// v1TokenSpan is tok's extent as a node Span. A Span is where the node sits in
+// the author's source -- a runtime error quotes it -- so a token of a marked
+// lowering contributes its authored extent (position_markers.go).
 func v1TokenSpan(tok Token) ast.Span {
-	return ast.Span{Line: tok.Line, Col: tok.Column, EndLine: tok.EndLine, EndCol: tok.EndCol}
+	line, col := tok.At()
+	endLine, endCol := tok.EndAt()
+	return ast.Span{Line: line, Col: col, EndLine: endLine, EndCol: endCol}
 }
 
 func joinV1Span(from, to ast.Span) ast.Span {

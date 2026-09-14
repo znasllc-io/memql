@@ -71,8 +71,13 @@ button:not(:disabled):active {
   color: var(--os-muted);
 }
 
+/* The data voice is read character by character -- the brand's own words for
+ * it -- so it shows the characters. JetBrains Mono's contextual ligatures draw
+ * `!=` as one not-equal sign and `==` as one long bar, and somebody copying a
+ * condition, a command or an id off the screen would type what they saw. */
 .os-mono {
   font-family: var(--os-font-mono);
+  font-variant-ligatures: none;
 }
 
 .os-link {
@@ -1393,6 +1398,12 @@ button:not(:disabled):active {
   margin: 0;
   padding: 0;
   display: grid;
+  /* One column exactly as wide as the list. The implicit `auto` column
+   * sizes to its widest row's min-content, and a row that carries a
+   * one-line sentence (`white-space: nowrap`, ellipsized) has the whole
+   * sentence as its min-content: at a narrow window the column grew past
+   * the window and carried every row's status chip off its right edge. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 4px;
 }
 
@@ -1510,12 +1521,33 @@ button:not(:disabled):active {
   font-weight: 600;
   font-size: var(--os-text-base);
 }
+/* The icon keeps its size when a long name wraps beside it: as a plain flex
+ * item it was the first thing squeezed. */
+.os-row > svg {
+  flex: none;
+}
 .os-row-state,
 .os-machine-state {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* A chip in a row's state cluster is a word in a pill, and a pill that wraps
+ * is not one: "Set up on some nodes" broke onto three lines when the row got
+ * tight, while the quiet middle -- whose whole job is to yield first -- kept
+ * its width. So a chip stays on one line, and when the row is too narrow for
+ * the whole cluster it is the CLUSTER that wraps, between chips, right-aligned
+ * -- which keeps its narrowest width to one chip's rather than every chip's,
+ * so a phone-width row still fits its window. */
+.os-row-state {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 4px;
+}
+.os-row-state .os-chip {
+  white-space: nowrap;
 }
 
 /* A row that opens something is a button, and has to look and focus like the
@@ -1930,6 +1962,14 @@ button:not(:disabled):active {
 .os-select:focus-visible {
   outline: 2px solid var(--os-accent);
   outline-offset: 1px;
+}
+/* An input holding code (kit `Input` with `code`, `CopyField` with `mono`).
+ * A compound selector, because `.os-input`'s `font: inherit` comes later in
+ * this file than `.os-mono` and on its own would put the prose face back --
+ * and the ligatures with it. */
+.os-input.os-mono {
+  font-family: var(--os-font-mono);
+  font-variant-ligatures: none;
 }
 .os-select-label {
   display: inline-flex;
@@ -6990,6 +7030,19 @@ a.os-button {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* The rule's condition: a full-width field with its reference right under it
+ * (see RuleBuilder). The caption keeps a reading measure while the field
+ * takes the width a real condition needs. */
+.os-campaign-condition {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+.os-campaign-condition > .os-caption {
+  max-width: 72ch;
 }
 
 .os-campaign-more {
@@ -13518,4 +13571,62 @@ a.os-button {
   border: 1px solid var(--os-line);
   border-radius: var(--os-radius-xs);
   background: var(--os-raised);
+}
+
+/* ---------------------------------------------------------------------------
+ * Cluster -> Modules detail: one module across the cluster (memql#5259)
+ * ------------------------------------------------------------------------- */
+
+/* Each live node on one row: the node and its own answer on the first line,
+ * its type and freshness beneath -- the environment list's grammar, so the
+ * two lists on one page read as one language. */
+.os-cluster-readiness {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.os-cluster-readiness-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "node words"
+    "note note";
+  gap: 2px 10px;
+  padding: 6px 8px;
+  border-radius: var(--os-radius-xs);
+}
+
+.os-cluster-readiness-row:nth-child(odd) {
+  background: var(--os-plate);
+}
+
+.os-cluster-readiness-node {
+  grid-area: node;
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+  overflow-wrap: anywhere;
+}
+
+.os-cluster-readiness-words {
+  grid-area: words;
+  color: var(--os-ink);
+  font-size: var(--os-text-sm);
+  white-space: nowrap;
+}
+
+.os-cluster-readiness-note {
+  grid-area: note;
+  color: var(--os-muted);
+  font-size: var(--os-text-xs);
+  line-height: 1.5;
+}
+
+/* A node the fold SET ASIDE reads quieter than one that voted: it is listed
+ * so an operator can see which node and since when, and it must never read as
+ * a vote. Muted ink and nothing else -- not a warn colour, because a node
+ * catching up has nothing wrong with it. */
+.os-cluster-readiness-row[data-aside] .os-cluster-readiness-node,
+.os-cluster-readiness-row[data-aside] .os-cluster-readiness-words {
+  color: var(--os-muted);
 }

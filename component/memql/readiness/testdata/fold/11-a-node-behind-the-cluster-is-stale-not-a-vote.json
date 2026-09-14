@@ -1,0 +1,53 @@
+{
+  "name": "memql#5259: rows that read the fleet before a machine was paired are stale, not unconfigured",
+  "now": "2026-09-09T15:43:02Z",
+  "reports": [
+    {"module": "ai", "nodeId": "agent-a", "nodeType": "agent", "state": "configured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": true, "slots": [{"name": "live", "present": true}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-09T15:42:54Z"},
+    {"module": "ai", "nodeId": "planner-a", "nodeType": "planner", "state": "configured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": true, "slots": [{"name": "live", "present": true}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-09T15:42:54Z"},
+    {"module": "ai", "nodeId": "bff-a", "nodeType": "bff", "state": "configured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": true, "slots": [{"name": "live", "present": false}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-09T15:42:41Z"},
+    {"module": "ai", "nodeId": "bff-b", "nodeType": "bff", "state": "unconfigured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-09T15:09:12Z"},
+    {"module": "ai", "nodeId": "bff-product-a", "nodeType": "bff", "state": "unconfigured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-09T09:03:40Z"},
+    {"module": "ai", "nodeId": "edge-a", "nodeType": "edge", "state": "unconfigured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-09T09:05:02Z"},
+    {"module": "ai", "nodeId": "identity-a", "nodeType": "identity", "state": "unconfigured", "core": true, "lanes": [
+      {"name": "local", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "app", "configurableFrom": "fleet", "scope": "cluster", "complete": false, "slots": [{"name": "live", "present": false}]},
+      {"name": "federation", "configurableFrom": "deployment", "complete": false, "slots": [{"name": "live", "present": false}]}
+    ], "reportedAt": "2026-09-09T09:14:20Z"}
+  ],
+  "nodes": [
+    {"nodeId": "agent-a", "health": "healthy", "lastSeen": "2026-09-09T15:42:50Z"},
+    {"nodeId": "planner-a", "health": "healthy", "lastSeen": "2026-09-09T15:42:50Z"},
+    {"nodeId": "bff-a", "health": "healthy", "lastSeen": "2026-09-09T15:42:50Z"},
+    {"nodeId": "bff-b", "health": "healthy", "lastSeen": "2026-09-09T15:42:50Z"},
+    {"nodeId": "bff-product-a", "health": "healthy", "lastSeen": "2026-09-09T15:42:50Z"},
+    {"nodeId": "edge-a", "health": "healthy", "lastSeen": "2026-09-09T15:42:50Z"},
+    {"nodeId": "identity-a", "health": "healthy", "lastSeen": "2026-09-09T15:42:50Z"}
+  ],
+  "expect": [
+    {"module": "ai", "state": "configured", "disagreement": [], "unknown": [], "stale": ["bff-b", "bff-product-a", "edge-a", "identity-a"]}
+  ]
+}

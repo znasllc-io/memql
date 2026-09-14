@@ -57,8 +57,11 @@ func (p *Parser) tryParseV1LambdaOperand() (ExpressionNode, bool, error) {
 		if err != nil {
 			return nil, true, err
 		}
+		if err := p.refuseCommaAfterLambda(); err != nil {
+			return nil, true, err
+		}
 		if !p.check(TokenParenClose) {
-			return nil, true, p.v1Expected("`)` to close the lambda opened at line " + strconv.Itoa(open.Line) + ", column " + strconv.Itoa(open.Column))
+			return nil, true, p.v1Expected("`)` to close the lambda opened at " + v1Where(open))
 		}
 		p.advance()
 		return e.n, true, nil
@@ -123,10 +126,28 @@ func (p *Parser) parseRefineFunction() (ExpressionNode, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := p.refuseCommaAfterLambda(); err != nil {
+		return nil, err
+	}
 	if err := p.expect(TokenParenClose); err != nil {
 		return nil, err
 	}
 	return &RefineExpr{Target: target, Lambda: lam}, nil
+}
+
+// refuseCommaAfterLambda refuses a `,` directly after the lambda of a
+// predicate clause -- a filter, a refine clause, a spec or trait, @filter.
+// The lambda is the whole clause, so a comma there can only be the retired
+// `,` connective (`filter row => a, b`), and it gets that refusal, naming
+// `||` and the migrator, rather than the "expected )" the enclosing construct
+// would otherwise report. @trigger(filter=...) is the one place a comma
+// legitimately follows the lambda -- it separates the annotation's
+// arguments -- and does not call this.
+func (p *Parser) refuseCommaAfterLambda() error {
+	if p.check(TokenComma) {
+		return v1Retired(p.current, ruleCommaConnective)
+	}
+	return nil
 }
 
 // v1FilterLambdaAhead reports whether the cursor opens a lambda: `x =>`, or a
@@ -161,8 +182,9 @@ func formatV1(n ExpressionNode) string { return ast.FormatExpr(n) }
 // checkV1QueryFilter refuses, with ExpressionsV1 on, a query whose filter is
 // not a lambda. A struct-form query reaches the parser as
 // `[directives](concept==<id> [&& (<filter>)])`, so the filter is the right
-// operand of the join under the directive wrappers.
-func (p *Parser) checkV1QueryFilter(body ExpressionNode, at Token) error {
+// operand of the join under the directive wrappers. from is the index of the
+// body's first token.
+func (p *Parser) checkV1QueryFilter(body ExpressionNode, from int) error {
 	if !p.opts.ExpressionsV1 {
 		return nil
 	}
@@ -177,7 +199,50 @@ func (p *Parser) checkV1QueryFilter(body ExpressionNode, at Token) error {
 	if _, isLambda := and.Right.(*ast.LambdaExpr); isLambda {
 		return nil
 	}
-	return v1Retired(at, ruleFilterWithoutLambda)
+	first, last := p.v1FilterExtent(from)
+	err := v1Retired(first, ruleFilterWithoutLambda)
+	// The refusal covers the whole predicate the rewrite converts, so an
+	// editor's squiggle -- and the quick fix keyed on it -- is that clause on
+	// its own line(s), not one token of it.
+	err.(*RetiredFormError).Parse.setEnd(last)
+	return err
+}
+
+// v1FilterExtent is the first and last token of the filter a struct-form
+// query joins as `concept==<id> && (<filter>)`, searched from the body's
+// first token: the refusal of a filter belongs on the author's text, and every
+// token around the filter is the rewriter's. The body's first token is the
+// fallback for both.
+func (p *Parser) v1FilterExtent(from int) (first, last Token) {
+	for i := from; i+5 < len(p.tokens); i++ {
+		t := p.tokens[i]
+		if t.Type == TokenBraceClose {
+			break
+		}
+		if t.Type == TokenIdentifier && t.Literal == "concept" && p.tokens[i+1].Literal == "==" &&
+			p.tokens[i+3].Type == TokenAmpAmp && p.tokens[i+4].Type == TokenParenOpen {
+			depth := 0
+			for j := i + 5; j < len(p.tokens); j++ {
+				switch p.tokens[j].Type {
+				case TokenParenOpen, TokenBracketOpen, TokenBraceOpen:
+					depth++
+				case TokenParenClose, TokenBracketClose, TokenBraceClose:
+					if depth == 0 {
+						return p.tokens[i+5], p.tokens[max(j-1, i+5)]
+					}
+					depth--
+				case TokenEOF:
+					return p.tokens[i+5], p.tokens[i+5]
+				}
+			}
+			return p.tokens[i+5], p.tokens[i+5]
+		}
+	}
+	fallback := p.current
+	if from < len(p.tokens) {
+		fallback = p.tokens[from]
+	}
+	return fallback, fallback
 }
 
 // unwrapQueryDirectives strips the directive wrappers a struct-form query's

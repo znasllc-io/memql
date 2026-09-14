@@ -1,0 +1,5 @@
+/// Tickets sorted by a key written as a member path.
+query ticket soMemberPath {
+  sort row.createdAt
+  paginate 20
+}

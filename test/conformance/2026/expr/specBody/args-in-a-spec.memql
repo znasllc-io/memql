@@ -1,0 +1,2 @@
+/// Tickets in the caller's status: a spec has no args to read.
+spec ticket sbReadsArgs = row => row.status == args.status

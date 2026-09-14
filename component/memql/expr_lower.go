@@ -1578,8 +1578,13 @@ func (l *lowerer) walkPlanConstant(n ast.ExpressionNode, local map[string]bool, 
 			}
 		case lowerPlanConstantRoots[e.Name]:
 		default:
-			*errp = l.refuse(e, fmt.Sprintf("`%s` is not defined here", e.Name),
-				"A predicate reads its parameter ("+l.rowParam()+"), args, actor, now and config")
+			fix := "A predicate reads its parameter (" + l.rowParam() + "), args, actor, now and config"
+			if _, isField := l.fields[e.Name]; isField {
+				// The pre-v1 filter's bare payload field (D1): the fix is
+				// mechanical, so the refusal carries it (D24).
+				fix = "A payload field is read through the parameter: write `" + l.rowParam() + "." + e.Name + "`"
+			}
+			*errp = l.refuse(e, fmt.Sprintf("`%s` is not defined here", e.Name), fix)
 		}
 	case *ast.MemberExpr:
 		if root, path, ok := simpleRootPath(e); ok && !local[root] {

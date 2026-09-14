@@ -1,0 +1,1 @@
+args.items.where(i => i.qty > 0).count()

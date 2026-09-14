@@ -94,6 +94,9 @@ func (p *Parser) parseSpecDecl(attrs []*ast.Attribute, isTrait bool) (*ast.SpecD
 		if err != nil {
 			return nil, err
 		}
+		if err := p.refuseCommaAfterLambda(); err != nil {
+			return nil, err
+		}
 		decl.Lambda = lam
 		return decl, nil
 	}

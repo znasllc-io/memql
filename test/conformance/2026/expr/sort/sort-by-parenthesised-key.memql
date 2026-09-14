@@ -1,0 +1,5 @@
+/// Tickets sorted by a parenthesised key.
+query ticket soParen {
+  sort ("row.createdAt")
+  paginate 20
+}

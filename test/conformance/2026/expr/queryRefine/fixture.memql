@@ -1,0 +1,18 @@
+/// A support ticket: the row every refine case here reads. `value` is typed
+/// any, so it holds whatever JSON a row stored, and the cases pin what each
+/// operator does with every kind of value -- absent included.
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+  priority     int
+  urgent       bool
+  tags         []string
+  value        any
+  lineage {
+    planId  string
+  }
+}
+
+/// Tickets that are open.
+trait qrIsOpen = row => row.status == "open"

@@ -3,9 +3,12 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -64,7 +67,7 @@ func readinessRewriteNeeded(prev *readiness.NodeReport, next readiness.NodeRepor
 	if prev == nil {
 		return true
 	}
-	if prev.State != next.State || prev.Core != next.Core || !readinessLanesEqual(prev.Lanes, next.Lanes) {
+	if prev.State != next.State || prev.Reason != next.Reason || prev.Core != next.Core || !readinessLanesEqual(prev.Lanes, next.Lanes) {
 		return true
 	}
 	return now.Sub(prev.ReportedAt) >= readinessRewriteFloor
@@ -85,20 +88,46 @@ func readinessLanesEqual(a, b []readiness.LaneReport) bool {
 	return string(ra) == string(rb)
 }
 
+// readinessStanding is what this node's rows said before a pass: its latest
+// row per module, and whether the read that answered that question landed.
+//
+// READABLE IS A SEPARATE FACT FROM EMPTY, and the difference is load-bearing
+// for exactly one decision. "No row for this module" lets an unknown verdict
+// be written, so a fresh pod can say "could not evaluate" instead of nothing;
+// "the read failed" must NOT, because a standing row we could not see may be
+// a correct known verdict that unknown would then replace.
+type readinessStanding struct {
+	rows     map[string]*readiness.NodeReport
+	readable bool
+}
+
+// knownRow reports whether the standing row for module is a KNOWN verdict --
+// any state but Unknown -- or whether that cannot be ruled out because the
+// read failed.
+func (s readinessStanding) knownRow(module string) bool {
+	if !s.readable {
+		return true
+	}
+	r := s.rows[module]
+	return r != nil && r.State != readiness.Unknown
+}
+
 // standingReadiness reads this node's current verdict per module. A failed
-// read answers an empty map, which makes every module rewrite -- the
-// pre-existing behaviour -- rather than skipping on a guess.
-func (e *MemQLEngine) standingReadiness(ctx context.Context, nodeId string) map[string]*readiness.NodeReport {
-	out := map[string]*readiness.NodeReport{}
+// read answers an empty, UNREADABLE standing, which makes every known module
+// rewrite -- the pre-existing behaviour -- rather than skipping on a guess, and
+// holds every unknown one back.
+func (e *MemQLEngine) standingReadiness(ctx context.Context, nodeId string) readinessStanding {
+	out := readinessStanding{rows: map[string]*readiness.NodeReport{}}
 	reports, err := e.readModuleReadinessRows(ctx)
 	if err != nil {
-		e.safeLogger().Warn("module readiness: standing rows unreadable; rewriting every module", "error", err)
+		e.safeLogger().Warn("module readiness: standing rows unreadable; rewriting every known module", "error", err)
 		return out
 	}
+	out.readable = true
 	for i := range reports {
 		if reports[i].NodeId == nodeId {
 			r := reports[i]
-			out[r.Module] = &r
+			out.rows[r.Module] = &r
 		}
 	}
 	return out
@@ -112,6 +141,9 @@ func readinessRowID(module, nodeId string) string {
 // Every string goes through QuoteString -- the lexer's own escaping, which
 // diverges from Go's %q on four control characters (memql#4256) -- and the
 // lanes ride as a JSON literal, which the parser accepts as a list of objects.
+//
+// `reason` is rendered only when the report carries one (an Unknown verdict),
+// so a known verdict's call is byte-for-byte what it was before the field.
 func renderRecordModuleReadiness(r readiness.NodeReport, rowId string) (string, error) {
 	lanes := r.Lanes
 	if lanes == nil {
@@ -121,13 +153,18 @@ func renderRecordModuleReadiness(r readiness.NodeReport, rowId string) (string, 
 	if err != nil {
 		return "", err
 	}
+	reason := ""
+	if r.Reason != "" {
+		reason = ", reason: " + langparser.QuoteString(r.Reason)
+	}
 	return fmt.Sprintf(
-		"mutation recordModuleReadiness(rowId: %s, module: %s, nodeId: %s, nodeType: %s, state: %s, core: %t, lanes: %s, reportedAt: %s)",
+		"mutation recordModuleReadiness(rowId: %s, module: %s, nodeId: %s, nodeType: %s, state: %s%s, core: %t, lanes: %s, reportedAt: %s)",
 		langparser.QuoteString(rowId),
 		langparser.QuoteString(r.Module),
 		langparser.QuoteString(r.NodeId),
 		langparser.QuoteString(r.NodeType),
 		langparser.QuoteString(string(r.State)),
+		reason,
 		r.Core,
 		string(raw),
 		langparser.QuoteString(r.ReportedAt.UTC().Format(time.RFC3339)),
@@ -235,38 +272,171 @@ func readinessWriteContext(ctx context.Context) context.Context {
 	return auth.ContextWithInternalOrigin(ctx)
 }
 
+// readinessMemory is this process's record of the KNOWN verdicts it has
+// evaluated, per module.
+//
+// It exists for one rule (persistReadiness): an Unknown verdict is written
+// only when nothing known stands for that module. The standing row answers
+// that question on every pass -- and a standing read that FAILED already
+// counts as "something known may stand" (readinessStanding.knownRow). This is
+// the process's own half: a verdict it knows it evaluated still counts when a
+// read that did land comes back without the row. The zero value is ready to
+// use.
+type readinessMemory struct {
+	mu    sync.Mutex
+	known map[string]readiness.State
+}
+
+func (m *readinessMemory) hasKnown(module string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.known[module]
+	return ok
+}
+
+func (m *readinessMemory) remember(module string, s readiness.State) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.known == nil {
+		m.known = map[string]readiness.State{}
+	}
+	m.known[module] = s
+}
+
+// readinessPersistInput is everything the persist rule looks at. A STRUCT,
+// deliberately, so a later rule is one more field and one more clause rather
+// than a second code path or a new parameter at every call site.
+type readinessPersistInput struct {
+	State readiness.State
+	// KnownBefore is true when a known verdict stands for the module -- this
+	// process evaluated one, the standing row is one -- or when the standing
+	// read failed and that cannot be ruled out.
+	KnownBefore bool
+}
+
+// persistReadiness decides whether a report may be written at all (D1 of the
+// 2026-09-14 readiness-convergence record). Every known state may. Unknown may
+// only when nothing known stands, so "could not ask" can never replace an
+// answer: a fresh pod says why it has no verdict, and a pod that had one keeps
+// it. Whether a permitted write is also NEEDED is readinessRewriteNeeded's
+// question, asked after this one.
+func persistReadiness(in readinessPersistInput) bool {
+	if in.State != readiness.Unknown {
+		return true
+	}
+	return !in.KnownBefore
+}
+
+// ReadinessUnknownError says a pass could not evaluate one or more modules.
+// The rows for every KNOWN module in the same pass were still written; this is
+// returned so a caller retries the pass (the recompute subscriber does, with
+// backoff) rather than believing the cluster is described. Reasons are the
+// closed vocabulary from component/memql/readiness, never resolver error text,
+// which stayed in the evaluator's own log line.
+type ReadinessUnknownError struct {
+	Modules []string
+	Reasons map[string]string
+}
+
+func (e *ReadinessUnknownError) Error() string {
+	return fmt.Sprintf("module readiness: %d module(s) could not be evaluated: %s",
+		len(e.Modules), strings.Join(e.pairs(), ", "))
+}
+
+// pairs renders module=reason for each unknown module, in module order.
+func (e *ReadinessUnknownError) pairs() []string {
+	out := make([]string, 0, len(e.Modules))
+	for _, m := range e.Modules {
+		out = append(out, m+"="+e.Reasons[m])
+	}
+	return out
+}
+
+// IsReadinessUnknown reports whether err is a pass that could not evaluate
+// some module, as opposed to a pass whose write failed.
+func IsReadinessUnknown(err error) bool {
+	var u *ReadinessUnknownError
+	return errors.As(err, &u)
+}
+
+// readinessExecutor runs one rendered @serverOnly call. Injected so the write
+// decision is testable with no engine and no database.
+type readinessExecutor func(ctx context.Context, call string) error
+
+// readinessExecutor is the engine's own: the rendered call under the write
+// context. Built once per pass so every module's write shares one actor.
+func (e *MemQLEngine) readinessExecutor(ctx context.Context) readinessExecutor {
+	wctx := readinessWriteContext(ctx)
+	return func(_ context.Context, call string) error {
+		_, err := e.Execute(wctx, call)
+		return err
+	}
+}
+
+// writeModuleReadiness is the whole write decision with its inputs handed in.
+//
+// A FAILED WRITE stops at the first module and leaves the PREVIOUS version of
+// every remaining row standing, which is the right failure: a stale verdict a
+// person can act on beats a half-rewritten set nobody can interpret.
+//
+// AN UNKNOWN EVALUATION does not stop the pass: every known module is still
+// written (when it changed, or its row is past the restatement floor), an
+// unknown one only where nothing known stands (persistReadiness), and the pass
+// returns *ReadinessUnknownError so the caller retries.
+func writeModuleReadiness(ctx context.Context, r readinessResolvers, mods []envregistry.Module, nodeId, nodeType string, mem *readinessMemory, standing readinessStanding, exec readinessExecutor, now time.Time) (int, error) {
+	// THE CALLER'S CONTEXT, AND THAT IS DELIBERATE. `evaluateModule` applies
+	// the evaluation actor itself, at the one place a context reaches a
+	// resolver -- see the comment there for why this is not a line here.
+	reports := evaluateModules(ctx, r, mods, nodeId, nodeType, now)
+	written := 0
+	unknown := &ReadinessUnknownError{Reasons: map[string]string{}}
+	for _, rep := range reports {
+		if rep.State == readiness.Unknown {
+			unknown.Modules = append(unknown.Modules, rep.Module)
+			unknown.Reasons[rep.Module] = rep.Reason
+		}
+		knownBefore := mem.hasKnown(rep.Module) || standing.knownRow(rep.Module)
+		if !persistReadiness(readinessPersistInput{State: rep.State, KnownBefore: knownBefore}) {
+			continue
+		}
+		if !readinessRewriteNeeded(standing.rows[rep.Module], rep, now) {
+			if rep.State != readiness.Unknown {
+				mem.remember(rep.Module, rep.State)
+			}
+			continue
+		}
+		call, err := renderRecordModuleReadiness(rep, readinessRowID(rep.Module, nodeId))
+		if err != nil {
+			return written, fmt.Errorf("module readiness: render %s: %w", rep.Module, err)
+		}
+		if err := exec(ctx, call); err != nil {
+			return written, fmt.Errorf("module readiness: write %s: %w", rep.Module, err)
+		}
+		written++
+		if rep.State != readiness.Unknown {
+			mem.remember(rep.Module, rep.State)
+		}
+	}
+	if len(unknown.Modules) > 0 {
+		sort.Strings(unknown.Modules)
+		return written, unknown
+	}
+	return written, nil
+}
+
 // WriteModuleReadiness evaluates every module and writes this node's rows as
 // new versions of their deterministic ids. Returns how many were written.
 //
-// A failure stops at the first module and leaves the PREVIOUS version of
-// every remaining row standing, which is the right failure: a stale verdict a
-// person can act on beats a half-rewritten set nobody can interpret.
+// When any module could not be evaluated the error is *ReadinessUnknownError
+// (IsReadinessUnknown); the rows for the other modules were still written.
+// Callers that need the cluster described retry -- the recompute subscriber
+// does.
 func (e *MemQLEngine) WriteModuleReadiness(ctx context.Context) (int, error) {
 	manifest, err := envregistry.LoadManifest("")
 	if err != nil {
 		return 0, fmt.Errorf("module readiness: manifest: %w", err)
 	}
 	nodeId, nodeType := e.readinessIdentity()
-	// THE CALLER'S CONTEXT, AND THAT IS DELIBERATE. `evaluateModule` applies
-	// the evaluation actor itself, at the one place a context reaches a
-	// resolver -- see the comment there for why this is not a line here.
-	reports := evaluateModules(ctx, e.readinessResolvers(), manifest.Modules, nodeId, nodeType, time.Now().UTC())
-	wctx := readinessWriteContext(ctx)
 	standing := e.standingReadiness(ctx, nodeId)
-	now := time.Now().UTC()
-	written := 0
-	for _, r := range reports {
-		if !readinessRewriteNeeded(standing[r.Module], r, now) {
-			continue
-		}
-		call, err := renderRecordModuleReadiness(r, readinessRowID(r.Module, nodeId))
-		if err != nil {
-			return written, fmt.Errorf("module readiness: render %s: %w", r.Module, err)
-		}
-		if _, err := e.Execute(wctx, call); err != nil {
-			return written, fmt.Errorf("module readiness: write %s: %w", r.Module, err)
-		}
-		written++
-	}
-	return written, nil
+	return writeModuleReadiness(ctx, e.readinessResolvers(), manifest.Modules, nodeId, nodeType, &e.readinessMemory, standing, e.readinessExecutor(ctx), time.Now().UTC())
 }

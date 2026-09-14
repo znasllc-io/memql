@@ -1,0 +1,5 @@
+/// Open urgent tickets.
+query ticket qfSemicolon {
+  filter row => row.status == "open"; row.urgent == true
+  paginate 20
+}

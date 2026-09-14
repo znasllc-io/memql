@@ -1,0 +1,5 @@
+/// List the tickets, with a computed default.
+@handler(type="query", query="paginate(query tdTickets(), args.limit)")
+tool tdArithmetic {
+  limit  integer  @default(10 + 5) @description("How many tickets to return.")
+}

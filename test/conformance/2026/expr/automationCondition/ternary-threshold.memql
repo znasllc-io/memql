@@ -1,0 +1,1 @@
+args.escalated == true ? args.priority > 1 : args.priority > 3

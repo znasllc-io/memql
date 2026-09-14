@@ -83,6 +83,13 @@ func resolveAuthoredPosition(c SandboxConstruct, err error) authoredPosition {
 		return authoredPosition{}
 	}
 
+	// A parse of the positioned lowering (languageParser.PositionLowering)
+	// already names the failing token's extent in c.Source, column included:
+	// hop A is done, exactly, so only hop B remains.
+	if pe.AuthoredLine > 0 {
+		return c.bundleExtent(pe.AuthoredLine, pe.AuthoredColumn, pe.AuthoredEndLine, pe.AuthoredEndColumn)
+	}
+
 	lm := newAuthoredLineMap(c.Source, rewrittenForKind(c))
 
 	line, col, ok := c.bundlePos(lm, pe.Line, pe.Column)
@@ -96,6 +103,28 @@ func resolveAuthoredPosition(c SandboxConstruct, err error) authoredPosition {
 		if eLine, eCol, eok := c.bundlePos(lm, pe.Token.EndLine, pe.Token.EndCol); eok {
 			out.EndLine, out.EndColumn = eLine, eCol
 		}
+	}
+	return out
+}
+
+// bundleExtent runs hop B alone for a token whose extent is already known in
+// c.Source's coordinates: off the prepended import preamble, onto the bundle
+// line. A token inside that preamble has no authored-body position.
+func (c SandboxConstruct) bundleExtent(line, col, endLine, endCol int) authoredPosition {
+	toBundle := func(sliceLine int) (int, bool) {
+		bodyLine := sliceLine - c.BundlePreambleLines
+		if bodyLine < 1 {
+			return 0, false
+		}
+		return c.BundleLine + bodyLine - 1, true
+	}
+	start, ok := toBundle(line)
+	if !ok {
+		return authoredPosition{}
+	}
+	out := authoredPosition{Line: start, Column: col}
+	if end, ok := toBundle(endLine); ok {
+		out.EndLine, out.EndColumn = end, endCol
 	}
 	return out
 }

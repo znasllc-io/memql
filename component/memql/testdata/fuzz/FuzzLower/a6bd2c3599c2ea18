@@ -1,0 +1,2 @@
+go test fuzz v1
+string("row => row.region == var(\"region\") || row.region == systemVar(\"defaultRegion\") || row.code == secret(\"incidentPrefix\") || row.code == systemSecret(\"globalIncidentPrefix\")")

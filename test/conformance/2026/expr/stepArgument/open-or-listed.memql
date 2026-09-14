@@ -1,0 +1,1 @@
+saIsOpen(args.ticket) || args.status in ["held"]

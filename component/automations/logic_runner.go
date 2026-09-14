@@ -1302,6 +1302,21 @@ func (r *LogicRunner) compileBodyToAutomation(fnName string, body *languageParse
 	}
 
 	compiled := result.Automations[0].JSON
+	// A body that is one `return` compiles to no steps, which an automation
+	// may not have. Its return is then its one step, prepared by parseJSON
+	// like any other. Only an edition-2026 body arrives here that way (the
+	// loader stores a legacy one-`return` body as fn.Expr, never as
+	// LogicSteps -- component/memql/logic_body_v1.go).
+	if steps, _ := compiled["steps"].([]map[string]any); len(steps) == 0 {
+		if returnExpr, ok := compiled["_return"].(string); ok && strings.TrimSpace(returnExpr) != "" {
+			compiled["steps"] = []map[string]any{{
+				"id":    "_return",
+				"type":  string(StepTypeQuery),
+				"query": map[string]any{"query": returnExpr},
+			}}
+			delete(compiled, "_return")
+		}
+	}
 	jsonBytes, err := json.Marshal(compiled)
 	if err != nil {
 		return nil, fmt.Errorf("marshal compiled logic %q: %w", fnName, err)
