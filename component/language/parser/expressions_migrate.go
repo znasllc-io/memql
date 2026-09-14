@@ -484,7 +484,11 @@ func (r *xmRewrite) filters() {
 		if end < 0 {
 			continue // unbalanced: the load refuses the construct; nothing to migrate
 		}
-		r.queryFilters(f.src[h[4]:h[5]], open+1, end)
+		bound := ""
+		if h[2] >= 0 {
+			bound = f.src[h[2]:h[3]]
+		}
+		r.queryFilters(f.src[h[4]:h[5]], bound, open+1, end)
 	}
 }
 
@@ -492,7 +496,7 @@ func (r *xmRewrite) filters() {
 // parseStructQueryBody does -- args block cut out, physical lines folded into
 // clauses by joinStructQueryContinuations' three rules -- but keeping each
 // line's offset so the clause can be spliced back where it was.
-func (r *xmRewrite) queryFilters(query string, lo, hi int) {
+func (r *xmRewrite) queryFilters(query, bound string, lo, hi int) {
 	f := r.f
 	view := []byte(f.code[lo:hi])
 	// The args block holds declarations, not clauses: blank it, so an argument
@@ -513,7 +517,7 @@ func (r *xmRewrite) queryFilters(query string, lo, hi int) {
 	acc := ""
 	flush := func() {
 		if len(clause) > 0 && xmOpensFilter(strings.TrimSpace(clause[0].text)) {
-			r.filterClause(query, clause)
+			r.filterClause(query, bound, clause)
 		}
 		clause, acc = nil, ""
 	}
@@ -552,7 +556,7 @@ func xmOpensFilter(t string) bool {
 	return unicode.IsSpace(c) || c == '('
 }
 
-func (r *xmRewrite) filterClause(query string, lines []xmLine) {
+func (r *xmRewrite) filterClause(query, bound string, lines []xmLine) {
 	f := r.f
 	first, last := lines[0], lines[len(lines)-1]
 	kw := first.start + len(first.text) - len(strings.TrimLeftFunc(first.text, unicode.IsSpace))
@@ -577,7 +581,7 @@ func (r *xmRewrite) filterClause(query string, lines []xmLine) {
 		r.fail(kw, exprEnd, kw, "query %s: filter %q: a comment inside the clause would be lost; move it above the clause and rerun", query, clause)
 		return
 	}
-	expr, err := xmConvertChecked(clause, xmConverter{mode: xmFilter, param: "row", preds: r.preds})
+	expr, err := xmConvertChecked(clause, xmConverter{mode: xmFilter, param: "row", preds: r.preds, bound: bound})
 	if err != nil {
 		r.fail(kw, exprEnd, kw, "query %s: filter %q: %v", query, clause, err)
 		return
@@ -882,6 +886,10 @@ type xmConverter struct {
 	// block declares: a bare one resolves to the bound argument (G2,
 	// memql#2364) in both grammars, so it keeps its bare name.
 	argsFields map[string]bool
+	// bound is, in filter mode, the concept the query's signature binds
+	// (`query <bound> <name>`): the legacy `<bound>.<field>` spelling is a
+	// field of that row.
+	bound string
 }
 
 // xmConvertChecked converts src and verifies the result: the conversion is run
@@ -1170,6 +1178,18 @@ func (c xmConverter) field(parts []string) (ast.ExpressionNode, error) {
 			return nil, fmt.Errorf("payload.%s names the PAYLOAD field %s while row.%s names the row intrinsic; migrate it by hand", parts[1], parts[1], parts[1])
 		}
 		return xmPath("row", parts[1:]...), nil
+	}
+	if c.bound != "" && head == c.bound && len(parts) > 1 {
+		// `<boundConcept>.<field>`: before bare payload access (epic #2292) a
+		// filter wrote a payload field under the name of the concept its
+		// query binds, and the legacy rewriter read the prefix as the
+		// payload. It is that row's field. The tree carries none
+		// (TestFilterSyntaxCanonical), but Go fixtures and bundles do.
+		rest := parts[1:]
+		if canon, ok := xmIntrinsic(rest[0]); ok {
+			return xmPath("row", append([]string{canon}, rest[1:]...)...), nil
+		}
+		return xmPath("row", rest...), nil
 	}
 	if xmReservedHead(head) {
 		return nil, fmt.Errorf("%s is a reserved engine name, not a field of the row", head)

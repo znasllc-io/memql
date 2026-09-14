@@ -1169,3 +1169,30 @@ func TestPlanExpressions(t *testing.T) {
 		t.Errorf("refusal names %v", plan.Refused[1].Err)
 	}
 }
+
+// The legacy `<boundConcept>.<field>` spelling -- `todo.ownerUserId` in a query
+// bound to todo -- is that row's field, as the legacy rewriter read it: not a
+// nested `row.todo.ownerUserId`. Another prefix stays a path.
+func TestRewriteExpressions_BoundConceptPrefix(t *testing.T) {
+	for _, tc := range []struct{ in, want string }{
+		{"query todo sandboxOwned {\n  filter todo.ownerUserId == actor.userId\n}\n",
+			"query todo sandboxOwned {\n  filter row => row.ownerUserId == actor.userId\n}\n"},
+		// An intrinsic takes its canonical row spelling.
+		{"query todo one {\n  filter  todo.id == args.id && todo.createdat > args.since\n}\n",
+			"query todo one {\n  filter  row => row.id == args.id && row.createdAt > args.since\n}\n"},
+		// Deeper paths keep their tail; a guard's comparison is a filter's too.
+		{"query todo meta {\n  filter  when(args.kind) { todo.meta.kind == args.kind }\n}\n",
+			"query todo meta {\n  filter  row => args.kind == nil || row.meta.kind == args.kind\n}\n"},
+		// A prefix that is not the bound concept is a nested field, as it was.
+		{"query todo other {\n  filter  task.status == \"open\"\n}\n",
+			"query todo other {\n  filter  row => row.task.status == \"open\"\n}\n"},
+	} {
+		got := xmtRewrite(t, tc.in, nil)
+		if got != tc.want {
+			t.Errorf("\n got:\n%s\nwant:\n%s", got, tc.want)
+		}
+		if again := xmtRewrite(t, got, nil); again != got {
+			t.Errorf("a second run changed the output:\n%s", again)
+		}
+	}
+}
