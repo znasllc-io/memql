@@ -1106,3 +1106,66 @@ func TestRewriteExpressions_TriggerFilterBareNames(t *testing.T) {
 		t.Errorf("terse automation:\n%s", got)
 	}
 }
+
+// PlanExpressions is RewriteExpressions clause by clause: the edits applied
+// together are the rewrite, and a refused clause comes back with its span and
+// no edit, so an editor can convert the rest and leave it where it is.
+func TestPlanExpressions(t *testing.T) {
+	clean := xmtQuery("  filter  status==args.status") +
+		"\ntrait isOpen {\n  return status == \"open\"\n}\n" +
+		"\n@trigger(event=\"node.updated\", concept=\"v1:x:y\", partition=\"*\")\n@filter(payload.kind == \"file\")\n" +
+		"automation a {\n  step s {\n    logic l ( event )\n  }\n}\n"
+	plan, err := PlanExpressions([]byte(clean), xmtPreds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Refused) != 0 || len(plan.Edits) != 3 {
+		t.Fatalf("want 3 edits and no refusal, got %+v", plan)
+	}
+	var b strings.Builder
+	prev := 0
+	for _, e := range plan.Edits {
+		b.WriteString(clean[prev:e.Start])
+		b.WriteString(e.Text)
+		prev = e.End
+	}
+	b.WriteString(clean[prev:])
+	if want := xmtRewrite(t, clean, xmtPreds); b.String() != want {
+		t.Errorf("the plan's edits applied:\n%s\nRewriteExpressions:\n%s", b.String(), want)
+	}
+
+	// Two refused clauses -- a trait body that is not `return <expression>`
+	// and a trigger filter with an ambiguous bare word -- between two that
+	// convert. RewriteExpressions refuses the file; the plan keeps the two
+	// conversions and spans each refusal over its whole clause.
+	refusedTrait := "trait isOdd {\n  status == \"odd\"\n}\n"
+	refusedFilter := "@filter(payload.status == active)"
+	mixed := xmtQuery("  filter  status==args.status") + "\n" + refusedTrait +
+		"\n@trigger(event=\"node.updated\", concept=\"v1:x:y\", partition=\"*\")\n" + refusedFilter + "\n" +
+		"automation a {\n  step s {\n    logic l ( event )\n  }\n}\n" +
+		"\ntrait isOpen {\n  return status == \"open\"\n}\n"
+	if _, err := RewriteExpressions([]byte(mixed), xmtPreds); err == nil {
+		t.Fatal("RewriteExpressions converted a source holding refused clauses")
+	}
+	plan, err = PlanExpressions([]byte(mixed), xmtPreds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Edits) != 2 || len(plan.Refused) != 2 {
+		t.Fatalf("want 2 edits and 2 refusals, got %+v", plan)
+	}
+	for i, want := range []string{strings.TrimSuffix(refusedTrait, "\n"), refusedFilter} {
+		got := plan.Refused[i]
+		if span := mixed[got.Start:got.End]; span != want {
+			t.Errorf("refusal %d spans %q, want %q (%v)", i, span, want, got.Err)
+		}
+		for _, e := range plan.Edits {
+			if e.Start < got.End && got.Start < e.End {
+				t.Errorf("edit %+v overlaps refused clause %q", e, want)
+			}
+		}
+	}
+	if !strings.Contains(plan.Refused[1].Err.Error(), "the bare word active") {
+		t.Errorf("refusal names %v", plan.Refused[1].Err)
+	}
+}
