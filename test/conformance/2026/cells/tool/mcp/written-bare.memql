@@ -1,0 +1,6 @@
+/// Open a support ticket, on the curated MCP connector surface.
+@handler(type="function", name="openTicketMcp")
+@mcp
+tool openSupportTicketMcp {
+  title  string!  @description("The ticket's one-line title.")
+}

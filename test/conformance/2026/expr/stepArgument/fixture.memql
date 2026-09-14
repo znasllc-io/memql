@@ -31,3 +31,14 @@ query ticket saTickets {
 
 /// Tickets that are open.
 trait saIsOpen = row => row.status == "open"
+
+/// Raise a ticket with a title.
+mutate ticket raiseTicketFromStep {
+  args {
+    title  string!
+  }
+  insert {
+    title: args.title
+    status: "open"
+  }
+}

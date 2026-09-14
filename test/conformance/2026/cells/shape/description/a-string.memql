@@ -1,0 +1,7 @@
+@row
+@description("A ticket as a card: its title and status.")
+shape ticket ticketCardDescription {
+  row.id
+  title
+  status
+}

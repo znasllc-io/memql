@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-an-unquoted-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@policy on a rule takes one string"
+    },
+    {
+      "file": "no-policy.memql",
+      "verdict": "refuse_parse",
+      "message": "@policy is required -- a rule maps a call to a policy"
+    }
+  ]
+}

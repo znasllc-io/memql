@@ -1,0 +1,3 @@
+/// Any signed-in app -- with no first entry.
+@fallback("app:*")
+policy appsOnly { }

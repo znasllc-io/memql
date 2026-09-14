@@ -1,0 +1,6 @@
+/// Open a support ticket for the caller. @enabled restates the default.
+@handler(type="function", name="openTicketEnabled")
+@enabled
+tool openSupportTicketEnabled {
+  title  string!  @description("The ticket's one-line title.")
+}

@@ -1,0 +1,9 @@
+use capabilities.fs.{ readFile }
+
+@description("Read a ticket's attachment from the runner's workspace.")
+action readTicketAttachmentDescription {
+  args {
+    path  string!
+  }
+  capability readFile(path: args.path)
+}

@@ -206,6 +206,41 @@
       "verdict": "refuse_load",
       "message": "a spec or trait takes no arguments",
       "note": "A spec body reads its parameter and the clock; args belong to the query that applies it."
+    },
+    {
+      "file": "fields-through-the-parameter.memql",
+      "verdict": "load_ok",
+      "note": "A spec body reads the bound concept's fields through its parameter. (Before edition 2026 it read them bare.)"
+    },
+    {
+      "file": "urgent-and-open.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open",
+        "priority": 5
+      },
+      "expect": true
+    },
+    {
+      "file": "urgent-and-open.memql",
+      "verdict": "evaluate",
+      "concept": "ticket",
+      "row": {
+        "status": "open",
+        "priority": 2
+      },
+      "expect": false
+    },
+    {
+      "file": "reads-an-intrinsic-through-the-parameter.memql",
+      "verdict": "load_ok",
+      "note": "The parameter is the row, intrinsics included. Before edition 2026 a spec body read its fields bare and refused row.* (\"a spec body may not read row.* directly\")."
+    },
+    {
+      "file": "reads-the-actor.memql",
+      "verdict": "load_ok",
+      "note": "An edition-2026 spec body reads the caller's envelope as a plan constant, evaluated once per call (Lower). Before edition 2026 it was refused (\"a spec body may not read actor.* directly\")."
     }
   ]
 }

@@ -166,6 +166,15 @@
         }
       },
       "expect": true
+    },
+    {
+      "file": "coalesce.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "an-undeclared-arg.memql",
+      "verdict": "refuse_load",
+      "message": "body reads args.name, which is not declared in the args block (declared: ticketId)"
     }
   ]
 }

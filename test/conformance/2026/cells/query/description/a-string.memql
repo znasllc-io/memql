@@ -1,0 +1,6 @@
+@description("The open tickets, newest first.")
+query ticket openTicketsDescription {
+  filter row => row.status == "open"
+  sort "row.createdAt", "desc"
+  paginate 20
+}

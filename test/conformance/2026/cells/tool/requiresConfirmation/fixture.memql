@@ -1,0 +1,17 @@
+/// A support ticket: the row this cell's cases read and write.
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}
+
+/// Close a ticket.
+mutate ticket closeTicketRequiresConfirmation {
+  args {
+    ticketId  string!
+  }
+  update {
+    id: args.ticketId
+    status: "closed"
+  }
+}

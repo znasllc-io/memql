@@ -1,0 +1,6 @@
+/// A support ticket.
+concept ticket {
+  title     string
+  status    string
+  closedAt  datetime  @serverSet(true)
+}

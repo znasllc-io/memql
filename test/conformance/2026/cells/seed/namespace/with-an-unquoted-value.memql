@@ -1,0 +1,5 @@
+/// The getting-started article every cluster starts with.
+@namespace(support)
+seed helpArticle gettingStarted {
+  title: "Getting started with the support queue"
+}

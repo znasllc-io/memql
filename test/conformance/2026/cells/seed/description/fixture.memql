@@ -1,0 +1,16 @@
+/// The row this cell's seed writes.
+concept ticketCategory {
+  name  string
+}
+
+/// The mutation the seed materializer writes this concept's rows through: create<Concept>.
+mutate ticketCategory createTicketCategory {
+  args {
+    ticketCategoryId  string!
+    name              string!
+  }
+  insert {
+    id: args.ticketCategoryId
+    name: args.name
+  }
+}

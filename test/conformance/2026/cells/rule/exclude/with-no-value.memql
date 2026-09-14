@@ -1,0 +1,6 @@
+/// Background calls resolve through the local-first chain, never on the qwen3.5:7b fleet model.
+@when(tag="background")
+@policy("localFirst")
+@precedence(14)
+@exclude
+rule backgroundLocalExclude { }

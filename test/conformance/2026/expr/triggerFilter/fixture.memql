@@ -32,3 +32,14 @@ mutate goalNote tfNoteGoal {
 
 /// Archived tickets.
 trait tfIsArchived = row => row.status == "archived"
+
+/// Raise a ticket with a title.
+mutate ticket raiseFilteredTicket {
+  args {
+    title  string!
+  }
+  insert {
+    title: args.title
+    status: "open"
+  }
+}

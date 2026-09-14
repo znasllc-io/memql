@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "file": "ordered-by-precedence-instead.memql",
+      "verdict": "load_ok",
+      "note": "@locked is accepted only in the embedded tree, and every corpus case loads as a mounted domain, so no case here can load WITH it: the embedded tree's own locked rules (dsl/rules/rules.memql) are its positive, loaded by every boot. This is the nearest honest one -- the form the loader's refusal tells a bundle to write instead, an unlocked rule placed by @precedence."
+    },
+    {
+      "file": "locked-in-a-mounted-domain.memql",
+      "verdict": "refuse_load",
+      "message": "@locked is accepted only in the embedded tree",
+      "note": "A mounted rule that could lock itself would evaluate before every shipped rule; the rule loader refuses it by the tree it came from, which the parser cannot see."
+    },
+    {
+      "file": "with-true.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@locked on a rule takes no arguments"
+    }
+  ]
+}

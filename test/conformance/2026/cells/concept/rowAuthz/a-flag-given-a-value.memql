@@ -1,0 +1,7 @@
+/// A support ticket raised by a customer, the cluster-owner flag given a value.
+@rowAuthz(owner="ownerUserId", clusterOwner="true")
+concept ticket {
+  ownerUserId  string
+  title        string
+  status       string
+}

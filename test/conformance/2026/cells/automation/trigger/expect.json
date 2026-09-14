@@ -1,0 +1,25 @@
+{
+  "cases": [
+    {
+      "file": "keyword-arguments.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@trigger on an automation takes keyword arguments"
+    },
+    {
+      "file": "an-unregistered-concept.memql",
+      "verdict": "refuse_load",
+      "message": "@trigger concept=\"v1:cluster:nodes\" is not a registered concept"
+    },
+    {
+      "file": "a-misspelled-key.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_key",
+      "message": "@trigger on an automation has no key evnt -- did you mean event?"
+    }
+  ]
+}

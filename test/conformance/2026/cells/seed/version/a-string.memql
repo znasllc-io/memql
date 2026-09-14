@@ -1,0 +1,6 @@
+/// The urgent escalation rule every cluster starts with, at version 1.0.0.
+@version("1.0.0")
+seed escalationRule urgentEscalation {
+  name: "Urgent"
+  afterHours: 4
+}

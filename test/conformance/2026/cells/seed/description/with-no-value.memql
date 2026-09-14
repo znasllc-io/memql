@@ -1,0 +1,4 @@
+@description
+seed ticketCategory billingCategory {
+  name: "Billing"
+}

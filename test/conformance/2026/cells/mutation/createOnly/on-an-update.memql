@@ -1,0 +1,11 @@
+/// Reopen a ticket, with a create-only field on a write that never creates.
+@createOnly("status")
+mutate ticket reopenTicketCreateOnly {
+  args {
+    ticketId  string!
+  }
+  update {
+    id: args.ticketId
+    status: "open"
+  }
+}

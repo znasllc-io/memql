@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-no-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@pattern on an args field takes one string"
+    },
+    {
+      "file": "an-invalid-pattern.memql",
+      "verdict": "refuse_load",
+      "message": "args field \"region\": invalid @pattern \"^[A-Z\": error parsing regexp: missing closing ]",
+      "note": "An args field's pattern is compiled once at load. (A concept field's @pattern is not compiled at load today: the same mistake on a concept field loads.)"
+    }
+  ]
+}

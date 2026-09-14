@@ -1,0 +1,7 @@
+/// The open tickets, newest first, for a role the ladder does not have.
+@requiresRank("superuser")
+query ticket openTicketsUnknownRank {
+  filter row => row.status == "open"
+  sort "row.createdAt", "desc"
+  paginate 20
+}

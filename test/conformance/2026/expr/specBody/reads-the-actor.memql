@@ -1,0 +1,2 @@
+/// Matches the caller's own tickets, reading the actor directly.
+spec ticket isCallersTicket = row => actor.userId == row.ownerUserId

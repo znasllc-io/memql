@@ -1,0 +1,5 @@
+/// A support ticket: the row a queue collects.
+concept ticket {
+  title   string
+  status  string
+}

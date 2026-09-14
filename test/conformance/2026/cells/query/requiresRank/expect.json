@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "file": "a-string.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "with-an-unquoted-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@requiresRank on a query takes one string"
+    },
+    {
+      "file": "an-unknown-role.memql",
+      "verdict": "refuse_load",
+      "message": "declares @requiresRank(\"superuser\"), which names no role in dsl/rbac",
+      "note": "A floor that does not resolve would rank 0 and admit every caller, so the load refuses it."
+    }
+  ]
+}

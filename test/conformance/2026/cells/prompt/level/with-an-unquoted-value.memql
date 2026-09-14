@@ -1,0 +1,6 @@
+/// Summarise a ticket in one sentence: a fast call.
+@templateFile("summariseTicket.tmpl")
+@level(fast)
+prompt summariseTicketLevel {
+  title  string!  @description("The ticket's title.")
+}
