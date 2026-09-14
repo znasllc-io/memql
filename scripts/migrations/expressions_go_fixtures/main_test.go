@@ -8,19 +8,32 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // main_test.go pins the literal rewrite on the fixture shapes Go tests embed
 // MemQL in. Each case is a whole Go file, processed the way the tool
 // processes a file on disk.
 
-var testPreds = map[string]langparser.PredicateInfo{"isNotDeleted": {}}
+// testTree stands in for the dsl/ tree a fixture's MemQL loads over: a trait,
+// the core @actor shape, and the concept the fixtures bind.
+var testTree = map[string][]byte{
+	"common/traits.memql":  []byte("trait isNotDeleted {\n  return deleted != true\n}\n"),
+	"common/shapes.memql":  []byte("/// The caller.\n@actor\nshape actorEnvelope {\n  actor.userId\n  actor.role\n}\n"),
+	"todos/concepts.memql": []byte("concept todo {\n  ownerUserId string\n}\n"),
+}
+
+func testBase(t *testing.T) predicateBase {
+	t.Helper()
+	base, err := newPredicateBase(testTree)
+	if err != nil {
+		t.Fatalf("newPredicateBase: %v", err)
+	}
+	return base
+}
 
 func process(t *testing.T, src string) fileReport {
 	t.Helper()
-	rep, err := processFile("fixture_test.go", []byte(src), testPreds)
+	rep, err := processFile("fixture_test.go", []byte(src), testBase(t))
 	if err != nil {
 		t.Fatalf("processFile: %v", err)
 	}
@@ -159,7 +172,7 @@ func TestIdempotentAndStillGo(t *testing.T) {
 	if _, err := parser.ParseFile(token.NewFileSet(), "x.go", first.out, 0); err != nil {
 		t.Fatalf("the rewritten file is not Go: %v\n%s", err, first.out)
 	}
-	second, err := processFile("fixture_test.go", first.out, map[string]langparser.PredicateInfo{"isOpen": {}})
+	second, err := processFile("fixture_test.go", first.out, testBase(t))
 	if err != nil {
 		t.Fatalf("second pass: %v", err)
 	}
@@ -195,5 +208,101 @@ func TestGoFilesSelection(t *testing.T) {
 	}
 	if len(nonTest) != 1 || filepath.Base(nonTest[0]) != "b.go" {
 		t.Fatalf("survey files = %v, want only b.go", nonTest)
+	}
+}
+
+// A fixture that declares a spec over the core @actor shape actorEnvelope,
+// without declaring the shape, gets `= actor =>` and `isAdmin(actor)`: its
+// declarations resolve over the tree it loads over. Before, the literal's
+// declarations were collected on their own, the shape was nowhere, and the
+// spec came out `= row => row.role` -- which a real engine refuses at define,
+// and which a second run would see as v1 and keep.
+func TestSpecOverACoreActorShape(t *testing.T) {
+	src := "package p\n\nconst spec = `spec actorEnvelope isAdmin {\n  return role == \"admin\"\n}\n`\n\n" +
+		"const q = `query todo mine {\n  filter isAdmin || ownerUserId == actor.userId\n}\n`\n"
+	for name, base := range map[string]predicateBase{"the test tree": testBase(t), "the real dsl tree": realTree(t)} {
+		t.Run(name, func(t *testing.T) {
+			rep, err := processFile("fixture_test.go", []byte(src), base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantOutcomes(t, rep, "changed", "changed")
+			for _, want := range []string{
+				"`spec actorEnvelope isAdmin = actor => actor.role == \"admin\"\n`",
+				"filter row => isAdmin(actor) || row.ownerUserId == actor.userId",
+			} {
+				if !bytes.Contains(rep.out, []byte(want)) {
+					t.Errorf("rewritten file lacks %s:\n%s", want, rep.out)
+				}
+			}
+		})
+	}
+}
+
+// A binding nothing declares -- not the file, not the tree, not a signature
+// -- is refused and named, and the literal is left as it was.
+func TestBindingNothingDeclaresIsRefused(t *testing.T) {
+	rep := process(t, "package p\n\nconst s = `spec gadget isShiny {\n  return shiny == true\n}\n`\n")
+	wantOutcomes(t, rep, "refused")
+	if rep.out != nil {
+		t.Fatalf("a refused literal was rewritten:\n%s", rep.out)
+	}
+	if want := "spec isShiny binds gadget, which no shape and no concept declares"; !strings.Contains(rep.results[0].reason, want) {
+		t.Errorf("refusal reason = %q, want it to name the binding", rep.results[0].reason)
+	}
+}
+
+// The legacy `<boundConcept>.<field>` spelling, as TestSandboxInheritsActorBinding
+// (component/memql) writes it: `todo.ownerUserId` in a query bound to todo is
+// `row.ownerUserId`, not `row.todo.ownerUserId`.
+func TestBoundConceptPrefix(t *testing.T) {
+	src := "package p\n\nvar c = struct{ Source string }{\n\tSource: `@actor\nquery todo sandboxOwned {\n  filter todo.ownerUserId == actor.userId\n}`,\n}\n"
+	rep := process(t, src)
+	wantOutcomes(t, rep, "changed")
+	if want := "`@actor\nquery todo sandboxOwned {\n  filter row => row.ownerUserId == actor.userId\n}`"; !bytes.Contains(rep.out, []byte(want)) {
+		t.Fatalf("rewritten file:\n%s\nwant it to contain:\n%s", rep.out, want)
+	}
+}
+
+// realTree is the repository's dsl/, the tree the tool reads by default.
+func realTree(t *testing.T) predicateBase {
+	t.Helper()
+	base, err := loadPredicates([]string{filepath.Join("..", "..", "..", "dsl")})
+	if err != nil {
+		t.Fatalf("loadPredicates: %v", err)
+	}
+	if len(base.decls) < 100 {
+		t.Fatalf("read %d files from dsl/: the real-tree case would prove nothing", len(base.decls))
+	}
+	if _, ok := base.preds["isActiveRecord"]; !ok {
+		t.Fatal("the real tree has no isActiveRecord: the wrong tree was read")
+	}
+	return base
+}
+
+// Two fixtures of one file that declare one shape name with different kinds
+// leave the file's declarations unusable; each refusal then says so, rather
+// than pointing at the tree with "not in the predicate set".
+func TestConflictingFileDeclarationsAreNamed(t *testing.T) {
+	src := "package p\n\nconst a = `@actor\nshape labActor {\n  actor.role\n}\n`\n\n" +
+		"const b = `@row\nshape labActor {\n  sku\n}\n`\n\n" +
+		"const s = `spec labActor requiresAdmin {\n  return role == \"admin\"\n}\n`\n"
+	rep := process(t, src)
+	wantOutcomes(t, rep, "refused")
+	if want := "this file's own declarations conflict"; !strings.Contains(rep.results[0].reason, want) || !strings.Contains(rep.results[0].reason, "labActor") {
+		t.Errorf("refusal reason = %q, want it to name the conflict", rep.results[0].reason)
+	}
+
+	// Independent snippets that declare one name differently -- a spec foo
+	// over the core @actor shape in one literal, a trait foo in another --
+	// each answer for themselves.
+	snippets := "package p\n\nconst a = `spec actorEnvelope foo {\n  return role == \"admin\"\n}\n`\n\n" +
+		"const b = `trait foo {\n  return active == true\n}\n`\n"
+	rep = process(t, snippets)
+	wantOutcomes(t, rep, "changed", "changed")
+	for _, want := range []string{"spec actorEnvelope foo = actor => actor.role == \"admin\"", "trait foo = row => row.active == true"} {
+		if !bytes.Contains(rep.out, []byte(want)) {
+			t.Errorf("rewritten file lacks %s:\n%s", want, rep.out)
+		}
 	}
 }

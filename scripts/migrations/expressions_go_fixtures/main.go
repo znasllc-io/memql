@@ -18,7 +18,11 @@
 //   - runs the expressions rewrite over the literal's DECODED text, with the
 //     tree's predicate set (every spec and trait under -dsl, collected once)
 //     plus whatever the file's own literals declare -- a fixture that defines
-//     a trait in one literal and filters on it in another resolves it;
+//     a trait in one literal and filters on it in another resolves it. The
+//     file's declarations are resolved OVER the tree, so a spec a fixture
+//     declares over the core @actor shape actorEnvelope, without declaring
+//     the shape, is an actor predicate; a binding nothing declares is
+//     refused by name;
 //   - writes the result back in the literal's own form: a raw literal stays
 //     raw, byte for byte outside the rewritten spans, so its indentation is the
 //     indentation it had; an interpreted literal is re-quoted;
@@ -191,7 +195,7 @@ func run(w io.Writer, paths []string, o options) error {
 	if o.survey {
 		return surveyFiles(w, files)
 	}
-	preds, err := loadPredicates(o.dslRoots)
+	base, err := loadPredicates(o.dslRoots)
 	if err != nil {
 		return err
 	}
@@ -201,7 +205,7 @@ func run(w io.Writer, paths []string, o options) error {
 		if err != nil {
 			return err
 		}
-		rep, err := processFile(path, src, preds)
+		rep, err := processFile(path, src, base)
 		if errors.Is(err, errNotGo) {
 			// A file the Go parser cannot read holds no literal this tool can
 			// place; say so and go on.
@@ -282,8 +286,16 @@ func goFiles(paths []string, o options) ([]string, error) {
 	return out, nil
 }
 
-// loadPredicates collects every spec and trait the named trees declare.
-func loadPredicates(roots []string) (map[string]langparser.PredicateInfo, error) {
+// predicateBase is the tree a fixture's MemQL loads over: its declarations,
+// scanned once, and the predicate set they answer on their own.
+type predicateBase struct {
+	decls []langparser.PredicateDeclarations
+	preds map[string]langparser.PredicateInfo
+}
+
+// loadPredicates scans every spec, trait, shape and concept the named trees
+// declare.
+func loadPredicates(roots []string) (predicateBase, error) {
 	files := map[string][]byte{}
 	for _, root := range roots {
 		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -304,14 +316,33 @@ func loadPredicates(roots []string) (map[string]langparser.PredicateInfo, error)
 			return nil
 		})
 		if err != nil {
-			return nil, fmt.Errorf("read the predicate tree %s: %w", root, err)
+			return predicateBase{}, fmt.Errorf("read the predicate tree %s: %w", root, err)
 		}
 	}
-	return langparser.CollectPredicates(files)
+	return newPredicateBase(files)
+}
+
+// newPredicateBase scans files, in path order, and resolves them.
+func newPredicateBase(files map[string][]byte) (predicateBase, error) {
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	var b predicateBase
+	for _, p := range paths {
+		b.decls = append(b.decls, langparser.ScanPredicateDeclarations(p, files[p]))
+	}
+	preds, err := langparser.ResolvePredicates(b.decls)
+	if err != nil {
+		return predicateBase{}, err
+	}
+	b.preds = preds
+	return b, nil
 }
 
 // processFile rewrites one test file's MemQL literals.
-func processFile(path string, src []byte, corpus map[string]langparser.PredicateInfo) (fileReport, error) {
+func processFile(path string, src []byte, base predicateBase) (fileReport, error) {
 	rep := fileReport{path: path}
 	lits, keepFile, err := stringLiterals(path, src)
 	if err != nil {
@@ -332,11 +363,23 @@ func processFile(path string, src []byte, corpus map[string]langparser.Predicate
 		}
 		return rep, nil
 	}
-	preds := filePredicates(corpus, dsl)
+	preds, conflict := filePredicates(path, base, lits)
 
 	var edits []edit
 	for _, l := range dsl {
-		res := rewriteLiteral(l, preds)
+		lp := preds
+		if conflict != nil {
+			// The file holds several fixtures that declare one name
+			// differently, so no set answers for the whole file: each literal
+			// answers for itself, over the tree.
+			lp = literalPredicates(base, l)
+		}
+		res := rewriteLiteral(l, lp)
+		if res.outcome == refused && conflict != nil {
+			// Say why the file's other declarations were not used: the
+			// refusal alone would point at the tree.
+			res.reason += "; this file's own declarations conflict, so each literal was resolved on its own over the tree: " + firstOf(conflict)
+		}
 		rep.results = append(rep.results, res)
 		if res.outcome == changed {
 			edits = append(edits, edit{start: l.start, end: l.end, text: encode(l, res.newText)})
@@ -413,26 +456,41 @@ func isMemQL(text string) bool {
 
 // filePredicates is the corpus predicate set with the file's own literal
 // declarations laid over it: a fixture that declares a trait and filters on it
-// resolves its own. A file whose declarations cannot be collected (two
-// literals declaring one name differently) falls back to the corpus, and the
-// rewrite refuses whatever that leaves unresolved.
-func filePredicates(corpus map[string]langparser.PredicateInfo, dsl []literal) map[string]langparser.PredicateInfo {
-	files := make(map[string][]byte, len(dsl))
-	for i, l := range dsl {
-		files[fmt.Sprintf("literal%03d", i)] = []byte(l.text)
+// resolves its own. Every literal of the file is read for declarations, not
+// only the ones the tool rewrites -- a fixture declares its @actor shape or its
+// concept in a literal that carries nothing to rewrite, often split over a
+// `+` whose first half holds the header. The file's declarations resolve
+// through the corpus's shapes and concepts, so a spec over a binding the
+// corpus declares -- the core @actor shape actorEnvelope -- takes its kind
+// from there, and one over a binding nothing declares is refused by the
+// rewrite, by name. A file whose declarations cannot be collected (two
+// literals declaring one name differently -- two fixtures of one file, each
+// with its own shape of one name) falls back to the corpus, and the rewrite
+// refuses whatever that leaves unresolved; the conflict comes back for the
+// report.
+func filePredicates(path string, base predicateBase, lits []literal) (map[string]langparser.PredicateInfo, error) {
+	local := make([]langparser.PredicateDeclarations, 0, len(lits))
+	for _, l := range lits {
+		// Named by the literal's Go line, so a conflict points at the file.
+		local = append(local, langparser.ScanPredicateDeclarations(fmt.Sprintf("%s:%d", filepath.Base(path), l.line), []byte(l.text)))
 	}
-	local, err := langparser.CollectPredicates(files)
-	if err != nil || len(local) == 0 {
-		return corpus
+	preds, err := langparser.ResolvePredicatesOver(base.decls, local)
+	if err != nil {
+		return base.preds, err
 	}
-	out := make(map[string]langparser.PredicateInfo, len(corpus)+len(local))
-	for k, v := range corpus {
-		out[k] = v
+	return preds, nil
+}
+
+// literalPredicates is one literal's own declarations laid over the corpus:
+// the answer for a literal of a file whose declarations conflict as a whole --
+// independent snippets, one declaring `spec actorEnvelope foo` and another
+// `trait foo`, each of which is consistent on its own.
+func literalPredicates(base predicateBase, l literal) map[string]langparser.PredicateInfo {
+	preds, err := langparser.ResolvePredicatesOver(base.decls, []langparser.PredicateDeclarations{langparser.ScanPredicateDeclarations("literal", []byte(l.text))})
+	if err != nil {
+		return base.preds
 	}
-	for k, v := range local {
-		out[k] = v
-	}
-	return out
+	return preds
 }
 
 // rewriteLiteral runs the expressions rewrite over one literal's text.
@@ -480,6 +538,15 @@ func legacyLeft(text string) string {
 		return "a cond / concat / coalesce / exists call with no logic, automation or mutation header in this literal"
 	}
 	return ""
+}
+
+// firstOf is the first of a joined error's lines, and how many follow.
+func firstOf(err error) string {
+	lines := strings.Split(err.Error(), "\n")
+	if len(lines) == 1 {
+		return oneLine(lines[0])
+	}
+	return fmt.Sprintf("%s (and %d more)", oneLine(lines[0]), len(lines)-1)
 }
 
 func oneLine(s string) string {
