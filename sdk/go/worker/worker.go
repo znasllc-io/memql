@@ -244,12 +244,18 @@ func (c *Connection) Recv() (*memqlv1.WorkerServerMessage, error) {
 // gRPC connection. Safe to call on a nil receiver, idempotent, and safe
 // to call while other goroutines are in Send: CloseSend is taken under
 // sendMu, so it waits for an in-flight Send to return rather than
-// running beside it. That wait is bounded by the transport -- a Send
-// blocked on flow control returns once the keepalive
-// (DefaultKeepaliveTime + DefaultKeepaliveTimeout) tears the transport
-// down -- and in the ordinary case is microseconds. The ClientConn is
-// closed after the half-close, outside the lock, so the server sees a
-// clean end of the send direction before the transport goes.
+// running beside it -- ordinarily one frame's write.
+//
+// KEEPALIVE DOES NOT BOUND THAT WAIT. A Send blocked on flow control
+// returns only when the peer reads again or the stream ends: the context
+// passed to Dial is cancelled, the server ends the stream, or the
+// transport fails. Keepalive (DefaultKeepaliveTime +
+// DefaultKeepaliveTimeout) catches only the last, for a peer that stops
+// answering altogether; a peer that is alive but has stopped reading this
+// stream still acks pings, so it never fires. A caller that needs Close to
+// return promptly cancels the Dial context first. The ClientConn is closed
+// after the half-close, outside the lock, so the server sees a clean end
+// of the send direction before the transport goes.
 func (c *Connection) Close() {
 	if c == nil {
 		return
