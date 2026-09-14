@@ -780,6 +780,27 @@ The run belongs to the deployment (the synthetic journal actor), as an automatio
 - the retired codes from the `_retired` members of `BodyRefusalCodes()`;
 - the codes deferred to the flip (`statementRetiredAtTheFlip`), which the transitional dispatch still accepts: `body_step_retired` and `body_terse_retired` for automations, `body_block_retired` for logic. The flip empties that map and adds the cells.
 
+*The scenarios, as built* (agreed with memql-b1, who owns the corpus layout).
+They land before the flip, not after it, because running the same scenarios
+over both body forms is itself the flip's behaviour check.
+- The format is one `scenarios/<suite>/scenario.json` per suite, naming
+  shipped automations and mutations: seeds, fires, expected rows (by id or by
+  `where`, with an optional version `history`), expected calls, a `dryRun`
+  fire and a `resume` point. `test/conformance/2026/scenarios/README.md`
+  documents it.
+- The runner (`scenarios_db_test.go`) boots the conformance rig's engine,
+  fires through the real Executor over the production step registry, and
+  stubs the capability dispatcher. It is database-gated like the
+  differential lane, so it runs in mcp-conformance.
+- Suites: decide-and-apply (the model-pull sweep, the stale-node prune),
+  forge (owner, writer, reader, and the unchanged status), deployment
+  (docker-local, and azure failing its gate and rolling back).
+- Campaigns is pending: it needs the campaigns integration wired in the rig.
+- The one legacy difference found is transitionEventKind's `old == st`,
+  already recorded as a legacy defect in the logic goldens. The scenario
+  states the body's meaning and carries a `legacy` count, which the runner
+  refuses once the tree is statements.
+
 *Constraints the fixtures met:*
 - Every load case boots in one engine, and function names are flat, so each directory's fixture declares its constructs under corpus-unique names. A duplicate either fails the cross-namespace import gate or leaves a diagnostic no domain claims, which silently drops the runner into one boot per case (5s became 106s).
 - A fixture concept must not share a bare name with a tree concept: `order` made Shopify's ambiguous.

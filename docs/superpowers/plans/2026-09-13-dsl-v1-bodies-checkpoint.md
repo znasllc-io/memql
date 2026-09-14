@@ -28,8 +28,9 @@ it in the epic's merge (plan Task 16 step 3). Update it each time you stop.
 
 ## State (2026-09-14)
 
-Done: Tasks 1-11, and Task 12's statement cells with their completeness gate.
-Since the last rebase onto the epic-2 base:
+Done: Tasks 1-11; Task 12's statement cells with their completeness gate,
+and three of its four scenario suites. Since the last rebase onto the epic-2
+base:
 
 | Commit | What |
 |---|---|
@@ -38,6 +39,8 @@ Since the last rebase onto the epic-2 base:
 | `622d36702` | #5373: the migrated tree loads through the boot walk (`component/automations/migrated_tree_load_test.go`); a moved logic's unused imports are pruned |
 | `6707f4ad5` | #5372: an action statement binds its capability's result (`actionStatementValue` unwraps the authored record, a real bug); the automation corpus (`component/automations/steps/automation_v1_corpus_test.go`, 58 goldens, 344 runs) holds every automation's statement form to its legacy runs |
 | `daa0f0d99` | #5371: memql-10's three load gaps: a `trace` read (CheckBody, `body_unknown_name`), a `config.<key>` outside the allow-list (dslgate `statement-config-key`, `body_config_unknown`, shown by Sense too), and an unknown bare call (dslgate `statement-unknown-call`, `body_call_unknown`) |
+| `2596afda7` | #5371: the two statement-body gates report their coverage (`dslgate.StatementBodiesRead`), and the migrated tree passes them |
+| `6daca7fcc` | #5374: the scenario suites (`test/conformance/scenarios_db_test.go`, `test/conformance/2026/scenarios/<suite>/scenario.json`): decide-and-apply, forge, deployment; 8 scenarios, each live plus dryRun and resume variants over a real database |
 
 The migrated tree passes the two statement-body gates, and the gates read
 all 85 of its bodies (58 automations, 27 logic):
@@ -118,9 +121,19 @@ Negative controls were run on each new check and restored.
      anything once the parser refuses the retired forms. Replace it with the
      parser's refusal, or delete it. The comments in `statement_bodies.go` and
      Sense's `diagnose_body_scope.go` that say "until the flip" change with it.
-3. **Task 12 step 4:** the scenario suites, after the flip. Include the two
-   deletion reminders and `onDelegationCreated`, which the flip moves into
-   automations.
+   - Scenarios: they run over the statement bodies from the flip on. The
+     runner then refuses the `legacy` entries in
+     `scenarios/forge-state-machine/scenario.json`; delete them, and delete
+     `scenarioRow.Legacy`, `scenarioLegacy` and the `legacy` branches in
+     `scenarios_db_test.go`. The rows' own counts are what the statement
+     bodies must produce, and this is the first run that holds them to it.
+3. **Task 12 step 4, the rest:**
+   - The campaigns suite, a generated event-email automation. It needs the
+     campaigns integration wired in the conformance rig, with a stub sender:
+     `component/emailrules.Generate`, a seeded rule, then a firing on a seeded
+     row, asserting the `v1:campaigns:delivery` row.
+   - After the flip, scenarios for the two deletion reminders and
+     `onDelegationCreated`, which the flip moves into automations.
 4. **Tasks 14, 15 and 16:** the gates port, the docs, then ship. Open the PR
    only after epics 1 and 2 merge, with one `Closes #n` line per issue.
 
@@ -148,3 +161,16 @@ Negative controls were run on each new check and restored.
   are noise, and `go build` and `go vet` are the authority.
 - For a negative control, copy the file to the scratchpad, perturb it, run,
   copy it back and `cmp`. `rm -rf` inside a compound command is denied here.
+- Scenario runner specifics:
+  - Every script action dispatches the one capability `shell.script`, so a
+    call is labelled `shell.script:<script>`.
+  - Resume refuses to re-run a failed action step unless `AllowSideEffects` is
+    set. The runner sets it because its injected failure comes before the step
+    runs.
+  - `failAt` counts the top-level steps the registry is asked to run. A
+    for-each's children go through the inner registry, and a flattened switch
+    adds steps after the flip, so pick a small index.
+  - The dry run intercepts actions, so an action's result reads absent there.
+    The deployment dry run therefore takes the failure path, with nine
+    intercepted calls.
+  - A relationship field reads back canonical (`v1:identity:user:<id>`).
