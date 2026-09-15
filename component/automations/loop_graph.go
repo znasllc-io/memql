@@ -332,6 +332,9 @@ func (b *graphBuilder) productions(i int) []production {
 		}
 	}
 	walk(i, nil)
+	for i := range out {
+		b.invalidateBeforeWriteFields(&out[i])
+	}
 	sort.SliceStable(out, func(x, y int) bool {
 		p, q := out[x], out[y]
 		if p.topic != q.topic {

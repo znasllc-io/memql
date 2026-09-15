@@ -134,6 +134,12 @@ func (s *AuthoredScheduler) refuseCandidateCycle(automation *Automation, origin 
 	}
 	s.mu.Unlock()
 	g := BuildLoopGraph(all, newFunctionSource(s.loader.functions, s.loader.registry), 0)
+	// A before-write body changes other automations' event payloads without
+	// being an event node in their cycle. Its activation must therefore judge
+	// the full resulting graph, not only cycles passing through its own node.
+	if candidate.BeforeWrite != nil && len(g.Problems) > 0 {
+		return fmt.Errorf("authored scheduler: %s: before-write hook may enable an uncovered cycle: %s", origin, g.Problems[0].Message)
+	}
 	if p, refused := g.problemThrough(origin); refused {
 		return fmt.Errorf("authored scheduler: %s: %s", origin, p.Message)
 	}
