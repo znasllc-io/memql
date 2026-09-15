@@ -8,6 +8,7 @@
           "payload": {
             "agentId": "agent-1",
             "createdBySubject": "subject-0",
+            "firstVersion": true,
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
@@ -66,6 +67,7 @@
           "payload": {
             "agentId": "agent-1",
             "createdBySubject": "subject-0",
+            "firstVersion": true,
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
@@ -124,6 +126,7 @@
           "payload": {
             "agentId": "agent-1",
             "createdBySubject": "subject-0",
+            "firstVersion": true,
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
@@ -182,6 +185,7 @@
           "payload": {
             "agentId": "agent-1",
             "createdBySubject": "subject-0",
+            "firstVersion": true,
             "id": "v1:probe:thing:1",
             "identityId": "identity-1",
             "identitySubject": "subject-1",
