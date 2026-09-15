@@ -26,7 +26,7 @@ keyword header -- and lives in a per-namespace, per-construct file
 |-----------|---------|
 | **Query** | Read rows of a concept with a filter and a shape projection |
 | **Mutation** | Write one row (`insert` or `update`) of a concept |
-| **Logic** | Imperative orchestration block called from automation steps |
+| **Logic** | A pure decision: statements that end in `return`, called from an automation or another logic |
 | **Automation** | Event- or schedule-triggered workflow |
 | **Prompt** | AI prompt template with a typed input schema |
 | **Provider** | AI vendor + model configuration |
@@ -80,7 +80,7 @@ use common.traits.{ isActiveRecord }
 ```
 
 The **concept a construct binds to is named in its signature**:
-`query <Concept> <name>`, `mutate <Concept> <name>`,
+`query <Concept> <name>`, `mutation <Concept> <name>`,
 `shape <Concept> <name>`, `seed <Concept> <name>`. The short concept
 name resolves through the file's `use ...concepts.{ ... }` import.
 
@@ -303,7 +303,7 @@ Mutations write exactly one row of their signature-bound concept.
 use library.concepts.{ folder }
 
 @description("Create a Library folder")
-mutate folder createFolder {
+mutation folder createFolder {
   args {
     folderId  string  @required
     name      string  @required
@@ -324,8 +324,10 @@ is rejected (`TestNoRetiredBindingForms`).
 
 ### Args Annotations and Defaults
 
-`args { ... }` fields take `@required`, `@enum("a", "b")`,
-`@description("...")`, `@maxLength(N)`, `@pattern("re")`.
+`args { ... }` fields take `@required` (or the `!` sigil after the type),
+`@enum("a", "b")`, `@maxLength(N)`, `@pattern("re")`, `@minimum(N)` and
+`@maximum(N)`. A field is described by a `///` doc comment on the line above
+it; `@description` on an args field is refused at load.
 
 > **Retired: `@default` on args fields.** It was never applied and is
 > rejected at load time. Apply a default in the body with the `??`
@@ -357,88 +359,112 @@ want the sum coalesced.
 
 ## Logic Functions
 
-Logic blocks are the imperative tier: called from automation steps,
-they declare `args { ... }` and a `body { ... }` that is a sequence of
-named statements ending in `return <expr>`.
+A logic is the imperative tier: a procedure an automation or another logic
+calls. It declares its inputs in `args { ... }`, and its statements follow,
+running in the order they are written, the last of them a `return`. The body
+language -- statements, names and scope, trailing clauses -- is specified in
+[memql.md](memql.md#bodies).
 
-### Single-statement form (the common case)
+### One statement (the common case)
 
 ```memql
-use common.builtins.{ ensureKnowledgeBridge }
-
-@description("On document creation, make sure its knowledge bridge exists.")
-logic provisionBridgeOnDocumentCreate {
+/// Pure decide for the workspace-release sweep: every v1:workbench:workspace
+/// of the updated run.
+logic releaseWorkspaceOnRunTerminal {
   args {
-    event object @required
+    event object!
   }
-  body {
-    return ensureKnowledgeBridge(documentId: args.event.payload.id)
-  }
+  return query workspaceForRun(runId: args.event.payload.id ?? "")
 }
 ```
 
-### Multi-statement bodies
+A construct call names its kind and names every argument, and it is a
+statement of its own -- the whole value of `return` here, or the whole
+right-hand side of `:=`.
 
-Intermediate steps are `name := <call>` assignments; steps execute in
-dependency order, and the trailing `return <expr>` is the function's
-return value. A step can be guarded with `if <cond> { ... }` so it
-only fires when the condition holds:
+### Several statements
 
-```memql fragment
-body {
-  getUser := query userById(userId: args.event.payload.ownerUserId)
-  activeAssistantId := getUser.first().payload.preferences.activeAssistantId ?? ""
+`name := <call>` binds the call's value to `name` from the next statement on,
+and the `return` is the logic's value. A branch of an `if` runs at most once and
+shares the scope around it, so each branch may bind the same name and the
+statement after the `if` reads whichever one ran:
 
-  getActiveGA := if activeAssistantId != "" {
-    query agentById(agentId: activeAssistantId)
+```memql
+/// Resolve the agent to act as: the owner's preferred assistant, or their default one.
+logic resolveActingAgent {
+  args {
+    ownerUserId string!
   }
-  getFallbackGA := if activeAssistantId == "" {
-    query assistantAgentForUser(ownerUserId: args.event.payload.ownerUserId)
+  user := query userById(userId: args.ownerUserId)
+  preferred := user.first().preferences.activeAssistantId ?? ""
+  if preferred != "" {
+    agent := query agentById(agentId: preferred)
+  } else {
+    agent := query assistantAgentForUser(ownerUserId: args.ownerUserId)
   }
-
-  return getActiveGA ?? getFallbackGA
+  return agent.first()
 }
 ```
 
-Step results are referenced by their **bare step name**; result
-navigation uses the lowercase accessors `step.first()`, `step.empty()`,
-`step.count()` (and `step.Ran()` for whether a guarded step executed).
-A step result is also a collection you can run the collection/lambda
-library over (`where` / `select` / `count` / ...) — see
-[memql.md](memql.md#collection--lambda-library). The capitalized
-`.First()` / `.Empty()` / `.Nodes()` / `.Len()` / `.Count()` / `.Last()`
-accessors are retired.
+A later statement reads an earlier one's value by its name. A query's value is
+its rows, a row reads its payload fields by name (`user.first().preferences`),
+and the lowercase accessors and the collection library work over them:
+`agent.first()`, `rows.empty()`, `rows.count()`,
+`rows.where(r => r.active).select(r => r.id)` -- see
+[memql.md](memql.md#collection--lambda-library). What every other kind of
+statement's value is, is under [What runs](memql.md#what-runs).
+
+A logic calls `query`, `mutation`, `logic` and `builtin`. Publishing and calling
+an `automation` or an `action` are an automation's, and a logic that does one is
+refused at load.
 
 ---
 
 ## Automation Functions
 
-Automations are event- or schedule-triggered workflows. The canonical
-body is one or more `step` blocks, each invoking a logic function with
-the triggering event:
+Automations are event- or schedule-triggered workflows, written in the same
+body language plus the statements only an automation makes: `publish`, and a
+call of an `automation` or an `action`.
 
 ### Event-Triggered
 
 ```memql
-use library.logic.{ indexArtifact }
+/// When a run reaches a terminal status, release its workbench workspace and
+/// tear down its on-disk directory.
+@trigger(event="graph.node.updated.v1:work:run")
+@filter(row => row.status != "running" && row.status != "compiling" && row.status != "waiting")
+automation releaseWorkspaceOnRunTerminal {
+  args {
+    id any
+    status any
+  }
 
-@trigger(event="node.created", concept="v1:library:file", partition="*")
-@description("On file creation, index it into the Library.")
-automation indexArtifact {
-  step decide {
-    logic indexArtifact(event: event)
+  terminal := logic runIsTerminal(status: args.status)
+  decide := logic releaseWorkspaceOnRunTerminal(event: event)
+  for item in decide.nodes() {
+    if terminal == true && item.status == "provisioned" {
+      mutation releaseWorkspace(
+        workspaceId: item.id,
+        reason: "run_terminal"
+      )
+    }
+  }
+  if terminal == true && args.id != nil {
+    teardown := builtin workbenchTeardownDirectory(runId: args.id)
   }
 }
 ```
 
-Inside the logic function, the triggering event is bound as `args`, so
-`args.event.payload.<field>` is how the body reaches the event data. The
-event is a first-class, in-scope value the engine threads into EVERY nested
-step's argument resolution, and it binds identically across every invocation
-surface -- a real graph event, the live `run_automation` path, and the
-`run_automation` dry-run preview (memql#1727). Run a logic without an event
-in scope (a misconfigured/direct call) and `event.*` references degrade to
-empty rather than erroring.
+The fields of the triggering row's payload are bound into the automation's
+`args` block and validated against it before the first statement runs;
+the body reads each as `args.<field>`. A dotted `event.<field>` read in an
+automation is refused at load. `event` is the event itself, and it is what an
+automation forwards when a logic wants the whole event: `logic l(event: event)`.
+Inside that logic, `event` is an argument like any other -- it declares
+`event object!` in its `args` block and reads `args.event.payload.<field>`.
+The event binds identically across every invocation surface -- a real graph
+event, the live `run_automation` path, and the `run_automation` dry-run preview
+(memql#1727).
 
 ### Scheduled
 
@@ -446,55 +472,61 @@ empty rather than erroring.
 (sec min hour dom mon dow):
 
 ```memql
+/// Every 10 min: mark departed cluster nodes as health='stopped'.
 @trigger(schedule="0 */10 * * * *")
-@description("Every 10 min: mark departed cluster nodes as health='stopped'.")
 automation pruneStaleClusterNodes {
-  step run {
-    logic pruneStaleClusterNodes(event: event)
+  decide := logic pruneStaleClusterNodes(event: event)
+  for node in decide {
+    mutation updateNodeHealth(
+      id:       node.id,
+      health:   "stopped",
+      lastSeen: now
+    )
   }
 }
 ```
 
 ### Preconditions (self-healing)
 
-An automation may declare one or more first-class `precondition` blocks
-alongside its `step` blocks. A precondition is a **deterministic boolean
-check** (no LLM) evaluated at the start of the run — after the trigger
-fires and the input query (if any) loads, but **before any step executes**.
+An automation may declare one or more first-class `precondition` blocks, after
+its `args` block and before its first statement. A precondition is a
+**deterministic boolean check** (no LLM) evaluated at the start of the run --
+after the trigger fires, but **before any statement runs**.
 
 ```memql
-automation deployStaging {
-  precondition envIsStaging {
-    check: config.MEMQL_ENV == "staging"
-    literal: MEMQL_ENV
-    description: "Only drive the staging deploy spine in staging."
+@trigger(event="node.created", concept="v1:forge:request")
+automation routeRequest {
+  args {
+    id            any
+    submitterRole any
   }
-  precondition digestPinned {
-    check: args.imageDigest != nil
-    literal: imageDigest
+  precondition hasId {
+    check: args.id != nil
+    literal: id
+    description: "Route only a request that carries its id."
   }
-  step run {
-    logic driveDeploy(event: event)
-  }
+  decide := logic routeStatus(submitterRole: args.submitterRole)
+  mutation advanceRequest(requestId: args.id, status: decide)
 }
 ```
 
 The `check` expression is an automation condition, written in the same
-expression language as every other: `event.payload.<field>`,
-`config.<key>`, `var("NAME")`, `args.<field>` (the G5 typed contract binds
-the payload to the automation's args), comparisons, `&&` / `||` / `!`. It
-must be boolean. `args.X != nil` is the presence check: an absent field, a
-null and an empty string are one unset value, so it is false for all three
-(the retired `exists(...)` read a blank the same way).
+expression language as every other. It reads only the roots -- `args.<field>`
+(the automation's declared args, bound from the trigger payload), `actor`,
+`event`, `config.<key>`, `partition`, `now` -- which the load checks, and may
+call catalog functions such as `var("NAME")`; comparisons, `&&` / `||` / `!`.
+It must be boolean. `args.X != nil` is the
+presence check: an absent field, a null and an empty string are one unset
+value, so it is false for all three.
 
 A precondition that evaluates false is a **miss**:
 
-1. The run aborts cleanly — **no step fires**, the execution is recorded
-   as `skipped`.
+1. The run aborts cleanly -- **no statement runs**, and the execution is
+   recorded as `skipped`.
 2. The harness emits a structured `healing.precondition.missed` event
    (see [events](../concepts/events.md#self-healing-events)) carrying the
    automation + precondition identity, the failed `check`, the asserted
-   `literal`, and the triggering event 
+   `literal`, and the triggering event.
 
 A miss is **both** the clean self-healing repair trigger and the
 cross-machine portability mechanism: a literal asserted by a precondition
@@ -504,12 +536,12 @@ misses here. Fields:
 | Field | Required | Purpose |
 |-------|----------|---------|
 | `check` | yes | The deterministic boolean expression that must hold |
-| `literal` | no | Names the machine-specific literal asserted (path / id / endpoint) — the portability hint the repair loop relativizes |
+| `literal` | no | Names the machine-specific literal asserted (path / id / endpoint) -- the portability hint the repair loop relativizes |
 | `description` | no | Human-readable context surfaced in the miss signal |
 
 Preconditions are evaluated in declaration order; the first miss wins and
-aborts the run. They are deterministic by design — they guard the
-authored/deterministic deploy spine but are never themselves LLM-healed.
+aborts the run. They are deterministic by design -- they guard the
+authored/deterministic spine but are never themselves LLM-healed.
 
 ### Attribute Reference
 

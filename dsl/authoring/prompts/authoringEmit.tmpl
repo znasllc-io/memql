@@ -56,10 +56,40 @@ Dependencies to REUSE (reference by name, do NOT author):
   `logic record(event: event)` -- never `logic record({ ... })` and never
   a bare argument `logic record(event)`. Only a spec or trait takes a
   bare argument, its receiver: `isActiveRecord(row)`.
-- Mutations: exactly one `insert { ... }` OR `update { ... }` block.
-  Owner-stamped writes (`createdBy: actor.userId`,
-  `ownerUserId: actor.userId`) and owner-filtered reads
-  (`filter row => row.ownerUserId == actor.userId`) for per-row authz.
+- Mutations: `mutation <Concept> <name> { ... }` with exactly one
+  `insert { ... }` OR `update { ... }` block. Owner-stamped writes
+  (`createdBy: actor.userId`, `ownerUserId: actor.userId`) and
+  owner-filtered reads (`filter row => row.ownerUserId == actor.userId`)
+  for per-row authz.
+
+# Logic and automation bodies
+
+A logic and an automation are written in statements, one per line, that run
+in the order written. There is no `body { }` wrapper and no `step` block.
+
+- `x := <kind> name(k: v)` binds a call's value to `x`; `<kind> name(k: v)`
+  calls without binding. `<kind>` is `query`, `mutation`, `logic`,
+  `builtin`, `automation` or `action`. A call is a statement of its own --
+  never nested inside an expression.
+- `if c { ... } else if d { ... } else { ... }` (`else` on the closing
+  brace's line), `for x in <source> if <filter> { ... }`,
+  `switch s { case "a", "b" { ... } default { ... } }`,
+  `parallel { branch a { ... } branch b { ... } }`,
+  `publish "<topic>" { k: v }` and `return <expr>`.
+- A later statement reads an earlier one's value by its NAME (`rows.count()`,
+  `decide.status`) -- never `steps.x.result` or `x.result`. A query's value is
+  its rows; a row reads its payload fields by name.
+- After a call, in this order: `on surface("<name>")` (an action),
+  `retry(n)`, `on error continue`.
+- A logic ends with `return <expr>` and calls only queries, other logic and
+  read-only builtins: no mutation, action, automation or publish.
+- An automation carries exactly one `@trigger(event="node.created",
+  concept="v1:<ns>:<concept>")` or `@trigger(schedule="<6-field cron>")` --
+  no `partition=`, no `@schedule`. The triggering row's payload binds into
+  its `args { ... }` block: declare every field the body reads and read it
+  as `args.X` (a dotted `event.X` read is refused). Pass the whole event to
+  a logic as `logic l(event: event)`; the logic declares `event object!` and
+  reads `args.event.payload.X`.
 
 # Specs
 

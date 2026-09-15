@@ -196,64 +196,68 @@ The Parser Engine (`component/language/parser/`) transforms MemQL source text in
 │  │   ├── TokenDefine          // :=                                            │
 │  │   └── TokenQuestion        // ?  (ternary)                                  │
 │  │                                                                             │
-│  └── Keywords                                                                  │
+│  └── Keywords (a selection: the full set is TokenType in                       │
+│      │        component/language/parser/lexer.go)                              │
 │      ├── TokenKeywordQuery        // query                                     │
 │      ├── TokenKeywordMutation     // mutation                                  │
 │      ├── TokenKeywordAutomation   // automation                                │
-│      ├── TokenKeywordWhen         // when                                      │
+│      ├── TokenKeywordUse          // use                                       │
+│      ├── TokenKeywordIf / Else    // if, else                                  │
+│      ├── TokenKeywordFor / In     // for, in                                   │
+│      ├── TokenKeywordSwitch       // switch, case, default                     │
+│      ├── TokenKeywordRetry        // retry                                     │
 │      ├── TokenKeywordReturn       // return                                    │
-│      ├── TokenKeywordSchedule     // schedule                                  │
-│      ├── TokenKeywordEnabled      // enabled                                   │
-│      ├── TokenKeywordOnComplete   // onComplete                                │
-│      └── TokenKeywordOnError      // onError                                   │
+│      └── TokenKeywordNil          // nil                                       │
 │                                                                                │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Parser Architecture
 
-The parser uses recursive descent with the following grammar productions:
+The parser uses recursive descent. The construct-level grammar, in EBNF (the
+expression grammar is the one [memql.md](../language/memql.md#operators)
+publishes, and the statement grammar is specified under
+[Bodies](../language/memql.md#bodies)):
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────────────┐
-│                              PARSER GRAMMAR (EBNF)                                   │
-├──────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                      │
-│  file            = { useDecl } { definition } ;                                      │
-│                                                                                      │
-│  useDecl         = "use" module "." "{" name { "," name } "}" ;                      │
-│                                                                                      │
-│  definition      = { annotation } ( query | mutation | automation | ... ) ;          │
-│                                                                                      │
-│  query           = "query" concept identifier "{" [argsBlock] "filter" expression    │
-│                    [sortDir] [paginateDir] "shape" identifier "}" ;                  │
-│                                                                                      │
-│  mutation        = "mutation" concept identifier "{" [argsBlock]                     │
-│                    ( "insert" | "update" ) "{" fieldList "}" "}" ;                   │
-│                                                                                      │
-│  automation      = "automation" identifier "{" { automationStmt } "}" ;              │
-│                                                                                      │
-│  automationStmt  = step | stepAssign | controlFlow | returnStmt ;                    │
-│                                                                                      │
-│  step            = "step" identifier ["when" condition] "{" stepBody "}" ;           │
-│  stepAssign      = identifier ":=" functionCall ;                                    │
-│                                                                                      │
-│  argsBlock       = "args" "{" { argDecl } "}" ;                                      │
-│                                                                                      │
-│  expression      = logicalOr ;                                                       │
-│  logicalOr       = logicalAnd { "||" logicalAnd } ;                                  │
-│  logicalAnd      = primary { "&&" primary } ;                                        │
-│  primary         = grouped | whenGuard | comparison | functionCall ;                 │
-│                                                                                      │
-│  comparison      = fieldRef operator value ;                                         │
-│  whenGuard       = "when" "(" expression ")" "{" expression "}" ;                    │
-│                                                                                      │
-│  functionCall    = identifier "(" [ argList ] ")" ;                                  │
-│  argList         = "(" [ arg { "," arg } ] ")" ;                                     │
-│  arg             = identifier [ "=" value ] ;                                        │
-│                                                                                      │
-└──────────────────────────────────────────────────────────────────────────────────────┘
+file         = { useDecl } { definition } ;
+useDecl      = "use" module "." "{" name { "," name } "}" ;
+definition   = { annotation } ( query | mutation | logic | automation | ... ) ;
+
+query        = "query" concept identifier "{" [ argsBlock ] { queryClause } "}" ;
+queryClause  = "filter" lambda | "sort" string "," string | "paginate" number
+             | "refine" lambda | "count" | "asOf" expression | "shape" identifier ;
+mutation     = "mutation" concept identifier "{" [ argsBlock ]
+               ( "insert" | "update" ) "{" fieldList "}" "}" ;
+logic        = "logic" identifier "{" [ argsBlock ] { statement } "}" ;
+automation   = "automation" identifier "{" [ argsBlock ] { precondition }
+               statement { statement } "}" ;
+
+statement    = assign | call | if | for | switch | parallel | publish | return ;
+assign       = identifier ":=" ( call | expression ) ;
+call         = kind identifier "(" [ namedArg { "," namedArg } ] ")"
+               [ "on" "surface" "(" string ")" ] [ "retry" "(" number ")" ]
+               [ "on" "error" "continue" ] ;
+kind         = "query" | "mutation" | "logic" | "builtin" | "automation" | "action" ;
+namedArg     = identifier ":" expression ;
+if           = "if" expression block { "else" "if" expression block } [ "else" block ] ;
+for          = "for" identifier "in" expression [ "if" expression ] block
+               [ "on" "error" "continue" ] ;
+switch       = "switch" expression "{" { "case" literal { "," literal } block }
+               [ "default" block ] "}" ;
+parallel     = "parallel" "{" "branch" identifier block { "branch" identifier block } "}"
+               [ "wait" "any" ] [ "on" "error" "continue" ] ;
+publish      = "publish" string map ;
+return       = "return" [ call | expression ] ;
+block        = "{" { statement } "}" ;
+
+argsBlock    = "args" "{" { argDecl } "}" ;
+lambda       = identifier "=>" expression ;
 ```
+
+One statement per line; `else` follows its closing brace on the same line. A
+query and a mutation reach the parser through the struct-form rewriter; a
+logic and an automation are read as written (`parser/v1_body.go`).
 
 ### AST Node Hierarchy
 
@@ -283,24 +287,20 @@ The parser uses recursive descent with the following grammar productions:
 │  │   ├── MutationStmt         // insert { ... } / update { ... }                     │
 │  │   └── QueryStmt            // expression as statement                             │
 │  │                                                                                   │
-│  ├── FunctionDef              // query/mutation/automation definition                │
+│  ├── FunctionDef              // query/mutation/logic/automation definition          │
 │  │   ├── Name                 // function name                                       │
-│  │   ├── Type                 // query | mutation | automation                       │
+│  │   ├── Type                 // query | mutation | logic | automation               │
 │  │   ├── Args                 // []FunctionArg                                       │
-│  │   └── Body                 // Node (expression, mutation, or automation)          │
+│  │   └── Body                 // Node (expression, mutation, or AutomationDef)       │
 │  │                                                                                   │
-│  ├── AutomationDef            // automation body                                     │
-│  │   ├── Schedule             // cron expression                                     │
+│  ├── AutomationDef            // a logic's or an automation's body                   │
+│  │   ├── Schedule             // cron expression (@trigger(schedule=...))            │
 │  │   ├── Trigger              // event trigger                                       │
-│  │   ├── Steps                // []StepDef                                           │
-│  │   ├── OnComplete           // completion hook                                     │
-│  │   └── OnError              // error hook                                          │
+│  │   └── Body                 // *Body: the statements, in the order written         │
 │  │                                                                                   │
-│  ├── StepDef                  // automation step                                     │
-│  │   ├── ID                   // step identifier                                     │
-│  │   ├── Type                 // query | mutation | webhook | forEach | ...          │
-│  │   ├── Condition            // "when" condition                                    │
-│  │   └── Config               // step-specific configuration                         │
+│  ├── Body                     // component/language/ast/body.go                      │
+│  │   └── Statements           // assign, call, if, for, switch, parallel,            │
+│  │                            // publish, return                                     │
 │  │                                                                                   │
 │  └── File                     // parsed .memql file                                  │
 │      └── Definitions          // []Node                                              │
@@ -336,11 +336,10 @@ The Compiler Engine (`component/language/compiler/`) transforms AST nodes into t
 │                                                                                      │
 │   SOURCE (.memql)                                                                    │
 │   ┌─────────────────────────────────────────────────────────────────────────────┐   │
-│   │  @enabled                                                                    │   │
+│   │  /// Process active leads every 30 minutes                                   │   │
 │   │  @trigger(schedule="0 */30 * * * *")                                         │   │
-│   │  @description("Process active leads every 30 minutes")                       │   │
 │   │  automation leadProcessor {                                                  │   │
-│   │      fetchLeads := queryActiveLeads()                                        │   │
+│   │      fetchLeads := query activeLeads()                                       │   │
 │   │  }                                                                           │   │
 │   └─────────────────────────────────────────────────────────────────────────────┘   │
 │                                         │                                            │
@@ -363,9 +362,10 @@ The Compiler Engine (`component/language/compiler/`) transforms AST nodes into t
 │   │        Type: FunctionTypeAutomation                                          │   │
 │   │        Body: AutomationDef {                                                 │   │
 │   │          Schedule: "0 */30 * * * *"                                          │   │
-│   │          Steps: [                                                            │   │
-│   │            StepDef { ID: "fetchLeads", Type: StepTypeFunction, ... }         │   │
-│   │          ]                                                                   │   │
+│   │          Body: Body { Statements: [                                          │   │
+│   │            AssignStatement { Name: "fetchLeads",                             │   │
+│   │              Call: ConstructCall { Kind: "query", Name: "activeLeads" } }    │   │
+│   │          ] }                                                                 │   │
 │   │        }                                                                     │   │
 │   │      }                                                                       │   │
 │   │    ]                                                                         │   │
@@ -394,8 +394,10 @@ The Compiler Engine (`component/language/compiler/`) transforms AST nodes into t
 │   │      {                                                                       │   │
 │   │        "id": "fetchLeads",                                                   │   │
 │   │        "type": "function",                                                   │   │
+│   │        "binds": "fetchLeads",                                                │   │
 │   │        "function": {                                                         │   │
-│   │          "name": "queryActiveLeads"                                          │   │
+│   │          "kind": "query",                                                    │   │
+│   │          "name": "activeLeads"                                               │   │
 │   │        }                                                                     │   │
 │   │      }                                                                       │   │
 │   │    ],                                                                        │   │
@@ -730,57 +732,30 @@ The Executor Engine (in `component/memql/`) executes parsed queries against the 
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Adding New Step Types (Automations)
+### Adding a New Capability to Automations
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                         ADDING A NEW AUTOMATION STEP TYPE                            │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                      │
-│  1. AST (component/language/parser/ast.go)                                          │
-│     ┌─────────────────────────────────────────────────────────────────────────┐     │
-│     │  const (                                                                │     │
-│     │      StepTypeSlack StepType = "slack"  // NEW                           │     │
-│     │  )                                                                      │     │
-│     │                                                                         │     │
-│     │  type SlackStepConfig struct {                                          │     │
-│     │      Channel  string                                                    │     │
-│     │      Message  string                                                    │     │
-│     │      Blocks   []any                                                     │     │
-│     │  }                                                                      │     │
-│     └─────────────────────────────────────────────────────────────────────────┘     │
-│                                                                                      │
-│  2. PARSER (component/language/parser/parser.go)                                    │
-│     ┌─────────────────────────────────────────────────────────────────────────┐     │
-│     │  func (p *Parser) parseStep() {                                         │     │
-│     │      case "slack":                                                      │     │
-│     │          stepType = StepTypeSlack                                       │     │
-│     │  }                                                                      │     │
-│     └─────────────────────────────────────────────────────────────────────────┘     │
-│                                                                                      │
-│  3. COMPILER (component/language/compiler/automation_generator.go)                  │
-│     ┌─────────────────────────────────────────────────────────────────────────┐     │
-│     │  func (c *Compiler) compileStep(step *StepDef) {                        │     │
-│     │      case StepTypeSlack:                                                │     │
-│     │          if cfg, ok := step.Config.(*SlackStepConfig); ok {             │     │
-│     │              output["slack"] = map[string]any{                          │     │
-│     │                  "channel": cfg.Channel,                                │     │
-│     │                  "message": cfg.Message,                                │     │
-│     │              }                                                          │     │
-│     │          }                                                              │     │
-│     │  }                                                                      │     │
-│     └─────────────────────────────────────────────────────────────────────────┘     │
-│                                                                                      │
-│  4. SCHEDULER (component/automations/evaluator.go)                                  │
-│     ┌─────────────────────────────────────────────────────────────────────────┐     │
-│     │  func (e *Evaluator) executeStep(step Step) {                           │     │
-│     │      case "slack":                                                      │     │
-│     │          return e.executeSlackStep(step)                                │     │
-│     │  }                                                                      │     │
-│     └─────────────────────────────────────────────────────────────────────────┘     │
-│                                                                                      │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
+A new thing an automation can do is almost never a new statement. It is a
+**builtin**: a Go integration registered with `memql.RegisterPlugin`, declared
+in `dsl/<namespace>/builtins.memql` with `@executor("integration.<name>.<verb>")`,
+and called from a body as `x := builtin <name>(<named args>)`. Work that
+reaches the outside world through a script is an **action** over a declared
+**capability**, called as `action <name>(...)`. Both are journaled, previewed
+and retried like every other call.
+
+The statement set itself is closed, and a new statement kind is a grammar
+change touching every layer, each pinned by a test that fails until it is
+done:
+
+1. **AST** -- a statement type in `component/language/ast/body.go`.
+2. **Parser** -- its production in `component/language/parser/v1_body.go`,
+   its refusals in `v1_body_refusals.go`, and its entry in
+   `parser.BodyStatementForms()`.
+3. **Compiler** -- its scope rules in `compiler/body_scope.go` and its step in
+   `compiler/body_compile.go` (`TestCompileBodyCoversEveryStatementKind`).
+4. **Runtime** -- the step's executor in `component/automations/steps/`.
+5. **Corpus** -- a cell per construct under
+   `test/conformance/2026/statements/<construct>/<form>/`, which the
+   completeness gate requires, and a `GrammarVersion` bump.
 
 ---
 

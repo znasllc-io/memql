@@ -59,14 +59,16 @@ they sweep: `instance.trialEndsAt` is copied from the subscription, and
 billing relationship. Not duplication for convenience — it is what makes the
 sweeps possible at all.
 
-### The `where` clause is the only thing between a sweep and the fleet
+### The loop's `if` filter is the only thing between a sweep and the fleet
 
 The candidate queries are unwindowed by design (a filter cannot call
-`addDuration`), so the bracket lives in each automation's `forEach ... where`.
+`addDuration`), so the bracket lives in each automation's
+`for <x> in <candidates> if <bracket>` filter.
 
 Drop it from `teardownAfterGrace` and the next 04:00 UTC run destroys **every**
 suspended tenant, having taken a final backup of each and reported complete
-success. `TestEverySweepNarrowsItsCandidates` refuses a bare `forEach`, and
+success. `TestEverySweepNarrowsItsCandidates` refuses a sweep's `for` with no
+`if` filter, and
 `TestTheDestructiveSweepIsTheOnlyTeardownPath` keeps `requestInstanceTeardown`
 to exactly one caller — because what protects a customer's data here is a
 **sequence** (pause, fourteen days, teardown), and a second caller removes the

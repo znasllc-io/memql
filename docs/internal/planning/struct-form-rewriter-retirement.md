@@ -13,6 +13,13 @@ owner: znas
 work needs coordinated grammar + AST + evaluator changes that don't
 fit in a single coherent commit.
 
+> **Partly done (2026-09-14, epic memql#5370).** The logic, automation and
+> terse-automation stages are deleted: the parser reads a `logic` and an
+> `automation` natively as statements (`component/language/parser/v1_body.go`)
+> and refuses their retired forms by name. `rewriter.go` now lowers only a
+> `query`, a `mutation` and the file-top `args` block (`structFormSteps`), so
+> what remains of this plan is those two constructs.
+
 **Last landed:** the commit hash previously cited here (`daaec10`) does not
 resolve in this repo's history -- the five-file consolidation
 (`query_rewrite.go` / `mutation_rewrite.go` / `logic_rewrite.go` /

@@ -44,7 +44,6 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@removeFromSet`](#removefromset) |  | strings |  |  |
 | [`@requiresCapability`](#requirescapability) | strings | strings | strings |  |
 | [`@requiresRank`](#requiresrank) | string | string | string |  |
-| [`@schedule`](#schedule) |  |  |  | string or keywords |
 | [`@scrubPii`](#scrubpii) |  | flag |  |  |
 | [`@serverOnly`](#serveronly) | flag | flag |  |  |
 | [`@template`](#template) |  |  |  | flag |
@@ -213,7 +212,6 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@enabled`](#enabled) | no arguments | `@enabled` |
 | [`@filter`](#filter) | an expression | `@filter(row => row.status == "open")` |
 | [`@mcp`](#mcp) | no arguments | `@mcp` |
-| [`@schedule`](#schedule) | one string or keyword arguments | `@schedule(cron="0 0 * * * *")` |
 | [`@template`](#template) | no arguments | `@template` |
 | [`@trigger`](#trigger) | keyword arguments | `@trigger(event="node.created", concept="v1:cluster:node")` |
 
@@ -1106,20 +1104,6 @@ SUBSCRIPTIONS are gated by the same row admission (memql#4309): a graph.node.* e
 
 Implementation: component/memql/rowauthz_enforce.go, called from parser.go. MEASURED BY TestClusterOwnerTierInjectsTheAdminGate, TestFilteredReadPathAppliesTheRowGate, TestGraphExpansionAppliesTheTraversalGateBeforeItEmitsTheRow, TestTopLevelBuiltinAppliesTheRowGate and TestSubscriptionFanOutAppliesTheRowGate -- named so a reader can check whether this is still true rather than trust the sentence. Trusting it would have been wrong before: this doc described the tier as parsed-but-unread for as long as Phase 3 had been live, which is false in the one direction that costs a reader a wrong authorization assumption, and because the doc also feeds editor hover, the error reached every author who hovered the annotation (memql#3727). See [per-row-authz-audit.md](../operate/auth/per-row-authz-audit.md) and memql#2803.
 
-### @schedule
-
-| On | Written as | Example |
-|---|---|---|
-| [automation](#automation) | one string or keyword arguments | `@schedule(cron="0 0 * * * *")` |
-
-`@schedule` takes these keys, each written as `key=value`.
-
-| Key | Type | Meaning |
-|---|---|---|
-| `cron` | string | Cron schedule, e.g. "0 0 * * * *". Synonym for @trigger(schedule=...). |
-
-Cron schedule for a scheduled automation. Format: @schedule(cron="0 0 * * * *"). Synonym for @trigger(schedule=...); folds to the same scheduler field (#2712).
-
 ### @scope
 
 | On | Written as | Example |
@@ -1210,7 +1194,7 @@ On a capability: the coarse risk class @sideEffect("read"|"write"|"exec"). It is
 |---|---|---|
 | [automation](#automation) | no arguments | `@template` |
 
-On an automation: this is a work-spine TEMPLATE, invoked by a v1:work:run that named it rather than fired by the graph (memql#5048). It is the third way an automation can be reachable, alongside an event trigger and a schedule. A @template automation must carry NEITHER @trigger nor @schedule -- the load-time gate refuses both combinations, so "called" and "triggered" stay distinct.
+On an automation: this is a work-spine TEMPLATE, invoked by a v1:work:run that named it rather than fired by the graph (memql#5048). It is the third way an automation can be reachable, alongside an event trigger and a schedule. A @template automation must carry no @trigger -- the load-time gate refuses the combination, so "called" and "triggered" stay distinct.
 
 ### @templateFile
 
@@ -1234,7 +1218,6 @@ On an automation: this is a work-spine TEMPLATE, invoked by a v1:work:run that n
 |---|---|---|
 | `event` | string | Event pattern, e.g. "node.created" (with concept=) or a raw topic such as "system.startup". |
 | `concept` | string | Concept id the triggering event targets; required by the structured node.* event kinds. |
-| `partition` | string | Partition selector, e.g. "*" for all partitions. Required while the event topic carries a partition segment (#56 phase 8). |
 | `schedule` | string | Cron schedule with a leading seconds field, e.g. "0 0 * * * *". |
 | `filter` | expression | The trigger filter as a keyword: a lambda of one parameter over the triggering row, filter=row => &lt;predicate>. The standalone @filter(...) annotation is the usual spelling and sets the same filter. |
 | `on` | string | A synonym for event=: on=&lt;concept>.&lt;created\|updated\|deleted>, with the concept named through the file's `use` import, folds to the same graph.node.&lt;action>.&lt;concept> pattern event= names (resolved by the automation loader and the concept resolver). A later epic retires the synonyms (D15/D17). |
@@ -1333,6 +1316,7 @@ A retired name is refused where the table says, with `annotation_retired` and a 
 | `@retry` | everywhere | Removed from the allow-lists in memql#989; nothing reads it -- delete the annotation. |
 | `@role` | everywhere | Buried (#2631 ruling / #2709); it was documented but never enforced (nothing ever checked the value at runtime; the load gate rejects it) -- access control lives at the actor layer (RBAC + the @public per-row-authz classification). |
 | [`@row`](#row) | [spec and trait](#spec-and-trait) | It is a shape-only marker since epic #2281 -- to predicate on row metadata, bind a @row shape in the signature (`spec <shape> <name>`) and read its projected key by bare name. |
+| `@schedule` | [automation](#automation) | A scheduled automation is written @trigger(schedule="&lt;cron>"), the one spelling (D15, epic memql#5370); memqlmigrate --rewrite=bodies rewrites it. |
 | [`@scope`](#scope) | [concept](#concept) | Remove the annotation; every concept lives in the default partition post-#56. |
 | `@shape` | [spec and trait](#spec-and-trait) | A spec binds its shape or concept in the signature (epic #2281): `spec <boundName> <name> { return <bool> }`, with boundName resolved through the file-top `use` import. |
 | [`@sideEffect`](#sideeffect) | [action](#action) | The authoritative side-effect class lives on the capability declaration the action calls, where an action cannot overstate or understate it; remove it from the action. |
