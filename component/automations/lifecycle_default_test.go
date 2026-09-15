@@ -19,9 +19,7 @@ func lifecycleAutomationSource(annotation string) string {
 	return prefix + `@trigger(event="deploy.requested")
 @description("lifecycle default probe")
 automation lifecycleProbe {
-  step gate {
-    logic requireForwardDeploy { environment: "staging" }
-  }
+  gate := logic requireForwardDeploy(environment: "staging")
 }`
 }
 

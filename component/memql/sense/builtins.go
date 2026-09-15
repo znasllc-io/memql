@@ -57,34 +57,30 @@ var AnnotationsByReceiver = annotations.ByReceiver
 // (component/language/annotations, #991) under its historic name.
 var AnnotationDocs = annotations.Docs
 
-// KeywordDocs maps control-flow / clause keywords to documentation strings.
-// It is the fallback doc source for the reserved words the DSL spec does not
-// model; the retired forms have been purged so hover never teaches grammar the
-// parser rejects (E2 / memql#2373): the procedural `func (Receiver)` receiver
-// form (the struct form is the only author surface), the `has` membership
-// operator (retired for `in`, #971), and the `use v1:domain:concept` import
-// (Form A -- retired for `use <domain>.<construct>.{ names }`).
-var KeywordDocs = map[string]string{
-	"for":        "Loop over a range: for item := range collection { ... }",
-	"range":      "Used with for to iterate: for item := range collection",
-	"if":         "Conditional execution: if condition { ... } else { ... }",
-	"else":       "Alternative branch in an if statement.",
-	"switch":     "Multi-way branch: switch value { case X: ... default: ... }",
-	"case":       "A branch in a switch statement.",
-	"default":    "Default branch in a switch statement.",
-	"continue":   "Skip to the next iteration of a for loop.",
-	"break":      "Exit the current for loop.",
-	"return":     "Return a value from a function.",
-	"nil":        "The nil value (absence of a value).",
-	"retry":      "Retry an expression N times: retry(3) expression",
-	"when":       "Retired in edition 2026: `when(args.x) { <predicate> }` is written `args.x == nil || <predicate>`. memqlmigrate --rewrite=expressions rewrites it.",
-	"as":         "Alias in forEach iteration: for item as alias",
-	"where":      "Filter in forEach: for item := range collection where condition",
-	"use":        "File-top import: use <domain>.<construct>.{ names } (e.g. use cognition.concepts.{ space }).",
-	"concept":    "Define a concept schema: concept Name { ... }",
-	"in":         "Membership test: value in collection (the single membership operator; `has` is retired, #971).",
-	"startsWith": "String-prefix test: <field> startsWith \"lit\" / [\"a\", \"b\"] / args.x -- true when the field begins with the prefix, or with ANY prefix in a list (memql#4208). Compiles to a parameterized ^@ ANY(text[]); an empty list and a blank prefix match nothing.",
-	"not":        "Retired in edition 2026: `x not in list` is written `!(x in list)`. memqlmigrate --rewrite=expressions rewrites it.",
+// KeywordDocs maps keywords to their hover / completion documentation: the
+// DSL spec's lexicon (dslspec) for every word it documents -- the one source
+// of the statement language's docs (epic memql#5370), so hover never shows a
+// second, older description of a word -- and the entries below for the few
+// words the spec does not model. The retired forms stay purged so hover never
+// teaches grammar the parser rejects (E2 / memql#2373): the procedural
+// `func (Receiver)` receiver form, the `has` membership operator (retired for
+// `in`, #971), the `use v1:domain:concept` import, and the retired body forms
+// (`for x := range`, the forEach step's `as` and `where`, `continue` and
+// `break`, which no body has).
+var KeywordDocs = keywordDocs()
+
+func keywordDocs() map[string]string {
+	out := map[string]string{
+		"nil":     "The nil value (absence of a value).",
+		"concept": "Define a concept schema: concept Name { ... }",
+		"not":     "Retired in edition 2026: `x not in list` is written `!(x in list)`. memqlmigrate --rewrite=expressions rewrites it.",
+		"as":      "Retired in edition 2026 with the forEach step: a loop names its variable in `for <x> in <source>`. memqlmigrate --rewrite=bodies rewrites it.",
+		"where":   "Retired in edition 2026 with the forEach step: a loop filters with `for <x> in <source> if <cond>`. memqlmigrate --rewrite=bodies rewrites it.",
+	}
+	for _, kw := range dslSpec.Keywords {
+		out[kw.Name] = kw.Doc
+	}
+	return out
 }
 
 // FieldTypes lists the field types the editor offers in concept / args /

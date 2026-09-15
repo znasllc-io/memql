@@ -30,7 +30,7 @@ func TestCompleteTopLevelOffersLiveConstructs(t *testing.T) {
 }
 
 // TestCompleteTopLevelPrefixFilter confirms prefix filtering still applies --
-// typing `mut` offers `mutate` (the declaration keyword) and nothing unrelated.
+// typing `mut` offers `mutation` and nothing unrelated.
 func TestCompleteTopLevelPrefixFilter(t *testing.T) {
 	s := New(nil)
 	got := map[string]bool{}
@@ -40,7 +40,7 @@ func TestCompleteTopLevelPrefixFilter(t *testing.T) {
 		}
 	}
 	if !got["mutation"] {
-		t.Error("prefix `mut` should offer `mutate`")
+		t.Error("prefix `mut` should offer `mutation`")
 	}
 	if got["query"] || got["concept"] {
 		t.Error("prefix `mut` should not offer non-matching constructs")

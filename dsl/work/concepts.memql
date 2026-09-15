@@ -99,9 +99,9 @@ concept run {
 concept step {
   ownerUserId        string  @serverSet  @description("Copied from the run's owner; present-and-empty for a system run.")
   runId              string!  @description("v1:work:run.id this step belongs to.")
-  key                string!  @description("The stable step key from the template (the automation step id).")
+  key                string!  @description("The stable step key from the template: the statement's name, or for an unnamed statement its callee's name (`for_<var>`, `parallel`, `publish` or `return` where it has none), numbered #2 on a repeat.")
   seq                int!  @description("Position in the run's step order, 0-based.")
-  stepType           string!  @description("The automation step type: query, mutation, shape, webhook, event, function, action, automation, forEach, parallel, switch, detectLeadSignal, emitConceptCard.")
+  stepType           string!  @description("The automation step type the statement compiled to: function, action, automation, event, forEach, parallel, block, expression, return.")
   kind               enum("", "deterministic", "reasoning", "decision", "human", "loop", "subrun")  @description("Derived kind (spec section B). Epic A1 derives it for every type except function, which stays empty until the A2 loader rule.")
   call               object  @description("{construct, name} -- what the step invoked, by name only.")
   dependsOn          []string  @description("Step keys this step depends on.")

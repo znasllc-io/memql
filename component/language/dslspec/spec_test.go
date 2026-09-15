@@ -147,7 +147,7 @@ func TestAnnotationsAreProjectionOfRegistry(t *testing.T) {
 }
 
 // TestImportSuggestionRulePresent guards the owner-requested behaviour: after
-// `mutate`/`query` the spec must mark that a concept is expected and an
+// `mutation`/`query` the spec must mark that a concept is expected and an
 // import should be offered when none is in scope.
 func TestImportSuggestionRulePresent(t *testing.T) {
 	s := Build()

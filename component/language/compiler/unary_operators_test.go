@@ -59,13 +59,9 @@ query test testMissing {
 		result, err := CompileSource(`
 @trigger(schedule="0 */15 * * * *")
 automation testAutomation {
-  step flagged {
-    query openFlags()
-  }
-  step escalate {
-    if flagged.first().slaDeadline != nil {
-      logic escalateFlag(flag: flagged.first())
-    }
+  flagged := query openFlags()
+  if flagged.first().slaDeadline != nil {
+    escalate := logic escalateFlag(flag: flagged.first())
   }
 }`)
 		if err != nil {

@@ -52,7 +52,15 @@ func validateLogicEventBinding(rawSource string, funcDef *languageParser.Functio
 	// can't be mistaken for a body reference to the event.
 	bodyNoAnnotations := stripAttrLines(body)
 
-	if !referencesTriggeringEvent(bodyNoAnnotations) {
+	reads := referencesTriggeringEvent(bodyNoAnnotations)
+	if auto, ok := funcDef.Body.(*languageParser.AutomationDef); ok && auto.Body != nil {
+		// A statement body (epic memql#5370) reads the event only as
+		// args.event. A bare `event` there is a name the scope checker
+		// refuses with the message written for it (CheckBody: a logic has no
+		// trigger of its own), which this one would pre-empt.
+		reads = argsEventRefPattern.MatchString(languageParser.BlankCommentsAndStrings(bodyNoAnnotations))
+	}
+	if !reads {
 		return nil
 	}
 
@@ -75,6 +83,9 @@ func validateLogicEventBinding(rawSource string, funcDef *languageParser.Functio
 // not trip the check; `\bargs\.event\b` additionally accepts `args.event`
 // passed as a whole object (e.g. `foo({ payload: args.event })`).
 var triggeringEventRefPattern = regexp.MustCompile(`\bargs\.event\b|\bevent\.`)
+
+// argsEventRefPattern is the one of the two a statement body can write.
+var argsEventRefPattern = regexp.MustCompile(`\bargs\.event\b`)
 
 // referencesTriggeringEvent reports whether body reads the triggering event.
 func referencesTriggeringEvent(body string) bool {

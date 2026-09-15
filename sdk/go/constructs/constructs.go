@@ -106,8 +106,8 @@ type Construct struct {
 	// Name is the registry key: a concept's canonical id
 	// ("v1:cognition:space"), or the declared name for every other kind.
 	Name string
-	// Kind is the KIND, not the authored keyword -- "mutation" for what a file
-	// spells `mutate`. Do not derive Runnable from it; read Runnable.
+	// Kind is the construct's kind ("query", "mutation", ...). Do not derive
+	// Runnable from it; read Runnable.
 	Kind string
 	// Namespace is the DSL domain it was authored in. Empty for a construct
 	// that lives in a database row rather than a file.

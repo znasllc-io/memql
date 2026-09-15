@@ -1,0 +1,281 @@
+{
+  "automation": "library/automations.memql indexGeneratedOutputOnCreate",
+  "runs": {
+    "event agent | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "format": "s-format",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "mimeType": "s-mimeType",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "ownerUserId": "s-ownerUserId",
+            "partitionId": "space-1",
+            "producedByAgentId": "s-producedByAgentId",
+            "producedByPlanId": "s-producedByPlanId",
+            "producedByWorkerId": "s-producedByWorkerId",
+            "producedByWorkerName": "s-producedByWorkerName",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "source": "s-source",
+            "status": "succeeded",
+            "summary": "s-summary",
+            "title": "s-title"
+          },
+          "topic": "graph.node.created.v1:library:generatedOutput"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "agentId": "s-producedByAgentId",
+              "format": "s-format",
+              "kind": "generated_output",
+              "lens": "artifact",
+              "live": false,
+              "mimeType": "s-mimeType",
+              "ownerUserId": "s-ownerUserId",
+              "partitionId": "space-1",
+              "producedByPlanId": "s-producedByPlanId",
+              "producedByWorkerId": "s-producedByWorkerId",
+              "producedByWorkerName": "s-producedByWorkerName",
+              "source": "s-source",
+              "sourceConceptRef": "v1:probe:thing:1",
+              "summary": "s-summary",
+              "title": "s-title"
+            },
+            "kind": "mutation",
+            "name": "createArtifact"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event agent | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "format": "s-format",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "mimeType": "s-mimeType",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "ownerUserId": "s-ownerUserId",
+            "partitionId": "space-1",
+            "producedByAgentId": "s-producedByAgentId",
+            "producedByPlanId": "s-producedByPlanId",
+            "producedByWorkerId": "s-producedByWorkerId",
+            "producedByWorkerName": "s-producedByWorkerName",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "source": "s-source",
+            "status": "succeeded",
+            "summary": "s-summary",
+            "title": "s-title"
+          },
+          "topic": "graph.node.created.v1:library:generatedOutput"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "agentId": "s-producedByAgentId",
+              "format": "s-format",
+              "kind": "generated_output",
+              "lens": "artifact",
+              "live": false,
+              "mimeType": "s-mimeType",
+              "ownerUserId": "s-ownerUserId",
+              "partitionId": "space-1",
+              "producedByPlanId": "s-producedByPlanId",
+              "producedByWorkerId": "s-producedByWorkerId",
+              "producedByWorkerName": "s-producedByWorkerName",
+              "source": "s-source",
+              "sourceConceptRef": "v1:probe:thing:1",
+              "summary": "s-summary",
+              "title": "s-title"
+            },
+            "kind": "mutation",
+            "name": "createArtifact"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "format": "s-format",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "mimeType": "s-mimeType",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "ownerUserId": "s-ownerUserId",
+            "partitionId": "space-1",
+            "producedByAgentId": "s-producedByAgentId",
+            "producedByPlanId": "s-producedByPlanId",
+            "producedByWorkerId": "s-producedByWorkerId",
+            "producedByWorkerName": "s-producedByWorkerName",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "source": "s-source",
+            "status": "succeeded",
+            "summary": "s-summary",
+            "title": "s-title"
+          },
+          "topic": "graph.node.created.v1:library:generatedOutput"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "agentId": "s-producedByAgentId",
+              "format": "s-format",
+              "kind": "generated_output",
+              "lens": "artifact",
+              "live": false,
+              "mimeType": "s-mimeType",
+              "ownerUserId": "s-ownerUserId",
+              "partitionId": "space-1",
+              "producedByPlanId": "s-producedByPlanId",
+              "producedByWorkerId": "s-producedByWorkerId",
+              "producedByWorkerName": "s-producedByWorkerName",
+              "source": "s-source",
+              "sourceConceptRef": "v1:probe:thing:1",
+              "summary": "s-summary",
+              "title": "s-title"
+            },
+            "kind": "mutation",
+            "name": "createArtifact"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "format": "s-format",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "mimeType": "s-mimeType",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "ownerUserId": "s-ownerUserId",
+            "partitionId": "space-1",
+            "producedByAgentId": "s-producedByAgentId",
+            "producedByPlanId": "s-producedByPlanId",
+            "producedByWorkerId": "s-producedByWorkerId",
+            "producedByWorkerName": "s-producedByWorkerName",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "source": "s-source",
+            "status": "succeeded",
+            "summary": "s-summary",
+            "title": "s-title"
+          },
+          "topic": "graph.node.created.v1:library:generatedOutput"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "agentId": "s-producedByAgentId",
+              "format": "s-format",
+              "kind": "generated_output",
+              "lens": "artifact",
+              "live": false,
+              "mimeType": "s-mimeType",
+              "ownerUserId": "s-ownerUserId",
+              "partitionId": "space-1",
+              "producedByPlanId": "s-producedByPlanId",
+              "producedByWorkerId": "s-producedByWorkerId",
+              "producedByWorkerName": "s-producedByWorkerName",
+              "source": "s-source",
+              "sourceConceptRef": "v1:probe:thing:1",
+              "summary": "s-summary",
+              "title": "s-title"
+            },
+            "kind": "mutation",
+            "name": "createArtifact"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

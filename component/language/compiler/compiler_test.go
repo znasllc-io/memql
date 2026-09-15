@@ -80,14 +80,10 @@ mutation thing createThing {
 
 func TestCompileSource_Automation(t *testing.T) {
 	source := `
-@trigger(schedule="*/30 * * * *")
+@trigger(schedule="0 */30 * * * *")
 automation leadProcessor {
-  step fetchLeads {
-    query activeLeads(limit: 10)
-  }
-  step processLeads {
-    logic processLeads(leads: fetchLeads)
-  }
+  fetchLeads := query activeLeads(limit: 10)
+  processLeads := logic processLeads(leads: fetchLeads)
 }`
 
 	result, err := CompileSource(source)
@@ -109,9 +105,7 @@ func TestTranspileAutomation(t *testing.T) {
 	source := `
 @trigger(event="node.created", concept="v1:probe:thing")
 automation testAuto {
-  step step1 {
-    query listThings()
-  }
+  step1 := query listThings()
 }`
 
 	jsonOutput, err := TranspileAutomation(source)
@@ -138,13 +132,9 @@ func TestTranspileAutomation_ForEachBareVarReferencesNotQuoted(t *testing.T) {
 	source := `
 @trigger(event="node.created", concept="v1:probe:agent")
 automation autoJoinAIExample {
-  step getAgents {
-    query activeAgents()
-  }
-  step join {
-    forEach agent in getAgents.nodes() where agent.status != "left" {
-      mutation createParticipant(agentId: agent.id, status: "joined")
-    }
+  getAgents := query activeAgents()
+  for agent in getAgents.nodes() if agent.status != "left" {
+    mutation createParticipant(agentId: agent.id, status: "joined")
   }
 }`
 
@@ -155,18 +145,19 @@ automation autoJoinAIExample {
 
 	// A reference to the loop variable is an expression the runtime
 	// evaluates, never a string: it compiles to an {"$expr"} leaf, and a
-	// literal beside it stays a literal.
-	if strings.Contains(jsonOutput, `"agentId": "item.id"`) {
+	// literal beside it stays a literal. A statement loop keeps the name its
+	// author gave the variable.
+	if strings.Contains(jsonOutput, `"agentId": "agent.id"`) {
 		t.Fatalf("the loop variable was written as a string, which the runtime reads as text: %s", jsonOutput)
 	}
-	if !strings.Contains(jsonOutput, `"$expr": "item.id"`) {
-		t.Fatalf("expected the loop variable read as {\"$expr\": \"item.id\"}, got: %s", jsonOutput)
+	if !strings.Contains(jsonOutput, `"$expr": "agent.id"`) {
+		t.Fatalf("expected the loop variable read as {\"$expr\": \"agent.id\"}, got: %s", jsonOutput)
 	}
 	if !strings.Contains(jsonOutput, `"status": "joined"`) {
 		t.Fatalf("expected the literal argument to stay a literal, got: %s", jsonOutput)
 	}
-	if !strings.Contains(jsonOutput, `"filter": "item.status != \"left\""`) {
-		t.Fatalf("expected the where clause as canonical v1 source, got: %s", jsonOutput)
+	if !strings.Contains(jsonOutput, `"filter": "agent.status != \"left\""`) {
+		t.Fatalf("expected the loop's filter as canonical v1 source, got: %s", jsonOutput)
 	}
 }
 
@@ -224,10 +215,9 @@ func TestValidateMemQL(t *testing.T) {
 		},
 		{
 			name: "valid automation",
-			source: `func (Automation) test(_ any) {
-				step1 := query { concept==v1:test }
-				return step1
-			}`,
+			source: `automation test {
+  step1 := query readTest()
+}`,
 			wantErr: false,
 		},
 		{
@@ -251,9 +241,10 @@ func TestCompileSource_FunctionCallStepInAutomation(t *testing.T) {
 	source := `
 @trigger(event="node.created", concept="v1:probe:user")
 automation testAuto {
-  step checkUser {
-    query userById(userId: event.payload.userId)
+  args {
+    userId any
   }
+  checkUser := query userById(userId: args.userId)
 }`
 
 	result, err := CompileSource(source)
@@ -283,7 +274,7 @@ automation testAuto {
 		t.Fatalf("expected function name userById, got %v", functionConfig["name"])
 	}
 	args, _ := functionConfig["args"].(map[string]any)
-	if leaf, _ := args["userId"].(map[string]any); leaf["$expr"] != "event.payload.userId" {
+	if leaf, _ := args["userId"].(map[string]any); leaf["$expr"] != "args.userId" {
 		t.Fatalf("expected the userId argument as an expression leaf, got %#v", args["userId"])
 	}
 }
@@ -309,9 +300,7 @@ func TestCompileResult_ToJSON(t *testing.T) {
 	source := `
 @trigger(event="node.created", concept="v1:probe:thing")
 automation testAuto {
-  step step1 {
-    query listThings()
-  }
+  step1 := query listThings()
 }`
 
 	result, err := CompileSource(source)
@@ -394,13 +383,9 @@ func TestCompiler_AutomationWithCondition(t *testing.T) {
 	source := `
 @trigger(event="node.created", concept="v1:probe:thing")
 automation conditional {
-  step checkExists {
-    query thingById(id: "test-id")
-  }
-  step createIfMissing {
-    if checkExists.empty() {
-      mutation createThing(id: "test-id", created: true)
-    }
+  checkExists := query thingById(id: "test-id")
+  if checkExists.empty() {
+    createIfMissing := mutation createThing(id: "test-id", created: true)
   }
 }`
 
@@ -460,26 +445,6 @@ func (Query) getDefault() {
 	}
 }
 
-func TestCompiler_ExpressionToString_StepRef(t *testing.T) {
-	source := `
-func (Query) checkResult() {
-	step("checkUser")
-}`
-
-	result, err := CompileSource(source)
-	if err != nil {
-		t.Fatalf("CompileSource error: %v", err)
-	}
-
-	if len(result.Functions) != 1 {
-		t.Fatalf("Expected 1 function, got %d", len(result.Functions))
-	}
-
-	if !strings.Contains(result.Functions[0].Query, "step(") {
-		t.Errorf("Expected query to contain 'step(', got %q", result.Functions[0].Query)
-	}
-}
-
 func TestCompiler_ExpressionToString_ConcatExpr(t *testing.T) {
 	source := `
 func (Query) makeId() {
@@ -504,7 +469,7 @@ func (Query) makeId() {
 func TestCompiler_ExpressionToString_CoalesceExpr(t *testing.T) {
 	source := `
 func (Query) fallback() {
-	coalesce(step("create"), step("existing"))
+	coalesce(args.create, args.existing)
 }`
 
 	result, err := CompileSource(source)
@@ -567,7 +532,7 @@ func (Query) conditional() {
 func TestCompiler_ExpressionToString_FieldRef(t *testing.T) {
 	source := `
 func (Query) getField() {
-	field(item(), "name")
+	field(args.row, "name")
 }`
 
 	result, err := CompileSource(source)
@@ -583,8 +548,8 @@ func (Query) getField() {
 	if !strings.Contains(query, "field(") {
 		t.Errorf("Expected query to contain 'field(', got %q", query)
 	}
-	if !strings.Contains(query, "item()") {
-		t.Errorf("Expected query to contain 'item()', got %q", query)
+	if !strings.Contains(query, `arg("row")`) {
+		t.Errorf("Expected query to contain 'arg(\"row\")', got %q", query)
 	}
 }
 
@@ -595,9 +560,6 @@ func TestCompiler_ExpressionToString_NoArgAccessors(t *testing.T) {
 		expected string
 	}{
 		{"now", `func (Query) ts() { now }`, "timestamp()"},
-		{"input", `func (Query) inp() { input() }`, "input()"},
-		{"item", `func (Query) it() { item() }`, "item()"},
-		{"index", `func (Query) idx() { index() }`, "index()"},
 		{"event", `func (Query) ev() { event() }`, "event()"},
 		{"error", `func (Query) err() { error() }`, "error()"},
 	}
@@ -678,20 +640,19 @@ func TestCompiler_ExpressionToString_StringFunctions(t *testing.T) {
 // resolved to empty -- the dailyspace builtin then errored "userId is
 // required" on every login.
 //
-// The fix evaluates the fallback inside an intermediate function STEP whose
-// args the runtime resolves against the logic's own arguments before it
-// calls the builtin. In edition 2026 that argument is an {"$expr"} leaf the
-// runtime evaluates with EvalExpr, args in scope, and the `_return` is a
-// bare step reference -- never a re-parsed builtin call string.
+// The fallback is a statement's argument: an {"$expr"} leaf the runtime
+// evaluates with EvalExpr, args in scope, before the builtin is called, and
+// the return reads the statement's name -- never a re-parsed builtin call
+// string.
 func TestCompiler_LogicCoalesceInFunctionStepResolvesArgRefs(t *testing.T) {
 	source := `
 use common.builtins.{ ensureDailySpaceForUser }
 logic logicEnsureDailySpaceOnAuthSession {
-  args { event object @required }
-  body {
-    ensured := ensureDailySpaceForUser(userId: args.event.payload.userId ?? args.event.payload.subject)
-    return ensured
+  args {
+    event object!
   }
+  ensured := builtin ensureDailySpaceForUser(userId: args.event.payload.userId ?? args.event.payload.subject)
+  return ensured
 }`
 	normalised, err := parser.NormaliseAll(source)
 	if err != nil {
@@ -724,15 +685,13 @@ logic logicEnsureDailySpaceOnAuthSession {
 	}
 	compiled := result.Automations[0].JSON
 
-	// _return must be the BARE step reference, not a re-parsed builtin call.
-	ret, _ := compiled["_return"].(string)
-	if strings.TrimSpace(ret) != "ensured" {
-		t.Fatalf("_return = %q, want bare step ref %q (a builtin-call _return string can't resolve arg() refs)", ret, "ensured")
-	}
-
+	// The return reads the statement's name, not a re-parsed builtin call.
 	steps, _ := compiled["steps"].([]map[string]any)
-	if len(steps) != 1 {
-		t.Fatalf("expected 1 function step, got %d", len(steps))
+	if len(steps) != 2 {
+		t.Fatalf("expected the call and the return, got %d steps", len(steps))
+	}
+	if ret, _ := steps[1]["return"].(map[string]any); ret == nil || ret["value"] != "ensured" {
+		t.Fatalf("step 1 = %#v, want the return of the statement's name", steps[1])
 	}
 	fn, _ := steps[0]["function"].(map[string]any)
 	if fn == nil || fn["name"] != "ensureDailySpaceForUser" {

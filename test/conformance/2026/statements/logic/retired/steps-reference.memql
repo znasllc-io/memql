@@ -1,0 +1,4 @@
+logic stepsReference {
+  a := logic other()
+  return steps.a.result
+}

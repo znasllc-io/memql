@@ -51,7 +51,7 @@ import (
 // extension (memql#3309); field semantics must not drift without changing both
 // sides together.
 type RunnableConstruct struct {
-	// Kind is the authored construct keyword: query, mutate, logic, tool, or
+	// Kind is the authored construct keyword: query, mutation, logic, tool, or
 	// automation. These five are the whole runnable set -- spec / trait /
 	// prompt / seed / concept / shape / provider / builtin each need an
 	// execution semantic decided (which row does a spec evaluate against; who
@@ -98,7 +98,7 @@ type RunnableArg struct {
 	Enum []string
 	// Description is the arg's documentation.
 	//
-	// Sourcing note: for query / mutate / logic args this is the `///` doc
+	// Sourcing note: for query / mutation / logic args this is the `///` doc
 	// comment above the field, which is the ONLY per-arg documentation channel
 	// -- an args-field @description(...) has no AST slot and is REJECTED at
 	// load (memql#3336). For tool fields it is the field's @description(...)
@@ -109,7 +109,7 @@ type RunnableArg struct {
 	//
 	// Reported per-field so a client can mark the one or two fields it applies
 	// to, instead of disclaiming the whole form (memql#3333). Only a `tool`
-	// field can carry it -- query / mutate / logic args have no such annotation
+	// field can carry it -- query / mutation / logic args have no such annotation
 	// -- so it is always false for the other kinds.
 	//
 	// The field stays in Args rather than being filtered out here: dropping it
@@ -258,14 +258,6 @@ func scanTopLevelConstructs(source string) []constructSpan {
 				i = braceIdx // the loop's i++ steps past the opening brace
 				continue
 			}
-			if span, lastTok, ok := matchTerseAutomation(tokens, i); ok {
-				span.start = tokens[startTok].Pos
-				span.end = tokens[lastTok].EndPos
-				out = append(out, span)
-				preambleTok = -1
-				i = lastTok
-				continue
-			}
 			if span, lastTok, ok := matchPredicateDecl(tokens, i, scanLines); ok {
 				span.start = tokens[startTok].Pos
 				span.end = tokens[lastTok].EndPos
@@ -408,63 +400,14 @@ func matchConstructHeader(tokens []parser.Token, i int) (constructSpan, int, boo
 	return span, j, true
 }
 
-// matchTerseAutomation recognises the brace-less single-step automation form:
-//
-//	automation NAME @trigger(schedule="0 0 2 * * *") => logic targetLogic
-//
-// It has to be handled explicitly for two reasons. The obvious one is that it
-// IS a runnable automation and would otherwise be invisible. The subtler one is
-// that its inline `@trigger(...)` sits at depth 0 with no declaration body to
-// close: left unrecognised it becomes a dangling annotation preamble, and the
-// NEXT declaration's fragment gets sliced from there -- swallowing this whole
-// line and every comment between the two, which is exactly how the two
-// dsl/identity automations that surfaced this were lost.
-//
-// The form is one line by construction (parser.terseAutomationHeader is
-// `(?m)^...$`), so the declaration ends with the last token on the header's
-// line. Returns the span (start filled by the caller) and the index of that
-// last token.
-func matchTerseAutomation(tokens []parser.Token, i int) (constructSpan, int, bool) {
-	t := tokens[i]
-	if t.Type != parser.TokenIdentifier || t.Literal != "automation" {
-		return constructSpan{}, 0, false
-	}
-	if i+2 >= len(tokens) {
-		return constructSpan{}, 0, false
-	}
-	nameTok := tokens[i+1]
-	// `automation NAME @...` -- the `@` is what distinguishes the terse form
-	// from a block automation (whose next token is `{`).
-	if nameTok.Type != parser.TokenIdentifier || tokens[i+2].Type != parser.TokenAt {
-		return constructSpan{}, 0, false
-	}
-
-	last := i + 2
-	for k := i + 2; k < len(tokens); k++ {
-		if tokens[k].Type == parser.TokenEOF || tokens[k].Line != t.Line {
-			break
-		}
-		last = k
-	}
-
-	return constructSpan{
-		keyword: "automation",
-		name:    nameTok.Literal,
-		signature: Range{
-			Start: Position{Line: t.Line, Column: t.Column},
-			End:   Position{Line: nameTok.EndLine, Column: nameTok.EndCol},
-		},
-	}, last, true
-}
-
 // matchPredicateDecl recognises an edition-2026 brace-less predicate
 // declaration (memql#5364):
 //
 //	spec agent isAssistant = row => row.role == "assistant"
 //	trait isActiveRecord = row => row.active == true
 //
-// For the terse automation's two reasons: it IS a declaration, and left
-// unrecognised its annotation preamble dangles at depth 0 and the NEXT
+// It has to be handled explicitly for two reasons: it IS a declaration, and
+// left unrecognised its annotation preamble dangles at depth 0 and the NEXT
 // declaration's span is cut from there -- swallowing this whole declaration
 // into the next one's text and its source hash.
 //

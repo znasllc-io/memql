@@ -7,31 +7,25 @@ import (
 	"testing"
 )
 
-// memql#1368 -- the `parallel` step in the struct-form automation grammar.
+// memql#1368 -- the `parallel` statement.
 //
-// These tests lock the full chain: authored struct form -> rewriter ->
-// procedural parser -> compiler -> Automation.Steps[].Parallel IR
-// (ParallelStepConfig{Branches, Wait, FailFast}), which the executor's
-// ParallelExecutor already runs (branch ids surface as <parent>.<branch>).
+// These tests lock the full chain: an authored `parallel` statement -> the
+// statement parser -> the statement compiler -> Automation.Steps[].Parallel IR
+// (ParallelStepConfig{Branches, Wait, FailFast}, each branch a block step),
+// which the ParallelExecutor runs.
 
 const parallelAuthoredSrc = `@description("Gather two reports concurrently, then merge.")
 @trigger(event="system.startup")
 automation gather {
-  step layer0 {
-    parallel {
-      wait: "all"
-      failFast: true
-      branches: [
-        step sales   { automation fetchSales { } },
-        step support { automation fetchSupport { } }
-      ]
+  parallel {
+    branch sales {
+      automation fetchSales()
+    }
+    branch support {
+      automation fetchSupport()
     }
   }
-  step merge {
-    if steps.layer0.status == "success" {
-      automation mergeReports { }
-    }
-  }
+  automation mergeReports()
 }`
 
 func newTestLoader() *Loader {
@@ -49,11 +43,8 @@ func TestCompileSource_ParallelStep(t *testing.T) {
 	}
 
 	layer := auto.Steps[0]
-	if layer.ID != "layer0" || layer.Type != StepTypeParallel {
-		t.Fatalf("step 0 must be the parallel layer, got %s/%s", layer.ID, layer.Type)
-	}
-	if layer.Parallel == nil {
-		t.Fatal("parallel step must carry the Parallel config")
+	if layer.Type != StepTypeParallel || layer.Parallel == nil {
+		t.Fatalf("step 0 must be the parallel, got %s/%s", layer.ID, layer.Type)
 	}
 	if layer.Parallel.Wait != "all" || !layer.Parallel.FailFast {
 		t.Errorf("want wait=all failFast=true, got wait=%q failFast=%v",
@@ -62,43 +53,46 @@ func TestCompileSource_ParallelStep(t *testing.T) {
 	if len(layer.Parallel.Branches) != 2 {
 		t.Fatalf("want 2 branches, got %d", len(layer.Parallel.Branches))
 	}
-	// `automation <name> { }` branch bodies compile to sub-automation
-	// dispatch steps (StepTypeAutomation), exactly like top-level steps.
+	// Each branch is a block step named by its label, holding its
+	// statements: here one sub-automation call.
 	wantBranches := []struct{ id, sub string }{
 		{"sales", "fetchSales"},
 		{"support", "fetchSupport"},
 	}
 	for i, want := range wantBranches {
 		br := layer.Parallel.Branches[i]
-		if br == nil || br.ID != want.id {
-			t.Fatalf("branch %d: want id %q, got %+v", i, want.id, br)
+		if br == nil || br.ID != want.id || br.Type != StepTypeBlock || br.Block == nil {
+			t.Fatalf("branch %d: want block %q, got %+v", i, want.id, br)
 		}
-		if br.Type != StepTypeAutomation || br.Automation == nil || br.Automation.Name != want.sub {
+		if len(br.Block.Steps) != 1 {
+			t.Fatalf("branch %q: want one statement, got %d", want.id, len(br.Block.Steps))
+		}
+		if call := br.Block.Steps[0]; call.Type != StepTypeAutomation || call.Automation == nil || call.Automation.Name != want.sub {
 			t.Errorf("branch %q must dispatch sub-automation %s, got type=%s automation=%+v",
-				want.id, want.sub, br.Type, br.Automation)
+				want.id, want.sub, call.Type, call.Automation)
 		}
 	}
 
-	// The downstream merge step is gated on the parallel layer's status.
+	// The merge runs after the parallel, ungated: a failed branch stops the
+	// other branches and fails the parallel, which ends the run before it.
 	merge := auto.Steps[1]
-	if merge.ID != "merge" || merge.Condition == "" {
-		t.Fatalf("merge step must be gated; got %+v", merge)
-	}
-	if !strings.Contains(merge.Condition, "steps.layer0.status") {
-		t.Errorf("merge gate must reference the parallel layer, got %q", merge.Condition)
+	if merge.Automation == nil || merge.Automation.Name != "mergeReports" || merge.Condition != "" {
+		t.Fatalf("the merge must follow the parallel, ungated; got %+v", merge)
 	}
 }
 
+// A statement parallel waits for every branch and stops the others when one
+// fails: `wait any` and `on error continue` are the two ways to say otherwise.
 func TestCompileSource_ParallelStep_Defaults(t *testing.T) {
 	src := `@description("Defaults probe.")
 @trigger(event="system.startup")
 automation gather {
-  step layer0 {
-    parallel {
-      branches: [
-        step a { automation fetchA { } },
-        step b { automation fetchB { } }
-      ]
+  parallel {
+    branch a {
+      automation fetchA()
+    }
+    branch b {
+      automation fetchB()
     }
   }
 }`
@@ -110,27 +104,25 @@ automation gather {
 	if cfg == nil {
 		t.Fatal("parallel config missing")
 	}
-	if cfg.Wait != "all" || cfg.FailFast {
-		t.Errorf("defaults must be wait=all failFast=false, got wait=%q failFast=%v", cfg.Wait, cfg.FailFast)
+	if cfg.Wait != "all" || !cfg.FailFast {
+		t.Errorf("defaults must be wait=all failFast=true, got wait=%q failFast=%v", cfg.Wait, cfg.FailFast)
 	}
 }
 
-// A gated parallel layer (`if cond { parallel { ... } }`) keeps the
-// condition on the parallel step itself -- the synthesizer's layer-k>0 shape.
+// A gated parallel (`if cond { parallel { ... } }`) keeps the condition on
+// the parallel step itself.
 func TestCompileSource_ParallelStep_GatedLayer(t *testing.T) {
 	src := `@description("Gated fan-out probe.")
 @trigger(event="system.startup")
 automation gather {
-  step prep {
-    automation prep { }
-  }
-  step layer1 {
-    if steps.prep.status == "success" {
-      parallel {
-        branches: [
-          step a { automation fetchA { } },
-          step b { automation fetchB { } }
-        ]
+  prep := automation prep()
+  if prep.ready == true {
+    parallel {
+      branch a {
+        automation fetchA()
+      }
+      branch b {
+        automation fetchB()
       }
     }
   }
@@ -144,25 +136,30 @@ automation gather {
 	}
 	layer := auto.Steps[1]
 	if layer.Type != StepTypeParallel || layer.Parallel == nil {
-		t.Fatalf("step 1 must be the gated parallel layer, got %+v", layer)
+		t.Fatalf("step 1 must be the gated parallel, got %+v", layer)
 	}
-	if !strings.Contains(layer.Condition, "steps.prep.status") {
-		t.Errorf("gate condition must ride onto the parallel step, got %q", layer.Condition)
+	if !strings.Contains(layer.Condition, "prep.ready") {
+		t.Errorf("the gate's condition must ride onto the parallel step, got %q", layer.Condition)
 	}
 }
 
-// Per-branch gating inside the parallel: the executor's ParallelExecutor
-// evaluates branch Condition before dispatch.
+// Per-branch gating inside the parallel: an `if` in a branch gates the
+// statements of that branch alone.
 func TestCompileSource_ParallelStep_GatedBranch(t *testing.T) {
 	src := `@description("Branch gate probe.")
 @trigger(event="system.startup")
 automation gather {
-  step layer0 {
-    parallel {
-      branches: [
-        step a { if steps.prep.status == "success" { automation fetchA { } } },
-        step b { automation fetchB { } }
-      ]
+  args {
+    go any
+  }
+  parallel {
+    branch a {
+      if args.go == true {
+        automation fetchA()
+      }
+    }
+    branch b {
+      automation fetchB()
     }
   }
 }`
@@ -174,11 +171,11 @@ automation gather {
 	if len(branches) != 2 {
 		t.Fatalf("want 2 branches, got %d", len(branches))
 	}
-	if branches[0].Condition == "" {
-		t.Errorf("gated branch must keep its condition")
+	if steps := branches[0].Block.Steps; len(steps) != 1 || steps[0].Condition == "" {
+		t.Errorf("the gated branch's statement must keep its condition, got %+v", steps)
 	}
-	if branches[1].Condition != "" {
-		t.Errorf("ungated branch must have no condition, got %q", branches[1].Condition)
+	if steps := branches[1].Block.Steps; len(steps) != 1 || steps[0].Condition != "" {
+		t.Errorf("the ungated branch's statement must have no condition, got %+v", steps)
 	}
 }
 
@@ -189,34 +186,34 @@ func TestCompileSource_ParallelStep_Diagnostics(t *testing.T) {
 		wantErr string
 	}{
 		{
-			name:    "missing branches",
-			body:    `parallel { wait: "all" }`,
-			wantErr: "branches",
+			name:    "no branches",
+			body:    "parallel {\n  }",
+			wantErr: "a parallel has at least one branch",
 		},
 		{
-			name:    "empty branches",
-			body:    `parallel { branches: [ ] }`,
-			wantErr: "branches must not be empty",
+			name:    "a branch without its keyword",
+			body:    "parallel {\n    a {\n      automation x()\n    }\n  }",
+			wantErr: "expected `branch <label> { }` in the parallel",
+		},
+		{
+			name:    "duplicate branch labels",
+			body:    "parallel {\n    branch a {\n      automation x()\n    }\n    branch a {\n      automation y()\n    }\n  }",
+			wantErr: "the branch label `a` is used twice in this parallel",
 		},
 		{
 			name:    "bad wait value",
-			body:    `parallel { wait: "sometimes", branches: [ step a { automation x { } } ] }`,
-			wantErr: `invalid wait value "sometimes"`,
+			body:    "parallel {\n    branch a {\n      automation x()\n    }\n  } wait sometimes",
+			wantErr: "`wait` takes `any`",
 		},
 		{
-			name:    "duplicate branch ids",
-			body:    `parallel { branches: [ step a { automation x { } }, step a { automation y { } } ] }`,
-			wantErr: `duplicate branch id "a"`,
-		},
-		{
-			name:    "unknown key",
-			body:    `parallel { retries: 3, branches: [ step a { automation x { } } ] }`,
-			wantErr: `unknown key "retries"`,
+			name:    "the default wait written",
+			body:    "parallel {\n    branch a {\n      automation x()\n    }\n  } wait all",
+			wantErr: "`wait all` is the default",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			src := "@description(\"bad\")\nautomation bad {\n  step s {\n    " + tc.body + "\n  }\n}"
+			src := "@description(\"bad\")\n@trigger(event=\"system.startup\")\nautomation bad {\n  " + tc.body + "\n}"
 			_, err := newTestLoader().CompileSource(src, "test:parallel-bad")
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tc.wantErr)

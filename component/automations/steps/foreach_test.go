@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
+	"github.com/znasllc-io/memql/component/events"
 )
 
 type fakeExecutor struct {
@@ -23,55 +24,38 @@ func (e *fakeExecutor) Execute(ctx context.Context, step *automations.Step, step
 	}, nil
 }
 
+// TestForEachExecutor_EvaluatesNestedStepCondition: a gated statement inside
+// a `for` decides per item, over the loop's variable -- a false gate runs
+// nothing, a true one runs the call.
 func TestForEachExecutor_EvaluatesNestedStepCondition(t *testing.T) {
-	reg := NewRegistry()
-	fake := &fakeExecutor{}
-	reg.Register(automations.StepType("fake"), fake)
-
-	exec := &ForEachExecutor{Registry: reg}
-
-	eval := automations.NewEvaluator()
-	eval.SetInput([]any{"only-item"})
-
-	step := &automations.Step{
-		ID:   "forEach_test",
-		Type: automations.StepTypeForEach,
-		ForEach: &automations.ForEachStepConfig{
-			Source: "input",
-			As:     "item",
-			Do: []*automations.Step{
-				{
-					ID:        "doIt",
-					Type:      automations.StepType("fake"),
-					Condition: "index == 1", // index will be 0 for the only item -> should skip
-				},
-			},
-		},
-	}
-	if err := automations.PrepareExpressions(&automations.Automation{Name: "probe", Steps: []*automations.Step{step}}); err != nil {
-		t.Fatalf("prepare: %v", err)
-	}
-
-	res, err := exec.Execute(context.Background(), step, &Context{
-		Evaluator: eval,
-	})
+	a, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(`@trigger(event="probe.fired")
+automation loops {
+  args {
+    items any
+  }
+  for item in args.items {
+    if item == "wanted" {
+      builtin doIt()
+    }
+  }
+}`, "test.memql")
 	if err != nil {
-		t.Fatalf("expected no error, got: %v", err)
+		t.Fatalf("compile: %v", err)
 	}
-	if fake.calls != 0 {
-		t.Fatalf("expected fake executor not to be called, got calls=%d", fake.calls)
-	}
-
-	// Verify nested step result is marked skipped.
-	if res == nil || len(res.Children) != 1 {
-		t.Fatalf("expected 1 iteration child result, got: %#v", res)
-	}
-	iter := res.Children[0]
-	if iter == nil || len(iter.Children) != 1 {
-		t.Fatalf("expected 1 nested child result, got: %#v", iter)
-	}
-	nested := iter.Children[0]
-	if nested.Status != "skipped" {
-		t.Fatalf("expected nested step to be skipped, got status=%q", nested.Status)
+	for _, c := range []struct {
+		items []any
+		calls int
+	}{{[]any{"only-item"}, 0}, {[]any{"only-item", "wanted"}, 1}} {
+		fake := &fakeExecutor{}
+		reg := NewRegistry()
+		reg.Register(automations.StepTypeFunction, fake)
+		ev := events.NewEvent("probe.fired", events.KindMessage, map[string]any{"items": c.items})
+		exec, err := automations.NewExecutor(automations.ExecutorOptions{StepRegistry: reg}).ExecuteWithEvent(context.Background(), a, "test", &ev)
+		if err != nil {
+			t.Fatalf("run: %v (%s)", err, exec.Error)
+		}
+		if fake.calls != c.calls {
+			t.Fatalf("items %v: the gated call ran %d time(s), want %d", c.items, fake.calls, c.calls)
+		}
 	}
 }

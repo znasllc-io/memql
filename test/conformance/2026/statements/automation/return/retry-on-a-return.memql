@@ -1,0 +1,5 @@
+@trigger(schedule="0 0 * * * *")
+automation retryOnAReturn {
+  rows := query things()
+  return rows.count() retry(2)
+}

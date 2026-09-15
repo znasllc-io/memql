@@ -276,9 +276,7 @@ logic orphanProbe {
   args {
     a string @required
   }
-  body {
-    return args.a ?? ""
-  }
+  return args.a ?? ""
 }
 `
 	got := rewriteDoc(t, src)
@@ -318,9 +316,7 @@ logic absentProbe {
   args {
     a string @required
   }
-  body {
-    return args.a ?? ""
-  }
+  return args.a ?? ""
 }
 `
 	got := rewriteDoc(t, src)

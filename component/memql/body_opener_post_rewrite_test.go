@@ -51,43 +51,48 @@ var structFormSamples = map[string]structFormSample{
   args {
     event object @required
   }
-  body {
-    return sampleBuiltin({ id: args.event.payload.id })
-  }
+  return builtin sampleBuiltin(id: args.event.payload.id)
 }
 `,
 		bodyMarker: "sampleBuiltin(",
 	},
 	"automation": {
-		source: `@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
+		source: `@trigger(event="node.created", concept="v1:cognition:participant")
 automation sampleAutomation {
   args {
     id any
   }
 
-  step decide {
-    logic sampleLogic ( event )
-  }
+  decide := logic sampleLogic(id: args.id)
 }
 `,
 		bodyMarker: "sampleLogic(",
 	},
 }
 
+// statementBodyKeywords are the struct-form keywords the parser reads as
+// written, statement bodies and all (epic memql#5370): NormaliseAll leaves
+// them alone. A logic's body is extractStatementLogicBody's to find; an
+// automation is not a function, and the function loader never hands one to
+// extractFunctionBody.
+var statementBodyKeywords = map[string]bool{"logic": true, "automation": true}
+
 // TestBodyOpenerOnlySeesPostRewriteHeaders pins the invariant
-// precededByBodyOpener rests on: NormaliseAll rewrites every
-// author-facing struct-form keyword into a `func (Receiver) ...`
-// header, and the function-loader snapshot the body extractor runs
-// against (rawSourceForUsage) is taken AFTER that rewrite. So the
-// extractor only ever needs to recognise the `func ` header, and a
-// struct-form keyword arm alongside it would be dead by construction
-// (memql#3194).
+// precededByBodyOpener rests on: NormaliseAll rewrites every struct-form
+// keyword it expands (query, mutation) into a `func (Receiver) ...` header,
+// and the function-loader snapshot the body extractor runs against
+// (rawSourceForUsage) is taken AFTER that rewrite. So precededByBodyOpener
+// only ever needs to recognise the `func ` header, and a struct-form keyword
+// arm alongside it would be dead by construction (memql#3194). The keywords
+// the parser reads as written (statementBodyKeywords) must come through
+// NormaliseAll unchanged, a logic's body found by the statement arm.
 //
-// If the rewriter ever stops emitting a `func ` header for one of
-// these keywords -- or the snapshot moves above NormaliseAll -- this
-// test fails loudly, instead of extractFunctionBody quietly returning
-// "" and every validator fed that snapshot (declared usage, logic
-// event binding, actor binding, logic event fields) failing open.
+// If the rewriter ever stops emitting a `func ` header for one of the
+// expanded keywords, starts rewriting a statement body, or the snapshot
+// moves above NormaliseAll, this test fails loudly, instead of
+// extractFunctionBody quietly returning "" and every validator fed that
+// snapshot (declared usage, logic event binding, actor binding, logic event
+// fields) failing open.
 func TestBodyOpenerOnlySeesPostRewriteHeaders(t *testing.T) {
 	if len(languageParser.StructFormKeywords) == 0 {
 		t.Fatal("parser.StructFormKeywords is empty -- the rewriter chain lost its construct set")
@@ -105,11 +110,20 @@ func TestBodyOpenerOnlySeesPostRewriteHeaders(t *testing.T) {
 				t.Fatalf("NormaliseAll(%s sample): %v", kw, err)
 			}
 
-			if !containsHeaderLine(rewritten, "func ") {
-				t.Errorf("rewritten %s source carries no `func (Receiver) ...` header -- precededByBodyOpener recognises nothing else\nrewritten:\n%s", kw, rewritten)
-			}
-			if containsHeaderLine(rewritten, kw+" ") {
-				t.Errorf("rewritten %s source still opens a construct with the author-facing keyword -- the struct-form rewrite did not run\nrewritten:\n%s", kw, rewritten)
+			if statementBodyKeywords[kw] {
+				if rewritten != sample.source {
+					t.Errorf("NormaliseAll changed a %s, which the statement parser reads as written\nrewritten:\n%s", kw, rewritten)
+				}
+				if kw == "automation" {
+					return
+				}
+			} else {
+				if !containsHeaderLine(rewritten, "func ") {
+					t.Errorf("rewritten %s source carries no `func (Receiver) ...` header -- precededByBodyOpener recognises nothing else\nrewritten:\n%s", kw, rewritten)
+				}
+				if containsHeaderLine(rewritten, kw+" ") {
+					t.Errorf("rewritten %s source still opens a construct with the author-facing keyword -- the struct-form rewrite did not run\nrewritten:\n%s", kw, rewritten)
+				}
 			}
 
 			body := extractFunctionBody(rewritten)
@@ -125,9 +139,10 @@ func TestBodyOpenerOnlySeesPostRewriteHeaders(t *testing.T) {
 
 // TestBodyOpenerRejectsAuthoredStructForm records the flip side: an
 // authored (un-rewritten) struct-form header is NOT a body opener.
-// That is intentional -- such a header cannot appear in the snapshot
-// (see precededByBodyOpener) -- and it is why matching one there would
-// be dead code rather than a safety net.
+// That is intentional -- an expanded keyword's header cannot appear in the
+// snapshot, and a logic's is the statement arm's (see precededByBodyOpener)
+// -- and it is why matching one there would be dead code rather than a
+// safety net.
 func TestBodyOpenerRejectsAuthoredStructForm(t *testing.T) {
 	for _, kw := range languageParser.StructFormKeywords {
 		header := kw + " sampleName "

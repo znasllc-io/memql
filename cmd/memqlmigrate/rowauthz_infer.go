@@ -35,7 +35,7 @@ import (
 )
 
 // constructHeaderRe matches a top-level `query <Concept> <name> {` or
-// `mutate <Concept> <name> {` declaration, capturing the kind, the
+// `mutation <Concept> <name> {` declaration, capturing the kind, the
 // bound concept, and the construct name.
 //
 // The bound concept is the whole point here, so unlike the conformance

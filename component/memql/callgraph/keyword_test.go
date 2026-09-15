@@ -66,17 +66,17 @@ func TestRestrictedReceiversAreUnambiguous(t *testing.T) {
 	}
 }
 
-// The write function is declared `mutate`, and the retired `mutation` noun is
-// the invocation-step prefix only. A header matcher that accepted the retired
-// spelling would match nothing in the tree -- which is exactly the #3043
-// defect, and is invisible unless asserted from both sides.
+// The write function is declared `mutation`, the word a call spells too (D13,
+// epic memql#5370); the verb `mutate` is retired. A header matcher that
+// accepted the retired spelling would match nothing in the tree -- which is
+// exactly the #3043 defect, and is invisible unless asserted from both sides.
 func TestMutationKeywordIsMutation(t *testing.T) {
 	keyword, conceptInSignature, ok := kindKeyword("mutation")
 	if !ok {
 		t.Fatal("kind \"mutation\" resolves to no dslspec construct")
 	}
 	if keyword != "mutation" {
-		t.Errorf("mutation declaration keyword = %q, want \"mutation\" (epic memql#5375 collapsed `mutate` and `mutation` onto one word)", keyword)
+		t.Errorf("mutation declaration keyword = %q, want \"mutation\" (D13)", keyword)
 	}
 	if !conceptInSignature {
 		t.Error("mutation binds its concept in the signature (`mutation <Concept> <name>`)")
@@ -84,7 +84,7 @@ func TestMutationKeywordIsMutation(t *testing.T) {
 }
 
 // The retired spelling must produce NO constructs, so a fixture that drifts
-// back to `mutation node x {` fails loudly instead of silently exercising the
+// back to `mutate node x {` fails loudly instead of silently exercising the
 // rules against a keyword the parser no longer accepts.
 //
 // The retired word is `mutate` now, not `mutation` -- epic memql#5375
@@ -99,7 +99,7 @@ mutate node twoWrites {
   insert { id: args.id }
   update { id: args.id, health: "up" }
 }`
-	if got := splitConstructs("mutate", retired); len(got) != 0 {
+	if got := splitConstructs("mutation", retired); len(got) != 0 {
 		t.Fatalf("retired `mutate` spelling must split to nothing; got %d constructs", len(got))
 	}
 	if fs := CheckFile("dsl/cluster/mutations.memql", retired, nil); len(fs) != 0 {
@@ -109,7 +109,7 @@ mutate node twoWrites {
 
 // The live spelling splits and is judged. Guards the concept segment being
 // optional (`mutation <name>` as well as `mutation <Concept> <name>`).
-func TestLiveMutateSpellingSplits(t *testing.T) {
+func TestLiveMutationSpellingSplits(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		header string
@@ -142,7 +142,7 @@ func TestEveryRestrictedKindSplitsItsLiveForm(t *testing.T) {
 	for _, tc := range []struct{ kind, src string }{
 		{"query", "query node q {\n  filter row => row.id == args.id\n}"},
 		{"mutation", "mutation node m {\n  insert { id: args.id }\n}"},
-		{"logic", "logic decide {\n  body { return true }\n}"},
+		{"logic", "logic decide {\n  return true\n}"},
 		{"action", "action run {\n  args { x string }\n}"},
 	} {
 		t.Run(tc.kind, func(t *testing.T) {

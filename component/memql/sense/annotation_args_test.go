@@ -26,12 +26,15 @@ func TestCompleteAnnotationArgs_DerivedFromRegistry(t *testing.T) {
 	s := New(nil)
 
 	trigger := labelSet(s.completeAnnotationArgs(CursorContext{AnnotationName: "trigger"}))
-	// partition is currently-required and common in the real DSL (#56 phase 8),
-	// so it must be offered alongside event/schedule/concept.
-	for _, want := range []string{"event", "schedule", "concept", "partition"} {
+	for _, want := range []string{"event", "schedule", "concept"} {
 		if !trigger[want] {
 			t.Errorf("trigger args missing %q (want registry-derived)", want)
 		}
+	}
+	// partition= is retired from @trigger (the parser refuses it,
+	// trigger_partition_retired), so completion must not offer it.
+	if trigger["partition"] {
+		t.Error("trigger args offer the retired partition key")
 	}
 
 	// @rateLimit stood here until memql#5375 retired it (stored on the

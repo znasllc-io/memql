@@ -396,13 +396,10 @@ func signatureLineOffset(c SandboxConstruct) int {
 }
 
 // signatureKeywords maps a construct kind to the keyword(s) its signature line
-// can begin with. Since memql#5375 the kind and the keyword are the same word
-// the kind name and the keyword differ.
+// can begin with: its own name.
 func signatureKeywords(kind string) []string {
 	switch kind {
-	case "mutation":
-		return []string{"mutation"}
-	case "query", "logic", "concept", "shape", "spec", "trait", "automation", "action", "capability", "seed":
+	case "query", "mutation", "logic", "concept", "shape", "spec", "trait", "automation", "action", "capability", "seed":
 		return []string{kind}
 	default:
 		return nil

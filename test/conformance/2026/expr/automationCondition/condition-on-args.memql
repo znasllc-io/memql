@@ -18,9 +18,7 @@ automation acNoteClosedGoal {
     id      string
     status  string
   }
-  step note {
-    if args.status == "closed" {
-      mutation acNoteGoal(goalId: args.id, note: "closed")
-    }
+  if args.status == "closed" {
+    note := mutation acNoteGoal(goalId: args.id, note: "closed")
   }
 }

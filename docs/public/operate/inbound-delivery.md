@@ -166,13 +166,26 @@ mirrored data — a notification to act on, a job to enqueue, something with
 no system of record on the other side:
 
 ```memql fragment
-@trigger(event="node.created", concept="v1:platform:inboundRequest", partition="*")
-automation handleShopifyOrder { ... }
+/// Work a staged order delivery from the store's webhook.
+@trigger(event="node.created", concept="v1:platform:inboundRequest")
+@filter(row => row.source == "shopify-orders")
+automation handleShopifyOrder {
+  args {
+    id any
+    body any
+  }
+  mutation updateInboundRequestStatus(requestId: args.id, status: "processing")
+  order := logic parseShopifyOrder(body: args.body)
+  mutation recordOrder(orderId: order.id, total: order.total)
+  mutation updateInboundRequestStatus(requestId: args.id, status: "processed", processedAt: now)
+}
 ```
 
-Filter on `source`, read `body`, and stamp `updateInboundRequestStatus` with
-`processing` / `processed` / `failed` as you work it. The engine only ever
-writes the initial `received`; everything after that is yours.
+Filter on `source` in the trigger's `@filter`, declare the payload fields the
+body reads in its `args` block (`body`, `contentType`, ...), and stamp
+`updateInboundRequestStatus` with `processing` / `processed` / `failed` as you
+work the row. The engine only ever writes the initial `received`; everything
+after that is yours.
 
 Both can coexist: the dispatcher only ever offers a row to the connector
 its `source` names, so an automation on a different source never sees a

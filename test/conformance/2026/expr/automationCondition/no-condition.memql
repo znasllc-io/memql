@@ -1,12 +1,8 @@
 /// When a node joins the cluster, raise a ticket -- behind an `if` with nothing to decide.
-@trigger(event="node.created", concept="v1:cluster:node", partition="*")
+@trigger(event="node.created", concept="v1:cluster:node")
 automation welcomeNodeUnconditionally {
-  step kind {
-    logic joinedNodeType (event)
-  }
-  step raise {
-    if {
-      mutation raiseAgentTicket (title: "A node joined the cluster")
-    }
+  kind := logic joinedNodeType(event: event)
+  if  {
+    raise := mutation raiseAgentTicket(title: "A node joined the cluster")
   }
 }

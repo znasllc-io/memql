@@ -75,24 +75,19 @@ func TestReject_UnknownInvocationKind_NotSilentlyDropped(t *testing.T) {
 }
 
 func TestReject_UnknownInvocationKind_InLogicBody(t *testing.T) {
-	// Faithful reproduction of the audit probe "in a logic body": the full
-	// struct-form logic construct, rewritten by NormaliseAll then parsed. The
-	// body's `return <expr>` carries the malformed call.
+	// Faithful reproduction of the audit probe "in a logic body": the logic's
+	// `return <expr>` carries the malformed call, and the statement parser
+	// names the kinds a statement calls.
+	// memqlmigrate:keep -- `mutate` is the malformed kind under test.
 	src := `logic doThing {
-  body {
-    return mutate createNode(id: "x")
-  }
+  return mutate createNode(id: "x")
 }`
-	rewritten, err := NormaliseAll(src)
-	if err != nil {
-		t.Fatalf("NormaliseAll error: %v", err)
-	}
-	_, err = parseViaMethod(t, rewritten)
+	_, err := ParseFile(src)
 	if err == nil {
 		t.Fatal("expected the logic body to reject `mutate createNode(...)`, got nil")
 	}
-	if !strings.Contains(err.Error(), "did you mean 'mutation'?") {
-		t.Errorf("logic-body error should carry the mutation hint; got: %v", err)
+	if !strings.Contains(err.Error(), "body_call_kind_missing") || !strings.Contains(err.Error(), "`mutation`") {
+		t.Errorf("logic-body error should name the kinds a statement calls; got: %v", err)
 	}
 }
 

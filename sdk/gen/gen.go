@@ -61,9 +61,8 @@ var (
 	// Anchored at column 0 to avoid matching `logic X { ... }` nested
 	// inside automation step bodies -- those are call-site references,
 	// not top-level declarations.
-	// The mutation declaration keyword is `mutation` (epic memql#5375; it was
-	// `mutate` under C6 / memql#2036). It is
-	// normalised to the canonical kind label "mutation" in CollectConstructs.
+	// The declaration keyword is the kind label itself (`mutation`, D13;
+	// epic memql#5375 retired the old `mutate` spelling).
 	constructHeader = regexp.MustCompile(
 		`(?m)^(query|mutation|logic|builtin)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
 	)
@@ -361,9 +360,6 @@ func CollectConstructs(root string) ([]Construct, error) {
 		for _, m := range matches {
 			// m: [headStart, headEnd, kindStart, kindEnd, conceptStart, conceptEnd, nameStart, nameEnd]
 			kind := src[m[2]:m[3]]
-			if kind == "mutation" {
-				kind = "mutation" // the keyword and the kind label are one word since memql#5375
-			}
 			concept := ""
 			if m[4] >= 0 {
 				concept = src[m[4]:m[5]]

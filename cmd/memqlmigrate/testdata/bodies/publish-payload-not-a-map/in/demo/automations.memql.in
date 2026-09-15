@@ -1,0 +1,6 @@
+@trigger(event="demo.received")
+automation demoReceive {
+  step forward {
+    logic demoForward ( event: event )
+  }
+}

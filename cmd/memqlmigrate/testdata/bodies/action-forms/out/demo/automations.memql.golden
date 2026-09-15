@@ -1,0 +1,13 @@
+@trigger(event="demo.actions")
+automation demoActionForms {
+  args {
+    ref     string!
+    dryRun  boolean
+  }
+
+  authored := action cloneRepoAtVersion(ref: args.ref, dryRun: args.dryRun) on surface("runner")
+  procedural := action cloneRepoAtVersion(ref: args.ref) on surface("runner")
+  invocation := action cloneRepoAtVersion(ref: args.ref, dryRun: args.dryRun) on surface("runner")
+  gate := action runDeployGate(provider: "azure", workdir: "/w", dryRun: args.dryRun)
+  outcome := logic deployOutcomeLabel(passed: gate.passed)
+}

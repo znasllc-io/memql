@@ -1,8 +1,6 @@
 /// When a node joins the cluster, open a ticket; also exposed as its own MCP tool.
-@trigger(event="node.created", concept="v1:cluster:node", partition="*")
+@trigger(event="node.created", concept="v1:cluster:node")
 @mcp(true)
 automation welcomeNodeMcp {
-  step raise {
-    mutation raiseTicketMcp (title: "A node joined the cluster")
-  }
+  raise := mutation raiseTicketMcp(title: "A node joined the cluster")
 }

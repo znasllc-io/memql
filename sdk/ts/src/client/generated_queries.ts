@@ -3312,7 +3312,7 @@ QueryClient.prototype.expiredActiveDelegations = function (this: QueryClient, ar
   return this.executeNamed("expiredActiveDelegations", buildExpiredActiveDelegations(args), opts);
 };
 
-/** All audit events; the retention sweep iterates and per-row checks occurredAt + retention-days < now.
+/** All audit events; the retention sweep counts them.
 It reads under `actor.isClusterOwner==true` because its only caller is the auditEventRetentionSweep cron running under the cluster's MAINTENANCE PRINCIPAL (component/auth/maintenance_actor.go, memql#4366). Stating the conjunct rather than leaning on the tier's injection makes the arrangement legible here, at the read -- and makes the failure mode loud rather than silent. This sweep is OBSERVATION-ONLY today: it publishes a candidate COUNT, so an unauthorized read does not fail, it reports zero, and a retention window nobody is enforcing looks exactly like a retention window with nothing to do. */
 // Bound concept: v1:identity:auditEvent (machine-readable: BoundConcepts["expiredAuditEvents"] in generated_concepts.ts).
 export interface ExpiredAuditEventsArgs {
@@ -3377,7 +3377,7 @@ QueryClient.prototype.expiredMagicLinkRequests = function (this: QueryClient, ar
   return this.executeNamed("expiredMagicLinkRequests", buildExpiredMagicLinkRequests(args), opts);
 };
 
-/** Pending access requests; the expiry sweep iterates these and per-row checks createdAt + expiry-days < now. */
+/** Pending access requests, created before createdBefore when it is supplied; the expiry sweep expires each one it returns. */
 // Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["expiredPendingAccessRequests"] in generated_concepts.ts).
 export interface ExpiredPendingAccessRequestsArgs {
   createdBefore?: string;
@@ -3738,7 +3738,7 @@ QueryClient.prototype.inboundRequestByDedupeKey = function (this: QueryClient, a
   return this.executeNamed("inboundRequestByDedupeKey", buildInboundRequestByDedupeKey(args), opts);
 };
 
-/** One staged inbound request by its row id. The read a product's handler does when an automation hands it `event.payload.id` and it needs the body, the source and the verification bit (memql#3461 -- the campaign feedback ingestion reads all three before it will act on a payload). A by-id read returns at most one row, so it is not a list and declares no pagination. */
+/** One staged inbound request by its row id. The read a product's handler does when an automation hands it the staged row's id (`args.id`) and it needs the body, the source and the verification bit (memql#3461 -- the campaign feedback ingestion reads all three before it will act on a payload). A by-id read returns at most one row, so it is not a list and declares no pagination. */
 // Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestById"] in generated_concepts.ts).
 export interface InboundRequestByIdArgs {
   requestId: string;

@@ -1,0 +1,85 @@
+{
+  "description": "The forge state machine: routeRequest routes a new request by its submitter's role and records the routing; recordTransition records each status change once, and nothing for a write that leaves the status as it was.",
+  "scenarios": [
+    {
+      "name": "owner-request-is-queued",
+      "description": "An owner's request goes straight to queued, approved by its submitter, and the transition is recorded as approved.",
+      "seed": [
+        { "mutation": "createRequest", "args": { "requestId": { "$id": "req" }, "projectId": "project-scenario", "title": "A scenario request", "body": "Routed by role." } }
+      ],
+      "fire": [
+        { "automation": "routeRequest", "event": { "action": "created", "concept": "v1:forge:request", "id": { "$id": "req" } } },
+        { "automation": "recordTransition", "event": { "action": "updated", "concept": "v1:forge:request", "id": { "$id": "req" } } }
+      ],
+      "expect": {
+        "rows": [
+          { "concept": "v1:forge:request", "id": { "$id": "req" }, "payload": { "status": "queued", "submitterRole": "owner", "approvedByUserId": "v1:identity:user:user-scenario-owner" } },
+          { "concept": "v1:forge:requestEvent", "where": { "requestId": { "$id": "req" }, "kind": "routed" }, "payload": { "fromStatus": "submitted", "note": "routed by submitter role" } },
+          { "concept": "v1:forge:requestEvent", "where": { "requestId": { "$id": "req" }, "kind": "approved" }, "payload": { "fromStatus": "submitted", "toStatus": "queued" } },
+          { "concept": "v1:forge:requestEvent", "where": { "requestId": { "$id": "req" } }, "count": 2 }
+        ]
+      },
+      "dryRun": { "fire": 0, "writes": 2 },
+      "resume": { "fire": 0, "failAt": 2 }
+    },
+    {
+      "name": "unchanged-status-records-nothing",
+      "description": "Writing a request's status again, unchanged, is an update and fires recordTransition, which records nothing for it.",
+      "seed": [
+        { "mutation": "createRequest", "args": { "requestId": { "$id": "req" }, "projectId": "project-scenario", "title": "A scenario request", "body": "Routed by role." } }
+      ],
+      "fire": [
+        { "automation": "routeRequest", "event": { "action": "created", "concept": "v1:forge:request", "id": { "$id": "req" } } },
+        { "automation": "recordTransition", "event": { "action": "updated", "concept": "v1:forge:request", "id": { "$id": "req" } } },
+        { "mutation": "advanceRequest", "args": { "requestId": { "$id": "req" }, "status": "queued" } },
+        { "automation": "recordTransition", "event": { "action": "updated", "concept": "v1:forge:request", "id": { "$id": "req" } } }
+      ],
+      "expect": {
+        "rows": [
+          { "concept": "v1:forge:request", "id": { "$id": "req" }, "payload": { "status": "queued" } },
+          { "concept": "v1:forge:requestEvent", "where": { "requestId": { "$id": "req" } }, "count": 2 },
+          { "concept": "v1:forge:requestEvent", "where": { "requestId": { "$id": "req" }, "fromStatus": "queued" }, "count": 0 }
+        ]
+      },
+      "resume": { "fire": 3, "failAt": 1 }
+    },
+    {
+      "name": "writer-request-needs-approval",
+      "description": "A writer's request needs approval. The transition is recorded as validated.",
+      "seed": [
+        { "mutation": "createRequest", "as": { "userId": "user-scenario-writer", "role": "writer" }, "args": { "requestId": { "$id": "req" }, "projectId": "project-scenario", "title": "A scenario request", "body": "Routed by role." } }
+      ],
+      "fire": [
+        { "automation": "routeRequest", "event": { "action": "created", "concept": "v1:forge:request", "id": { "$id": "req" } } },
+        { "automation": "recordTransition", "event": { "action": "updated", "concept": "v1:forge:request", "id": { "$id": "req" } } }
+      ],
+      "expect": {
+        "rows": [
+          { "concept": "v1:forge:request", "id": { "$id": "req" }, "payload": { "status": "needs_approval", "submitterRole": "writer" } },
+          { "concept": "v1:forge:requestEvent", "where": { "requestId": { "$id": "req" }, "kind": "routed" }, "payload": { "fromStatus": "submitted" } },
+          { "concept": "v1:forge:requestEvent", "where": { "requestId": { "$id": "req" }, "kind": "validated" }, "payload": { "fromStatus": "submitted", "toStatus": "needs_approval" } },
+          { "concept": "v1:forge:requestEvent", "where": { "requestId": { "$id": "req" } }, "count": 2 }
+        ]
+      },
+      "resume": { "fire": 1, "failAt": 2 }
+    },
+    {
+      "name": "reader-request-needs-validation",
+      "description": "A reader's request needs validation. needs_validation names no audit kind, so the transition records nothing.",
+      "seed": [
+        { "mutation": "createRequest", "as": { "userId": "user-scenario-reader", "role": "reader" }, "args": { "requestId": { "$id": "req" }, "projectId": "project-scenario", "title": "A scenario request", "body": "Routed by role." } }
+      ],
+      "fire": [
+        { "automation": "routeRequest", "event": { "action": "created", "concept": "v1:forge:request", "id": { "$id": "req" } } },
+        { "automation": "recordTransition", "event": { "action": "updated", "concept": "v1:forge:request", "id": { "$id": "req" } } }
+      ],
+      "expect": {
+        "rows": [
+          { "concept": "v1:forge:request", "id": { "$id": "req" }, "payload": { "status": "needs_validation", "submitterRole": "reader" } },
+          { "concept": "v1:forge:requestEvent", "where": { "requestId": { "$id": "req" }, "kind": "routed" }, "payload": { "fromStatus": "submitted" } },
+          { "concept": "v1:forge:requestEvent", "where": { "requestId": { "$id": "req" } }, "count": 1 }
+        ]
+      }
+    }
+  ]
+}

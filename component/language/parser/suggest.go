@@ -16,9 +16,9 @@ import (
 
 // keywordSuggestionThreshold bounds how far a mistyped token may sit from a
 // known keyword before we stop offering a "did you mean" hint. The canonical
-// footgun this hardening targets -- `mutate` (the mutation *declaration*
-// verb) written in *call* position where the *invocation* noun `mutation`
-// belongs -- is edit distance 3, so the threshold must be at least 3. It is
+// footgun this hardening targets -- `mutate` (the declaration verb edition
+// 2026 retired) written in *call* position where `mutation` belongs -- is
+// edit distance 3, so the threshold must be at least 3. It is
 // held EXACTLY at 3 so genuinely-unrelated garbage (`foobar` -> `tool` is 4)
 // does not draw a misleading suggestion.
 const keywordSuggestionThreshold = 3
@@ -67,7 +67,7 @@ func levenshtein(a, b string) int {
 
 // nearestKeyword returns the candidate closest to name by edit distance and
 // whether a candidate within keywordSuggestionThreshold was found. An exact
-// match is skipped: a valid-but-misused keyword (e.g. `mutate` in call
+// match is skipped: a valid-but-misused keyword (e.g. `shape` in call
 // position) suggests its nearest COUSIN rather than itself. Ties break on the
 // lexically-smaller candidate so the result is deterministic regardless of
 // the candidate slice's order.
@@ -104,7 +104,7 @@ func didYouMean(name string, candidates []string) string {
 // keywords that NormaliseAll rewrites to the internal `func (Receiver)` form
 // BEFORE parseDefinition's contextual-keyword dispatch runs, so they are
 // deliberately absent from topLevelDeclParsers / TopLevelDeclKeywords: the
-// query / mutate / logic / automation family. They are still valid words an
+// query / mutation / logic / automation family. They are still valid words an
 // author types, so the call-position did-you-mean below offers them -- a
 // typo'd `quer allNodes(...)` should suggest `query`. Kept as an explicit list
 // so TestDeclarationKeywordNamesInSync can prove declarationKeywordNames =
@@ -113,7 +113,7 @@ var rewriterHandledDeclKeywords = []string{"automation", "logic", "mutation", "q
 
 // declarationKeywordNames is the flat, sorted, hand-maintained literal of every
 // author-facing top-level DECLARATION keyword: the contextual constructs
-// dispatched by topLevelDeclParsers PLUS the rewriter-handled query / mutate /
+// dispatched by topLevelDeclParsers PLUS the rewriter-handled query / mutation /
 // logic / automation family (rewriterHandledDeclKeywords). It serves only the
 // CALL-position hint below; a top-level statement no construct parser takes is
 // refused from ConstructKeywords, the one construct-keyword table
@@ -159,10 +159,8 @@ func renderKeywordList(kws []string) string {
 
 // kindSuggestionCandidates is the did-you-mean pool for an unknown
 // invocation-kind prefix in call position: every invocation kind UNION every
-// declaration keyword. Including the declaration keywords is what lets `mutate`
-// -- itself a valid declaration verb -- resolve to its invocation cousin
-// `mutation` (nearestKeyword skips the exact `mutate` match, leaving `mutation`
-// at distance 3 as the nearest), and lets a near-miss of a declaration keyword
+// declaration keyword. The retired verb `mutate` resolves to `mutation` at
+// distance 3, and including the declaration keywords lets a near-miss of one
 // typed in call position (`shappe foo(`) still draw a useful hint.
 func kindSuggestionCandidates() []string {
 	set := map[string]bool{}

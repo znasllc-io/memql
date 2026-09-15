@@ -1,0 +1,1 @@
+publishEvent: the payload args.event is not a map literal; a publish statement's payload is written { k: v }

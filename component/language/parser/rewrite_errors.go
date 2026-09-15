@@ -161,12 +161,6 @@ func refuseClause(keyword string, err error) error {
 	return &refusal{err: err, at: -1, pattern: clauseLine(keyword)}
 }
 
-// refuseNthClause is refuseClause for the nth (0-based) such line: the
-// second write block of a mutation that may have one.
-func refuseNthClause(keyword string, nth int, err error) error {
-	return &refusal{err: err, at: -1, pattern: clauseLine(keyword), nth: nth}
-}
-
 // refuseTextAfter marks err as a refusal of the first occurrence of text as
 // a word after the construct's first line opening with keyword.
 func refuseTextAfter(keyword, text string, err error) error {

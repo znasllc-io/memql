@@ -92,18 +92,20 @@ func TestConstructScopedBodyCompletion(t *testing.T) {
 			src:  "mutation todo createTodo {\n  ",
 			want: []string{"args", "insert", "update", "accept", "stamp"}, absent: []string{"filter", "shape", "body"},
 		},
+		// A logic's and an automation's statements are the body (epic
+		// memql#5370): the retired `body { }` wrapper is never offered.
 		{
-			name: "logic body offers body, never filter",
+			name: "logic body offers statements, never filter or a body block",
 			src:  "logic compute {\n  ",
-			want: []string{"args", "body"}, absent: []string{"filter", "insert", "shape"},
+			want: []string{"args", "return", "if"}, absent: []string{"filter", "insert", "shape", "body", "publish"},
 		},
 		{
-			// An automation has no body block -- its body is step blocks
-			// (emitAutomation refuses `body { }`); offering `body` here was
-			// the stale hand list memql#5359 replaced.
-			name: "automation body offers steps, never body or insert",
+			// An automation's statements are its body (epic memql#5370): neither
+			// a `body { }` wrapper nor a `step` block is offered; its blocks are
+			// args and precondition.
+			name: "automation body offers statements, never a body or step block or insert",
 			src:  "@trigger(event=\"x.y\")\nautomation onThing {\n  ",
-			want: []string{"args", "step", "precondition"}, absent: []string{"insert", "filter", "shape", "body"},
+			want: []string{"args", "precondition", "return", "publish"}, absent: []string{"insert", "filter", "shape", "body", "step"},
 		},
 	}
 	for _, tc := range cases {

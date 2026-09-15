@@ -23,11 +23,11 @@ import (
 // caught: `$args`-interpolated object-literal query calls
 // (`activeHumanParticipants({...})`) that are not a legal top-level
 // declaration at all, a `payload.`-prefixed filter clause retired by epic
-// #2292, and a curly-brace logic-step call (`logic autoJoinSI { event:
-// event }`) that fails ParseExpression outright -- the parenthesized form
-// (`logic autoJoinSI ( event )`) is what every real automation in
-// dsl/*/automations.memql uses. None of these announce themselves: a stale
-// snippet renders exactly like a working one in GitHub's markdown preview.
+// #2292, and a curly-brace logic call (`logic autoJoinSI { event: event }`)
+// that no grammar ever parsed -- a statement names every argument,
+// `joined := logic autoJoinSI(event: event)`. None of these announce
+// themselves: a stale snippet renders exactly like a working one in GitHub's
+// markdown preview.
 //
 // # What this validates, and how
 //

@@ -166,19 +166,18 @@ func TestSignatureOffsetFallsBackInsideTheConstruct(t *testing.T) {
 	}
 }
 
-// TestMutationSignatureUsesTheMutateKeyword covers the one kind whose name and
-// keyword differ. A `mutation` is declared `mutation NAME`, so a scan keyed on
-// the kind string alone would miss every mutation in the tree and silently
-// anchor them all at their annotation line.
-func TestMutationSignatureUsesTheMutateKeyword(t *testing.T) {
+// TestMutationSignatureAnchorsAtItsKeyword: a mutation's diagnostic anchors at
+// its `mutation` line, not at the annotation above it -- the kind whose
+// keyword differed from its name until edition 2026 (D13), which is how a
+// scan keyed on the kind once missed every mutation in the tree.
+func TestMutationSignatureAnchorsAtItsKeyword(t *testing.T) {
 	c := SandboxConstruct{
 		Name:   "createThing",
 		Kind:   "mutation",
 		Source: "@description(\"c\")\nmutation thing createThing {\n  insert { id: args.id }\n}\n",
 	}
 	if got := signatureLineOffset(c); got != 1 {
-		t.Errorf("offset = %d, want 1 (the `mutate` line, not the @description above it). "+
-			"`mutation` is the one kind whose keyword differs from its name.", got)
+		t.Errorf("offset = %d, want 1 (the `mutation` line, not the @description above it)", got)
 	}
 }
 

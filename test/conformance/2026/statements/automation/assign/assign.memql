@@ -1,0 +1,6 @@
+@trigger(schedule="0 0 * * * *")
+automation assignStatement {
+  tripled := logic triple(n: 14)
+  size := tripled > 40 ? "large" : "small"
+  mutation recordSize(size: size)
+}

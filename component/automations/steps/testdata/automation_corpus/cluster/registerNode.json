@@ -1,0 +1,257 @@
+{
+  "automation": "cluster/automations.memql registerNode",
+  "runs": {
+    "event agent | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "deploymentId": "s-deploymentId",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "provider": "s-provider",
+            "recordType": "contact",
+            "region": "s-region",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "system.startup"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "address": "",
+              "deploymentId": "s-deploymentId",
+              "id": "v1:cluster:node:n1",
+              "nodeType": "agent",
+              "provider": "s-provider",
+              "region": "s-region"
+            },
+            "kind": "mutation",
+            "name": "createNode"
+          },
+          {
+            "args": {
+              "action": "spawned",
+              "nodeId": "v1:cluster:node:n1",
+              "nodeType": "agent",
+              "reason": "system.startup"
+            },
+            "kind": "mutation",
+            "name": "createSpawnEvent"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event agent | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "deploymentId": "s-deploymentId",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "provider": "s-provider",
+            "recordType": "contact",
+            "region": "s-region",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "system.startup"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "address": "",
+              "deploymentId": "s-deploymentId",
+              "id": "v1:cluster:node:n1",
+              "nodeType": "agent",
+              "provider": "s-provider",
+              "region": "s-region"
+            },
+            "kind": "mutation",
+            "name": "createNode"
+          },
+          {
+            "args": {
+              "action": "spawned",
+              "nodeId": "v1:cluster:node:n1",
+              "nodeType": "agent",
+              "reason": "system.startup"
+            },
+            "kind": "mutation",
+            "name": "createSpawnEvent"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "deploymentId": "s-deploymentId",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "provider": "s-provider",
+            "recordType": "contact",
+            "region": "s-region",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "system.startup"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "address": "",
+              "deploymentId": "s-deploymentId",
+              "id": "v1:cluster:node:n1",
+              "nodeType": "bff",
+              "provider": "s-provider",
+              "region": "s-region"
+            },
+            "kind": "mutation",
+            "name": "createNode"
+          },
+          {
+            "args": {
+              "action": "spawned",
+              "nodeId": "v1:cluster:node:n1",
+              "nodeType": "bff",
+              "reason": "system.startup"
+            },
+            "kind": "mutation",
+            "name": "createSpawnEvent"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "deploymentId": "s-deploymentId",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "provider": "s-provider",
+            "recordType": "contact",
+            "region": "s-region",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "system.startup"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "address": "",
+              "deploymentId": "s-deploymentId",
+              "id": "v1:cluster:node:n1",
+              "nodeType": "bff",
+              "provider": "s-provider",
+              "region": "s-region"
+            },
+            "kind": "mutation",
+            "name": "createNode"
+          },
+          {
+            "args": {
+              "action": "spawned",
+              "nodeId": "v1:cluster:node:n1",
+              "nodeType": "bff",
+              "reason": "system.startup"
+            },
+            "kind": "mutation",
+            "name": "createSpawnEvent"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

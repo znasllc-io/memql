@@ -78,25 +78,21 @@ automation registerNode {
     provider any
     region any
   }
-  step record {
-    createNode {
-      id:           node.id ?? "",
-      nodeType:     node.type ?? "",
-      address:      node.address ?? "",
-      deploymentId: deploymentId ?? "",
-      provider:     provider ?? "",
-      environment:  environment ?? "",
-      region:       region ?? ""
-    }
-  }
-  step spawn {
-    createSpawnEvent {
-      nodeId:   node.id ?? "",
-      nodeType: node.type ?? "",
-      action:   "spawned",
-      reason:   "system.startup"
-    }
-  }
+  record := mutation createNode(
+    id:           args.node.id ?? "",
+    nodeType:     args.node.type ?? "",
+    address:      args.node.address ?? "",
+    deploymentId: args.deploymentId ?? "",
+    provider:     args.provider ?? "",
+    environment:  args.environment ?? "",
+    region:       args.region ?? ""
+  )
+  spawn := mutation createSpawnEvent(
+    nodeId:   args.node.id ?? "",
+    nodeType: args.node.type ?? "",
+    action:   "spawned",
+    reason:   "system.startup"
+  )
 }`
 
 // TestDryRun_RegisterNode_BindsCleanMutationArgs: a dry-run of the registerNode

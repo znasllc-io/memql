@@ -12,8 +12,17 @@ package planner
 // This is the replacement the owner asked for: capture the LITERAL MemQL of
 // what ACTUALLY ran. Every tool call an agent makes is already recorded, so on
 // a completed RUN we just read those records and render them as a MemQL
-// automation -- one step per call. No LLM: it's transcription, not generation.
-// Reliable, free, and it is genuinely "the MemQL that ran".
+// automation -- one statement per call. No LLM: it's transcription, not
+// generation. Reliable, free, and it is genuinely "the MemQL that ran".
+//
+// # A tool call is written as the call its handler makes
+//
+// A tool is agent-only: no statement calls one. A tool whose handler is a
+// function handler runs one construct call with the tool's arguments, so the
+// statement is that call, `callN := <kind> <handler>(<args>)`. A query or
+// webhook handler substitutes the arguments into MemQL text or a request, so
+// the tool's arguments are no one call's; such a call is recorded as a
+// comment line, and the transcript is not re-runnable.
 //
 // # What it reads changed with memql#5050
 //
@@ -36,6 +45,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -87,7 +97,11 @@ func (d *AuthoringCaptureDispatcher) runCaptureTranscript(ctx context.Context, r
 	}
 
 	autoName := transcriptAutomationName(runId)
-	source := renderTranscriptAutomation(autoName, goal, calls)
+	var callee toolCalleeFunc
+	if speller, ok := d.engine.(ToolCallSpeller); ok {
+		callee = speller.ToolCallee
+	}
+	source, everyCallWritten := renderTranscriptAutomation(autoName, goal, calls, callee)
 
 	bundleId := id.NewShortId()
 	title := goal
@@ -105,10 +119,11 @@ func (d *AuthoringCaptureDispatcher) runCaptureTranscript(ctx context.Context, r
 	// Gate 1 (re-runnability check, #1195): compile + bind the rendered
 	// automation through the SAME sandbox the author path uses. A transcript is
 	// a faithful RECORD regardless; this answers whether it is also genuinely
-	// RE-RUNNABLE -- compiles + binds -- versus a record whose literal calls
-	// (run-scoped ids, non-automation tool calls) don't form a runnable
-	// automation. Best-effort: a binary without the authoring seams linked
-	// still stores the transcript as a record, just without the Gate-1 verdict.
+	// RE-RUNNABLE -- compiles + binds, and wrote every call as a statement --
+	// versus a record whose literal calls (run-scoped ids, tool calls with no
+	// statement form) don't form a runnable automation. Best-effort: a binary
+	// without the authoring seams linked still stores the transcript as a
+	// record, just without the Gate-1 verdict.
 	var (
 		report     memql.SandboxReport
 		gate1Ran   bool
@@ -117,7 +132,7 @@ func (d *AuthoringCaptureDispatcher) runCaptureTranscript(ctx context.Context, r
 	if ae, ok := d.engine.(captureEngine); ok {
 		report = ae.CompileBundle([]memql.SandboxConstruct{construct})
 		gate1Ran = true
-		reRunnable = report.OK
+		reRunnable = report.OK && everyCallWritten
 	}
 	if err := d.recordTranscriptValidated(ctx, ownerUserId, bundleId, report, gate1Ran, reRunnable, len(calls)); err != nil {
 		return fmt.Errorf("record transcript status: %w", err)
@@ -196,11 +211,24 @@ func observationArgsJSON(data map[string]any) string {
 	return args
 }
 
+// ToolCallSpeller is the engine seam that answers how a tool's call is written
+// as a statement (MemQLEngine.ToolCallee). Optional: an engine without it
+// writes every call as a comment line.
+type ToolCallSpeller interface {
+	ToolCallee(tool string) (kind, callee string, ok bool)
+}
+
+// toolCalleeFunc answers the kind and name of the construct call a tool's
+// handler makes; ok is false when the tool has no such call.
+type toolCalleeFunc func(tool string) (kind, callee string, ok bool)
+
 // renderTranscriptAutomation builds the MemQL automation that reproduces the
-// recorded calls: one step per call, in order, each invoking the tool with the
-// exact args it ran with. Deterministic + verbatim -- this is what actually
-// happened, expressed as MemQL.
-func renderTranscriptAutomation(name, goal string, calls []toolCall) string {
+// recorded calls: one statement per call, in order, each making the call the
+// tool's handler made, with the exact args the tool ran with. Deterministic +
+// verbatim -- this is what actually happened, expressed as MemQL. A call with
+// no statement form (see the file comment) is a comment line naming the tool
+// and its args; everyCallWritten reports whether there was none.
+func renderTranscriptAutomation(name, goal string, calls []toolCall, callee toolCalleeFunc) (source string, everyCallWritten bool) {
 	var b strings.Builder
 	desc := goal
 	if desc == "" {
@@ -210,18 +238,103 @@ func renderTranscriptAutomation(name, goal string, calls []toolCall) string {
 	}
 	fmt.Fprintf(&b, "@description(%q)\n", truncate(desc, 200))
 	fmt.Fprintf(&b, "automation %s {\n", name)
+	everyCallWritten = true
 	for i, c := range calls {
-		// Story 9 (#2335): emit the named-args invocation form `name(k: v, ...)`,
-		// not the legacy object-literal wrapper `name({...})`. c.Args is the raw
-		// recorded JSON args object; lower it to named args (nested values keep
-		// their JSON braces). Unparseable / empty args render `name()`.
-		var argsMap map[string]any
-		_ = json.Unmarshal([]byte(strings.TrimSpace(c.Args)), &argsMap)
-		fmt.Fprintf(&b, "  step call%d {\n    %s(%s)\n  }\n", i, c.Name, encodeArgs(argsMap))
+		// Named args `name(k: v, ...)`. c.Args is the raw recorded JSON args
+		// object; lower it to named args (nested values keep their JSON
+		// braces). Unparseable / empty args render `name()`.
+		args, written := transcriptArgs(c.Args)
+		if written && callee != nil {
+			if kind, target, ok := callee(c.Name); ok {
+				fmt.Fprintf(&b, "  call%d := %s %s(%s)\n", i, kind, target, args)
+				continue
+			}
+		}
+		everyCallWritten = false
+		if !written {
+			// The recorded JSON, on one line: a comment ends at a newline.
+			args = strings.Join(strings.Fields(c.Args), " ")
+		}
+		fmt.Fprintf(&b, "  // call%d: tool %s(%s) -- no statement writes this call\n", i, c.Name, args)
 	}
 	b.WriteString("}\n")
-	return b.String()
+	return b.String(), everyCallWritten
 }
+
+// transcriptArgs writes a recorded JSON argument object as named arguments,
+// `k: v, ...` in key order, each value a MemQL literal. ok is false when some
+// part has no MemQL spelling: a key that is not a name (a map key is an
+// unquoted name), or arguments that do not decode as an object. Empty or
+// absent arguments write as nothing.
+func transcriptArgs(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", true
+	}
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	var args map[string]any
+	if err := dec.Decode(&args); err != nil {
+		return "", false
+	}
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		v, ok := transcriptValue(args[k])
+		if !ok || !transcriptName.MatchString(k) {
+			return "", false
+		}
+		parts = append(parts, k+": "+v)
+	}
+	return strings.Join(parts, ", "), true
+}
+
+// transcriptValue writes one decoded JSON value as a MemQL literal.
+func transcriptValue(v any) (string, bool) {
+	switch x := v.(type) {
+	case nil:
+		return "nil", true
+	case bool:
+		return fmt.Sprintf("%t", x), true
+	case string:
+		return langparser.QuoteString(x), true
+	case json.Number:
+		return x.String(), true
+	case []any:
+		items := make([]string, 0, len(x))
+		for _, item := range x {
+			s, ok := transcriptValue(item)
+			if !ok {
+				return "", false
+			}
+			items = append(items, s)
+		}
+		return "[" + strings.Join(items, ", ") + "]", true
+	case map[string]any:
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		entries := make([]string, 0, len(keys))
+		for _, k := range keys {
+			s, ok := transcriptValue(x[k])
+			if !ok || !transcriptName.MatchString(k) {
+				return "", false
+			}
+			entries = append(entries, k+": "+s)
+		}
+		return "{" + strings.Join(entries, ", ") + "}", true
+	}
+	return "", false
+}
+
+// transcriptName is the shape of an argument name or a map key.
+var transcriptName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // --- persistence (transcript-specific) ------------------------------------
 

@@ -125,16 +125,12 @@ type BundleApprovalArtifact struct {
 	// Trace is the behavioral trace of the dry-run -- every step the automation
 	// ran, in order, so the approver sees what it actually does.
 	Trace []DryRunStep `json:"trace"`
-	// SideEffectManifest is the tiered catalog of mutations / reads / blocked
-	// webhooks the automation produced under the isolated tier.
+	// SideEffectManifest is the tiered catalog of writes and metered reads the
+	// automation produced in the sandbox.
 	SideEffectManifest SideEffectManifest `json:"sideEffectManifest"`
 	// CostEstimate is the metered cost of the run's real reads -- what the
 	// automation will spend in production each time it fires.
 	CostEstimate CostEstimate `json:"costEstimate"`
-	// FullLiveStaged is true when the dry-run that produced this artifact ran
-	// under the optional full-sandbox-live staging tier, so the approver knows
-	// the evidence reflects a live-webhook (capture-sink) staging pass.
-	FullLiveStaged bool `json:"fullLiveStaged"`
 }
 
 // BuildApprovalArtifact frames a dryRunPassed bundle row as the Gate-3 approval
@@ -155,7 +151,6 @@ func BuildApprovalArtifact(bundle AuthoringBundleRow) (BundleApprovalArtifact, e
 		Trace:              bundle.DryRunReport.Trace,
 		SideEffectManifest: bundle.DryRunReport.SideEffectManifest,
 		CostEstimate:       bundle.DryRunReport.CostEstimate,
-		FullLiveStaged:     bundle.DryRunReport.Mode == DryRunModeFullSandboxLive,
 	}, nil
 }
 

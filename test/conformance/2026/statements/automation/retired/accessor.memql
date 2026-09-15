@@ -1,0 +1,9 @@
+@trigger(schedule="0 0 * * * *")
+automation accessorRead {
+  args {
+    items []object
+  }
+  for x in args.items {
+    mutation touchThing(id: item())
+  }
+}

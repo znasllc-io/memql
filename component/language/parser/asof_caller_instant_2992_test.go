@@ -132,11 +132,11 @@ func TestAsOf_RejectedClauses(t *testing.T) {
 // accepted spelling must not open that door, and it would be an easy thing to
 // miss -- the new branch sits after the query-only check, not before it.
 func TestAsOf_CallerInstantStaysQueryOnly(t *testing.T) {
-	for _, body := range []string{"Logic", "Automation"} {
+	for body, src := range map[string]string{
+		"logic":      "logic xReadsAsOf {\n  args {\n    at string\n  }\n  return asOf(concept == \"v1:cluster:node\", args.at ?? latest)\n}",
+		"automation": "automation xReadsAsOf {\n  args {\n    at string\n  }\n  x := asOf(concept == \"v1:cluster:node\", args.at ?? latest)\n}",
+	} {
 		t.Run(body, func(t *testing.T) {
-			src := "func (" + body + ") xReadsAsOf(ctx any) (any, error) {\n" +
-				"  return asOf(concept == \"v1:cluster:node\", args.at ?? latest)\n" +
-				"}"
 			_, err := ParseFile(src)
 			if err == nil {
 				t.Fatalf("the caller-instant asOf form parsed in a %s body -- memql#2992 must not "+

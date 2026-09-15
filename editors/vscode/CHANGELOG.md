@@ -7,7 +7,7 @@ someone deciding whether to install rather than for someone reading the repo.
 
 **The MemQL it speaks, and the cluster's**
 - This release speaks MemQL edition 2026, grammar
-  `2026.09-dsl-v1-expressions-52d9aeb1`: its
+  `2026.09-dsl-v1-bodies-8fef9e94`: its
   highlighting, completion and diagnostics are that grammar's.
 - When you connect to a cluster, the extension compares the cluster's MemQL
   with its own. A cluster on a newer grammar raises a notice naming the release
@@ -60,6 +60,29 @@ someone deciding whether to install rather than for someone reading the repo.
   once, and runs on save if `source.fixAll` is in your
   `editor.codeActionsOnSave`. A construct the rewrite cannot convert, such as a
   relationship traversal, keeps its underline and offers no fix.
+
+**Writing a logic or an automation**
+- A logic's and an automation's body is a list of statements, run in the order
+  they are written: `x := query activeUsers(status: "active")`, a bare call,
+  `if` / `else if` / `else`, `for x in xs if <cond> { ... }`, `switch`,
+  `parallel { branch a { ... } }`, `publish "<topic>" { ... }` in an automation,
+  and `return`. A call carries its kind -- `query`, `mutation`, `logic`,
+  `builtin`, `automation` or `action` -- and names every argument, and
+  `retry(n)`, `on error continue` and `on surface(...)` close one. A statement's
+  value is read by its name: `rows.first().email`.
+- Completion in a body offers the statements its position accepts, the kinds a
+  call names, and the names bound above the cursor.
+- The forms statements replace no longer load: a `step` block, a logic's
+  `body { }`, the one-line `automation x @trigger(...) => logic y`,
+  `steps.<id>.result`, `forEach`, `publishEvent(...)`, `@schedule(...)` and
+  `partition=` on a trigger. The editor underlines each as an error naming the
+  replacement and the command that rewrites a whole tree,
+  `memqlmigrate --rewrite=bodies`.
+- `step("x")`, `input()`, `item()` and `index()` no longer load either: a
+  statement is read by its name, an argument as `args.<name>`, and a loop's
+  element by the name the loop gives it.
+- A mutation is declared with the word a call spells:
+  `mutation <Concept> <name> { ... }`. `mutate` no longer loads.
 
 ## 0.3.1
 

@@ -375,22 +375,50 @@ MemQL DSL is a domain-specific query language for time-series memory graphs.
 
 ### Example Query
 
-The named-args form is how a declared query is invoked from a logic body or
-a tool handler (not a standalone top-level `.memql` declaration in its own
-right):
+A query is declared once, bound to its concept in the signature, and read
+through a lambda over the row:
 
-```memql fragment
-query activeHumanParticipants(partitionId: "space_123")
+```memql
+/// List the caller's Library rows for one lens (artifact | record).
+@actor
+query artifact libraryArtifactsByLens {
+  args {
+    lens  string!
+  }
+  filter   row => row.ownerUserId == actor.userId && row.lens == args.lens
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape    artifactFull
+}
 ```
 
+A logic or an automation calls it by kind and name, with named arguments, as a
+statement of its own: `rows := query libraryArtifactsByLens(lens: "record")`.
+
 ### Example Automation
+
+An automation's `args` block is the contract the triggering row's payload is
+bound into, and its body is statements that run in the order written:
+
 ```memql
-@trigger(event="node.created", concept="v1:cognition:space", partition="*")
-@description("On space creation, auto-join the creator's assistant")
-automation autoJoinSI {
-  step run {
-    logic autoJoinSI(event: event)
+/// On to-do creation, promote it into the Library Records lens.
+@trigger(event="node.created", concept="v1:todos:todo")
+automation indexTodoOnCreate {
+  args {
+    id any
+    ownerUserId any
+    title any
   }
+
+  persist := mutation createArtifact(
+    sourceConceptRef: args.id,
+    ownerUserId:      args.ownerUserId,
+    lens:             "record",
+    kind:             "todo",
+    source:           "agent_generated",
+    title:            args.title ?? "Untitled to-do",
+    live:             false
+  )
 }
 ```
 

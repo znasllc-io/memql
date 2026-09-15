@@ -103,7 +103,7 @@ func TestResumeBindsPersistedMaterializerArguments(t *testing.T) {
 func TestJournalRecordsForkOrderWithoutChainTracking(t *testing.T) {
 	e := NewExecutor(ExecutorOptions{StepRegistry: journalProbeRegistry{}})
 	a := adoptProbeAutomation()
-	a.Steps = append(a.Steps, &Step{ID: "b", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}})
+	a.Steps = append(a.Steps, &Step{ID: "b", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}})
 	first, err := e.ExecuteAdopted(context.Background(), a, RunAdoption{RunId: "r"})
 	if err != nil {
 		t.Fatal(err)

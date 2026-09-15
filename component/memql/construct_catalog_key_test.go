@@ -34,11 +34,10 @@ func TestConstructKindForKeywordTranslatesEveryCatalogedKind(t *testing.T) {
 			t.Errorf("ConstructKindForKeyword(%q) = %q; want %q", keyword, got, kind)
 		}
 	}
-	// The one keyword whose two halves differ at all. Spelled out because it is
-	// the whole reason the translation exists, and a loop over an inverted map
-	// would pass just as happily if both halves were `mutate`.
-	if got, _ := ConstructKindForKeyword("mutation"); got != ConstructKindMutation {
-		t.Errorf("ConstructKindForKeyword(\"mutation\") = %q; want %q", got, ConstructKindMutation)
+	// The retired declaration verb names no kind (D13): a document still
+	// written with it reads as unknown, never as a mutation.
+	if got, ok := ConstructKindForKeyword("mutate"); ok {
+		t.Errorf("ConstructKindForKeyword(\"mutate\") = %q; the retired verb names no kind", got)
 	}
 }
 

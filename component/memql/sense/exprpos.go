@@ -184,7 +184,9 @@ func bodyPosition(lines []string, line int, before, cur string, scan textScan, e
 		return exprPos{position: tiers.PositionSpecBody, bound: enc.Concept}
 
 	case "logic":
-		if containsString(enc.Blocks, "body") {
+		// A logic's statements (epic memql#5370): its lines are the body
+		// itself.
+		if inStatementBody(lines, line, cur, enc) {
 			return exprPos{position: tiers.PositionLogicBody, nested: nestedLambdaParams(strings.TrimLeft(cur, " \t"))}
 		}
 

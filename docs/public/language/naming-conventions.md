@@ -20,14 +20,12 @@ or `seed*` prefix.
 - Queries: what they return -- `libraryArtifactsByKind`,
   `workRunsForGoal`, `userById`
 - Mutations: the verb -- `createLibraryFolder`, `moveArtifactToFolder`,
-  `archiveUser`. (Note the declaration keyword is `mutate`, while the
-  invocation verb inside a logic body is `mutation` -- the parser's tests
-  call that pair "the canonical footgun distance". Neither belongs in the
-  name.)
+  `archiveUser`. (The declaration keyword and the call kind are one word,
+  `mutation`, and it does not belong in the name either.)
 - Logic: the verb -- `indexArtifact`, `generateResponse`
 - Specs and traits: the predicate they express -- `isNotArchived`,
   `isActiveRecord`, `requiresOwner`
-- Automations: verb-first -- `indexArtifact`, `releaseWorkspaceOnPlanTerminal`
+- Automations: verb-first -- `indexArtifact`, `releaseWorkspaceOnRunTerminal`
 - Shapes: `<concept><Projection>` -- `artifactFull`, `folderCard`
 - Seeds: the thing being seeded -- `sofia`, `plannerAgent`
 
@@ -39,7 +37,7 @@ states one token earlier. Call sites read better without it:
 
 ```memql fragment
 filter  row => row.folderId == args.folderId && isActiveRecord(row)
-step decide { logic indexArtifact(event: event) }
+decide := logic indexArtifact(event: event)
 ```
 
 This is also what the codebase has always done. Measured across the shipped
@@ -58,7 +56,8 @@ Two earlier drafts undercounted, and both were caught by review rather than by
 the gate: a regex version reported 506 / 25 seeds (blind to the 160 seeds whose
 names contain `-`, a legal identifier character), and the first token version
 reported 1081 (blind to the 10 terse `automation X @trigger(...) => logic X`
-declarations, which carry no brace at all). The measurement and the enforcement
+declarations, which carried no brace at all -- a form since retired,
+memql#5370). The measurement and the enforcement
 are the same code path, which is the only way the number stays true.
 
 Declarations, precisely: a call site may still name a prefixed construct that
@@ -109,10 +108,10 @@ Constructs live in one consolidated file per kind per namespace
 (`dsl/<namespace>/queries.memql`, `dsl/<namespace>/mutations.memql`,
 ...), so file names never carry an individual construct's name.
 
-An automation step references a logic construct by the same name the
-file-top import names -- `step decide { logic indexArtifact(event:
-event) }` resolves through `use library.logic.{ indexArtifact }`. There
-is no prefixed/bare split between the two.
+An automation's statement calls a logic construct by the name the
+file-top import gives it -- `decide := logic indexArtifact(event: event)`
+resolves through `use library.logic.{ indexArtifact }`. There is no
+prefixed/bare split between the two.
 
 
 ## Enforcement
@@ -125,15 +124,16 @@ nothing in the corpus followed it, and nothing noticed.
 
 It covers **all 17 declaration keywords**, and both halves are derived
 from the parser: thirteen from `parser.TopLevelDeclKeywords` (its dispatch
-table) and the four struct forms the rewriter lowers -- `query` /
-`mutate` / `logic` / `automation` -- from `parser.StructFormKeywords`
-(built from `structFormSteps`, the rewrite chain itself). Adding a
+table) and the four struct-form keywords -- `query` / `mutation`, which
+the rewriter lowers, and `logic` / `automation`, which the statement
+parser reads as written -- from `parser.StructFormKeywords`. Adding a
 construct kind to either list extends the gate automatically.
 
 `TestDeclKeywordSetMatchesTheParser` then pins the resulting set by name,
 so a kind that is added, removed, or *renamed* fails the test and forces a
 deliberate update here. A rename is the case a count alone misses --
-`mutation` became `mutate` in #2036 without moving any total.
+`mutation` became `mutate` in #2036, and `mutate` became `mutation` again
+in memql#5370 (D13), without moving any total.
 
 > **This part was wrong in the first published version**, which pinned the
 > four rewriter forms by hand under the claim that "the parser exports no
@@ -155,9 +155,9 @@ braces inside string literals and comments as real syntax.
 
 The token rewrite then turned out to be narrower than the grammar too,
 in three further ways: it anchored on `{` and so missed the 10 **terse
-automations** (`automation X @trigger(...) => logic X`), which have no
-body; it forbade only `mutation` on `mutate` declarations and so let
-`mutateArchiveUser` through; and its word-boundary test was ASCII and
+automations** (`automation X @trigger(...) => logic X`, since retired),
+which had no body; it forbade only `mutation` on `mutate` declarations and
+so let `mutateArchiveUser` through; and its word-boundary test was ASCII and
 camelCase-only, so a kebab-case prefix and a non-ASCII uppercase letter
 both evaded.
 

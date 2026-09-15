@@ -1,0 +1,9 @@
+@trigger(schedule="0 0 * * * *")
+automation elseAlone {
+  if now != "" {
+    builtin one()
+  }
+  else {
+    builtin two()
+  }
+}

@@ -31,14 +31,13 @@ func TestResolveEnclosingConstruct(t *testing.T) {
 			src:        "mutation todo createTodo {\n  insert {\n    stamp {\n      ",
 		},
 		{
-			name: "automation step", wantKeyword: "automation", wantReceiver: "Automation",
-			wantBlocks: []string{"step"},
-			src:        "@trigger(event=\"x.y\")\nautomation onThing {\n  step run {\n    ",
+			name: "automation precondition", wantKeyword: "automation", wantReceiver: "Automation",
+			wantBlocks: []string{"precondition"},
+			src:        "@trigger(event=\"x.y\")\nautomation onThing {\n  precondition ready {\n    ",
 		},
 		{
-			name: "logic body", wantKeyword: "logic", wantReceiver: "Logic",
-			wantBlocks: []string{"body"},
-			src:        "logic compute {\n  body {\n    ",
+			name: "logic statement body", wantKeyword: "logic", wantReceiver: "Logic",
+			src: "logic compute {\n  ",
 		},
 		{
 			name: "concept body", wantKeyword: "concept",

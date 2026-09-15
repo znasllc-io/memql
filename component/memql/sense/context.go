@@ -501,11 +501,11 @@ func checkInvocationContext(tokens []parser.Token, prefix string) (CursorContext
 		return CursorContext{}, false
 	}
 	// Only a BEHAVIORAL construct (logic / automation / action) invokes others.
-	// In a concept / query / mutate / shape / seed body a `<verb> <ident>` pair
+	// In a concept / query / mutation / shape / seed body a `<verb> <ident>` pair
 	// is a field or clause declaration -- a field literally named `query` must
 	// not misfire. Gating on the enclosing construct (which also implies body
-	// depth) covers those, plus the mutate write-sugar blocks (accept / stamp /
-	// insert / update) since mutate is not behavioral.
+	// depth) covers those, plus the mutation write-sugar blocks (accept / stamp /
+	// insert / update) since mutation is not behavioral.
 	enc, ok := resolveEnclosingConstruct(tokens)
 	if !ok || !behavioralConstruct[enc.Keyword] {
 		return CursorContext{}, false

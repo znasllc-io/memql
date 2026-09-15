@@ -580,8 +580,8 @@ func (p *Parser) parseV1Name() (v1Expr, error) {
 		case wordThenName && root.text == "trait":
 			return v1Expr{}, v1Retired(tok, ruleTraitReference)
 		case wordThenName && p.peekAhead(2).Type == TokenParenOpen:
-			// memql#2358: `mutation createNode(...)` -- the declaration verb
-			// where the invocation noun belongs -- would otherwise read as a
+			// memql#2358: `mutate createNode(...)` -- the retired declaration
+			// verb where `mutation` belongs -- would otherwise read as a
 			// name and a separate call, dropping the call's kind silently.
 			return v1Expr{}, v1Errorf(tok, "%q is not a construct-invocation kind, so the call %s(...) would be silently dropped -- a kind-prefixed call must lead with one of %s%s",
 				root.text, next.Literal, renderKeywordList(invocationKindKeywordList()), didYouMean(root.text, kindSuggestionCandidates()))
@@ -613,6 +613,8 @@ func (p *Parser) parseV1Name() (v1Expr, error) {
 // query (core-builtins ADR §2.3). Without them an in-process position -- a
 // logic statement, an if-condition, a step argument -- would read each as a
 // call to a function nothing defines, and the migration hint would be gone.
+// The step bodies' accessors -- `step("x")`, `input()`, `item()`, `index()`
+// -- are refused the same way, by their shape, with body_accessor_retired.
 func (p *Parser) parseV1FunctionCall() (v1Expr, error) {
 	nameTok := p.v1Take()
 	name := nameTok.Literal
@@ -622,6 +624,12 @@ func (p *Parser) parseV1FunctionCall() (v1Expr, error) {
 	lower := strings.ToLower(name)
 	if rule, retired := v1RetiredCalls[lower]; retired {
 		return v1Expr{}, v1Retired(nameTok, rule)
+	}
+	// `mutation(...)`, `query(...)`: a construct kind is not a function. A
+	// construct is called by name, as a statement of its own.
+	if bodyCallKinds[name] {
+		return v1Expr{}, bodyRefuse(nameTok, codeBodyCallKindMissing,
+			"`%s(...)` is not a call: a %s is declared elsewhere and called by name, as a statement of its own -- `x := %s <name>(<named args>)`", name, name, name)
 	}
 	if hint, retired := retiredExprBuiltins[lower]; retired {
 		return v1Expr{}, v1Errorf(nameTok, "%s", retiredExprBuiltinMessage(name, hint))
@@ -635,6 +643,16 @@ func (p *Parser) parseV1FunctionCall() (v1Expr, error) {
 	args, named, closeTok, err := p.parseV1CallArgs(name, "", true)
 	if err != nil {
 		return v1Expr{}, err
+	}
+	if isRetiredBodyAccessorCall(lower, args, named) {
+		spelling := "`" + name + "()`"
+		instead := retiredBodyAccessors[lower]
+		if lower == "step" {
+			id := args[0].(*ast.LiteralExpr).Value.(string)
+			spelling = "`" + name + "(\"" + id + "\")`"
+			instead = "a statement's name is its value, so write `" + id + "`"
+		}
+		return v1Expr{}, bodyRefuse(nameTok, codeBodyAccessorRetired, "%s is retired in edition 2026: %s", spelling, instead)
 	}
 	// `contains` is two things by shape: with a lambda (and an optional
 	// leading label) it is the graph traversal, which stays; with two plain

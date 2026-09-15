@@ -16,13 +16,13 @@ func TestStructuredTrigger_NormalizesToCanonicalTopic(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	loader := NewLoader(LoaderOptions{Logger: logger})
 
-	const structuredSource = `@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
+	const structuredSource = `@trigger(event="node.created", concept="v1:cognition:participant")
 automation testStructured {
-  step noop { logic noopLogic { } }
+  noop := logic noopLogic()
 }`
 	const legacySource = `@trigger(event="graph.node.created.v1:cognition:participant")
 automation testLegacy {
-  step noop { logic noopLogic { } }
+  noop := logic noopLogic()
 }`
 
 	structured, err := loader.compileMemQL(structuredSource, "test:structured")
@@ -51,7 +51,7 @@ func TestStructuredTrigger_DefaultsPartitionToWildcard(t *testing.T) {
 
 	const src = `@trigger(event="node.updated", concept="v1:identity:user")
 automation testDefaultPartition {
-  step noop { logic noopLogic { } }
+  noop := logic noopLogic()
 }`
 	auto, err := loader.compileMemQL(src, "test:default-partition")
 	if err != nil {
@@ -71,7 +71,7 @@ func TestStructuredTrigger_RejectsMissingConcept(t *testing.T) {
 
 	const src = `@trigger(event="node.created")
 automation testBad {
-  step noop { logic noopLogic { } }
+  noop := logic noopLogic()
 }`
 	if _, err := loader.compileMemQL(src, "test:bad"); err == nil {
 		t.Fatalf("expected error for structured form missing concept=, got nil")
@@ -91,12 +91,12 @@ func TestStructuredTrigger_LeavesNonGraphTriggersAlone(t *testing.T) {
 	}{
 		{
 			name:      "system.startup",
-			src:       `@trigger(event="system.startup")` + "\nautomation testSystem { step noop { logic noopLogic { } } }",
+			src:       `@trigger(event="system.startup")` + "\nautomation testSystem {\n  noop := logic noopLogic()\n}",
 			wantEvent: "system.startup",
 		},
 		{
 			name:      "cognition.capability.unmet",
-			src:       `@trigger(event="cognition.capability.unmet")` + "\nautomation testCog { step noop { logic noopLogic { } } }",
+			src:       `@trigger(event="cognition.capability.unmet")` + "\nautomation testCog {\n  noop := logic noopLogic()\n}",
 			wantEvent: "cognition.capability.unmet",
 		},
 	}

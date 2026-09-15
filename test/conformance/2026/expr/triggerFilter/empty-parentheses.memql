@@ -1,8 +1,6 @@
 /// When a node joins the cluster, raise a ticket -- with a filter that says nothing.
-@trigger(event="node.created", concept="v1:cluster:node", partition="*")
+@trigger(event="node.created", concept="v1:cluster:node")
 @filter()
 automation welcomeNodeUnfiltered {
-  step raise {
-    mutation raiseFilteredTicket (title: "A node joined the cluster")
-  }
+  raise := mutation raiseFilteredTicket(title: "A node joined the cluster")
 }

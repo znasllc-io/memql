@@ -27,7 +27,6 @@ mutation record checkRecord {
 //
 // Performs a human confirmation on a data record. Only human identities
 // should call this. Updates the confirm count and validation state.
-// Audit logging is handled by the conflictDetection automation.
 //
 // Arguments:
 //   recordId (string, required)        - ID of the record to confirm
@@ -231,7 +230,6 @@ mutation record deleteRecord {
 //
 // Only identities with sufficient role (per policy's revertMinRole) should
 // call this. The caller is responsible for verifying authority.
-// Audit logging is handled by the conflictDetection automation.
 //
 // Arguments:
 //   recordId (string, required)     - ID of the record to revert

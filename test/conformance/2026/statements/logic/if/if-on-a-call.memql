@@ -1,0 +1,6 @@
+logic ifOnACall {
+  if logic other() {
+    return 1
+  }
+  return 0
+}

@@ -19,8 +19,8 @@ import (
 // to), so the join branch fired with no GA and the write was refused for a
 // missing `agentId`.
 //
-// Both guard spellings must decide correctly over a query result: the
-// positive id-presence check and the `!`-negation.
+// Both guard spellings must decide correctly over a query statement's rows:
+// the positive id-presence check and the `!`-negation.
 
 func autoJoinResult(ids ...string) *memqlengine.ExecuteResult {
 	var nodes []*memqlv1.MemoryNode
@@ -60,11 +60,8 @@ func TestAutoJoinAI_JoinGuard_NoOpsWithoutAssistant(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			eval := NewEvaluator()
-			eval.SetStepResult("getGA", &StepResult{
-				StepId: "getGA",
-				Status: "success",
-				Result: tc.getGA,
-			})
+			eval.enterStatements()
+			eval.Bind("getGA", functionStatementValue("query", tc.getGA))
 
 			got, err := evalV1Cond(t, eval, guard)
 			if err != nil {
@@ -102,11 +99,8 @@ func TestAutoJoinAI_BangEmptyGuard_HonoursNegation(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			eval := NewEvaluator()
-			eval.SetStepResult("getGA", &StepResult{
-				StepId: "getGA",
-				Status: "success",
-				Result: tc.getGA,
-			})
+			eval.enterStatements()
+			eval.Bind("getGA", functionStatementValue("query", tc.getGA))
 
 			got, err := evalV1Cond(t, eval, guard)
 			if err != nil {

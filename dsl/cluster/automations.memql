@@ -3,36 +3,28 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 //
-// All four cluster automations are now longhand multi-step blocks: the inline
-// graph writes that used to live in their pass-through `logic` (ADR S2.1 logic-
-// purity violations, baselined under #2217) now live here as the automation's
-// own steps, so no impure `logic` survives (#2235). The four logic-purity
-// baseline entries were removed across the migrating PRs (deregisterNode +
-// registerNode under PR #2239; bootstrapCluster + pruneStaleClusterNodes here):
-//   - deregisterNode / registerNode -- the inline createSpawnEvent / createNode
-//     writes became bare `<mutation>{ ... }` mutation steps.
-//   - bootstrapCluster -- the pure `bootstrapCluster` logic decides
-//     { create, withIdentityProvider }; the three conditional creates moved
-//     onto `if`-gated mutation steps (gated on `steps.decide.result.<field> ==
-//     true` -- a step-result field resolves in a COMPARISON, not bare-truthy).
+// The inline graph writes that used to live in the cluster automations'
+// pass-through `logic` (ADR S2.1 logic-purity violations, baselined under
+// #2217) are the automations' own statements, so no impure `logic` survives
+// (#2235):
+//   - deregisterNode / registerNode -- the createSpawnEvent / createNode writes
+//     are `mutation` statements.
+//   - bootstrapCluster -- the pure `bootstrapCluster` logic decides whether to
+//     create the cluster row; the conditional creates are `if`-gated
+//     `mutation` statements.
 //   - pruneStaleClusterNodes -- the pure `pruneStaleClusterNodes` logic returns
 //     the rows past the stale window (window math pushed into the query via
-//     olderThan); the per-row terminal write moved onto a `forEach` step.
-//
-// Authoring note (#2235): inside a step, use the bare `<mutation>{ ... }` call
-// form -- the `mutate <name>{` keyword form collides with the struct-form
-// mutation-DEFINITION rewriter (NormaliseMutationSource matches the header
-// anywhere in the file).
+//     olderThan); the per-row terminal write is a `for` statement.
 
 // Bootstrap cluster, database, and identity provider records on startup.
-// The pure bootstrapCluster logic decides `create` (existingCluster() empty
-// AND node.type == "bff") and gates the cluster create, so that row is
-// written once; clusterInfraRefresh gates the database and identity-provider
-// creates on every bff start (memql#4766), and the identityProvider row lands
-// only when the startup envelope carries one. Every create field binds an
-// explicit key + a `??` fallback (a multi-segment path like database.host is
-// nil when absent, and a nil @required arg trips validation), mirroring
-// registerNode/deregisterNode.
+// The pure bootstrapCluster logic decides whether to create (existingCluster()
+// empty AND the startup node's type is "bff"), and `decide` gates the cluster
+// create, so that row is written once; clusterInfraRefresh gates the database
+// and identity-provider creates on every bff start (memql#4766), and the
+// identityProvider row lands only when the startup envelope carries one. Every
+// create field binds an explicit key + a `??` fallback (a multi-segment path
+// like args.database.host is nil when absent, and a nil @required arg trips
+// validation), mirroring registerNode/deregisterNode.
 /// Bootstrap cluster, database, and identity provider records on first startup
 @trigger(event="system.startup")
 automation bootstrapCluster {
@@ -43,23 +35,13 @@ automation bootstrapCluster {
     provider any
   }
 
-  step decide {
-    logic bootstrapCluster (
-      event
-    )
-  }
+  decide := logic bootstrapCluster(event: event)
   // The infrastructure rows answer a DIFFERENT question from the cluster row,
   // so they get a different gate (memql#4766). `decide` is "create the cluster",
   // once per lifetime; this is "what is true about the infrastructure now",
   // every time a bff starts. Sharing one gate is what made these rows
   // uncompletable.
-  step refreshInfra {
-    logic clusterInfraRefresh (
-      event
-    )
-  }
-  // Steps renamed (was database / identityProvider): G2 shadowing rule vs the
-  // synthesized args fields of the same names (#2364/#2367).
+  refreshInfra := logic clusterInfraRefresh(event: event)
   // ===========================================================================
   // THE THREE IDS ARE LITERALS, AND THAT IS WHAT MAKES THE LINKS POSSIBLE
   // ===========================================================================
@@ -71,72 +53,66 @@ automation bootstrapCluster {
   // memql#4766 `cluster.databaseId`, `cluster.identityProviderId` and both
   // children's `clusterId` were empty, leaving NO path from the cluster
   // singleton to either row in any direction. Filling them from generated ids
-  // would need a mutation step to hand its inserted id to a later step, which
-  // nothing in the tree does; with literals every step already knows all three.
+  // would need each write to hand its inserted id to the next; with literals
+  // every write already knows all three.
   //
-  // The ids are spelled out at each call rather than bound once because an
-  // automation has no let-binding, and a constant that appears three times is
-  // still one decision.
-  step databaseRecord {
-    if steps.refreshInfra.result == true {
-      mutation createDatabase (
-        databaseId:        "v1:cluster:database:primary",
-        clusterId:         "v1:cluster:cluster:self",
-        host:              database.host ?? "localhost",
-        dbName:            database.dbName ?? "memql",
-        sslMode:           database.sslMode ?? "disable",
-        // Forwarded rather than stamped: createDatabase used to hardcode 5432
-        // while the DSN parse had the real value in this very payload.
-        port:              database.port ?? 5432,
-        // Probed from the live connection at startup (app/cluster.go). Absent
-        // when the probe could not run, which is why each has a fallback
-        // rather than making the step conditional -- a database row with no
-        // version is still worth having.
-        engineVersion:     database.engineVersion ?? "",
-        extensions:        database.extensions ?? [],
-        extensionVersions: database.extensionVersions ?? {}
-      )
-    }
+  // The ids are spelled out at each call. A statement could bind each once
+  // (`clusterId := "v1:cluster:cluster:self"`); a constant that appears three
+  // times is still one decision, and each write stays readable alone.
+  if refreshInfra == true {
+    databaseRecord := mutation createDatabase(
+      databaseId:        "v1:cluster:database:primary",
+      clusterId:         "v1:cluster:cluster:self",
+      host:              args.database.host ?? "localhost",
+      dbName:            args.database.dbName ?? "memql",
+      sslMode:           args.database.sslMode ?? "disable",
+      // Forwarded rather than stamped: createDatabase used to hardcode 5432
+      // while the DSN parse had the real value in this very payload.
+      port:              args.database.port ?? 5432,
+      // Probed from the live connection at startup (app/cluster.go). Absent
+      // when the probe could not run, which is why each has a fallback
+      // rather than making the write conditional -- a database row with no
+      // version is still worth having.
+      engineVersion:     args.database.engineVersion ?? "",
+      extensions:        args.database.extensions ?? [],
+      extensionVersions: args.database.extensionVersions ?? {}
+    )
   }
-  step idpRecord {
-    if steps.refreshInfra.result == true && payload.identityProvider != nil {
-      mutation createIdentityProvider (
-        identityProviderId: "v1:cluster:identityProvider:primary",
-        clusterId:          "v1:cluster:cluster:self",
-        name:               identityProvider.name ?? "memql-identity",
-        issuerUrl:          identityProvider.issuerUrl ?? "",
-        clientIdPrefix:     identityProvider.clientIdPrefix ?? "",
-        redirectUrl:        identityProvider.redirectUrl ?? "",
-        // These two were COMPUTED by parseIdentityProviderInfo and dropped
-        // here -- the step forwarded four fields out of six (memql#4766).
-        acceptedAudiences:  identityProvider.acceptedAudiences ?? [],
-        jwksUrl:            identityProvider.jwksUrl ?? ""
-      )
-    }
+  if refreshInfra == true && args.identityProvider != nil {
+    idpRecord := mutation createIdentityProvider(
+      identityProviderId: "v1:cluster:identityProvider:primary",
+      clusterId:          "v1:cluster:cluster:self",
+      name:               args.identityProvider.name ?? "memql-identity",
+      issuerUrl:          args.identityProvider.issuerUrl ?? "",
+      clientIdPrefix:     args.identityProvider.clientIdPrefix ?? "",
+      redirectUrl:        args.identityProvider.redirectUrl ?? "",
+      // These two were COMPUTED by parseIdentityProviderInfo and dropped
+      // here -- the call forwarded four fields out of six (memql#4766).
+      acceptedAudiences:  args.identityProvider.acceptedAudiences ?? [],
+      jwksUrl:            args.identityProvider.jwksUrl ?? ""
+    )
   }
-  step cluster {
-    if steps.decide.result == true {
-      mutation createCluster (
-        clusterId:          "v1:cluster:cluster:self",
-        name:               "memql",
-        region:             "local",
-        provider:           provider ?? "",
-        version:            node.version ?? "",
-        // createCluster has always ACCEPTED these and the automation never
-        // passed them, which is half of why the links were dead.
-        databaseId:         "v1:cluster:database:primary",
-        identityProviderId: "v1:cluster:identityProvider:primary"
-      )
-    }
+  if decide == true {
+    cluster := mutation createCluster(
+      clusterId:          "v1:cluster:cluster:self",
+      name:               "memql",
+      region:             "local",
+      provider:           args.provider ?? "",
+      version:            args.node.version ?? "",
+      // createCluster has always ACCEPTED these and the automation never
+      // passed them, which is half of why the links were dead.
+      databaseId:         "v1:cluster:database:primary",
+      identityProviderId: "v1:cluster:identityProvider:primary"
+    )
   }
 }
 
 // Record node shutdown in the database: append a v1:cluster:spawnEvent with
 // action="stopped", reason="system.shutdown". The former deregisterNode logic
-// was a single inline write (ADR S2.1 logic-purity violation); the write now
-// lives here as a mutation step and the logic is gone (#2235). Every field is
+// was a single inline write (ADR S2.1 logic-purity violation); the write is
+// now this automation's `mutation` statement and the logic is gone (#2235). Every field is
 // bound with an explicit key + a `??` fallback: a multi-segment path like
-// node.id evaluates to nil when absent, and passing nil for a @required
+// args.node.id evaluates to nil when absent, and passing nil for a @required
 // mutation arg (nodeId / nodeType / action) trips "required argument missing"
 // at validation; `?? ""` guarantees a non-nil string.
 /// Record node shutdown in the database
@@ -146,14 +122,12 @@ automation deregisterNode {
     node any
   }
 
-  step persist {
-    mutation createSpawnEvent (
-      nodeId:   node.id ?? "",
-      nodeType: node.type ?? "",
-      action:   "stopped",
-      reason:   "system.shutdown"
-    )
-  }
+  persist := mutation createSpawnEvent(
+    nodeId:   args.node.id ?? "",
+    nodeType: args.node.type ?? "",
+    action:   "stopped",
+    reason:   "system.shutdown"
+  )
 }
 
 // Register this node in the database when it starts up: a v1:cluster:node record
@@ -162,11 +136,11 @@ automation deregisterNode {
 // NodeStatusWriter rows (via updateNodeHealth) share the same time-series
 // timeline -- one concept row per real node. The former registerNode logic did
 // both inline writes (ADR S2.1 logic-purity violation); each write is now its
-// own mutation step and the logic is gone (#2235). Every field is bound with an
+// own `mutation` statement and the logic is gone (#2235). Every field is bound with an
 // explicit key + a `??` fallback for the same reason as deregisterNode above: a
 // multi-segment path is nil when absent and would trip the @required check.
 // version/address are not createSpawnEvent args (they already live on the node
-// record from createNode), so the spawn step carries only the flat event fields.
+// record from createNode), so the `spawn` statement carries only the flat event fields.
 /// Register this node in the database on startup
 @trigger(event="system.startup")
 automation registerNode {
@@ -177,26 +151,20 @@ automation registerNode {
     region any
   }
 
-  // Step renamed record (was node): the G2 shadowing rule (#2364) forbids a
-  // step id colliding with the args field of the same name.
-  step record {
-    mutation createNode (
-      id:           node.id ?? "",
-      nodeType:     node.type ?? "",
-      address:      node.address ?? "",
-      deploymentId: deploymentId ?? "",
-      provider:     provider ?? "",
-      region:       region ?? ""
-    )
-  }
-  step spawn {
-    mutation createSpawnEvent (
-      nodeId:   node.id ?? "",
-      nodeType: node.type ?? "",
-      action:   "spawned",
-      reason:   "system.startup"
-    )
-  }
+  record := mutation createNode(
+    id:           args.node.id ?? "",
+    nodeType:     args.node.type ?? "",
+    address:      args.node.address ?? "",
+    deploymentId: args.deploymentId ?? "",
+    provider:     args.provider ?? "",
+    region:       args.region ?? ""
+  )
+  spawn := mutation createSpawnEvent(
+    nodeId:   args.node.id ?? "",
+    nodeType: args.node.type ?? "",
+    action:   "spawned",
+    reason:   "system.startup"
+  )
 }
 
 // Heartbeat-based prune of departed cluster nodes (#1061). Every 10 minutes,
@@ -208,25 +176,19 @@ automation registerNode {
 //
 // The pure pruneStaleClusterNodes logic decides WHICH rows to retire (cutoff =
 // now - window, pushed into staleClusterNodes via olderThan) and returns that
-// node list (#2235). The `prune` forEach step appends the terminal
-// health="stopped" row per returned node -- the per-row write that used to live
-// inline in the logic. updateNodeHealth takes only id / health / lastSeen.
+// node list (#2235). A `for` over the returned nodes appends the terminal
+// health="stopped" row per node -- the per-row write that used to live inline
+// in the logic. updateNodeHealth takes only id / health / lastSeen.
 /// Every 10 min: mark departed cluster nodes (lastSeen older than MEMQL_NODE_STALE_PRUNE_MINUTES,
 /// default 30) as health='stopped'.
 @trigger(schedule="0 */10 * * * *")
 automation pruneStaleClusterNodes {
-  step decide {
-    logic pruneStaleClusterNodes (
-      event: event
+  decide := logic pruneStaleClusterNodes(event: event)
+  for node in decide {
+    mutation updateNodeHealth(
+      id:       node.id,
+      health:   "stopped",
+      lastSeen: now
     )
-  }
-  step prune {
-    forEach node in decide.result {
-      updateNodeHealth {
-        id:       node.id,
-        health:   "stopped",
-        lastSeen: now
-      }
-    }
   }
 }

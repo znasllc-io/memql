@@ -1,0 +1,5 @@
+@trigger(schedule="0 0 * * * *")
+automation returnStatement {
+  members := query activeMembers()
+  return members.count()
+}

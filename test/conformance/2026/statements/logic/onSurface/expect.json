@@ -1,0 +1,10 @@
+{
+  "cases": [
+    {
+      "file": "surface-in-a-logic.memql",
+      "verdict": "refuse_load",
+      "code": "body_call_not_in_logic",
+      "message": "a logic calls queries, mutations, builtins and other logic: `action deployRun(...)` belongs in an automation"
+    }
+  ]
+}

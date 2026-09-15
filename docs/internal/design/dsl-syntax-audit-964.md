@@ -290,7 +290,7 @@ trait traitIsChecked {
 
 ### 5. mutation
 
-Options. Signature `mutate <Concept> <name>`. Annotations: `@enabled`/
+Options. Signature `mutation <Concept> <name>`. Annotations: `@enabled`/
 `@disabled`, `@description`, `@public`/`@internal` (authz markers). `args { <name>
 <type> [@required] [@enum(...)] [@default(...)] [@description] }`. Exactly ONE
 body: `insert <Concept> { ... }` OR `update <Concept> { ... }` (concept currently

@@ -320,7 +320,7 @@ func TestActorUndeclaredRule(t *testing.T) {
 		"spec-body":         "spec actorEnvelope isOwner = actor => actor.role == \"owner\"\n",
 		"shape-kind-marker": "@actor\nshape actorEnvelope {\n  actor.userId\n  actor.role\n}\n",
 		"prose-only":        "// gated by actor.rank\nquery todo all {\n  filter row => row.done == false\n}\n",
-		"event-envelope":    "@trigger(event=\"x.y\")\nautomation onThing {\n  step run {\n    logic handle ( event: event )\n  }\n}\n",
+		"event-envelope":    "@trigger(event=\"x.y\")\nautomation onThing {\n  run := logic handle(event: event)\n}\n",
 	} {
 		if got := actorUndeclaredRule(clean); len(got) != 0 {
 			t.Errorf("%s: want no diagnostics, got %+v", name, got)

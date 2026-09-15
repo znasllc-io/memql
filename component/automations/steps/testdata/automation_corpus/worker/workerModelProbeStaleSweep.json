@@ -1,0 +1,97 @@
+{
+  "automation": "worker/automations.memql workerModelProbeStaleSweep",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "MEMQL_MODEL_PROBE_CLAIM_GRACE_SECONDS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "name": "MEMQL_MODEL_PROBE_STALL_GRACE_SECONDS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "requestedBefore": "<ts>",
+              "updatedBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "openModelProbes"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "MEMQL_MODEL_PROBE_CLAIM_GRACE_SECONDS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "name": "MEMQL_MODEL_PROBE_STALL_GRACE_SECONDS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "requestedBefore": "<ts>",
+              "updatedBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "openModelProbes"
+          },
+          {
+            "args": {
+              "endedAt": "<ts>",
+              "errorMessage": "No agent replica is driving this probe -- either the node holding the machine's connection stopped before it began, or it went away mid-suite. Nothing was measured, so nothing was recorded; running it again costs only the time.",
+              "measurementId": "",
+              "probeId": "v1:probe:row:openModelProbes-1",
+              "status": "failed"
+            },
+            "kind": "mutation",
+            "name": "finishModelProbe"
+          },
+          {
+            "args": {
+              "endedAt": "<ts>",
+              "errorMessage": "No agent replica is driving this probe -- either the node holding the machine's connection stopped before it began, or it went away mid-suite. Nothing was measured, so nothing was recorded; running it again costs only the time.",
+              "measurementId": "",
+              "probeId": "v1:probe:row:openModelProbes-2",
+              "status": "failed"
+            },
+            "kind": "mutation",
+            "name": "finishModelProbe"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

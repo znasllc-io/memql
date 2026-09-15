@@ -57,11 +57,10 @@ type FunctionSlice struct {
 // nothing imports them via `use`, and the function type switch has no
 // automation case (an `*ast.AutomationDef` body would be rejected).
 // Slicing them here only produced "body is not an expression node"
-// skips on every load (issue #212). The inner `logic NAME { ... }`
-// invocations that live inside an automation's `step` blocks are
-// likewise NOT top-level declarations -- the brace-depth guard in
-// ExtractFunctionSlices skips them so they aren't mis-extracted as
-// standalone logic slices.
+// skips on every load (issue #212). A construct keyword nested inside
+// another construct's braces is likewise NOT a top-level declaration --
+// the brace-depth guard in ExtractFunctionSlices skips it so it isn't
+// mis-extracted as a standalone slice.
 var functionDeclHeader = regexp.MustCompile(
 	`(?m)^[ \t]*(?:` +
 		// struct-form: `<kind> [<concept>] <name> {`. The optional
@@ -147,8 +146,8 @@ func extractFunctionSlices(source string) []FunctionSlice {
 
 		// Only extract top-level (brace-depth-0) declarations. A header
 		// that sits inside another construct's braces is not a standalone
-		// declaration -- e.g. a `logic NAME { ... }` invocation inside an
-		// automation `step` block, or a nested construct in a logic body.
+		// declaration -- e.g. a construct keyword inside a logic's or an
+		// automation's statements.
 		// Without this guard those get mis-extracted as bogus slices that
 		// then fail to parse (issue #212). `use ...{ ... }` preambles have
 		// balanced braces so they net to depth 0 and don't shift it.
@@ -260,12 +259,6 @@ var automationDeclHeader = regexp.MustCompile(
 // automations because the function-parse pipeline has no automation case, but
 // the dry-run sandbox only needs the source TEXT, not a parsed *Function.
 func ExtractAutomationSlices(source string) []FunctionSlice {
-	// Lower terse single-step automations (memql#2215) to longhand first so the
-	// `automation NAME {` header scan below discovers them; offsets then align
-	// with the lowered source.
-	if lowered, err := languageParser.NormaliseTerseAutomationSource(source); err == nil {
-		source = lowered
-	}
 	scan := languageParser.BlankComments(source)
 	matches := automationDeclHeader.FindAllStringSubmatchIndex(scan, -1)
 	if len(matches) == 0 {

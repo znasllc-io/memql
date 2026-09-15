@@ -1,0 +1,58 @@
+// builtins.memql -- the deploy pack (examples/deploypack), Epic 2 / #2095.
+//
+// The deploy pack dogfoods MemQL's OWN deployment workflow: it packages the
+// deploy EFFECTS that component/deploycontrol performs imperatively today as
+// DSL-callable builtins, each backed by the pack's IntegrationProvider
+// (see ../pack.go). Every @executor names a capability FQN
+// "integration.deploypack.<cap>", which the engine resolves to the Go handler
+// registered by NewProvider().Capabilities().
+//
+// Every effect routes through the EXISTING component/deploycontrol Executor
+// boundary (git / kubectl) -- this is ADDITIVE, not a rip-and-replace.
+//
+// Model A (GitOps-canonical) flow these effects compose:
+//   commitOverlay -> argoSync -> (Argo reconciles) -> observeReconciledState
+//                                                  -> recordBack
+//
+// deployRunPromote -- the staging-to-prod digest pin that used to author the
+// overlay commit -- was removed with the environment concept itself (epic
+// memql#3943). With one installation the digests are cut on the build server
+// and land in the one overlay by a reviewed PR, so the deploy IS the merge and
+// the lifecycle's terminal transition is decided by OBSERVING ArgoCD rather
+// than by running an effect (see ../pack.go).
+
+@enabled
+@executor("integration.deploypack.commitOverlay")
+@args(profile="object")
+@description("Model A: stage + commit the kustomize overlay change via the deploycontrol Executor (git). The committed overlay is the GitOps source of truth ArgoCD reconciles. Epic 2 / #2095.")
+builtin deployCommitOverlay {
+  message  string  @description("Commit message; a provenance default is used when empty.")
+}
+
+@enabled
+@executor("integration.deploypack.argoSync")
+@args(profile="object")
+@description("Model A: push the committed overlay so ArgoCD reconciles it onto the cluster (via the deploycontrol Executor git push). The pack never bypasses ArgoCD with a direct apply. Epic 2 / #2095.")
+builtin deployArgoSync {
+}
+
+@enabled
+@executor("integration.deploypack.recordBack")
+@args(profile="object")
+@description("Model A record-back: append the reconciled deployment status (+ optional per-node spec) into the deployment concept via the E2.1 mutations, so the data layer mirrors the GitOps-observed state. The committed overlay stays the source of truth. Epic 2 / #2095.")
+builtin deployRecordBack {
+  deploymentId  string  @required  @description("v1:cluster:deployment.deploymentId to record against.")
+  status        string             @description("Reconciled lifecycle status (pending|in_progress|succeeded|failed|superseded|rolled_back). When set, appends a deployment status transition.")
+  nodeType      string             @description("When set with version/replicas/imageDigest, appends a per-node v1:cluster:deploymentNodeSpec for this node type.")
+  version       string             @description("Per-node version pin (empty = engine-as-spine). Used only when nodeType is set.")
+  replicas      int                @description("Per-node replica count. Used only when nodeType is set.")
+  imageDigest   string             @description("Resolved image digest for the node type / deployment. Used only when nodeType is set.")
+}
+
+@enabled
+@executor("integration.deploypack.observeReconciledState")
+@args(profile="object")
+@description("Model A read leg (E2.4): read the ArgoCD application's reconciled state via the deploycontrol Executor (kubectl -n argocd get app -o json) and map it with deploycontrol.MapArgoStatus. Returns synced + healthy + revision + outOfSync so the record-back automation can mirror the GitOps-observed state into the deployment concept. Read-only; never mutates the cluster. Epic 2 / #2097.")
+builtin deployObserveReconciledState {
+  app  string  @description("ArgoCD application name to read (defaults to the configured app, e.g. 'memql', when empty).")
+}

@@ -11,12 +11,11 @@ package parser
 // legacy spelling each replaced is refused naming memqlmigrate
 // --rewrite=expressions.
 //
-// The IN-PROCESS positions -- conditions, forEach sources and filters, switch
-// subjects, step-call arguments, logic statements, mutation values -- parse
-// with the v1 parser: each position's string field holds the canonical v1
-// source (ast.FormatExpr), and the node sits beside it (StepDef.ConditionExpr,
-// ForEachStepConfig.SourceExpr/FilterExpr, SwitchStepConfig.ExpressionExpr,
-// MutationStmt.PayloadExpr, or the v1 node itself inside a value map).
+// The IN-PROCESS positions parse with the v1 parser: a logic's and an
+// automation's statements (the statement parser, v1_body.go), and a
+// mutation's values, whose string field holds the canonical v1 source
+// (ast.FormatExpr) beside the node (MutationStmt.PayloadExpr, or the v1 node
+// itself inside a value map).
 //
 // The engine's internal query form -- the string an SDK sends to Execute --
 // keeps its own grammar. The one thing that grammar learns here is to read a
@@ -24,9 +23,6 @@ package parser
 // query's v1 filter reaches it: `concept==<id> && (row => ...)`.
 
 import (
-	"strconv"
-	"strings"
-
 	"github.com/znasllc-io/memql/component/language/ast"
 )
 
@@ -296,124 +292,6 @@ func unwrapQueryDirectives(n ExpressionNode) ExpressionNode {
 // In-process positions.
 // ---------------------------------------------------------------------------
 
-// parseStepCondition parses a step's condition, up to the `{` that opens its
-// block: a v1 expression, returned as its canonical source and its node.
-func (p *Parser) parseStepCondition() (string, ExpressionNode, error) {
-	n, err := p.parseV1Expression()
-	if err != nil {
-		return "", nil, err
-	}
-	return formatV1(n), n, nil
-}
-
-// stepBlockAhead reports whether a step's right-hand side is a step-type
-// block -- `query { ... }`, `mutation if c { ... }`, `parallel { ... }`,
-// `action { ... }`, or one of the retired inline blocks, which the step-type
-// switch refuses by name -- rather than an expression.
-func (p *Parser) stepBlockAhead() bool {
-	if p.check(TokenKeywordQuery) || p.check(TokenKeywordMutation) {
-		return true
-	}
-	if !p.check(TokenIdentifier) {
-		return false
-	}
-	if next := p.peekAhead(1).Type; next != TokenBraceOpen && next != TokenKeywordIf {
-		return false
-	}
-	switch strings.ToLower(p.current.Literal) {
-	case "query", "mutation", "parallel", "action", "shape", "webhook", "event", "publishevent":
-		return true
-	}
-	return false
-}
-
-// v1Step is the step a v1 right-hand side makes. A call to a function or a
-// construct is a function step, its Args map holding the v1 argument nodes
-// under the argument's name, or its position ("0", "1", ...), and anything
-// else is a query step carrying the node, which the runtime evaluates in
-// process.
-func v1Step(id string, retry int, n ExpressionNode) *StepDef {
-	if call, ok := n.(*ast.CallExpr); ok && call.Receiver == nil {
-		return &StepDef{ID: id, Type: StepTypeFunction, RetryCount: retry, Config: &FunctionStepConfig{Name: call.Name, Args: v1CallArgs(call)}}
-	}
-	return &StepDef{ID: id, Type: StepTypeQuery, RetryCount: retry, Config: &QueryStepConfig{Query: n}}
-}
-
-// v1CallArgs is a v1 call's arguments as a step's Args map.
-func v1CallArgs(call *ast.CallExpr) map[string]any {
-	args := make(map[string]any, len(call.Args)+len(call.Named))
-	for i, a := range call.Args {
-		args[strconv.Itoa(i)] = a
-	}
-	for _, a := range call.Named {
-		args[a.Name] = a.Value
-	}
-	return args
-}
-
-// parseV1StepCall parses a statement that must be one call -- a conditional
-// step's body, a bare call in an if-body -- returning the call.
-func (p *Parser) parseV1StepCall(what string) (*ast.CallExpr, error) {
-	start := p.current
-	n, err := p.parseV1Expression()
-	if err != nil {
-		return nil, err
-	}
-	call, ok := n.(*ast.CallExpr)
-	if !ok || call.Receiver != nil {
-		return nil, v1Errorf(start, "%s must be a function or construct call, got `%s`", what, formatV1(n))
-	}
-	return call, nil
-}
-
-// ifStatementToSteps flattens a parsed IfStmt into a list of conditional
-// StepDefs, so the runtime sees a flat list of gated steps rather than a
-// nested if: each step under the if carries the if's condition, ANDed with
-// its own, and the else branch carries its negation -- as nodes, so the
-// stamped Condition string is canonical v1 source. An empty if body is no
-// steps.
-func ifStatementToSteps(stmt *IfStmt) []StepDef {
-	if stmt == nil {
-		return nil
-	}
-	cond := stmt.Condition
-	var out []StepDef
-	for _, step := range stmt.ThenSteps {
-		out = append(out, stampStepCondition(step, cond))
-	}
-	negated := &ast.UnaryExpr{Op: "!", Operand: cond}
-	if stmt.ElseIf != nil {
-		for _, step := range ifStatementToSteps(stmt.ElseIf) {
-			out = append(out, stampStepCondition(step, negated))
-		}
-	} else {
-		for _, step := range stmt.ElseSteps {
-			out = append(out, stampStepCondition(step, negated))
-		}
-	}
-	return out
-}
-
-// stampStepCondition ANDs outer onto a step's condition, and onto every step
-// inside a for-range the step owns (they do not inherit it otherwise).
-func stampStepCondition(step StepDef, outer ExpressionNode) StepDef {
-	if outer == nil {
-		return step
-	}
-	if step.ConditionExpr == nil {
-		step.ConditionExpr = outer
-	} else {
-		step.ConditionExpr = &ast.BinaryExpr{Op: "&&", Left: outer, Right: step.ConditionExpr}
-	}
-	step.Condition = formatV1(step.ConditionExpr)
-	if cfg, ok := step.Config.(*ForEachStepConfig); ok && cfg != nil {
-		for i := range cfg.Do {
-			cfg.Do[i] = stampStepCondition(cfg.Do[i], outer)
-		}
-	}
-	return step
-}
-
 // parseMutationValue parses one insert()/update() argument value, a v1 node.
 func (p *Parser) parseMutationValue() (any, error) {
 	n, err := p.parseV1Expression()
@@ -434,25 +312,4 @@ func (p *Parser) parseV1Payload() (ExpressionNode, string, error) {
 		return nil, "", err
 	}
 	return e.n, formatV1(e.n), nil
-}
-
-// parseV1ArgsMap parses a step config's `args: { ... }` into an Args map of v1
-// nodes. allowPuns admits a bare name as `name: name`:
-// the struct-form rewriter lowers `action f(workdir, ref: ref)` into
-// `args: { workdir, ref: ref }`, so an action's args map is a construct call's
-// argument list in map clothing, and a construct call's bare name puns.
-func (p *Parser) parseV1ArgsMap(allowPuns bool) (map[string]any, error) {
-	if !p.check(TokenBraceOpen) {
-		return nil, v1Errorf(p.current, "args is a map literal, { name: value, ... }; got %s", v1Describe(p.current))
-	}
-	e, err := p.parseV1MapWith(allowPuns)
-	if err != nil {
-		return nil, err
-	}
-	m := e.n.(*ast.MapExpr)
-	args := make(map[string]any, len(m.Entries))
-	for _, en := range m.Entries {
-		args[en.Key] = en.Value
-	}
-	return args, nil
 }

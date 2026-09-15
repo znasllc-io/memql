@@ -504,7 +504,9 @@ func GenerateAutomation(r Rule) (string, error) {
 	}
 	b.WriteString("// Lane: " + LaneFor(r.RecipientMode) + " (recipients: " + r.RecipientMode + ").\n")
 
-	fmt.Fprintf(&b, "@trigger(event=%s, concept=%s, partition=\"*\")\n",
+	// No partition: edition 2026 retired the kwarg (D15), and the topic a
+	// structured trigger compiles to never carried it.
+	fmt.Fprintf(&b, "@trigger(event=%s, concept=%s)\n",
 		langparser.QuoteString(event), langparser.QuoteString(strings.TrimSpace(r.TriggerConcept)))
 	// The filter is the rule's condition in its canonical v1 form -- the
 	// PARSED condition, re-printed, never the text the operator typed -- as
@@ -525,28 +527,13 @@ func GenerateAutomation(r Rule) (string, error) {
 		b.WriteString("    " + firstVersionArg + "\n")
 	}
 	b.WriteString("  }\n")
-	b.WriteString("  step send {\n")
-	// The arguments are COMMA-separated. A construct call's arguments are a
-	// list, and the parser refuses a second one that is not preceded by a
-	// comma ("expected ')'"). The generator wrote them newline-separated, which
-	// no binary linking the automation compiler accepted: this package's own
-	// Gate-1 test passed only because its test binary did not link that
-	// compiler, so the sandbox skipped the automation kind instead of
-	// compiling it. generate_v1_test.go links it, which is what exposed it.
-	b.WriteString("    builtin emailRuleFire (\n")
-	fmt.Fprintf(&b, "      emailRuleId: %s,\n", langparser.QuoteString(r.ID))
-	b.WriteString("      nodeId: id,\n")
-	// `event: event` passes the triggering event's WHOLE ENVELOPE, and `id`
-	// is the args field the trigger payload binds. In the edition-2026
-	// grammar both are names: the run's scope (component/automations
-	// RunScope) resolves `event` to the envelope and `id` to the bound
-	// field, and a name it cannot resolve is refused -- at load by the
-	// args-resolution gate, at fire time as an unknown name -- never passed
-	// along as its own text. (Until the grammar flips, the legacy step
-	// evaluator reads the same two words as runtime references.)
-	b.WriteString("      event: event\n")
-	b.WriteString("    )\n")
-	b.WriteString("  }\n")
+	// The body is one statement (epic memql#5370): the builtin, called by its
+	// kind. `args.id` is the args field the trigger payload binds, and `event`
+	// is the triggering event's WHOLE ENVELOPE, an automation's own root; the
+	// scope checker refuses either at load if it does not resolve, and the
+	// run's scope never passes a name along as its own text. The arguments
+	// are comma-separated, as every construct call's are.
+	fmt.Fprintf(&b, "  builtin emailRuleFire(emailRuleId: %s, nodeId: args.id, event: event)\n", langparser.QuoteString(r.ID))
 	b.WriteString("}\n")
 	return b.String(), nil
 }

@@ -1,0 +1,17 @@
+/// A support ticket the if cell escalates.
+concept ticket {
+  status  string
+}
+
+query ticket ticketsAwaitingReply {
+  filter row => row.status == "open"
+}
+
+mutation ticket escalate {
+  args {
+    reason  string  @required
+  }
+  insert {
+    status: args.reason
+  }
+}

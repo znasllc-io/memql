@@ -48,12 +48,12 @@ import (
 //
 // # In edition 2026
 //
-// cond() is retired: the conditional is `p ? a : b`, and a logic body that
-// returns an expression runs on the LogicRunner, which evaluates it with
-// EvalExpr over the call's arguments (logic_body_v1.go). The mechanism above
-// has no edition-2026 path. What stays is the property -- a comparison
-// predicate over an argument discriminates -- driven through the real parse
-// and the evaluator the runner calls, with the two-inputs assertion.
+// cond() is retired: the conditional is `p ? a : b`, and a logic's return
+// statement is evaluated by the LogicRunner with EvalExpr over the call's
+// arguments. The mechanism above has no edition-2026 path. What stays is the
+// property -- a comparison predicate over an argument discriminates -- driven
+// through the real parse and compile and the evaluator the runner calls, with
+// the two-inputs assertion.
 
 // condProbeSource builds a single-statement logic whose body is `expr`.
 func condProbeSource(expr string) string {
@@ -65,24 +65,20 @@ logic condProbe {
     n     int      @required
     flag  boolean  @required
   }
-  body {
-    return %s
-  }
+  return %s
 }
 `, expr)
 }
 
-// evalCondProbe parses `expr` as a logic body and evaluates its returned
-// expression against args with EvalExpr, the evaluator the LogicRunner runs it
-// with.
+// evalCondProbe loads `expr` as a logic body and evaluates its return
+// statement's value against args with EvalExpr, the evaluator the LogicRunner
+// runs it with.
 func evalCondProbe(t *testing.T, expr string, args map[string]any) any {
 	t.Helper()
 	fn, err := tryParseNewFunctionSyntax("condProbe", "logic", condProbeSource(expr), "memql#2962-test", memorynodes.DefaultRegistry())
 	require.NoErrorf(t, err, "the probe body %q must parse", expr)
-	ret, ok := fn.Expr.(*PlanConstExpression)
-	require.Truef(t, ok, "fn.Expr = %T, want the returned expression as a *PlanConstExpression", fn.Expr)
 
-	got, err := EvalExpr(context.Background(), ret.Expr, MapScope{"args": args}, EvalOptions{})
+	got, err := EvalExpr(context.Background(), statementReturnExpr(t, fn), MapScope{"args": args}, EvalOptions{})
 	require.NoErrorf(t, err, "evaluating %q", expr)
 	return got
 }

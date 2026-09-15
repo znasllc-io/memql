@@ -1,0 +1,6 @@
+@trigger(schedule="0 0 * * * *")
+automation ifOnACall {
+  if query things() {
+    mutation saveThing(label: "some")
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "automation": "agents/automations.memql produceArtifact",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "s-agentId",
+            "filename": "s-filename",
+            "format": "s-format",
+            "goal": "s-goal"
+          },
+          "topic": "automation.invocation.produceArtifact"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "agentId": "s-agentId",
+              "prompt": "Produce the following deliverable and save it to the Library. Do not reply with the content itself -- write it to a file and confirm what you saved.\n\nDeliverable: s-goal\nFormat: s-format\nFilename: s-filename",
+              "requireFile": true
+            },
+            "kind": "builtin",
+            "name": "runAgentTurn"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "s-agentId",
+            "filename": "s-filename",
+            "format": "s-format",
+            "goal": "s-goal"
+          },
+          "topic": "automation.invocation.produceArtifact"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "agentId": "s-agentId",
+              "prompt": "Produce the following deliverable and save it to the Library. Do not reply with the content itself -- write it to a file and confirm what you saved.\n\nDeliverable: s-goal\nFormat: s-format\nFilename: s-filename",
+              "requireFile": true
+            },
+            "kind": "builtin",
+            "name": "runAgentTurn"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

@@ -17,12 +17,12 @@ func TestCompileMemQL_AnnotationGate(t *testing.T) {
 		src    string
 		expect string
 	}{
-		{"unknown", "@triggr(event=\"x\")\nautomation p {\n  step s { logic l {} }\n}\n", "triggr"},
-		{"dead-retry", "@retry(count=3)\nautomation p {\n  step s { logic l {} }\n}\n", "retry"},
-		{"dead-async", "@async\nautomation p {\n  step s { logic l {} }\n}\n", "async"},
-		{"retired-role", "@role(\"admin\")\nautomation p {\n  step s { logic l {} }\n}\n", "#2709"},
-		{"retired-internal", "@internal\nautomation p {\n  step s { logic l {} }\n}\n", "#2708"},
-		{"retired-permission", "@permission(\"x\")\nautomation p {\n  step s { logic l {} }\n}\n", "#2713"},
+		{"unknown", "@triggr(event=\"x\")\nautomation p {\n  s := logic l()\n}\n", "triggr"},
+		{"dead-retry", "@retry(count=3)\nautomation p {\n  s := logic l()\n}\n", "retry"},
+		{"dead-async", "@async\nautomation p {\n  s := logic l()\n}\n", "async"},
+		{"retired-role", "@role(\"admin\")\nautomation p {\n  s := logic l()\n}\n", "#2709"},
+		{"retired-internal", "@internal\nautomation p {\n  s := logic l()\n}\n", "#2708"},
+		{"retired-permission", "@permission(\"x\")\nautomation p {\n  s := logic l()\n}\n", "#2713"},
 	}
 	for _, tc := range reject {
 		t.Run(tc.name, func(t *testing.T) {

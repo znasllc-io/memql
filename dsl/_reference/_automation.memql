@@ -4,7 +4,9 @@
 //
 // This file is the source of truth for `automation` syntax. It is NOT loaded
 // by the engine (the leading underscore on the path tells every walker to
-// skip it -- see core/dslfs/walker.go).
+// skip it -- see core/dslfs/walker.go). Two tests parse it:
+// component/memql/reference_skeletons_test.go and
+// component/memql/sense/reference_diagnose_test.go.
 //
 // `automation` is the behavioral DSL's ONLY reactive + composing construct.
 // From the behavioral-constructs ADR
@@ -13,171 +15,149 @@
 //     logic decides, mutations persist, actions touch the world,
 //     queries read, automations orchestrate and react.
 //
-// An automation is triggered by an event / schedule / CDC change (or invoked
-// by reference, ADR §2.2) and sequences steps. It is the one place the
-// decide -> persist -> act rhythm comes together: call `logic` to decide,
-// call a `mutation` to persist one write, call an `action` to reach the
-// outside world, call a `query` to read, and call a sub-automation to
-// compose. It is also the only construct that may carry a `@trigger`.
+// An automation is triggered by an event or a schedule (or invoked by the work
+// run that names it, as a `@template`) and runs its statements in the order
+// they are written. It is the one place the decide -> persist -> act rhythm
+// comes together: call a `logic` to decide, a `mutation` to persist one
+// write, an `action` to reach the outside world, a `query` to read, a
+// `builtin` for a Go-backed operation, and a sub-`automation` to compose. It
+// is also the only construct that may carry a `@trigger`, `publish` an event,
+// or call an `automation` or an `action`.
+//
+// Its body is the statement language every logic and automation is written in
+// (docs/public/language/memql.md#bodies).
 //
 // ----------------------------------------------------------------------------
-// Call-graph contract (ADR §2 table) -- enforced by the I2 call-graph validator
+// Call-graph contract (ADR §2 table) -- enforced by the call-graph validator
 // ----------------------------------------------------------------------------
 //
-//   Construct  | May call                                       | May NOT
-//   -----------|------------------------------------------------|---------
-//   automation | logic, query, mutation, action, sub-automation;| --
-//              | branch (switch / success-failure), loop        |
-//              | (forEach), fan-out (parallel)                  |
+//   Construct  | May call                                        | May NOT
+//   -----------|-------------------------------------------------|---------
+//   automation | logic, query, mutation, builtin, action,        | --
+//              | sub-automation; publish; branch (if / switch),  |
+//              | loop (for), fan-out (parallel)                  |
 //
 // Automations consume the layers above them and never the other way around:
 // a logic/query/mutation/action never calls back into an automation.
-//
+
 // =============================================================================
 //   1. Automation-level annotations
 // =============================================================================
 //
-//   @disabled               Lifecycle flag. The companion @enabled is
-//                           RETIRED (epic memql#5375); it was the explicit-on
-//                           default; @disabled skips the automation at load.
-//   @description("text")    Human-readable description.            optional
 //   @trigger(...)           The reactive surface. EXACTLY ONE per automation
 //                           (the only construct allowed to carry it).
+//   @filter(row => ...)     A predicate over the triggering row: the
+//                           automation runs only when it holds.
+//   /// text                The description: a doc comment above the
+//                           declaration (@description("text") is the same).
+//   @disabled               Skip the automation at load. A construct is
+//                           enabled by default; @enabled was the explicit-on
+//                           no-op and is RETIRED (epic memql#5375).
+//   @template               A work-spine template: invoked by the run that
+//                           names it; it carries no @trigger.
+//   @actor                  The body reads actor.*.
+//   @mcp                    Promote the automation to the MCP surface.
 //
 // Trigger forms:
-//   @trigger(event="<name>", concept="v1:<ns>:<concept>", partition="*")
-//                           Fire on a graph/event-bus event. `concept` scopes
-//                           it to a concept; `partition="*"` is still required
-//                           while the event topic carries a partition segment
-//                           (#56 phase 8 removes it).
+//   @trigger(event="node.created", concept="v1:<ns>:<concept>")
+//                           A graph event on a concept (node.created /
+//                           node.updated / node.deleted).
+//   @trigger(event="<topic>")
+//                           A published topic, or system.startup /
+//                           system.shutdown.
 //   @trigger(schedule="<6-field cron>")
 //                           Time-driven (sec min hour dom mon dow), e.g.
 //                           @trigger(schedule="0 */10 * * * *") = every 10 min.
 //
 // =============================================================================
-//   2. Terse single-step form -- replaces the pass-through ceremony (ADR §2.4)
+//   2. The args contract and the event
 // =============================================================================
 //
-// Most automations existed only to make a `logic` reactive: their whole body
-// was `step run { logic X(event: event) }`. The terse form expresses that
-// in one line WITHOUT hiding the reactive surface (it stays greppable):
-//
-//     automation NAME @trigger(event="...") => logic logicName
-//
-// The loader lowers it to the canonical single-step automation; it forwards
-// the trigger payload as `event` when the target logic declares args, and
-// calls it with an empty object otherwise. The terse and longhand forms
-// compile to IDENTICAL runtime automations (dry-run + live parity).
-//
-// Examples (the cluster pass-throughs, terse):
-//
-//     automation registerNode   @trigger(event="system.startup")  => logic registerNode
-//     automation deregisterNode  @trigger(event="system.shutdown") => logic deregisterNode
-//     automation pruneStaleNodes @trigger(schedule="0 */10 * * * *") => logic pruneStaleClusterNodes
-//
-// NOTE: terse-form parsing lands in I3 (#2215); this section documents the
-// committed target syntax (ADR §7) ahead of that parser work.
-//
-// =============================================================================
-//   3. Full form -- the canonical longhand single-step automation
-// =============================================================================
-//
-// The longhand the terse form lowers to. `event` is the bound trigger
-// payload; `args.X` reaches its fields inside step calls.
-//
-// ILLUSTRATIVE PSEUDOCODE, not a call into any real construct: `logic
-// exampleLogic` below names no logic that exists in this tree, and the real
-// `automation registerNode` (dsl/cluster/automations.memql) is NOT this
-// shape -- its former logic step was retired (#2235) in favor of writing
-// directly via `mutation createNode`, because both its inline writes
-// violated logic purity (ADR S2.1). This block exists only to show the
-// SHAPE the terse form (section 2) lowers to.
-
-@trigger(event="system.startup")
-@description("Illustrative longhand single-step form -- names no real logic construct.")
-automation longhandSingleStepExample {
-  step run {
-    logic exampleLogic(event: event)
-  }
-}
-
-// =============================================================================
-//   3a. Typed input contract -- the `args { }` block  (AVAILABLE, G1 #2363)
-// =============================================================================
-//
-// A full-form automation MAY declare a typed input contract with an
-// `args { }` block, exactly like logic/query (event-payload-binding ADR
-// Decision 1). It replaces the ~60-line payload COMMENT block that emitters
-// and consumers used to hand-maintain with a machine-checked schema.
-//
-// Field grammar (identical to logic/query args):
-//   <name> <type> [@required] [@enum("a","b")] [@description("...")]
-//                 [@maxLength(N)] [@pattern("re")]
-//   -- `@default` is REJECTED on an args field (#991); default in the body
-//      with `??`, `args.X ?? <v>` (#2611/#2766). The `coalesce(args.X, <v>)`
-//      call form is retired in edition 2026: the parser refuses it, naming
-//      `??`, and memqlmigrate --rewrite=expressions rewrites it.
-//
-// Fire-time validation (ADR Decision 2): when the automation declares an
-// args block, the trigger path binds `event.payload` -> `args` and validates
-// it BEFORE any step (and before the `@trigger @filter(...)`):
-//   - a missing @required field / type mismatch / @enum miss / @maxLength
+// The triggering row's payload is bound INTO the automation's `args { }`
+// block and validated against it before the first statement runs
+// (event-payload-binding ADR Decision 2):
+//   - a missing required field / type mismatch / @enum miss / @maxLength
 //     overrun / @pattern miss makes the automation REFUSE to fire -- a loud
 //     Warn (automation / topic / field / reason) + a skip counter. Never a
 //     silent nil, never a partial run.
 //   - unknown extra payload fields are TOLERATED (tolerant-reader): not
 //     bound, Debug-noted.
-// The invoke-by-reference path validates its params against the SAME contract.
+// The invoke-by-reference path validates its params against the SAME
+// contract.
 //
-// Reading the fields inside the body:
-//   - `args.<field>` -- the validated map is exposed as `args` (G1).
-//   - bare `<field>` -- resolves loop-var > step name > args field; a typo'd
-//     or shadowed name is a LOAD ERROR, never a silent nil (G2, #2364).
-//   - punned `f(provider)` == `f(provider: provider)` -- a bare
-//     simple identifier in a construct-call arg position (G3, #2365); any
-//     other positional argument on a construct call is rejected.
-// Envelope intrinsics stay prefixed: `event.topic`, `event.kind`,
-// `event.timestamp` (RFC3339 occurrence time; distinct from `now`), and
-// `event.actor.id` (the acting identity, present when the emitter stamped
-// it -- graph CDC events do; check with `event.actor != nil`).
+// Field grammar (identical to logic / query args):
+//   <name> <type>[!] [@enum("a","b")] [@maxLength(N)] [@pattern("re")]
+//                     [@minimum(N)] [@maximum(N)]
+//   -- `!` (or @required) makes a field required; describe a field with a ///
+//      doc comment above it. @default and @description are refused on an args
+//      field: default in the body with `??`, `args.x ?? <v>`.
+//
+// Reading the fields inside the body: `args.<field>`, always. A bare field
+// name is refused (body_unknown_name, whose hint says args.<field>), and so is
+// a dotted `event.<field>` read (G5): `event` is the event itself, and an
+// automation forwards it whole to a logic that wants it, `logic l(event: event)`.
+// The logic declares `event object!` and reads args.event.payload.<field>.
 
-@trigger(event="deploy.requested", concept="v1:cluster:deployment", partition="*")
-@description("Full form with a typed args contract (G1).")
-automation deployWithArgs {
+/// On to-do creation, promote it into the Library Records lens. (The live
+/// automation is dsl/library/automations.memql, indexTodoOnCreate.)
+@trigger(event="node.created", concept="v1:todos:todo")
+automation referenceIndexTodo {
   args {
-    deploymentId string!
-    provider     enum("docker-local", "azure")!
+    id          any
+    ownerUserId any
+    title       any
   }
-  step gate {
-    // deploymentForwardAllowed (dsl/deployment/logic.memql) is @actor-bound
-    // and reads actor.role directly -- it takes no args of its own; the
-    // automation's OWN args are consumed below via punning (G3).
-    logic deploymentForwardAllowed()
-  }
-  step record {
-    mutation createDeployment(deploymentId, provider)
-  }
+
+  persist := mutation createArtifact(
+    sourceConceptRef: args.id,
+    ownerUserId:      args.ownerUserId,
+    lens:             "record",
+    kind:             "todo",
+    source:           "agent_generated",
+    title:            args.title ?? "Untitled to-do",
+    live:             false
+  )
 }
 
 // =============================================================================
-//   4. Full form -- multi-step orchestration (decide / persist / act / branch)
+//   3. Statements
 // =============================================================================
 //
-// The deployment bundle's shape (illustrative; the real bundle lands in
-// Phase 3). Engine mesh ONLY -- no bff / product nodes. Actions default to the
-// `cockpit/runner` surface; the env `switch` stays in ONE automation.
+//   x := <kind> name(<named args>)        bind a call's value to x
+//   x := <expression>                     bind a computed value
+//   <kind> name(<named args>)             call; the value is not bound
+//   if <cond> { } else if <cond> { } else { }
+//                                         `else` on the closing brace's line
+//   for x in <source> if <filter> { }     loop; x exists only inside
+//   switch <subject> { case "a", "b" { } default { } }
+//   parallel { branch a { } branch b { } } [wait any]
+//   publish "<topic>" { <field>: <value>, ... }
+//   return [<expression>]                 end the run early
 //
-// NOTE (G5, #2367): `event.payload.X` reads are RETIRED in automation
-// bodies -- declare the field in the `args { }` block and read it bare
-// (or as `args.X`); the migrator is scripts/migrations/event_payload_args.
-// `event.actor.id` is the envelope actor (G4, #2366): populated on graph CDC
-// events (.created / .updated) from the mutation's acting identity; absent
-// when an emitter carries no actor -- guard with `event.actor != nil`.
+// <kind> is query, mutation, logic, builtin, automation or action. Every
+// argument is named (`name: value`), and a construct call is a statement of
+// its own -- the whole right-hand side of `:=` or a line by itself, never
+// nested in an expression (body_call_in_expression). One statement per line.
 //
-// CONDITION VOCABULARY (P4, #2371 -- enforced by the callgraph validator +
-// the whole-tree contract test + the authoring sandbox at define time).
-// A condition (if gate / forEach where / @filter) may use:
-//   - step-result comparisons: steps.<decide>.result == <value>
+// Trailing clauses, written in this order:
+//   on surface("<name>")   an action call: the surface it runs on
+//   retry(<n>)             a call: retry a failure up to n more times
+//   on error continue      a call, a for, a parallel: record the failure,
+//                          leave the name absent and go on (stopping the run
+//                          is the default and is never written)
+//
+// Names: a statement's name is its value -- a query's rows, a mutation's
+// written row, a logic's return value, a builtin's result, an action's
+// capability result. A name is read only after the statement that binds it
+// (body_forward_reference). An if branch or a switch case runs at most once
+// and shares the scope around it: a name bound in a branch that did not run
+// reads absent, and the branches of one chain may each bind the same name. A
+// loop body and a parallel branch have their own scope.
+//
+// CONDITION VOCABULARY (P4, #2371 -- enforced by the call-graph validator, the
+// whole-tree contract test and the authoring sandbox at define time).
+// A condition (an if, a for's `if` filter, a @filter) may use:
+//   - a decided value: decide == <value>, gate.passed == true
 //   - presence guards: <ref> != nil
 //   - SINGLE-value fan-out equality: <field> == "<one literal>"
 //   - boolean fields / == true / == false
@@ -185,87 +165,168 @@ automation deployWithArgs {
 // query pushdown):
 //   - a same-field string-literal ||-vocabulary (x == "a" || x == "b")
 //   - date math / defaults in conditions (addDuration, `??`, `+`)
-// Switch SUBJECTS are exempt: switching on a decided value IS the sanctioned
+// A switch SUBJECT is exempt: switching on a decided value IS the sanctioned
 // fan-out shape.
 //
-// Step vocabulary an automation may use:
-//   step NAME { logic L(...) }              -- decide (pure)
-//   step NAME { query Q(...) }              -- read
-//   step NAME { mutation M(...) }           -- persist (one write per step)
-//   step NAME { action act(...) on surface(<expr>) }
-//                                          -- touch the world (external capability)
-//   step NAME { automation Sub(...) }       -- compose a sub-automation
-//   forEach x in <list> { ... }            -- loop / fan one step over a list
-//   switch <expr> { case "v" { ... } default { ... } }   -- branch
-//   parallel { ... }                       -- fan-out concurrently
-//   on success when <logic> { ... } / on failure { ... }  -- terminal branch
-//
-// A `forEach` source may be a collection chain from the in-memory
-// collection/lambda library (ADR §2.2, #2302) -- e.g.
-// `forEach m in args.members.where(m => m.active) { ... }`. Lambda bodies stay
-// PURE (no mutations / actions inside the lambda); the side effects live in
-// the forEach step body. See `_logic.memql` §6 for the full method surface.
-//
-//   (@enabled was here and is RETIRED -- epic memql#5375)
-//   @trigger(event="deploy.requested", concept="v1:cluster:deployment")
-//   @description("Deploy the MemQL ENGINE cluster. No bff / product nodes.")
-//   automation deployEngineCluster {
-//     step authorize { logic requireForwardDeploy(event: event) }   // requiresDeveloperOrAbove
-//     step record    { mutation createDeployment(                   // ONE write
-//                        deploymentId,          // punned (G3)
-//                        provider,              // punned (G3)
-//                        triggeredBy:  event.actor.id) }
-//     step clone     { action cloneRepoAtVersion(
-//                        workdir, ref)          // punned (G3)
-//                      on surface("cockpit/runner") }
-//     step build     { forEach nodeType in logic engineNodeTypes() {
-//                        action buildEngineImage(
-//                          nodeType, version, workdir) } }  // punned
-//     step place {
-//       switch provider {
-//         case "docker-local" {
-//           forEach nodeType in logic engineNodeTypes() {
-//             action importImageToK3d(nodeType: nodeType, cluster: "memql") }
-//         }
-//         default {  // azure -> GitOps (deploys = merges)
-//           action pinOverlayDigests(
-//             overlayPath: logic cloudOverlayPath(),
-//             digests: $steps.build.result)
-//           action argoSync(app: "memql", revision: ref)
-//         }
-//       }
-//     }
-//     step gate { action runDeployGate(
-//                   provider, workdir) }
-//     step finish {
-//       on success when logic deployGatePassed(gate: $steps.gate.result) {
-//         mutation updateDeploymentStatus(deploymentId,          // punned (G3) status: "succeeded")
-//         action notifyDeploy(status: "succeeded")
-//       }
-//       on failure {
-//         action revertOverlay(overlayPath: logic cloudOverlayPath())
-//         mutation updateDeploymentStatus(deploymentId,          // punned (G3) status: "failed")
-//         action notifyDeploy(status: "failed")
-//       }
-//     }
-//   }
-//
 // =============================================================================
-//   5. NON-COMPLIANT examples
+//   4. A multi-statement orchestration (decide / persist / act / branch)
 // =============================================================================
 //
-// 5a. Two writes in one step. Each mutation step performs exactly one graph
-//     write; split a second write into its own step.
+// The deployment bundle's automation, as dsl/deployment/automations.memql
+// writes it. Engine mesh ONLY -- no bff / product nodes. Each action statement
+// is one external capability on the cockpit/runner surface; the provider
+// `switch` stays in ONE automation.
+
+/// Deploy the MemQL ENGINE cluster: authorize -> record -> clone -> build ->
+/// place (provider switch) -> gate -> finish -> roll back on a failed gate.
+@trigger(event="deploy.requested")
+automation referenceDeployEngineCluster {
+  args {
+    deploymentId         string!
+    provider             enum("docker-local", "azure")!
+    engineNodeTypes      []string!
+    ref                  string!
+    version              string!
+    workdir              string!
+    overlayPath          string
+    digests              object
+    previousDeploymentId string
+    triggeredBy          string
+    dryRun               boolean
+  }
+
+  authorize := logic deploymentForwardAllowed(event: event)
+  record := mutation createDeployment(
+    deploymentId: args.deploymentId,
+    provider:     args.provider,
+    version:      args.version,
+    triggeredBy:  args.triggeredBy,
+    status:       "in_progress",
+    previousDeploymentId: args.previousDeploymentId
+  )
+  clone := action cloneRepoAtVersion(workdir: args.workdir, ref: args.ref, dryRun: args.dryRun)
+  for nt in args.engineNodeTypes {
+    action buildEngineImage(nodeType: nt, version: args.version, workdir: args.workdir, dryRun: args.dryRun)
+  }
+  for nt in args.engineNodeTypes if args.provider == "docker-local" {
+    action importImageToK3d(nodeType: nt, cluster: "memql", version: args.version, dryRun: args.dryRun)
+  }
+  switch args.provider {
+    case "docker-local" { }
+    default {
+      action pinOverlayDigests(overlayPath: args.overlayPath, digests: args.digests, dryRun: args.dryRun)
+      action argoSync(app: "memql", revision: args.ref, dryRun: args.dryRun)
+    }
+  }
+  gate := action runDeployGate(provider: args.provider, workdir: args.workdir, dryRun: args.dryRun)
+  outcome := logic deployOutcomeLabel(passed: gate.passed)
+  switch outcome {
+    case "succeeded" {
+      mutation updateDeploymentStatus(deploymentId: args.deploymentId, status: "succeeded")
+      action notifyDeploy(status: "succeeded", deploymentId: args.deploymentId, dryRun: args.dryRun)
+    }
+    default {
+      mutation updateDeploymentStatus(deploymentId: args.deploymentId, status: "failed")
+      action notifyDeploy(status: "failed", deploymentId: args.deploymentId, dryRun: args.dryRun)
+    }
+  }
+  rollbackTarget := logic deployRollbackTarget(passed: gate.passed, previousDeploymentId: args.previousDeploymentId)
+  switch rollbackTarget {
+    case "" { }
+    default {
+      action revertOverlay(overlayPath: args.overlayPath, toDeploymentId: rollbackTarget, dryRun: args.dryRun)
+    }
+  }
+}
+
+// A `for` source may be a collection chain from the in-memory collection /
+// lambda library -- e.g. `for m in args.members.where(m => m.active) { ... }`.
+// Lambda bodies stay PURE (no mutations / actions inside the lambda); the side
+// effects live in the loop's statements. See `_logic.memql` §6.
 //
-//   // INVALID: two mutations crammed into one step.
-//   step record {
-//     mutation createDeployment { ... }
-//     mutation updateDeploymentStatus { ... }   // <- second write: split it out
-//   }
+// =============================================================================
+//   5. Scheduled, with a publish
+// =============================================================================
+
+/// Every 10 min: mark departed cluster nodes as health='stopped', and say how
+/// many went.
+@trigger(schedule="0 */10 * * * *")
+automation referencePruneStaleClusterNodes {
+  stale := logic pruneStaleClusterNodes(event: event)
+  for node in stale {
+    mutation updateNodeHealth(id: node.id, health: "stopped", lastSeen: now) on error continue
+  }
+  publish "cluster.nodes.pruned" { count: stale.count() }
+}
+
+// =============================================================================
+//   6. Preconditions (self-healing)
+// =============================================================================
 //
-// 5b. A trigger on a non-automation. `@trigger` is automation-only -- a
-//     logic/query/mutation carrying one is rejected (see `_logic.memql` §5c).
+// A `precondition NAME { ... }` block sits after the args block and before the
+// first statement: a deterministic boolean `check:` evaluated after the
+// trigger fires and before any statement runs. It reads only the roots
+// (args, actor, event, config, partition, now -- checked at load) and may
+// call catalog functions such as var("NAME"); comparisons, && / || / !. A miss aborts the run as
+// skipped and emits healing.precondition.missed. `literal:` names the
+// machine-specific literal asserted, `description:` the context.
+
+/// Route a submitted request by the submitter's role -- only one that carries
+/// its id.
+@trigger(event="node.created", concept="v1:forge:request")
+automation referenceRouteRequest {
+  args {
+    id            any
+    submitterRole any
+  }
+  precondition hasId {
+    check: args.id != nil
+    literal: id
+    description: "Route only a request that carries its id."
+  }
+  decide := logic requestRouteStatus(submitterRole: args.submitterRole)
+  mutation advanceRequest(requestId: args.id, status: decide)
+}
+
+// =============================================================================
+//   7. NON-COMPLIANT examples
+// =============================================================================
 //
-// See `_logic.memql` for pure decisions and `_action.memql` (I6) for the
-// external-capability construct each `action(...)` step references.
+// 7a. A construct call nested in an expression (body_call_in_expression). A
+//     side effect that is not a statement is not journaled, previewed or
+//     retried: bind it, then read the name.
+//
+//   total := 1 + query openTickets().count()      // <- refused
+//
+// 7b. A trigger on a non-automation. `@trigger` is automation-only -- a
+//     logic/query/mutation carrying one is refused (see `_logic.memql` §5c).
+//
+// 7c. The retired body forms, each refused at parse by name and rewritten by
+//     `memqlmigrate --rewrite=bodies`:
+//       - `step NAME { <call> }` blocks (body_step_retired)
+//                                          -> `NAME := <call>`
+//       - a `body { }` block (body_block_retired)
+//                                          -> the statements, after args { }
+//       - the terse `automation X @trigger(...) => logic Y` header
+//         (body_terse_retired)            -> an automation whose one statement
+//                                             is `logic Y(event: event)`
+//       - `steps.x.result` / `x.result` (body_steps_reference_retired)
+//                                          -> `x`
+//       - `forEach x in s where f { }` (body_foreach_retired)
+//                                          -> `for x in s if f { }`
+//       - `publishEvent(...)` (body_publish_event_retired)
+//                                          -> `publish "<topic>" { ... }`
+//       - a call with no kind, the argument pun `logic l(event)`
+//         (body_call_kind_missing, body_positional_argument)
+//                                          -> `logic l(event: event)`
+//       - `partition="*"` on @trigger (trigger_partition_retired) -> delete it
+//       - `@schedule(cron="...")` (trigger_schedule_synonym_retired)
+//                                          -> `@trigger(schedule="...")`
+//     The step bodies' accessors are refused at parse the same way
+//     (body_accessor_retired), with no rewrite: `step("x")` -> `x`,
+//     `input()` -> `args.<name>`, `item()` / `index()` -> the loop's own
+//     name, `for x in s`.
+//
+// See `_logic.memql` for pure decisions and `_action.memql` for the
+// external-capability construct each `action` statement calls.
 // =============================================================================

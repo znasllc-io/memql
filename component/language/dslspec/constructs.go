@@ -13,7 +13,7 @@ import (
 // DERIVED from the parser wherever the parser can say it (memql#5359):
 //   - the SET of constructs is parser.ConstructKeywords, the one table of
 //     words that open a top-level statement -- the struct-form rewriter's
-//     family (query / mutate / logic / automation), the parser's top-level
+//     family (query / mutation / logic / automation), the parser's top-level
 //     dispatch, and the `use` import -- which the parser's refusal of any
 //     other word and the load gate construct_unknown read too (memql#5356);
 //   - each construct's BodyBlocks are parser.BodyClauses -- the clauses the
@@ -136,21 +136,21 @@ func constructCatalog() []Construct {
 		{
 			Keyword:            "mutation",
 			Category:           CategoryFunction,
-			Doc:                "Write function on a bound concept: declared `mutate <Concept> <name>` with exactly one insert{} OR update{} block. (`mutate` is the declaration keyword -- rewriter.go mutationStructHeader / memql#2041; `mutation` is the invocation-step prefix only.)",
+			Doc:                "Write function on a bound concept: declared `mutation <Concept> <name>` with exactly one insert{} OR update{} block, and called `mutation <name>(...)` -- the one word declares and calls (D13).",
 			AnnotationReceiver: "Mutation",
 			ConceptInSignature: true,
 		},
 		{
 			Keyword:            "logic",
 			Category:           CategoryFunction,
-			Doc:                "Imperative procedure called from an automation step. `args { }` declares inputs; `body { }` is named statements ending in `return <expr>`.",
+			Doc:                "A procedure that decides. `args { }` declares its inputs; its statements follow in the order they run (`x := <kind> name(...)`, if, for, switch, parallel) and end with `return <expr>`. It calls queries, mutations, logic and builtins; publishing, calling an automation and dispatching an action are an automation's (D14).",
 			AnnotationReceiver: "Logic",
 			ConceptInSignature: false,
 		},
 		{
 			Keyword:            "automation",
 			Category:           CategoryFunction,
-			Doc:                "Event- or schedule-triggered side-effect (via @trigger). Consumes the layers above it; the triggering event is bound as `args`.",
+			Doc:                "Event- or schedule-triggered side-effect (via @trigger). Its statements run in the order written and call every construct kind; the triggering event's payload is bound into its `args { }` block.",
 			AnnotationReceiver: "Automation",
 			ConceptInSignature: false,
 		},

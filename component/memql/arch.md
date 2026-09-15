@@ -1,6 +1,6 @@
 # Engine Package Architecture
 
-> **Last Updated:** 2026-06-22
+> **Last Updated:** 2026-09-14
 
 This document describes the architecture of the MemQL processing engine,
 which is split across two Go modules: `component/language/` (parsing +
@@ -59,12 +59,12 @@ The engine package follows a **compiler pipeline architecture** with clear separ
 │   │                        engine/compiler/                                 │     │
 │   │                                                                         │     │
 │   │   ┌───────────────────────┐    ┌───────────────────────┐                │     │
-│   │   │ AutomationGenerator   │    │  FunctionGenerator    │                │     │
+│   │   │ CheckBody+CompileBody │    │  FunctionGenerator    │                │     │
 │   │   │                       │    │                       │                │     │
-│   │   │   AST → .json         │    │   AST → definition    │                │     │
+│   │   │ statements → steps    │    │   AST → definition    │                │     │
 │   │   └───────────────────────┘    └───────────────────────┘                │     │
 │   │                                                                         │     │
-│   │   Responsibility: AST → Target Formats (JSON, definitions)              │     │
+│   │   Responsibility: AST → the executor's steps and function definitions   │     │
 │   └─────────────────────────────────────────────────────────────────────────┘     │
 │                                      │                                            │
 │                                      ▼                                            │
@@ -88,250 +88,95 @@ The engine package follows a **compiler pipeline architecture** with clear separ
 
 ---
 
-## 1. Parser Engine (`engine/parser/`)
+## 1. Parser Engine (`component/language/parser/`)
 
-Transforms MemQL source text into an Abstract Syntax Tree.
+Transforms MemQL source text into an Abstract Syntax Tree. The package's own
+guide is [component/language/CLAUDE.md](../language/CLAUDE.md); the
+construct-level grammar is in
+[architecture.md](../../docs/public/concepts/architecture.md#parser-architecture),
+and the language itself in
+[memql.md](../../docs/public/language/memql.md).
 
 ### Files
 
 | File | Purpose |
 |------|---------|
-| `ast.go` | AST node type definitions |
 | `lexer.go` | Tokenization |
-| `parser.go` | Recursive descent parser |
+| `rewriter.go` | The struct-form rewriter: a query and a mutation lowered to the internal procedural form |
+| `parser.go` | Recursive descent parser: the top-level dispatch and every declaration |
+| `v1_body.go` | The statement parser: a logic's and an automation's body, read as written |
+| `v1_expr.go` | The edition-2026 expression grammar (`ParseV1Expression`, `ParseV1Lambda`) |
+| `v1_refusals.go` / `v1_body_refusals.go` | The retired spellings and body forms, each refused by name |
 | `errors.go` | Error types with position info |
 
-### Lexer Flow
+### Two front halves
 
-```
-Input String
-     │
-     ▼
-┌──────────────────────────────────────────────────────────┐
-│                        LEXER                             │
-│                                                          │
-│  "automation test() { step1: query { ... } }"            │
-│                          │                               │
-│                          ▼                               │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │ Skip Whitespace / Comments                         │  │
-│  └────────────────────────────────────────────────────┘  │
-│                          │                               │
-│                          ▼                               │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │ Scan Token                                         │  │
-│  │  ├── Keywords (automation, query, mutation, when)  │  │
-│  │  ├── Operators (==, !=, >, >=, <, <=, in, not in, &&, ||, !, ??)│  │
-│  │  ├── Literals (strings, numbers)                   │  │
-│  │  ├── Identifiers (names, concept refs)             │  │
-│  │  └── Structural (, ; : { } [ ] ( ))                │  │
-│  └────────────────────────────────────────────────────┘  │
-│                          │                               │
-│                          ▼                               │
-│  Token Stream: [KEYWORD:automation] [IDENT:test] ...     │
-│                                                          │
-└──────────────────────────────────────────────────────────┘
-```
+- A **query** and a **mutation** are rewritten first (`NormaliseAll`), then
+  parsed; a refusal from the rewriter leads with `rewrite error at line L,
+  column C:`.
+- A **logic** and an **automation** are parsed as written into an
+  `ast.Body` of statements (`component/language/ast/body.go`): assign, call,
+  if, for, switch, parallel, publish and return.
 
-`!` lexes here like any other operator, but every ASTConverter surface
-refuses it after parsing -- filters/specs get the expression-led scope
-error, logic bodies and collection lambdas get "NOT/! does not convert".
-Its working homes are the two surfaces served by the runtime STRING
-evaluator (`component/automations.Evaluator`): an automation cond-step
-condition and a trigger `@filter`, which `evaluateTriggerFilter`
-(`component/automations/scheduler.go`) evaluates with the same evaluator
-(memql#3630). Authors write the `!=` comparison form elsewhere.
+Every expression an author writes -- a filter, a spec or trait body, a
+trigger `@filter`, a statement, a condition, a mutation value -- is parsed by
+the edition-2026 grammar into the node set of `component/language/ast/v1.go`
+(`IdentExpr`, `MemberExpr`, `CallExpr`, `UnaryExpr`, `BinaryExpr`,
+`TernaryExpr`, `LambdaExpr`, `ListExpr`, `MapExpr`, ...). The older node set
+in `ast.go` (`LogicalExpr`, `ComparisonExpr`, `SortExpr`, ...) is the
+engine's internal query form: the string an SDK sends to `Execute` and the
+wrapper the rewriter generates.
 
-### Parser Grammar (Simplified)
-
-```
-file         = { definition }
-definition   = queryFunc | mutationFunc | automation | expression
-
-queryFunc    = "query" name? "(" args ")" "{" expression "}"
-mutationFunc = "mutation" name? "(" args ")" ["when" cond] "{" insert "}"
-automation   = "automation" name "(" args ")" "{" { statement } "}"
-
-statement    = schedule | enabled | step | return
-step         = id ":" stepType ["when" cond] "{" body "}"
-
-expression   = logicalOr
-logicalOr    = logicalAnd { "||" logicalAnd }
-logicalAnd   = unary { "&&" unary }
-unary        = "!" unary | primary   // parses; refused post-parse except in
-                                      // an automation cond-step (memql#3630)
-primary      = comparison | functionCall | whenGuard | grouped
-```
-
-### AST Node Types
-
-```
-Node
-├── ExpressionNode
-│   ├── LogicalExpr           // a && b (AND) or a || b (OR); ! for NOT
-│   │                         // (parses into this node, but every
-│   │                         // ASTConverter surface except an automation
-│   │                         // cond-step refuses it -- memql#3630)
-│   ├── ComparisonExpr        // field==value
-│   ├── FunctionCallExpr      // func(args)
-│   ├── RelationshipExpr      // parentOf(...), childOf(...)
-│   ├── ConditionalFilterExpr // when(args.x) { <expr> } arg-conditional guard
-│   │                         // (the node's name + internal `?.` parsing survive
-│   │                         // from the retired `?.` prefix syntax it replaced;
-│   │                         // authors write `when(...)`, never `?.`)
-│   ├── SortExpr              // sort(fields)(...)
-│   ├── PaginateExpr          // paginate(limit,offset)(...)
-│   ├── DepthExpr             // depth(n)(...)
-│   ├── LiteralExpr           // "string", 123, true
-│   ├── TernaryExpr           // cond ? then : else
-│   │
-│   │   // Accessor Expressions (for automations/mutations)
-│   ├── ArgRefExpr            // args.name
-│   ├── VarRefExpr            // var("NAME")
-│   ├── StepRefExpr           // step("id")
-│   ├── InputRefExpr          // input()
-│   ├── ItemRefExpr           // item()
-│   ├── IndexRefExpr          // index()
-│   ├── EventRefExpr          // event()
-│   ├── ErrorRefExpr          // error()
-│   ├── TimestampExprFunc     // timestamp(), now()
-│   ├── FieldRefExpr          // field(obj, "key")
-│   │
-│   │   // Helper Function Expressions
-│   ├── ConcatExpr            // concat(a, b, ...)
-│   ├── CoalesceExpr          // coalesce(a, b, ...)
-│   ├── IfExpr                // if(cond, then, else)
-│   ├── FirstExpr             // first(collection)
-│   ├── LastExpr              // last(collection)
-│   ├── LowerExpr             // lower(str)
-│   ├── UpperExpr             // upper(str)
-│   ├── TrimExpr              // trim(str)
-│   ├── HashExpr              // hash(str)
-│   └── ContainsExpr          // contains(str, substr)
-│
-├── StatementNode
-│   ├── MutationStmt        // insert(...)
-│   └── QueryStmt           // expression as statement
-│
-├── FunctionDef             // query/mutation/automation definition
-│   ├── Name
-│   ├── Type                // query | mutation | automation
-│   ├── Args[]
-│   └── Body
-│
-├── AutomationDef           // automation body
-│   ├── Schedule
-│   ├── Steps[]
-│   ├── OnComplete
-│   └── OnError
-│
-├── StepDef                 // automation step
-│   ├── ID
-│   ├── Type                // query | mutation | webhook | forEach...
-│   ├── Condition
-│   └── Config
-│
-└── File                    // parsed .memql file
-    └── Definitions[]
-```
+`!` negates exactly in every position; there is no truthiness, so a
+condition must be boolean.
 
 ---
 
-## 2. Compiler Engine (`engine/compiler/`)
+## 2. Compiler Engine (`component/language/compiler/`)
 
-Transforms AST into target output formats.
+Transforms the AST into what the engine loads.
 
 ### Files
 
 | File | Purpose |
 |------|---------|
-| `compiler.go` | Main compiler interface |
-| `api.go` | Public API functions |
-| `automation_generator.go` | AST → JSON automation |
+| `compiler.go` / `api.go` | Main compiler interface and public API |
+| `body_scope.go` | `CheckBody`: a body's scope and construct rules |
+| `body_compile.go` | `CompileBody`: a body lowered to the executor's steps, in source order |
+| `automation_generator.go` | An automation's trigger, args and steps as the executor's JSON |
 | `function_generator.go` | AST → function definition |
+| `composition.go` | The CQS file-composition rules |
 
 ### Compilation Flow
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                    COMPILER                              │
-│                                                          │
-│   Input: AST (*File or *FunctionDef)                     │
-│                                                          │
-│   ┌───────────────────────────────────────────────────┐  │
-│   │              Type Detection                       │  │
-│   │                                                   │  │
-│   │  FunctionDef.Type == ?                            │  │
-│   │    ├── Automation → AutomationGenerator           │  │
-│   │    ├── Query      → FunctionGenerator             │  │
-│   │    └── Mutation   → FunctionGenerator             │  │
-│   └───────────────────────────────────────────────────┘  │
-│                          │                               │
-│          ┌───────────────┴───────────────┐               │
-│          ▼                               ▼               │
-│   ┌──────────────────┐        ┌───────────────────┐      │
-│   │ Automation       │        │ Function          │      │
-│   │ Generator        │        │ Generator         │      │
-│   │                  │        │                   │      │
-│   │ Outputs:         │        │ Outputs:          │      │
-│   │  - name.json     │        │  - function def   │      │
-│   │                  │        │  - function.memql │      │
-│   └──────────────────┘        └───────────────────┘      │
-│                                                          │
-└──────────────────────────────────────────────────────────┘
-```
-
-### API Functions
-
-```go
-// High-level compilation
-CompileSource(source string) (*CompileResult, error)
-CompileFile(path string) (*CompileResult, error)
-TranspileAutomation(source string) (string, error)
-
-// Validation & inspection
-ValidateMemQL(source string) error
-DetectFileType(source string) (FileType, error)
-GetAutomationName(source string) (string, error)
-IsAutomationFile(source string) bool
-ParseMemQL(source string) (Node, error)
-```
+`CheckBody` refuses a name read before it is bound or outside the block that
+binds it, a name bound twice, a bare argument read, and a construct call a
+logic may not make; `CompileBody` then emits one step per statement in the
+order written -- no sort -- flattening an `if` or a `switch` into the steps
+of its branches, each carrying its branch's condition.
 
 ### Transpilation Example
 
 ```
-INPUT (.memql)                          OUTPUT (.json)
+INPUT (.memql)                          OUTPUT (steps)
 ─────────────────                       ─────────────────
-automation test() {                     {
-  schedule "*/5 * * * *"          →       "name": "test",
-  step1: query {                          "schedule": "*/5 * * * *",
-    concept==v1:user                      "steps": [{
-  }                                         "id": "step1",
-}                                           "type": "query",
-                                            "query": {
-                                              "query": "concept==v1:user"
+@trigger(schedule="0 */5 * * * *")      {
+automation test {                 →       "name": "test",
+  users := query activeUsers()            "schedule": "0 */5 * * * *",
+}                                         "steps": [{
+                                            "id": "users",
+                                            "type": "function",
+                                            "binds": "users",
+                                            "function": {
+                                              "kind": "query",
+                                              "name": "activeUsers"
                                             }
-                                          }],
-                                          "enabled": true
+                                          }]
                                         }
 ```
 
-### Expression Translation
-
-The compiler translates accessor expressions to JSON `$` format:
-
-| MemQL Syntax | JSON Format |
-|--------------|-------------|
-| `var("NAME")` | `$var.NAME` |
-| `step("id")` | `$steps.id.result` |
-| `step("id").metadata.itemCount` | `$steps.id.metadata.itemCount` |
-| `input()` | `$input` |
-| `item()` | `$item` |
-| `index()` | `$index` |
-| `event()` | `$event` |
-| `error()` | `$error` |
-| `timestamp()` | `$timestamp` |
-| `field(item(), "name")` | `$item.name` |
+A later statement reads `users` by its name; there is no `$`-expression
+translation and no step accessor.
 
 ---
 
@@ -380,19 +225,13 @@ Executes queries against TimescaleDB and orchestrates supporting services.
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                 │
 │  ┌───────────────────────────────────────────────────────────┐  │
-│  │                  RuntimeEvaluator                         │  │
+│  │                  In-process evaluator                     │  │
 │  │                                                           │  │
-│  │  Evaluates accessor expressions during automation:        │  │
-│  │  ├── EvaluateArg()       → args.name                    │  │
-│  │  ├── EvaluateVar()       → var("NAME")                    │  │
-│  │  ├── EvaluateStep()      → step("id")                     │  │
-│  │  ├── EvaluateInput()     → input()                        │  │
-│  │  ├── EvaluateItem()      → item()                         │  │
-│  │  ├── EvaluateIndex()     → index()                        │  │
-│  │  ├── EvaluateTimestamp() → timestamp()                    │  │
-│  │  ├── EvaluateConcat()    → concat(a, b, ...)              │  │
-│  │  ├── EvaluateCoalesce()  → coalesce(a, b, ...)            │  │
-│  │  └── ... (count, first, last, lower, upper, etc.)         │  │
+│  │  EvalExpr (expr_eval.go) evaluates an edition-2026        │  │
+│  │  expression over an ExprScope: a run's names and roots    │  │
+│  │  (component/automations RunScope), a logic's bindings,    │  │
+│  │  a mutation's args. Its functions are the catalog's       │  │
+│  │  (component/language/functions), one spelling each.       │  │
 │  └───────────────────────────────────────────────────────────┘  │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
@@ -404,30 +243,13 @@ Executes queries against TimescaleDB and orchestrates supporting services.
 |------|---------|
 | `engine.go` | MemoryEngine struct, initialization, variable resolution |
 | `executor.go` | Query execution logic |
-| `runtime_evaluator.go` | Accessor expression evaluation at runtime |
+| `expr_eval.go` | The in-process evaluator of edition-2026 expressions (`EvalExpr`) |
 | `relations.go` | Relationship traversal |
 | `shape_template.go` | Result shaping |
 | `ai_runtime.go` | AI provider invocation |
 | `result_cache.go` | Query result caching |
 | `function_loader.go` | Load .memql functions |
 | `spec_loader.go` | Load specifications |
-
-### RuntimeContext
-
-The `RuntimeEvaluator` uses a `RuntimeContext` to resolve accessor expressions:
-
-```go
-type RuntimeContext struct {
-    Engine *MemoryEngine       // For var() resolution
-    Args   map[string]any      // For arg() resolution
-    Steps  map[string]*StepResult // For step() resolution
-    Input  any                 // For input() resolution
-    Item   any                 // For item() in forEach
-    Index  int                 // For index() in forEach
-    Event  map[string]any      // For event() triggers
-    Error  string              // For error() in onError
-}
-```
 
 ### Variable Resolution
 
@@ -437,8 +259,7 @@ Variables are stored in the `v1:platform:partitionVariable` concept and resolved
 // Engine method
 engine.ResolveVariable(ctx, "MEMQL_DEFAULT_USER_ROLE")
 
-// RuntimeEvaluator method (delegates to engine)
-evaluator.EvaluateVar(ctx, "MEMQL_DEFAULT_USER_ROLE")
+// In an expression, the catalog function var("NAME") reaches the same resolver
 ```
 
 Query executed internally:
@@ -635,59 +456,23 @@ func (p *Parser) parseMyNew() (*MyNewExpr, error) {
 }
 ```
 
-### Adding a New Automation Step Type
+### Adding a Capability to Automations
 
-```go
-// 1. ast.go - Add step type
-const StepTypeMyStep StepType = "mystep"
+A new thing an automation can do is a **builtin** (a Go integration behind
+`@executor("integration.<name>.<verb>")`, called as `builtin <name>(...)`) or
+an **action** over a declared capability -- not a new step type. The
+statement set is closed; a new statement kind touches the AST
+(`ast/body.go`), the statement parser (`parser/v1_body.go`), the compiler
+(`body_scope.go`, `body_compile.go`), a step executor in
+`component/automations/steps/`, and the statement cells under
+`test/conformance/2026/statements/`, each pinned by a gate.
 
-type MyStepConfig struct {
-    // config fields
-}
+### Adding a New Function
 
-// 2. parser.go - Parse it in parseStep()
-case "mystep":
-    stepType = StepTypeMyStep
-
-// 3. automation_generator.go - Generate JSON
-case StepTypeMyStep:
-    // output generation
-```
-
-### Adding a New Accessor Function
-
-```go
-// 1. ast.go - Define the expression node
-type MyAccessorExpr struct {
-    Target ExpressionNode
-}
-
-func (*MyAccessorExpr) node()           {}
-func (*MyAccessorExpr) expressionNode() {}
-
-// 2. parser.go - Add to parseFunctionCall()
-case "myaccessor":
-    return p.parseMyAccessor()
-
-func (p *Parser) parseMyAccessor() (ExpressionNode, error) {
-    target, err := p.parseExpressionArg()
-    // ...
-    return &MyAccessorExpr{Target: target}, nil
-}
-
-// 3. automation_generator.go - Add to expressionToString()
-case *parser.MyAccessorExpr:
-    return fmt.Sprintf("myaccessor(%s)", c.expressionToString(e.Target))
-
-// 4. automation_generator.go - Add to expressionToJSONExpr()
-case *parser.MyAccessorExpr:
-    return fmt.Sprintf("$myaccessor.%s", c.expressionToJSONExpr(e.Target))
-
-// 5. runtime_evaluator.go - Add evaluation method
-func (e *RuntimeEvaluator) EvaluateMyAccessor(target any) any {
-    // evaluation logic
-}
-```
+A function an expression can call is one entry in the catalog,
+`component/language/functions` (its spelling, signature, tier and the retired
+spellings it replaces). Both evaluators, Sense and the generated docs read the
+catalog, so there is no parser case or accessor node to add.
 
 ---
 

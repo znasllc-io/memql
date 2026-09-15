@@ -78,7 +78,7 @@ var scaffoldAnnotations = map[string]string{
 	"Mutation/noUnset":         `@noUnset("closedAt")`,
 	"Logic/description":        `@description("The headline a ticket shows: its title, or a placeholder when it has none.")`,
 	"Automation/description":   `@description("When a node joins the cluster, open a ticket to welcome it.")`,
-	"Automation/trigger":       `@trigger(event="node.created", concept="v1:cluster:node", partition="*")`,
+	"Automation/trigger":       `@trigger(event="node.created", concept="v1:cluster:node")`,
 	"Automation/filter":        `@filter(row => row.nodeType == "agent")`,
 	"Action/description":       `@description("Read a ticket's attachment from the runner's workspace.")`,
 	"Capability/description":   `@description("List the entries of a directory on the runner's workspace.")`,
@@ -556,7 +556,7 @@ func scaffoldMutation(p annotations.Placement, s, line string) (string, string, 
 func scaffoldAutomation(p annotations.Placement, s, ann string) (string, string, map[string]string) {
 	fixture := scaffoldTicket + "\n/// Raise a ticket with a title.\nmutation ticket raiseTicket" + s + " {\n" + scaffoldArgs([2]string{"title", "string!"}) +
 		"  insert {\n    title: args.title\n    status: \"open\"\n  }\n}\n"
-	trigger := `@trigger(event="node.created", concept="v1:cluster:node", partition="*")` + "\n"
+	trigger := `@trigger(event="node.created", concept="v1:cluster:node")` + "\n"
 	name := "welcomeNode" + s
 	step := "  step raise {\n    mutation raiseTicket" + s + " (title: \"A node joined the cluster\")\n  }\n"
 	args := ""

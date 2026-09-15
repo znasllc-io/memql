@@ -1,0 +1,3 @@
+logic noReturn {
+  x := 1
+}

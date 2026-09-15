@@ -1,0 +1,71 @@
+{
+  "automation": "identity/automations.memql auditEventRetentionSweep",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "expiredAuditEvents"
+          },
+          {
+            "args": {
+              "name": "MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "candidateCount": 0,
+              "retentionDays": "365",
+              "timestamp": "<ts>"
+            },
+            "kind": "event",
+            "name": "identity.audit.retention.observed"
+          }
+        ],
+        "result": {
+          "output": 0,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "expiredAuditEvents"
+          },
+          {
+            "args": {
+              "name": "MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "candidateCount": 2,
+              "retentionDays": "7",
+              "timestamp": "<ts>"
+            },
+            "kind": "event",
+            "name": "identity.audit.retention.observed"
+          }
+        ],
+        "result": {
+          "output": 2,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

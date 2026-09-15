@@ -469,6 +469,13 @@ jobs:
               # and mcp-conformance runs `./test/conformance/...` -- and the
               # gate-inputs step does not.
               - 'test/conformance/**'
+              # The golden trees of `memqlmigrate --rewrite=bodies` (epic
+              # memql#5370): input trees and the trees the rewrite must produce,
+              # read by the golden and idempotency tests in cmd/memqlmigrate,
+              # so a case changed with no Go beside it must still run them.
+              # go-tests reaches cmd/memqlmigrate; the gate-inputs step does
+              # not run cmd/**.
+              - 'cmd/memqlmigrate/testdata/**'
             # The embedded DSL tree.
             dsl:
               - 'dsl/**'

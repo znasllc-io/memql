@@ -23,14 +23,12 @@ import (
 
 // ConstructHeaderRe matches the header line of a row-accessing construct.
 //
-// The keyword set is `query|mutation|seed`. It was `query|mutate|seed`:
-// memql#3013 renamed `mutation` -> `mutate` and epic memql#5375 renamed it
-// BACK, and the hazard is the same in both directions -- a classifier looking
-// for the word the corpus no longer writes matches nothing and reports a clean
-// tree. That is what happened here twice. A classifier looking for
-// `mutation` walked queries only and every mutation and seed in the tree was
-// invisible to it. component/language/dslspec already hard-fails if `mutation`
-// is still a construct keyword; the classifier never got the memo.
+// The keyword set is `query|mutation|seed`. The mutation keyword has moved
+// twice -- memql#3013 renamed `mutation` -> `mutate`, and epic memql#5370
+// renamed it back (D13) -- and a classifier looking for the other spelling
+// walks queries only, every mutation and seed in the tree invisible to it.
+// component/language/dslspec hard-fails if `mutate` is a construct keyword
+// again.
 var ConstructHeaderRe = regexp.MustCompile(`(?m)^[ \t]*(query|mutation|seed)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 
 // UserScopeFieldRe matches a user-scope field named BARE, as an update block's

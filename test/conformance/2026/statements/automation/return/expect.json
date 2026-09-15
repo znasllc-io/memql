@@ -1,0 +1,15 @@
+{
+  "cases": [
+    {
+      "file": "return.memql",
+      "verdict": "load_ok",
+      "note": "the value a run ends with is on its outcome"
+    },
+    {
+      "file": "retry-on-a-return.memql",
+      "verdict": "refuse_parse",
+      "code": "body_retry_placement",
+      "message": "`retry(n)` applies to a construct call statement"
+    }
+  ]
+}

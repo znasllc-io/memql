@@ -522,9 +522,7 @@ func (v *functionValidator) expandFunctionCall(call *FunctionCallExpression) (Ex
 	// valid input here; downstream code (validator, ArgRef
 	// substitution, mutation-template rendering) expects the flat
 	// shape. Reducing here means callers never have to think about
-	// which parser produced the call. The F.6 path
-	// (`substituteArgRefsAndCallArgs`) does the same flattening
-	// after substitution.
+	// which parser produced the call.
 	args := flattenPositionalArgs(call.Args)
 	if args == nil {
 		args = make(map[string]any)
@@ -571,141 +569,6 @@ func flattenPositionalArgs(args map[string]any) map[string]any {
 		return args
 	}
 	return inner
-}
-
-// expandFunctionCallAllowMutationLeaf expands a Logic function call
-// to its return expression with args substituted, permitting the leaf
-// to be a mutation call. This is the F.6 hook for top-level Logic
-// invocations whose body returns a mutation call -- the plan
-// resolver hoists the resulting FunctionCallExpression into
-// plan.MutationCall so the engine dispatches it through
-// executeMutationFunctionCall.
-//
-// Returns (nil, nil) if the call is not a Logic, the Logic's
-// expression is missing, or the expansion does not yield a
-// top-level FunctionCallExpression.
-func (v *functionValidator) expandFunctionCallAllowMutationLeaf(call *FunctionCallExpression) (ExpressionNode, error) {
-	if call == nil {
-		return nil, nil
-	}
-	key := strings.TrimSpace(call.Name)
-	if key == "" {
-		return nil, nil
-	}
-	fn, ok := v.functions[key]
-	if !ok || fn == nil {
-		return nil, nil
-	}
-	if !strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "logic") {
-		return nil, nil
-	}
-	// This is the F.6 single-mutation-leaf hoist, and it is a FOURTH dispatch
-	// point -- it reaches a construct without going through
-	// expandFunctionCall, so it inherits none of that function's gates. It
-	// checked neither, which meant a @disabled logic still hoisted, and a
-	// @serverOnly one would have hoisted for a client (memql#2800).
-	//
-	// @serverOnly is not currently registrable on Logic
-	// (annotations/registry.go offers it on Query and Mutation only), so the
-	// second half is defence rather than a live hole today. It is checked
-	// anyway: the reason the other three points are all gated is that a
-	// missing one is invisible until someone finds it, and "the annotation
-	// cannot be applied here yet" is a fact about a registry that can change
-	// in one line.
-	if !fn.Enabled {
-		return nil, fmt.Errorf("function %q is disabled", key)
-	}
-	if fn.ServerOnly && !v.origin.IsInternal() {
-		return nil, fmt.Errorf("function %q is server-only and cannot be called by a client", key)
-	}
-	// Record the construct's actor-rank floor for the executing caller to
-	// clear. Recorded rather than checked -- see requiredRanks.
-	if v.requiredRanks != nil && strings.TrimSpace(fn.RequiresRank) != "" {
-		v.requiredRanks[key] = strings.TrimSpace(fn.RequiresRank)
-	}
-	if v.requiredCapabilities != nil && fn.RequiresCapability.declared() {
-		v.requiredCapabilities[key] = fn.RequiresCapability
-	}
-	if fn.Expr == nil {
-		return nil, nil
-	}
-
-	args := call.Args
-	if args == nil {
-		args = make(map[string]any)
-	}
-	if err := v.validateFunctionArgs(fn, args); err != nil {
-		return nil, err
-	}
-
-	expr := cloneExpressionNode(fn.Expr)
-	// Substitute caller args against the Logic's body. We can't call
-	// the regular expandExpressionWithArgs path because that recurses
-	// into expandFunctionCall which rejects mutations. Substitute
-	// ArgReference nodes manually -- they're the only things in a
-	// Logic's `return <mutationCall(args.X)>` body that need
-	// rewriting (the call target itself stays a FunctionCallExpression
-	// pointing at the mutation).
-	substituted, err := v.substituteArgRefsAndCallArgs(expr, args)
-	if err != nil {
-		return nil, err
-	}
-	return substituted, nil
-}
-
-// substituteArgRefsAndCallArgs handles the F.6 case where a Logic's
-// `return <expr>` body is a top-level mutation call -- e.g.
-// `return mutationCreateSpace({ id: args.id, name: args.name })`.
-// We need a fully-substituted top-level FunctionCallExpression so
-// resolvePlanFunctions can hoist it into plan.MutationCall. ArgReference
-// nodes live in the call-args value space (not the ExpressionNode
-// hierarchy), so this walker only fires on FunctionCallExpression
-// targets and rewrites their Args map; non-call expressions pass
-// through unchanged.
-//
-// Single-positional object-literal calls produced by the language
-// parser (`mutationFoo({a: 1, b: 2})` -> Args = {"0": {a:1, b:2}})
-// are flattened to the inner map so the downstream mutation
-// validator sees the canonical flat-args shape. The engine's own
-// expression parser produces flat args directly; this normalisation
-// closes the gap between the two parsers.
-func (v *functionValidator) substituteArgRefsAndCallArgs(expr ExpressionNode, args map[string]any) (ExpressionNode, error) {
-	call, ok := expr.(*FunctionCallExpression)
-	if !ok || call == nil {
-		return expr, nil
-	}
-	newArgs := make(map[string]any, len(call.Args))
-	for k, val := range call.Args {
-		// memql#2870: fold here too. This is a FOURTH dispatch point that
-		// reaches a construct without going through expandExpressionWithArgs, so
-		// it inherits none of that path's argument handling -- exactly the
-		// asymmetry that let `args.x ?? ""` reach validation as an AST node in
-		// the first place. No shipped logic currently returns a mutation leaf,
-		// so this is not a live failure; it is the next instance of the class,
-		// pre-empted rather than left for whoever writes that construct.
-		if pc, isV1 := val.(*PlanConstExpression); isV1 {
-			// A v1 logic body's argument expression (logic_body_v1.go).
-			value, present, err := evaluateLogicArgumentV1(pc, args, v.ambient)
-			if err != nil {
-				return nil, fmt.Errorf("argument %q of mutation-leaf call %q: %w", k, call.Name, err)
-			}
-			if present {
-				newArgs[k] = value
-			}
-			continue
-		}
-		folded, err := foldArgExpression(substituteArgRefValue(val, args, v.ambient), args)
-		if err != nil {
-			return nil, fmt.Errorf("argument %q of mutation-leaf call %q: %w", k, call.Name, err)
-		}
-		newArgs[k] = folded
-	}
-	if len(newArgs) == 1 {
-		if inner, ok := newArgs["0"].(map[string]any); ok {
-			newArgs = inner
-		}
-	}
-	return &FunctionCallExpression{Name: call.Name, Args: newArgs}, nil
 }
 
 // foldArgExpression evaluates an argument that is still an engine expression
@@ -787,12 +650,10 @@ func substituteArgRefValue(v any, args map[string]any, ambient map[string]any) a
 		}
 		return nil
 	case *ast.ArgRefExpr:
-		// The PARSER arg-ref node. A nested call inside a Logic body
-		// (`recordRequestEvent({ note: args.note })`) reaches the F.6
-		// hoist with its object-literal arg values still carried as raw parser
-		// nodes -- convertFunctionCallExpr shallow-copies a FunctionCallExpr's
-		// Args verbatim, so the inner `args.note` is never converted to the
-		// engine-side *ArgReference. Without this case the node passed straight
+		// The PARSER arg-ref node. A nested call's object-literal arg values
+		// can still be raw parser nodes here -- convertFunctionCallExpr
+		// shallow-copies a FunctionCallExpr's Args verbatim, so an inner
+		// `args.note` is never converted to the engine-side *ArgReference. Without this case the node passed straight
 		// through to the mutation validator as `*ast.ArgRefExpr`, which is the
 		// #1840 forge approval-pipeline outage ("expected string, got
 		// *ast.ArgRefExpr" across routing / audit / mentoring / attach). Resolve
@@ -938,15 +799,6 @@ var ambientEnvelopeRoots = map[string]struct{}{
 	"now":       {},
 }
 
-// reservedUnsuppliedRoots is the complement: reserved top-level names that no
-// envelope supplies. A comparison rooted here can never resolve, so it is
-// refused at load (validateLogicCondBareIdentifierPredicate) rather than
-// folded to nil -- a loud boot error instead of a gate that is open or closed
-// by accident.
-var reservedUnsuppliedRoots = map[string]struct{}{
-	"trace": {},
-}
-
 // isAmbientRoot reports whether name is a reserved top-level identifier the
 // ambient envelope carries, and can therefore be RESOLVED during expansion
 // (memql#3024). None of these can be a lambda local or a payload field, which
@@ -957,13 +809,6 @@ var reservedUnsuppliedRoots = map[string]struct{}{
 // which is not the same as "has a value". See ambientEnvelopeRoots.
 func isAmbientRoot(name string) bool {
 	_, ok := ambientEnvelopeRoots[strings.TrimSpace(name)]
-	return ok
-}
-
-// isReservedUnsuppliedRoot reports whether name is reserved but carried by no
-// envelope, so a comparison rooted at it cannot resolve on any path.
-func isReservedUnsuppliedRoot(name string) bool {
-	_, ok := reservedUnsuppliedRoots[strings.TrimSpace(name)]
 	return ok
 }
 
@@ -1048,10 +893,7 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		// reaches the builtin executor with `args["userId"] =
 		// *ArgReference{Path: "event.payload.userId"}` instead of the
 		// resolved string -- and the executor's `asString(...)` returns
-		// empty. The Logic-call-mutation path already does this via
-		// `substituteArgRefsAndCallArgs` (F.6); the builtin / nested-
-		// call path needs the same treatment, here in the generic
-		// recursive expansion. Surfaced via memql-cockpit#49 -- daily-
+		// empty. Surfaced via memql-cockpit#49 -- daily-
 		// space provisioning fired but every call into
 		// `integration.dailyspace.ensureForUser` saw an empty userId.
 		if args != nil && len(node.Args) > 0 {
@@ -1128,18 +970,6 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		if args != nil && len(node.Args) > 0 {
 			folded := make(map[string]any, len(node.Args))
 			for k, val := range node.Args {
-				if pc, isV1 := val.(*PlanConstExpression); isV1 {
-					// A v1 logic body's argument expression, evaluated here
-					// where the call's arguments are known (logic_body_v1.go).
-					value, present, err := evaluateLogicArgumentV1(pc, args, v.ambient)
-					if err != nil {
-						return nil, fmt.Errorf("argument %q of call %q: %w", k, node.Name, err)
-					}
-					if present {
-						folded[k] = value
-					}
-					continue
-				}
 				fv, err := foldArgExpression(val, args)
 				if err != nil {
 					return nil, fmt.Errorf("argument %q of call %q: %w", k, node.Name, err)
@@ -1690,37 +1520,13 @@ func resolvePlanFunctionsWithAmbient(plan *QueryPlan, functions *FunctionRegistr
 		}
 	}
 
-	// F.5 -- Multi-step Logic dispatch: when a top-level call is a
-	// Logic function whose body has intermediate `name := <call>` steps
-	// before the `_return` terminator, hoist it to plan.LogicCall so
-	// the engine dispatches it through the wired LogicRunner. The
-	// runner walks the steps via the automation step registry,
-	// binding each result for later steps + the `_return` expression.
+	// A top-level logic call runs its statement body through the wired
+	// LogicRunner (epic memql#5370).
 	if call, ok := plan.Root.(*FunctionCallExpression); ok && call != nil && functions != nil {
-		if fn, err := functions.Get(call.Name); err == nil && fn != nil && strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "logic") && fn.LogicSteps != nil {
+		if fn, err := functions.Get(call.Name); err == nil && fn != nil && strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "logic") && fn.LogicBody != nil {
 			plan.LogicCall = call
 			plan.Root = nil
 			return nil
-		}
-	}
-
-	// F.6 -- Logic-calls-mutation dispatch: when a Logic function's
-	// `return <expr>` body is a top-level mutation call, the resolved
-	// expression is a FunctionCallExpression whose target is a
-	// mutation. expandFunctionCall would normally reject that with
-	// "function X is a mutation and cannot be used inside query
-	// expressions". Instead, treat it the same as a direct top-level
-	// mutation call: hoist it to plan.MutationCall so Execute dispatches
-	// through executeMutationFunctionCall.
-	if call, ok := plan.Root.(*FunctionCallExpression); ok && call != nil && functions != nil {
-		if expanded, err := validator.expandFunctionCallAllowMutationLeaf(call); err == nil && expanded != nil {
-			if inner, isCall := expanded.(*FunctionCallExpression); isCall && inner != nil {
-				if fn, err := functions.Get(inner.Name); err == nil && fn != nil && strings.EqualFold(strings.TrimSpace(fn.FunctionKind), "mutation") {
-					plan.MutationCall = inner
-					plan.Root = nil
-					return nil
-				}
-			}
 		}
 	}
 

@@ -1,0 +1,4 @@
+@trigger(schedule="0 0 * * * *")
+automation retryExpression {
+  x := 1 retry(2)
+}

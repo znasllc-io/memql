@@ -139,9 +139,7 @@ func eventAutomationSrc(name string) string {
 	return `
 @trigger(event="node.created", concept="v1:identity:user")
 automation ` + name + ` {
-  step run {
-    logic sandboxNoopLogic { event: event }
-  }
+  run := logic sandboxNoopLogic(event: event)
 }`
 }
 

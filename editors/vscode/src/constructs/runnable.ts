@@ -25,7 +25,7 @@
 // seed / concept / shape / provider / builtin each need an execution semantic
 // decided (which row does a spec evaluate against; who pays for a prompt's
 // provider call) that the runtime-panel design explicitly defers.
-export const RUNNABLE_KINDS = ["query", "mutate", "logic", "tool", "automation"] as const;
+export const RUNNABLE_KINDS = ["query", "mutation", "logic", "tool", "automation"] as const;
 export type RunnableKind = (typeof RUNNABLE_KINDS)[number];
 
 // The six form-level types. A DSL type with no form equivalent arrives as
@@ -60,7 +60,7 @@ export interface RunnableArg {
   // type. Absent when unconstrained.
   enum?: string[];
   // Already resolved by the server from whichever channel the construct kind
-  // actually retains -- the `///` doc comment for query/mutate/logic args, the
+  // actually retains -- the `///` doc comment for query/mutation/logic args, the
   // field's @description(...) for tool fields. The extension just renders it.
   description?: string;
   // The field is marked @autoInjected: the engine stamps it server-side and
@@ -121,7 +121,7 @@ export const RUNNABLE_CONSTRUCTS_METHOD = "memql/runnableConstructs";
 // one of them. Generating a form from that would produce an empty form. Its
 // run surface is state/automationForm.ts (pick a row of the trigger concept,
 // or paste JSON) instead -- see memql#3310.
-export const ARG_FORM_RUNNABLE_KINDS: readonly RunnableKind[] = ["query", "mutate", "logic", "tool"];
+export const ARG_FORM_RUNNABLE_KINDS: readonly RunnableKind[] = ["query", "mutation", "logic", "tool"];
 
 export function usesArgForm(kind: RunnableKind): boolean {
   return ARG_FORM_RUNNABLE_KINDS.includes(kind);
@@ -132,7 +132,7 @@ export function usesArgForm(kind: RunnableKind): boolean {
 // neither can be injected from a buffer -- running one runs the DEPLOYED
 // definition. The UI has to say so; see webview/runPanel.ts's banner.
 export function isSessionDefinable(kind: RunnableKind): boolean {
-  return kind === "query" || kind === "mutate" || kind === "logic";
+  return kind === "query" || kind === "mutation" || kind === "logic";
 }
 
 // Write kinds take the non-local-cluster confirmation. Reads run freely.
@@ -152,7 +152,7 @@ export function isSessionDefinable(kind: RunnableKind): boolean {
 // declared, not authored here, and the deployed handler's own authorization
 // applies.
 export function isWriteKind(kind: RunnableKind): boolean {
-  return kind === "mutate" || kind === "automation";
+  return kind === "mutation" || kind === "automation";
 }
 
 // -----------------------------------------------------------------------------
@@ -403,7 +403,7 @@ export function lensPlansFor(
 // person about to re-enable it -- a construct that silently loses its
 // affordance reads as a broken extension, not as a disabled construct.
 //
-// Session-definable kinds get the second sentence: a query / mutate / logic is
+// Session-definable kinds get the second sentence: a query / mutation / logic is
 // injected from the buffer, so the run genuinely can succeed once the
 // annotation is gone -- and, since the injected definition is what runs,
 // removing the annotation in the buffer is enough. A tool or automation runs

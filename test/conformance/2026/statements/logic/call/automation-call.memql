@@ -1,0 +1,4 @@
+logic sweepAll {
+  automation sweep(limit: 10)
+  return 1
+}

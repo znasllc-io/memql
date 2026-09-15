@@ -554,7 +554,7 @@ smoke("every webview surface opens without throwing", async () => {
       args: [{ name: "spaceId", type: "string", required: true }],
       boundConcept: "",
       sourceHash: "abc123",
-      source: "logic trainedResponder {\n  body { return 1 }\n}",
+      source: "logic trainedResponder {\n  return 1\n}",
     },
     {
       // Rejecting rather than pretending, like the two hosts above: nothing
@@ -727,7 +727,7 @@ smoke("a cluster document opens read-only with no language-server diagnostics", 
   assert.ok(folder !== undefined, "no workspace folder, so the language server has no root to serve");
   const brokenPath = path.join(folder.uri.fsPath, "cluster-document-control.memql");
   // The shape cmd/memql-lsp's own TestPublishDiagnostics_CleanAndBroken uses:
-  // a logic missing its mandatory body, which is a lowering error.
+  // a logic whose block never closes, which is a parse error.
   fs.writeFileSync(brokenPath, "logic oops {\n", "utf8");
 
   try {

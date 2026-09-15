@@ -22,28 +22,32 @@ package steps
 // After the flip the tree IS edition 2026, so the v1 arm reads the tree's own
 // files, with no codemod step, and the legacy arm, which had no legacy source
 // left to read, is gone. The v1 arm against the goldens is the whole test.
+// After the bodies flip (epic memql#5370) the tree is written in statements
+// too, and the arm that runs them is that v1 arm (bodiesArm).
 //
 // # Arms
 //
 // An arm is a name, the source it reads, and a run: a function from (source,
 // fixture arguments, probe) to a result; the calls it made are the probe's
-// record. Today's two go through the engine's own logic dispatch --
+// record. Today's goes through the engine's own logic dispatch --
 // engine.Execute of the construct's call, with the LogicRunner wired, so the
-// engine decides between fn.Expr and fn.LogicSteps as it does in production.
-// A runner that replaces them adds its arm to the list in TestLogicCorpusRuns
-// and is held to the same goldens. Nothing but the two arms is specific to
-// today's runners: a construct call's answer is given in the statement's own
+// engine reaches the statement runner as it does in production. A runner
+// that replaces it adds its arm to the list in TestLogicCorpusRuns and is
+// held to the same goldens. Nothing but the arm is specific to today's
+// runner: a construct call's answer is given in the statement's own
 // terms -- a query answers its rows (a []any of row maps), a builtin its
 // result, a logic its return value, a mutation the row it wrote -- which each
-// arm adapts to its runner (probeRegistry and probeFakes do it for today's).
-// Calls are compared in order, the order the legacy topological sort ran
-// them. Journal writes are not calls: only construct calls and published
-// events are recorded.
+// arm adapts to its runner (probeRegistry does it for today's).
+// Calls are compared in order: the order the statements run them. Journal
+// writes are not calls: only construct calls and published events are
+// recorded.
 //
-// In ten constructs the legacy build does not do what the body says
+// In ten constructs the legacy build did not do what the body says
 // (logicLegacyDefects: each checked, each mended only in the part that is
 // defective). The goldens hold what the body says, and name the defect where
-// the legacy build differs.
+// the legacy build differed. Seven of the ten published, so the bodies flip
+// moved them into their automations (a logic may not publish, D14); the
+// table keeps the three the tree still has.
 //
 // Two things the comparison does not pin, because a later runner may answer
 // them differently without changing what a logic does: the envelope a result
@@ -78,7 +82,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
-	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/bodymigrate"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
@@ -184,6 +188,10 @@ type corpusSource struct {
 	Current string
 	// V1 is the file in edition 2026: since the flip, Current.
 	V1 string
+	// Bodies is V1 with its bodies written in statements (epic memql#5370):
+	// V1 carried by the bodies rewrite (withBodies), which leaves a tree
+	// already in statements unchanged.
+	Bodies string
 }
 
 // logicFixture is one run: a logic construct, the arguments it is called
@@ -208,6 +216,27 @@ func logicCorpusSources(t *testing.T) []*corpusSource {
 	for _, f := range files {
 		out = append(out, &corpusSource{Path: f.Path, Current: f.Content, V1: f.Content})
 	}
+	return withBodies(t, out)
+}
+
+// withBodies sets every source's Bodies the way `memqlmigrate
+// --rewrite=bodies` writes it: one rewrite over the whole tree's V1 text, its
+// bare calls resolved over the tree. The tree is the engine's embedded one,
+// so the index needs nothing beyond it.
+func withBodies(t *testing.T, out []*corpusSource) []*corpusSource {
+	t.Helper()
+	files := make(map[string][]byte, len(out))
+	for _, f := range out {
+		files[f.Path] = []byte(f.V1)
+	}
+	changed, err := bodymigrate.RewriteTree(files, bodymigrate.IndexFiles(files))
+	require.NoError(t, err, "the bodies rewrite refuses the tree")
+	for _, f := range out {
+		f.Bodies = f.V1
+		if b, ok := changed[f.Path]; ok {
+			f.Bodies = string(b)
+		}
+	}
 	return out
 }
 
@@ -230,6 +259,9 @@ var logicArgVariants = map[string][]map[string]any{
 	},
 	"governanceCanCreatePrincipal": {{"newRoleSlug": "user"}, {"newRoleSlug": "owner"}},
 	"revokeExpiredDelegations":     {{"asOf": "2026-09-01T00:00:00Z"}},
+	// The two reminder windows: the first canned row is a week into its
+	// cooldown and the second 25 days, so each window takes one of them.
+	"usersDueDeletionReminder": {{"from": "P7D", "to": "P8D"}, {"from": "P25D", "to": "P26D"}},
 }
 
 // logicRoles are the actors every fixture runs as: the role gates of the tree
@@ -332,16 +364,29 @@ type logicArm struct {
 	legacy bool
 	source func(*corpusSource) string
 	run    func(ctx context.Context, src, path, name string, args map[string]any, probe *logicProbe) (any, error)
+	// moved reports a logic the arm's source no longer declares, because the
+	// bodies rewrite moved it into the one automation that calls it (a logic
+	// may not publish, D14). The arm has no run of it to compare.
+	moved func(path, name string) bool
 }
 
-// todayArm runs the tree through today's runners: one engine per arm, booted
-// on the embedded tree, every logic construct of the tree rebuilt from the
-// arm's source with the arm's grammar through the loader's own entry point
-// (memql.BuildFunctionConstruct) and upserted over the booted one, the
-// LogicRunner wired with probeRegistry, and each run an engine.Execute of the
-// construct's call -- so the engine picks fn.Expr or fn.LogicSteps as it does
-// in production.
-func todayArm(t *testing.T, name string, v1 bool, sources []*corpusSource) logicArm {
+// bodiesArm runs the tree with its bodies in statements (corpusSource.Bodies):
+// one engine, booted on the embedded tree, every logic construct of the tree
+// rebuilt from the arm's source through the loader's own entry point
+// (memql.BuildFunctionConstruct) and upserted over the booted one, each
+// required to build to a statement body (fn.LogicBody), the LogicRunner wired
+// with probeRegistry, and each run an engine.Execute of the construct's call,
+// which reaches RunLogicBody as production does. Since the bodies flip the
+// tree is its own statement source (Bodies == Current), so this is the v1
+// arm; the arm that ran the tree's text alongside it read the same source.
+func bodiesArm(t *testing.T, sources []*corpusSource) logicArm {
+	t.Helper()
+	return engineArm(t, "bodies", true, true, func(f *corpusSource) string { return f.Bodies }, sources)
+}
+
+// engineArm is an arm through the engine, bodiesArm's.
+// statements requires every logic to build as a statement body.
+func engineArm(t *testing.T, name string, v1, statements bool, pick func(*corpusSource) string, sources []*corpusSource) logicArm {
 	t.Helper()
 	eng := bootEmbeddedEngine(t)
 	// A lazy handle satisfies engine.Execute's setup; port 1 makes any
@@ -359,11 +404,6 @@ func todayArm(t *testing.T, name string, v1 bool, sources []*corpusSource) logic
 		if fn != nil {
 			kinds[fn.Name] = strings.ToLower(strings.TrimSpace(fn.FunctionKind))
 		}
-	}
-
-	pick := func(f *corpusSource) string { return f.Current }
-	if v1 {
-		pick = func(f *corpusSource) string { return f.V1 }
 	}
 
 	// build builds one logic construct from a file's source in the arm's
@@ -384,34 +424,43 @@ func todayArm(t *testing.T, name string, v1 bool, sources []*corpusSource) logic
 		if err != nil {
 			return nil, err
 		}
+		if statements && fn.LogicBody == nil {
+			return nil, fmt.Errorf("%s arm: %s did not build as a statement body", name, logic)
+		}
 		cache[key] = builtEntry{src: src, fn: fn}
 		return fn, nil
 	}
 
+	// The logic the arm's source still declares: the bodies rewrite moves a
+	// publishing logic into its automation, and the arm has nothing to run
+	// for it.
+	declared := map[string]bool{}
+	for _, f := range sources {
+		for _, slice := range memql.ExtractFunctionSlices(pick(f)) {
+			if slice.Kind == languageParser.FunctionTypeLogic {
+				declared[f.Path+" "+slice.Name] = true
+			}
+		}
+	}
+	moved := func(path, logic string) bool { return !declared[path+" "+logic] }
+
 	// Every logic construct of the tree builds, up front: a construct that
-	// does not is the arm's failure, not one fixture's, and the builds name
-	// the constructs a one-`return` body reaches through fn.Expr (probeFakes).
-	built := map[string]*memql.Function{}
+	// does not is the arm's failure, not one fixture's.
 	var failures []string
 	for _, f := range sources {
 		for _, slice := range memql.ExtractFunctionSlices(f.Current) {
-			if slice.Kind != languageParser.FunctionTypeLogic {
+			if slice.Kind != languageParser.FunctionTypeLogic || moved(f.Path, slice.Name) {
 				continue
 			}
-			fn, err := build(pick(f), f.Path, slice.Name)
-			if err != nil {
+			if _, err := build(pick(f), f.Path, slice.Name); err != nil {
 				failures = append(failures, f.Path+" "+slice.Name+": "+err.Error())
-				continue
 			}
-			built[f.Path+" "+slice.Name] = fn
 		}
 	}
 	require.Emptyf(t, failures, "%s arm: %d logic constructs do not build:\n%s", name, len(failures), strings.Join(failures, "\n"))
 
 	reg := &probeRegistry{real: NewRegistry(), engine: eng, kinds: kinds}
 	eng.SetLogicRunner(automations.NewLogicRunner(eng, reg, slog.New(slog.NewTextHandler(io.Discard, nil))))
-	fakes := &probeFakes{kinds: kinds}
-	fakes.install(t, eng, built)
 
 	return logicArm{
 		name:   name,
@@ -425,99 +474,20 @@ func todayArm(t *testing.T, name string, v1 bool, sources []*corpusSource) logic
 			if err := eng.Functions().Upsert(fn); err != nil {
 				return nil, err
 			}
-			reg.probe, fakes.probe = probe, probe
-			defer func() { reg.probe, fakes.probe = nil, nil }()
+			reg.probe = probe
+			defer func() { reg.probe = nil }()
 			return eng.Execute(ctx, logic+"("+renderV1NamedArgs(args)+")")
 		},
+		moved: moved,
 	}
-}
-
-// probeFakes stands a probe in for every construct a one-`return` logic
-// calls, which the engine reaches through fn.Expr rather than a step: each
-// becomes a builtin, with the construct's own argument schema, whose executor
-// asks the probe. So the call's arguments are validated as the real
-// construct's would be, and what the probe records is what argument expansion
-// handed it.
-type probeFakes struct {
-	kinds map[string]string
-	probe *logicProbe
-}
-
-type probeIntegration struct{ caps []memql.IntegrationCapability }
-
-func (p *probeIntegration) IntegrationName() string                     { return "logicprobe" }
-func (p *probeIntegration) Capabilities() []memql.IntegrationCapability { return p.caps }
-
-func (f *probeFakes) install(t *testing.T, eng *memql.MemQLEngine, built map[string]*memql.Function) {
-	t.Helper()
-	targets := map[string]bool{}
-	for _, fn := range built {
-		if call, ok := fn.Expr.(*memql.FunctionCallExpression); ok && fn.LogicSteps == nil {
-			if _, known := f.kinds[call.Name]; known && f.kinds[call.Name] != "logic" {
-				targets[call.Name] = true
-			}
-		}
-	}
-	names := make([]string, 0, len(targets))
-	for n := range targets {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	integration := &probeIntegration{}
-	for _, n := range names {
-		real, ok := eng.Functions().Lookup(n)
-		require.Truef(t, ok, "%s is called and not registered", n)
-		kind := f.kinds[n]
-		construct := n
-		integration.caps = append(integration.caps, memql.IntegrationCapability{
-			Name: construct,
-			Handler: func(_ context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-				if f.probe == nil {
-					return nil, fmt.Errorf("probe: %s called outside a run", construct)
-				}
-				return answerNodes(f.probe.answer(kind, construct, canonicalArgs(args)))
-			},
-		})
-		require.NoError(t, eng.Functions().Upsert(&memql.Function{
-			Name:         construct,
-			Origin:       real.Origin,
-			FunctionKind: memql.FunctionTypeBuiltin,
-			Executor:     "integration.logicprobe." + construct,
-			Enabled:      true,
-			ArgsSchema:   real.ArgsSchema,
-		}))
-	}
-	require.NoError(t, eng.RegisterIntegration(integration))
-}
-
-// answerNodes is a probe answer as a builtin executor's nodes: rows are rows,
-// and any other answer is one node carrying it (canonicalResult reads it back).
-func answerNodes(answer any) ([]memorynodes.MemoryNode, error) {
-	if rows, ok := answer.([]any); ok {
-		out := make([]memorynodes.MemoryNode, 0, len(rows))
-		for _, r := range rows {
-			m := r.(map[string]any)
-			payload, err := json.Marshal(m["payload"])
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, memorynodes.MemoryNode{ID: m["id"].(string), Concept: probeRowConcept, Type: "node", Payload: payload})
-		}
-		return out, nil
-	}
-	payload, err := json.Marshal(answer)
-	if err != nil {
-		return nil, err
-	}
-	return []memorynodes.MemoryNode{{ID: probeAnswerConcept + ":1", Concept: probeAnswerConcept, Type: "node", Payload: payload}}, nil
 }
 
 // probeRegistry is the LogicRunner's step registry for today's arms: every
 // step runs on its real executor except a construct call, which the probe
 // answers with the arguments the real executor would have sent -- rendered
 // as it renders them and read back as the engine reads them -- and a
-// published event, which runs for real and is recorded. Containers are built
-// here with Dispatch pointed back at Execute, so a nested step re-enters it
+// published event, which runs for real and is recorded. A parallel is built
+// here with Dispatch pointed back at Execute, so a branch re-enters it
 // (child_dispatch.go).
 type probeRegistry struct {
 	real   *Registry
@@ -531,12 +501,8 @@ func (r *probeRegistry) Execute(ctx context.Context, step *automations.Step, ste
 		return nil, fmt.Errorf("probe: step %q runs outside a run", step.ID)
 	}
 	switch step.Type {
-	case automations.StepTypeForEach:
-		return (&ForEachExecutor{Registry: r.real, Dispatch: r.Execute}).Execute(ctx, step, stepCtx)
 	case automations.StepTypeParallel:
 		return (&ParallelExecutor{Registry: r.real, Dispatch: r.Execute}).Execute(ctx, step, stepCtx)
-	case automations.StepTypeSwitch:
-		return (&SwitchExecutor{Registry: r.real, Dispatch: r.Execute}).Execute(ctx, step, stepCtx)
 	case automations.StepTypeEvent:
 		res, err := r.real.Execute(ctx, step, stepCtx)
 		if err == nil && res != nil {
@@ -556,24 +522,11 @@ func (r *probeRegistry) Execute(ctx context.Context, step *automations.Step, ste
 			return nil, err
 		}
 		return r.call(step, step.Function.Name+"("+renderV1CallArgs(args)+")")
-	case automations.StepTypeQuery:
-		x := step.Exprs
-		if step.Query == nil || x == nil || x.Query == nil {
-			return r.real.Execute(ctx, step, stepCtx) // the real executor refuses it
-		}
-		call, ok := ast.Unparen(x.Query).(*ast.CallExpr)
-		if !ok || call.Kind == "" {
-			return r.real.Execute(ctx, step, stepCtx) // evaluated in process
-		}
-		text, err := v1ConstructCallText(ctx, stepCtx.Evaluator, call)
-		if err != nil {
-			return nil, err
-		}
-		return r.call(step, text)
-	case automations.StepTypeMutation, automations.StepTypeWebhook, automations.StepTypeAction,
-		automations.StepTypeAutomation, automations.StepTypeEmitConceptCard:
+	case automations.StepTypeAction, automations.StepTypeAutomation:
 		return nil, fmt.Errorf("probe: step %q is a %s step, which this corpus has no answer for -- teach probeRegistry to record it", step.ID, step.Type)
 	}
+	// A `for` and a block run their lists on the executor's sequence runner,
+	// whose registry is this one, so every statement in them re-enters it.
 	return r.real.Execute(ctx, step, stepCtx)
 }
 
@@ -840,48 +793,8 @@ type legacyDefect struct {
 // construct. Each was read off the legacy compiled body, not inferred from
 // the difference.
 var logicLegacyDefects = map[string]legacyDefect{
-	"purgeExpiredSafetyClassifications": retentionObservation("safety.classification.retention.observed", "90"),
-	"purgeExpiredOutputScreenings":      retentionObservation("safety.outputScreening.retention.observed", "90"),
-	"auditEventRetentionSweep":          retentionObservation("identity.audit.retention.observed", "365"),
-	"onDelegationCreated": {
-		why:     "`now` in the event payload compiles to the text `timestamp()`, which the event step publishes as text",
-		applies: func(logicFixture) bool { return true },
-		mend: func(_ logicFixture, legacy, other *logicRecord) error {
-			if err := mendEventField(legacy, other, "delegation.created", "timestamp", isInstant); err != nil {
-				return err
-			}
-			// The logic returns the event step's result, which carries the
-			// same payload.
-			return mendResultPath(legacy, other, []string{"payload", "timestamp"}, isInstant)
-		},
-	},
-	"accountDeletionReminder7Days":  deletionReminder(7, 1),
-	"accountDeletionReminder25Days": deletionReminder(25, 2),
-	"governanceCanManagePrincipal":  governanceDefect("rbacGovernPrincipal", []string{"actorUserId", "actorIsOwner", "actorRank", "targetRank"}, "targetRoleSlug"),
-	"governanceCanCreatePrincipal":  governanceDefect("rbacCanCreatePrincipal", []string{"actorIsOwner", "actorRank", "newRank"}, "newRoleSlug"),
-	"conflictDetection": {
-		why: "the condition `! matchingConfirmed.empty()` evaluates false with matches in hand, so the conflict event is never published " +
-			"(and its payload's `matchingConfirmed.count()`, `.nodes()` and `now` compile to text)",
-		applies: func(fx logicFixture) bool { _, hasEvent := fx.Args["event"]; return hasEvent && fx.Rows > 0 },
-		mend: func(fx logicFixture, legacy, other *logicRecord) error {
-			if eventCall(legacy, "data.conflicts.detected") != nil || legacy.Result != nil {
-				return fmt.Errorf("the legacy run published the conflict event")
-			}
-			ev := eventCall(other, "data.conflicts.detected")
-			if ev == nil {
-				return fmt.Errorf("the v1 run did not publish the conflict event")
-			}
-			if n, _ := ev.Args["matchCount"].(float64); int(n) != fx.Rows {
-				return fmt.Errorf("the v1 event counts %v matches, want %d", ev.Args["matchCount"], fx.Rows)
-			}
-			if matches, _ := ev.Args["matches"].([]any); len(matches) != fx.Rows {
-				return fmt.Errorf("the v1 event carries %d matches, want %d", len(matches), fx.Rows)
-			}
-			other.Calls = withoutEvent(other.Calls, "data.conflicts.detected")
-			other.Result = nil
-			return nil
-		},
-	},
+	"governanceCanManagePrincipal": governanceDefect("rbacGovernPrincipal", []string{"actorUserId", "actorIsOwner", "actorRank", "targetRank"}, "targetRoleSlug"),
+	"governanceCanCreatePrincipal": governanceDefect("rbacCanCreatePrincipal", []string{"actorIsOwner", "actorRank", "newRank"}, "newRoleSlug"),
 	"transitionEventKind": {
 		why: "the legacy compiler turns `old == st` into `old == \"st\"`, a comparison with the literal text, so an unchanged status reads as a transition",
 		applies: func(fx logicFixture) bool {
@@ -899,70 +812,6 @@ var logicLegacyDefects = map[string]legacyDefect{
 			return nil
 		},
 	},
-}
-
-// retentionObservation is the defect of the three retention sweeps: the
-// observation event's payload expressions compile to strings, which the
-// event step publishes as their text.
-func retentionObservation(topic, defaultDays string) legacyDefect {
-	return legacyDefect{
-		why: "the event payload's expressions -- `rows.count()`, `retentionDays.first().payload.value ?? \"" + defaultDays +
-			"\"` and `now` -- compile to strings the event step publishes as text",
-		applies: func(logicFixture) bool { return true },
-		mend: func(fx logicFixture, legacy, other *logicRecord) error {
-			days := defaultDays
-			if fx.Rows > 0 {
-				days = "7" // the probe's globalVariable row
-			}
-			for field, want := range map[string]func(any) bool{
-				"candidateCount": func(v any) bool { n, ok := v.(float64); return ok && int(n) == fx.Rows },
-				"retentionDays":  func(v any) bool { return v == days },
-				"timestamp":      isInstant,
-			} {
-				if err := mendEventField(legacy, other, topic, field, want); err != nil {
-					return err
-				}
-			}
-			return nil
-		},
-	}
-}
-
-// deletionReminder is the defect of the two deletion-reminder sweeps: the
-// reminder window -- `addDuration(item.payload.deletionScheduledAt, "PnD") <
-// now && ...` -- compiles to a condition the string evaluator reads as false,
-// so no reminder is ever published. The probe's rows sit one inside each
-// window: row 1 half a day into the 7-day one, row 2 into the 25-day one.
-func deletionReminder(days, row int) legacyDefect {
-	return legacyDefect{
-		why: fmt.Sprintf("the %d-day window condition compiles to one the string evaluator reads as false, so no reminder is published "+
-			"(and the payload's `now` compiles to the text `timestamp()`)", days),
-		applies: func(fx logicFixture) bool { return fx.Rows >= row },
-		mend: func(_ logicFixture, legacy, other *logicRecord) error {
-			const topic = "identity.deletion.reminder"
-			if eventCall(legacy, topic) != nil {
-				return fmt.Errorf("the legacy run published a reminder")
-			}
-			var reminders []probeCall
-			for _, c := range other.Calls {
-				if c.Kind == "event" && c.Name == topic {
-					reminders = append(reminders, c)
-				}
-			}
-			if len(reminders) != 1 {
-				return fmt.Errorf("the v1 run published %d reminders, want the one row inside the window", len(reminders))
-			}
-			got := reminders[0].Args
-			if want := fmt.Sprintf("v1:probe:row:usersInDeletionCooldown-%d", row); got["userId"] != want {
-				return fmt.Errorf("the v1 reminder is for %v, want %s", got["userId"], want)
-			}
-			if n, _ := got["milestoneDays"].(float64); int(n) != days || !isInstant(got["timestamp"]) {
-				return fmt.Errorf("the v1 reminder is %v", got)
-			}
-			other.Calls = withoutEvent(other.Calls, topic)
-			return nil
-		},
-	}
 }
 
 // governanceDefect is the defect of the two rbac governance logics: the
@@ -1030,87 +879,12 @@ func governanceDefect(builtin string, actorFields []string, targetSlugArg string
 	}
 }
 
-// isInstant reports whether v is an instant -- or the mask a golden stores
-// one as.
-func isInstant(v any) bool {
-	s, ok := v.(string)
-	return ok && (s == logicInstantMask || (logicTimestamp.MatchString(s) && logicTimestamp.FindString(s) == s))
-}
-
-func eventCall(rec *logicRecord, topic string) *probeCall {
-	for i := range rec.Calls {
-		if rec.Calls[i].Kind == "event" && rec.Calls[i].Name == topic {
-			return &rec.Calls[i]
-		}
-	}
-	return nil
-}
-
 func lastCall(rec *logicRecord, name string) *probeCall {
 	for i := len(rec.Calls) - 1; i >= 0; i-- {
 		if rec.Calls[i].Name == name {
 			return &rec.Calls[i]
 		}
 	}
-	return nil
-}
-
-func withoutEvent(calls []probeCall, topic string) []probeCall {
-	out := make([]probeCall, 0, len(calls))
-	for _, c := range calls {
-		if c.Kind == "event" && c.Name == topic {
-			continue
-		}
-		out = append(out, c)
-	}
-	return out
-}
-
-// mendEventField checks one field of a published event's payload: the
-// legacy value is expression text, the other arm's satisfies want. It then
-// removes the field from both.
-func mendEventField(legacy, other *logicRecord, topic, field string, want func(any) bool) error {
-	lev, oev := eventCall(legacy, topic), eventCall(other, topic)
-	if lev == nil || oev == nil {
-		return fmt.Errorf("an arm did not publish %s", topic)
-	}
-	if s, _ := lev.Args[field].(string); !strings.Contains(s, "(") {
-		return fmt.Errorf("the legacy %s.%s is %v, not expression text", topic, field, lev.Args[field])
-	}
-	if !want(oev.Args[field]) {
-		return fmt.Errorf("the v1 %s.%s is %v", topic, field, oev.Args[field])
-	}
-	delete(lev.Args, field)
-	delete(oev.Args, field)
-	return nil
-}
-
-// mendResultPath checks a value under a result map the same way.
-func mendResultPath(legacy, other *logicRecord, path []string, want func(any) bool) error {
-	at := func(rec *logicRecord) (map[string]any, bool) {
-		m, ok := rec.Result.(map[string]any)
-		for _, p := range path[:len(path)-1] {
-			if !ok {
-				return nil, false
-			}
-			m, ok = m[p].(map[string]any)
-		}
-		return m, ok
-	}
-	lm, lok := at(legacy)
-	om, ook := at(other)
-	leaf := path[len(path)-1]
-	if !lok || !ook {
-		return fmt.Errorf("a result has no %s", strings.Join(path, "."))
-	}
-	if s, _ := lm[leaf].(string); !strings.Contains(s, "(") {
-		return fmt.Errorf("the legacy result %s is %v, not expression text", strings.Join(path, "."), lm[leaf])
-	}
-	if !want(om[leaf]) {
-		return fmt.Errorf("the v1 result %s is %v", strings.Join(path, "."), om[leaf])
-	}
-	delete(lm, leaf)
-	delete(om, leaf)
 	return nil
 }
 
@@ -1260,11 +1034,12 @@ func compareRuns(fx logicFixture, aLegacy bool, a logicRecord, bLegacy bool, b l
 // instead, once they agree.
 func TestLogicCorpusRuns(t *testing.T) {
 	sources := logicCorpusSources(t)
-	// The first arm is the one the others are compared with. The flip deletes
-	// the legacy arm's line: the tree then has no legacy source, and the v1
-	// arm against the goldens is the whole test.
+	// The first arm is the one the others are compared with. Since the
+	// bodies flip (epic memql#5370) the tree is written in statements and one
+	// arm runs it: that arm against the goldens is the whole test. A runner
+	// that replaces it adds its arm here and is held to the same goldens.
 	arms := []logicArm{
-		todayArm(t, "v1", true, sources),
+		bodiesArm(t, sources),
 	}
 	legacyRuns := false
 	golden := -1 // the arm an -update writes the goldens from
@@ -1292,15 +1067,24 @@ func TestLogicCorpusRuns(t *testing.T) {
 	taken := map[string]bool{}
 	mended := map[string]int{}
 	constructs := map[string]bool{}
+	moved := map[string]map[string]string{} // arm -> golden file -> the construct it has no run of
 	matched, refused := 0, 0
 	var diffs []string
 	for _, fx := range fixtures {
 		ctx := auth.ContextWithInternalOrigin(auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "user-corpus", Role: auth.Role(fx.Role)}))
 		records := make([]logicRecord, len(arms))
+		ran := make([]bool, len(arms))
 		for i, arm := range arms {
+			if arm.moved != nil && arm.moved(fx.File.Path, fx.Name) {
+				if moved[arm.name] == nil {
+					moved[arm.name] = map[string]string{}
+				}
+				moved[arm.name][goldenFileFor(fx)] = fx.Key
+				continue
+			}
 			probe := &logicProbe{rows: fx.Rows, now: now}
 			res, err := arm.run(ctx, arm.source(fx.File), fx.File.Path, fx.Name, fx.Args, probe)
-			records[i] = newLogicRecord(res, err, probe.calls)
+			records[i], ran[i] = newLogicRecord(res, err, probe.calls), true
 		}
 		file, key := goldenFileFor(fx), goldenRunKey(fx)
 		where := fmt.Sprintf("%s [%s]", fx.Key, key)
@@ -1308,6 +1092,9 @@ func TestLogicCorpusRuns(t *testing.T) {
 
 		agreed := true
 		for i := 1; i < len(arms); i++ {
+			if !ran[0] || !ran[i] {
+				continue
+			}
 			m, err := compareRuns(fx, arms[0].legacy, records[0], arms[i].legacy, records[i])
 			if m {
 				mended[fx.Name]++
@@ -1361,6 +1148,9 @@ func TestLogicCorpusRuns(t *testing.T) {
 			refused++
 		}
 		for i, arm := range arms {
+			if !ran[i] {
+				continue
+			}
 			m, err := compareRuns(fx, arm.legacy, records[i], false, want)
 			if m {
 				mended[fx.Name]++
@@ -1382,6 +1172,16 @@ func TestLogicCorpusRuns(t *testing.T) {
 				}
 			}
 		}
+		// An arm skips only a logic the bodies rewrite moved into its
+		// automation, and the rewrite moves only a logic that publishes: its
+		// goldens publish in some run.
+		for arm, files := range moved {
+			for file, k := range files {
+				if !goldensPublish(goldens[file]) {
+					diffs = append(diffs, fmt.Sprintf("%s: the %s arm has no run of it, and no golden run of it publishes: the rewrite moved a logic that may stay one", k, arm))
+				}
+			}
+		}
 	}
 	sort.Strings(diffs)
 	require.Emptyf(t, diffs, "%d runs differ:\n%s", len(diffs), strings.Join(diffs, "\n"))
@@ -1398,6 +1198,29 @@ func TestLogicCorpusRuns(t *testing.T) {
 		return
 	}
 	t.Logf("%d arm runs match the goldens over %d logic constructs and %d fixtures (%d refused, %d legacy-defect mends)", matched, len(constructs), len(fixtures), refused, sumInts(mended))
+	for _, arm := range arms {
+		if files := moved[arm.name]; len(files) > 0 {
+			keys := make([]string, 0, len(files))
+			for _, k := range files {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			t.Logf("the %s arm has no run of %d logic the bodies rewrite moved into their automations: %s", arm.name, len(keys), strings.Join(keys, ", "))
+		}
+	}
+}
+
+// goldensPublish reports whether one construct's golden runs publish an event
+// in any run.
+func goldensPublish(runs map[string]map[string]any) bool {
+	for _, run := range runs {
+		for _, c := range recordOf(run["outcome"]).Calls {
+			if c.Kind == "event" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func sumInts(m map[string]int) int {

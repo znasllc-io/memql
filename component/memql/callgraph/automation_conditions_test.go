@@ -18,50 +18,51 @@ func TestAutomationCondition_MigratedPatternsAreFindings(t *testing.T) {
 		rule string
 	}{
 		{"forge role-if vocabulary", `automation probe {
-  step apply {
-    if submitterRole == "admin" || submitterRole == "writer" {
-      mutation advanceRequest ( requestId: id )
-    }
+  if submitterRole == "admin" || submitterRole == "writer" {
+    apply := mutation advanceRequest(requestId: id)
   }
 }`, "automation-condition-vocabulary"},
 		{"retention date-math if", `automation probe {
-  step apply {
-    forEach item in decide.result {
-      if addDuration(item.createdAt, "P" + (window.first().payload.value ?? "30") + "D") < now {
-        mutation expire ( id: item.id )
-      }
+  for item in decide.result {
+    if addDuration(item.createdAt, "P" + (window.first().value ?? "30") + "D") < now {
+      mutation expire(id: item.id)
     }
   }
 }`, "automation-condition-builtin"},
 		{"workbench terminal ||-chain", `automation probe {
-  step teardown {
-    if event.node.payload.status == "succeeded" || event.node.payload.status == "failed" || event.node.payload.status == "cancelled" {
-      builtin teardown ( planId: event.node.id )
-    }
+  if event.node.payload.status == "succeeded" || event.node.payload.status == "failed" || event.node.payload.status == "cancelled" {
+    teardown := builtin teardown(planId: event.node.id)
   }
 }`, "automation-condition-vocabulary"},
 		{"`??` default in @filter", `@filter(row => (row.kind ?? "regular") == "daily")
 automation probe {
-  step run { logic f ( event ) }
+  run := logic f(event: event)
 }`, "automation-condition-builtin"},
 		{"`+` concat in an if", `automation probe {
-  step apply {
-    if "role:" + event.node.payload.role == "role:admin" {
-      mutation m ( id: id )
-    }
+  if "role:" + event.node.payload.role == "role:admin" {
+    apply := mutation m(id: id)
   }
 }`, "automation-condition-builtin"},
 		{"vocabulary in a lambda @filter", `@filter(row => row.status == "running" || row.status == "compiling")
 automation probe {
-  step run { logic f ( event ) }
+  run := logic f(event: event)
 }`, "automation-condition-vocabulary"},
 		{"vocabulary in forEach where", `automation probe {
-  step fan {
-    forEach nt in engineNodeTypes where nt == "voice" || nt == "bff" {
-      logic f ( nt )
-    }
+  for nt in engineNodeTypes if nt == "voice" || nt == "bff" {
+    logic f(nt: nt)
   }
 }`, "automation-condition-vocabulary"},
+		// Two shapes of a statement body that open no line with `if`.
+		{"vocabulary in an else-if", `automation probe {
+  if args.a == nil {
+    logic f()
+  } else if args.status == "failed" || args.status == "cancelled" {
+    logic g()
+  }
+}`, "automation-condition-vocabulary"},
+		{"date math in a one-line if", `automation probe {
+  if addDuration(args.at, "P7D") < now { logic f() }
+}`, "automation-condition-builtin"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,51 +83,55 @@ func TestAutomationCondition_SanctionedShapesPass(t *testing.T) {
 		src  string
 	}{
 		{"decide-gate + presence + single fan-out equality", `automation probe {
-  step decide { logic decideThing ( event ) }
-  step apply {
-    forEach item in decide.nodes() {
-      if steps.decide.result == true && item.payload.status == "provisioned" {
-        mutation release ( id: item.id )
-      }
-    }
+  args {
+    id any
   }
-  step teardown {
-    if steps.terminal.result == true && event.node.id != nil {
-      builtin teardown ( planId: event.node.id )
-    }
+  decide := logic decideThing(event: event)
+  rows := query releasable(id: args.id)
+  for item in rows if decide == true && item.status == "provisioned" {
+    mutation release(id: item.id)
+  }
+  terminal := logic isTerminal(event: event)
+  if terminal == true && args.id != nil {
+    builtin teardown(planId: args.id)
   }
 }`},
 		{"relevance @filter equality", `@filter(row => event.node.payload.preferences.computerUseEnabled == false)
 automation probe {
-  step run { logic f ( event ) }
+  run := logic f(event: event)
 }`},
 		{"switch fan-out on decided value", `automation probe {
-  step decide { logic decideThing ( event ) }
-  step advance {
-    switch steps.decide.result {
-      case "queued" { mutation m ( id: id ) }
-      default { mutation n ( id: id ) }
+  decide := logic decideThing(event: event)
+  switch decide {
+    case "queued" {
+      mutation m(id: id)
+    }
+    default {
+      mutation n(id: id)
     }
   }
 }`},
 		{"where single equality fan-out", `automation probe {
-  step fan {
-    forEach nt in engineNodeTypes where environment == "development" {
-      logic f ( nt )
-    }
+  for nt in engineNodeTypes if environment == "development" {
+    logic f(nt: nt)
   }
 }`},
 		{"relevance lambda @filter on the row", `@filter(row => row.preferences.computerUseEnabled == false)
 automation probe {
-  step run { logic f ( event ) }
+  run := logic f(event: event)
 }`},
 		{"a group inside a lambda @filter", `@filter(row => (row.kind == "file" && row.archived == true))
 automation probe {
-  step run { logic f ( event ) }
+  run := logic f(event: event)
 }`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// A body the parser refuses has no conditions to judge, so a
+			// sanctioned shape that stopped parsing would pass here unread.
+			if _, ok := statementConditions(tc.src); !ok {
+				t.Fatalf("the shape must parse, or its conditions are never judged:\n%s", tc.src)
+			}
 			if fs := automationFindings(t, tc.src); len(fs) != 0 {
 				t.Fatalf("sanctioned shape must produce zero findings, got %v", fs)
 			}

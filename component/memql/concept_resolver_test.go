@@ -35,9 +35,7 @@ func TestResolveAttribute_TriggerOnSugarEmits5SegmentPattern(t *testing.T) {
 
 @trigger(on=participant.created)
 automation testAutomation {
-  step run {
-    mutation createThing (id: "x")
-  }
+  run := mutation createThing(id: "x")
 }`
 	lowered, err := languageParser.NormaliseAll(src)
 	require.NoError(t, err)

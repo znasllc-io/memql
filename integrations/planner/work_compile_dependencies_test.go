@@ -45,7 +45,7 @@ func dependencyFixture() (*PlannerAgentLoop, *workDependencyEngine, authoringBun
 	}
 	query := row("q", "b", "query", "reused", "use identity.concepts.{ user }\n@actor\nquery user reused {\n  filter row => row.id == actor.userId\n  shape reusedShape\n}")
 	shape := row("s", "b", "shape", "reusedShape", "use identity.concepts.{ user }\n@row\nshape user reusedShape { row.id }")
-	logic := row("l", "c", "logic", "transitive", "logic transitive { body { return 42 } }")
+	logic := row("l", "c", "logic", "transitive", "logic transitive {\n  return 42\n}")
 	e := &workDependencyEngine{
 		catalog: map[string][]map[string]any{"reused": {query}, "transitive": {logic}},
 		bundles: map[string]map[string]any{
@@ -54,7 +54,7 @@ func dependencyFixture() (*PlannerAgentLoop, *workDependencyEngine, authoringBun
 		},
 		members: map[string][]map[string]any{"b": {query, shape}, "c": {logic}},
 	}
-	bundle := authoringBundle{AutomationName: "runFile", Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: "runFile", Source: "@template\nautomation runFile { step get { query reused() } }"}}, ReuseEdges: []reuseEdge{{Kind: "query", Name: "reused", Namespace: "authored"}}}
+	bundle := authoringBundle{AutomationName: "runFile", Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: "runFile", Source: "@template\nautomation runFile {\n  get := query reused()\n}"}}, ReuseEdges: []reuseEdge{{Kind: "query", Name: "reused", Namespace: "authored"}}}
 	return &PlannerAgentLoop{engine: e}, e, bundle
 }
 

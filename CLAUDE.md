@@ -1158,8 +1158,8 @@ a single `<construct>s.memql` file (e.g. `dsl/library/queries.memql`,
 `dsl/identity/concepts.memql`, `dsl/providers/providers.memql`). The flattened
 tree is produced by
 [`scripts/restructure-by-construct`](scripts/restructure-by-construct/main.go).
-Authoring reference skeletons live under `dsl/_reference/` (`_concept`,
-`_shape`, `_spec`, `_trait`, `_agent`). Loaders read through `Source()`, which
+Authoring reference skeletons live under `dsl/_reference/`, one per construct
+(`_concept.memql`, `_logic.memql`, `_automation.memql`, ...). Loaders read through `Source()`, which
 routes through [`core/dslfs`](core/dslfs/dslfs.go).
 
 ### `MEMQL_DSL_PATH` — runtime product-DSL delivery
@@ -1270,7 +1270,7 @@ against it (`@required` / type / `@enum` / `@pattern`), and a violation refuses
 the run rather than binding a partial map
 (`component/automations/args_binding.go`, memql#2352). The triggering **event**
 rides its own `event` envelope (`event.topic` / `event.kind` /
-`event.payload.<field>`), which a step conventionally forwards to logic as
+`event.payload.<field>`), which a statement forwards to logic as
 `logic name(event: event)`; the logic declares `event` in its args block and
 reads `args.event.payload.<field>`. The bare-name argument pun
 (`logic name ( event )`) is retired (D12): name the argument.
@@ -1303,6 +1303,15 @@ see one in an old diff:
   two-identifier construct signature.
 - `@input { ... }` — the prompt body IS the field list.
 - `include` in a shape body.
+- The retired body forms (epic memql#5370): `body { }` around a logic's
+  statements, `step` blocks, the terse `=> logic` automation header,
+  `steps.<id>` references, a bare argument read, `partition=` on `@trigger`,
+  the `@schedule` annotation (`@trigger(schedule=...)` is the one spelling),
+  and `mutate` as the mutation declaration keyword (it is `mutation`, D13).
+  `memqlmigrate --rewrite=bodies` rewrites each; the language reference lists
+  them ([memql.md](docs/public/language/memql.md#retired-forms)). The step
+  bodies' accessors -- `step("x")`, `input()`, `item()`, `index()` -- are
+  refused too, and have no rewrite: no tree wrote one in a statement body.
 
 Only `dsl/_reference/*.memql` still shows these, deliberately, as
 don't-do-this skeletons.
@@ -1575,10 +1584,10 @@ are stated once in
 [access-model.md](docs/public/operate/auth/access-model.md#grants-to-people-and-groups).
 
 The partition dimension that historically gated tenant isolation is retired in
-#56 (phases 1-7 landed; phase 8 sweeps the remaining cross-repo stragglers + the
-DSL `partition="*"` automation kwarg). The `partition` wire field is already
-removed (`reserved "partition"` in `component/grpc/memql.proto`); nothing
-derives scope from the envelope.
+#56. The `partition` wire field is removed (`reserved "partition"` in
+`component/grpc/memql.proto`), nothing derives scope from the envelope, and the
+DSL's `partition="*"` automation kwarg is refused at parse
+(`trigger_partition_retired`, epic memql#5370).
 
 ### Concepts
 
@@ -1632,19 +1641,37 @@ v1:cluster:node:bff-local
 ### Automations
 
 Event-driven workflows. The `@trigger` annotation keys off an event name plus
-the target concept, using keyword args:
+the target concept, using keyword args, and the automation's `args { }` block
+is the contract the triggering row's payload is bound into:
 
 ```memql
-@trigger(event="node.created", concept="v1:worker:registration", partition="*")
-automation onWorkerRegistered { ... }
+/// On to-do creation, promote it into the Library Records lens.
+@trigger(event="node.created", concept="v1:todos:todo")
+automation indexTodoOnCreate {
+  args {
+    id any
+    ownerUserId any
+    title any
+  }
+
+  persist := mutation createArtifact(
+    sourceConceptRef: args.id,
+    ownerUserId:      args.ownerUserId,
+    lens:             "record",
+    kind:             "todo",
+    source:           "agent_generated",
+    title:            args.title ?? "Untitled to-do",
+    live:             false
+  )
+}
 ```
 
-A time-driven automation uses the `schedule` kwarg instead:
-`@trigger(schedule="0 */10 * * * *")`.
-
-> **#56 phase 8 caveat:** the `partition="*"` kwarg is still required while the
-> event topic carries a partition segment. That segment goes away in phase 8,
-> after which the kwarg drops.
+A time-driven automation uses the `schedule` kwarg instead, with a six-field
+cron (leading seconds): `@trigger(schedule="0 */10 * * * *")`. It is the one
+spelling -- the `@schedule` annotation and `partition=` on a trigger are
+refused at parse. An automation's statements are the body language
+[Logic](#logic) describes, plus `publish`, `automation` and `action` calls,
+which only an automation makes.
 
 ### Functions
 
@@ -1772,7 +1799,7 @@ Mutations:
 use library.concepts.{ folder }
 
 @description("Create a Library folder")
-mutation folder mutationCreateFolder {
+mutation folder createFolder {
   args {
     folderId  string  @required
     name      string  @required
@@ -1793,9 +1820,9 @@ block per mutation.
 
 ### Logic
 
-Imperative procedure called from an automation step. `args { ... }` declares
-inputs; `body { ... }` is a sequence of named statements ending in
-`return <expr>`. The single-statement form is the common case:
+A procedure an automation or another logic calls. `args { ... }` declares its
+inputs, and its statements follow, the last of them a `return`. The
+one-statement form is the common case:
 
 ```memql
 /// Pure decide for the workspace-release sweep: every v1:workbench:workspace
@@ -1804,9 +1831,7 @@ logic releaseWorkspaceOnRunTerminal {
   args {
     event object!
   }
-  body {
-    return query workspaceForRun(runId: args.event.payload.id ?? "")
-  }
+  return query workspaceForRun(runId: args.event.payload.id ?? "")
 }
 ```
 
@@ -1815,11 +1840,15 @@ A construct call names its kind and its arguments -- `query workspaceForRun(runI
 object-literal form `name({ k: v })` is refused, and the bare-name pun
 (`logic decide(event)` for `event: event`) is retired.
 
-Multi-statement bodies (intermediate `name := <call>` steps with side effects,
-followed by a trailing `return <expr>`) execute via the `LogicRunner`: the
-runner walks intermediate steps in dependency order through the same step
-registry the automation scheduler uses, then evaluates the trailing `return`.
-Logic functions don't write `ctx.output = ...`.
+A logic and an automation share one body language (epic memql#5370):
+`name := <call>` binds, `if` / `for` / `switch` / `parallel` / `return`, trailing
+`retry(n)` and `on error continue`. Statements run in the order written, through
+the same sequence runner an automation's run uses; nothing is reordered by
+dependency, and there is no `ctx.output = ...`. A logic may call queries,
+mutations, logic and builtins, and ends with `return`; publishing and calling an
+automation or an action are an automation's. The whole language (statements,
+names and scope, trailing clauses, what each statement is at run time) is in
+[memql.md](docs/public/language/memql.md#bodies).
 
 ### Prompts
 

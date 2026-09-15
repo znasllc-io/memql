@@ -29,9 +29,8 @@
 //     embedding source.
 //
 //   - The body is an OPTIONAL `args { ... }` input schema, using the same
-//     args-block grammar as action / builtin / file-top args. There is NO
-//     `body { ... }` block -- a `body` is the procedural marker and a
-//     capability is never procedural.
+//     args-block grammar as action / builtin / file-top args. There are no
+//     statements -- a capability is never procedural.
 //
 // ---------------------------------------------------------------------------
 // Declaration shape

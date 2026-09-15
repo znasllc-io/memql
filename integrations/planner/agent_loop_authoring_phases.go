@@ -12,18 +12,17 @@ package planner
 //   - the LLM emits each phase's BEHAVIOR -- one sub-automation + its authored
 //     deps -- via the SAME authoringEmit prompt the single-phase path uses
 //     (a phase is just "one automation + its closure"). So no new prompt.
-//   - Go DETERMINISTICALLY synthesizes the headline that triggers the phase
-//     sub-automations in DAG order. The sequencing is real: the automation
-//     executor runs top-level steps sequentially in list order, each layer
-//     after the first is gated on the prior layer's step having status
-//     "success" (memql#1366), and a layer with 2+ independent phases emits a
-//     `parallel { branches }` step so those phases run CONCURRENTLY
-//     (memql#1164, grammar restored in memql#1368). Determinism here means
-//     the sequencing can't be fumbled by the model, and it's unit-testable
+//   - Go DETERMINISTICALLY synthesizes the headline that calls the phase
+//     sub-automations in DAG order. The sequencing is real: an automation's
+//     statements run in source order and a failed statement ends the run, so
+//     a layer runs only once the layer before it finished; a layer with 2+
+//     independent phases is one `parallel` statement whose branches run
+//     CONCURRENTLY (memql#1164, memql#1368). Determinism here means the
+//     sequencing can't be fumbled by the model, and it's unit-testable
 //     without an engine.
 //
 // The phase sub-automations + the headline are all trigger-less: they are
-// invoked via TriggerAutomation / the `step { automation ... }` kind, not by a
+// invoked via TriggerAutomation / an `automation <name>()` call, not by a
 // real-world event. That fits the capture path (a one-off task has no
 // recurring trigger) -- the captured bundle is a replayable record, run on
 // demand. A future Responsibility-path bundle can stamp the headline's trigger
@@ -149,26 +148,18 @@ func synthesizeHeadlineAutomation(headline, purpose string, phaseAutomations []s
 
 // synthesizePhasedHeadline builds the headline automation that invokes the
 // phase sub-automations honoring their dependency DAG (epic memql#1160, issues
-// #1163 + #1164; gating fixed for real Gate 1 in memql#1366; within-layer
-// concurrency restored on the authored `parallel` grammar in memql#1368):
+// #1163 + #1164; within-layer concurrency in memql#1368):
 //
 //   - The phases are topologically LAYERED: layer 0 is every phase with no
 //     unmet dependency; layer k is every phase whose deps all sit in earlier
 //     layers. Phases in the same layer are mutually independent.
-//   - A layer with ONE phase emits a plain `step`, named after the phase.
-//   - A layer with 2+ independent phases emits ONE `parallel` step (named
-//     `layer<k>`) whose branches invoke each phase automation, so they run
-//     CONCURRENTLY (#1164 / #1368). The step carries `wait: "all"` +
-//     `failFast: true`: the layer completes only when every branch has, and
-//     any branch failure fails the layer so downstream gating skips.
-//   - Each layer-k>0 step is gated `if steps.<priorStep>.status == "success"`
-//     on the prior layer's step (the phase step for a single-phase layer,
-//     the `layer<k-1>` parallel step otherwise), so a failed (or skipped)
-//     layer skips everything downstream instead of running phases whose
-//     inputs never materialized. A skipped step records status "skipped",
-//     which keeps the cascade going. The condition compiles through the
-//     struct-form rewrite (translateStepCall's `if` form) and resolves at
-//     runtime via the evaluator's steps.* filter-value resolution (#1366).
+//   - A layer with ONE phase is one call statement, `automation <phase>()`.
+//   - A layer with 2+ independent phases is ONE `parallel` statement with a
+//     branch per phase, so they run CONCURRENTLY (#1164 / #1368). It waits
+//     for every branch, and a failed branch fails it.
+//   - No layer needs a gate: a failed statement ends the run, so a layer
+//     runs only when every layer before it finished, and a phase never runs
+//     on inputs that never materialized.
 //
 // If the DAG can't be layered (a cycle, or an unknown dependsOn), the phases
 // fall back to a strict by-index sequential chain so the bundle is still valid.
@@ -193,46 +184,18 @@ func synthesizePhasedHeadline(headline, purpose string, phases []phaseNode) memq
 		fmt.Fprintf(&b, "@description(%q)\n", fmt.Sprintf("Headline automation running %d phases across %d ordered layers.", len(phases), len(layers)))
 	}
 	fmt.Fprintf(&b, "automation %s {\n", headline)
-	prevStep := ""
-	for li, layer := range layers {
-		gate := ""
-		if prevStep != "" {
-			gate = fmt.Sprintf("steps.%s.status == %q", prevStep, "success")
-		}
+	for _, layer := range layers {
 		if len(layer) == 1 {
-			name := phases[layer[0]].Name
-			if gate == "" {
-				fmt.Fprintf(&b, "  step %s {\n    automation %s { }\n  }\n", name, name)
-			} else {
-				fmt.Fprintf(&b, "  step %s {\n    if %s {\n      automation %s { }\n    }\n  }\n", name, gate, name)
-			}
-			prevStep = name
+			fmt.Fprintf(&b, "  automation %s()\n", phases[layer[0]].Name)
 			continue
 		}
-		// Independent phases in this layer -> one parallel step fanning out.
-		stepName := fmt.Sprintf("layer%d", li)
-		fmt.Fprintf(&b, "  step %s {\n", stepName)
-		indent, closeStr := "    ", ""
-		if gate != "" {
-			fmt.Fprintf(&b, "    if %s {\n", gate)
-			indent, closeStr = "      ", "    }\n"
-		}
-		fmt.Fprintf(&b, "%sparallel {\n", indent)
-		fmt.Fprintf(&b, "%s  wait: \"all\"\n", indent)
-		fmt.Fprintf(&b, "%s  failFast: true\n", indent)
-		fmt.Fprintf(&b, "%s  branches: [\n", indent)
-		for bi, idx := range layer {
+		// Independent phases in this layer -> one parallel statement.
+		b.WriteString("  parallel {\n")
+		for _, idx := range layer {
 			name := phases[idx].Name
-			fmt.Fprintf(&b, "%s    step %s { automation %s { } }", indent, name, name)
-			if bi < len(layer)-1 {
-				b.WriteString(",")
-			}
-			b.WriteString("\n")
+			fmt.Fprintf(&b, "    branch %s {\n      automation %s()\n    }\n", name, name)
 		}
-		fmt.Fprintf(&b, "%s  ]\n%s}\n", indent, indent)
-		b.WriteString(closeStr)
 		b.WriteString("  }\n")
-		prevStep = stepName
 	}
 	b.WriteString("}\n")
 	return memql.SandboxConstruct{Kind: "automation", Name: headline, Source: b.String()}

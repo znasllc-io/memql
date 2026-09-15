@@ -26,10 +26,8 @@ var clauseDispatch = map[string]struct {
 	// The query's `args { }` block is cut out by argsBlockHeader before the
 	// line switch runs; its `concept` arm refuses the retired inline concept
 	// line.
-	"query":      {file: "rewriter.go", fn: "parseStructQueryBody", beforeSwitch: []string{"args"}, refusalArms: []string{"concept"}},
-	"mutation":   {file: "rewriter.go", fn: "parseStructMutationBody"},
-	"logic":      {file: "rewriter.go", fn: "logicBodyClause"},
-	"automation": {file: "rewriter.go", fn: "automationBodyClause"},
+	"query":    {file: "rewriter.go", fn: "parseStructQueryBody", beforeSwitch: []string{"args"}, refusalArms: []string{"concept"}},
+	"mutation": {file: "rewriter.go", fn: "parseStructMutationBody"},
 	"action": {file: "parser.go", fn: "parseActionDecl", tag: "key",
 		refusalArms: []string{"intent", "params", "argTemplate", "body"}, notClauses: []string{"capability"}},
 	"capability": {file: "parser.go", fn: "parseCapabilityDecl", tag: "p.current.Literal", refusalArms: []string{"body"}},
@@ -99,6 +97,9 @@ func renderGoExpr(e goast.Expr) string {
 // not only the two whose case arms feed the grammar digest.
 func TestBodyClausesMatchTheParserDispatch(t *testing.T) {
 	for keyword := range bodyClauseTable {
+		if statementClauseKeywords[keyword] {
+			continue
+		}
 		if _, ok := clauseDispatch[keyword]; !ok {
 			t.Errorf("%s has a clause table but no dispatch entry in clauseDispatch", keyword)
 		}
@@ -131,6 +132,13 @@ func TestBodyClausesMatchTheParserDispatch(t *testing.T) {
 	}
 }
 
+// statementClauseKeywords are the constructs whose leading blocks the
+// statement parser reads (parseV1Definition): `args`, and an automation's
+// `precondition`s, before the statements. It reads them with comparisons,
+// not a switch, so there is no dispatch to pin; the two tests below pin their
+// rows by what the parser accepts and refuses.
+var statementClauseKeywords = map[string]bool{"logic": true, "automation": true}
+
 // bodyClauseFixtures is, per construct and clause, the smallest construct
 // that uses the clause.
 var bodyClauseFixtures = map[string]map[string]string{
@@ -152,16 +160,14 @@ var bodyClauseFixtures = map[string]map[string]string{
 		"stamp":  "mutation thing probe {\n  args {\n    name string!\n  }\n  accept { name }\n  stamp { createdAt: now }\n}",
 	},
 	"logic": {
-		"args": "logic probe {\n  args {\n    x string\n  }\n  body {\n    return args.x\n  }\n}",
-		"body": "logic probe {\n  body {\n    return 1\n  }\n}",
+		"args": "logic probe {\n  args {\n    x string\n  }\n  return args.x\n}",
 	},
 	"automation": {
-		"args": "automation probe {\n  args {\n    x any\n  }\n  step run {\n    mutation createThing (id: \"x\")\n  }\n}",
-		"step": "automation probe {\n  step run {\n    mutation createThing (id: \"x\")\n  }\n}",
-		// component/automations extracts a precondition before the rewriter
-		// runs; one that reaches the rewriter (an editor lowering the file) is
-		// a known clause it skips.
-		"precondition": "automation probe {\n  precondition ready {\n    check: 1 == 1\n  }\n  step run {\n    mutation createThing (id: \"x\")\n  }\n}",
+		"args": "automation probe {\n  args {\n    x any\n  }\n  run := mutation createThing(id: \"x\")\n}",
+		// component/automations extracts a precondition before the parser
+		// runs; one that reaches the parser (an editor reading the file) is a
+		// block it steps over.
+		"precondition": "automation probe {\n  precondition ready {\n    check: 1 == 1\n  }\n  run := mutation createThing(id: \"x\")\n}",
 	},
 	"action": {
 		"args": "action probe {\n  args {\n    x string\n  }\n  capability script(script: args.x)\n}",
@@ -204,8 +210,8 @@ func TestBodyClausesMatchWhatTheParsersAccept(t *testing.T) {
 var bodyProbeFixtures = map[string]string{
 	"query":      "query thing probe {\n  filter row => row.id != \"\"\n  %s\n}",
 	"mutation":   "mutation thing probe {\n  insert {\n    id: \"x\"\n  }\n  %s\n}",
-	"logic":      "logic probe {\n  %s\n  body {\n    return 1\n  }\n}",
-	"automation": "automation probe {\n  %s\n  step run {\n    mutation createThing (id: \"x\")\n  }\n}",
+	"logic":      "logic probe {\n  %s\n  return 1\n}",
+	"automation": "automation probe {\n  %s\n  run := mutation createThing(id: \"x\")\n}",
 	"action":     "action probe {\n  %s\n  capability script(script: \"x\")\n}",
 	"capability": "capability integration.probe.run {\n  %s\n}",
 	"provider":   "provider probe {\n  %s\n}",

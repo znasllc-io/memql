@@ -11,12 +11,9 @@
 // are closed vocabularies the ENGINE owns and delivers as a bare string, which
 // the extension's existing run path types more narrowly:
 //
-//  1. THE KIND. The catalog reports `mutation`; the run path's `RunnableKind`
-//     spells it `mutate`, because that is the keyword it is authored under.
-//     The engine keeps the same mapping internally (`constructKeyword` in
-//     component/memql/construct_catalog.go) for slicing source, but does not
-//     put it on the wire -- so it is made here, once, rather than at each of
-//     the several places that ask "can I run this".
+//  1. THE KIND. The catalog reports a kind; the run path's `RunnableKind`
+//     names the runnable ones. The mapping is made here, once, rather than at
+//     each of the several places that ask "can I run this".
 //  2. THE ARG TYPE. `ConstructArg.type` arrives as `string`. `RunnableArg.type`
 //     is the six-value `RunnableArgType` the argument form binds. An
 //     unrecognised value narrows to `any`, which is not an invention: it is the
@@ -99,15 +96,12 @@ export const KIND_LABELS: Readonly<Record<string, string>> = {
 };
 
 /**
- * The catalog kind -> the keyword the run path knows it by.
- *
- * Only `mutation` differs, and the engine's own `constructKeyword` table says
- * the same thing. Written as a table rather than a special case so the one
- * difference is visible rather than buried in a conditional.
+ * The catalog kind -> the runnable kind the run path knows it by: the same
+ * word, for the five kinds that run.
  */
 const RUNNABLE_KIND_BY_CATALOG_KIND: Readonly<Record<string, RunnableKind>> = {
   query: "query",
-  mutation: "mutate",
+  mutation: "mutation",
   logic: "logic",
   tool: "tool",
   automation: "automation",
@@ -116,7 +110,7 @@ const RUNNABLE_KIND_BY_CATALOG_KIND: Readonly<Record<string, RunnableKind>> = {
 /** A construct as this surface uses it: the wire record, typed for the run path. */
 export interface CatalogConstruct {
   name: string;
-  /** The kind the CATALOG reports (`mutation`, not `mutate`). */
+  /** The kind the CATALOG reports. */
   kind: string;
   namespace: string;
   origin: Construct["origin"];

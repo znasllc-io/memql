@@ -10,8 +10,6 @@ import (
 	"testing"
 )
 
-const probeTrigger = "@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\n"
-
 // rewriteRefusalCases is one input per refusal the rewriter makes of authored
 // text: needle (its nth occurrence, 1-based) is where the refusal must land,
 // and want is in its message.
@@ -52,19 +50,9 @@ var rewriteRefusalCases = []struct {
 	{"an update with no id", "mutation thing m {\n  args {\n    name string\n  }\n  update {\n    name: args.name\n  }\n}\n", "update", 1, "update block requires an `id: <expr>` line"},
 	{"a body block in a mutation", "mutation thing m {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
 
-	// Logic.
-	{"a logic with no body block", "logic noBody {\n  args {\n    a string\n  }\n}\n", "noBody", 1, "must wrap its procedural code in a `body { }` block"},
-	{"a logic body with no return", "logic noReturn {\n  args {\n    a string\n  }\n  body {\n    x := f(a: args.a)\n  }\n}\n", "x :=", 1, "must end with a `return <expr>` terminator"},
-
-	// Automation steps.
-	{"an empty step", probeTrigger + "automation a {\n  step first {\n  }\n}\n", "step", 1, "body is empty"},
-	{"a forEach with no in", probeTrigger + "automation a {\n  step loop {\n    forEach t of event.payload.items {\n      logic touch(x: t)\n    }\n  }\n}\n", "forEach", 1, "expected `in`"},
-	{"a conditional step with no body", probeTrigger + "automation a {\n  step s {\n    if event.payload.a == 1\n  }\n}\n", "if", 1, "expected `{` after the if condition"},
-	{"an automation with no steps", probeTrigger + "automation noSteps {\n  args {\n    x string\n  }\n}\n", "noSteps", 1, "at least one `step` is required"},
-	{"a body block in an automation", probeTrigger + "automation a {\n  body {\n    x := 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
-
-	// A terse automation.
-	{"an args block before a terse automation", "args {\n  x string\n}\nautomation onThing @trigger(event=\"node.created\", concept=\"v1:probe:thing\") => logic noteThing\n", "args", 1, "must not be preceded by an `args { ... }` block"},
+	// A logic and an automation are not the rewriter's: the statement parser
+	// reads them as written, and their refusals are its own
+	// (v1BodyRefusalCases) and the compiler's (epic memql#5370).
 
 	// Text the stages before moved: a spec StripNonProceduralBlocks folds to
 	// one line, and a query the query stage lowers to fewer lines.
@@ -145,9 +133,8 @@ func TestRewriteRefusalsNameTheAuthorsPosition(t *testing.T) {
 // text it names, so a squiggle is that keyword or field and nothing past it.
 func TestRewriteRefusalCoversItsText(t *testing.T) {
 	// Where the text covered is shorter than the needle that finds it: a
-	// second `id:` field is named at its key, and a body that ends without a
-	// return at its last statement's first word.
-	covers := map[string]string{"a second id": "id", "a logic body with no return": "x"}
+	// second `id:` field is named at its key.
+	covers := map[string]string{"a second id": "id"}
 	for _, c := range rewriteRefusalCases {
 		t.Run(c.name, func(t *testing.T) {
 			var pe *ParseError

@@ -1,0 +1,73 @@
+{
+  "automation": "worker/automations.memql workerInvocationRetentionSweep",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "name": "WORKER_INVOCATION_RETENTION_DAYS"
+            },
+            "kind": "query",
+            "name": "globalVariable"
+          },
+          {
+            "args": {
+              "createdBefore": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredWorkerInvocations"
+          },
+          {
+            "args": {
+              "invocationId": "v1:probe:row:expiredWorkerInvocations-1"
+            },
+            "kind": "mutation",
+            "name": "softDeleteWorkerInvocation"
+          },
+          {
+            "args": {
+              "invocationId": "v1:probe:row:expiredWorkerInvocations-2"
+            },
+            "kind": "mutation",
+            "name": "softDeleteWorkerInvocation"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

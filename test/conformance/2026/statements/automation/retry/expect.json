@@ -1,0 +1,27 @@
+{
+  "cases": [
+    {
+      "file": "retry.memql",
+      "verdict": "load_ok",
+      "note": "the clauses trail the call, in the order on surface, retry, on error"
+    },
+    {
+      "file": "retry-on-an-expression.memql",
+      "verdict": "refuse_parse",
+      "code": "body_retry_placement",
+      "message": "`retry(n)` applies to a construct call statement"
+    },
+    {
+      "file": "retry-before-the-call.memql",
+      "verdict": "refuse_parse",
+      "code": "body_retry_placement",
+      "message": "`x := retry(n) <call>` is retired in edition 2026: write the clause after the call, `x := <call> retry(n)`"
+    },
+    {
+      "file": "clauses-out-of-order.memql",
+      "verdict": "refuse_parse",
+      "code": "body_clause_order",
+      "message": "trailing clauses are written once each, in the order `on surface(...)`, `retry(n)`, `on error continue`"
+    }
+  ]
+}

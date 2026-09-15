@@ -102,8 +102,8 @@ mutation request advanceRequest {
 // Purpose-built transitions -- stamp the acting user from the auth context so
 // the tool surface (one handler per tool) can't be spoofed. Each is an update
 // (read-merges the prior row). The matching requestEvent is recorded
-// separately (see the follow-up note: a node.updated -> recordTransition
-// automation will append the audit event automatically).
+// separately: the recordTransition automation, fired by node.updated,
+// appends the audit event.
 // ---------------------------------------------------------------------------
 
 /// Validate a v1:forge:request (developer action): set status 'needs_approval' and stamp
@@ -185,7 +185,7 @@ mutation request attachToRequest {
 // requestId is normalized to the SHORT id form via shortId() (#1859). The two
 // caller paths feed two id shapes:
 //   - automation path (routeRequest / recordTransition) passes
-//     args.event.payload.id, which is the CANONICAL node id
+//     args.id, the trigger payload's id, which is the CANONICAL node id
 //     (v1:forge:request:r-...) of the created/updated request row;
 //   - tool path (recordMentoredEvent) passes the SHORT tool arg (r-...).
 // Without normalization the audit trail splits across both forms and

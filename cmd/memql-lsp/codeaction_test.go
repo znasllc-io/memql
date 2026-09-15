@@ -472,11 +472,9 @@ func TestCodeAction_NoEditThatWouldNotParse(t *testing.T) {
 		"  args {\n" +
 		"    event object @required\n" +
 		"  }\n" +
-		"  body {\n" +
-		"    note := cond(args.event.payload.note == null, \"none\", \"some\")\n" +
-		"    emitted := emitRecord({ note: note })\n" +
-		"    return emitted\n" +
-		"  }\n" +
+		"  note := cond(args.event.payload.note == null, \"none\", \"some\")\n" +
+		"  emitted := builtin emitRecord({ note: note })\n" +
+		"  return emitted\n" +
 		"}\n"
 	files[rel] = broken + "\nquery order open {\n  filter  status == \"open\"\n}\n"
 	root := writeWorkspace(t, files)

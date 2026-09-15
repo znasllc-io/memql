@@ -1,7 +1,5 @@
 /// How many tickets there are on the first page.
 logic lbCountTickets {
-  body {
-    rows := query lbTickets()
-    return rows.count()
-  }
+  rows := query lbTickets()
+  return rows.count()
 }

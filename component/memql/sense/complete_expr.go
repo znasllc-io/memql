@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/compiler"
 	"github.com/znasllc-io/memql/component/language/functions"
 	"github.com/znasllc-io/memql/component/language/tiers"
 )
@@ -143,6 +144,11 @@ func (s *Service) completeExpression(ctx CursorContext, source string, line, col
 			items = append(items, it)
 		}
 	}
+	// An expression in a body written in statements (epic memql#5370) reads
+	// the roots the load gate admits there, and a construct call in it is a
+	// statement's whole value, never part of an expression.
+	statements := (pos == tiers.PositionLogicBody || pos == tiers.PositionStepArgument || pos == tiers.PositionAutomationCondition) &&
+		inStatementBody(strings.Split(source, "\n"), line, cursorLine(source, line, col), ctx.Enclosing)
 
 	// 1. The lambda parameters in scope, innermost last.
 	seen := map[string]bool{}
@@ -172,9 +178,10 @@ func (s *Service) completeExpression(ctx CursorContext, source string, line, col
 		})
 	}
 
-	// 3. The reserved roots this position evaluates with.
+	// 3. The reserved roots this position evaluates with -- in a statement body,
+	// those the load gate admits (compiler.IsBodyRoot).
 	for _, r := range positionRoots[pos] {
-		if seen[r] {
+		if seen[r] || (statements && !compiler.IsBodyRoot(ctx.Enclosing.Keyword, r)) {
 			continue
 		}
 		def := rootDefAt(pos, r)
@@ -226,8 +233,15 @@ func (s *Service) completeExpression(ctx CursorContext, source string, line, col
 	}
 
 	// 7. Construct calls, where the position admits them (a logic body, a step
-	// argument): the kind-prefixed verbs.
-	if tiers.Allows(pos, ast.KindConstructCall) {
+	// argument): the kind-prefixed verbs. In a statement body a call is a
+	// statement's whole value -- `x := <call>`, `return <call>` -- and refused
+	// inside an expression (body_call_in_expression).
+	switch {
+	case statements:
+		if statementValueStart.MatchString(strings.TrimSuffix(cursorLine(source, line, col), ctx.Prefix)) {
+			items = append(items, s.statementCallItems(ctx.Prefix, ctx.Enclosing)...)
+		}
+	case tiers.Allows(pos, ast.KindConstructCall):
 		for _, kw := range invocationKeywordsForConstruct(ctx.Enclosing) {
 			add(CompletionItem{Label: kw, Kind: "keyword", Detail: "construct call", InsertText: kw + " ", SortPriority: 5})
 		}
@@ -235,23 +249,29 @@ func (s *Service) completeExpression(ctx CursorContext, source string, line, col
 
 	// 8. Statement keywords, only where a statement can start: the beginning of
 	// a line in a logic body. Mid-expression, `if` or `return` is not an
-	// expression and offering it would teach one.
-	if pos == tiers.PositionLogicBody && atStatementStart(source, line, col, ctx.Prefix) {
+	// expression and offering it would teach one. A statement body's starts are
+	// the statement completer's (complete_statements.go), so a line reaching
+	// here there continues an expression.
+	if pos == tiers.PositionLogicBody && !statements && atStatementStart(source, line, col, ctx.Prefix) {
 		for _, kw := range statementKeywords {
 			add(CompletionItem{Label: kw, Kind: "keyword", Detail: "keyword", Documentation: KeywordDocs[kw], InsertText: kw, SortPriority: 10})
 		}
 	}
 
-	// 9. An automation's declared args resolve bare (G2, memql#2364).
-	if ctx.Enclosing.Keyword == "automation" {
+	// 9. A legacy automation's declared args resolve bare (G2, memql#2364). A
+	// body written in statements reads them `args.x` (epic memql#5370) and
+	// refuses the bare name, so it is not offered there.
+	if ctx.Enclosing.Keyword == "automation" && !inStatementBody(strings.Split(source, "\n"), line, cursorLine(source, line, col), ctx.Enclosing) {
 		items = append(items, automationArgsFieldCompletions(source, line, ctx.Prefix)...)
 	}
 	return items
 }
 
-// statementKeywords are the words that open a statement in a logic body. `nil`
-// is a literal (offered above) and `when` is retired, so neither is here.
-var statementKeywords = []string{"if", "else", "for", "range", "switch", "case", "default", "return", "continue", "break", "retry"}
+// statementKeywords are the words that open a statement in a logic body, or
+// trail one (edition 2026, epic memql#5370). `nil` is a literal (offered
+// above), `publish` is an automation's only (D14), and `range`, `when`,
+// `continue` and `break` are not statements.
+var statementKeywords = []string{"if", "else", "for", "switch", "case", "default", "parallel", "branch", "return", "retry", "wait", "on"}
 
 // atStatementStart reports whether the cursor line holds nothing before the
 // prefix being typed.
@@ -555,10 +575,6 @@ var rootDefs = map[string]rootDef{
 	"now":    {"the evaluation clock", "The RFC 3339 timestamp captured when evaluation began.", "now"},
 	"config": {"allow-listed configuration", "Configuration values the engine exposes to the language.", "config."},
 	"event":  {"the triggering event", "The event envelope: topic, kind, payload, actor, timestamp.", "event."},
-	"steps":  {"earlier step results", "The results of the steps this run has already taken.", "steps."},
-	"item":   {"the loop element", "The element of the enclosing forEach.", "item"},
-	"index":  {"the loop index", "The position of the element in the enclosing forEach.", "index"},
-	"input":  {"the automation input", "The rows the automation's input query loaded.", "input"},
 }
 
 // rootDefAt is a root's completion entry at a position. A trigger filter has
@@ -583,10 +599,10 @@ var positionRoots = map[tiers.Position][]string{
 	tiers.PositionQueryRefine:         {"args", "actor", "now", "config"},
 	tiers.PositionSpecBody:            {"now"},
 	tiers.PositionTriggerFilter:       {"args", "now", "config"},
-	tiers.PositionAutomationCondition: {"args", "actor", "now", "config", "event", "steps", "item", "index", "input"},
+	tiers.PositionAutomationCondition: {"args", "actor", "now", "config", "event"},
 	tiers.PositionLogicBody:           {"args", "actor", "now", "config"},
 	tiers.PositionMutationValue:       {"args", "actor", "now", "config"},
-	tiers.PositionStepArgument:        {"args", "actor", "now", "config", "event", "steps", "item", "index", "input"},
+	tiers.PositionStepArgument:        {"args", "actor", "now", "config", "event"},
 	tiers.PositionPromptInput:         {"args", "now", "config"},
 }
 

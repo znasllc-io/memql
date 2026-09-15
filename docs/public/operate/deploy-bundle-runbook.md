@@ -81,7 +81,8 @@ construct that fails to load is logged and dropped instead of refusing boot.
 ## What the bundle did
 
 Every phase -- authorize, record, clone, build, place, gate, outcome, finalize,
-rollback -- ran as automation steps, and the `v1:cluster:deployment` timeline
+rollback -- ran as the automation's statements, each one a journaled step, and
+the `v1:cluster:deployment` timeline
 in the target database was the record of evidence.
 
 Scope: engine mesh ONLY (identity / agent / planner / workbench / mcp /

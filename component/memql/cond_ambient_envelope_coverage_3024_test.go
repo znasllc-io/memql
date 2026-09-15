@@ -8,10 +8,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/znasllc-io/memql/component/auth"
 	busv1 "github.com/znasllc-io/memql/component/bus/gen"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
-// cond_ambient_envelope_coverage_3024_test.go closes the gaps the memql#3024
-// landing review found in the first cut of that change.
+// cond_ambient_envelope_coverage_3024_test.go -- memql#3024: a conditional
+// whose predicate reads an ambient root (`actor.` / `config.` / `partition` /
+// `now`) must discriminate. Resolving to nothing, it silently takes the else
+// branch, and a gate written on it is open or closed by accident. These tests
+// also close the gaps the landing review found in the first cut of the fix.
 //
 // The tests here answer the same question from different sides: WHICH
 // ambient paths actually resolve, and does anything notice when one stops?
@@ -19,9 +23,9 @@ import (
 // accepted five roots, buildAmbientEnvelope supplied four, and the LogicRunner
 // bound one -- so a predicate could be accepted by the validator, folded to nil
 // by expansion, and silently take the else branch forever. That is memql#2962's
-// defect reached through memql#3024's own fix. Since edition 2026 a logic body
-// runs on the LogicRunner, which binds the ambient roots from the same
-// canonical envelope, so the evaluation tests run over that envelope.
+// defect reached through memql#3024's own fix. A logic's statement body runs on
+// the LogicRunner, which binds the ambient roots from the same canonical
+// envelope, so the evaluation tests run over that envelope.
 
 // TestAmbientRootsMatchEnvelopeKeys is the drift test, and it is the durable
 // half of the fix -- correcting the list without pinning it just resets the
@@ -48,34 +52,24 @@ func TestAmbientRootsMatchEnvelopeKeys(t *testing.T) {
 		require.Truef(t, ok,
 			"isAmbientRoot accepts %q but buildAmbientEnvelope never supplies it, so "+
 				"substituteArgRefValue folds %q.* to nil and the comparison becomes a CONSTANT -- "+
-				"the memql#2962 silent gate, reintroduced. Either supply the key or move %q to "+
-				"reservedUnsuppliedRoots so it is refused at load.", root, root, root)
-	}
-
-	// The two sets must not overlap, or a root would be both resolvable and
-	// refused depending on which check ran first.
-	for root := range reservedUnsuppliedRoots {
-		require.Falsef(t, isAmbientRoot(root),
-			"%q is in BOTH ambientEnvelopeRoots and reservedUnsuppliedRoots", root)
-		_, ok := envelope[root]
-		require.Falsef(t, ok,
-			"%q is listed as unsupplied but buildAmbientEnvelope supplies it", root)
+				"the memql#2962 silent gate, reintroduced. Either supply the key or drop %q from "+
+				"ambientEnvelopeRoots.", root, root, root)
 	}
 }
 
-// TestLogicCondBareIdentifierPredicate_RejectsUnresolvableAmbientPaths pins
-// the ambient paths an edition-2026 logic body still refuses at load: an
-// actor member the auth envelope does not carry (the closed-set check, #2623).
-// Documented and unresolvable is the worst combination -- CLAUDE.md's
-// argument-resolution table once listed actor.partitions -- so an author has
-// every reason to write it, and at run time it would read absent.
+// TestLogicAmbientPredicate_RejectsUnresolvableActorPaths pins the ambient
+// paths a logic's load refuses here: an actor member the auth envelope does
+// not carry (the closed-set check, #2623). Documented and unresolvable is the
+// worst combination -- CLAUDE.md's argument-resolution table once listed
+// actor.partitions -- so an author has every reason to write it, and at run
+// time it would read absent.
 //
-// The pre-2026 load also refused `trace` (a reserved root no envelope
-// supplies) and a `config` key outside the allow-list. An edition-2026 body is
-// not refused for either at load: `trace` is refused when the body runs
-// (unknown_name), and an unlisted config key reads absent. Neither is pinned
-// here; the load-time refusal is the v1 loader's to restore.
-func TestLogicCondBareIdentifierPredicate_RejectsUnresolvableAmbientPaths(t *testing.T) {
+// The other two unresolvable ambient paths are refused elsewhere: `trace` (a
+// reserved root no envelope supplies) by the body's own scope check
+// (body_unknown_name, component/language/compiler's body_scope_test.go), and
+// a `config` key outside the allow-list by the boot gate
+// (body_config_unknown, dslgate's statement_bodies_test.go).
+func TestLogicAmbientPredicate_RejectsUnresolvableActorPaths(t *testing.T) {
 	for name, tc := range map[string]struct{ pred, wants string }{
 		"actor-unknown-leaf": {
 			pred:  `actor.partitions == "p"`,
@@ -87,7 +81,7 @@ func TestLogicCondBareIdentifierPredicate_RejectsUnresolvableAmbientPaths(t *tes
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := loadCondBarePredicateProbe(tc.pred)
+			_, err := tryParseNewFunctionSyntax("ambientPathProbe", "logic", condAmbientProbeSource("ambientPathProbe", tc.pred), "common.logic.memql", dotAccessLoadRegistry())
 			require.Errorf(t, err,
 				"(%s) ? ... resolves to nothing on every evaluation path, so it is a CONSTANT "+
 					"that takes the else branch for every input. It must be refused at load (memql#2962).",
@@ -95,45 +89,6 @@ func TestLogicCondBareIdentifierPredicate_RejectsUnresolvableAmbientPaths(t *tes
 			require.Contains(t, err.Error(), tc.wants)
 		})
 	}
-}
-
-// TestLogicCondBareIdentifier_MultiStepDeclaredArgIsNotRejected is the
-// false-positive guard, and it is the direction that matters most on a load
-// rule: it runs at DSL load in every binary, so a wrong rejection is a boot
-// failure on every node in the cluster rather than one bad answer.
-//
-// A body with a statement before its return runs on the LogicRunner, whose
-// scope resolves a bare DECLARED argument (memql#2364) -- so a conditional on
-// `role == "owner"` there is not a constant, and the load must not refuse it.
-// Nothing in this repo's tree writes that shape, so the boot canary cannot
-// catch a regression; a product DSL bundle mounted at MEMQL_DSL_PATH goes
-// through the same loader.
-//
-// The pre-2026 load also refused the complement -- a bare name that is
-// neither a local nor a declared argument. An edition-2026 body refuses it
-// when it runs (unknown_name) instead; that is not pinned here.
-func TestLogicCondBareIdentifier_MultiStepDeclaredArgIsNotRejected(t *testing.T) {
-	multiStep := strings.Join([]string{
-		"@actor",
-		"@description(\"multi-step declared-arg probe\")",
-		"logic condMultiStepArgProbe {",
-		"  args {",
-		"    role string @required",
-		"  }",
-		"  body {",
-		"    seen := actor.role ?? \"\"",
-		"    return role == \"owner\" ? \"ALLOW\" : \"DENY\"",
-		"  }",
-		"}",
-	}, "\n")
-
-	_, err := tryParseNewFunctionSyntax(
-		"condMultiStepArgProbe", "logic", multiStep, "common.logic.memql", dotAccessLoadRegistry())
-	require.NoErrorf(t, err,
-		"a MULTI-STEP body comparing a bare DECLARED ARG must load. That path runs on "+
-			"the LogicRunner, whose scope resolves declared args (memql#2364), so the predicate "+
-			"discriminates. Refusing it is a false positive on a load-path rule, which is a boot "+
-			"failure on every node: %v", err)
 }
 
 // TestCondAmbientConfigPredicate_DiscriminatesOverTheEnvelope is memql#3024's
@@ -224,4 +179,74 @@ func TestCondAmbientPredicate_NegatedAbsentActorDeniesOverTheEnvelope(t *testing
 					"predicate read true and opens the gate for an unauthenticated caller.", pred)
 		})
 	}
+}
+
+// condAmbientProbeSource builds a logic returning a conditional over `pred`.
+func condAmbientProbeSource(name, pred string) string {
+	return strings.Join([]string{
+		"@actor",
+		"@description(\"memql#3024 ambient predicate probe\")",
+		"logic " + name + " {",
+		"  args {",
+		"    a string @required",
+		"  }",
+		"  return (" + pred + ") ? \"elevated\" : \"plain\"",
+		"}",
+	}, "\n")
+}
+
+// evalOverTheEnvelope evaluates a probe logic's returned expression the way
+// the LogicRunner evaluates it for the ambient roots: with EvalExpr, over the
+// engine's canonical envelope for ctx (buildAmbientEnvelope -- the source the
+// runner binds config and partition from, and whose actor is the same
+// auth.ActorEnvelopeMap the runner binds) beside the call's arguments.
+func evalOverTheEnvelope(t *testing.T, eng *MemQLEngine, ctx context.Context, name, pred string, args map[string]any) any {
+	t.Helper()
+	fn, err := tryParseNewFunctionSyntax(name, "logic", condAmbientProbeSource(name, pred), "memql#3024-test", memorynodes.DefaultRegistry())
+	require.NoErrorf(t, err, "an ambient predicate must LOAD: %s", pred)
+	scope := MapScope{"args": args}
+	for k, v := range eng.AmbientEnvelope(ctx) {
+		scope[k] = v
+	}
+	got, err := EvalExpr(ctx, statementReturnExpr(t, fn), scope, EvalOptions{})
+	require.NoErrorf(t, err, "evaluating %s", pred)
+	return got
+}
+
+// TestCondAmbientPredicate_DiscriminatesOverTheEnvelope: an ambient predicate
+// is evaluated against the resolved actor, so an owner and a reader take
+// different branches. (Before edition 2026 this was driven through
+// MemQLEngine.Execute, because the pre-2026 path expanded the arguments and
+// then evaluated the plan root with no arguments at all; a logic's body runs
+// on the LogicRunner, which component/automations provides and drives end to
+// end in its logic corpus.)
+func TestCondAmbientPredicate_DiscriminatesOverTheEnvelope(t *testing.T) {
+	eng := &MemQLEngine{}
+	call := func(role string) any {
+		ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "u-" + role, Role: auth.Role(role)})
+		return evalOverTheEnvelope(t, eng, ctx, "ambientRoleGate", `actor.role == "owner"`, map[string]any{"a": "ignored"})
+	}
+	owner, reader := call("owner"), call("reader")
+	require.Equal(t, "elevated", owner, "an owner actor must take the then branch")
+	require.Equal(t, "plain", reader, "a reader actor must take the else branch")
+	require.NotEqualf(t, owner, reader,
+		"ambientRoleGate returned %#v for BOTH actors -- the predicate is not evaluated against the "+
+			"resolved actor envelope, so the gate is open or closed by accident (memql#3024).", owner)
+}
+
+// TestCondAmbientPredicate_AbsentActorDeniesOverTheEnvelope pins the
+// fail-closed direction.
+//
+// buildAmbientEnvelope is built UNCONDITIONALLY (memql#2801): an absent auth
+// context yields the DENYING envelope with every key present, rather than an
+// empty map whose absent keys make a negated predicate evaluate true. A gate
+// that opens when authentication is missing is worse than one that never fires.
+func TestCondAmbientPredicate_AbsentActorDeniesOverTheEnvelope(t *testing.T) {
+	// context.Background() carries no AccessContext, so the envelope is the
+	// denying default.
+	got := evalOverTheEnvelope(t, &MemQLEngine{}, context.Background(), "ambientDenyGate", `actor.isClusterOwner == true`, map[string]any{"a": "x"})
+	require.Equal(t, "plain", got,
+		"with no resolved actor the owner gate must DENY. An envelope that omits keys instead "+
+			"of defaulting them is the memql#2801 fail-open: the predicate compares against a "+
+			"missing value and a gate written this way opens for an unauthenticated caller.")
 }

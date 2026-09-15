@@ -34,11 +34,7 @@ automation seedSelfAccount {
     node any
   }
 
-  step decide {
-    logic selfAccountAbsent (
-      event
-    )
-  }
+  decide := logic selfAccountAbsent(event: event)
 
   // THE ID IS A LITERAL, and that is the accurate statement rather than a
   // shortcut: there is exactly one company that is this instance's owner.
@@ -53,14 +49,12 @@ automation seedSelfAccount {
   // app/cluster.go. Every field binds an explicit key + a `??` fallback, mirroring
   // bootstrapCluster: a multi-segment path evaluates to nil when absent, and a
   // nil argument for a required arg trips validation.
-  step selfAccount {
-    if steps.decide.result == true {
-      mutation createClientAccount (
-        accountId: "v1:accounts:account:self",
-        name:      "My company",
-        domain:    domain ?? ""
-      )
-    }
+  if decide == true {
+    selfAccount := mutation createClientAccount(
+      accountId: "v1:accounts:account:self",
+      name:      "My company",
+      domain:    args.domain ?? ""
+    )
   }
 
   // THE SELF ACCOUNT'S DOMAIN IS VERIFIED BY THE FACT OF THE DEPLOYMENT
@@ -69,7 +63,7 @@ automation seedSelfAccount {
   // owner to publish a TXT record proving they own it would be the cluster
   // asking itself for evidence it already is.
   //
-  // A SECOND STEP rather than arguments on createClientAccount, because
+  // A SECOND STATEMENT rather than arguments on createClientAccount, because
   // that mutation is client-reachable and @requiresRank("admin"): letting a
   // caller pass domainStatus would let any admin declare any client's domain
   // verified, which is the one thing the walk exists to decide.
@@ -78,15 +72,13 @@ automation seedSelfAccount {
   // version. Changing the self account's domain afterwards puts it through
   // the ordinary walk like anybody else's -- the reset in
   // component/memql/account_domain_validation.go does not exempt it.
-  step selfAccountDomain {
-    if steps.decide.result == true {
-      mutation recordAccountDomainCheck (
-        accountId:        "v1:accounts:account:self",
-        domainStatus:     "verified",
-        domainVerifiedAt: now,
-        memqlReservedAt:  now
-      )
-    }
+  if decide == true {
+    selfAccountDomain := mutation recordAccountDomainCheck(
+      accountId:        "v1:accounts:account:self",
+      domainStatus:     "verified",
+      domainVerifiedAt: now,
+      memqlReservedAt:  now
+    )
   }
 }
 
@@ -100,17 +92,13 @@ automation seedSelfAccount {
 // than from any of the three callers being careful.
 
 /// Give a new account its group.
-@trigger(event="node.created", concept="v1:accounts:account", partition="*")
+@trigger(event="node.created", concept="v1:accounts:account")
 automation ensureAccountGroup {
   args {
     id any
   }
 
-  step ensure {
-    builtin groupEnsureForAccount (
-      accountId: id
-    )
-  }
+  ensure := builtin groupEnsureForAccount(accountId: args.id)
 }
 
 /// Archive an account's groups when the account is archived, and remove their
@@ -122,18 +110,14 @@ automation ensureAccountGroup {
 /// would run a cascade on a live account hundreds of times a day, and each run
 /// would find nothing to do only because the groups it walks are already
 /// active. The one time it mattered would be indistinguishable from the noise.
-@trigger(event="node.updated", concept="v1:accounts:account", partition="*")
+@trigger(event="node.updated", concept="v1:accounts:account")
 @filter(row => row.status == "archived")
 automation archiveAccountGroup {
   args {
     id any
   }
 
-  step cascade {
-    builtin groupArchiveForAccount (
-      accountId: id
-    )
-  }
+  cascade := builtin groupArchiveForAccount(accountId: args.id)
 }
 
 /// Walk every client's own domain: mint its ownership token, check the TXT
@@ -146,7 +130,5 @@ automation archiveAccountGroup {
 /// cluster whose clients are all set up pays one query per tick.
 @trigger(schedule="0 */2 * * * *")
 automation reconcileAccountDomains {
-  step walk {
-    builtin accountDomainReconcile ()
-  }
+  walk := builtin accountDomainReconcile()
 }

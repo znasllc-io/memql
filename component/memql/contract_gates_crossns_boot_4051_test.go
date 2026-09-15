@@ -48,9 +48,7 @@ func crossNamespaceCorpus() []baseloader.RawFile {
 		{
 			Path: "cognition/automations.memql",
 			Content: `automation a {
-  step s {
-    builtin trackPresence(x: "1")
-  }
+  s := builtin trackPresence(x: "1")
 }
 `,
 		},

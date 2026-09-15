@@ -1,0 +1,317 @@
+{
+  "automation": "deployment/automations.memql repairInstance",
+  "runs": {
+    "event agent | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "clusterIssuer": "s-clusterIssuer",
+            "createdBySubject": "subject-0",
+            "declaredRef": "s-declaredRef",
+            "dryRun": true,
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "ingressClass": "s-ingressClass",
+            "instanceId": "s-instanceId",
+            "namespace": "s-namespace",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "productEnv": "s-productEnv",
+            "recordType": "contact",
+            "requireIssuer": true,
+            "revision": "s-revision",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "instance.repairRequested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "declaredRef": "s-declaredRef",
+              "dryRun": true,
+              "namespace": "s-namespace",
+              "overlayPath": "s-overlayPath",
+              "productEnv": "s-productEnv"
+            },
+            "kind": "action",
+            "name": "reportInstanceVersion"
+          },
+          {
+            "args": {
+              "clusterIssuer": "s-clusterIssuer",
+              "ingressClass": "s-ingressClass",
+              "namespace": "s-namespace",
+              "requireIssuer": true
+            },
+            "kind": "action",
+            "name": "verifyInstallDependencies"
+          },
+          {
+            "args": {
+              "app": "memql",
+              "dryRun": true,
+              "revision": "s-revision"
+            },
+            "kind": "action",
+            "name": "argoSync"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event agent | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "clusterIssuer": "s-clusterIssuer",
+            "createdBySubject": "subject-0",
+            "declaredRef": "s-declaredRef",
+            "dryRun": true,
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "ingressClass": "s-ingressClass",
+            "instanceId": "s-instanceId",
+            "namespace": "s-namespace",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "productEnv": "s-productEnv",
+            "recordType": "contact",
+            "requireIssuer": true,
+            "revision": "s-revision",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "instance.repairRequested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "declaredRef": "s-declaredRef",
+              "dryRun": true,
+              "namespace": "s-namespace",
+              "overlayPath": "s-overlayPath",
+              "productEnv": "s-productEnv"
+            },
+            "kind": "action",
+            "name": "reportInstanceVersion"
+          },
+          {
+            "args": {
+              "clusterIssuer": "s-clusterIssuer",
+              "ingressClass": "s-ingressClass",
+              "namespace": "s-namespace",
+              "requireIssuer": true
+            },
+            "kind": "action",
+            "name": "verifyInstallDependencies"
+          },
+          {
+            "args": {
+              "app": "memql",
+              "dryRun": true,
+              "revision": "s-revision"
+            },
+            "kind": "action",
+            "name": "argoSync"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "clusterIssuer": "s-clusterIssuer",
+            "createdBySubject": "subject-0",
+            "declaredRef": "s-declaredRef",
+            "dryRun": true,
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "ingressClass": "s-ingressClass",
+            "instanceId": "s-instanceId",
+            "namespace": "s-namespace",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "productEnv": "s-productEnv",
+            "recordType": "contact",
+            "requireIssuer": true,
+            "revision": "s-revision",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "instance.repairRequested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "declaredRef": "s-declaredRef",
+              "dryRun": true,
+              "namespace": "s-namespace",
+              "overlayPath": "s-overlayPath",
+              "productEnv": "s-productEnv"
+            },
+            "kind": "action",
+            "name": "reportInstanceVersion"
+          },
+          {
+            "args": {
+              "clusterIssuer": "s-clusterIssuer",
+              "ingressClass": "s-ingressClass",
+              "namespace": "s-namespace",
+              "requireIssuer": true
+            },
+            "kind": "action",
+            "name": "verifyInstallDependencies"
+          },
+          {
+            "args": {
+              "app": "memql",
+              "dryRun": true,
+              "revision": "s-revision"
+            },
+            "kind": "action",
+            "name": "argoSync"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "clusterIssuer": "s-clusterIssuer",
+            "createdBySubject": "subject-0",
+            "declaredRef": "s-declaredRef",
+            "dryRun": true,
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "ingressClass": "s-ingressClass",
+            "instanceId": "s-instanceId",
+            "namespace": "s-namespace",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "productEnv": "s-productEnv",
+            "recordType": "contact",
+            "requireIssuer": true,
+            "revision": "s-revision",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "instance.repairRequested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "declaredRef": "s-declaredRef",
+              "dryRun": true,
+              "namespace": "s-namespace",
+              "overlayPath": "s-overlayPath",
+              "productEnv": "s-productEnv"
+            },
+            "kind": "action",
+            "name": "reportInstanceVersion"
+          },
+          {
+            "args": {
+              "clusterIssuer": "s-clusterIssuer",
+              "ingressClass": "s-ingressClass",
+              "namespace": "s-namespace",
+              "requireIssuer": true
+            },
+            "kind": "action",
+            "name": "verifyInstallDependencies"
+          },
+          {
+            "args": {
+              "app": "memql",
+              "dryRun": true,
+              "revision": "s-revision"
+            },
+            "kind": "action",
+            "name": "argoSync"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

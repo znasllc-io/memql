@@ -15,7 +15,7 @@ import (
 // TestAsOfRejectedInLogicBody asserts a logic body that calls `asOf`
 // fails to parse with the query-only migration message.
 func TestAsOfRejectedInLogicBody(t *testing.T) {
-	src := `func (Logic) logicReadsAsOf(ctx any) (any, error) {
+	src := `logic logicReadsAsOf {
   return asOf(concept == "v1:cluster:node", latest)
 }`
 	_, err := ParseFile(src)
@@ -30,9 +30,8 @@ func TestAsOfRejectedInLogicBody(t *testing.T) {
 // TestAsOfRejectedInAutomationBody asserts an automation body that calls
 // `asOf` fails to parse.
 func TestAsOfRejectedInAutomationBody(t *testing.T) {
-	src := `func (Automation) autoReadsAsOf(ctx any) (any, error) {
+	src := `automation autoReadsAsOf {
   x := asOf(concept == "v1:cluster:node", latest)
-  return x
 }`
 	_, err := ParseFile(src)
 	if err == nil {

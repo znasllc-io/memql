@@ -1,0 +1,6 @@
+@trigger(event="demo.dup")
+automation demoDup {
+  step go {
+    dupName { x: "1" }
+  }
+}

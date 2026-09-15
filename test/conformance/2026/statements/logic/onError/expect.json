@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "file": "on-error-continue.memql",
+      "verdict": "evaluate",
+      "call": "alertsOrNone",
+      "args": {},
+      "expect": "none",
+      "note": "the corpus runs no query, so the call fails; continued past, its name is absent"
+    },
+    {
+      "file": "on-error-on-an-if.memql",
+      "verdict": "refuse_parse",
+      "code": "body_on_error_placement",
+      "message": "`on error continue` applies to a call, a `for` or a `parallel` statement"
+    }
+  ]
+}

@@ -224,21 +224,17 @@ func TestTokenize_ConstructKeywordPositionAware(t *testing.T) {
 		"  capability  string\n" +
 		"}"
 	const invocation = "automation onThing {\n" +
-		"  step run {\n" +
-		"    mutation mutationCreateCanvasState(stateId: \"x\")\n" +
-		"  }\n" +
+		"  mutation mutationCreateCanvasState(stateId: \"x\")\n" +
 		"}"
-	// The three forms where a construct kind does NOT lead its line or
-	// sits outside a declaration header. Each regressed during the fix
-	// before the classifier learned it.
+	// The two forms where a construct kind does NOT lead its line or sits
+	// outside a declaration header. Each regressed during the fix before the
+	// classifier learned it.
 	const midLineCall = "logic bootstrap {\n" +
-		"  body {\n" +
-		"    existing := query existingCluster()\n" +
-		"  }\n" +
+		"  existing := query existingCluster()\n" +
+		"  return existing\n" +
 		"}"
-	const arrowTarget = "automation onUser @trigger(event=\"node.created\") => logic handleUser"
 	const queryClause = "query participant activeOnes {\n" +
-		"  filter status==\"active\"\n" +
+		"  filter row => row.status == \"active\"\n" +
 		"  shape participantFull\n" +
 		"}"
 
@@ -256,9 +252,8 @@ func TestTokenize_ConstructKeywordPositionAware(t *testing.T) {
 		{"concept declaration keyword", conceptDecl, "concept", 1, "keyword"},
 		{"declared concept name", conceptDecl, "action", 1, "concept"},
 		{"payload field sharing a keyword spelling", conceptDecl, "capability", 2, "identifier"},
-		{"in-body invocation step keeps keyword", invocation, "mutation", 3, "keyword"},
-		{"mid-line invocation keeps keyword", midLineCall, "query", 3, "keyword"},
-		{"automation arrow target keeps keyword", arrowTarget, "logic", 1, "keyword"},
+		{"in-body call statement keeps keyword", invocation, "mutation", 2, "keyword"},
+		{"mid-line call keeps keyword", midLineCall, "query", 2, "keyword"},
 		{"query shape clause keeps keyword", queryClause, "shape", 3, "keyword"},
 		{"query signature concept", queryClause, "participant", 1, "concept"},
 	}
@@ -325,19 +320,15 @@ func TestKeywordDocsFreeOfRetiredForms(t *testing.T) {
 	}
 }
 
-// E6 (memql#2392): invocation kind prefixes color as keywords -- notably
-// `mutation`, whose DECLARATION keyword is `mutate` (so it is absent from the
-// dslspec construct set). The set is sourced from the parser's authoritative
-// invocationKindKeywords via parser.InvocationKindKeywords(), drift-proof by
-// construction; this test pins the wiring end-to-end.
+// E6 (memql#2392): invocation kind prefixes color as keywords -- `mutation`
+// among them, which is the declaration keyword too. The set is sourced from
+// the parser's authoritative invocationKindKeywords via
+// parser.InvocationKindKeywords(), drift-proof by construction; this test pins
+// the wiring end-to-end.
 func TestTokenize_InvocationKindPrefixesAreKeywords(t *testing.T) {
 	src := `automation deploy {
-  step record {
-    mutation createDeployment(deploymentId: x)
-  }
-  step decide {
-    logic deployGateGreen(environment: y)
-  }
+  record := mutation createDeployment(deploymentId: x)
+  decide := logic deployGateGreen(environment: y)
 }`
 	s := New(nil)
 	tokens := s.Tokenize(src)

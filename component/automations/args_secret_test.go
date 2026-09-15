@@ -55,9 +55,7 @@ automation rotateCredential {
     token   string  @required  @pattern("^tok_[a-z]+$")
     label   string  @required  @enum("alpha", "beta")
   }
-  step gate {
-    logic requireRotation { apiKey: args.apiKey, token: args.token, label: args.label }
-  }
+  gate := logic requireRotation(apiKey: args.apiKey, token: args.token, label: args.label)
 }`
 
 // secretTestRegistry is a minimal read-only Registry over a fixed concept map.

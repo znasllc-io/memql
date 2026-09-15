@@ -247,8 +247,10 @@ func TestGeneratedAutomationIsV1(t *testing.T) {
 		t.Fatalf("compile: %v", err)
 	}
 	compiled := res.Automations[0].JSON
-	if _, marked := compiled["expressions"]; marked {
-		t.Fatalf(`the retired "expressions" marker is written: %#v`, compiled["expressions"])
+	for _, marker := range []string{"expressions", "body"} {
+		if _, marked := compiled[marker]; marked {
+			t.Fatalf(`the retired %q marker is written: %#v`, marker, compiled[marker])
+		}
 	}
 	b, err := json.Marshal(compiled)
 	if err != nil {
@@ -256,7 +258,7 @@ func TestGeneratedAutomationIsV1(t *testing.T) {
 	}
 	for _, want := range []string{
 		`"filter":"row =\u003e row.role == \"admin\" \u0026\u0026 row.active == true"`,
-		`"nodeId":{"$expr":"id"}`,
+		`"nodeId":{"$expr":"args.id"}`,
 		`"event":{"$expr":"event"}`,
 		`"emailRuleId":"v1:campaigns:emailRule:ab12cd34"`,
 	} {
@@ -277,12 +279,11 @@ func TestGeneratedAutomationIsV1(t *testing.T) {
 	}
 }
 
-// TestGeneratedAutomationLoadsThroughTheAuthoringPipeline: the authoring
-// pipeline -- the loader activation arms a rule through, with its own parse
-// options rather than the explicit ones TestGeneratedAutomationIsV1 passes --
-// loads the construct, and its filter is the lambda it generated, parsed at
-// load.
-func TestGeneratedAutomationLoadsThroughTheAuthoringPipeline(t *testing.T) {
+// TestGeneratedAutomationLoadsAsStatements: the authoring pipeline -- the
+// loader activation arms a rule through -- takes the construct's one builtin
+// statement (epic memql#5370), and its filter is the lambda it generated,
+// parsed at load.
+func TestGeneratedAutomationLoadsAsStatements(t *testing.T) {
 	src := generate(t, `row.role == "admin"`)
 	a, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(src, "authored:emailrules")
 	if err != nil {
@@ -290,5 +291,8 @@ func TestGeneratedAutomationLoadsThroughTheAuthoringPipeline(t *testing.T) {
 	}
 	if a.Trigger == nil || a.Trigger.FilterLambda == nil {
 		t.Fatalf("trigger=%+v: want the lambda filter parsed at load", a.Trigger)
+	}
+	if len(a.Steps) != 1 || a.Steps[0].Function == nil || a.Steps[0].Function.Name != "emailRuleFire" || a.Steps[0].Function.Kind != "builtin" {
+		t.Fatalf("steps %+v: want the one builtin statement", a.Steps)
 	}
 }

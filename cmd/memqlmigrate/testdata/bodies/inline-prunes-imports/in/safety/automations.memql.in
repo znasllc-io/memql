@@ -1,0 +1,4 @@
+// automations.memql -- safety namespace.
+
+/// Daily sweep: identifies classification rows past retention.
+automation purgeExpiredClassifications @trigger(schedule="0 35 2 * * *") => logic purgeExpiredClassifications

@@ -1,0 +1,4 @@
+@trigger(schedule="0 0 * * * *")
+automation onSurfaceClause {
+  action deployRun(target: "cluster") on surface("ops")
+}

@@ -1,0 +1,4 @@
+@trigger(schedule="0 0 * * * *")
+automation retryBefore {
+  x := retry(2) builtin flaky()
+}

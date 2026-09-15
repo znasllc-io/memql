@@ -8,9 +8,11 @@
 // THESE ARE BUILTINS RATHER THAN MUTATIONS because each one is more than
 // a row write. composeMaterialize opens the composition AND the goal AND
 // the goal's first run, then dispatches; composeRunRecipe reads a recipe
-// and derives a materialization from it. A mutation step cannot hand its
-// inserted id to a later one, so the composition has to happen in Go --
-// the same reasoning dsl/work/builtins.memql gives for createGoal.
+// and derives a materialization from it. A statement body can hand an
+// inserted row to the next write (`x := mutation ...` names the row), but
+// opening a run and dispatching it are the engine's, so the composition
+// happens in Go -- the same reasoning dsl/work/builtins.memql gives for
+// createGoal.
 //
 // Every handler repeats its own gate. A builtin's annotation set carries
 // no @requiresRank, so the floor is the handler's -- and these are all

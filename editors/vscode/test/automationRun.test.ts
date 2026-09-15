@@ -169,7 +169,7 @@ test("run -- the prompt fires once per (cluster, construct), through the SHARED 
   assert.equal(h.prompts.length, 1);
   // And an acknowledgement granted through the automation surface is visible
   // to the gate B2 shares.
-  assert.equal(h.gate.required("mutate", false, "staging", "autoJoinSI"), false);
+  assert.equal(h.gate.required("mutation", false, "staging", "autoJoinSI"), false);
 });
 
 test("run -- declining the prompt runs nothing", async () => {

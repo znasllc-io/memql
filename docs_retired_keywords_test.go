@@ -29,9 +29,11 @@ import (
 //
 // # Why it earns a gate
 //
-// `mutation` was renamed to `mutate` in memql#2041, and
-// component/language/dslspec hard-fails if it is still a construct keyword --
-// so a doc teaching it teaches a declaration the parser REJECTS. CLAUDE.md is
+// The declaration keyword has moved twice: memql#2041 renamed `mutation` to
+// `mutate`, and epic memql#5370 renamed it back (D13), so today `mutate` is
+// the retired spelling. component/language/dslspec hard-fails if it is still a
+// construct keyword -- so a doc teaching it teaches a declaration the parser
+// REJECTS. CLAUDE.md is
 // the sharp edge: the drifted line was the canonical "Mutations:" example in its
 // Functions section, which is the standing instruction every Claude Code session
 // in this repo reads. A worked example there teaching a retired form is
@@ -250,18 +252,28 @@ func TestDocsDoNotTeachRetiredDeclarationKeywords(t *testing.T) {
 
 // retiredDeclGateExempt reports whether a path is outside the sweep.
 //
-// ONE FILE, and it should stay that way. component/memql/callgraph/keyword_test.go
-// asserts that the RETIRED spelling splits to nothing -- it has to write
-// `mutation node twoWrites {` to assert that the checker ignores it, exactly as
-// the sibling gate's two entries have to write the retired names to say what
-// they forbid. Exempting it is not a carve-out for drift; it is the only way
-// that assertion can exist.
+// THREE ENTRIES, and each has to write the retired spelling to say what it is
+// about. component/memql/callgraph/keyword_test.go asserts that the RETIRED
+// spelling splits to nothing -- it has to write `mutate node twoWrites {` to
+// assert that the checker ignores it, exactly as the sibling gate's two entries
+// have to write the retired names to say what they forbid. Exempting it is not
+// a carve-out for drift; it is the only way that assertion can exist.
+//
+// cmd/memqlmigrate/testdata/bodies/ holds the golden trees of
+// `memqlmigrate --rewrite=bodies` (epic memql#5370): each case is a tree as the
+// retired forms wrote it (`in/*.in`) beside the tree the rewrite produces
+// (`out/*.golden`). A migration's fixture states a conversion, so its inputs
+// write the retired `mutate`. The files carry `.in` / `.golden` suffixes so no
+// .memql walker loads them. component/language/bodymigrate/ is that rewrite's
+// code and tests, which read and write the retired spelling on purpose.
 //
 // What does NOT belong here: a file that merely happens to contain a violation.
 // The escape hatch for a legitimate mention is the one in this gate's header --
 // keep the line out of declaration shape.
 func retiredDeclGateExempt(rel string) bool {
-	return rel == "component/memql/callgraph/keyword_test.go"
+	return rel == "component/memql/callgraph/keyword_test.go" ||
+		strings.HasPrefix(rel, "cmd/memqlmigrate/testdata/bodies/") ||
+		strings.HasPrefix(rel, "component/language/bodymigrate/")
 }
 
 // retiredDeclarationKeywords is one entry per retired declaration keyword, with
@@ -421,19 +433,15 @@ func TestRetiredKeywordGateMatchesADeclarationAndNotProse(t *testing.T) {
 			r.replacement + " space createSpace {",       // the live form
 			"The mutation writes exactly one aggregate.", // prose
 			"Mutations:", // a heading
-			"| `mutate` | retired, use `mutation` | ",        // a table quoting the keyword
-			"a `mutate` declaration used to look like this:", // teaching against it
-			// A kind-prefixed CALL, not a declaration. It reads `mutation`
-			// now, which is the same word the declaration uses -- the `\{`
-			// anchor is the only thing keeping the two apart, so this
-			// fixture carries more weight after memql#5375 than before it.
-			"  ev: mutation createSpawnEvent(nodeId: args.id)",
-			"mutate {", // not the two-identifier shape
+			"| `" + r.keyword + "` | retired, use `" + r.replacement + "` | ", // a table quoting the keyword
+			"a `" + r.keyword + "` declaration used to look like this:",       // teaching against it
+			"  ev: " + r.keyword + " createSpawnEvent(nodeId: args.id)",       // a call shape, not a declaration
+			r.keyword + " {", // not the two-identifier shape
 			// The two with real discriminating power. Every fixture above
 			// survives an anchor being "simplified" away; these do not --
 			// dropping `\{` makes the first fire, dropping `^` the second.
-			"the mutate space handler runs first",   // no brace: needs the `\{` anchor
-			"see `x.mutate space createSpace {` in", // mid-line: needs the `^` anchor
+			"the " + r.keyword + " space handler runs first",   // no brace: needs the `\{` anchor
+			"see `x." + r.keyword + " space createSpace {` in", // mid-line: needs the `^` anchor
 		} {
 			if re.MatchString(ok) {
 				t.Errorf("the %s gate fires on a legitimate line, which is how a gate gets "+

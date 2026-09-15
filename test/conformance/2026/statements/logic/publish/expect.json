@@ -1,0 +1,10 @@
+{
+  "cases": [
+    {
+      "file": "publish.memql",
+      "verdict": "refuse_load",
+      "code": "body_publish_in_logic",
+      "message": "a logic may not publish: move `publish \"things.happened\"` into the automation that calls announce, or declare announce as an automation"
+    }
+  ]
+}

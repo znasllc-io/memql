@@ -85,7 +85,7 @@ func TestPublishDiagnostics_CleanAndBroken(t *testing.T) {
 	s.publishDiagnostics(notify, clean)
 
 	const broken = "file:///broken.memql"
-	s.docs.open(broken, "logic oops {\n") // logic missing its mandatory body { } -> lowering error
+	s.docs.open(broken, "logic oops {\n") // a logic whose block never closes -> a parse error
 	s.publishDiagnostics(notify, broken)
 
 	if len(*got) != 2 {

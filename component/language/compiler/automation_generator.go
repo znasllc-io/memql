@@ -246,15 +246,11 @@ func compileArgsFieldJSON(f *parser.ArgsField) map[string]any {
 
 func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput, error) {
 	automation, ok := def.Body.(*parser.AutomationDef)
-	if !ok {
-		return nil, fmt.Errorf("expected AutomationDef body for automation %q", def.Name)
+	if !ok || automation.Body == nil {
+		return nil, fmt.Errorf("expected a statement body for automation %q", def.Name)
 	}
 
 	output := make(map[string]any)
-
-	// Every expression compiles through automation_generator_v1.go: it is
-	// carried as canonical v1 source or a `{"$expr": ...}` value leaf, and
-	// the runtime evaluates it with EvalExpr (memql#5367).
 
 	// Basic metadata
 	output["name"] = def.Name
@@ -277,108 +273,21 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	}
 
 	// Args contract (event-payload-binding ADR Decision 1, memql#2363): the
-	// automation's typed input schema, hoisted onto the FunctionDef by the
-	// struct-form rewriter. When present, the scheduler/executor bind
-	// event.payload -> args with fire-time validation (Decision 2) before any
-	// step runs. Emitting it here carries the schema through to the runtime
-	// Automation.Args, mirroring how logic/query surface their args schema.
+	// automation's typed input schema. When present, the scheduler/executor
+	// bind event.payload -> args with fire-time validation (Decision 2) before
+	// any statement runs.
 	if def.ArgsSchema != nil && len(def.ArgsSchema.Fields) > 0 {
 		output["args"] = compileArgsSchemaJSON(def.ArgsSchema)
 	}
 
-	// Input (if defined)
-	if automation.Input != nil {
-		input, err := c.compileInputExpression(automation.Input)
-		if err != nil {
-			return nil, err
-		}
-		output["input"] = input
-	}
-
-	// Steps -- two-pass compile with topological sort.
-	//
-	// Pass 1 collects every step ID into a symbol table and builds a
-	// dependency graph by extracting step references from both the
-	// condition string AND the step's expression content (function
-	// arguments, query strings, mutation payloads). This catches
-	// dependencies like `coalesce(autoRole.First().payload.value, ...)`.
-	//
-	// Pass 2 topologically sorts the steps by their dependency graph and
-	// emits them in dependency order. This means authors can declare
-	// steps in any order -- the compiler reorders them so every step
-	// executes after all its dependencies. Cycles produce a clear
-	// compile-time error.
-	//
-	// Unknown references (typos) still surface as compile-time errors.
-	// Two steps with one id are refused before anything is keyed by id: an
-	// id names a step's result and its journal record, so the second step
-	// would overwrite the first in both, and every map below would hold one
-	// of them (memql#5367).
-	if err := refuseDuplicateStepIDs(def.Name, automation.Steps); err != nil {
-		return nil, err
-	}
-
-	stepIds := make(map[string]struct{}, len(automation.Steps))
-	var ordered []*parser.StepDef
-	var orderedIds []string
-	var returnStep *parser.StepDef
-
-	for i := range automation.Steps {
-		step := &automation.Steps[i]
-		if step.ID == "_return" {
-			returnStep = step
-			continue
-		}
-		stepIds[step.ID] = struct{}{}
-		ordered = append(ordered, step)
-		orderedIds = append(orderedIds, step.ID)
-	}
-
-	// Build dependency graph: per step, in source order, the step ids its
-	// expressions read (their free names that are step ids).
-	deps := make([]map[string]struct{}, len(ordered))
-	for i, step := range ordered {
-		refs, err := collectStepReferencesV1(step, stepIds)
-		if err != nil {
-			return nil, fmt.Errorf("automation %q: %w", def.Name, err)
-		}
-		deps[i] = refs
-	}
-
-	// Stable topological sort: dependency order, and source order otherwise.
-	sorted, err := topoSortSteps(def.Name, orderedIds, deps)
+	// The statements compile in source order through CompileBody
+	// (body_compile.go): each is a step, carried as canonical v1 source or a
+	// `{"$expr": ...}` value leaf the runtime evaluates with EvalExpr.
+	steps, err := compileStatementSteps(def, automation)
 	if err != nil {
 		return nil, err
 	}
-
-	steps := make([]map[string]any, 0, len(sorted))
-	for _, i := range sorted {
-		compiledStep, err := c.compileStepV1(ordered[i])
-		if err != nil {
-			return nil, err
-		}
-		steps = append(steps, compiledStep)
-	}
-
 	output["steps"] = steps
-
-	// OnComplete hook (using return if defined)
-	if automation.OnComplete != nil {
-		onComplete, err := c.compileStepV1(automation.OnComplete)
-		if err != nil {
-			return nil, err
-		}
-		output["onComplete"] = onComplete
-	}
-
-	// OnError hook
-	if automation.OnError != nil {
-		onError, err := c.compileStepV1(automation.OnError)
-		if err != nil {
-			return nil, err
-		}
-		output["onError"] = onError
-	}
 
 	// Enabled state
 	output["enabled"] = automation.Enabled
@@ -394,211 +303,11 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	// triggered.
 	output["template"] = attributeFlagPresent(def.Attributes, "template") || attributeFlagPresent(automation.Attributes, "template")
 
-	// A return statement is the final computation: canonical v1 source, like
-	// every other expression.
-	if returnStep != nil {
-		src, err := v1ReturnSource(returnStep)
-		if err != nil {
-			return nil, fmt.Errorf("automation %q: %w", def.Name, err)
-		}
-		output["_return"] = src
-	}
-
 	return &AutomationOutput{
 		Name:        def.Name,
 		Description: parser.EffectiveDescription(automation.DocComment, automation.Description),
 		JSON:        output,
 	}, nil
-}
-
-// topoSortSteps orders an automation's steps so every step runs after the
-// steps it depends on, and is otherwise in SOURCE order: of the steps ready to
-// run, the one written first runs first -- a stable topological sort. ids are
-// the steps' ids in source order and deps[i] the ids step i reads; the result
-// is positions into ids. When the source is already in dependency order the
-// result is the source order exactly, which is what the statement form of a
-// body means (D12) and what the legacy runtime did. A step that reads a step
-// written after it is the one thing that moves: its provider is pulled ahead
-// of it, and nothing else changes place.
-//
-// The earlier sort was breadth-first (Kahn's algorithm with a FIFO queue), so
-// "ready" meant "ready in the same round": a step with no dependencies ran
-// ahead of an EARLIER step that depended on the first one, and two steps
-// released by the same provider came out in map-iteration order. In
-// forge's routeRequest that put `persistRouted` (independent) ahead of
-// `advance` (reads `steps.decide`), the reverse of source order (memql#5367).
-//
-// It tracks steps by POSITION, never by id, so it cannot depend on the ids
-// being unique. Keyed by id, emitting the first of two steps with one id
-// marked both done: the second was never emitted, and the sort reported a
-// dependency cycle among no steps. The compiler refuses two steps with one id
-// before it sorts (refuseDuplicateStepIDs); a read of an id two steps carry
-// waits for both.
-//
-// Returns an error if a cycle is detected or if a step references an unknown
-// step ID (typo detection).
-func topoSortSteps(automationName string, ids []string, deps []map[string]struct{}) ([]int, error) {
-	at := make(map[string][]int, len(ids))
-	for i, id := range ids {
-		at[id] = append(at[id], i)
-	}
-
-	// Resolve each step's reads to the positions of the steps it reads, in
-	// source order so an unknown reference is reported the same every time.
-	providers := make([][]int, len(ids))
-	for i, id := range ids {
-		var names []string
-		if i < len(deps) {
-			names = make([]string, 0, len(deps[i]))
-			for dep := range deps[i] {
-				names = append(names, dep)
-			}
-		}
-		sort.Strings(names)
-		for _, dep := range names {
-			pos, ok := at[dep]
-			if !ok {
-				return nil, fmt.Errorf(
-					"automation %q: step %q references unknown step %q -- check for a typo, or add the step",
-					automationName, id, dep)
-			}
-			providers[i] = append(providers[i], pos...)
-		}
-	}
-
-	emitted := make([]bool, len(ids))
-	ready := func(i int) bool {
-		for _, p := range providers[i] {
-			if !emitted[p] {
-				return false
-			}
-		}
-		return true
-	}
-	sorted := make([]int, 0, len(ids))
-	for len(sorted) < len(ids) {
-		// The first step in source order whose dependencies have all run.
-		next := -1
-		for i := range ids {
-			if !emitted[i] && ready(i) {
-				next = i
-				break
-			}
-		}
-		if next < 0 {
-			// Cycle detected -- name the participating steps.
-			var cycle []string
-			for i, id := range ids {
-				if !emitted[i] {
-					cycle = append(cycle, id)
-				}
-			}
-			return nil, fmt.Errorf(
-				"automation %q: dependency cycle among steps %v -- each step references one or more of the others",
-				automationName, cycle)
-		}
-		emitted[next] = true
-		sorted = append(sorted, next)
-	}
-	return sorted, nil
-}
-
-// refuseDuplicateStepIDs refuses an automation in which two steps carry one
-// id, naming both and the lines they are written on. The steps a switch case,
-// a forEach body or a parallel branch runs are counted with the top-level
-// ones: a step's result is recorded under its id wherever it runs, so a
-// nested step with a top-level step's id overwrites it too.
-func refuseDuplicateStepIDs(automationName string, steps []parser.StepDef) error {
-	seen := map[string]*parser.StepDef{}
-	var walk func(steps []parser.StepDef) error
-	visit := func(s *parser.StepDef) error {
-		if s.ID == "" || s.ID == "_return" {
-			return nil
-		}
-		if first, ok := seen[s.ID]; ok {
-			return fmt.Errorf(
-				"automation %q: two steps have the id %q -- %s and %s. A step's id names its result and its journal record, so the second would overwrite the first: give each step its own name",
-				automationName, s.ID, describeStepAt(first), describeStepAt(s))
-		}
-		seen[s.ID] = s
-		return nil
-	}
-	walk = func(steps []parser.StepDef) error {
-		for i := range steps {
-			s := &steps[i]
-			if err := visit(s); err != nil {
-				return err
-			}
-			for _, nested := range nestedStepLists(s) {
-				if err := walk(nested); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	return walk(steps)
-}
-
-// nestedStepLists is the steps a step runs as part of itself: a forEach body,
-// parallel branches, and a switch's cases, in source order.
-func nestedStepLists(s *parser.StepDef) [][]parser.StepDef {
-	switch cfg := s.Config.(type) {
-	case *parser.ForEachStepConfig:
-		return [][]parser.StepDef{cfg.Do}
-	case *parser.ParallelStepConfig:
-		return [][]parser.StepDef{cfg.Branches}
-	case *parser.SwitchStepConfig:
-		var out [][]parser.StepDef
-		keys := make([]string, 0, len(cfg.Cases))
-		for k := range cfg.Cases {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			if c := cfg.Cases[k]; c != nil {
-				out = append(out, c.Steps)
-			}
-		}
-		if cfg.Default != nil {
-			out = append(out, cfg.Default.Steps)
-		}
-		return out
-	}
-	return nil
-}
-
-// describeStepAt names a step for a refusal: its kind, and the line it is
-// written on when the parser recorded one.
-func describeStepAt(s *parser.StepDef) string {
-	kind := string(s.Type)
-	if kind == "" {
-		kind = "step"
-	} else {
-		kind += " step"
-	}
-	if s.Line > 0 {
-		return fmt.Sprintf("the %s at line %d", kind, s.Line)
-	}
-	return "the " + kind + " (no source line)"
-}
-
-// compileInputExpression converts an input expression to JSON format.
-func (c *Compiler) compileInputExpression(expr parser.ExpressionNode) (map[string]any, error) {
-	queryStr := c.expressionToString(expr)
-
-	input := map[string]any{
-		"query": queryStr,
-	}
-
-	// Extract limit (page size) if present
-	if pag, ok := expr.(*parser.PaginateExpr); ok {
-		if pag.Limit != nil {
-			input["limit"] = *pag.Limit
-		}
-	}
-
-	return input, nil
 }
 
 // expressionToString converts an expression node back to MemQL string format.
@@ -754,18 +463,6 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 	// New accessor expressions
 	case *parser.VarRefExpr:
 		return "var(" + parser.QuoteString(e.Name) + ")"
-
-	case *parser.StepRefExpr:
-		return "step(" + parser.QuoteString(e.StepId) + ")"
-
-	case *parser.InputRefExpr:
-		return "input()"
-
-	case *parser.ItemRefExpr:
-		return "item()"
-
-	case *parser.IndexRefExpr:
-		return "index()"
 
 	case *parser.EventRefExpr:
 		return "event()"

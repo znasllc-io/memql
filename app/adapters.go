@@ -128,6 +128,17 @@ func (a *CognitionEngineAdapter) CatalogNearMatches(ctx context.Context, matchTe
 	return a.Engine.CatalogNearMatches(ctx, matchText, limit)
 }
 
+// ToolCallee delegates to the engine's answer of how a tool's call is written
+// as a statement (memql#5370). The planner's transcript capture writes each
+// recorded tool call as the construct call its handler makes; the adapter
+// exists because the tool registry is on the concrete *MemQLEngine.
+func (a *CognitionEngineAdapter) ToolCallee(tool string) (kind, callee string, ok bool) {
+	if a == nil || a.Engine == nil {
+		return "", "", false
+	}
+	return a.Engine.ToolCallee(tool)
+}
+
 func (a *CognitionEngineAdapter) RenderPrompt(templateId string, data map[string]any) (string, error) {
 	if a == nil || a.Engine == nil {
 		return "", fmt.Errorf("memql engine not configured")

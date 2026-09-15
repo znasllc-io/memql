@@ -49,6 +49,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
@@ -83,6 +84,10 @@ type workJournal struct {
 	// falls to ActAsk, which is what a failed run did before any of this was
 	// wired. See failure_path.go.
 	classifier SymptomClassifier
+
+	// hold, when set, keeps every write until release: a directly called
+	// logic's journal, whose run opens only if the logic writes.
+	hold *heldWrites
 }
 
 // newWorkJournal returns nil when there is no executor, and every method
@@ -110,6 +115,10 @@ func newWorkJournal(exec journalExecutor, logger *slog.Logger) *workJournal {
 // reads returns zero rows -- which resume would read as "no journal" and
 // answer by re-running completed steps.
 func journalContext(ctx context.Context) context.Context {
+	// A journal write is not a write the run made: a directly called logic's
+	// run opens at the logic's first write (logic_statements.go), and the
+	// journal writes that open it must not count as another (release).
+	ctx = common.ContextWithoutWriteObserver(ctx)
 	claims := map[string]any{"sub": workJournalActor, "role": "system"}
 	ctx = auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: workJournalActor, Claims: claims})
 	ctx = auth.ContextWithAccess(ctx, &auth.AccessContext{
@@ -178,18 +187,12 @@ func stepKindFor(step *Step) string {
 func stepCallSummary(step *Step) map[string]any {
 	call := map[string]any{"construct": string(step.Type)}
 	switch {
-	case step.Query != nil:
-		call["name"] = step.Query.Query
-	case step.Mutation != nil:
-		call["name"] = step.Mutation.Concept
 	case step.Function != nil:
 		call["name"] = step.Function.Name
 	case step.Automation != nil:
 		call["name"] = step.Automation.Name
 	case step.Action != nil:
 		call["name"] = step.Action.Ref
-	case step.Webhook != nil:
-		call["name"] = step.Webhook.URL
 	case step.Event != nil:
 		call["name"] = step.Event.Topic
 	}
@@ -217,8 +220,8 @@ func journalArgs(name string, args map[string]any) (string, error) {
 	}
 	// A NIL VALUE IS AN ABSENT ARGUMENT, and it has to be dropped rather than
 	// rendered. `input: null` is the case that found this: exec.Input is nil
-	// whenever an automation declares no `input:` block -- most of them -- and
-	// the concept declares `input object`, so the engine refused the whole row
+	// on an automation's run -- only a logic run records its arguments there --
+	// and the concept declares `input object`, so the engine refused the whole row
 	// with "expected object, but got null". The refusal was invisible, because
 	// call() logs a Warn and lets the run continue: every step row landed and
 	// no run row ever did.
@@ -268,6 +271,14 @@ func (j *workJournal) call(ctx context.Context, name string, args map[string]any
 	if j == nil {
 		return
 	}
+	if j.hold.keep(ctx, name, args) {
+		return
+	}
+	j.write(ctx, name, args)
+}
+
+// write renders and executes one journal call.
+func (j *workJournal) write(ctx context.Context, name string, args map[string]any) {
 	query, err := journalArgs(name, args)
 	if err != nil {
 		j.warn(name, err)
@@ -278,11 +289,98 @@ func (j *workJournal) call(ctx context.Context, name string, args map[string]any
 		// The owning principal must write an adopted run and its steps.
 		// The cluster actor remains the read identity for recovery, but its
 		// synthetic writes would blank the step owner and fail owned updates.
-		writeCtx = auth.ContextWithInternalOrigin(auth.ContextWithUserActor(ctx, run.OwnerUserId))
+		// Masked like journalContext: a journal write is not the run's write.
+		writeCtx = auth.ContextWithInternalOrigin(auth.ContextWithUserActor(common.ContextWithoutWriteObserver(ctx), run.OwnerUserId))
 	}
 	if _, err := j.exec.Execute(writeCtx, query); err != nil {
 		j.warn(name, err)
 	}
+}
+
+// heldWrites keeps a journal's writes until the run they belong to opens: a
+// directly called logic's run, which opens at the logic's first write
+// (logic_statements.go). A journal whose run never opens writes nothing.
+// Held writes are kept unrendered; they cost a render only if they are
+// written.
+type heldWrites struct {
+	mu       sync.Mutex
+	released bool
+	// open writes the run row when the run opens, ahead of every held write.
+	open   func()
+	writes []heldWrite
+}
+
+type heldWrite struct {
+	ctx  context.Context
+	name string
+	args map[string]any
+}
+
+// keep holds one write while the run is unopened, reporting whether it did.
+func (h *heldWrites) keep(ctx context.Context, name string, args map[string]any) bool {
+	if h == nil {
+		return false
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.released {
+		return false
+	}
+	// Written later, if at all: past the deadline of the context it was made
+	// under (a heartbeat's pulse is cancelled the moment its call returns).
+	h.writes = append(h.writes, heldWrite{ctx: context.WithoutCancel(ctx), name: name, args: args})
+	return true
+}
+
+// release opens a held journal's run: the run row, then every held write in
+// the order it was made. A write made meanwhile waits and follows them, and
+// every later write goes straight through. Idempotent.
+//
+// The journal's own writes are masked from the write observer that calls
+// this (journalContext): were they not, the first write of the flush would
+// call release again from inside it.
+func (j *workJournal) release() {
+	if j == nil || j.hold == nil {
+		return
+	}
+	h := j.hold
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.released {
+		return
+	}
+	h.released = true
+	if h.open != nil {
+		h.open()
+	}
+	for _, w := range h.writes {
+		j.write(w.ctx, w.name, w.args)
+	}
+	h.writes = nil
+}
+
+// runJournalKey carries, beside the run on a context, the journal that run
+// writes through. A logic a statement calls journals its statements through
+// it, so they land where the run's own rows land -- held with them while a
+// directly called logic's run is unopened, and nowhere for a run that is not
+// journaled (a typed nil: journalSkipsAutomation).
+type runJournalKey struct{}
+
+// withRunJournal pairs j with the run exec.ID on ctx. A context already
+// associated with another run keeps that run's journal, as withRunContext
+// keeps its association.
+func withRunJournal(ctx context.Context, runId string, j *workJournal) context.Context {
+	if run, ok := common.RunFromContext(ctx); ok && memql.BareShortId(run.RunId) != memql.BareShortId(runId) {
+		return ctx
+	}
+	return context.WithValue(ctx, runJournalKey{}, j)
+}
+
+// runJournalFrom returns the journal paired with ctx's run, and whether one
+// was paired (a nil journal paired is a run that is not journaled).
+func runJournalFrom(ctx context.Context) (*workJournal, bool) {
+	j, ok := ctx.Value(runJournalKey{}).(*workJournal)
+	return j, ok
 }
 
 func (j *workJournal) warn(name string, err error) {
@@ -303,6 +401,11 @@ func (j *workJournal) openRun(ctx context.Context, automation *Automation, exec 
 	if j == nil || automation == nil || exec == nil {
 		return
 	}
+	j.call(ctx, "createWorkRun", j.openRunArgs(automation, exec, triggeringEvent))
+}
+
+// openRunArgs is the run row openRun writes.
+func (j *workJournal) openRunArgs(automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event) map[string]any {
 	args := map[string]any{
 		"runId":                 exec.ID,
 		"automationName":        automation.Name,
@@ -324,7 +427,7 @@ func (j *workJournal) openRun(ctx context.Context, automation *Automation, exec 
 			"payload": triggeringEvent.Payload,
 		}
 	}
-	j.call(ctx, "createWorkRun", args)
+	return args
 }
 
 // stepRunning writes the intent version of a step row.
@@ -358,6 +461,23 @@ func (j *workJournal) stepFinished(ctx context.Context, exec *AutomationExecutio
 	if j == nil || exec == nil || step == nil || result == nil {
 		return
 	}
+	j.stepFinishedRowOnly(ctx, exec, step, result)
+	j.call(ctx, "updateWorkRun", map[string]any{
+		"runId":       exec.ID,
+		"heartbeatAt": rfc3339(time.Now()),
+		"chainHead":   chainHead,
+		"stepOrder":   exec.StepOrder,
+	})
+}
+
+// stepFinishedRowOnly writes a step's receipt and nothing on the run: for the
+// statements of a logic called INSIDE another run (logic_statements.go), whose
+// run row -- its heartbeat, chain head and step order -- belongs to the
+// caller's executor, not to the logic.
+func (j *workJournal) stepFinishedRowOnly(ctx context.Context, exec *AutomationExecution, step *Step, result *StepResult) {
+	if j == nil || exec == nil || step == nil || result == nil {
+		return
+	}
 	status := "done"
 	switch result.Status {
 	case "failed":
@@ -382,12 +502,6 @@ func (j *workJournal) stepFinished(ctx context.Context, exec *AutomationExecutio
 		}
 	}
 	j.call(ctx, "updateWorkStep", args)
-	j.call(ctx, "updateWorkRun", map[string]any{
-		"runId":       exec.ID,
-		"heartbeatAt": rfc3339(time.Now()),
-		"chainHead":   chainHead,
-		"stepOrder":   exec.StepOrder,
-	})
 }
 
 // stepSkipped writes a step whose condition decided it would not run: one
@@ -464,10 +578,33 @@ func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, c
 			return
 		}
 	}
+	j.closeRunRecord(ctx, exec, chainHead)
+}
 
+// closeRunRecord writes the run's terminal row as the run ended, with no
+// failure path: the tail of closeRun, and the whole close of a directly called
+// logic's run (logic_statements.go), whose caller already has its error and
+// which nothing parks, classifies or resumes.
+func (j *workJournal) closeRunRecord(ctx context.Context, exec *AutomationExecution, chainHead string) {
+	if j == nil || exec == nil {
+		return
+	}
+	status := "succeeded"
+	switch exec.Status {
+	case "failed":
+		status = "failed"
+	case "cancelled":
+		status = "cancelled"
+	}
 	finished := exec.CompletedAt
 	if finished.IsZero() {
 		finished = time.Now()
+	}
+	outcome := map[string]any{"executorStatus": exec.Status}
+	if exec.Returned {
+		// The value a statement body's `return` ended the run with (epic
+		// memql#5370).
+		outcome["returned"] = exec.Output
 	}
 	args := map[string]any{
 		"runId":      exec.ID,
@@ -475,7 +612,7 @@ func (j *workJournal) closeRun(ctx context.Context, exec *AutomationExecution, c
 		"finishedAt": rfc3339(finished),
 		"chainHead":  chainHead,
 		"stepOrder":  exec.StepOrder,
-		"outcome":    map[string]any{"executorStatus": exec.Status},
+		"outcome":    outcome,
 	}
 	if exec.Error != "" {
 		args["errorMessage"] = exec.Error

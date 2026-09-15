@@ -416,9 +416,7 @@ logic widget {
   args {
     event object @required
   }
-  body {
-    return true
-  }
+  return true
 }`),
 		"demo/queries.memql": file(`use demo.logic.{ widget }
 
@@ -450,9 +448,7 @@ logic widget {
   args {
     event object @required
   }
-  body {
-    return true
-  }
+  return true
 }`),
 		"demo/queries.memql": file(`use demo.logic.{ widget }
 
@@ -662,18 +658,14 @@ logic decideThing {
   args {
     event object @required
   }
-  body {
-    return true
-  }
+  return true
 }`),
 		"demo/automations.memql": file(`use demo.logic.{ decideThing }
 
 @trigger(event="graph.node.created.v1:demo:item")
 @description("The step call was renamed to a nonexistent construct, stranding the file-top logic import.")
 automation onItemCreated {
-  step decide {
-    logic decideThingX ( event: event )
-  }
+  decide := logic decideThingX(event: event)
 }`),
 	})
 	assertFindings(t, tree,

@@ -108,20 +108,16 @@ func TestNegative_MalformedDeclBody(t *testing.T) {
 // 2. Structural violations.
 // ---------------------------------------------------------------------------
 
-// 2a. Body rule (ADR Decision 5): `body { }` is MANDATORY on logic, FORBIDDEN
-// on every other construct. Cross-ref: body_rule_test.go covers the direct
-// decl-parser sites; here we cover the rewriter-family sites (query / mutation /
-// automation) via NormaliseAll plus the logic-missing-body half.
+// 2a. Body rule (body_rule.go): no construct has a `body { }` block; on a
+// logic and an automation it is the wrapper epic memql#5370 retired, refused
+// by name (pinned in body_rule_test.go). Cross-ref: body_rule_test.go covers
+// the direct decl-parser sites; here we cover the rewriter-family sites
+// (query / mutation) via NormaliseAll.
 func TestNegative_BodyRule(t *testing.T) {
-	t.Run("logic-missing-body", func(t *testing.T) {
-		_, err := NormaliseAll("logic l {\n  args { event object @required }\n  return 1\n}\n")
-		assertParseErr(t, "logic without body{}", err,
-			"logic", "must wrap its procedural code in a `body { }` block")
-	})
 	t.Run("query-with-body", func(t *testing.T) {
 		_, err := NormaliseAll("use cognition.concepts.{ space }\nquery space q {\n  filter row => row.active == true\n  body { return 1 }\n}\n")
 		assertParseErr(t, "query with body{}", err,
-			"must not declare a `body { }` block", "reserved for `logic`")
+			"must not declare a `body { }` block", "no MemQL construct has one")
 	})
 	t.Run("mutation-with-body", func(t *testing.T) {
 		_, err := NormaliseAll("use cognition.concepts.{ space }\nmutation space m {\n  args { x string @required }\n  body { return 1 }\n}\n")
@@ -182,8 +178,8 @@ func TestNegative_UnknownAnnotation_Rejected(t *testing.T) {
 // must not lower to a silently-untriggered automation.
 func TestNegative_MalformedTrigger(t *testing.T) {
 	cases := map[string]string{
-		"empty-event-value": "@trigger(event=)\nautomation a {\n  step run { logic doThing { event: event } }\n}\n",
-		"unclosed-trigger":  "@trigger(event=\"x\"\nautomation a {\n  step run { logic doThing { event: event } }\n}\n",
+		"empty-event-value": "@trigger(event=)\nautomation a {\n  run := logic doThing(event: event)\n}\n",
+		"unclosed-trigger":  "@trigger(event=\"x\"\nautomation a {\n  run := logic doThing(event: event)\n}\n",
 	}
 	for label, src := range cases {
 		t.Run(label, func(t *testing.T) {

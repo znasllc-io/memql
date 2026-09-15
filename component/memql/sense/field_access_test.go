@@ -57,7 +57,7 @@ func TestFieldAccess_ActorMembers(t *testing.T) {
 }
 
 func TestFieldAccess_EventMembers(t *testing.T) {
-	got := labels(completeAt(t, &fakeRegistry{}, "@trigger(event=\"x.y\")\nautomation onThing {\n  step run {\n    note := event."))
+	got := labels(completeAt(t, &fakeRegistry{}, "@trigger(event=\"x.y\")\nautomation onThing {\n  note := event."))
 	for _, want := range []string{"topic", "kind", "payload", "actor", "timestamp"} {
 		if !got[want] {
 			t.Errorf("event. must offer %q, got %v", want, got)
@@ -65,14 +65,14 @@ func TestFieldAccess_EventMembers(t *testing.T) {
 	}
 
 	// event.actor is the EVENT stamp: {id} only.
-	items := completeAt(t, &fakeRegistry{}, "@trigger(event=\"x.y\")\nautomation onThing {\n  step run {\n    who := event.actor.")
+	items := completeAt(t, &fakeRegistry{}, "@trigger(event=\"x.y\")\nautomation onThing {\n  who := event.actor.")
 	if len(items) != 1 || items[0].Label != "id" {
 		t.Errorf("event.actor. must offer only id, got %v", labels(items))
 	}
 }
 
 func TestFieldAccess_ArgsMembers(t *testing.T) {
-	auto := "automation sweep {\n  args {\n    windowDays int\n    dryRun bool\n  }\n  step run {\n    d := args."
+	auto := "automation sweep {\n  args {\n    windowDays int\n    dryRun bool\n  }\n  d := args."
 	got := labels(completeAt(t, &fakeRegistry{}, auto))
 	if !got["windowDays"] || !got["dryRun"] || len(got) != 2 {
 		t.Errorf("args. must offer exactly the declared fields, got %v", got)
@@ -106,12 +106,12 @@ func TestFieldAccess_PayloadMembers(t *testing.T) {
 }
 
 func TestFieldAccess_UnknownRootOffersNothing(t *testing.T) {
-	items := completeAt(t, &fakeRegistry{}, "logic l {\n  body {\n    x := steps.")
+	items := completeAt(t, &fakeRegistry{}, "logic l {\n  x := steps.")
 	if len(items) != 0 {
 		t.Errorf("unknown root must offer nothing, got %v", labels(items))
 	}
 	// Float literals never fire the dot context as members of "3".
-	items = completeAt(t, &fakeRegistry{}, "logic l {\n  body {\n    x := 3.")
+	items = completeAt(t, &fakeRegistry{}, "logic l {\n  x := 3.")
 	for _, it := range items {
 		if it.Kind == "field" {
 			t.Errorf("numeric dot must not be member completion: %+v", it)

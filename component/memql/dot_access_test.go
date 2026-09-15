@@ -205,11 +205,10 @@ func dotAccessLoadRegistry() memoryNodes.Registry {
 }
 
 // TestLogicDotAccess_CallResultObjectRejectedAtLoad is the loader-altitude
-// twin of the converter gate: a single-statement logic body plucking a field
-// off a construct call's result must fail tryParseNewFunctionSyntax (load),
-// not defer to a runtime failure. In edition 2026 a construct call is a
-// statement of its own -- the runner journals it -- so the refusal names the
-// fix: bind the call first and read the name.
+// twin of the converter gate: a logic plucking a field off a construct call's
+// result must fail tryParseNewFunctionSyntax (load), not defer to a runtime
+// failure. A construct call is a statement of its own -- the runner journals
+// it -- so the refusal names the fix: bind the call first and read the name.
 func TestLogicDotAccess_CallResultObjectRejectedAtLoad(t *testing.T) {
 	src := strings.Join([]string{
 		"@description(\"call-result field access must fail at load\")",
@@ -217,9 +216,7 @@ func TestLogicDotAccess_CallResultObjectRejectedAtLoad(t *testing.T) {
 		"  args {",
 		"    id string @required",
 		"  }",
-		"  body {",
-		"    return query getUser( id: args.id ).name",
-		"  }",
+		"  return (query getUser(id: args.id)).name",
 		"}",
 	}, "\n")
 
@@ -227,7 +224,7 @@ func TestLogicDotAccess_CallResultObjectRejectedAtLoad(t *testing.T) {
 	if err == nil {
 		t.Fatalf("load must reject a field access on a construct call's result")
 	}
-	for _, want := range []string{"inside an expression", "a construct call is a statement of its own", "bind it first"} {
+	for _, want := range []string{"a construct call is a statement of its own", "bind it", "[body_call_in_expression]"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("load error = %q; want the bind-it-first refusal (%q)", err.Error(), want)
 		}
@@ -235,11 +232,10 @@ func TestLogicDotAccess_CallResultObjectRejectedAtLoad(t *testing.T) {
 }
 
 // TestLogicDotAccessLoads is the #2542 item 4 load repro at the
-// function-loader altitude: a single-statement logic body plucking a scalar
-// field off a collection accessor loads end-to-end. An edition-2026 body
-// returning an expression runs on the LogicRunner, which evaluates it with
-// EvalExpr (logic_body_v1.go), so fn.Expr is the expression itself -- and
-// that expression plucks the field the body names.
+// function-loader altitude: a logic returning a scalar field plucked off a
+// collection accessor loads end-to-end. Its compiled body is the return, whose
+// value the LogicRunner parses and evaluates with EvalExpr -- and that value
+// plucks the field the body names.
 func TestLogicDotAccessLoads(t *testing.T) {
 	src := strings.Join([]string{
 		"@description(\"pluck the newest row's createdAt\")",
@@ -247,9 +243,7 @@ func TestLogicDotAccessLoads(t *testing.T) {
 		"  args {",
 		"    rows object @required",
 		"  }",
-		"  body {",
-		"    return args.rows.first().createdAt",
-		"  }",
+		"  return args.rows.first().createdAt",
 		"}",
 	}, "\n")
 
@@ -257,23 +251,15 @@ func TestLogicDotAccessLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load logic with .first().field return: %v", err)
 	}
-	pc, ok := fn.Expr.(*PlanConstExpression)
-	if !ok {
-		t.Fatalf("fn.Expr = %T, want the returned expression as a *PlanConstExpression", fn.Expr)
-	}
-	if fn.LogicSteps == nil {
-		t.Fatalf("a body returning an expression runs on the LogicRunner, so fn.LogicSteps must be set")
-	}
-	got, err := EvalExpr(context.Background(), pc.Expr, MapScope{"args": dotAccessSampleArgs()}, EvalOptions{})
+	got, err := EvalExpr(context.Background(), statementReturnExpr(t, fn), MapScope{"args": dotAccessSampleArgs()}, EvalOptions{})
 	if err != nil || got != "2026-01-01T00:00:00Z" {
 		t.Fatalf("the returned expression = %#v, %v; want the first row's createdAt", got, err)
 	}
 }
 
 // TestLogicDotAccessLoads_MultiStep pins the multi-step shape from the
-// issue: `q := query ...; return q.first().createdAt`. The body is stashed on
-// fn.LogicSteps for the LogicRunner, and the return is kept as fn.Expr for
-// the walkers that read it.
+// issue: `q := query ...` then `return q.first().createdAt`. The compiled body
+// is the query step binding q, then the return reading it.
 func TestLogicDotAccessLoads_MultiStep(t *testing.T) {
 	src := strings.Join([]string{
 		"@description(\"pluck a field off a step result\")",
@@ -281,10 +267,8 @@ func TestLogicDotAccessLoads_MultiStep(t *testing.T) {
 		"  args {",
 		"    id string @required",
 		"  }",
-		"  body {",
-		"    q := query queryThing( id: args.id )",
-		"    return q.first().createdAt",
-		"  }",
+		"  q := query queryThing(id: args.id)",
+		"  return q.first().createdAt",
 		"}",
 	}, "\n")
 
@@ -292,14 +276,10 @@ func TestLogicDotAccessLoads_MultiStep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load multi-step logic with .first().field return: %v", err)
 	}
-	if fn.LogicSteps == nil {
-		t.Fatalf("expected fn.LogicSteps for the multi-step body")
+	if len(fn.LogicBody) != 2 || fn.LogicBody[0]["binds"] != "q" || fn.LogicBody[0]["type"] != "function" {
+		t.Fatalf("LogicBody = %v, want the query step binding q, then the return", fn.LogicBody)
 	}
-	pc, ok := fn.Expr.(*PlanConstExpression)
-	if !ok {
-		t.Fatalf("fn.Expr = %T, want the returned expression as a *PlanConstExpression", fn.Expr)
-	}
-	if got := ast.FormatExpr(pc.Expr); got != "q.first().createdAt" {
-		t.Fatalf("fn.Expr carries %q, want the return expression", got)
+	if got := ast.FormatExpr(statementReturnExpr(t, fn)); got != "q.first().createdAt" {
+		t.Fatalf("the return carries %q, want the return expression", got)
 	}
 }

@@ -17,8 +17,9 @@ examples a model is shown, so a case that loads is a form an author may copy.
 | `manifest.json` | The edition and language line every case here is written in, and the corpus status (`draft` until the freeze). |
 | `cells/<receiver>/<annotation>/` | One directory per place an annotation can be written, from the annotation registry (`annotations.Placements()`): the receiver lower-camel-cased (`query`, `conceptField`), the annotation as written (`createOnly`). Each holds at least one case that loads and one that is refused. |
 | `expr/<position>/` | One directory per expression position, from `component/language/tiers`. Each holds at least one case that loads and one that is refused at that position. |
+| `statements/<construct>/<form>/` | For `logic` and `automation`, one directory per statement form and trailing clause (`parser.BodyStatementForms`), plus `scope/`, `body/` and `retired/` (one refusal per retired body form). Each form holds a case that runs and one that is refused; `statements_gate_test.go` holds them to the parser's lists. |
 | `negative/<construct>/` | One fault per file, the file named after the fault. |
-| `scenarios/<domain>/` | Whole automations as the product ships them, loaded together. |
+| `scenarios/<suite>/` | Whole automations as the product ships them, run over a database: one `scenario.json` per suite, naming shipped automations and mutations rather than copying them (see `scenarios/README.md`). The verdict runner does not read these directories. |
 | `fuzz/` | Inputs that once broke the parser. |
 
 ## A case directory
@@ -35,7 +36,7 @@ domain's `.memql` files.
 Each case loads as its own domain, and the load cases share boots. A concept
 is qualified by its domain (`v1:<domain>:ticket`), so a concept's name may
 repeat -- most cells declare a `ticket`. Every other construct is found by its
-bare name somewhere: a tool's handler, an automation's step, a seed's
+bare name somewhere: a tool's handler, an automation's call, a seed's
 `create<Concept>`, the tool the engine registers for every function, the rule
 and policy registries. Those names must be unique across the corpus, because a
 bare name two domains declare is ambiguous to every such lookup. A cell's
@@ -70,6 +71,7 @@ constructs carry the annotation's name for that reason (`openTicketsCache`,
 | `calls` | For `evaluate`: the answer to each construct call the expression makes, by `"<kind> <name>"` (`"query openTickets"`). The corpus boots no database, so what a call returns is the case's to state; the construct must be one the fixture declares and the engine registered, and a call is admitted only where the position admits one (a logic body, a step argument). |
 | `sql` | For `lower`: text the lowered SQL must contain. |
 | `expect` | For `evaluate`: the value the expression must produce. An absent result is `null`. |
+| `call` | For `evaluate`: a logic the case file declares, run with `args` instead of evaluating a bare expression; `calls` answers the construct calls it makes that are not to another logic the case declares. |
 | `note` | Why the case exists. Not checked. |
 
 ## The verdicts
@@ -86,9 +88,10 @@ The edition's grammar is the expression grammar of edition 2026, the only
 grammar the loaders read: a case is judged by the grammar a node boots with.
 Every spelling edition 2026 retires is
 a parse refusal, the predicate positions' old forms included -- a filter with
-no lambda header, a spec or trait `{ return }` body, a raw-text `@filter`.
-The cells were written before the flip to mean the same thing after it, and
-they needed no edit when it landed.
+no lambda header, a spec or trait `{ return }` body, a raw-text `@filter` --
+and so is every retired body form: a logic's `body { }`, an automation's
+`step` block, the terse `=> logic` header, `partition=` on `@trigger` and
+`@schedule` (`statements/<construct>/retired/` holds one case per code).
 
 A case file for `lower` or `evaluate` holds the expression alone -- at a
 position written as a lambda over the row (a query filter, a spec body, a
@@ -108,6 +111,13 @@ depends on the tier the position evaluates in (`test/conformance/engine_adapter_
 
 `now` reads `2026-01-02T03:04:05Z` in every case, so a case that reads the
 clock has one answer on every run.
+
+An `evaluate` case with `call` is the one whose file is not an expression: it
+declares logic and must load clean, and the named logic runs with `args`
+through the runner a node calls it through (`test/conformance/corpus_call_test.go`),
+returning `expect`. No construct call reaches the outside: a call to another
+logic the case declares runs it, `calls` answers any other, and a call neither
+covers fails the case.
 
 ## What a load proves
 

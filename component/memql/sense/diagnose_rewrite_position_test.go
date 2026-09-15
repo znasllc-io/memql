@@ -31,7 +31,7 @@ var senseRewriteRefusalCases = []struct {
 	{"@unbounded with count", "@unbounded(\"every one\")\nquery thing q {\n  filter row => row.a == 1\n  count\n}\n", "@unbounded", 1, "cannot be combined with `count`"},
 	{"an inline concept line", "query thing q {\n  concept thing\n  filter row => row.a == 1\n}\n", "concept", 1, "inline `concept` line is no longer supported"},
 	{"an unknown clause", "query thing q {\n  filter row => row.a == 1\n  limit 10\n}\n", "limit", 1, "unknown struct-query field"},
-	{"a body block in a query", "query thing q {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
+	{"a body block in a query", "query thing q {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"}, // memqlmigrate:keep
 	{"a query with no concept", "query listThings {\n  filter row => row.a == 1\n}\n", "listThings", 1, "missing concept binding"},
 	{"an unclosed query", "query thing q {\n  filter row => row.a == 1\n", "{", 1, "missing closing brace"},
 
@@ -49,21 +49,11 @@ var senseRewriteRefusalCases = []struct {
 	{"a second id", "mutation thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n    id: args.id\n  }\n}\n", "id:", 2, "duplicate `id:` line"},
 	{"a bare mirror of a path", "mutation thing m {\n  args {\n    id string @required\n    user object\n  }\n  insert {\n    id: args.id\n    args.user.id\n  }\n}\n", "args.user.id", 1, "has no key"},
 	{"an update with no id", "mutation thing m {\n  args {\n    name string\n  }\n  update {\n    name: args.name\n  }\n}\n", "update", 1, "update block requires an `id: <expr>` line"},
-	{"a body block in a mutation", "mutation thing m {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
+	{"a body block in a mutation", "mutation thing m {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"}, // memqlmigrate:keep
 
-	// Logic.
-	{"a logic with no body block", "logic noBody {\n  args {\n    a string\n  }\n}\n", "noBody", 1, "must wrap its procedural code in a `body { }` block"},
-	{"a logic body with no return", "logic noReturn {\n  args {\n    a string\n  }\n  body {\n    x := f(a: args.a)\n  }\n}\n", "x :=", 1, "must end with a `return <expr>` terminator"},
-
-	// Automation steps.
-	{"an empty step", probeTrigger + "automation a {\n  step first {\n  }\n}\n", "step", 1, "body is empty"},
-	{"a forEach with no in", probeTrigger + "automation a {\n  step loop {\n    forEach t of event.payload.items {\n      logic touch(x: t)\n    }\n  }\n}\n", "forEach", 1, "expected `in`"},
-	{"a conditional step with no body", probeTrigger + "automation a {\n  step s {\n    if event.payload.a == 1\n  }\n}\n", "if", 1, "expected `{` after the if condition"},
-	{"an automation with no steps", probeTrigger + "automation noSteps {\n  args {\n    x string\n  }\n}\n", "noSteps", 1, "at least one `step` is required"},
-	{"a body block in an automation", probeTrigger + "automation a {\n  body {\n    x := 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
-
-	// A terse automation.
-	{"an args block before a terse automation", "args {\n  x string\n}\nautomation onThing @trigger(event=\"node.created\", concept=\"v1:probe:thing\") => logic noteThing\n", "args", 1, "must not be preceded by an `args { ... }` block"},
+	// A logic and an automation are not the rewriter's: the statement parser
+	// reads them as written, and their refusals are its own and the load
+	// gate's (epic memql#5370): TestDiagnose_StatementRefusalLandsOnTheAuthorsText.
 
 	// Text the stages before moved: a spec StripNonProceduralBlocks folds to
 	// one line, and a query the query stage lowers to fewer lines.
@@ -106,7 +96,7 @@ func nthAt(t *testing.T, src, needle string, nth int) Position {
 // one diagnostic whose range is the clause keyword, field or step the
 // rewriter refused, and whose message leads with that position.
 func TestDiagnose_RewriteRefusalLandsOnTheAuthorsText(t *testing.T) {
-	covers := map[string]string{"a second id": "id", "a logic body with no return": "x"}
+	covers := map[string]string{"a second id": "id"}
 	for _, c := range senseRewriteRefusalCases {
 		t.Run(c.name, func(t *testing.T) {
 			errs := errorDiags(New(nil).Diagnose(c.src, "probe/things.memql"))

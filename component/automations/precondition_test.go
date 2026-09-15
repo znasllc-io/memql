@@ -20,7 +20,7 @@ import (
 
 func TestExtractPreconditions_None(t *testing.T) {
 	src := `automation foo {
-  step run { logic doThing { event: event } }
+  run := logic doThing(event: event)
 }`
 	pcs, stripped, err := extractPreconditions(src)
 	if err != nil {
@@ -41,7 +41,7 @@ func TestExtractPreconditions_ParsesFieldsAndStrips(t *testing.T) {
     literal: MEMQL_ENV
     description: "Only drive the staging deploy spine in staging."
   }
-  step run { logic driveDeploy { event: event } }
+  run := logic driveDeploy(event: event)
 }`
 	pcs, stripped, err := extractPreconditions(src)
 	if err != nil {
@@ -63,13 +63,13 @@ func TestExtractPreconditions_ParsesFieldsAndStrips(t *testing.T) {
 	if pc.Description != "Only drive the staging deploy spine in staging." {
 		t.Errorf("description = %q", pc.Description)
 	}
-	// The precondition block must be gone from the stripped source so the
-	// struct-form rewriter (which only knows `step`) never sees it.
+	// The precondition block must be gone from the stripped source, and the
+	// statements beside it kept.
 	if contains(stripped, "precondition") {
 		t.Errorf("stripped source still contains a precondition block:\n%s", stripped)
 	}
-	if !contains(stripped, "step run") {
-		t.Errorf("stripped source dropped the step block:\n%s", stripped)
+	if !contains(stripped, "run := logic driveDeploy(event: event)") {
+		t.Errorf("stripped source dropped the statement:\n%s", stripped)
 	}
 }
 
@@ -77,7 +77,7 @@ func TestExtractPreconditions_Multiple(t *testing.T) {
 	src := `automation multi {
   precondition a { check: event.payload.x != "" }
   precondition b { check: config.Y == "z" literal: Y }
-  step run { logic doThing { event: event } }
+  run := logic doThing(event: event)
 }`
 	pcs, stripped, err := extractPreconditions(src)
 	if err != nil {
@@ -119,8 +119,7 @@ func TestValidatePreconditions_DuplicateID(t *testing.T) {
 // after) and surface the precondition on the compiled Automation.
 func TestCompileMemQL_AttachesPreconditions(t *testing.T) {
 	loader := NewLoader(LoaderOptions{})
-	src := `
-@trigger(event="node.created", concept="v1:cognition:space", partition="*")
+	src := `@trigger(event="node.created", concept="v1:cognition:space")
 @description("guarded greet")
 automation guardedGreet {
   precondition ownerPresent {
@@ -128,9 +127,7 @@ automation guardedGreet {
     literal: ownerUserId
     description: "owner id must be present"
   }
-  step greet {
-    publishEvent { topic: "demo.greeted" }
-  }
+  publish "demo.greeted" {}
 }`
 	auto, err := loader.compileMemQL(src, "test:guardedGreet")
 	if err != nil {
@@ -152,12 +149,12 @@ automation guardedGreet {
 // the full-DSL load-test catches authoring mistakes.
 func TestCompileMemQL_RejectsPreconditionMissingCheck(t *testing.T) {
 	loader := NewLoader(LoaderOptions{})
-	src := `@trigger(event="node.created", concept="v1:cognition:space", partition="*")
+	src := `@trigger(event="node.created", concept="v1:cognition:space")
 automation badGuard {
   precondition broken {
     literal: ownerUserId
   }
-  step greet { publishEvent { topic: "x" } }
+  publish "x" {}
 }`
 	if _, err := loader.compileMemQL(src, "test:badGuard"); err == nil {
 		t.Fatalf("expected compile to reject a precondition with no check")

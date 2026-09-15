@@ -27,9 +27,7 @@ func loadFlipProbe(t *testing.T, doc, annot string) *Function {
 		"    /// The subject arg.",
 		"    a string @required",
 		"  }",
-		"  body {",
-		"    return args.a ?? \"\"",
-		"  }",
+		"  return args.a ?? \"\"",
 		"}")
 	fn, err := tryParseNewFunctionSyntax("flipProbeLogic", "logic", strings.Join(lines, "\n"), "common.logic.memql", dotAccessLoadRegistry())
 	if err != nil {
@@ -85,7 +83,7 @@ func TestDescriptionFlip_CloneCarriesDocComment(t *testing.T) {
 // The promote-time catalog match text prefers the /// block via the parser's
 // own lexer extraction, with the @description regex as fallback.
 func TestDescriptionFlip_CatalogMatchText(t *testing.T) {
-	src := "/// Catalog doc channel.\n@description(\"Catalog annot channel.\")\nlogic catProbe {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}"
+	src := "/// Catalog doc channel.\n@description(\"Catalog annot channel.\")\nlogic catProbe {\n  args {\n    a string @required\n  }\n  return args.a ?? \"\"\n}"
 	text, err := CatalogMatchText("logic", src)
 	if err != nil {
 		t.Fatalf("CatalogMatchText: %v", err)
@@ -96,7 +94,7 @@ func TestDescriptionFlip_CatalogMatchText(t *testing.T) {
 	if strings.Contains(text, "intent:Catalog annot channel.") {
 		t.Errorf("catalog intent must not be the fallback when /// present, got %q", text)
 	}
-	annotOnly := "@description(\"Catalog annot channel.\")\nlogic catProbe {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}"
+	annotOnly := "@description(\"Catalog annot channel.\")\nlogic catProbe {\n  args {\n    a string @required\n  }\n  return args.a ?? \"\"\n}"
 	text2, err := CatalogMatchText("logic", annotOnly)
 	if err != nil {
 		t.Fatalf("CatalogMatchText: %v", err)
@@ -146,7 +144,7 @@ func TestDescriptionFlip_FunctionToolsSchemaDescription(t *testing.T) {
 // The catalog extraction anchors on the construct even when a use/import
 // prelude precedes it (authoring slices carry file-top imports).
 func TestDescriptionFlip_CatalogWithUsePrelude(t *testing.T) {
-	src := "use cognition.concepts.{ space }\n\n/// Prelude doc channel.\nlogic catPreludeProbe {\n  args {\n    a string @required\n  }\n  body {\n    return args.a ?? \"\"\n  }\n}"
+	src := "use cognition.concepts.{ space }\n\n/// Prelude doc channel.\nlogic catPreludeProbe {\n  args {\n    a string @required\n  }\n  return args.a ?? \"\"\n}"
 	text, err := CatalogMatchText("logic", src)
 	if err != nil {
 		t.Fatalf("CatalogMatchText: %v", err)

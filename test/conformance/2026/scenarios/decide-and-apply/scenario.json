@@ -1,0 +1,43 @@
+{
+  "description": "The decide-and-apply sweeps: a logic decides which rows are stale, and the automation writes each one.",
+  "scenarios": [
+    {
+      "name": "model-pull-stale-sweep",
+      "description": "A pull still at requested past the claim grace is failed; a pull asked for just now is left to its replica.",
+      "seed": [
+        { "mutation": "createModelPull", "args": { "pullId": { "$id": "stale" }, "workerId": "worker-scenario", "model": "scenario/model:1", "requestedAt": { "$ago": "PT10M" } } },
+        { "mutation": "createModelPull", "args": { "pullId": { "$id": "fresh" }, "workerId": "worker-scenario", "model": "scenario/model:1", "requestedAt": { "$ago": "PT0S" } } }
+      ],
+      "fire": [
+        { "automation": "workerModelPullStaleSweep", "schedule": true }
+      ],
+      "expect": {
+        "rows": [
+          { "concept": "v1:worker:modelPull", "id": { "$id": "stale" }, "payload": { "status": "failed", "readvertised": false } },
+          { "concept": "v1:worker:modelPull", "id": { "$id": "fresh" }, "payload": { "status": "requested" } }
+        ]
+      },
+      "dryRun": { "fire": 0, "writes": 1 },
+      "resume": { "fire": 0, "failAt": 2 }
+    },
+    {
+      "name": "stale-cluster-node-prune",
+      "description": "A node whose last sighting is older than the prune window is marked stopped; one seen just now stays healthy.",
+      "seed": [
+        { "mutation": "createNode", "args": { "id": { "$id": "gone" }, "nodeType": "bff", "health": "healthy", "lastSeen": { "$ago": "PT2H" } } },
+        { "mutation": "createNode", "args": { "id": { "$id": "here" }, "nodeType": "bff", "health": "healthy", "lastSeen": { "$ago": "PT0S" } } }
+      ],
+      "fire": [
+        { "automation": "pruneStaleClusterNodes", "schedule": true }
+      ],
+      "expect": {
+        "rows": [
+          { "concept": "v1:cluster:node", "id": { "$id": "gone" }, "payload": { "health": "stopped" } },
+          { "concept": "v1:cluster:node", "id": { "$id": "here" }, "payload": { "health": "healthy" } }
+        ]
+      },
+      "dryRun": { "fire": 0, "writes": 1 },
+      "resume": { "fire": 0, "failAt": 2 }
+    }
+  ]
+}

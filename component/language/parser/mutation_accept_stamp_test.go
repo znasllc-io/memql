@@ -523,20 +523,3 @@ func TestNormaliseMutation_ArgsDefaultStringWithBrace(t *testing.T) {
 		t.Fatalf("args @default string should survive intact; got %q", out)
 	}
 }
-
-func TestNormaliseLogic_BodyReturnsStringWithBrace(t *testing.T) {
-	// A `}` inside a string returned from a logic body must not truncate the
-	// body block (string-aware inner framing).
-	src := `logic mk {
-  body {
-    return "a}b"
-  }
-}`
-	out, err := NormaliseLogicSource(src)
-	if err != nil {
-		t.Fatalf("`}` in a logic body return string broke the body block: %v", err)
-	}
-	if !strings.Contains(out, `return "a}b"`) {
-		t.Fatalf("logic body should keep the full return string; got %q", out)
-	}
-}

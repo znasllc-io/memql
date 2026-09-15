@@ -243,15 +243,12 @@ func NewEngineSiteStore(engine Engine) SiteStore {
 // cluster-owner actor -- see systemEdgePublishActor's comment for why a
 // second synthetic identity exists here rather than reusing edge.go's.
 //
-// The invocation keyword is "mutation", not "mutate": "mutate" is the
-// DECLARATION verb used when authoring the .memql construct
-// (`mutation site updateSiteBundle { ... }`); in call position the invocation
-// noun is "mutation" (component/campaigns/store.go's call() helper uses the
-// same keyword for exactly this reason, and the parser rejects the
-// declaration verb written in call position rather than silently dropping
-// it, memql#2358). Neither form repeats the bound concept name -- that
-// binding is resolved from the construct's own signature at load time, the
-// same way edge.go's "query siteByHostname(...)" names no concept either.
+// The invocation keyword is "mutation", the word the .memql construct is
+// declared with too (`mutation site updateSiteBundle { ... }`, D13;
+// component/campaigns/store.go's call() helper uses the same keyword). The
+// call does not repeat the bound concept name -- that binding is resolved
+// from the construct's own signature at load time, the same way edge.go's
+// "query siteByHostname(...)" names no concept either.
 func (s *engineSiteStore) UpdateBundleRef(ctx context.Context, siteID, bundleRef string) error {
 	ctx = publishActorContext(ctx)
 	q := fmt.Sprintf("mutation updateSiteBundle(siteId: %s, bundleRef: %s)",

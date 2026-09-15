@@ -9,7 +9,7 @@ import (
 )
 
 // signature_concept.go flags a construct whose signature binds a concept that
-// resolves to nothing -- `mutate/query/shape/seed <Concept> <name>` where
+// resolves to nothing -- `mutation/query/shape/seed <Concept> <name>` where
 // <Concept> exists nowhere the workspace can see. This is the user's symptom 5
 // (`mutation full ...` with no concept `full`). Error severity: a signature
 // concept with no registry match is a hard boot failure (the strict-boot gate
@@ -141,7 +141,7 @@ func localConceptNames(file *parser.File) map[string]bool {
 // the author got no squiggle at all -- the failure surfaced at boot instead.
 //
 // Scope follows the extractor: SignatureConceptRefs is pinned to
-// `query|mutate|shape|seed`, every one of which binds a concept and nothing
+// `query|mutation|shape|seed`, every one of which binds a concept and nothing
 // else. `spec` is deliberately outside it, which is what keeps the
 // shape-XOR-concept binding legal -- flagging a spec that binds a shape would
 // be wrong, and there are live ones in the tree.

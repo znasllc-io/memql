@@ -1,0 +1,7 @@
+@trigger(schedule="0 0 * * * *")
+automation ifStatement {
+  open := query ticketsAwaitingReply()
+  if open.count() > 0 {
+    mutation escalate(reason: "open tickets")
+  }
+}

@@ -160,9 +160,7 @@ concept marker {
 		"lintlogic/logic.memql": {Data: []byte(`
 @description("Reads the triggering event without declaring an event input.")
 logic decideThing {
-  body {
-    return args.event.payload.partitionId
-  }
+  return args.event.payload.partitionId
 }
 `)},
 	}
@@ -194,9 +192,7 @@ logic ratioGate {
     a  int  @required
     b  int  @required
   }
-  body {
-    return args.a - args.b > 0
-  }
+  return args.a - args.b > 0
 }
 `)},
 	}
@@ -224,9 +220,7 @@ logic ratioGateOK {
     a  int  @required
     b  int  @required
   }
-  body {
-    return (args.a - args.b) > 0
-  }
+  return (args.a - args.b) > 0
 }
 `)},
 	}

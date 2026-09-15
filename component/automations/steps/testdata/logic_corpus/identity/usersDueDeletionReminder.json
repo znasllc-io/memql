@@ -1,0 +1,725 @@
+{
+  "construct": "identity/logic.memql usersDueDeletionReminder",
+  "runs": {
+    "schema args 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "refused": true,
+        "result": null
+      }
+    },
+    "schema args 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "refused": true,
+        "result": null
+      }
+    },
+    "schema args 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "refused": true,
+        "result": null
+      }
+    },
+    "schema args 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "refused": true,
+        "result": null
+      }
+    },
+    "schema args 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "refused": true,
+        "result": null
+      }
+    },
+    "schema args 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "refused": true,
+        "result": null
+      }
+    },
+    "schema args 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "refused": true,
+        "result": null
+      }
+    },
+    "schema args 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "schema args 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "from": "s-from",
+          "to": "s-to"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "refused": true,
+        "result": null
+      }
+    },
+    "variant 0 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "from": "P7D",
+          "to": "P8D"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "variant 0 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "from": "P7D",
+          "to": "P8D"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:usersInDeletionCooldown-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "usersInDeletionCooldown-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "variant 0 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "from": "P7D",
+          "to": "P8D"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "variant 0 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "from": "P7D",
+          "to": "P8D"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:usersInDeletionCooldown-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "usersInDeletionCooldown-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "variant 0 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "from": "P7D",
+          "to": "P8D"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "variant 0 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "from": "P7D",
+          "to": "P8D"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:usersInDeletionCooldown-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "usersInDeletionCooldown-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "variant 0 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "from": "P7D",
+          "to": "P8D"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "variant 0 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "from": "P7D",
+          "to": "P8D"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:usersInDeletionCooldown-1",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "usersInDeletionCooldown-1",
+              "primaryEmail": "person1@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "variant 1 | actor admin | 0 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "from": "P25D",
+          "to": "P26D"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "variant 1 | actor admin | 2 rows": {
+      "input": {
+        "actor": "admin",
+        "args": {
+          "from": "P25D",
+          "to": "P26D"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:usersInDeletionCooldown-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "usersInDeletionCooldown-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "variant 1 | actor developer | 0 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "from": "P25D",
+          "to": "P26D"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "variant 1 | actor developer | 2 rows": {
+      "input": {
+        "actor": "developer",
+        "args": {
+          "from": "P25D",
+          "to": "P26D"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:usersInDeletionCooldown-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "usersInDeletionCooldown-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "variant 1 | actor owner | 0 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "from": "P25D",
+          "to": "P26D"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "variant 1 | actor owner | 2 rows": {
+      "input": {
+        "actor": "owner",
+        "args": {
+          "from": "P25D",
+          "to": "P26D"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:usersInDeletionCooldown-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "usersInDeletionCooldown-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    },
+    "variant 1 | actor user | 0 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "from": "P25D",
+          "to": "P26D"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": []
+      }
+    },
+    "variant 1 | actor user | 2 rows": {
+      "input": {
+        "actor": "user",
+        "args": {
+          "from": "P25D",
+          "to": "P26D"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "kind": "query",
+            "name": "usersInDeletionCooldown"
+          }
+        ],
+        "result": [
+          {
+            "concept": "v1:probe:row",
+            "id": "v1:probe:row:usersInDeletionCooldown-2",
+            "payload": {
+              "deletionScheduledAt": "<ts>",
+              "name": "usersInDeletionCooldown-2",
+              "primaryEmail": "person2@example.test",
+              "rank": 100,
+              "status": "provisioned",
+              "value": "7"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

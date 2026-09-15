@@ -1,0 +1,273 @@
+{
+  "automation": "data/automations.memql conflictDetection",
+  "runs": {
+    "event agent | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "graph.node.created.v1:data:record"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "naturalKeyValue": "someone@example.test",
+              "partitionId": "space-1",
+              "recordType": "contact"
+            },
+            "kind": "query",
+            "name": "detectConflicts"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event agent | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "graph.node.created.v1:data:record"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "naturalKeyValue": "someone@example.test",
+              "partitionId": "space-1",
+              "recordType": "contact"
+            },
+            "kind": "query",
+            "name": "detectConflicts"
+          },
+          {
+            "args": {
+              "matchCount": 2,
+              "matches": [
+                {
+                  "concept": "v1:probe:row",
+                  "id": "v1:probe:row:detectConflicts-1",
+                  "payload": {
+                    "deletionScheduledAt": "<ts>",
+                    "name": "detectConflicts-1",
+                    "primaryEmail": "person1@example.test",
+                    "rank": 100,
+                    "status": "provisioned",
+                    "value": "7"
+                  }
+                },
+                {
+                  "concept": "v1:probe:row",
+                  "id": "v1:probe:row:detectConflicts-2",
+                  "payload": {
+                    "deletionScheduledAt": "<ts>",
+                    "name": "detectConflicts-2",
+                    "primaryEmail": "person2@example.test",
+                    "rank": 100,
+                    "status": "provisioned",
+                    "value": "7"
+                  }
+                }
+              ],
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "partitionId": "space-1",
+              "recordId": "v1:probe:thing:1",
+              "recordType": "contact",
+              "requiresHumanApproval": true,
+              "timestamp": "<ts>"
+            },
+            "kind": "event",
+            "name": "data.conflicts.detected"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "graph.node.created.v1:data:record"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "naturalKeyValue": "someone@example.test",
+              "partitionId": "space-1",
+              "recordType": "contact"
+            },
+            "kind": "query",
+            "name": "detectConflicts"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "graph.node.created.v1:data:record"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "naturalKeyValue": "someone@example.test",
+              "partitionId": "space-1",
+              "recordType": "contact"
+            },
+            "kind": "query",
+            "name": "detectConflicts"
+          },
+          {
+            "args": {
+              "matchCount": 2,
+              "matches": [
+                {
+                  "concept": "v1:probe:row",
+                  "id": "v1:probe:row:detectConflicts-1",
+                  "payload": {
+                    "deletionScheduledAt": "<ts>",
+                    "name": "detectConflicts-1",
+                    "primaryEmail": "person1@example.test",
+                    "rank": 100,
+                    "status": "provisioned",
+                    "value": "7"
+                  }
+                },
+                {
+                  "concept": "v1:probe:row",
+                  "id": "v1:probe:row:detectConflicts-2",
+                  "payload": {
+                    "deletionScheduledAt": "<ts>",
+                    "name": "detectConflicts-2",
+                    "primaryEmail": "person2@example.test",
+                    "rank": 100,
+                    "status": "provisioned",
+                    "value": "7"
+                  }
+                }
+              ],
+              "naturalKeyField": "email",
+              "naturalKeyValue": "someone@example.test",
+              "partitionId": "space-1",
+              "recordId": "v1:probe:thing:1",
+              "recordType": "contact",
+              "requiresHumanApproval": true,
+              "timestamp": "<ts>"
+            },
+            "kind": "event",
+            "name": "data.conflicts.detected"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

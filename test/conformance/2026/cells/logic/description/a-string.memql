@@ -3,7 +3,5 @@ logic ticketHeadlineDescription {
   args {
     title  string
   }
-  body {
-    return args.title ?? "(untitled)"
-  }
+  return args.title ?? "(untitled)"
 }

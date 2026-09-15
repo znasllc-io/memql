@@ -211,17 +211,8 @@ query thing second {
 @filter(row => row.b == null)
 @trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
-  step first {
-    logic other(x: 1)
-  }
+  logic other(x: 1)
 }
-`,
-		needle: "null", nth: 1, want: "null is retired",
-	},
-	{
-		name: "@filter on a terse automation, hoisted by the lowering",
-		src: `/// Note a thing when it is created.
-automation onThing @trigger(event="node.created", concept="v1:probe:thing") @filter(row => row.b == null) => logic noteThing
 `,
 		needle: "null", nth: 1, want: "null is retired",
 	},
@@ -235,9 +226,7 @@ automation onThing @trigger(event="node.created", concept="v1:probe:thing") @fil
 
 @trigger(event="node.created", concept="v1:probe:thing", filter=row => row.b == null)
 automation probe {
-  step first {
-    logic other(x: 1)
-  }
+  logic other(x: 1)
 }
 `,
 		needle: "null", nth: 1, want: "null is retired",
@@ -289,52 +278,53 @@ trait isB = row => row.b == null
   args {
     a bool
   }
-  body {
-    return cond(args.a, 1, 2)
-  }
+  return cond(args.a, 1, 2)
 }
 `,
 		needle: "cond", nth: 1, want: "cond(p, a, b) is retired",
 	},
 	{
-		name: "a step condition",
+		name: "an if condition",
 		src: `@trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
-  step first {
-    logic runIt(mode: "x")
+  args {
+    id any
+    y  any
   }
-  step second {
-    if event.payload.y != null {
-      builtin doIt(id: event.payload.id)
-    }
+  first := logic runIt(mode: "x")
+  if args.y != null {
+    builtin doIt(id: args.id)
   }
 }
 `,
 		needle: "null", nth: 1, want: "null is retired",
 	},
 	{
-		name: "a forEach where filter",
+		name: "a for filter",
 		src: `@trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
-  step loop {
-    forEach t in event.payload.items where t.active == null {
-      touch { id: t.id }
-    }
+  args {
+    items any
+  }
+  for t in args.items if t.active == null {
+    mutation touch(id: t.id)
   }
 }
 `,
 		needle: "null", nth: 1, want: "null is retired",
 	},
 	{
-		name: "a step argument map entry with no key",
+		name: "a call argument map entry with no key",
 		src: `@trigger(event="node.created", concept="v1:probe:thing")
 automation probe {
-  step first {
-    logic record(payload: { delegationId: event.payload.id, event.payload.identityId })
+  args {
+    id         any
+    identityId any
   }
+  logic record(payload: { delegationId: args.id, args.identityId })
 }
 `,
-		needle: "event.payload.identityId", nth: 1, want: "a map entry needs a key: write identityId: event.payload.identityId",
+		needle: "args.identityId", nth: 1, want: "a map entry needs a key: write identityId: args.identityId",
 	},
 }
 

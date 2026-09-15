@@ -18,11 +18,12 @@ package automations
 // exactly that reason.
 //
 // THE RETRYABLE RULE IS THE IDEMPOTENCY RULE'S A1 FORM (spec section D):
-// a completed step is served from the journal and never re-run; a step
-// whose type has no external effect (query, shape, function, forEach,
-// parallel, switch, automation) is re-run; a mutation, webhook, event or
-// action step at the resume point needs AllowSideEffects, because the
-// journal cannot yet tell whether its far side already holds a receipt.
+// a completed step is served from the journal and never re-run; a step with
+// no external effect (a query, logic or builtin call, a for, a parallel, a
+// sub-automation) is re-run; a `mutation` call, a publish or an action at the
+// resume point needs AllowSideEffects (stepRetryable), because the journal
+// cannot yet tell whether its far side already holds a receipt. The body
+// resumes by running again over its recorded values (resume_statements.go).
 // Epic A2 wires the receipts and narrows this to "retried when
 // idempotent by key".
 //
@@ -43,6 +44,7 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
+	"github.com/znasllc-io/memql/core/num"
 )
 
 var (
@@ -56,7 +58,7 @@ var (
 	ErrAutomationChanged = errors.New("automation definition changed since the run started")
 	// ErrNonRetryableStep is returned when the resume point has an external
 	// effect and AllowSideEffects was not set.
-	ErrNonRetryableStep = errors.New("step is not safely retryable (mutation, webhook, event or action)")
+	ErrNonRetryableStep = errors.New("step is not safely retryable (a mutation call, a publish or an action)")
 )
 
 // RunJournal is what resume needs from the rows: the run's envelope and
@@ -92,6 +94,17 @@ type RunJournal struct {
 	// FailedStep is the key of the step at `failed` or `running` with no
 	// receipt -- the default resume point.
 	FailedStep string
+	// StepStates is every step's latest row, by key: its status and the
+	// attempt it recorded. A statement body resumes from these (epic
+	// memql#5370): a `failed` statement that carries `on error continue` was
+	// continued past, and stays so.
+	StepStates map[string]StepState
+}
+
+// StepState is one step's latest journal row: its status and its attempt.
+type StepState struct {
+	Status  string
+	Attempt int
 }
 
 // ResumeOptions configures resume behavior.
@@ -99,8 +112,9 @@ type ResumeOptions struct {
 	// FromStep overrides the resume point (defaults to the failed step).
 	FromStep string
 
-	// AllowSideEffects permits retrying mutation/webhook/event/action steps.
-	// Without this flag, resuming from a non-retryable step returns an error.
+	// AllowSideEffects permits retrying a mutation call, a publish or an
+	// action. Without this flag, resuming from a non-retryable step returns
+	// an error.
 	AllowSideEffects bool
 }
 
@@ -108,7 +122,7 @@ type ResumeOptions struct {
 // external effect.
 func IsStepRetryable(stepType StepType) bool {
 	switch stepType {
-	case StepTypeMutation, StepTypeWebhook, StepTypeEvent, StepTypeAction:
+	case StepTypeEvent, StepTypeAction:
 		return false
 	}
 	return true
@@ -177,6 +191,7 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 		ChainHead:             stringField(run, "chainHead"),
 		InitialChainHead:      stringField(run, "initialChainHead"),
 		Steps:                 map[string]*MinimalStepResult{},
+		StepStates:            map[string]StepState{},
 	}
 	j.HeartbeatAt, _ = time.Parse(time.RFC3339Nano, stringField(run, "heartbeatAt"))
 	j.WaitingOn, _ = run["waitingOn"].(map[string]any)
@@ -193,9 +208,13 @@ func runJournalFromRows(run map[string]any, steps []map[string]any) (*RunJournal
 	}
 	for _, row := range steps {
 		key := stringField(row, "key")
-		if key == "" {
+		if key == "" || isNestedStepKey(key) {
+			// A nested key is a row of a logic a statement called (a logic's
+			// statements journal under the calling statement's key): resume
+			// re-runs that statement, never into it.
 			continue
 		}
+		j.StepStates[key] = StepState{Status: stringField(row, "status"), Attempt: intField(row, "attempt")}
 		if stringField(row, "status") == "running" {
 			j.HasRunningStep = true
 		}
@@ -258,6 +277,30 @@ func boolField(m map[string]any, k string) bool {
 	return b
 }
 
+// intField reads a step row's attempt however the row decoded it.
+//
+// narrowing: ZERO -- the one caller reads 0 as "no attempt recorded" and
+// resumes as the second attempt (attemptBase); a number out of range is no
+// attempt this executor wrote, and saturating would claim an attempt count
+// nobody made.
+func intField(m map[string]any, k string) int {
+	switch n := m[k].(type) {
+	case int:
+		return n
+	case int64:
+		return num.Int64OrZero(n)
+	case float64:
+		return num.Float64OrZero(n)
+	}
+	return 0
+}
+
+// isNestedStepKey reports whether a step key belongs to a list inside a step
+// -- `decide/a`, `for_x/0/touch` -- rather than to the run's own list.
+func isNestedStepKey(key string) bool {
+	return strings.Contains(key, "/")
+}
+
 // ResumeFrom resumes execution from the work journal.
 // It rehydrates the evaluator with the completed step results the journal
 // holds, then continues execution from the specified step (or the
@@ -287,7 +330,7 @@ func (e *Executor) ResumeFrom(
 	}
 
 	// Determine the resume point
-	resumeStepId := journal.FailedStep
+	resumeStepId := statementResumePoint(journal, automation)
 	if opts.FromStep != "" {
 		resumeStepId = opts.FromStep
 	}
@@ -307,7 +350,7 @@ func (e *Executor) ResumeFrom(
 	}
 
 	// Check if resume step is retryable
-	if !IsStepRetryable(resumeStep.Type) && !opts.AllowSideEffects {
+	if !stepRetryable(resumeStep) && !opts.AllowSideEffects {
 		return nil, fmt.Errorf("%w: step %q is type %s, set AllowSideEffects to retry",
 			ErrNonRetryableStep, resumeStepId, resumeStep.Type)
 	}
@@ -350,7 +393,7 @@ func (e *Executor) ResumeFrom(
 	evaluator.SetSystemSecretResolver(e.createSystemSecretResolver())
 	evaluator.SetCanonicalIdResolver(e.createCanonicalIdResolver())
 	evaluator.SetLogger(e.logger)
-	evaluator.SetCustom("timestamp", time.Now().UTC().Format(time.RFC3339))
+	evaluator.SetCustom("now", time.Now().UTC().Format(time.RFC3339))
 	// Resume restores the same declared arguments and validation used at
 	// first execution. Variables on a goal run are authoritative; ordinary
 	// scheduled/event runs take their saved event payload.
@@ -364,37 +407,30 @@ func (e *Executor) ResumeFrom(
 	}
 	if boundArgs != nil {
 		evaluator.SetCustom("args", boundArgs)
-		evaluator.SetCustom("argsDeclared", declaredArgsSet(automation))
 	}
 	bindRunAmbient(ctx, e.engine, evaluator)
 
-	// Restore input from the run row
+	// Restore the run's input record from the run row.
 	if journal.Input != nil {
 		exec.Input = journal.Input
-		evaluator.SetInput(journal.Input)
 	}
 
-	// Restore the trigger context from the run row. When the run has
-	// no triggering event (cron / manual / startup resume), seed a
-	// synthetic object envelope so step args that pass `event: event`
-	// still resolve to an object rather than the unresolved literal
-	// `event` token (which the engine coerces to a string and the
-	// receiving logic function rejects -- see executor.go / issue #418).
+	// Restore the trigger context from the run row. When the run has no
+	// triggering event (cron / manual / startup resume), seed a synthetic
+	// object envelope so a call that passes `event: event` still passes an
+	// object (see executor.go / issue #418).
 	if journal.TriggerEvent != nil {
 		evaluator.SetCustom("event", journal.TriggerEvent)
 	} else {
 		evaluator.SetCustom("event", buildEventEnvelope(nil, "resume", "resume"))
 	}
 
-	// Rehydrate evaluator with the completed step results the journal holds
-	for stepId, minResult := range journal.Steps {
-		if minResult == nil {
-			continue
+	// The run's record of the steps the journal holds. Their values reach the
+	// resumed statements through resumedStatements.
+	for _, minResult := range journal.Steps {
+		if minResult != nil {
+			exec.AddStepResult(minimalToStepResult(minResult))
 		}
-		// Convert MinimalStepResult to StepResult for evaluator
-		fullResult := minimalToStepResult(minResult)
-		evaluator.SetStepResult(stepId, fullResult)
-		exec.AddStepResult(fullResult)
 	}
 
 	if e.logger != nil {
@@ -418,26 +454,11 @@ func (e *Executor) ResumeFrom(
 		"restoredSteps":  len(journal.Steps),
 	})
 
-	// Chain tracking - start from the run row's chain head
-	// Include completed steps from the journal in StepOrder for chain verification
-	// Only copy steps BEFORE the resume point to avoid duplicates
+	// Chain tracking starts from the run row's chain head. The body runs again
+	// from its first statement over names rehydrated from the journal; the
+	// statement order is the body's, so it is not copied from the journal.
 	var chainHead string
-	{
-		// Copy only steps before resumeIndex (not including the failed step)
-		// The failed step will be added when it executes
-		if len(journal.StepOrder) > 0 && resumeIndex > 0 {
-			// Find how many steps from journal.StepOrder to keep
-			// This is the minimum of resumeIndex and the journal's step count
-			stepsToKeep := resumeIndex
-			if stepsToKeep > len(journal.StepOrder) {
-				stepsToKeep = len(journal.StepOrder)
-			}
-			exec.StepOrder = make([]string, stepsToKeep, len(automation.Steps))
-			copy(exec.StepOrder, journal.StepOrder[:stepsToKeep])
-		} else {
-			exec.StepOrder = make([]string, 0, len(automation.Steps))
-		}
-	}
+	exec.StepOrder = make([]string, 0, len(automation.Steps))
 	if e.chainTrackingEnabled {
 		exec.InitialChainHead = journal.InitialChainHead
 		chainHead = journal.ChainHead // Resume from the run row's chain position
@@ -454,6 +475,7 @@ func (e *Executor) ResumeFrom(
 		writer = nil
 	}
 	writer.reopenRun(ctx, exec)
+	ctx = withRunJournal(ctx, exec.ID, writer)
 
 	// Set up step context.
 	//
@@ -473,191 +495,11 @@ func (e *Executor) ResumeFrom(
 		ChainTrackingEnabled: e.chainTrackingEnabled,
 	}
 
-	// Execute steps starting from resumeIndex
-	for i := resumeIndex; i < len(automation.Steps); i++ {
-		step := automation.Steps[i]
-
-		// Replay/fork needs the executed order even without chain hashing.
-		exec.StepOrder = append(exec.StepOrder, step.ID)
-
-		// Check for cancellation
-		select {
-		case <-ctx.Done():
-			exec.Cancel()
-			writer.closeRun(ctx, exec, chainHead)
-			return exec, ctx.Err()
-		default:
-		}
-
-		// Evaluate step condition if present
-		if step.Condition != "" {
-			if e.logger != nil {
-				e.logger.Debug("evaluating step condition",
-					"step", step.ID,
-					"condition", step.Condition,
-				)
-			}
-			shouldRun, err := evaluator.StepCondition(ctx, step)
-			if err != nil {
-				if e.logger != nil {
-					e.logger.Warn("step condition evaluation failed",
-						"step", step.ID,
-						"condition", step.Condition,
-						"error", err,
-					)
-				}
-				shouldRun = false
-			}
-			if !shouldRun {
-				// Record skipped step
-				skipResult := &StepResult{
-					StepId:      step.ID,
-					Status:      "skipped",
-					StartedAt:   time.Now(),
-					CompletedAt: time.Now(),
-				}
-				exec.AddStepResult(skipResult)
-				evaluator.SetStepResult(step.ID, skipResult)
-				writer.stepSkipped(ctx, exec, step, i)
-				continue
-			}
-		}
-
-		// Set current chain head in context
-		if e.chainTrackingEnabled {
-			stepCtx.PreviousChainHead = chainHead
-		}
-
-		// Execute the step. A resumed step is by definition at least its
-		// SECOND attempt at the resume point; the steps after it are running
-		// for the first time in this run.
-		attemptNo := 1
-		if i == resumeIndex {
-			attemptNo = 2
-		}
-		writer.stepRunning(ctx, exec, step, i, attemptNo)
-		result, err := e.executeJournaledStep(ctx, writer, step, stepCtx)
-		if result != nil {
-			// Compute chain linkage if tracking enabled
-			if e.chainTrackingEnabled {
-				result.PreviousChainHead = chainHead
-				result.ContentId = StepDeterministicFingerprint(step, result)
-				chainHead = string(fingerprintEngine.Combine(
-					id.ID(chainHead),
-					id.ID(result.ContentId),
-				))
-			}
-
-			exec.AddStepResult(result)
-			evaluator.SetStepResult(step.ID, result)
-			writer.stepFinished(ctx, exec, step, result, chainHead)
-		}
-
-		if err != nil {
-			// Handle error based on strategy
-			switch step.OnError {
-			case ErrorStrategyContinue:
-				if e.logger != nil {
-					e.logger.Warn("step failed, continuing",
-						"component", ComponentName,
-						"step", step.ID,
-						"error", err,
-					)
-				}
-				continue
-			case ErrorStrategyRetry:
-				// Retry logic
-				retried := false
-				for attempt := 1; attempt <= step.RetryCount && !retried; attempt++ {
-					if e.logger != nil {
-						e.logger.Info("retrying step",
-							"component", ComponentName,
-							"step", step.ID,
-							"attempt", attempt,
-						)
-					}
-					writer.stepRunning(ctx, exec, step, i, attemptNo+attempt)
-					result, err = e.executeJournaledStep(ctx, writer, step, stepCtx)
-					if err == nil {
-						if e.chainTrackingEnabled && result != nil {
-							result.PreviousChainHead = chainHead
-							result.ContentId = StepDeterministicFingerprint(step, result)
-							chainHead = string(fingerprintEngine.Combine(
-								id.ID(chainHead),
-								id.ID(result.ContentId),
-							))
-						}
-						exec.AddStepResult(result)
-						evaluator.SetStepResult(step.ID, result)
-						writer.stepFinished(ctx, exec, step, result, chainHead)
-						retried = true
-					}
-				}
-				if !retried {
-					exec.Fail(err)
-					writer.stepFinished(ctx, exec, step, result, chainHead)
-					writer.closeRun(ctx, exec, chainHead)
-					// The step's own rows already record the failure; the run
-					// stays resumable from them.
-					return exec, err
-				}
-			default: // ErrorStrategyStop
-				exec.Fail(err)
-				writer.closeRun(ctx, exec, chainHead)
-				return exec, err
-			}
-		}
-	}
-
-	// Execute onComplete hook if defined
-	if automation.OnComplete != nil {
-		_, err := e.executeStep(ctx, automation.OnComplete, stepCtx)
-		if err != nil && e.logger != nil {
-			e.logger.Warn("onComplete hook failed",
-				"component", ComponentName,
-				"error", err,
-			)
-		}
-	}
-
-	exec.Complete()
-	writer.closeRun(ctx, exec, chainHead)
-
-	// Finalize chain tracking
-	if e.chainTrackingEnabled {
-		exec.ChainHead = chainHead
-	}
-
-	// Publish automation completed event
-	completedPayload := map[string]any{
-		"automationName": automation.Name,
-		"executionId":    exec.ID,
-		"runId":          journal.RunId,
-		"resumed":        true,
-		"duration":       exec.Duration.Milliseconds(),
-		"stepCount":      len(exec.Steps),
-	}
-	if e.chainTrackingEnabled && exec.ChainHead != "" {
-		completedPayload["chainHead"] = exec.ChainHead
-	}
-	e.publishEvent(events.TopicAutomationCompleted, events.KindAutomationCompleted, completedPayload)
-
-	if e.logger != nil {
-		e.logger.Info("resumed automation execution completed",
-			"component", ComponentName,
-			"automation", automation.Name,
-			"executionId", exec.ID,
-			"runId", journal.RunId,
-			"status", exec.Status,
-			"duration", exec.Duration,
-		)
-	}
-
-	return exec, nil
+	return e.runStatementAutomation(ctx, automation, exec, nil, writer, stepCtx, chainHead, resumedStatements(journal, automation, resumeIndex))
 }
 
-// minimalToStepResult converts a MinimalStepResult back to a full StepResult.
-// This is used to rehydrate the evaluator during resume.
+// minimalToStepResult converts a MinimalStepResult back to a full StepResult,
+// the run's record of a step a resume did not run again.
 func minimalToStepResult(min *MinimalStepResult) *StepResult {
 	if min == nil {
 		return nil
@@ -719,6 +561,7 @@ func ToMinimalStepResults(steps map[string]*StepResult) map[string]*MinimalStepR
 				minResult.Result = UnwrapStepResult(result.Result)
 			}
 		}
+		minResult.Value = result.Bound
 
 		// Extract key metadata for evaluator
 		if result.Metadata != nil {

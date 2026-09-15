@@ -1,0 +1,9 @@
+logic demoForward {
+  args {
+    event object!
+  }
+  body {
+    sent := publishEvent( topic: "demo.forwarded", payload: args.event )
+    return 1
+  }
+}

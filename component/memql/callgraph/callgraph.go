@@ -1,17 +1,21 @@
 // Package callgraph enforces the behavioral DSL call-graph contract from the
-// ADR (docs/internal/design/dsl-behavioral-constructs-adr.md, §2):
+// ADR (docs/internal/design/dsl-behavioral-constructs-adr.md, §2), with the
+// logic row as D14 of the DSL v1 program states it (epic memql#5370):
 //
 //	logic decides, mutations persist, actions touch the world,
 //	queries read, automations orchestrate and react.
 //
-//	| Construct  | May call                                   | May NOT             |
-//	|------------|--------------------------------------------|---------------------|
-//	| query      | queries, read-only builtins                | any write           |
-//	| mutation   | builtins; RMW on its own aggregate         | >1 aggregate write  |
-//	| logic      | queries, other logic, read-only builtins   | mutations, actions, |
-//	|            |                                            | triggers            |
-//	| action     | one external capability (I6/I7)            | graph / other calls |
-//	| automation | logic/query/mutation/action/sub-automation | --                  |
+//	| Construct  | May call                                      | May NOT              |
+//	|------------|-----------------------------------------------|----------------------|
+//	| query      | queries, read-only builtins                   | any write            |
+//	| mutation   | builtins; RMW on its own aggregate            | >1 aggregate write   |
+//	| logic      | queries, mutations, other logic, builtins     | actions, automations,|
+//	|            | that do not touch the world                   | publish, triggers    |
+//	| action     | one external capability (I6/I7)               | graph / other calls  |
+//	| automation | logic/query/mutation/action/sub-automation    | --                   |
+//
+// A logic's publish, automation call and action call are refused by the body
+// compiler too (compiler.CheckBody), when the body loads.
 //
 // It is the single source of truth for the rules, wired into BOTH the
 // authoring sandbox cross-reference pass (reject at define->promote) and a
@@ -62,8 +66,8 @@ var (
 	writeBlockRE = regexp.MustCompile(`(?m)^\s*(insert|update)\s*\{`)
 	// A trigger annotation (the reactive surface).
 	triggerRE = regexp.MustCompile(`@trigger\b`)
-	// A `body { }` block opener at statement position -- the procedural
-	// marker (construct-invocation ADR Decision 5). Requires the `{` so a
+	// A `body { }` block opener at statement position, which no construct
+	// has (the body rule, parser/body_rule.go). Requires the `{` so a
 	// declarative field merely *named* body is never matched.
 	bodyBlockRE = regexp.MustCompile(`(?m)^[ \t]*body[ \t]*\{`)
 	// The single capability call inside a simplified action body (ADR
@@ -76,14 +80,15 @@ var (
 	useRE = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+([A-Za-z_][A-Za-z0-9_.]*)\.\{([^}]*)\}`)
 )
 
-// bodyRuleProceduralKinds is the set of non-logic constructs whose top-level
-// `body {` opener is unambiguously the procedural marker (and thus a body-rule
-// violation, ADR Decision 5) rather than a declarative object field. Declarative
-// constructs (concept/shape/prompt/provider/tool/builtin/seed/policy) are
-// intentionally absent: they may carry a nested object field named `body`.
+// bodyRuleProceduralKinds is the set of constructs whose top-level `body {`
+// opener is unambiguously a `body { }` block (and thus a body-rule violation)
+// rather than a declarative object field. Declarative constructs
+// (concept/shape/prompt/provider/tool/builtin/seed/policy) are intentionally
+// absent: they may carry a nested object field named `body`.
 var bodyRuleProceduralKinds = map[string]bool{
 	"query":      true,
 	"mutation":   true,
+	"logic":      true,
 	"action":     true,
 	"automation": true,
 	"spec":       true,
@@ -317,21 +322,16 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 		add("trigger-monopoly", "carries @trigger -- only automations are reactive (ADR §2.4); express reactivity as a triggered automation")
 	}
 
-	// Rule: body { } (construct-invocation ADR Decision 5). The procedural
-	// `body { }` marker is MANDATORY on logic and FORBIDDEN on every other
-	// construct. Mirrors the parser's enforcement so the whole-tree CI gate
-	// + the authoring-sandbox cross-reference pass flag the same violation.
-	// The forbidden arm is scoped to the procedural/behavioral kinds whose
-	// `body {` opener is unambiguously the marker; a *declarative* construct
-	// (concept/shape/...) may legitimately carry a nested object field named
-	// `body`, so those are not flagged here.
-	hasBody := bodyBlockRE.MatchString(text)
-	if kind == "logic" {
-		if !hasBody {
-			add("body-rule", "must wrap its procedural code in a `body { }` block (mandatory on logic; ADR Decision 5)")
-		}
-	} else if bodyRuleProceduralKinds[kind] && hasBody {
-		add("body-rule", fmt.Sprintf("declares a `body { }` block -- forbidden on %s; `body { }` is the procedural marker reserved for logic (ADR Decision 5)", kind))
+	// Rule: body { } (the body rule, parser/body_rule.go). No construct has a
+	// `body { }` block: a logic's and an automation's statements follow their
+	// args block directly (epic memql#5370). Mirrors the parser's enforcement
+	// so the whole-tree CI gate + the authoring-sandbox cross-reference pass
+	// flag the same violation. The rule is scoped to the procedural/behavioral
+	// kinds whose `body {` opener is unambiguously the block; a *declarative*
+	// construct (concept/shape/...) may legitimately carry a nested object
+	// field named `body`, so those are not flagged here.
+	if bodyRuleProceduralKinds[kind] && bodyBlockRE.MatchString(text) {
+		add("body-rule", fmt.Sprintf("declares a `body { }` block -- no %s has one: a logic's and an automation's statements follow their args block directly", kind))
 	}
 
 	calls := callNames(text, useKinds)
@@ -349,13 +349,12 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 
 	switch kind {
 	case "logic":
-		// Logic is pure: no mutations, no actions, no side-effecting builtins.
+		// A logic reads and writes the graph (D14) and never touches the
+		// world: no actions, no side-effecting builtins.
 		for cn, ck := range calls {
 			switch ck {
-			case "mutation":
-				add("logic-purity", fmt.Sprintf("calls mutation %q -- logic is pure (ADR §2.1); move the write to an automation step", cn))
 			case "action":
-				add("logic-purity", fmt.Sprintf("calls action %q -- logic may not touch the world (ADR §2.1); call the action from an automation step", cn))
+				add("logic-purity", fmt.Sprintf("calls action %q -- logic may not touch the world (ADR §2.1); call the action from an automation's statement", cn))
 			case "builtin":
 				if sideEffecting(cn) {
 					add("read-only-builtin", fmt.Sprintf("calls side-effecting builtin %q in read context -- reclassify it as an action (ADR §3)", cn))
@@ -424,8 +423,8 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 		}
 	case "automation":
 		// Automations orchestrate; they do not DECIDE (P4, memql#2371).
-		// Conditions (if gates, forEach where clauses, @filter) may gate on
-		// step results, presence, and single-value fan-out equality -- but
+		// Conditions (if conditions, for filters, @filter) may gate on
+		// statement values, presence, and single-value fan-out equality -- but
 		// POLICY in a condition is a finding: a same-field string-literal
 		// ||-vocabulary (role/status sets), date math (addDuration), or a
 		// default injected into the compared value (`??` coalesce, `+`
@@ -434,7 +433,7 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 		// let 13 policy sites accumulate invisibly after the #2235 burn-down.
 		for _, cond := range automationConditions(text) {
 			if what, ok := conditionPolicyOp(cond); ok {
-				add("automation-condition-builtin", fmt.Sprintf("condition %q %s -- date math / defaults are POLICY; compute the decision in a pure logic (or push a cutoff into the query) and gate on steps.<decide>.result (P4, #2371)", snippet(cond), what))
+				add("automation-condition-builtin", fmt.Sprintf("condition %q %s -- date math / defaults are POLICY; compute the decision in a logic (or push a cutoff into the query) and gate on its value (`decide := logic ...`, then `if decide`) (P4, #2371)", snippet(cond), what))
 			}
 			if field, ok := literalVocabularyField(cond); ok {
 				add("automation-condition-vocabulary", fmt.Sprintf("condition %q compares %q against multiple string literals -- a value VOCABULARY is policy; own it in one pure decide logic and switch on its result (P4, #2371)", snippet(cond), field))
@@ -449,11 +448,6 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 // ---------------------------------------------------------------------------
 
 var (
-	// if-step gates: `if <cond> {` at a step position (never matches the
-	// construct headers -- automations have no top-level if).
-	automationIfRE = regexp.MustCompile(`(?m)^\s*if\s+(.+?)\s*\{\s*$`)
-	// forEach where clauses: `forEach x in <src> where <cond> {`.
-	automationWhereRE = regexp.MustCompile(`(?m)forEach\s+\w+\s+in\s+.+?\s+where\s+(.+?)\s*\{\s*$`)
 	// trigger relevance filters: `@filter(<cond>)`. Only the OPENING is
 	// matched; the argument runs to its balanced `)` (annotationArgs). A
 	// `[^)]*` capture stopped at the first `)` inside the condition, so
@@ -487,19 +481,51 @@ func literalVocabularyField(cond string) (string, bool) {
 }
 
 // automationConditions extracts every condition surface from an automation's
-// source: if-step gates, forEach where clauses, and the @filter annotation.
-// Switch SUBJECTS are exempt -- switching on a decided value is the sanctioned
-// fan-out shape.
+// source: its statements' if conditions and for filters, and the @filter
+// annotation. Switch SUBJECTS are exempt -- switching on a decided value is
+// the sanctioned fan-out shape.
 func automationConditions(text string) []string {
-	var out []string
-	for _, m := range automationIfRE.FindAllStringSubmatch(text, -1) {
-		out = append(out, m[1])
+	conds, _ := statementConditions(text)
+	return append(conds, annotationArgs(text, automationFilterRE)...)
+}
+
+// statementConditions returns a statement body's conditions (epic memql#5370),
+// read off the parsed body: every if and else-if condition and every loop
+// filter, wherever it sits. ok is false for a source the parser refuses,
+// which the loader reports.
+func statementConditions(text string) ([]string, bool) {
+	pf, err := parser.ParseFile(text)
+	if err != nil {
+		return nil, false
 	}
-	for _, m := range automationWhereRE.FindAllStringSubmatch(text, -1) {
-		out = append(out, m[1])
+	for _, d := range pf.Definitions {
+		fn, ok := d.(*ast.FunctionDef)
+		if !ok {
+			continue
+		}
+		auto, ok := fn.Body.(*ast.AutomationDef)
+		if !ok || auto.Body == nil {
+			continue
+		}
+		var out []string
+		ast.WalkBody(auto.Body.Statements, func(st ast.BodyStatement) bool {
+			switch s := st.(type) {
+			case *ast.IfStatement:
+				for _, b := range s.Branches {
+					if b.Cond != nil {
+						out = append(out, ast.FormatExpr(b.Cond))
+					}
+				}
+			case *ast.ForStatement:
+				if s.Filter != nil {
+					out = append(out, ast.FormatExpr(s.Filter))
+				}
+			}
+			return true
+		})
+		return out, true
 	}
-	out = append(out, annotationArgs(text, automationFilterRE)...)
-	return out
+	return nil, false
 }
 
 // annotationArgs returns the argument text of every annotation whose opening

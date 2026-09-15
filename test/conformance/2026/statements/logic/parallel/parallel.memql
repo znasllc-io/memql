@@ -1,0 +1,21 @@
+logic halveForParallel {
+  args {
+    n any
+  }
+  return args.n / 2
+}
+
+logic halvesInParallel {
+  args {
+    n any
+  }
+  parallel {
+    branch left {
+      logic halveForParallel(n: args.n)
+    }
+    branch right {
+      logic halveForParallel(n: args.n + 2)
+    }
+  }
+  return args.n
+}

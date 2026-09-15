@@ -138,13 +138,11 @@ logic logicCounterProbe {
   args {
     rows []object @required
   }
-  body {
-    big := args.rows.where(r => r.count > 10)
-    return big.count()
-  }
+  big := args.rows.where(r => r.count > 10)
+  return big.count()
 }
 `
-	body := parseLogicBodyForSteps(t, logicSrc)
+	body := compiledLogicForSteps(t, logicSrc)
 
 	// Serialize + re-parse the arg exactly as the function step does.
 	resolved, err := automations.NewEvaluator().ResolveV1Map(context.Background(), map[string]any{"rows": []any{
@@ -162,9 +160,9 @@ logic logicCounterProbe {
 	call := parsed.(*langparser.FunctionCallExpr)
 
 	runner := automations.NewLogicRunner(&memql.MemQLEngine{}, &nullStepRegistry{}, nil)
-	out, err := runner.RunLogic(context.Background(), "logicCounterProbe", body, call.Args)
+	out, err := runner.RunLogicBody(context.Background(), "logicCounterProbe", body, call.Args)
 	if err != nil {
-		t.Fatalf("RunLogic on round-tripped counter rows: %v", err)
+		t.Fatalf("RunLogicBody on round-tripped counter rows: %v", err)
 	}
 	if !intEquals(out, 1) {
 		t.Errorf("numeric comparison on the round-tripped counter: got %#v (%T), want 1 matching row (a bool-typed counter matches 0)", out, out)
@@ -257,15 +255,13 @@ logic logicArithCmpProbe {
   args {
     rows []object @required
   }
-  body {
-    big := args.rows.where(r => r.count - 10 > 0)
-    return big.count()
-  }
+  big := args.rows.where(r => r.count - 10 > 0)
+  return big.count()
 }
 `
-	body := parseLogicBodyForSteps(t, logicSrc)
+	body := compiledLogicForSteps(t, logicSrc)
 	runner := automations.NewLogicRunner(&memql.MemQLEngine{}, &nullStepRegistry{}, nil)
-	out, err := runner.RunLogic(context.Background(), "logicArithCmpProbe", body, map[string]any{
+	out, err := runner.RunLogicBody(context.Background(), "logicArithCmpProbe", body, map[string]any{
 		"rows": []any{
 			map[string]any{"count": int64(3)},
 			map[string]any{"count": int64(30)},
@@ -273,7 +269,7 @@ logic logicArithCmpProbe {
 		},
 	})
 	if err != nil {
-		t.Fatalf("RunLogic with arithmetic-LHS comparison lambda: %v", err)
+		t.Fatalf("RunLogicBody with arithmetic-LHS comparison lambda: %v", err)
 	}
 	if !intEquals(out, 2) {
 		t.Errorf("where(r => r.count - 10 > 0) kept %#v rows, want 2 (count 30 and 11)", out)

@@ -1,0 +1,46 @@
+{
+  "cases": [
+    {
+      "file": "conditional-assignment.memql",
+      "verdict": "refuse_parse",
+      "code": "body_conditional_assign_retired",
+      "message": "`x := if <cond> { <call> }` is retired in edition 2026: write `if <cond> { x := <call> }` -- a name bound in an if branch is readable after it"
+    },
+    {
+      "file": "steps-reference.memql",
+      "verdict": "refuse_parse",
+      "code": "body_steps_reference_retired",
+      "message": "`steps.<id>...` is retired in edition 2026: a statement's name is its value, so write `<id>`"
+    },
+    {
+      "file": "for-range.memql",
+      "verdict": "refuse_parse",
+      "code": "body_for_range_retired",
+      "message": "`for x := range <source>` is retired in edition 2026: write `for x in <source>`"
+    },
+    {
+      "file": "foreach.memql",
+      "verdict": "refuse_parse",
+      "code": "body_foreach_retired",
+      "message": "`forEach` is retired in edition 2026: write `for <x> in <source> if <cond> { }`"
+    },
+    {
+      "file": "publish-event.memql",
+      "verdict": "refuse_parse",
+      "code": "body_publish_event_retired",
+      "message": "`publishEvent(...)` is retired in edition 2026: write `publish \"<topic>\" { ... }` in an automation"
+    },
+    {
+      "file": "body-block.memql",
+      "verdict": "refuse_parse",
+      "code": "body_block_retired",
+      "message": "`body { }` is retired in edition 2026: a logic's statements follow its args block directly"
+    },
+    {
+      "file": "accessor.memql",
+      "verdict": "refuse_parse",
+      "code": "body_accessor_retired",
+      "message": "`step(\"first\")` is retired in edition 2026: a statement's name is its value, so write `first`"
+    }
+  ]
+}

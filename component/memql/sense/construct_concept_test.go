@@ -85,7 +85,7 @@ const (
 
 // TestConstructConceptAfterMutateOffersConcept verifies the headline path:
 // after `mutation ` the bound concept's SHORT name `space` is offered (not the
-// canonical id the registry stores). `mutate` is the declaration keyword
+// canonical id the registry stores). `mutation` is the declaration keyword
 // (memql#2041); `mutation` is the invocation-step prefix only.
 func TestConstructConceptAfterMutateOffersConcept(t *testing.T) {
 	rp := &fakeRegistry{concepts: []string{cidSpace}}

@@ -1,0 +1,6 @@
+@trigger(schedule="0 0 * * * *")
+automation callsEachKind {
+  rows := query things()
+  doubled := logic double(n: rows.count())
+  mutation saveThing(label: doubled > 0 ? "some" : "none")
+}

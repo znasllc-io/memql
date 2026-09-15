@@ -1,0 +1,71 @@
+{
+  "automation": "knowledge/automations.memql trainSpecialist",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "domainId": "s-domainId",
+            "mode": "s-mode",
+            "specialistId": "s-specialistId",
+            "topic": "s-topic"
+          },
+          "topic": "automation.invocation.trainSpecialist"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "domainId": "s-domainId",
+              "mode": "s-mode",
+              "specialistId": "s-specialistId",
+              "topic": "s-topic"
+            },
+            "kind": "builtin",
+            "name": "trainSpecialist"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "domainId": "s-domainId",
+            "mode": "s-mode",
+            "specialistId": "s-specialistId",
+            "topic": "s-topic"
+          },
+          "topic": "automation.invocation.trainSpecialist"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "domainId": "s-domainId",
+              "mode": "s-mode",
+              "specialistId": "s-specialistId",
+              "topic": "s-topic"
+            },
+            "kind": "builtin",
+            "name": "trainSpecialist"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}
