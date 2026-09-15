@@ -66,8 +66,8 @@ var (
 	writeBlockRE = regexp.MustCompile(`(?m)^\s*(insert|update)\s*\{`)
 	// A trigger annotation (the reactive surface).
 	triggerRE = regexp.MustCompile(`@trigger\b`)
-	// A `body { }` block opener at statement position -- the procedural
-	// marker (construct-invocation ADR Decision 5). Requires the `{` so a
+	// A `body { }` block opener at statement position, which no construct
+	// has (the body rule, parser/body_rule.go). Requires the `{` so a
 	// declarative field merely *named* body is never matched.
 	bodyBlockRE = regexp.MustCompile(`(?m)^[ \t]*body[ \t]*\{`)
 	// The single capability call inside a simplified action body (ADR
@@ -80,14 +80,15 @@ var (
 	useRE = regexp.MustCompile(`(?m)^[ \t]*use[ \t]+([A-Za-z_][A-Za-z0-9_.]*)\.\{([^}]*)\}`)
 )
 
-// bodyRuleProceduralKinds is the set of non-logic constructs whose top-level
-// `body {` opener is unambiguously the procedural marker (and thus a body-rule
-// violation, ADR Decision 5) rather than a declarative object field. Declarative
-// constructs (concept/shape/prompt/provider/tool/builtin/seed/policy) are
-// intentionally absent: they may carry a nested object field named `body`.
+// bodyRuleProceduralKinds is the set of constructs whose top-level `body {`
+// opener is unambiguously a `body { }` block (and thus a body-rule violation)
+// rather than a declarative object field. Declarative constructs
+// (concept/shape/prompt/provider/tool/builtin/seed/policy) are intentionally
+// absent: they may carry a nested object field named `body`.
 var bodyRuleProceduralKinds = map[string]bool{
 	"query":      true,
 	"mutation":   true,
+	"logic":      true,
 	"action":     true,
 	"automation": true,
 	"spec":       true,
@@ -321,19 +322,16 @@ func ConstructFindings(kind, name, text string, useKinds map[string]string, side
 		add("trigger-monopoly", "carries @trigger -- only automations are reactive (ADR §2.4); express reactivity as a triggered automation")
 	}
 
-	// Rule: body { } (construct-invocation ADR Decision 5). The procedural
-	// `body { }` marker is FORBIDDEN on every construct but logic. Mirrors the
-	// parser's enforcement so the whole-tree CI gate + the authoring-sandbox
-	// cross-reference pass flag the same violation. On logic it was
-	// mandatory until epic memql#5370 retired the wrapper: a logic without
-	// it is the edition-2026 statement form, and the parser refuses the
-	// wrapper itself once the tree is migrated.
-	// The forbidden arm is scoped to the procedural/behavioral kinds whose
-	// `body {` opener is unambiguously the marker; a *declarative* construct
-	// (concept/shape/...) may legitimately carry a nested object field named
-	// `body`, so those are not flagged here.
-	if kind != "logic" && bodyRuleProceduralKinds[kind] && bodyBlockRE.MatchString(text) {
-		add("body-rule", fmt.Sprintf("declares a `body { }` block -- forbidden on %s; `body { }` is the procedural marker reserved for logic (ADR Decision 5)", kind))
+	// Rule: body { } (the body rule, parser/body_rule.go). No construct has a
+	// `body { }` block: a logic's and an automation's statements follow their
+	// args block directly (epic memql#5370). Mirrors the parser's enforcement
+	// so the whole-tree CI gate + the authoring-sandbox cross-reference pass
+	// flag the same violation. The rule is scoped to the procedural/behavioral
+	// kinds whose `body {` opener is unambiguously the block; a *declarative*
+	// construct (concept/shape/...) may legitimately carry a nested object
+	// field named `body`, so those are not flagged here.
+	if bodyRuleProceduralKinds[kind] && bodyBlockRE.MatchString(text) {
+		add("body-rule", fmt.Sprintf("declares a `body { }` block -- no %s has one: a logic's and an automation's statements follow their args block directly", kind))
 	}
 
 	calls := callNames(text, useKinds)

@@ -62,20 +62,21 @@ import (
 // set.
 const GateUnresolvedSubAutomation Gate = "unresolved-sub-automation"
 
-// THE THREE DECLARATION FORMS. All three are live in the tree, and a
-// declaration index that knows only the first produces confident false
-// positives on the other two -- a refused boot naming an automation that is
-// right there in the file.
+// THE THREE DECLARATION SHAPES the loaders slice. A declaration index that
+// knows only the first produces confident false positives on the others -- a
+// refused boot naming an automation that is right there in the file.
 //
 //  1. strict:  `automation NAME {`
 //  2. loose:   `automation NAME` with the brace on the following line
-//  3. terse:   `automation NAME @trigger(...) => logic X`
+//  3. terse:   `automation NAME @trigger(...) => logic X`, the retired
+//     one-line form: the loaders slice it so the parser refuses it by name
+//     (body_terse_retired), and indexing it here keeps a call to it from
+//     reporting as unresolved beside that refusal.
 //
-// These mirror automationStructHeader / automationLooseHeader
-// (component/automations/unified_loader.go) and terseAutomationHeader
-// (component/language/parser/rewriter.go). They are copied rather than imported
-// because dslgate must not depend on the loader or the parser -- but they must
-// stay in step, which is what TestDeclarationFormsCoverTheLoaders asserts.
+// These mirror automationStructHeader / automationLooseHeader /
+// automationTerseHeader (component/automations/unified_loader.go). They are
+// copied rather than imported because dslgate must not depend on the loader,
+// so they are kept in step by hand.
 var (
 	automationDeclStrict = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 	automationDeclLoose  = regexp.MustCompile(`(?m)^[ \t]*automation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*$`)

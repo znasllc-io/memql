@@ -929,7 +929,7 @@ func (p *Parser) parseAttributeArgs() (*Attribute, error) {
 		for !p.check(TokenParenClose) && !p.check(TokenEOF) {
 			// A lexer-promoted keyword is a valid argument name here
 			// (memql#3652). `as` is promoted to TokenKeywordAs for
-			// `forEach ... as x` and `use ... as` aliasing, but an argument
+			// `use ... as` aliasing, but an argument
 			// name sits after `(` or `,` and is followed by `=` -- a position
 			// no control-flow keyword can occupy, so there is nothing to
 			// disambiguate. The identical allowance already exists one position
@@ -4201,12 +4201,13 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 	// is a collection operator (`args.members.where`) is a collection-method
 	// call, not a generic function call. Intercept before the table-driven
 	// dispatch so the receiver path + lambda args parse correctly. The
-	// engine converter enforces scope (logic/forEach only).
+	// engine converter enforces scope (a logic's or an automation's
+	// statements only).
 	if recvPath, method, ok := isCollectionMethodPath(name); ok {
 		return p.parseCollectionMethodCall(recvPath, method)
 	}
 
-	// index() with no args = forEach index accessor; index(arr, i) = array element (general parsing)
+	// index() with no args = the retired loop-index accessor (refused at load); index(arr, i) = array element (general parsing)
 	if lname == "index" && p.check(TokenParenClose) {
 		return p.parseIndexAccessor()
 	}
@@ -5387,13 +5388,12 @@ func (p *Parser) parseObject() (map[string]any, error) {
 			p.advance()
 		} else if p.check(TokenComma) || p.check(TokenBraceClose) {
 			// G3 (#2365) punning in object-literal position: a bare simple
-			// identifier is `key: key`. This is the path automation STEP
-			// calls lower through (the rewriter turns `logic X(k: v, j)`
-			// into an object form), so punning must parse here exactly as
-			// in parseFunctionCallWithKind. The value is the identifier's
-			// own literal -- identical to what parseValue returns for the
-			// named form `j: j` -- and resolves at runtime via the G2 bare
-			// rules. Dotted keys never reach here (they fail the key check).
+			// identifier is `key: key`, as in parseFunctionCallWithKind. The
+			// value is the identifier's own literal -- identical to what
+			// parseValue returns for the named form `j: j`. Dotted keys never
+			// reach here (they fail the key check). A logic's and an
+			// automation's statements parse their own expressions
+			// (v1_expr.go), where a keyless entry is refused.
 			obj[key] = key
 			if p.check(TokenComma) {
 				p.advance()
@@ -5521,7 +5521,8 @@ func (p *Parser) parseInputAccessor() (ExpressionNode, error) {
 	return &InputRefExpr{}, nil
 }
 
-// parseItemAccessor parses item() - forEach item reference.
+// parseItemAccessor parses item() -- the retired loop-item accessor, refused
+// at load in every position.
 func (p *Parser) parseItemAccessor() (ExpressionNode, error) {
 	if err := p.expect(TokenParenClose); err != nil {
 		return nil, err
@@ -5529,7 +5530,8 @@ func (p *Parser) parseItemAccessor() (ExpressionNode, error) {
 	return &ItemRefExpr{}, nil
 }
 
-// parseIndexAccessor parses index() - forEach index reference.
+// parseIndexAccessor parses index() -- the retired loop-index accessor,
+// refused at load in every position.
 func (p *Parser) parseIndexAccessor() (ExpressionNode, error) {
 	if err := p.expect(TokenParenClose); err != nil {
 		return nil, err
@@ -6233,7 +6235,7 @@ func (p *Parser) reconstructTokens(start, end int) string {
 // Accepts both int64 (the canonical type for integer literals emitted
 // by baseparser.ParseNumericLiteral) and float64 (decimals and
 // pre-#255 emissions) so directive-arg consumers that need an int
-// (paginate, withDepth, forEach concurrency) don't have to re-
+// (paginate, withDepth) don't have to re-
 // implement the type dispatch at every call site.
 //
 // Out-of-range values reject (ok=false) rather than wrap. The bound

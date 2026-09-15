@@ -92,32 +92,6 @@ func v1RequiredText(ctx context.Context, evaluator *automations.Evaluator, n ast
 	return s, nil
 }
 
-// v1ConstructCallText renders a construct call for engine.Execute:
-// `name(k: <literal>, ...)`, its arguments evaluated over the run. An
-// argument that evaluates to absent is omitted, so the callee sees the
-// argument as not passed (rule 30's container rule applied to a call);
-// an explicit nil is passed as null. Positional arguments are refused: a
-// construct call names its arguments.
-func v1ConstructCallText(ctx context.Context, evaluator *automations.Evaluator, call *ast.CallExpr) (string, error) {
-	if len(call.Args) > 0 {
-		return "", fmt.Errorf("%s %s: a construct call takes named arguments only, got %d positional", call.Kind, call.Name, len(call.Args))
-	}
-	args := make(map[string]any, len(call.Named))
-	for _, na := range call.Named {
-		v, err := evaluator.EvalV1(ctx, na.Value)
-		if err != nil {
-			return "", fmt.Errorf("%s %s argument %s: %w", call.Kind, call.Name, na.Name, err)
-		}
-		// The Absent sentinel, not nil: a JSON null is a value the author
-		// wrote and is passed.
-		if v == memql.Absent {
-			continue
-		}
-		args[na.Name] = v
-	}
-	return call.Name + "(" + renderV1NamedArgs(args) + ")", nil
-}
-
 // renderV1CallArgs renders a v1 function step's evaluated arguments: named
 // (`k: <literal>`, sorted), or -- when every key is an index "0".."n-1", the
 // shape a positional call is stored in -- positionally, in index order.

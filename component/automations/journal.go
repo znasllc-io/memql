@@ -220,8 +220,8 @@ func journalArgs(name string, args map[string]any) (string, error) {
 	}
 	// A NIL VALUE IS AN ABSENT ARGUMENT, and it has to be dropped rather than
 	// rendered. `input: null` is the case that found this: exec.Input is nil
-	// whenever an automation declares no `input:` block -- most of them -- and
-	// the concept declares `input object`, so the engine refused the whole row
+	// on an automation's run -- only a logic run records its arguments there --
+	// and the concept declares `input object`, so the engine refused the whole row
 	// with "expected object, but got null". The refusal was invisible, because
 	// call() logs a Warn and lets the run continue: every step row landed and
 	// no run row ever did.

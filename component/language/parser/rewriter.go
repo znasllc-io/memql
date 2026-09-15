@@ -761,8 +761,8 @@ func (q *structQueryBody) refuseClauseAt(kw string, err error) error {
 const UnboundedPaginateWindow = 1000000
 
 func emitQuery(name, conceptId, body, preamble string) (string, error) {
-	// ADR Decision 5: `body { }` is reserved for logic; a query is
-	// declarative clauses, never a procedural body block.
+	// The body rule (body_rule.go): a query is declarative clauses, never a
+	// `body { }` block.
 	if err := rejectNonLogicBodyBlock("query", name, body); err != nil {
 		return "", err
 	}
@@ -1108,9 +1108,8 @@ type structMutationBody struct {
 }
 
 func emitMutation(name, conceptId, body, _preamble string) (string, error) {
-	// ADR Decision 5: `body { }` is reserved for logic; a mutation is a
-	// declarative `insert { ... }` / `update { ... }` block, never a
-	// procedural body block.
+	// The body rule (body_rule.go): a mutation is a declarative
+	// `insert { ... }` / `update { ... }` block, never a `body { }` block.
 	if err := rejectNonLogicBodyBlock("mutation", name, body); err != nil {
 		return "", err
 	}

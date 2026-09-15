@@ -455,12 +455,6 @@ type EventStepConfig struct {
 	// leaf.
 	Payload map[string]any `json:"payload,omitempty"`
 
-	// IncludeResult includes a step's result in the payload.
-	IncludeResult bool `json:"includeResult,omitempty"`
-
-	// ResultFrom specifies which step's result to include.
-	ResultFrom string `json:"resultFrom,omitempty"`
-
 	// leaves are the value leaves carried in topic when it is not a string
 	// (value_leaves.go).
 	leaves leafFields

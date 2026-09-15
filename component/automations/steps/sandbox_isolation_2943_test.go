@@ -34,7 +34,6 @@ import (
 
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/events"
-	"github.com/znasllc-io/memql/component/memql"
 )
 
 // writeReachRecorder stands in for a production executor and records every
@@ -68,7 +67,7 @@ func sandboxWithRecorder(t *testing.T, types ...automations.StepType) (*sandboxS
 	for _, ty := range types {
 		real.Register(ty, rec)
 	}
-	return newSandboxStepRegistry(real, bootEmbeddedEngine(t), "sandbox:dryrun:2943", memql.DryRunModeIsolated, ""), rec
+	return newSandboxStepRegistry(real, bootEmbeddedEngine(t), "sandbox:dryrun:2943"), rec
 }
 
 func newStepCtx() *automations.StepContext {

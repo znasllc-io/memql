@@ -324,8 +324,8 @@ func (*FunctionCallExpr) expressionNode() {}
 // collection being operated on (a dotted-path arg/spec reference or a prior
 // MethodCallExpr in a chain); Method is the collection operator name
 // (where/select/count/...); Args are the parsed call arguments, each of which
-// may be a LambdaExpr. These nodes are only valid in logic bodies and
-// automation forEach; specs and query filters reject them at load.
+// may be a LambdaExpr. These nodes are only valid in a logic's or an
+// automation's statements; specs and query filters reject them at load.
 type MethodCallExpr struct {
 	Receiver ExpressionNode
 	Method   string

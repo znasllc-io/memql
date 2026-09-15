@@ -187,9 +187,10 @@ type StepContext struct {
 	AutomationTrigger AutomationTrigger
 	TriggeringEvent   *events.Event // The event that triggered this automation (if any)
 
-	// PreviousChainHead is the chain state before this step executes.
-	// For child steps in forEach/parallel, this links to the parent's chain position
-	// (parallel) or the previous sibling's chain head (forEach sequential).
+	// PreviousChainHead is the chain state before this step executes. The
+	// chain advances over the top-level statements only: a statement in a
+	// `for` body or a parallel branch carries the chain position of the
+	// statement that holds it.
 	PreviousChainHead string
 
 	// ChainTrackingEnabled indicates whether chain tracking is active.
@@ -212,11 +213,8 @@ type ExecutorOptions struct {
 	// straight to the engine, never through the interception layer, so a
 	// "dry-run" left durable, RESUMABLE rows in the live graph.
 	//
-	// It is not the only write that escapes -- sandbox_registry intercepts
-	// mutation / webhook / mutating-function steps and forwards everything else
-	// to the production executors, and executeInput bypasses the step registry
-	// entirely -- so dryrun.go's "zero rows land in the live graph" remains
-	// overstated after this change (tracked separately). The journal is the
+	// Since memql#2943 the sandbox registry refuses every step type it has not
+	// classified, so the journal was the last write that escaped, and it is the
 	// one that matters for #2890 / #2908, because it is the only escaping write
 	// that is a RESUMABLE TOKEN.
 	//
@@ -711,8 +709,8 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 // construct.
 //
 // This is a named function rather than an inline `if` because the inline form
-// was DELETABLE WITH A GREEN SUITE: the only end-to-end tests drive automations
-// with no `input:` block, so the branch was never entered. The Executor holds a
+// was DELETABLE WITH A GREEN SUITE: no end-to-end test entered the untrusted
+// branch. The Executor holds a
 // concrete *memql.MemQLEngine rather than an interface, so there is no seam to
 // inject a capturing engine through -- extracting the decision is what makes it
 // assertable at all. See TestOriginForSource.
@@ -759,11 +757,11 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 	// unconditional stamp; two earlier attempts were wrong in opposite
 	// directions and the reasoning for each looked sound at the time:
 	//
-	//   1. Stamped the `input:` block only. No step goes through that path --
-	//      every step type dispatches via stepRegistry.Execute -- so the kill
-	//      switch was refused as a client call and silently suspended
-	//      nothing. Closed-looking but open, exactly as the issue's park
-	//      comment predicted.
+	//   1. Stamped the automation's input evaluation only. No step went
+	//      through that path -- every step type dispatches via
+	//      stepRegistry.Execute -- so the kill switch was refused as a client
+	//      call and silently suspended nothing. Closed-looking but open,
+	//      exactly as the issue's park comment predicted.
 	//
 	//   2. Stamped HERE unconditionally, justified by "executeStep is
 	//      reachable only from automation execution and resume". That is
@@ -782,9 +780,9 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 	// client-callable `logic foo(...)` path, so stamping there would let a
 	// caller launder client origin by wrapping a @serverOnly read in a logic.
 	//
-	// Routed through originForSource so the step and input: paths cannot
-	// drift, and so the untrusted branch stamps CLIENT rather than inheriting
-	// whatever the parent carried -- see that function's comment.
+	// Routed through originForSource so the untrusted branch stamps CLIENT
+	// rather than inheriting whatever the parent carried -- see that
+	// function's comment.
 	trusted := stepCtx != nil && stepCtx.Execution != nil && stepCtx.Execution.SourceTrusted
 	stepExecCtx := e.withRunContext(originForSource(ctx, trusted), stepCtx, step)
 	result, err := e.stepRegistry.Execute(stepExecCtx, step, stepCtx)

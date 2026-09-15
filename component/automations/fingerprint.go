@@ -213,43 +213,20 @@ func ComputeInitialChainHead(automationName, triggeredBy string, triggeringEvent
 	return string(fingerprintEngine.MustFromMap(fp))
 }
 
-// FingerprintInput creates a deterministic hash of input query results.
+// FingerprintInput creates a deterministic hash of a run's input
+// (exec.Input).
 //
-// Reached only when automation.Input is set, which nothing populates today
-// (see the note at its call site in executor.go). The wall-clock rule that
-// governs every key in this file lives on eventFingerprintData above, next to
-// the key that IS live -- an earlier revision of this change put it here, on
-// the strength of "whoever builds the next key will start at the surviving
-// helper", which was wrong: a reader of running code never lands here.
+// An automation's run carries no input -- only a logic run records its
+// arguments there -- so an automation's chain does not reach this. The
+// wall-clock rule that governs every key in this file lives on
+// eventFingerprintData above, next to the key that IS live -- an earlier
+// revision of this change put it here, on the strength of "whoever builds the
+// next key will start at the surviving helper", which was wrong: a reader of
+// running code never lands here.
 func FingerprintInput(input any) string {
 	return string(fingerprintEngine.MustFromMap(map[string]any{
 		"input": fingerprintQueryResult(input),
 	}))
-}
-
-// ComputeChildFingerprint creates a ContentId for a forEach child iteration.
-func ComputeChildFingerprint(parentStepId string, index int, result *StepResult) string {
-	if result == nil {
-		return ""
-	}
-
-	fp := map[string]any{
-		"parentStep": parentStepId,
-		"childType":  "forEachIteration",
-		"index":      index,
-		"status":     result.Status,
-	}
-
-	// Include deterministic result shape
-	if result.Result != nil {
-		fp["resultShape"] = fingerprintGenericResult(result.Result)
-	}
-
-	if result.Error != "" {
-		fp["hasError"] = true
-	}
-
-	return string(fingerprintEngine.MustFromMap(fp))
 }
 
 // ComputeBranchFingerprint creates a ContentId for a parallel branch.

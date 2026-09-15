@@ -291,7 +291,8 @@ are passed by name in the parens (colon-separated) with empty = `()` (never
 `({})`); the language itself (operators, collection lambdas, control flow) stays
 **bare**. This makes the CQS nature of each call syntactically visible. `body { }`
 is the procedural marker: **mandatory on `logic`, forbidden on every other
-construct**. The full rules live in the
+construct** (since retired on `logic` too, epic memql#5370: no construct has
+one). The full rules live in the
 [construct-invocation & action syntax ADR](./construct-invocation-syntax-adr.md).
 
 ## 4. Worked examples (target syntax)

@@ -847,7 +847,7 @@ func (c *ASTConverter) convertMethodCallExpr(expr *languageParser.MethodCallExpr
 		return nil, nil
 	}
 	if !c.allowCollectionMethods {
-		return nil, fmt.Errorf("collection methods (.where/.select/.count/...) are not allowed in specs or query filters; use them in logic bodies or automation forEach (ADR §2.2)")
+		return nil, fmt.Errorf("collection methods (.where/.select/.count/...) are not allowed in specs or query filters; use them in a logic's or an automation's statements (ADR §2.2)")
 	}
 	receiver, err := c.ConvertExpression(expr.Receiver)
 	if err != nil {
@@ -888,7 +888,7 @@ func (c *ASTConverter) convertDotAccessExpr(expr *languageParser.DotAccessExpr) 
 		return nil, nil
 	}
 	if !c.allowCollectionMethods {
-		return nil, fmt.Errorf("field access on a call result (.first().field) is only available in logic bodies or automation forEach (in-memory), not in specs or query filters (#2542)")
+		return nil, fmt.Errorf("field access on a call result (.first().field) is only available in a logic's or an automation's statements (in-memory), not in specs or query filters (#2542)")
 	}
 	inner := languageParser.ExpressionNode(expr.Object)
 	for {
@@ -915,7 +915,7 @@ func (c *ASTConverter) convertLambdaExpr(expr *languageParser.LambdaExpr) (Expre
 		return nil, nil
 	}
 	if !c.allowCollectionMethods {
-		return nil, fmt.Errorf("lambdas (x => ...) are only valid as collection-method arguments in logic bodies or automation forEach (ADR §2.2)")
+		return nil, fmt.Errorf("lambdas (x => ...) are only valid as collection-method arguments in a logic's or an automation's statements (ADR §2.2)")
 	}
 	body, err := c.ConvertExpression(expr.Body)
 	if err != nil {

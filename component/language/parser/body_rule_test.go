@@ -13,9 +13,9 @@ import (
 // component/memql/callgraph).
 
 // rewriteAndParse runs the struct-form rewriter (NormaliseAll) and then parses
-// the result, mirroring the real loader pipeline. Logic/query/mutation/
-// automation reach the parser only after the rewriter expands their struct
-// form, so a test that exercises the full path must rewrite first.
+// the result, mirroring the real loader pipeline. A query and a mutation reach
+// the parser only after the rewriter expands their struct form, so a test that
+// exercises the full path must rewrite first.
 func rewriteAndParse(t *testing.T, src string) (*File, error) {
 	t.Helper()
 	rewritten, err := NormaliseAll(src)

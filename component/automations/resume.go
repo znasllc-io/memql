@@ -454,26 +454,11 @@ func (e *Executor) ResumeFrom(
 		"restoredSteps":  len(journal.Steps),
 	})
 
-	// Chain tracking - start from the run row's chain head
-	// Include completed steps from the journal in StepOrder for chain verification
-	// Only copy steps BEFORE the resume point to avoid duplicates
+	// Chain tracking starts from the run row's chain head. The body runs again
+	// from its first statement over names rehydrated from the journal; the
+	// statement order is the body's, so it is not copied from the journal.
 	var chainHead string
-	{
-		// Copy only steps before resumeIndex (not including the failed step)
-		// The failed step will be added when it executes
-		if len(journal.StepOrder) > 0 && resumeIndex > 0 {
-			// Find how many steps from journal.StepOrder to keep
-			// This is the minimum of resumeIndex and the journal's step count
-			stepsToKeep := resumeIndex
-			if stepsToKeep > len(journal.StepOrder) {
-				stepsToKeep = len(journal.StepOrder)
-			}
-			exec.StepOrder = make([]string, stepsToKeep, len(automation.Steps))
-			copy(exec.StepOrder, journal.StepOrder[:stepsToKeep])
-		} else {
-			exec.StepOrder = make([]string, 0, len(automation.Steps))
-		}
-	}
+	exec.StepOrder = make([]string, 0, len(automation.Steps))
 	if e.chainTrackingEnabled {
 		exec.InitialChainHead = journal.InitialChainHead
 		chainHead = journal.ChainHead // Resume from the run row's chain position
@@ -510,10 +495,6 @@ func (e *Executor) ResumeFrom(
 		ChainTrackingEnabled: e.chainTrackingEnabled,
 	}
 
-	// The body runs again from its first statement over names rehydrated
-	// from the journal; the statement order is the body's, so it is not
-	// copied from the journal.
-	exec.StepOrder = exec.StepOrder[:0]
 	return e.runStatementAutomation(ctx, automation, exec, nil, writer, stepCtx, chainHead, resumedStatements(journal, automation, resumeIndex))
 }
 

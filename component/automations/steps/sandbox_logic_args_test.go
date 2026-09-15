@@ -28,7 +28,7 @@ func TestStepCallArgs_BindsTheEventEnvelope(t *testing.T) {
 	evaluator := automations.NewEvaluator()
 	evaluator.SetCustom("event", envelope)
 
-	reg := newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test", "", "")
+	reg := newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test")
 	stepCtx := &automations.StepContext{Evaluator: evaluator}
 
 	// The compiled shape of `logic autoJoinAI ( event: event )`: a named
@@ -62,7 +62,7 @@ func TestStepCallArgs_BindsTheEventEnvelope(t *testing.T) {
 // TestStepCallArgs_EmptyArgs returns an empty map (no panic) when the call
 // carries no args -- the cron/no-arg logic shape.
 func TestStepCallArgs_EmptyArgs(t *testing.T) {
-	reg := newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test", "", "")
+	reg := newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test")
 	stepCtx := &automations.StepContext{Evaluator: automations.NewEvaluator()}
 
 	step := &automations.Step{ID: "probe", Type: automations.StepTypeFunction, Function: &automations.FunctionStepConfig{Name: "serviceVersionProbe"}}

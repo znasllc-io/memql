@@ -58,9 +58,9 @@ const (
 	TokenKeywordReturn     // return
 	TokenKeywordNil        // nil
 	TokenKeywordRetry      // retry
-	TokenKeywordWhen       // when (conditional step execution)
-	TokenKeywordAs         // as (forEach iteration variable, use alias)
-	TokenKeywordWhere      // where (forEach filter)
+	TokenKeywordWhen       // when (the retired `when(args.x) { }` guard; refused)
+	TokenKeywordAs         // as (use alias)
+	TokenKeywordWhere      // where (the retired forEach filter's word; usable as a name)
 	TokenKeywordUse        // use (concept import declaration)
 	TokenKeywordImport     // import (file-import block; new model)
 	TokenKeywordConcept    // concept (concept definition)
@@ -259,8 +259,7 @@ type Lexer struct {
 
 	// docBlocks collects /// doc-comment blocks captured at lex time
 	// (memql#2633): consecutive /// lines merge into one block. The token
-	// stream is untouched -- ~24 consumers iterate it positionally, the
-	// terse-automation migrator compares two streams for equality, and
+	// stream is untouched -- ~24 consumers iterate it positionally and
 	// sense emits its own comment tokens -- so doc comments travel on this
 	// side channel and reach the parser via SetDocComments.
 	docBlocks []DocCommentBlock

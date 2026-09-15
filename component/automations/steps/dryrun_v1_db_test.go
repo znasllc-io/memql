@@ -111,7 +111,6 @@ automation %s {
   v := logic %s()
   return v
 }`, name, topic, logicName),
-		Mode: memql.DryRunModeIsolated,
 	})
 	if err != nil {
 		t.Fatalf("runBundleDryRun: %v", err)

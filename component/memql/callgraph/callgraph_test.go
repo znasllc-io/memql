@@ -22,24 +22,27 @@ func has(fs []Finding, rule string) bool {
 	return false
 }
 
-// I2 acceptance: a logic with a write (mutation call) produces a finding.
-func TestLogicCallingMutationIsFlagged(t *testing.T) {
+// D14: a logic reads and writes through queries and mutations, and never
+// touches the world -- an action call produces a finding, and the query and
+// the mutation it calls do not.
+func TestLogicCallingActionIsFlagged(t *testing.T) {
 	src := `use cluster.mutations.{ createNode }
 use cluster.queries.{ existingCluster }
+use deployment.actions.{ tagRelease }
 logic registerBad {
   args { event object @required }
   existing := query existingCluster()
   node := mutation createNode(id: args.event.payload.id)
+  tagged := action tagRelease(version: "1")
   return node
 }`
 	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
 	if !has(fs, "logic-purity") {
-		t.Fatalf("expected logic-purity finding (logic calls a mutation); got %v", rules(fs))
+		t.Fatalf("expected logic-purity finding (logic calls an action); got %v", rules(fs))
 	}
-	// Calling a query is fine -- no finding for existingCluster.
 	for _, f := range fs {
-		if strings.Contains(f.Message, "existingCluster") {
-			t.Fatalf("calling a query must not be flagged: %s", f.Message)
+		if strings.Contains(f.Message, "existingCluster") || strings.Contains(f.Message, "createNode") {
+			t.Fatalf("a logic reads and writes through queries and mutations; flagged: %s", f.Message)
 		}
 	}
 }
@@ -139,12 +142,13 @@ automation deploy {
 
 // Multiple constructs in one file are split and judged independently.
 func TestSplitsMultipleConstructs(t *testing.T) {
-	src := `use cluster.mutations.{ createNode }
+	src := `use deployment.actions.{ tagRelease }
 logic clean {
   return 1
 }
 logic dirty {
-  return mutation createNode(id: "x")
+  tagged := action tagRelease(version: "1")
+  return tagged
 }`
 	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
 	if len(fs) != 1 || fs[0].Construct != "dirty" {

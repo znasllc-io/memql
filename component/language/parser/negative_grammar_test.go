@@ -108,16 +108,16 @@ func TestNegative_MalformedDeclBody(t *testing.T) {
 // 2. Structural violations.
 // ---------------------------------------------------------------------------
 
-// 2a. Body rule (ADR Decision 5): `body { }` is FORBIDDEN on every construct
-// but logic, where it is the wrapper epic memql#5370 retires (a logic without
-// it is the statement form, pinned in body_rule_test.go). Cross-ref:
-// body_rule_test.go covers the direct decl-parser sites; here we cover the
-// rewriter-family sites (query / mutate / automation) via NormaliseAll.
+// 2a. Body rule (body_rule.go): no construct has a `body { }` block; on a
+// logic and an automation it is the wrapper epic memql#5370 retired, refused
+// by name (pinned in body_rule_test.go). Cross-ref: body_rule_test.go covers
+// the direct decl-parser sites; here we cover the rewriter-family sites
+// (query / mutate) via NormaliseAll.
 func TestNegative_BodyRule(t *testing.T) {
 	t.Run("query-with-body", func(t *testing.T) {
 		_, err := NormaliseAll("use cognition.concepts.{ space }\nquery space q {\n  filter row => row.active == true\n  body { return 1 }\n}\n")
 		assertParseErr(t, "query with body{}", err,
-			"must not declare a `body { }` block", "reserved for `logic`")
+			"must not declare a `body { }` block", "no MemQL construct has one")
 	})
 	t.Run("mutation-with-body", func(t *testing.T) {
 		_, err := NormaliseAll("use cognition.concepts.{ space }\nmutate space m {\n  args { x string @required }\n  body { return 1 }\n}\n")

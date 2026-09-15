@@ -3,8 +3,8 @@ package callgraph
 import "testing"
 
 // Story 6 / memql#2327 -- the whole-tree gate's half of the body rule
-// (construct-invocation ADR Decision 5): `body { }` is FORBIDDEN on every
-// (procedural) construct but logic. ConstructFindings mirrors the parser's
+// (parser/body_rule.go): no construct has a `body { }` block, and epic
+// memql#5370 retired it on a logic too. ConstructFindings mirrors the parser's
 // enforcement so the conformance gate + authoring-sandbox cross-reference pass
 // flag the same violation.
 
@@ -21,21 +21,23 @@ func TestBodyRule_LogicWithoutBodyIsTheStatementForm(t *testing.T) {
 	}
 }
 
-// A conformant logic WITH a `body { }` block produces NO body-rule finding.
-func TestBodyRule_LogicWithBodyClean(t *testing.T) {
+// A logic WITH the retired `body { }` wrapper is flagged, as the parser
+// refuses it (body_block_retired).
+func TestBodyRule_LogicWithBodyFlagged(t *testing.T) {
 	src := `logic decideThing {
-  args { x string @required }
-  return x
+  args { x string! }
+  body {
+    return args.x
+  }
 }`
 	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
-	if has(fs, "body-rule") {
-		t.Fatalf("a logic with a body block must not be flagged; got %v", rules(fs))
+	if !has(fs, "body-rule") {
+		t.Fatalf("expected body-rule finding (logic with the retired body wrapper); got %v", rules(fs))
 	}
 }
 
-// A non-logic procedural construct WITH a `body { }` block is flagged. The
-// whole-tree gate restricts to {logic, query, mutation, action}; a query is a
-// representative non-logic procedural kind.
+// A query WITH a `body { }` block is flagged; a query is a representative
+// procedural kind.
 func TestBodyRule_QueryWithBodyFlagged(t *testing.T) {
 	src := `query participant queryParticipants {
   args { spaceId string @required }
@@ -65,7 +67,7 @@ func TestBodyRule_SpecWithBodyFlagged(t *testing.T) {
 }
 
 // A DECLARATIVE construct (concept) carrying a nested object field named
-// `body` is NOT flagged -- a field named body is not the procedural marker.
+// `body` is NOT flagged -- a field named body is not a body block.
 func TestBodyRule_DeclarativeBodyFieldNotFlagged(t *testing.T) {
 	src := `concept message {
   body {
