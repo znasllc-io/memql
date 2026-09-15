@@ -117,25 +117,12 @@ func positionalArgValues(args map[string]any) ([]any, bool) {
 }
 
 // isRuntimeReference checks if a string value is a runtime reference that should not be quoted.
-// These are patterns like event.xxx, item.xxx, input.xxx that the evaluator will resolve.
+// These are current expression paths such as event.xxx that the evaluator will resolve.
 func isRuntimeReference(s string) bool {
-	// List of prefixes that indicate runtime references
-	refPrefixes := []string{
-		"event.",
-		"item.",
-		"input.",
-		"$event.",
-		"$item.",
-		"$input.",
-		"$steps.",
-		"$var.",
-		"$timestamp",
-		"$error",
-	}
-	for _, prefix := range refPrefixes {
-		if strings.HasPrefix(s, prefix) {
-			return true
-		}
+	// Retired step roots are string data, never runtime references.
+	candidate := strings.TrimSpace(s)
+	if strings.HasPrefix(candidate, "$") || strings.HasPrefix(candidate, "item.") || strings.HasPrefix(candidate, "input.") {
+		return false
 	}
 
 	// Also check for function calls that return runtime values
@@ -460,9 +447,6 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 
 	case *parser.EventRefExpr:
 		return "event()"
-
-	case *parser.ErrorRefExpr:
-		return "error()"
 
 	case *parser.ErrorExpr:
 		return fmt.Sprintf("error(%s)", c.expressionToString(e.Message))

@@ -16,11 +16,9 @@ package steps
 //     synthetic success returned.
 //   - A LOGIC call runs its statements through this same registry, so every
 //     write in it is intercepted too.
-//   - READ / pure compute (a query, a builtin, ai(), similarTo, webSearch,
-//     fetchUrl): the read is METERED into the manifest (an ai() call ->
-//     aiCalls + a cost estimate; a similarTo / webSearch / fetchUrl call ->
-//     webCalls) and then DELEGATED to the real executor -> real engine.Execute
-//     -> real read.
+//   - READ / pure compute: queries and explicitly classified builtins are
+//     metered and delegated to the real executor. Unclassified builtins,
+//     including integration web reads, are refused before dispatch.
 
 import (
 	"context"
@@ -62,6 +60,7 @@ func newSandboxStepRegistry(real *Registry, engine *memql.MemQLEngine, partition
 // Execute routes one step through the interception tiers. It satisfies
 // automations.StepExecutorRegistry.
 func (s *sandboxStepRegistry) Execute(ctx context.Context, step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
+	ctx = memql.WithBuiltinPreview(ctx)
 	switch step.Type {
 	case automations.StepTypeFunction:
 		switch s.functionKind(step) {
@@ -73,6 +72,23 @@ func (s *sandboxStepRegistry) Execute(ctx context.Context, step *automations.Ste
 			// effects are intercepted too, instead of escaping to
 			// engine.Execute.
 			return s.interceptLogicFunction(ctx, step, stepCtx)
+		case "builtin":
+			executor := ""
+			if s.engine != nil && step.Function != nil {
+				if fn, ok := s.engine.Functions().Lookup(step.Function.Name); ok && fn != nil {
+					executor = fn.Executor
+				}
+			}
+			if err := memql.CheckBuiltinPreview(executor); err != nil {
+				s.note(step.ID, err.Error())
+				now := time.Now()
+				return &automations.StepResult{
+					StepId: step.ID, Status: "failed", Error: err.Error(),
+					StartedAt: now, CompletedAt: now,
+				}, err
+			}
+			s.meterRead(step, stepCtx)
+			return s.real.Execute(ctx, step, stepCtx)
 		default:
 			// A read (ai() / similarTo / webSearch / fetchUrl) or a plain
 			// query: meter the read into the manifest (real + metered), then

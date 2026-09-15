@@ -1851,6 +1851,8 @@ A bare name is a statement's name, a loop variable, a lambda parameter or a rese
 - A name is bound once, and read only after the statement that binds it. Reading it earlier is refused, naming both lines (`body_forward_reference`).
 - An `if`/`else` branch or a `switch` case runs at most once, and shares the scope around it. A name bound in a branch that did not run reads absent. The branches of one chain may each bind the same name; whichever runs binds it.
 - A loop body and a parallel branch have their own scope. A name bound inside exists only there, and it may not shadow a name or a root outside.
+- This remains true when `parallel` waits for all branches: waiting does not export their names. Keep dependent statements in the same branch, or run them sequentially when a later statement needs their results. `wait any` uses the same scope rule.
+- An automation reading `actor` declares `@actor`; every `args.<name>` it reads must be declared in its argument schema. These rules are checked when its statements compile.
 - `config.<key>` reads the configuration allow-list (`component/config`). A key the list does not hold is refused at load (`body_config_unknown`) rather than read as absent.
 
 ### What a logic may do, and what an automation may do
@@ -1862,6 +1864,8 @@ A bare name is a statement's name, a loop variable, a lambda parameter or a rese
 ### What runs
 
 A body compiles at load to a list of steps in the order written; nothing is reordered. Each call is one step: journaled on the run, previewed by a dry run, retried by `retry(n)` and by a resume. An `if` or a `switch` flattens into the steps of its branches, each carrying its branch's condition, so a switch compares with typed equality (`1 == "1"` is false). A logic called inside a run journals its statements as steps of that run.
+
+A dry-run preview executes a builtin only when its executor is classified as a metadata read or a computation without side effects. Unclassified executors, including integration builtins, stop the preview with a refusal. This also applies to builtins called from a query or nested logic; a stopped preview does not claim successful execution.
 
 A statement's value depends on its kind:
 
@@ -1893,6 +1897,8 @@ These forms are refused at parse, each refusal naming its replacement, and `memq
 | `mutate <Concept> <name> { ... }` | `mutation <Concept> <name> { ... }` |
 
 The step bodies' accessors are refused at parse too (`body_accessor_retired`), and the rewrite leaves them to the author: `step("n")` is `n`, `input()` is `args.<name>`, and `item()` and `index()` are the loop's own name, `for x in s` -- a loop has no index.
+
+The old `error()` accessor is also refused: statement bodies have no onError context to read. Use the catalog function `error("message")` to raise an error; it requires no builtin import.
 
 ## Logic
 

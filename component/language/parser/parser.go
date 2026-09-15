@@ -5517,14 +5517,11 @@ func (p *Parser) parseActorAccessor() (ExpressionNode, error) {
 	return &CallerRefExpr{}, nil
 }
 
-// parseErrorAccessor parses error() or error("message").
-// - error() returns ErrorRefExpr - references current error in onError context
-// - error("message") returns ErrorExpr - creates an error with a message
-func (p *Parser) parseErrorAccessor() (ExpressionNode, error) {
+// parseErrorFunction parses error("message") and refuses the retired accessor.
+func (p *Parser) parseErrorFunction() (ExpressionNode, error) {
 	// Check for no-arg accessor: error()
 	if p.check(TokenParenClose) {
-		p.advance()
-		return &ErrorRefExpr{}, nil
+		return nil, bodyRefuse(p.current, codeBodyAccessorRetired, "`error()` is retired in edition 2026: use error(\"message\") to raise an error; onError accessors are gone")
 	}
 
 	// Has argument - parse as error creation: error("message")

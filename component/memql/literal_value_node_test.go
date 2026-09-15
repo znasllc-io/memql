@@ -116,7 +116,6 @@ func allExpressionNodeImplementers() map[string]ExpressionNode {
 		"DepthExpression":             &DepthExpression{},
 		"CountExpression":             &CountExpression{},
 		"ShapeExpression":             &ShapeExpression{},
-		"ErrorRefExpression":          &ErrorRefExpression{},
 		"ErrorExpression":             &ErrorExpression{Message: &LiteralValueNode{Value: "boom"}},
 		"constantBoolExpression":      &constantBoolExpression{value: true},
 		"ArgRefExpression":            &ArgRefExpression{Path: "x"},

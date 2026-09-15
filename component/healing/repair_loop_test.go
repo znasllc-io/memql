@@ -48,7 +48,7 @@ func sampleMiss() PreconditionMiss {
 // A precondition miss yields the model's proposed typed patches (validated).
 func TestRepairLoop_ProposesTypedPatches(t *testing.T) {
 	stub := &stubProvider{respond: `{"patches":[
-		{"kind":"relativize-literal","target":"steps.run.input.path","replacement":"$config.MEMQL_ENGINE_DIGEST","reason":"relativize the engine digest path"},
+		{"kind":"relativize-literal","target":"steps.run.function.args.path","replacement":"config.MEMQL_ENGINE_DIGEST","reason":"relativize the engine digest path"},
 		{"kind":"add-precondition","precondition":{"id":"digestPinned2","check":"exists(event.payload.imageDigest)"}}
 	]}`}
 	loop := NewRepairLoop(stub)
@@ -123,7 +123,7 @@ func TestRepairLoop_DropsInvalidPatches(t *testing.T) {
 // target is absent) is dropped before a human ever sees it.
 func TestRepairLoop_DropsUnapplyableAgainstBase(t *testing.T) {
 	stub := &stubProvider{respond: `{"patches":[
-		{"kind":"relativize-literal","target":"steps.run.input.nope","replacement":"$config.X"},
+		{"kind":"relativize-literal","target":"steps.run.function.args.nope","replacement":"config.X"},
 		{"kind":"add-precondition","precondition":{"id":"g","check":"x == y"}}
 	]}`}
 	loop := NewRepairLoop(stub)
