@@ -1,14 +1,13 @@
 package steps
 
 // dryrun_v1_db_test.go -- a dry run of a statement body (epic memql#5370, task
-// memql#5372): the same preview a legacy body gets, over the statement forms.
+// memql#5372).
 //
 // The statements hold lists of their own -- a `for`'s body, an `if`'s arms
 // flattened onto conditions, a parallel's branches -- and a logic called as a
 // statement runs its own statements. Every one of them must re-enter the
 // sandbox, or a write nested in one escapes the preview: the property
-// memql#2943 won for forEach, parallel and switch, held here for the forms
-// that replace them. And a statement-body logic run in the preview journals
+// memql#2943 won for containers. And a logic run in the preview journals
 // nothing, whatever it writes.
 //
 // Postgres-gated (the engine needs one): skips cleanly when no DB is

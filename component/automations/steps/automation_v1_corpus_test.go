@@ -102,8 +102,8 @@ func (r *automationProbe) Execute(ctx context.Context, step *automations.Step, s
 		if step.Automation == nil {
 			break
 		}
-		// The real executor hands a legacy step's arguments over as written and
-		// a v1 step's as values (steps/automation.go); so does the probe.
+		// The real executor hands a sub-automation its arguments as values
+		// (steps/automation.go); so does the probe.
 		args, err := probeStepArgs(ctx, step, stepCtx, step.Automation.Args)
 		if err != nil {
 			return nil, err
@@ -140,7 +140,7 @@ func probeStepArgs(ctx context.Context, step *automations.Step, stepCtx *automat
 // probeActionAnswer is every action's step result, in the shape the real
 // ActionExecutor returns one: an authored action's record of the call around
 // a capability script's envelope (steps/action.go executeAuthored), whose
-// innermost `result` the statement form binds and the legacy form climbs to.
+// innermost `result` an action statement binds.
 func probeActionAnswer(ref string) map[string]any {
 	return map[string]any{
 		"authored": true, "ref": ref, "capability": "probe." + ref, "resultFingerprint": "probe",

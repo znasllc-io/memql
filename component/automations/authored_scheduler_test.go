@@ -162,8 +162,8 @@ automation aliceOnUserCreate {
 
 // TestAuthoredScheduler_EventTrigger_HonoursItsFilter: the @filter decides
 // whether an event fires an authored automation, as it does a core one -- a
-// v1 lambda over the triggering row and a legacy condition alike, with the
-// args contract an email rule's generated construct declares. The authored
+// method call and an equality over the triggering row alike, with the args
+// contract an email rule's generated construct declares. The authored
 // subscriber used to skip the filter, so a rule's "only when" condition
 // changed nothing: every event of the kind fired it.
 func TestAuthoredScheduler_EventTrigger_HonoursItsFilter(t *testing.T) {

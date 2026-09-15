@@ -38,9 +38,9 @@ package steps
 // terms -- a query answers its rows (a []any of row maps), a builtin its
 // result, a logic its return value, a mutation the row it wrote -- which each
 // arm adapts to its runner (probeRegistry does it for today's).
-// Calls are compared in order, the order the legacy topological sort ran
-// them. Journal writes are not calls: only construct calls and published
-// events are recorded.
+// Calls are compared in order: the order the statements run them. Journal
+// writes are not calls: only construct calls and published events are
+// recorded.
 //
 // In ten constructs the legacy build did not do what the body says
 // (logicLegacyDefects: each checked, each mended only in the part that is
