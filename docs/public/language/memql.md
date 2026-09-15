@@ -2077,7 +2077,9 @@ existing concurrency and budget limits.
 | `@mode(parallel, max=3)` | Allow three concurrent runs; skip excess fires. |
 
 `@mode(queued)` uses `MEMQL_AUTOMATION_QUEUED_MODE_DEFAULT_MAX` (10).
-`max` is invalid on `single` and `restart`.
+`max` is invalid on `single` and `restart`. A synchronous sub-automation call
+cannot queue behind its own active ancestor and is skipped. Authored automations
+with the same name have separate execution modes and deduplication per owner.
 
 ### Before-write adjustments
 

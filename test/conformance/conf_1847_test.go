@@ -5,7 +5,9 @@ package conformance
 // audit remains a real automation execution with a separate persisted effect.
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/znasllc-io/memql/component/automations"
 	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
@@ -27,6 +29,14 @@ func runAutomationLogicFullBody(t *testing.T, e *Env) {
 
 	// --- A. routeRequest (node.created -> routeRequest, owner fast-track) ---
 	routeRequestId := "req-route-" + suffix
+	captured := make(chan events.Event, 16)
+	unsubscribe := e.Eng.EventBus().Subscribe("graph.node.#", func(ev events.Event) {
+		id, _ := ev.Payload["id"].(string)
+		if id == routeRequestId || strings.HasSuffix(id, ":"+routeRequestId) {
+			captured <- ev
+		}
+	})
+	defer unsubscribe()
 	e.runMutation(t, "createRequest", map[string]any{
 		"requestId": routeRequestId,
 		"projectId": "proj-" + suffix,
@@ -38,6 +48,19 @@ func runAutomationLogicFullBody(t *testing.T, e *Env) {
 	afterRoute := requestRow(t, e, routeRequestId)
 	if got := asStr(afterRoute["status"]); got != "queued" {
 		t.Fatalf("#1847: before-write routing left owner request at %v", afterRoute["status"])
+	}
+	select {
+	case ev := <-captured:
+		if ev.Kind != events.KindNodeCreated || ev.Payload["status"] != "queued" || ev.Payload["firstVersion"] != true {
+			t.Fatalf("before-write must publish the initial routed row: %+v", ev)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("missing initial request event")
+	}
+	select {
+	case ev := <-captured:
+		t.Fatalf("before-write emitted a second request event: %+v", ev)
+	case <-time.After(200 * time.Millisecond):
 	}
 	payload := cloneStringMap(afterRoute)
 	payload["firstVersion"] = true
