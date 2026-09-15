@@ -544,18 +544,31 @@ func (e *MemQLEngine) publishEvent(topic string, kind events.Kind, payload map[s
 	e.eventBus.Publish(event)
 }
 
-// publishEventWithActor is publishEvent plus the acting identity stamped on
+// publishGraphWriteEvent is publishEvent plus the acting identity stamped on
 // the event envelope's Metadata (G4, memql#2366 / event-payload-binding ADR
-// Decision 4). Automations read it as `event.actor.id`; emitters no longer
-// need to hand-stamp a `triggeredBy` field into payloads for the envelope's
-// benefit. Empty actorId degrades to a plain publishEvent.
-func (e *MemQLEngine) publishEventWithActor(topic string, kind events.Kind, payload map[string]any, actorId string) {
+// Decision 4), plus the run's cause when ctx carries one (component/events/
+// cause.go, epic memql#5380). Automations read the actor as `event.actor.id`;
+// emitters no longer need to hand-stamp a `triggeredBy` field into payloads
+// for the envelope's benefit. Empty actorId degrades to a plain publishEvent.
+//
+// executeWrite / executeUpdate are the two callers -- every graph.node.created
+// / .updated a write produces -- so a write made by an automation step always
+// carries the run's cause forward onto what it caused, which is how a later
+// automation triggered by that write can be judged against the same chain.
+// ctx.Value has no branch here to get wrong either way: CauseFromContext
+// answers ok=false for a plain context exactly as it does today, so a
+// non-automation write (a person's, a Go-side publish with no run behind it)
+// still publishes a root event.
+func (e *MemQLEngine) publishGraphWriteEvent(ctx context.Context, topic string, kind events.Kind, payload map[string]any, actorId string) {
 	if e.eventBus == nil {
 		return
 	}
 	event := events.NewEvent(topic, kind, payload)
 	if actorId != "" {
 		event = event.WithMetadata("actor", actorId)
+	}
+	if cause, ok := events.CauseFromContext(ctx); ok {
+		event = event.WithCause(cause)
 	}
 	e.eventBus.Publish(event)
 }

@@ -204,7 +204,8 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 		if updateActor != "" {
 			eventPayload["actor"] = updateActor
 		}
-		e.publishEventWithActor(
+		e.publishGraphWriteEvent(
+			ctx,
 			events.BuildTopicWithConcept(events.TopicGraphNodeUpdated, meta.conceptName),
 			events.KindNodeUpdated,
 			eventPayload,
@@ -1454,7 +1455,8 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		// closes that with a claim (the email-rule fire path does).
 		eventPayload["firstVersion"] = !meta.priorExisted
 
-		e.publishEventWithActor(
+		e.publishGraphWriteEvent(
+			ctx,
 			events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptMeta.Name),
 			events.KindNodeCreated,
 			eventPayload,

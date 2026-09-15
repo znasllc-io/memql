@@ -63,6 +63,17 @@ func (c Cause) Next(automation, runId, correlationId string) Cause {
 	return Cause{CausationId: runId, CorrelationId: correlationId, Depth: c.Depth + 1, Chain: chain}
 }
 
+// WithCause returns a copy of the event with c as its cause. A run's
+// executor stamps this on every event it publishes -- through the engine, a
+// step, a sub-automation -- so the chain that led here survives to whatever
+// the event triggers next. Value receiver / return, like WithMetadata and
+// WithPartition: the caller reassigns (event = event.WithCause(c)) rather
+// than mutating a value another caller might still hold.
+func (e Event) WithCause(c Cause) Event {
+	e.Cause = c
+	return e
+}
+
 type causeKey struct{}
 
 // ContextWithCause returns ctx carrying c. The executor stamps the run's cause

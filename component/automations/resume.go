@@ -410,7 +410,7 @@ func (e *Executor) ResumeFrom(
 	}
 
 	// Publish automation resumed event
-	e.publishEvent("automation.resumed", events.KindTelemetry, map[string]any{
+	e.publishEvent(ctx, "automation.resumed", events.KindTelemetry, map[string]any{
 		"automationName": automation.Name,
 		"executionId":    exec.ID,
 		"runId":          journal.RunId,
@@ -640,7 +640,7 @@ func (e *Executor) ResumeFrom(
 	if e.chainTrackingEnabled && exec.ChainHead != "" {
 		completedPayload["chainHead"] = exec.ChainHead
 	}
-	e.publishEvent(events.TopicAutomationCompleted, events.KindAutomationCompleted, completedPayload)
+	e.publishEvent(ctx, events.TopicAutomationCompleted, events.KindAutomationCompleted, completedPayload)
 
 	if e.logger != nil {
 		e.logger.Info("resumed automation execution completed",

@@ -333,6 +333,14 @@ type Event struct {
 
 	// Partition is the data isolation boundary this event belongs to.
 	Partition string
+
+	// Cause is the event's causal lineage -- the automation run that
+	// published it, the chain of runs it belongs to, and how deep that chain
+	// is (component/events/cause.go, epic memql#5380). The zero value means a
+	// root event: nothing published it. Set via WithCause; carried across the
+	// mesh hop on typed fields of EventForward and EventPublish, never reset
+	// to zero at a node boundary.
+	Cause Cause
 }
 
 // NewEvent creates a new event with the current timestamp.
@@ -374,6 +382,7 @@ func (e Event) Clone() Event {
 		Timestamp:    e.Timestamp,
 		OriginNodeId: e.OriginNodeId,
 		Partition:    e.Partition,
+		Cause:        e.Cause.Clone(),
 	}
 
 	if e.Payload != nil {

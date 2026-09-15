@@ -178,6 +178,7 @@ func (eb *EventBridge) HandleInbound(evt *nodev1.EventForward) {
 		Payload:      payload,
 		Metadata:     make(map[string]string),
 		OriginNodeId: evt.OriginNodeId,
+		Cause:        causeFromProto(evt.Cause),
 	}
 
 	eb.publishViaBus(localEvent)
@@ -233,6 +234,7 @@ func (eb *EventBridge) onLocalEvent(event events.Event) {
 		Payload:      payloadStruct,
 		OriginNodeId: eb.identity.ID,
 		Ttl:          defaultTTL,
+		Cause:        causeToProto(event.Cause),
 	}
 
 	eb.forwardToPeers(forward, decision)
@@ -318,6 +320,7 @@ func (eb *EventBridge) ForwardInboundToPeers(evt *nodev1.EventForward, excludeNo
 		Payload:      evt.Payload,
 		OriginNodeId: evt.OriginNodeId,
 		Ttl:          evt.Ttl - 1,
+		Cause:        evt.Cause,
 	}
 
 	msg := &nodev1.NodeClientMessage{
@@ -376,6 +379,44 @@ func eventTimestamp(ts *timestamppb.Timestamp) time.Time {
 		return ts.AsTime()
 	}
 	return time.Now().UTC()
+}
+
+// causeToProto converts a Cause to the EventForward wire form (node.proto's
+// EventCause, epic memql#5380). The zero cause -- a root event, the common
+// case -- converts to nil, so a root event costs nothing extra on the mesh
+// hop; causeFromProto(nil) reads back as the zero cause.
+func causeToProto(c events.Cause) *nodev1.EventCause {
+	if c.IsZero() {
+		return nil
+	}
+	chain := make([]*nodev1.EventCauseLink, len(c.Chain))
+	for i, l := range c.Chain {
+		chain[i] = &nodev1.EventCauseLink{Automation: l.Automation, RunId: l.RunId}
+	}
+	return &nodev1.EventCause{
+		CausationId:   c.CausationId,
+		CorrelationId: c.CorrelationId,
+		Depth:         int32(c.Depth),
+		Chain:         chain,
+	}
+}
+
+// causeFromProto reverses causeToProto. A nil proto -- an old node in a
+// mixed-version rollout, or a root event -- gives the zero cause.
+func causeFromProto(p *nodev1.EventCause) events.Cause {
+	if p == nil {
+		return events.Cause{}
+	}
+	chain := make([]events.Link, len(p.Chain))
+	for i, l := range p.Chain {
+		chain[i] = events.Link{Automation: l.Automation, RunId: l.RunId}
+	}
+	return events.Cause{
+		CausationId:   p.CausationId,
+		CorrelationId: p.CorrelationId,
+		Depth:         int(p.Depth),
+		Chain:         chain,
+	}
 }
 
 // meshEventParticipants filters a broadcast target list down to the nodes that

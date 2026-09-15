@@ -39,6 +39,7 @@ func (eb *EventBridge) publishViaBus(event events.Event) {
 			Payload:       payload,
 			EventMetadata: event.Metadata,
 			OriginNodeId:  event.OriginNodeId,
+			Cause:         events.CauseToBusProto(event.Cause),
 		},
 	}
 
