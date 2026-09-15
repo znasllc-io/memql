@@ -74,6 +74,41 @@ func newStepCtx() *automations.StepContext {
 	return &automations.StepContext{Evaluator: automations.NewEvaluator()}
 }
 
+func TestSandboxRefusesUnclassifiedBuiltin(t *testing.T) {
+	sandbox, rec := sandboxWithRecorder(t, automations.StepTypeFunction)
+	step := &automations.Step{ID: "send", Type: automations.StepTypeFunction,
+		Function: &automations.FunctionStepConfig{Name: "unclassifiedBuiltin", Kind: "builtin"}}
+	if _, err := sandbox.Execute(context.Background(), step, newStepCtx()); err == nil {
+		t.Fatal("preview accepted an unclassified builtin")
+	}
+	if len(rec.reached()) != 0 {
+		t.Fatal("builtin reached production executor")
+	}
+}
+
+func TestSandboxClassifiesBuiltinByRegisteredExecutor(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		allowed bool
+	}{
+		{"memqlDocs", true}, {"routerSetApiKey", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sandbox, rec := sandboxWithRecorder(t, automations.StepTypeFunction)
+			// A caller's kind cannot disguise an effect as a query.
+			step := &automations.Step{ID: "probe", Type: automations.StepTypeFunction,
+				Function: &automations.FunctionStepConfig{Name: tc.name, Kind: "query"}}
+			_, err := sandbox.Execute(context.Background(), step, newStepCtx())
+			if (err == nil) != tc.allowed {
+				t.Fatalf("allowed=%v, err=%v", tc.allowed, err)
+			}
+			if (len(rec.reached()) > 0) != tc.allowed {
+				t.Fatalf("production calls: %v", rec.reached())
+			}
+		})
+	}
+}
+
 // TestSandboxInterceptsEveryWriteBearingStepType is the direct fix for the
 // reported escape: each of these used to fall through `default:` to the
 // production executor.

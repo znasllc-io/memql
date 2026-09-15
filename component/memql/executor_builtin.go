@@ -141,6 +141,11 @@ func (e *MemQLEngine) evaluateBuiltinFunctionExpression(ctx context.Context, exp
 	if expr == nil {
 		return nil, fmt.Errorf("builtin function expression is nil")
 	}
+	if preview, _ := ctx.Value(builtinPreviewContextKey{}).(bool); preview {
+		if err := CheckBuiltinPreview(expr.Executor); err != nil {
+			return nil, err
+		}
+	}
 	if e.builtinExecutorHandlers == nil {
 		if err := e.initBuiltinExecutorHandlers(); err != nil {
 			return nil, err

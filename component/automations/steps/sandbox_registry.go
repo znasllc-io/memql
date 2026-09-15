@@ -62,6 +62,7 @@ func newSandboxStepRegistry(real *Registry, engine *memql.MemQLEngine, partition
 // Execute routes one step through the interception tiers. It satisfies
 // automations.StepExecutorRegistry.
 func (s *sandboxStepRegistry) Execute(ctx context.Context, step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
+	ctx = memql.WithBuiltinPreview(ctx)
 	switch step.Type {
 	case automations.StepTypeFunction:
 		switch s.functionKind(step) {
@@ -73,6 +74,19 @@ func (s *sandboxStepRegistry) Execute(ctx context.Context, step *automations.Ste
 			// effects are intercepted too, instead of escaping to
 			// engine.Execute.
 			return s.interceptLogicFunction(ctx, step, stepCtx)
+		case "builtin":
+			executor := ""
+			if s.engine != nil && step.Function != nil {
+				if fn, ok := s.engine.Functions().Lookup(step.Function.Name); ok && fn != nil {
+					executor = fn.Executor
+				}
+			}
+			if err := memql.CheckBuiltinPreview(executor); err != nil {
+				s.note(step.ID, err.Error())
+				return nil, err
+			}
+			s.meterRead(step, stepCtx)
+			return s.real.Execute(ctx, step, stepCtx)
 		default:
 			// A read (ai() / similarTo / webSearch / fetchUrl) or a plain
 			// query: meter the read into the manifest (real + metered), then
