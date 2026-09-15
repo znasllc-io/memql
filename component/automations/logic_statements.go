@@ -40,6 +40,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/common"
@@ -104,6 +105,12 @@ func (r *LogicRunner) RunLogicBody(ctx context.Context, fnName string, body []ma
 	}
 	ex := &Executor{stepRegistry: r.stepRegistry, engine: r.engine, logger: r.logger}
 	exec := NewExecution(a.Name, "call")
+	// The statements run at the CALLER's origin. executeStep stamps each one
+	// from SourceTrusted (the #2800 rule), and a logic has no source trust of
+	// its own to lend: a trusted automation's call reaches it at internal
+	// origin, so its @serverOnly reads stay reachable, and a client's call
+	// stays at client origin, so calling a logic launders nothing.
+	exec.SourceTrusted = auth.OriginFromContext(ctx).IsInternal()
 	stepCtx := &StepContext{Logger: r.logger, Engine: r.engine, Evaluator: evaluator, EventBus: bus, Execution: exec}
 	run := &sequenceRun{stepCtx: stepCtx}
 	steps := a.Steps
