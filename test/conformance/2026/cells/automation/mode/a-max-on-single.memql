@@ -1,0 +1,8 @@
+/// When a node joins the cluster, open a ticket -- a bound on single, which never has a second run to bound.
+@trigger(event="node.created", concept="v1:cluster:node", partition="*")
+@mode(single, max=2)
+automation welcomeNodeMode {
+  step raise {
+    mutation raiseTicketMode (title: "A node joined the cluster")
+  }
+}

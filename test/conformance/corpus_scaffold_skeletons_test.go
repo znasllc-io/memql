@@ -80,6 +80,8 @@ var scaffoldAnnotations = map[string]string{
 	"Automation/description":   `@description("When a node joins the cluster, open a ticket to welcome it.")`,
 	"Automation/trigger":       `@trigger(event="node.created", concept="v1:cluster:node", partition="*")`,
 	"Automation/filter":        `@filter(row => row.nodeType == "agent")`,
+	"Automation/loop":          `@loop(maxDepth=4, until=row => row.status == "done")`,
+	"Automation/mode":          `@mode(queued, max=3)`,
 	"Action/description":       `@description("Read a ticket's attachment from the runner's workspace.")`,
 	"Capability/description":   `@description("List the entries of a directory on the runner's workspace.")`,
 	"Spec/description":         `@description("Matches the tickets that are still open.")`,
@@ -163,7 +165,9 @@ var scaffoldDocs = map[string]string{
 	"Automation/disabled": "When a node joins the cluster, open a ticket. Switched off: not loaded while @disabled stays.",
 	"Automation/enabled":  "When a node joins the cluster, open a ticket to welcome it. @enabled restates the default.",
 	"Automation/filter":   "When an agent node joins the cluster, open a ticket to welcome it.",
+	"Automation/loop":     "Move a new ticket to done. The update fires this automation again, and its filter stops it once the ticket is done.",
 	"Automation/mcp":      "When a node joins the cluster, open a ticket; also exposed as its own MCP tool.",
+	"Automation/mode":     "When a node joins the cluster, open a ticket; a fire while one runs waits its turn, and at most three wait.",
 	"Automation/schedule": "Every hour, open a ticket to review the queue.",
 	"Automation/template": "A work-spine template: opens a ticket with the title the run names.",
 	"Automation/trigger":  "When a node joins the cluster, open a ticket to welcome it.",
@@ -584,6 +588,23 @@ func scaffoldAutomation(p annotations.Placement, s, ann string) (string, string,
 			scaffoldArgs([2]string{"title", "string!"}, [2]string{"ownerUserId", "string!"}) +
 			"  insert {\n    title: args.title\n    status: \"open\"\n    ownerUserId: args.ownerUserId\n  }\n}\n"
 		step = "  step raise {\n    mutation raiseTicket" + s + " (title: \"A node joined the cluster\", ownerUserId: actor.userId)\n  }\n"
+	case "loop":
+		// A self-cycle, because an automation that writes an unrelated concept
+		// proves nothing about @loop: it moves the row that triggered it, and
+		// its @filter -- the negation of until, which the load requires --
+		// stops it once the row is done. The ticket carries a pinned namespace
+		// so the trigger names it by one id whatever domain the case loads in
+		// (namespace.pin, #2614).
+		mutation := "advanceTicket" + s + "Cell"
+		fixture = "/// A support ticket: the row this cell's automation moves forward.\n@namespace(\"loopcell\")\nconcept ticket {\n  status  string\n}\n\n" +
+			"/// Move a ticket to a status.\nmutate ticket " + mutation + " {\n" + scaffoldArgs([2]string{"id", "string!"}, [2]string{"status", "string"}) +
+			"  update {\n    id: args.id\n    status: args.status\n  }\n}\n"
+		trigger = `@trigger(event="node.created", concept="v1:loopcell:ticket")` + "\n" + `@filter(row => row.status != "done")` + "\n"
+		name = mutation
+		args = scaffoldArgs([2]string{"id", "any"}, [2]string{"status", "any"})
+		step = "  step advance {\n    mutation " + mutation + " (id: id, status: \"done\")\n  }\n"
+		return fixture, scaffoldDoc(p, "") + trigger + ann + "\nautomation " + name + " {\n" + args + step + "}\n",
+			map[string]string{"namespace.pin": "loopcell\n"}
 	}
 	return fixture, scaffoldDoc(p, "When a node joins the cluster, open a ticket to welcome it.") + trigger + ann + "\nautomation " + name + " {\n" + args + step + "}\n", nil
 }

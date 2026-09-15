@@ -36,8 +36,10 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@eventField`](#eventfield) |  |  | strings |  |
 | [`@filter`](#filter) |  |  |  | expression |
 | [`@latestMode`](#latestmode) | flag |  |  |  |
+| [`@loop`](#loop) |  |  |  | keywords |
 | [`@mcp`](#mcp) | flag | flag |  | flag |
 | [`@mergeFields`](#mergefields) |  | strings |  |  |
+| [`@mode`](#mode) |  |  |  | keywords |
 | [`@nocache`](#nocache) | flag |  |  |  |
 | [`@noUnset`](#nounset) |  | strings |  |  |
 | [`@public`](#public) | flag | flag |  |  |
@@ -212,7 +214,9 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
 | [`@enabled`](#enabled) | no arguments | `@enabled` |
 | [`@filter`](#filter) | an expression | `@filter(row => row.status == "open")` |
+| [`@loop`](#loop) | keyword arguments | `@loop(maxDepth=4, until=row => row.status == "done")` |
 | [`@mcp`](#mcp) | no arguments | `@mcp` |
+| [`@mode`](#mode) | keyword arguments | `@mode(queued, max=10)` |
 | [`@schedule`](#schedule) | one string or keyword arguments | `@schedule(cron="0 0 * * * *")` |
 | [`@template`](#template) | no arguments | `@template` |
 | [`@trigger`](#trigger) | keyword arguments | `@trigger(event="node.created", concept="v1:cluster:node")` |
@@ -802,6 +806,21 @@ On a query: marks the query as time-dependent because it reads `asOf latest` (th
 
 On a rule: evaluate before every unlocked rule regardless of precedence. Accepted only in the embedded tree -- the loader refuses it elsewhere.
 
+### @loop
+
+| On | Written as | Example |
+|---|---|---|
+| [automation](#automation) | keyword arguments | `@loop(maxDepth=4, until=row => row.status == "done")` |
+
+`@loop` takes these keys, each written as `key=value`.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `maxDepth` | int | The most runs of this automation one causal chain may hold. An integer from 1 to the depth cap (MEMQL_AUTOMATION_MAX_CHAIN_DEPTH, default 16). |
+| `until` | expression | The convergence predicate: a lambda of one parameter over the triggering row, until=row => row.status == "done". The automation's @filter must hold its negation as a top-level conjunct, which is what stops the loop. |
+
+On an automation that closes a deliberate cycle: permits the cycle the load would otherwise refuse, bounds it to maxDepth runs of this automation per causal chain, and names the predicate that ends it. The @filter must exclude the rows where until holds.
+
 ### @maximum
 
 | On | Written as | Example |
@@ -870,6 +889,24 @@ Declares WHO ELSE HOLDS A COPY of this MemQL-origin concept: @mirroredTo("shopif
 | [provider](#provider) | one string | `@modality("embedding")` |
 
 Provider modality (e.g., "chat", "audio", "image", "embedding").
+
+### @mode
+
+| On | Written as | Example |
+|---|---|---|
+| [automation](#automation) | keyword arguments | `@mode(queued, max=10)` |
+
+`@mode` takes these keys. A key of type `flag` is written bare, and every other as `key=value`.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `single` | flag | One run at a time in this process; a fire while one runs is refused with a warning. |
+| `queued` | flag | Fires wait their turn in order; more than max waiting are refused. |
+| `restart` | flag | A fire cancels the run in flight and starts again. |
+| `parallel` | flag | Runs concurrently; more than max at once are refused. The default when no @mode is written, with no max. |
+| `max` | int | With queued, the most fires that may wait (default 10); with parallel, the most runs at once. |
+
+How concurrent fires of this automation behave in one process: single, queued, restart or parallel, with max for queued and parallel. Without it an automation runs every fire in parallel.
 
 ### @model
 

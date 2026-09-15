@@ -1,0 +1,17 @@
+/// A support ticket: the row this cell's automation moves forward.
+@namespace("loopcell")
+concept ticket {
+  status  string
+}
+
+/// Move a ticket to a status.
+mutate ticket advanceTicketLoopCell {
+  args {
+    id      string!
+    status  string
+  }
+  update {
+    id: args.id
+    status: args.status
+  }
+}

@@ -1,0 +1,15 @@
+use loopcell.concepts.{ ticket }
+
+/// Move a new ticket to done -- until written as the value, not as a predicate over the row.
+@trigger(event="node.created", concept="v1:loopcell:ticket")
+@filter(row => row.status != "done")
+@loop(maxDepth=4, until="done")
+automation advanceTicketLoopCell {
+  args {
+    id     any
+    status any
+  }
+  step advance {
+    mutation advanceTicketLoopCell (id: id, status: "done")
+  }
+}

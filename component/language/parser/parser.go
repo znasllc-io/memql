@@ -3547,12 +3547,16 @@ func (p *Parser) attachAttributes(def Node, attributes []*Attribute) (Node, erro
 		p.processFunctionAttributes(d, attributes)
 		if automation, ok := d.Body.(*AutomationDef); ok {
 			automation.Attributes = attributes
-			p.processAutomationAttributes(automation, attributes)
+			if err := p.processAutomationAttributes(automation, attributes); err != nil {
+				return nil, err
+			}
 		}
 		return d, nil
 	case *AutomationDef:
 		d.Attributes = attributes
-		p.processAutomationAttributes(d, attributes)
+		if err := p.processAutomationAttributes(d, attributes); err != nil {
+			return nil, err
+		}
 		return d, nil
 	}
 	return def, nil
@@ -3648,8 +3652,10 @@ func (p *Parser) processFunctionAttributes(d *FunctionDef, attributes []*Attribu
 	}
 }
 
-// processAutomationAttributes processes attributes for an automation
-func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Attribute) {
+// processAutomationAttributes processes attributes for an automation. It
+// refuses an @loop or @mode whose value the source alone shows is wrong
+// (loop_mode.go); every other attribute folds without judgement.
+func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Attribute) error {
 	for _, attr := range attributes {
 		switch attr.Name {
 		case AttrEnabled:
@@ -3702,8 +3708,21 @@ func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Att
 				d.Trigger.Filter = formatV1(lam)
 				d.Trigger.FilterLambda = lam
 			}
+		case AttrLoop:
+			loop, err := p.foldLoop(d.Name, attr)
+			if err != nil {
+				return err
+			}
+			d.Loop = loop
+		case AttrMode:
+			mode, err := p.foldMode(d.Name, attr)
+			if err != nil {
+				return err
+			}
+			d.Mode = mode
 		}
 	}
+	return nil
 }
 
 // parseArgsFields converts a map of field definitions to ArgsField slice
