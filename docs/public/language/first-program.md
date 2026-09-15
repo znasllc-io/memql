@@ -107,7 +107,7 @@ checks parsing and local references. It does not test cluster authorization,
 persistence, or whether your definitions conflict with an existing cluster.
 The extension also reports diagnostics as you edit.
 
-## Run it in VS Code
+## Run it in VS Code or Cursor
 
 1. [Install the extension](vscode.md#get-the-extension), open the example's
    folder, and trust the workspace when you intend to connect.

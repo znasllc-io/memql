@@ -27,8 +27,8 @@ func TestBuiltinEditorClient_ResolvesWithDCROffAndNilStore(t *testing.T) {
 	if got.ClientId != BuiltinClientVSCode {
 		t.Fatalf("ClientId = %q, want %q", got.ClientId, BuiltinClientVSCode)
 	}
-	if got.Name != "MemQL for VS Code" {
-		t.Fatalf("Name = %q, want %q -- the consent page shows this", got.Name, "MemQL for VS Code")
+	if got.Name != "MemQL for Visual Studio Code and Cursor" {
+		t.Fatalf("Name = %q, want %q -- the consent page shows this", got.Name, "MemQL for Visual Studio Code and Cursor")
 	}
 }
 
@@ -220,7 +220,7 @@ func TestRoleFloorRefusal_CopyNamesTheRoleAndTheRequirement(t *testing.T) {
 		t.Fatal("expected a refusal")
 	}
 	got := r.Description()
-	for _, want := range []string{"MemQL for VS Code", "reader", "developer"} {
+	for _, want := range []string{"MemQL for Visual Studio Code and Cursor", "reader", "developer"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("Description() = %q, missing %q", got, want)
 		}

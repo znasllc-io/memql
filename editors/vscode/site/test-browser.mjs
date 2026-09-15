@@ -54,6 +54,7 @@ try {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1100 },
     reducedMotion: "reduce",
+    colorScheme: "light",
   });
   const page = await context.newPage();
   const errors = [];
@@ -64,14 +65,67 @@ try {
   });
   await page.goto(url, { waitUntil: "networkidle" });
   assert.equal(await page.locator("h1").count(), 1);
-  assert.equal(
-    await page
-      .locator("img")
-      .evaluateAll((images) =>
-        images.every((image) => image.complete && image.naturalWidth > 0),
+  const choice = (value) =>
+    page.locator(`input[name="appearance"][value="${value}"]`);
+  const choose = async (value) => choice(value).locator("..").click();
+  const theme = async (expected, preference) => {
+    await page.waitForFunction(
+      ([resolved, selected]) =>
+        document.documentElement.dataset.theme === resolved &&
+        document.documentElement.dataset.appearance === selected,
+      [expected, preference],
+    );
+    assert.equal(await choice(preference).isChecked(), true);
+    assert.equal(
+      await page.evaluate(
+        () => getComputedStyle(document.documentElement).colorScheme,
       ),
+      expected,
+    );
+  };
+  await theme("light", "system");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await theme("dark", "system");
+  await choose("light");
+  await page.reload();
+  await theme("light", "light");
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.emulateMedia({ colorScheme: "dark" });
+  await theme("light", "light");
+  await choose("system");
+  await theme("dark", "system");
+  await page.emulateMedia({ colorScheme: "light" });
+  await theme("light", "system");
+  await choice("system").focus();
+  await page.keyboard.press("ArrowRight");
+  await theme("light", "light");
+  assert.equal(
+    await choice("light").evaluate((input) => {
+      const style = getComputedStyle(input.nextElementSibling);
+      return (
+        style.outlineStyle !== "none" && parseFloat(style.outlineWidth) >= 2
+      );
+    }),
     true,
-    "all image assets decode",
+    "keyboard selection has a visible focus ring",
+  );
+  assert.ok((await page.locator(".brand-mark").count()) >= 3);
+  assert.equal(
+    await page.locator(".brand-mark").evaluateAll((marks) =>
+      marks.every((mark) => {
+        const style = getComputedStyle(mark);
+        return (
+          style.maskImage.includes("mark.svg") &&
+          mark.getBoundingClientRect().width > 0
+        );
+      }),
+    ),
+    true,
+    "all three marks use canonical geometry",
+  );
+  assert.equal(
+    (await context.request.get(url + "brand/mark.svg")).status(),
+    200,
   );
   for (let i = 0; i < 4; i++) {
     await page.locator("[data-example]").nth(i).click();
@@ -145,21 +199,87 @@ try {
   await page.locator(".run-guide summary").click();
   await page.locator("#tab-query").click();
   const sizes = [1440, 1024, 768, 390, 320];
-  for (const width of sizes) {
-    await page.setViewportSize({ width, height: 1000 });
-    await page.evaluate(() => document.fonts.ready);
-    assert.equal(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth > innerWidth,
-      ),
-      false,
-      `no overflow at ${width}px`,
-    );
-    if ([1440, 390].includes(width))
-      await page.screenshot({
-        path: path.join(artifacts, `${width}.png`),
-        fullPage: true,
-      });
+  for (const appearance of ["light", "dark"]) {
+    await choose(appearance);
+    await theme(appearance, appearance);
+    for (const width of sizes) {
+      await page.setViewportSize({ width, height: 1000 });
+      await page.evaluate(() => document.fonts.ready);
+      assert.equal(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth > innerWidth,
+        ),
+        false,
+        `no overflow in ${appearance} at ${width}px`,
+      );
+      if ([1440, 390].includes(width))
+        await page.screenshot({
+          path: path.join(artifacts, `${appearance}-${width}.png`),
+          fullPage: true,
+        });
+    }
+    // Resolve actual rendered colours, including ancestor backgrounds, not just
+    // stylesheet token strings. Every selected pair carries ordinary text.
+    const checkContrast = async (selectors) => {
+      const failures = await page.evaluate((selectors) => {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 1;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        const rgba = (color) => {
+          ctx.clearRect(0, 0, 1, 1);
+          ctx.fillStyle = color;
+          ctx.fillRect(0, 0, 1, 1);
+          return Array.from(ctx.getImageData(0, 0, 1, 1).data);
+        };
+        const lum = (rgb) =>
+          rgb
+            .slice(0, 3)
+            .map((v) => {
+              v /= 255;
+              return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+            })
+            .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+        return selectors.flatMap((selector) =>
+          Array.from(document.querySelectorAll(selector)).flatMap((el) => {
+            let parent = el,
+              bg;
+            while (parent) {
+              bg = rgba(getComputedStyle(parent).backgroundColor);
+              if (bg[3] === 255) break;
+              parent = parent.parentElement;
+            }
+            if (!parent) return [`${selector}: no opaque background`];
+            const a = lum(rgba(getComputedStyle(el).color)),
+              b = lum(bg);
+            const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+            return ratio < 4.5 ? [`${selector}: ${ratio.toFixed(2)}`] : [];
+          }),
+        );
+      }, selectors);
+      assert.deepEqual(
+        failures,
+        [],
+        `${appearance} rendered text contrast >= 4.5:1`,
+      );
+    };
+    await checkContrast([
+      ".lead",
+      ".primary",
+      ".editor-code",
+      ".editor .comment",
+      ".editor .keyword",
+      ".editor .string",
+      ".editor .type",
+      ".editor-mode",
+      ".editor-footer",
+      "#example-description",
+      ".example-tabs small",
+      ".copy",
+      ".appearance-controls span",
+      ".install-steps p",
+    ]);
+    await page.locator(".primary").first().hover();
+    await checkContrast([".primary"]);
   }
   assert.equal(
     await page.evaluate(
@@ -168,7 +288,10 @@ try {
     "auto",
     "reduced motion disables smooth scrolling",
   );
-  const plain = await browser.newContext({ javaScriptEnabled: false });
+  const plain = await browser.newContext({
+    javaScriptEnabled: false,
+    colorScheme: "dark",
+  });
   const plainPage = await plain.newPage();
   await plainPage.goto(url);
   assert.ok(
@@ -177,13 +300,56 @@ try {
     ),
   );
   assert.equal(await plainPage.locator("a[download]").count(), 2);
+  assert.equal(
+    await plainPage.locator(".appearance-controls").isVisible(),
+    false,
+  );
+  const darkGround = await plainPage.evaluate(
+    () => getComputedStyle(document.documentElement).backgroundColor,
+  );
+  await plainPage.emulateMedia({ colorScheme: "light" });
+  assert.notEqual(
+    await plainPage.evaluate(
+      () => getComputedStyle(document.documentElement).backgroundColor,
+    ),
+    darkGround,
+    "CSS follows the OS even without JavaScript",
+  );
+  await page.evaluate(() =>
+    localStorage.setItem("memql-editor-site.appearance", "invalid"),
+  );
+  await page.reload();
+  await theme("light", "system");
+  const blocked = await browser.newContext({ colorScheme: "dark" });
+  await blocked.addInitScript(() =>
+    Object.defineProperty(window, "localStorage", {
+      get() {
+        throw new DOMException("blocked", "SecurityError");
+      },
+    }),
+  );
+  const blockedPage = await blocked.newPage();
+  await blockedPage.goto(url);
+  assert.equal(
+    await blockedPage.locator("html").getAttribute("data-theme"),
+    "dark",
+  );
+  await blockedPage.locator('input[value="light"]').locator("..").click();
+  assert.equal(
+    await blockedPage.locator("html").getAttribute("data-theme"),
+    "light",
+    "selection works when storage is denied",
+  );
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
       ok: true,
       widths: sizes,
       checks: [
-        "image decoding",
+        "canonical marks",
+        "System/Light/Dark live OS changes and persistence",
+        "invalid and denied storage",
+        "rendered text contrast",
         "CSP",
         "tabs",
         "keyboard",

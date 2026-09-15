@@ -1,4 +1,4 @@
-# MemQL for VS Code: detailed reference
+# MemQL for Visual Studio Code and Cursor: detailed reference
 
 Language support for MemQL (`.memql`) files, powered by the offline
 `memql-lsp` language server (which embeds the same MemQL Sense brain the
@@ -349,7 +349,7 @@ a second implementation -- `src/install/session.ts` holds the orchestration and
 both the page and `src/install/cli.ts` are callers of it, so there is no second
 run path to drift out of step.
 
-Operator-facing detail: [VS Code Runtime Panel](https://github.com/znasllc-io/memql/blob/main/docs/public/language/vscode-runtime-panel.md).
+Operator-facing detail: [Visual Studio Code and Cursor Runtime Panel](https://github.com/znasllc-io/memql/blob/main/docs/public/language/vscode-runtime-panel.md).
 
 ## Constructs
 
@@ -725,13 +725,14 @@ PATH" from the VS Code command palette.
 
 ## Appearance
 
-The MemQL panels wear MemQL OS's palette -- the same hexes memql.io and the
-MemQL Portal render. Which of the two they wear is YOUR choice, not the
-editor's:
+The MemQL panels use the shared editor palette, derived from `brand/tokens.css`.
+Light uses neutral paper with green accents. Dark lifts the canonical dark
+surfaces to brighter charcoal for editing, retaining mint and amber syntax
+colours. Choose the panel appearance with:
 
 `memql.appearance` -- `system` (default) | `light` | `dark`
 
-- **`system` means follow the EDITOR's colour theme.** Inside VS Code the
+- **`system` means follow the EDITOR's colour theme.** Inside Visual Studio Code or Cursor the
   editor is the ambient theme, and it is what tracks your operating system if
   you have asked it to. This matches what "system" means in MemQL OS relative
   to its own host, the browser.
@@ -753,8 +754,8 @@ gap in this extension, and it is why the MemQL tree items speak VS Code's
 `charts.*` vocabulary (green = healthy, red = error, yellow = needs attention,
 purple = in progress) rather than a MemQL hex.
 
-So the only way the chrome AROUND the panels can wear the brand is for VS
-Code's own colour theme to be a MemQL theme. The extension ships two:
+To apply the brand to the surrounding workbench, select a MemQL editor theme
+in Visual Studio Code or Cursor. The extension ships two:
 
 - **MemQL Dark**
 - **MemQL Light**
@@ -775,8 +776,9 @@ green in that palette reads as "this file is executable".
 ### If the palette changes
 
 The hexes live in exactly one place, `src/webview/palette.ts`, and both the
-panel CSS and the two theme files are derived from it. When MemQL OS palette
-changes (upstream is `brand/` at the repository root -- see memql#4177):
+panel CSS and the two theme files are derived from it. Brand-role tests compare
+it with `brand/tokens.css`; the deliberately lifted dark surfaces have separate
+brightness and contrast checks. When updating this adaptation:
 
 1. Edit `src/webview/palette.ts`.
 2. Run `node scripts/generate-themes.mjs`.

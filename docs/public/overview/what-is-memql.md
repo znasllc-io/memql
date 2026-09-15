@@ -12,23 +12,23 @@ owner: znas
 MemQL is an open-source AI platform for applications that need AI to act on
 structured data and external systems. You declare data and behavior in `.memql`
 files; the engine executes them on a cluster. You can inspect that work through
-MemQL OS, VS Code, or your own client.
+MemQL OS, Visual Studio Code, Cursor, or your own client.
 
 ## The mental model
 
 **The engine runs the system. MemQL OS is an application connected to it.**
 Individual OS apps are views and controls for particular jobs, not separate
-engines. The VS Code extension is another client, with offline language support
-and an optional connection to one of your clusters.
+engines. The Visual Studio Code and Cursor extension is another client, with
+offline language support and an optional connection to one of your clusters.
 
 ```text
-MemQL OS apps       VS Code        Your sites and applications
-      \                |                 /
-             Authenticated engine API
-                        |
+MemQL OS apps     VS Code / Cursor     Your sites and applications
+       \                 |                     /
+               Authenticated engine API
+                          |
   Data and relationships · Tools and automations · Agent work
-                        |
-       Versioned memory graph and execution records
+                          |
+        Versioned memory graph and execution records
 ```
 
 ## What the engine supports
@@ -78,8 +78,8 @@ a replay result is not a guarantee about every external side effect.
 
 The approved OS design direction is
 [Supervised Visual Composition](../operate/supervised-visual-composition.md).
-That page distinguishes the current interface, Fleet work under local validation,
-and designs that have not shipped.
+That page distinguishes available Fleet composition and policy review from
+designs still being implemented or awaiting approval.
 
 ## What to expect today
 

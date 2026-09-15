@@ -1,4 +1,4 @@
-# MemQL for VS Code
+# MemQL for Visual Studio Code and Cursor
 
 Write `.memql` where you write code. Inspect and run it where it lives.
 
@@ -10,11 +10,14 @@ to your MemQL clusters. It is part of the alpha MemQL platform.
 From a checkout of this repository:
 
 ```bash
-make vscode-install
+make vscode-install                  # Visual Studio Code
+make vscode-install EDITOR_CMD=cursor # Cursor
 ```
 
-This packages the extension for your host and installs it through the `code` CLI.
-Then run **Developer: Reload Window**. Requirements: VS Code 1.91+, Go using the
+Choose the command for your editor. It packages the extension for your host and
+installs through the selected `code` or `cursor` CLI.
+Then run **Developer: Reload Window** in that editor. Requirements: VS Code
+1.91+ or a compatible Cursor version, Go using the
 repository's `go.mod` toolchain, Node.js 20+, npm, Make, and unzip.
 `make vscode-package` builds a VSIX without installing it.
 
@@ -82,8 +85,10 @@ cluster. The complete source is in `examples/reading-list/reading.memql`.
 
 ## Appearance
 
-The extension provides MemQL light and dark editor themes and themed webviews.
-Use VS Code's theme picker for the editor; see [appearance reference](REFERENCE.md#appearance)
+The extension provides **MemQL Light** (neutral paper and green) and **MemQL
+Dark** (brighter charcoal with mint and amber). Choose either with
+**Preferences: Color Theme** in Visual Studio Code or Cursor. The extension never
+changes your editor theme automatically. See [appearance reference](REFERENCE.md#appearance)
 for webview settings and native sidebar behavior.
 
 ## Reference and development

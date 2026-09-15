@@ -5,13 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
       name="description"
-      content="Write MemQL in Visual Studio Code. Offline language intelligence, connected cluster tools, and explicit control over what you run and promote."
+      content="Write MemQL in Visual Studio Code and Cursor. Offline language intelligence, connected cluster tools, and explicit control over what you run and promote."
     />
-    <meta name="theme-color" content="#2451da" />
-    <title>MemQL for VS Code — Write. Inspect. Run.</title>
+    <meta name="theme-color" content="#047d5a" />
+    <title>
+      MemQL for Visual Studio Code and Cursor — Write. Inspect. Run.
+    </title>
     <link rel="icon" href="brand/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="brand/fonts.css" />
+    <link rel="stylesheet" href="brand/tokens.css" />
+    <link rel="stylesheet" href="editor-theme.css" />
     <link rel="stylesheet" href="style.css" />
+    <script src="appearance.js"></script>
     <script type="module" src="site.js"></script>
   </head>
   <body>
@@ -21,11 +26,10 @@
         class="brand"
         href="https://github.com/znasllc-io/memql"
         aria-label="MemQL repository"
-        ><img src="brand/mark.svg" alt="" width="32" height="32" /><span
-          >MemQL</span
-        ></a
+        ><span class="brand-mark" aria-hidden="true"></span
+        ><span>MemQL</span></a
       >
-      <span class="product-name">for Visual Studio Code</span>
+      <span class="product-name">for VS Code &amp; Cursor</span>
       <nav aria-label="Main navigation">
         <a href="#workflow">Workflow</a>
         <a href="#example">Example</a>
@@ -34,6 +38,24 @@
         >
         <a class="nav-cta" href="#install">Get the extension</a>
       </nav>
+      <fieldset class="appearance-controls" hidden>
+        <legend class="sr-only">Page appearance</legend>
+        <label
+          ><input type="radio" name="appearance" value="system" checked /><span
+            >System</span
+          ></label
+        >
+        <label
+          ><input type="radio" name="appearance" value="light" /><span
+            >Light</span
+          ></label
+        >
+        <label
+          ><input type="radio" name="appearance" value="dark" /><span
+            >Dark</span
+          ></label
+        >
+      </fieldset>
     </header>
     <main id="main">
       <section class="hero wrap" aria-labelledby="hero-title">
@@ -44,9 +66,9 @@
           </p>
           <h1 id="hero-title">Your engine.<br />Your editor.</h1>
           <p class="lead">
-            Bring MemQL into VS Code. Write with offline language intelligence.
-            Connect to a cluster to inspect, run, and put your definitions to
-            work.
+            Bring MemQL into VS Code and Cursor. Write with offline language
+            intelligence. Connect to a cluster to inspect, run, and put your
+            definitions to work.
           </p>
           <div class="actions">
             <a class="button primary" href="#install">Build &amp; install</a
@@ -93,8 +115,8 @@
             </div>
           </div>
           <figcaption>
-            Code illustration from the reading-list example. No live cluster
-            connection.
+            Code illustration using the bundled MemQL editor theme. No live
+            cluster connection.
           </figcaption>
         </figure>
       </section>
@@ -178,7 +200,7 @@
           </div>
           <aside class="view-map" aria-labelledby="views-title">
             <div class="view-map-head">
-              <img src="brand/mark.svg" width="24" height="24" alt="" />
+              <span class="brand-mark" aria-hidden="true"></span>
               <h3 id="views-title">A place for each question</h3>
             </div>
             <dl>
@@ -319,11 +341,11 @@ concept readingItem {
             <a href="memql.toml" download>Download its language manifest</a>
           </div>
           <details class="run-guide">
-            <summary>Run this example in VS Code</summary>
+            <summary>Run this example in VS Code or Cursor</summary>
             <ol>
               <li>
-                Download both files into a new folder. Open it in VS Code with
-                the MemQL extension installed.
+                Download both files into a new folder. Open it in either editor
+                with the MemQL extension installed.
               </li>
               <li>
                 To validate offline from the repository, run
@@ -377,8 +399,8 @@ concept readingItem {
             editor. Your first file can stay entirely local.
           </p>
           <p class="install-requirements">
-            VS Code 1.91+ · Node.js 20+ · Go toolchain from go.mod · npm · Git ·
-            Make · unzip
+            VS Code 1.91+ or compatible Cursor · Node.js 20+ · Go toolchain from
+            go.mod · npm · Git · Make · unzip
           </p>
           <a
             href="https://github.com/znasllc-io/memql/blob/main/docs/public/language/vscode.md#install--update-locally"
@@ -391,15 +413,17 @@ concept readingItem {
               <h3>Clone and install</h3>
               <pre><code>git clone https://github.com/znasllc-io/memql.git
 cd memql
-make vscode-install</code></pre>
+make vscode-install                  # VS Code
+make vscode-install EDITOR_CMD=cursor # Cursor</code></pre>
               <p>
-                Builds for your host and installs through the
-                <code>code</code> CLI. Replaces an existing local MemQL
+                Choose the install command for your editor. It builds for your
+                host and uses the selected <code>code</code> or
+                <code>cursor</code> CLI. Replaces an existing local MemQL
                 extension.
               </p>
             </li>
             <li>
-              <h3>Reload VS Code</h3>
+              <h3>Reload your editor</h3>
               <p>
                 Run <strong>Developer: Reload Window</strong>, then open a
                 folder of <code>.memql</code> files.
@@ -422,14 +446,27 @@ make vscode-install</code></pre>
         </div>
       </section>
 
+      <section
+        class="editor-appearance wrap"
+        aria-labelledby="editor-appearance-title"
+      >
+        <h2 id="editor-appearance-title">Two themes. Your choice.</h2>
+        <p>
+          <strong>MemQL Light</strong> pairs neutral paper with green accents.
+          <strong>MemQL Dark</strong> uses brighter charcoal surfaces with mint
+          and amber syntax. In VS Code or Cursor, open
+          <strong>Preferences: Color Theme</strong> and choose either. The page
+          appearance control changes only this website.
+        </p>
+      </section>
       <section class="closing wrap" aria-labelledby="engine-title">
         <div>
-          <img src="brand/mark.svg" alt="" width="44" height="44" />
+          <span class="brand-mark" aria-hidden="true"></span>
           <h2 id="engine-title">An editor for a broader engine.</h2>
           <p>
             MemQL connects typed data, relationships, agent work, automations,
-            integrations, and hosted sites. VS Code is where you author. MemQL
-            OS is where you manage the cluster.
+            integrations, and hosted sites. VS Code and Cursor are where you
+            author. MemQL OS is where you manage the cluster.
           </p>
         </div>
         <a
@@ -440,7 +477,7 @@ make vscode-install</code></pre>
       </section>
     </main>
     <footer class="footer wrap">
-      <span>MemQL for Visual Studio Code</span>
+      <span>MemQL for VS Code &amp; Cursor</span>
       <nav aria-label="Footer">
         <a href="https://github.com/znasllc-io/memql/tree/main/editors/vscode"
           >Source</a

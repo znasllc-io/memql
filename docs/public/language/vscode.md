@@ -1,5 +1,5 @@
 ---
-title: MemQL in VS Code (offline language server)
+title: MemQL in Visual Studio Code and Cursor (offline language server)
 audience: public
 status: stable
 area: language
@@ -7,7 +7,7 @@ sinceVersion: 0.13.0
 owner: znas
 ---
 
-# MemQL in VS Code
+# MemQL in Visual Studio Code and Cursor
 
 Author `.memql` files with syntax highlighting, live diagnostics, completion,
 hover, signature help, and go-to-definition. The bundled language server runs
@@ -23,15 +23,18 @@ Saving a file does not deploy it.
 
 The reproducible installation path from this repository is a local VSIX build.
 You need Git, Make, Go (the toolchain in `go.mod`), Node.js 20+, npm, unzip, and
-VS Code 1.91+ with the `code` CLI on your PATH.
+VS Code 1.91+ or a compatible Cursor version, with its `code` or `cursor` CLI
+on your PATH. Both use the same extension package. Choose the install command
+for your editor below.
 
 ```bash
 git clone https://github.com/znasllc-io/memql.git
 cd memql
-make vscode-install
+make vscode-install                  # Visual Studio Code
+make vscode-install EDITOR_CMD=cursor # Cursor
 ```
 
-Then run **Developer: Reload Window** in VS Code. This rebuilds and replaces your
+Then run **Developer: Reload Window** in the editor you installed into. This rebuilds and replaces your
 installed MemQL extension. To create the archive without installing it, use
 `make vscode-package`; the script prints the `.vsix` path. Packaging defaults
 to your host's OS and architecture.
@@ -40,6 +43,17 @@ The repository also contains a release workflow targeting Marketplace and Open
 VSX for Linux x64/ARM64 and macOS x64/ARM64. A configured workflow does not prove
 that a particular version is available in a registry; this guide uses the
 source-build path rather than an unverified listing or download link.
+
+## Appearance
+
+Open **Preferences: Color Theme** in Visual Studio Code or Cursor and choose
+**MemQL Light** or **MemQL Dark**. Light uses neutral paper with green accents;
+Dark uses brighter charcoal surfaces with mint and amber syntax colours. These
+themes are optional.
+
+`memql.appearance` controls the extension panels separately: `system` follows
+your editor theme; `light` and `dark` select a fixed palette. High-contrast editor
+themes take precedence. See the [appearance reference](../../../editors/vscode/REFERENCE.md#appearance).
 
 ## First session
 
@@ -75,7 +89,7 @@ short product tour.
 ## Architecture
 
 ```
-  VS Code  (editors/vscode, TypeScript)
+  Visual Studio Code / Cursor  (editors/vscode, TypeScript)
     - vscode-languageclient  -- spawns -->  memql-lsp (stdio)
     - memql.tmLanguage.json  (baseline offline highlighting, generated)
     - language-configuration.json (comments / brackets / brace

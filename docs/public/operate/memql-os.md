@@ -24,9 +24,11 @@ and authentication reference.
 
 The approved design direction is
 [Supervised Visual Composition](supervised-visual-composition.md): direct visual
-composition and supervised proposals in a shared workspace. Fleet changes are
-under local validation; proposed Settings/Logs and Deployables layouts are not
-documented here as shipped functionality.
+composition and supervised proposals in a shared workspace. Fleet provides
+visual composition, persistent routing-policy editing, and typed Ask proposal
+review. Proposal generation requires configured compatible inference. The
+approved Deployables redesign is being implemented and has not yet deployed;
+proposed Settings/Logs layouts still await approval.
 
 Related: [identity](auth/identity-service.md), [access](auth/access-model.md),
 [environment parity](environment-parity.md), [front door](front-door.md).

@@ -13,7 +13,7 @@ import path from "node:path";
 const source = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(source, "../../..");
 const output = path.join(source, "dist");
-const assets = ["index.html", "style.css", "site.js"];
+const assets = ["index.html", "style.css", "site.js", "appearance.js"];
 
 async function check() {
   const html = await readFile(path.join(output, "index.html"), "utf8");
@@ -60,12 +60,66 @@ async function check() {
         ),
       )
     ).flat();
+  if (
+    (await readFile(path.join(output, "editor-theme.css"), "utf8")) !==
+    (await editorThemeCSS())
+  )
+    throw new Error("Editor theme preview is stale; rebuild");
+  if (
+    (await readFile(path.join(output, "brand/tokens.css"), "utf8")) !==
+    (await readFile(path.join(root, "brand/tokens.css"), "utf8"))
+  )
+    throw new Error("Canonical brand tokens are stale; rebuild");
   const sizes = await walk(output);
   return {
     files: sizes.length,
     bytes: sizes.reduce((a, b) => a + b, 0),
     output,
   };
+}
+
+async function editorThemeCSS() {
+  const roles = {
+    bg: "editor.background",
+    fg: "editor.foreground",
+    rail: "sideBar.background",
+    line: "widget.border",
+  };
+  const themes = await Promise.all(
+    ["light", "dark"].map(async (variant) =>
+      JSON.parse(
+        await readFile(
+          path.join(source, `../themes/memql-${variant}-color-theme.json`),
+          "utf8",
+        ),
+      ),
+    ),
+  );
+  const values = themes.map((theme) => ({
+    ...Object.fromEntries(
+      Object.entries(roles).map(([role, key]) => [role, theme.colors[key]]),
+    ),
+    comment: theme.tokenColors.find((rule) => rule.name === "Comment").settings
+      .foreground,
+    string: theme.tokenColors.find((rule) => rule.name === "String").settings
+      .foreground,
+    number: theme.tokenColors.find(
+      (rule) => rule.name === "Number and language constant",
+    ).settings.foreground,
+    keyword: theme.tokenColors.find(
+      (rule) => rule.name === "Keyword, storage and annotation",
+    ).settings.foreground,
+  }));
+  return (
+    "/* Generated from the contributed MemQL editor themes. */\n:root {\n" +
+    Object.keys(values[0])
+      .map(
+        (role) =>
+          `  --editor-${role}: light-dark(${values[0][role]}, ${values[1][role]});`,
+      )
+      .join("\n") +
+    "\n}\n"
+  );
 }
 
 async function build() {
@@ -76,11 +130,21 @@ async function build() {
     await cp(path.join(source, name), path.join(output, name));
   await mkdir(path.join(output, "brand"), { recursive: true });
   // Bundle canonical brand assets at build time; never fork their source definitions.
-  for (const name of ["fonts.css", "fonts", "mark.svg", "favicon.svg"]) {
+  for (const name of [
+    "fonts.css",
+    "tokens.css",
+    "fonts",
+    "mark.svg",
+    "favicon.svg",
+  ]) {
     await cp(path.join(root, "brand", name), path.join(output, "brand", name), {
       recursive: true,
     });
   }
+  await writeFile(
+    path.join(output, "editor-theme.css"),
+    await editorThemeCSS(),
+  );
   // The canonical mark is an HTML-ready SVG fragment. Its prose comments contain
   // double hyphens, which XML image decoders reject. Strip comments only for the
   // standalone image; preserve the canonical geometry and source file.

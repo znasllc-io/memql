@@ -1,28 +1,9 @@
-// The MemQL palette, as data (memql#4419, D3).
-//
-// UPSTREAM IS `brand/` AT THE REPOSITORY ROOT, and the hexes below are
-// memql#4177's exactly -- the same values the portal redesign ships and
-// memql.io renders. They are transcribed rather than imported: `brand/` is CSS
-// consumed by two build systems that share no package manager
-// (clients/os's Vite and component/identity/web's Tailwind CLI), and this
-// extension is a third with a strict webview CSP that loads no external
-// stylesheet at all. brand_shared_source_test.go scans those two trees and
-// deliberately does not scan this one; memql#4196's header records why. That
-// makes drift POSSIBLE at the moment the portal palette changes, so the
-// mitigation is procedural and written down: editors/vscode/README.md's
-// Appearance section carries the release step, and this header names the
-// source so nobody has to guess where the truth is.
-//
-// WHY DATA AND NOT CSS. These values used to live inside brandStyleBlock() as
-// CSS text, which was fine while CSS was their only consumer. It stopped being
-// fine when the extension had to emit VS Code color-theme JSON from the same
-// palette (memql#4420): a generator cannot read a template literal, so the
-// alternative was a second hand-typed copy of every hex in the theme files --
-// exactly the drift that this repo's generate-then-gate pairs exist to
-// prevent. One map, three consumers: brandStyleBlock(), buildEditorTheme(),
-// and scripts/generate-themes.mjs through the second of those.
-//
-// Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
+// MemQL's editor and webview palette. Brand accents, data tints and light
+// neutrals follow brand/tokens.css. The dark working surfaces are deliberately
+// lifted toward the brand foreground for long editing sessions (owner request).
+// This adaptation is local to the extension; it does not repaint MemQL OS.
+// Tests compare the unchanged roles with the canonical brand source and gate
+// contrast. Both native themes are generated from this same palette.
 
 /**
  * The token names, which are also the CSS custom-property suffixes:
@@ -79,40 +60,51 @@ export const PALETTE_KEYS: readonly PaletteKey[] = [
   "data-string",
 ];
 
-/** The light palette -- the portal's default, and this extension's. */
+/** The light palette: current canonical brand neutrals and accents. */
 export const LIGHT: Palette = {
-  bg: "#f2f4ef",
+  bg: "#f7f7f5",
   surface: "#ffffff",
-  raised: "#e9ede6",
-  border: "#d6ddd4",
-  "border-strong": "#c2cabf",
-  fg: "#14201a",
-  muted: "#586159",
-  subtle: "#7c847b",
+  raised: "#efefec",
+  border: "#e5e6e2",
+  "border-strong": "#d2d4cf",
+  fg: "#191d1a",
+  muted: "#5b615c",
+  subtle: "#7e837b",
   accent: "#047d5a",
   "accent-deep": "#026842",
   "on-accent": "#ffffff",
   "on-accent-hover": "#ffffff",
-  danger: "#b42318",
+  danger: "#b3362a",
   "data-number": "#0f766e",
   "data-string": "#b45309",
 };
 
-/** The dark palette. */
+// An sRGB lift of existing brand surfaces, rather than an unrelated dark hue.
+// Small, ordered lifts keep the editor, rail, hover and selection distinct.
+function lift(surface: string, amount: number): string {
+  const foreground = "#e8e6dd";
+  return "#" + [1, 3, 5].map((offset) => {
+    const base = parseInt(surface.slice(offset, offset + 2), 16);
+    const ink = parseInt(foreground.slice(offset, offset + 2), 16);
+    return Math.round(base + (ink - base) * amount).toString(16).padStart(2, "0");
+  }).join("");
+}
+
+/** Dark charcoal work surfaces with the canonical mint/amber syntax accents. */
 export const DARK: Palette = {
-  bg: "#07090a",
-  surface: "#0b1110",
-  raised: "#0e1311",
-  border: "#18231e",
-  "border-strong": "#213029",
+  bg: lift("#07090a", 0.09),
+  surface: lift("#0b1110", 0.10),
+  raised: lift("#0e1311", 0.12),
+  border: lift("#18231e", 0.12),
+  "border-strong": lift("#213029", 0.16),
   fg: "#e8e6dd",
   muted: "#9ca395",
   subtle: "#6c726a",
   accent: "#5ccda7",
   "accent-deep": "#026842",
-  "on-accent": "#052e21",
+  "on-accent": "#07090a",
   "on-accent-hover": "#ffffff",
-  danger: "#f97066",
+  danger: "#e0705f",
   "data-number": "#98ffe0",
   "data-string": "#cbb083",
 };

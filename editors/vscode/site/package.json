@@ -2,7 +2,7 @@
   "name": "memql-vscode-site",
   "private": true,
   "version": "1.0.0",
-  "description": "Static, source-grounded landing page for MemQL for VS Code",
+  "description": "Static landing page for MemQL for Visual Studio Code and Cursor",
   "type": "module",
   "engines": {
     "node": ">=20"

@@ -43,9 +43,9 @@ Status recorded **2026-09-15**:
 | Scope | Status |
 |---|---|
 | Existing OS apps | Available according to their current engine APIs, app grants, and configuration. Manual controls remain the baseline. |
-| Fleet composition | Changes are under local validation. The work includes an object-centered workspace, routing-policy composition, shared activity targets, and review of actual Ask policy proposals. It is not established here as a released capability. |
+| Fleet composition | Available: visual composition, persistent routing-policy editing, shared activity targets, and typed Ask policy proposal review. Proposal generation requires configured compatible inference. |
 | New Settings and per-app Logs layouts | Proposed; awaiting prototype approval. Existing Settings and Logs remain the current surfaces. |
-| Deployables composition redesign | Separate prototype work; not an approved production replacement. |
+| Deployables composition redesign | Approved; implementation is underway. The redesign has not yet deployed. |
 | General autonomous UI driving and voice orchestration | Future work. Activity hooks and a policy proposal do not establish this broader capability. |
 
 When evaluating a preview, distinguish real service activity from labeled

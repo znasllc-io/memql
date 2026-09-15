@@ -131,7 +131,7 @@ test("a newer cluster raises a warning naming the release, with both actions", a
   await flush();
 
   const at = recorded.warnings.indexOf(
-    "This cluster's MemQL grammar is newer than this extension's. Update MemQL for VS Code to 0.5.0 or newer so completion and diagnostics match the cluster.",
+    "This cluster's MemQL grammar is newer than this extension's. Update MemQL for Visual Studio Code and Cursor to 0.5.0 or newer so completion and diagnostics match the cluster.",
   );
   assert.ok(at >= 0, `the notice was not shown; saw: ${JSON.stringify(recorded.warnings)}`);
   assert.deepEqual(recorded.warningActions[at], ["Open in Extensions", "Show details"]);
@@ -156,7 +156,7 @@ test("with no id from the host, the notice draws no Open in Extensions button", 
   await flush();
 
   const at = recorded.warnings.indexOf(
-    "This cluster's MemQL grammar is newer than this extension's. Update MemQL for VS Code to 0.6.0 or newer so completion and diagnostics match the cluster.",
+    "This cluster's MemQL grammar is newer than this extension's. Update MemQL for Visual Studio Code and Cursor to 0.6.0 or newer so completion and diagnostics match the cluster.",
   );
   assert.ok(at >= 0, `the notice was not shown; saw: ${JSON.stringify(recorded.warnings)}`);
   assert.deepEqual(recorded.warningActions[at], ["Show details"]);
@@ -167,7 +167,7 @@ test("the details land in the MemQL Connection channel, naming both grammars and
   assert.match(text, /"newer"/, "the record names the cluster it is about");
   assert.ok(text.includes(GRAMMAR_A), "the extension's grammar is recorded");
   assert.ok(text.includes(GRAMMAR_B), "the cluster's grammar is recorded");
-  assert.ok(text.includes("MemQL for VS Code 0.5.0 is the first release that carries the cluster's grammar."));
+  assert.ok(text.includes("MemQL for Visual Studio Code and Cursor 0.5.0 is the first release that carries the cluster's grammar."));
 });
 
 test("a cluster on a newer edition raises a warning naming both editions and the release", async () => {
@@ -178,7 +178,7 @@ test("a cluster on a newer edition raises a warning naming both editions and the
   await flush();
 
   const at = recorded.warnings.indexOf(
-    "This cluster speaks MemQL edition 2027; this extension speaks edition 2026. Update MemQL for VS Code to 0.9.0 or newer.",
+    "This cluster speaks MemQL edition 2027; this extension speaks edition 2026. Update MemQL for Visual Studio Code and Cursor to 0.9.0 or newer.",
   );
   assert.ok(at >= 0, `the notice was not shown; saw: ${JSON.stringify(recorded.warnings)}`);
   assert.deepEqual(recorded.warningActions[at], ["Open in Extensions", "Show details"]);

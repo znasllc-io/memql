@@ -20,10 +20,12 @@ name at a call site is a release every time your fleet changes.
 
 ---
 
-The policy-composition changes described by
-[Supervised Visual Composition](supervised-visual-composition.md) are under local
-validation. This page describes the baseline engine contract; a preview of a
-new editor does not establish its availability on your cluster.
+Fleet provides a persistent visual policy editor and review of typed Ask policy
+proposals, following
+[Supervised Visual Composition](supervised-visual-composition.md). Generating
+proposals requires compatible inference to be configured. Manual policy editing
+remains available independently. This page describes the underlying engine
+contract.
 
 ## The three nouns
 

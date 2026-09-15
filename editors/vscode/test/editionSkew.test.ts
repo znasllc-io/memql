@@ -79,7 +79,7 @@ test("a newer grammar whose release is newer than this extension is clusterNewer
   assert.equal(skew.state, "clusterNewer");
   assert.equal(
     skew.headline,
-    "This cluster's MemQL grammar is newer than this extension's. Update MemQL for VS Code to 0.5.0 or newer so completion and diagnostics match the cluster.",
+    "This cluster's MemQL grammar is newer than this extension's. Update MemQL for Visual Studio Code and Cursor to 0.5.0 or newer so completion and diagnostics match the cluster.",
   );
   assert.equal(skew.releaseToInstall, "0.5.0");
 });
@@ -89,7 +89,7 @@ test("a later edition is clusterNewer, naming both editions and the release", ()
   assert.equal(skew.state, "clusterNewer");
   assert.equal(
     skew.headline,
-    "This cluster speaks MemQL edition 2027; this extension speaks edition 2026. Update MemQL for VS Code to 0.9.0 or newer.",
+    "This cluster speaks MemQL edition 2027; this extension speaks edition 2026. Update MemQL for Visual Studio Code and Cursor to 0.9.0 or newer.",
   );
   assert.equal(skew.releaseToInstall, "0.9.0");
 });
@@ -101,7 +101,7 @@ test("a later edition with no release named still says which edition to get, and
   assert.equal(skew.state, "clusterNewer");
   assert.equal(
     skew.headline,
-    "This cluster speaks MemQL edition 2027; this extension speaks edition 2026. Update MemQL for VS Code to a release that speaks edition 2027.",
+    "This cluster speaks MemQL edition 2027; this extension speaks edition 2026. Update MemQL for Visual Studio Code and Cursor to a release that speaks edition 2027.",
   );
   assert.equal(skew.releaseToInstall, undefined);
 });
@@ -136,7 +136,7 @@ test("different grammars that cannot be ordered are differs, naming both grammar
     assert.equal(skew.state, "differs", `editorRelease ${JSON.stringify(editorRelease)}`);
     assert.equal(
       skew.headline,
-      `This cluster runs MemQL grammar ${GRAMMAR_B}; this extension was built for ${GRAMMAR_A}. Use the MemQL for VS Code release built for this cluster's grammar (Show details has both).`,
+      `This cluster runs MemQL grammar ${GRAMMAR_B}; this extension was built for ${GRAMMAR_A}. Use the MemQL for Visual Studio Code and Cursor release built for this cluster's grammar (Show details has both).`,
     );
     assert.equal(skew.releaseToInstall, undefined);
   }
@@ -147,7 +147,7 @@ test("editions that are not years cannot be ordered either", () => {
   assert.equal(skew.state, "differs");
   assert.equal(
     skew.headline,
-    "This cluster speaks MemQL edition next; this extension was built for edition 2026. Use the MemQL for VS Code release built for this cluster's edition (Show details has both).",
+    "This cluster speaks MemQL edition next; this extension was built for edition 2026. Use the MemQL for Visual Studio Code and Cursor release built for this cluster's edition (Show details has both).",
   );
 });
 
@@ -209,9 +209,9 @@ test("every notice says what resolves it", () => {
   // update this extension, update the cluster, or use the release built for
   // the cluster's language.
   const resolution: Record<string, RegExp> = {
-    clusterNewer: /Update MemQL for VS Code to /,
+    clusterNewer: /Update MemQL for Visual Studio Code and Cursor to /,
     clusterOlder: / until the cluster is updated\.$/,
-    differs: /Use the MemQL for VS Code release built for this cluster's (grammar|edition) \(Show details has both\)\.$/,
+    differs: /Use the MemQL for Visual Studio Code and Cursor release built for this cluster's (grammar|edition) \(Show details has both\)\.$/,
   };
   for (const { name, cluster } of NOTICE_CASES) {
     const skew = compareLanguage(cluster, EXTENSION);
@@ -226,8 +226,8 @@ test("the details name both editions, both grammars, and the release that carrie
   const details = skew.details.join("\n");
   assert.deepEqual(skew.details, [
     `The cluster speaks MemQL edition 2026, grammar ${GRAMMAR_B}.`,
-    `This extension (MemQL for VS Code 0.4.0) speaks edition 2026, grammar ${GRAMMAR_A}.`,
-    "MemQL for VS Code 0.5.0 is the first release that carries the cluster's grammar.",
+    `This extension (MemQL for Visual Studio Code and Cursor 0.4.0) speaks edition 2026, grammar ${GRAMMAR_A}.`,
+    "MemQL for Visual Studio Code and Cursor 0.5.0 is the first release that carries the cluster's grammar.",
   ]);
   assert.ok(details.includes(GRAMMAR_A) && details.includes(GRAMMAR_B));
 });
@@ -236,7 +236,7 @@ test("the details say so when the cluster names no release", () => {
   const skew = compareLanguage({ edition: "2027", grammarVersion: GRAMMAR_B }, EXTENSION);
   assert.equal(
     skew.details[2],
-    "The cluster did not name the release of MemQL for VS Code that carries its grammar.",
+    "The cluster did not name the release of MemQL for Visual Studio Code and Cursor that carries its grammar.",
   );
 });
 

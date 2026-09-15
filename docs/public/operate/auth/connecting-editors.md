@@ -9,8 +9,8 @@ owner: znas
 
 # Connecting an Editor
 
-How the MemQL VS Code extension signs in to a cluster, what it needs from that
-cluster (nothing), who is allowed to do it, and what to do when it refuses.
+How the MemQL extension for Visual Studio Code and Cursor signs in to a cluster,
+what it needs from that cluster (nothing), who is allowed to do it, and what to do when it refuses.
 
 The short version: **an editor connects to a cluster with no configuration on
 either side.** If that is not what you are seeing, the
@@ -48,7 +48,7 @@ installed, and `MEMQL_IDENTITY_OAUTH_DCR_ENABLED` has nothing to do with it.
 | Property | Value | Why |
 |---|---|---|
 | `client_id` | `memql-vscode` | Fixed. A released extension carries this string, so changing it strands every editor already installed |
-| Display name | MemQL for VS Code | What the consent page shows |
+| Display name | MemQL for Visual Studio Code and Cursor | What the consent page shows |
 | Redirect URI | `http://127.0.0.1/callback` | Loopback only, and **portless** -- see below |
 | Client type | Public (no secret) | The extension ships to every user's machine, so a baked-in secret would be a secret in name only |
 | PKCE | Required (S256) | What actually binds the authorization code to the process that asked for it |
@@ -100,7 +100,7 @@ refusing them the editor while admitting them there would be incoherent.
 **A refused person sees a sentence naming their role**, in the editor, in both
 flows:
 
-> MemQL for VS Code manages this cluster. Your role on it is reader, and signing
+> MemQL for Visual Studio Code and Cursor manages this cluster. Your role on it is reader, and signing
 > in from an editor needs developer or above. Ask a cluster owner or admin to
 > raise your role.
 
@@ -199,7 +199,7 @@ released engine already supports.
 On the identity deployment:
 
 ```
-MEMQL_IDENTITY_REGISTERED_CLIENTS='[{"clientId":"memql-vscode","redirectURIs":["http://127.0.0.1/callback"],"name":"MemQL for VS Code"}]'
+MEMQL_IDENTITY_REGISTERED_CLIENTS='[{"clientId":"memql-vscode","redirectURIs":["http://127.0.0.1/callback"],"name":"MemQL for Visual Studio Code and Cursor"}]'
 ```
 
 The portless redirect URI is load-bearing here for the reason given

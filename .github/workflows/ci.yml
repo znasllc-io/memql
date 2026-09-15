@@ -520,6 +520,8 @@ jobs:
             # nothing. Renaming an export is enough to do it. The consumer must
             # rebuild whenever what it compiles against moves.
             vscode:
+              # Editor palette tests compare against the authoritative brand.
+              - 'brand/tokens.css'
               - 'editors/vscode/**'
               - 'cmd/memql-lsp/**'
               - 'scripts/vscode/**'

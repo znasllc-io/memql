@@ -1,7 +1,7 @@
-# MemQL VS Code landing page
+# MemQL for Visual Studio Code and Cursor landing page
 
 A static product page for the existing extension. It uses canonical brand fonts
-and artwork, shows the actual reading-list source, and links to repository docs.
+colours and artwork, shows the actual reading-list source, and links to repository docs.
 It has no cluster connection, external font dependency, analytics, or server runtime.
 
 ## Build and preview
@@ -24,7 +24,7 @@ python3 -m http.server 4318 --bind 127.0.0.1 --directory editors/vscode/site/dis
 ```
 
 The build copies static files plus shared `brand/` assets and generates the
-interactive code panels from `examples/reading-list/reading.memql`. The source
+code-theme CSS from the committed native editor themes and interactive panels from `examples/reading-list/reading.memql`. The source
 manifest is included beside the downloadable example. Run its actual linter:
 
 ```bash
@@ -63,7 +63,7 @@ slash. Relative asset paths support either. No SPA fallback is required.
 For MemQL hosting, publish the built directory through the existing Deployables /
 site bundle workflow, then associate the resulting bundle with the intended site
 and hostname. The source tree needs the repository root as build context because
-it reads `brand/` and `examples/reading-list/`; the output directory is
+it reads `brand/`, `editors/vscode/themes/`, and `examples/reading-list/`; the output directory is
 `editors/vscode/site/dist`. Do not use `editors/vscode/site` alone as the build
 context. The edge must be able to read the published bundle; a developer's local
 filesystem path is not a path inside the edge pod.
@@ -84,9 +84,16 @@ not been performed by this build.
 - Code illustration: a labeled illustration, not a screenshot or live run.
   Tabs and downloads use the canonical reading-list example. A snippet may
   depend on another construct; the download contains all four.
-- Shared visual identity: fonts, mark, and favicon are copied from `brand/` at
-  build time. Source definitions remain in `brand/`.
+- Shared visual identity: fonts, colour tokens, mark, and favicon are copied
+  from `brand/` at build time. Marks resolve the chosen page accent; code colours
+  come from the generated native editor themes.
+- Appearance: System is the default and follows OS changes live. Light and Dark
+  persist in local storage. Invalid or unavailable storage falls back to System;
+  selection still works for the visit. Without JavaScript, CSS follows the OS.
+  The page never changes the editor or OS appearance.
 
-Visual QA should cover desktop and narrow screens, all code tabs and keyboard
+Browser checks cover both appearances at 320–1440px, live System changes,
+persisted choices, unavailable storage, rendered text contrast, and keyboard
+focus. Visual QA covers desktop and narrow screens, all code tabs and keyboard
 navigation, visible focus, downloads, clipboard success/failure, reduced motion,
 and JavaScript-disabled fallback. See the task report for observed results.

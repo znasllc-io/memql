@@ -122,7 +122,7 @@ p{color:#555;line-height:1.5;margin:0}
 <body>
 <div class="card">
 <h1>Signed in to MemQL</h1>
-<p>You can close this tab and return to VS Code.</p>
+<p>You can close this tab and return to your editor.</p>
 </div>
 </body>
 </html>`;

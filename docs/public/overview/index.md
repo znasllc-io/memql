@@ -9,7 +9,7 @@ owner: znas
 
 # MemQL documentation
 
-Build with the engine, manage it in MemQL OS, and author `.memql` in VS Code.
+Build with the engine, manage it in MemQL OS, and author `.memql` in VS Code or Cursor.
 MemQL is alpha; use the docs for the same release as your cluster and extension.
 
 ## Start here
@@ -19,7 +19,7 @@ MemQL is alpha; use the docs for the same release as your cluster and extension.
 | Understand the product | [What is MemQL?](what-is-memql.md) |
 | Get an achievable first result | [Getting started](quickstart.md) |
 | Write and run a `.memql` file | [Your first MemQL program](../language/first-program.md) |
-| Install the editor extension | [MemQL in VS Code](../language/vscode.md) |
+| Install the editor extension | [MemQL in VS Code or Cursor](../language/vscode.md) |
 | Find the right cluster app | [MemQL OS](../operate/memql-os.md#the-apps) |
 
 ## Build with MemQL

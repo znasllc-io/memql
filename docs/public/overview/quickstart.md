@@ -15,7 +15,7 @@ constructs needs the engine.
 
 ## Try the language first
 
-Install [MemQL for VS Code](../language/vscode.md#get-the-extension) and open the
+Install [MemQL for Visual Studio Code and Cursor](../language/vscode.md#get-the-extension) and open the
 [reading-list example](../../../examples/reading-list/reading.memql). Completion,
 hover, and diagnostics work without credentials or a cluster. Follow
 [Your first MemQL program](../language/first-program.md) to understand the code
@@ -23,7 +23,7 @@ and validate it with the command-line linter.
 
 ## Connect to an existing cluster
 
-1. Open a trusted workspace in VS Code.
+1. Open a trusted workspace in VS Code or Cursor.
 2. Run **MemQL: Add Cluster** and enter the domain supplied by your operator.
 3. Select the cluster and use **Sign In**. The extension discovers the endpoints
    and opens the cluster's sign-in flow.
@@ -97,7 +97,7 @@ card. A local install does not require adding a paid-provider API key.
 ## Get your first result
 
 Use the [reading-list tutorial](../language/first-program.md) to register a small
-concept, add one row, and query it in VS Code. Then open **Concepts** in MemQL OS
+concept, add one row, and query it in VS Code or Cursor. Then open **Concepts** in MemQL OS
 to inspect the schema and rows. This exercises the engine without an AI call.
 Other apps have their own setup requirements: Fleet for execution resources,
 Files for artifacts, Deployables for sites, and Nexus for goals and approvals.

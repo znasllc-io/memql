@@ -17,20 +17,20 @@ work; it does not promise release dates. Status recorded **2026-09-15**.
 - Typed concepts, queries, mutations, logic, tools, prompts, and automations.
 - Durable agent work and a [scorecard](proving-scorecard.md) that states its measurement limits.
 - [MemQL OS](../operate/memql-os.md), with apps for data, artifacts, sites, Fleet, work, identity, and operations.
-- [VS Code authoring](../language/vscode.md), offline language intelligence, and authenticated runtime tools.
+- [VS Code or Cursor authoring](../language/vscode.md), offline language intelligence, and authenticated runtime tools.
 - [Pack enablement](../concepts/modules.md), [site hosting](../operate/site-hosting.md), and [client repositories](../concepts/clients.md).
 
 Availability on a particular cluster depends on its release, configuration,
 permissions, and healthy dependencies. Repository presence is not a production
 readiness certification.
 
-## Under validation or review
+## Design rollout
 
 [Supervised Visual Composition](../operate/supervised-visual-composition.md) is
-the approved OS design direction. Fleet is the first implementation under local
-validation. New Settings/Logs layouts await prototype approval; Deployables
-composition is separate prototype work. Do not infer that these changes have
-shipped to every cluster.
+the approved OS design direction. Fleet provides visual composition, persistent
+policy editing, and typed Ask proposal review. Ask generation requires configured
+compatible inference. The Deployables redesign is approved and being implemented;
+it has not yet deployed. New Settings/Logs layouts await prototype approval.
 
 ## Future work
 

@@ -211,6 +211,7 @@ const TEXT_PAIRS: [string, string][] = [
   ["tab.activeForeground", "tab.activeBackground"],
   ["tab.inactiveForeground", "tab.inactiveBackground"],
   ["button.foreground", "button.background"],
+  ["button.foreground", "button.hoverBackground"],
   ["button.secondaryForeground", "button.secondaryBackground"],
   ["badge.foreground", "badge.background"],
   ["input.foreground", "input.background"],
@@ -320,4 +321,14 @@ test(".vscodeignore does not exclude the themes directory", () => {
     .filter((line) => line !== "" && !line.startsWith("#"))
     .filter((line) => line === "themes" || line.startsWith("themes/"));
   assert.deepEqual(offenders, [], "the themes must ship inside the VSIX");
+});
+
+// The owner asked for a usable dark work surface instead of near-black.
+test("dark surfaces have visible depth without becoming a light theme", () => {
+  const colors = buildEditorTheme("dark").colors;
+  const editor = luminance(colors["editor.background"]);
+  const rail = luminance(colors["sideBar.background"]);
+  const hover = luminance(colors["list.hoverBackground"]);
+  assert.ok(editor >= 0.01 && editor < 0.05, "dark editor is charcoal, not near-black");
+  assert.ok(editor < rail && rail < hover, "editor, rail and hover have ordered depth");
 });

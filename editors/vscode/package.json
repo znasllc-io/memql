@@ -1,7 +1,7 @@
 {
   "name": "memql",
   "displayName": "MemQL",
-  "description": "Language support for MemQL (.memql): syntax highlighting, diagnostics, completion, hover, and signature help, powered by the offline memql-lsp language server.",
+  "description": "Language support for MemQL (.memql) in Visual Studio Code and Cursor: syntax highlighting, diagnostics, completion, hover, and signature help, powered by the offline memql-lsp language server.",
   "version": "0.4.0",
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
@@ -90,7 +90,7 @@
             "Always use the MemQL dark palette, whatever the editor is set to."
           ],
           "default": "system",
-          "description": "Which palette the MemQL panels (Clusters, Concepts, Constructs, Deployments, Runs and the connection page) use. 'system' means follow the EDITOR's colour theme -- inside VS Code the editor is the ambient theme, and it is what tracks your operating system if you have asked it to. 'light' and 'dark' pin the MemQL palette regardless of the editor. A high-contrast editor theme always wins: the panels then defer entirely to VS Code's own colours and this setting is ignored. Tree rows, the activity bar and the status bar are drawn by VS Code and cannot be styled by an extension -- to brand those too, pick the 'MemQL Dark' or 'MemQL Light' colour theme in the theme picker."
+          "description": "Which palette the MemQL panels (Clusters, Concepts, Constructs, Deployments, Runs and the connection page) use. 'system' means follow the EDITOR's colour theme -- in Visual Studio Code and Cursor the editor is the ambient theme, and it is what tracks your operating system if you have asked it to. 'light' and 'dark' pin the MemQL palette regardless of the editor. A high-contrast editor theme always wins: the panels then defer entirely to the editor's own colours and this setting is ignored. Tree rows, the activity bar and the status bar are drawn by the editor and cannot be styled by an extension -- to brand those too, pick the 'MemQL Dark' or 'MemQL Light' colour theme in the theme picker."
         },
         "memql.lsp.serverPath": {
           "type": "string",
@@ -106,7 +106,7 @@
             "verbose"
           ],
           "default": "off",
-          "description": "Trace the communication between VS Code and the memql-lsp server."
+          "description": "Trace the communication between the editor and the memql-lsp server."
         }
       }
     },

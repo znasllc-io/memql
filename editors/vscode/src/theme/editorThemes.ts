@@ -192,7 +192,9 @@ const COLORS: Readonly<Record<string, PaletteKey>> = {
   // Buttons
   "button.background": "accent",
   "button.foreground": "on-accent",
-  "button.hoverBackground": "accent-deep",
+  // VS Code has no button hover foreground. Keep the existing foreground
+  // readable on hover in BOTH themes (deep green failed with dark text).
+  "button.hoverBackground": "data-number",
   "button.secondaryBackground": "raised",
   "button.secondaryForeground": "fg",
   "button.secondaryHoverBackground": "border",

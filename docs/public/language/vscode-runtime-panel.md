@@ -1,5 +1,5 @@
 ---
-title: VS Code Runtime Panel
+title: Visual Studio Code and Cursor Runtime Panel
 audience: public
 status: stable
 area: language
@@ -7,14 +7,14 @@ sinceVersion: 0.14.0
 owner: znas
 ---
 
-# VS Code Runtime Panel
+# Visual Studio Code and Cursor Runtime Panel
 
-The MemQL extension's activity-bar panel connects VS Code to a running
+The MemQL extension's activity-bar panel connects Visual Studio Code or Cursor to a running
 cluster: pick a cluster, browse what that cluster has **defined**
 (Constructs) and what rows **exist** (Data), and run either without
 leaving the editor.
 
-Verifying a change to this panel: [VS Code Runtime Panel -- Manual Verification
+Verifying a change to this panel: [Visual Studio Code and Cursor Runtime Panel -- Manual Verification
 Checklist](vscode-runtime-panel-verification.md), which also states what the
 automated `make vscode-test-host` smoke lane covers and what it deliberately
 leaves to a human.

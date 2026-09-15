@@ -1,14 +1,14 @@
+/* Page roles resolve from the canonical brand stylesheet. Editor illustrations
+   resolve from the generated native themes, not a hand-painted lookalike. */
 :root {
-  color-scheme: light;
-  --page: #fff;
-  --ink: #172640;
-  --muted: #58677e;
-  --blue: #2451da;
-  --pale: #eef3ff;
-  --line: #dce3ee;
-  --code: #182b4a;
-  --green: #93dec4;
-  font-family: InterVariable, Arial, sans-serif;
+  --page: var(--memql-bg);
+  --ink: var(--memql-fg);
+  --muted: var(--memql-fg-muted);
+  --accent: var(--memql-accent);
+  --pale: var(--memql-accent-subtle);
+  --line: var(--memql-border-strong);
+  --code: var(--editor-bg);
+  font-family: var(--memql-font-sans);
   color: var(--ink);
   background: var(--page);
   font-synthesis: none;
@@ -24,7 +24,7 @@ body {
   margin: 0;
 }
 a {
-  color: var(--blue);
+  color: var(--accent);
   text-decoration-thickness: 1px;
   text-underline-offset: 4px;
 }
@@ -41,7 +41,7 @@ button {
 button:focus-visible,
 a:focus-visible,
 [tabindex]:focus-visible {
-  outline: 3px solid #ac5a00;
+  outline: 3px solid var(--accent);
   outline-offset: 5px;
 }
 p {
@@ -90,9 +90,6 @@ h3 {
   font-weight: 750;
   letter-spacing: -1px;
 }
-.brand img {
-  opacity: 0.86;
-}
 .product-name {
   border-left: 1px solid var(--line);
   padding-left: 22px;
@@ -139,7 +136,7 @@ nav a {
 .file-icon {
   font-family: "JetBrains Mono", monospace;
   font-size: 14px;
-  color: var(--blue);
+  color: var(--accent);
   font-weight: 700;
 }
 h1 {
@@ -173,12 +170,12 @@ h1 {
   font-weight: 600;
 }
 .primary {
-  background: var(--blue);
-  color: white;
-  box-shadow: 0 4px 10px #2451da18;
+  background: var(--accent);
+  color: var(--memql-accent-fg);
+  box-shadow: 0 4px 10px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .primary:hover {
-  background: #1c41b2;
+  background: color-mix(in srgb, var(--accent) 90%, var(--ink));
 }
 .text-link {
   font-size: 14px;
@@ -207,16 +204,16 @@ h1 {
 }
 .editor {
   background: var(--code);
-  color: #e3ebf8;
+  color: var(--editor-fg);
   border-radius: 9px;
-  box-shadow: 0 26px 44px -26px #182b4a80;
+  box-shadow: 0 26px 44px -26px color-mix(in srgb, var(--ink) 25%, transparent);
   overflow: hidden;
 }
 .editor-title {
   display: flex;
   align-items: center;
   gap: 9px;
-  background: #213758;
+  background: var(--editor-rail);
   padding: 17px 22px;
   font-family: "JetBrains Mono", monospace;
   font-size: 11px;
@@ -224,12 +221,12 @@ h1 {
 .file-dot {
   width: 8px;
   height: 10px;
-  border: 1px solid #a3b8dd;
+  border: 1px solid var(--editor-comment);
   border-radius: 1px;
 }
 .editor-mode {
   margin-left: auto;
-  color: #acc1e5;
+  color: var(--editor-comment);
   font-size: 10px;
 }
 pre {
@@ -251,28 +248,28 @@ pre code {
   padding: 25px 24px 28px;
 }
 .comment {
-  color: #abc0df;
+  color: var(--editor-comment);
 }
 .annotation {
-  color: #adc1ff;
+  color: var(--editor-keyword);
 }
 .keyword {
-  color: #dfb2fa;
+  color: var(--editor-keyword);
 }
 .string {
-  color: var(--green);
+  color: var(--editor-string);
 }
 .type {
-  color: #91cef4;
+  color: var(--editor-number);
 }
 .editor-explanation {
   display: flex;
   gap: 15px;
-  border-top: 1px solid #3b4d69;
+  border-top: 1px solid var(--editor-line);
   padding: 19px 24px;
 }
 .annotation-sign {
-  color: #adbeff;
+  color: var(--editor-keyword);
   font-family: "JetBrains Mono", monospace;
   font-size: 24px;
 }
@@ -286,16 +283,17 @@ pre code {
   display: block;
   font-size: 10px;
   line-height: 1.6;
-  color: #b9c8df;
+  color: var(--editor-comment);
   max-width: 300px;
 }
 .editor-footer {
+  border-top: 1px solid var(--editor-line);
   display: flex;
   gap: 20px;
   padding: 10px 24px;
-  background: #213758;
+  background: var(--editor-rail);
   font-size: 10px;
-  color: #b9c8df;
+  color: var(--editor-comment);
 }
 .editor-footer span:last-child {
   margin-left: auto;
@@ -321,7 +319,7 @@ pre code {
 .capability-icon {
   white-space: nowrap;
   grid-row: span 2;
-  color: var(--blue);
+  color: var(--accent);
   font-size: 20px;
   line-height: 1.1;
   font-family: "JetBrains Mono", monospace;
@@ -379,13 +377,13 @@ pre code {
   font-size: 12px;
 }
 .fact {
-  color: #305998;
+  color: var(--accent);
 }
 .view-map {
   border: 1px solid var(--line);
   align-self: center;
   border-radius: 10px;
-  background: #f9fbff;
+  background: var(--memql-surface);
 }
 .view-map-head {
   display: flex;
@@ -428,8 +426,8 @@ pre code {
   color: var(--muted);
 }
 .example-section {
-  background: #f1f5fd;
-  border-block: 1px solid #e3eaf7;
+  background: var(--memql-surface-raised);
+  border-block: 1px solid var(--line);
 }
 .example-layout {
   display: grid;
@@ -452,10 +450,10 @@ pre code {
   cursor: pointer;
 }
 .example-tabs button[aria-selected="true"] {
-  background: white;
-  border-color: #dce5f5;
-  border-left-color: var(--blue);
-  box-shadow: 0 5px 12px #17264004;
+  background: var(--memql-surface);
+  border-color: var(--line);
+  border-left-color: var(--accent);
+  box-shadow: 0 5px 12px color-mix(in srgb, var(--ink) 3%, transparent);
 }
 .example-tabs span {
   display: block;
@@ -469,7 +467,7 @@ pre code {
   margin-top: 6px;
 }
 .example-tabs button:hover {
-  background: #fff;
+  background: var(--memql-surface);
 }
 .example-note {
   margin-top: 23px;
@@ -478,8 +476,9 @@ pre code {
   color: var(--muted);
 }
 .example-code {
-  background: white;
-  border: 1px solid #d6dfef;
+  background: var(--editor-bg);
+  color: var(--editor-fg);
+  border: 1px solid var(--editor-line);
   border-radius: 9px;
   overflow: hidden;
   min-width: 0;
@@ -488,6 +487,7 @@ pre code {
   min-height: 420px;
 }
 .example-code-title {
+  background: var(--editor-rail);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -501,7 +501,7 @@ pre code {
 .copy {
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: white;
+  background: var(--memql-surface);
   color: var(--ink);
   font-size: 11px;
   padding: 5px 9px;
@@ -516,19 +516,19 @@ pre code {
   line-height: 1.8;
 }
 .example-code .comment {
-  color: #5a6c83;
+  color: var(--editor-comment);
 }
 .example-code .annotation {
-  color: #425aa3;
+  color: var(--editor-keyword);
 }
 .example-code .keyword {
-  color: #803a99;
+  color: var(--editor-keyword);
 }
 .example-code .string {
-  color: #0b6e58;
+  color: var(--editor-string);
 }
 .example-code .type {
-  color: #23659d;
+  color: var(--editor-number);
 }
 #example-description {
   font-size: 12px;
@@ -536,7 +536,7 @@ pre code {
   color: var(--muted);
   border-top: 1px solid var(--line);
   padding: 17px 28px;
-  background: #fafcff;
+  background: var(--editor-rail);
 }
 .example-next {
   display: flex;
@@ -592,7 +592,7 @@ pre code {
   display: grid;
   place-items: center;
   background: var(--pale);
-  color: var(--blue);
+  color: var(--accent);
   border-radius: 50%;
   font-size: 12px;
   font-weight: 600;
@@ -607,7 +607,7 @@ pre code {
   margin-top: 10px;
 }
 .install-steps pre {
-  background: #f3f6fb;
+  background: var(--memql-surface);
   border: 1px solid var(--line);
   padding: 15px;
   border-radius: 6px;
@@ -635,10 +635,6 @@ pre code {
 .closing > div {
   max-width: 690px;
 }
-.closing img {
-  float: left;
-  margin-right: 20px;
-}
 .closing h2 {
   font-size: 25px;
   letter-spacing: -0.035em;
@@ -652,9 +648,9 @@ pre code {
   max-width: 570px;
 }
 .secondary {
-  border: 1px solid #b7c9ef;
+  border: 1px solid var(--line);
   white-space: nowrap;
-  background: white;
+  background: var(--memql-surface);
 }
 .footer {
   display: flex;
@@ -679,7 +675,7 @@ pre code {
   top: -100px;
   left: 20px;
   padding: 12px;
-  background: white;
+  background: var(--memql-surface);
   z-index: 5;
 }
 .skip:focus {
@@ -954,11 +950,11 @@ pre code {
 }
 .run-guide summary {
   cursor: pointer;
-  color: var(--blue);
+  color: var(--accent);
   font-weight: 600;
 }
 .run-guide summary:focus-visible {
-  outline: 3px solid #ac5a00;
+  outline: 3px solid var(--accent);
   outline-offset: 5px;
 }
 .run-guide ol {
@@ -974,4 +970,98 @@ pre code {
 }
 .run-guide code {
   overflow-wrap: anywhere;
+}
+
+/* The canonical SVG's geometry is the mask; current accent follows appearance. */
+.brand-mark {
+  display: inline-block;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  background: var(--accent);
+  mask: url("brand/mark.svg") center / contain no-repeat;
+}
+.view-map .brand-mark {
+  width: 24px;
+  height: 24px;
+}
+.closing .brand-mark {
+  float: left;
+  width: 44px;
+  height: 44px;
+  margin-right: 20px;
+}
+.appearance-controls {
+  margin: 0;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: flex;
+  flex: none;
+  font-size: 11px;
+}
+.appearance-controls[hidden] {
+  display: none;
+}
+.appearance-controls label {
+  cursor: pointer;
+}
+.appearance-controls span {
+  display: block;
+  padding: 7px 9px;
+  border-radius: 4px;
+  color: var(--muted);
+}
+.appearance-controls input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.appearance-controls input:checked + span {
+  background: var(--pale);
+  color: var(--ink);
+}
+.appearance-controls label:hover span {
+  color: var(--ink);
+}
+.appearance-controls input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.editor-appearance {
+  padding-block: 0 70px;
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 70px;
+}
+.editor-appearance h2 {
+  font-size: 30px;
+}
+.editor-appearance p {
+  font-size: 14px;
+  color: var(--muted);
+}
+@media (max-width: 1120px) {
+  .header {
+    flex-wrap: wrap;
+    gap: 18px;
+    padding-block: 20px;
+  }
+  .header nav {
+    margin-left: auto;
+  }
+  .appearance-controls {
+    margin-left: auto;
+  }
+}
+@media (max-width: 760px) {
+  .appearance-controls {
+    margin-left: 0;
+  }
+  .editor-appearance {
+    grid-template-columns: 1fr;
+    gap: 20px;
+    padding-bottom: 45px;
+  }
 }

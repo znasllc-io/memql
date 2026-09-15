@@ -17,7 +17,7 @@ to use what you build.
 
 [Get started](docs/public/overview/quickstart.md) ·
 [Documentation](docs/public/overview/index.md) ·
-[VS Code extension](editors/vscode/README.md) ·
+[Visual Studio Code and Cursor extension](editors/vscode/README.md) ·
 [MemQL OS](docs/public/operate/memql-os.md)
 
 ## One engine, several ways to work
@@ -26,7 +26,7 @@ to use what you build.
 |---|---|---|
 | **MemQL engine** | Stores the memory graph, enforces declared access rules, executes constructs, routes model calls, and records agent work | A cluster, reached through gRPC or the browser WebSocket bridge |
 | **MemQL OS** | The browser workspace for managing that cluster and working with its data | Apps such as Fleet, Files, Deployables, Nexus, Concepts, and Logs |
-| **MemQL for VS Code** | Edits `.memql` files offline; connects to clusters to inspect, run, and train constructs | Your editor |
+| **MemQL for Visual Studio Code and Cursor** | Edits `.memql` files offline; connects to clusters to inspect, run, and train constructs | Your editor |
 | **Your applications** | Present your own product using MemQL's capabilities | A hosted site or an external client built with an SDK |
 
 The engine is built on a time-series memory graph backed by PostgreSQL,
@@ -63,11 +63,11 @@ query readingItem readingItems {
 and `@rowAuthz` declares the ownership tier. `paginate 50` bounds the first
 page. The [complete reading-list tutorial](docs/public/language/first-program.md)
 adds a mutation and a tool, explains how to validate the file, and walks through
-running it in VS Code. Saving a file does not deploy it.
+running it in VS Code or Cursor. Saving a file does not deploy it.
 
 ## Get started
 
-- **Try the language:** [build and install the VS Code extension](docs/public/language/vscode.md#get-the-extension), then open the [example](examples/reading-list/reading.memql). Editing works without a cluster.
+- **Try the language:** [build and install the Visual Studio Code and Cursor extension](docs/public/language/vscode.md#get-the-extension), then open the [example](examples/reading-list/reading.memql). Editing works without a cluster.
 - **Use an existing cluster:** add it in the extension, sign in, and inspect a query before running it.
 - **Run MemQL locally:** follow the [quickstart](docs/public/overview/quickstart.md). The supported local stack uses Docker, k3d, and ArgoCD. An initial image build can take time.
 
@@ -81,8 +81,11 @@ engine APIs as other clients.
 **[Supervised Visual Composition](docs/public/operate/supervised-visual-composition.md)**
 is the approved design direction: compose objects and their relationships
 with mouse and keyboard, and review MemQL's proposals in the same visible
-workspace. Fleet changes are under local validation. New Settings/Logs layouts
-await approval; generalized autonomous UI driving is future work.
+workspace. Fleet provides visual composition, persistent routing-policy editing,
+and review of typed Ask proposals; generating proposals requires compatible
+inference to be configured. The approved Deployables redesign is being
+implemented. New Settings/Logs layouts await approval; generalized autonomous
+UI driving is future work.
 
 ## Does it work?
 
