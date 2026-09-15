@@ -6,7 +6,7 @@ concept ticket {
 }
 
 /// Open a ticket with a title.
-mutate ticket openTicketEnabled {
+mutation ticket openTicketEnabled {
   args {
     title  string!
   }

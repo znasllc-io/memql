@@ -1,6 +1,6 @@
 /// Change some of a ticket's preferences, keeping the ones the caller did not name.
 @mergeFields("preferences")
-mutate ticket setTicketPreferencesMergeFields {
+mutation ticket setTicketPreferencesMergeFields {
   args {
     ticketId     string!
     preferences  object!

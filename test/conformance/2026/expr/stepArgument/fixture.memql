@@ -12,7 +12,7 @@ concept goalNote {
 }
 
 /// Write a note about a goal.
-mutate goalNote saNoteGoal {
+mutation goalNote saNoteGoal {
   args {
     goalId  string  @required
     note    string
@@ -33,7 +33,7 @@ query ticket saTickets {
 trait saIsOpen = row => row.status == "open"
 
 /// Raise a ticket with a title.
-mutate ticket raiseTicketFromStep {
+mutation ticket raiseTicketFromStep {
   args {
     title  string!
   }

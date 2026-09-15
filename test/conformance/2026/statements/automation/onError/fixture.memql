@@ -8,7 +8,7 @@ query alert openAlerts {
   filter row => row.open == true
 }
 
-mutate alert notifyOwner {
+mutation alert notifyOwner {
   args {
     note  string  @required
   }

@@ -34,8 +34,8 @@ var structFormSamples = map[string]structFormSample{
 `,
 		bodyMarker: "spaceCard",
 	},
-	"mutate": {
-		source: `mutate space sampleMutation {
+	"mutation": {
+		source: `mutation space sampleMutation {
   args {
     id string @required
   }
@@ -79,7 +79,7 @@ var statementBodyKeywords = map[string]bool{"logic": true, "automation": true}
 
 // TestBodyOpenerOnlySeesPostRewriteHeaders pins the invariant
 // precededByBodyOpener rests on: NormaliseAll rewrites every struct-form
-// keyword it expands (query, mutate) into a `func (Receiver) ...` header,
+// keyword it expands (query, mutation) into a `func (Receiver) ...` header,
 // and the function-loader snapshot the body extractor runs against
 // (rawSourceForUsage) is taken AFTER that rewrite. So precededByBodyOpener
 // only ever needs to recognise the `func ` header, and a struct-form keyword

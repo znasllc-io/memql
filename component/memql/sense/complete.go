@@ -94,11 +94,10 @@ func (s *Service) completeTopLevel(prefix string) []CompletionItem {
 	})
 
 	// Top-level construct keywords, projected from the DSL spec: concept,
-	// query, mutate, logic, automation, action, capability, spec, trait, shape,
-	// tool, prompt, provider, builtin, policy, seed, use. This replaces the
-	// stale hand-coded `func / use / concept` set -- so typing `mut` now offers
-	// `mutate` (the declaration keyword; `mutation` is invocation-only), etc.
-	// (#2122 / #2123).
+	// query, mutation, logic, automation, action, capability, spec, trait,
+	// shape, tool, prompt, provider, builtin, policy, seed, use. This replaces
+	// the stale hand-coded `func / use / concept` set -- so typing `mut` now
+	// offers `mutation`, etc. (#2122 / #2123).
 	items = append(items, specConstructItems(prefix)...)
 	// Construct skeletons (#2629): full declarations with tabstops,
 	// sorted below the bare keywords so they offer without displacing.
@@ -849,7 +848,7 @@ func argsFieldItems(fields []string, types map[string]string, prefix, doc string
 
 // enclosingConstructHeader matches the header of a construct that declares an
 // args block.
-const enclosingConstructHeader = `^\s*(?:automation|query|mutate|logic)\s+[A-Za-z_]`
+const enclosingConstructHeader = `^\s*(?:automation|query|mutation|logic)\s+[A-Za-z_]`
 
 // automationArgsFieldCompletions keeps the G2 bare-name behavior:
 // inside an AUTOMATION body the declared args fields resolve bare, so
@@ -1093,7 +1092,7 @@ func bodyBlocksForConstruct(enc EnclosingConstruct) []string {
 // construct's verbs.
 func invocationKeywordsForConstruct(enc EnclosingConstruct) []string {
 	switch enc.Keyword {
-	case "mutate":
+	case "mutation":
 		return []string{"insert", "update"}
 	case "logic", "automation", "action":
 		return []string{"query", "mutation", "logic"}

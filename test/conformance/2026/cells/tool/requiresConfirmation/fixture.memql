@@ -6,7 +6,7 @@ concept ticket {
 }
 
 /// Close a ticket.
-mutate ticket closeTicketRequiresConfirmation {
+mutation ticket closeTicketRequiresConfirmation {
   args {
     ticketId  string!
   }

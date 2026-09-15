@@ -160,7 +160,7 @@ func TestMirrorConceptsHaveNoClientReachableMutation(t *testing.T) {
 	// worse trade than a text pass over 214 files.
 	//
 	// The binding is matched on the concept's SHORT name, which is what
-	// the `mutate <Concept> <name>` signature carries. Two domains could
+	// the `mutation <Concept> <name>` signature carries. Two domains could
 	// in principle declare the same short name, in which case this gate
 	// asks for @serverOnly on a mutation over the wrong one. That is a
 	// false FAILURE, which is visible and arguable, rather than a false
@@ -210,7 +210,7 @@ func TestMirrorConceptsHaveNoClientReachableMutation(t *testing.T) {
 	t.Logf("%d mutation(s) over %d mirror concept(s), all @serverOnly", checked, len(mirrors))
 }
 
-// mutationDecl is one `mutate <Concept> <name>` declaration found in the
+// mutationDecl is one `mutation <Concept> <name>` declaration found in the
 // corpus, with whether its preamble carries @serverOnly.
 type mutationDecl struct {
 	file       string
@@ -219,7 +219,7 @@ type mutationDecl struct {
 	serverOnly bool
 }
 
-var mutateHeaderRe = regexp.MustCompile(`^[ \t]*mutate[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+var mutateHeaderRe = regexp.MustCompile(`^[ \t]*mutation[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 
 // scanMutationDeclarations walks the embedded tree and returns every
 // mutation declaration with its annotation preamble resolved.

@@ -396,13 +396,10 @@ func signatureLineOffset(c SandboxConstruct) int {
 }
 
 // signatureKeywords maps a construct kind to the keyword(s) its signature line
-// can begin with. "mutation" is declared with `mutate`, which is the one place
-// the kind name and the keyword differ.
+// can begin with: its own name.
 func signatureKeywords(kind string) []string {
 	switch kind {
-	case "mutation":
-		return []string{"mutate"}
-	case "query", "logic", "concept", "shape", "spec", "trait", "automation", "action", "capability", "seed":
+	case "query", "mutation", "logic", "concept", "shape", "spec", "trait", "automation", "action", "capability", "seed":
 		return []string{kind}
 	default:
 		return nil

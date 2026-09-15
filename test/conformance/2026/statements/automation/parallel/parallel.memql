@@ -2,7 +2,7 @@ query stock lowStock {
   filter row => row.level < 5
 }
 
-mutate stock restock {
+mutation stock restock {
   args {
     note  string  @required
   }

@@ -355,7 +355,7 @@ func TestFilterAnnotationLambda(t *testing.T) {
 
 // TestMutationValuesV1: insert/update values parse v1.
 func TestMutationValuesV1(t *testing.T) {
-	src := `mutate thing probe {
+	src := `mutation thing probe {
   args {
     id string @required
     name string
@@ -393,7 +393,7 @@ func TestRetiredSpellingsInProcessPositions(t *testing.T) {
 		"cond in a return":             {"logic probe {\n  args {\n    a bool\n  }\n  return cond(args.a, 1, 2)\n}", "retired_cond_call"},
 		"concat in an assignment":      {"logic probe {\n  args {\n    a string\n  }\n  x := concat(args.a, \"b\")\n  return x\n}", "retired_concat_call"},
 		"exists in an if":              {"logic probe {\n  args {\n    a string\n  }\n  if exists(args.a) {\n    x := logic f(a: args.a)\n  }\n  return args.a\n}", "retired_exists_call"},
-		"coalesce in a mutation value": {"mutate thing probe {\n  args {\n    id string @required\n    a string\n  }\n  insert {\n    id: args.id\n    a: coalesce(args.a, \"x\")\n  }\n}", "retired_coalesce_call"},
+		"coalesce in a mutation value": {"mutation thing probe {\n  args {\n    id string @required\n    a string\n  }\n  insert {\n    id: args.id\n    a: coalesce(args.a, \"x\")\n  }\n}", "retired_coalesce_call"},
 		"cond in a call argument":      {"@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  logic other(x: cond(true, 1, 2))\n}", "retired_cond_call"},
 	}
 	for name, c := range cases {

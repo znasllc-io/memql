@@ -75,10 +75,10 @@ func TestDeployDataModelLivesInThePack(t *testing.T) {
 
 	mutations := read(t, "deployment/mutations.memql")
 	for _, want := range []string{
-		"mutate deployment createDeployment {",
-		"mutate deployment updateDeploymentStatus {",
-		"mutate deploymentNodeSpec createDeploymentNodeSpec {",
-		"mutate deploymentNodeSpec updateDeploymentNodeSpec {",
+		"mutation deployment createDeployment {",
+		"mutation deployment updateDeploymentStatus {",
+		"mutation deploymentNodeSpec createDeploymentNodeSpec {",
+		"mutation deploymentNodeSpec updateDeploymentNodeSpec {",
 	} {
 		if !strings.Contains(mutations, want) {
 			t.Errorf("deployment/mutations.memql must declare %q (I11 centralization)", want)
@@ -97,9 +97,9 @@ func TestClusterNoLongerOwnsTheDeployModel(t *testing.T) {
 	}{
 		{"cluster/concepts.memql", "concept deployment {"},
 		{"cluster/concepts.memql", "concept deploymentNodeSpec {"},
-		{"cluster/mutations.memql", "mutate deployment createDeployment {"},
-		{"cluster/mutations.memql", "mutate deployment updateDeploymentStatus {"},
-		{"cluster/mutations.memql", "mutate deploymentNodeSpec createDeploymentNodeSpec {"},
+		{"cluster/mutations.memql", "mutation deployment createDeployment {"},
+		{"cluster/mutations.memql", "mutation deployment updateDeploymentStatus {"},
+		{"cluster/mutations.memql", "mutation deploymentNodeSpec createDeploymentNodeSpec {"},
 		{"cluster/queries.memql", "query deployment deploymentById {"},
 		{"cluster/queries.memql", "query deployment deploymentsForCluster {"},
 	} {

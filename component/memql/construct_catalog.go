@@ -31,9 +31,7 @@ package memql
 // reason recorded there: spec / trait / prompt / seed / concept / shape /
 // provider / builtin each need an execution semantic decided (which row does a
 // spec evaluate against; who pays for a prompt's provider call) that the design
-// defers. A client reads this field rather than re-deriving from `kind`, which
-// also spares it the keyword-vs-kind mismatch: the authored keyword is `mutate`
-// and the kind reported here is `mutation`.
+// defers. A client reads this field rather than re-deriving from `kind`.
 //
 // `args` comes from Sense, over the construct's authored source, via the same
 // AnalyzeRunnable the language server serves `memql/runnableConstructs` from.
@@ -115,7 +113,7 @@ var ConstructOriginVocabulary = []string{
 }
 
 // runnableConstructKinds is the five-kind runnable set, keyed by the kind this
-// catalog reports (so `mutation`, not the authored keyword `mutate`).
+// catalog reports.
 var runnableConstructKinds = map[string]bool{
 	ConstructKindQuery:      true,
 	ConstructKindMutation:   true,
@@ -125,11 +123,12 @@ var runnableConstructKinds = map[string]bool{
 }
 
 // constructKeyword maps a reported kind to the keyword it is AUTHORED under, so
-// the source index slices on the right token. Only `mutation` differs.
+// the source index slices on the right token. Since edition 2026 declares a
+// mutation `mutation` (D13), every kind is authored under its own name.
 var constructKeyword = map[string]string{
 	ConstructKindConcept:    "concept",
 	ConstructKindQuery:      "query",
-	ConstructKindMutation:   "mutate",
+	ConstructKindMutation:   "mutation",
 	ConstructKindLogic:      "logic",
 	ConstructKindTool:       "tool",
 	ConstructKindAutomation: "automation",
@@ -145,8 +144,7 @@ var constructKeyword = map[string]string{
 }
 
 // kindForConstructKeyword inverts constructKeyword once, at init. The map is
-// injective -- `mutation`/`mutate` is the only pair whose two halves differ at
-// all -- so the inverse is total and unambiguous.
+// injective, so the inverse is total and unambiguous.
 var kindForConstructKeyword = func() map[string]string {
 	out := make(map[string]string, len(constructKeyword))
 	for kind, keyword := range constructKeyword {
@@ -161,12 +159,10 @@ var kindForConstructKeyword = func() map[string]string {
 //
 // Exported for the language server, which holds the other half of drift
 // detection (memql#3759): the document side of that comparison sees the keyword
-// an author wrote (`mutate`) while the catalog side sees the kind the registries
-// key on (`mutation`), so one of the two has to be translated before anything
-// can be matched at all. Reading the same map both sides are built from is the
-// only way that translation cannot rot -- a kind added to constructKeyword
-// extends the language server for free, where a hand-written "map the one name
-// that differs" in the client would silently mis-key the next one.
+// an author wrote while the catalog side sees the kind the registries key on,
+// so the two are joined through this map. Reading the same map both sides are
+// built from is the only way that join cannot rot -- a kind added to
+// constructKeyword extends the language server for free.
 //
 // THE FALSE RETURN IS LOAD-BEARING, and it is not an error case. `action` and
 // `capability` are authored kinds this catalog deliberately does not carry (see

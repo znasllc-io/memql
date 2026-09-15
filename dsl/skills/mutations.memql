@@ -13,7 +13,7 @@
 /// mintedByAgentId carry the Phase 3 provenance triad. Server-side enforcement: the tier-validation
 /// rule from Phase 1 still applies (skill.tier >= max(domain tier)) -- a mint that violates it
 /// rejects with the same error path as the load-time check.
-mutate skill mintSkill {
+mutation skill mintSkill {
   args {
     skillId            string
     slug               string!
@@ -71,7 +71,7 @@ mutate skill mintSkill {
 /// triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to
 /// materialize with `function "createSkill" not found`. The materializer convention itself lives in
 /// component/memql/seed_materializer.go.
-mutate skill createSkill {
+mutation skill createSkill {
   args {
     skillId        string
     slug           string!
@@ -126,7 +126,7 @@ mutate skill createSkill {
 /// conjunct to narrow by, and narrowing it would hide the catalog it exists to describe.
 @serverOnly
 @actor
-mutate skillEdge createSkillEdge {
+mutation skillEdge createSkillEdge {
   args {
     edgeId       string!
     fromSkillId  string!
@@ -148,7 +148,7 @@ mutate skillEdge createSkillEdge {
 /// Commit a proposed edge after a successful run. @serverOnly for createSkillEdge's reason: only the
 /// run knows it succeeded, and a public-tier concept has no actor.userId conjunct to scope by.
 @serverOnly
-mutate skillEdge commitSkillEdge {
+mutation skillEdge commitSkillEdge {
   args {
     edgeId    string!
     evidence  []object
@@ -175,7 +175,7 @@ mutate skillEdge commitSkillEdge {
 /// array append, so a caller sending one entry would clobber whatever another run captured
 /// concurrently. Capture reads, merges by platform and writes back.
 @serverOnly
-mutate skill setSkillScripts {
+mutation skill setSkillScripts {
   args {
     skillId  string!
     scripts  array
@@ -196,7 +196,7 @@ mutate skill setSkillScripts {
 /// write in the caller is what lets the ladder's rule live in one readable place instead of being
 /// split between a mutation and its callers.
 @serverOnly
-mutate skill reinforceSkill {
+mutation skill reinforceSkill {
   args {
     skillId         string!
     reliability     float!

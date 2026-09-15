@@ -7,7 +7,7 @@ concept ticket {
 }
 
 /// Open a ticket, recording which agent opened it.
-mutate ticket openTicketAutoInjected {
+mutation ticket openTicketAutoInjected {
   args {
     title    string!
     agentId  string

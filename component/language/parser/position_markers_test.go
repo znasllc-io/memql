@@ -260,7 +260,7 @@ trait isB = row => row.b == null
 	},
 	{
 		name: "a mutation value",
-		src: `mutate thing probe {
+		src: `mutation thing probe {
   args {
     id string @required
   }

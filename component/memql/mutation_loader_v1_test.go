@@ -54,7 +54,7 @@ concept probe {
 const v1TreeFixtureMutations = `
 /// A longhand insert.
 @actor
-mutate probe createProbe {
+mutation probe createProbe {
   args {
     probeId  string!
     title    string!
@@ -82,7 +82,7 @@ mutate probe createProbe {
 
 /// accept / stamp inside the write block.
 @actor
-mutate probe createProbeAccepted {
+mutation probe createProbeAccepted {
   args {
     probeId  string!
     title    string!
@@ -102,7 +102,7 @@ mutate probe createProbeAccepted {
 
 /// The bare accept / stamp form: no write block, so an insert.
 @actor
-mutate probe createProbeBare {
+mutation probe createProbeBare {
   args {
     probeId  string!
     title    string!
@@ -118,7 +118,7 @@ mutate probe createProbeBare {
 /// An update: a read-merge write of the fields the call names.
 @actor
 @mergeFields("details")
-mutate probe updateProbe {
+mutation probe updateProbe {
   args {
     probeId  string!
     note     string
@@ -134,7 +134,7 @@ mutate probe updateProbe {
 
 /// A payload splat, re-stamped by its overlay (memql#401).
 @actor
-mutate probe replaceProbe {
+mutation probe replaceProbe {
   args {
     probeId  string!
     payload  object!
@@ -241,7 +241,7 @@ func TestLoaderBuildsTheTemplateFromItsV1Parse(t *testing.T) {
 	// The pre-flip spelling does not load, and the refusal names the
 	// migration that rewrites it.
 	// memqlmigrate:keep -- the legacy spelling is the subject.
-	const legacy = `mutate probe legacyProbe {
+	const legacy = `mutation probe legacyProbe {
   args {
     probeId  string!
   }
@@ -265,7 +265,7 @@ concept Space {
 }
 `, "v1/cognition/space")
 	registry := conceptRegistry(concept)
-	src := `mutate space mutBad {
+	src := `mutation space mutBad {
   args {
     name    string!
     status  string
@@ -284,7 +284,7 @@ concept Space {
 // evaluate is a load error (a baseloader Skip strict boot refuses), not a
 // failure on the first call.
 func TestLoaderRefusesAV1ValueAtLoad(t *testing.T) {
-	_, err := tryParseNewFunctionSyntax("mutUnbound", "mutation", `mutate space mutUnbound {
+	_, err := tryParseNewFunctionSyntax("mutUnbound", "mutation", `mutation space mutUnbound {
   args {
     name  string!
   }

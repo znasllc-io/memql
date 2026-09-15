@@ -1,5 +1,5 @@
 /// Write a note about a goal.
-mutate goalNote acNoteGoal {
+mutation goalNote acNoteGoal {
   args {
     goalId  string  @required
     note    string

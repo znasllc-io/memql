@@ -7857,9 +7857,9 @@ type ConstructInfo struct {
 	// kind is one of: concept, query, mutation, logic, tool, automation, spec,
 	// trait, shape, prompt, provider, builtin, policy, seed.
 	//
-	// NOTE it is the KIND, not the authored keyword: a mutation is authored
-	// `mutate` and reported here as "mutation". Do not re-derive `runnable` from
-	// this field -- read `runnable`, which the server derives.
+	// It is the KIND, which since edition 2026 is also the keyword the construct
+	// is authored under (a mutation is declared `mutation`). Do not re-derive
+	// `runnable` from this field -- read `runnable`, which the server derives.
 	Kind string `protobuf:"bytes,2,opt,name=kind,proto3" json:"kind,omitempty"`
 	// namespace is the DSL domain the construct was authored in. Empty for a
 	// promoted construct, which has no file and whose target namespace the
@@ -14146,7 +14146,7 @@ func (*DeployControlResult_Action) isDeployControlResult_Result() {}
 //
 // THE DEFINITION THAT RUNS IS ALWAYS THE DEPLOYED ONE. Session-define
 // (AuthoringSessionDefineBundleMsg) covers the plain construct family --
-// query / mutate / logic / spec / trait -- and deliberately does not cover
+// query / mutation / logic / spec / trait -- and deliberately does not cover
 // automations: an automation is registered against the scheduler's event
 // subscriptions at load time, not resolved by name at call time, so there is
 // nothing for a stream-scoped registry to shadow. A caller that just edited an
@@ -15621,7 +15621,7 @@ func (x *IdentityAdminResult) GetInvitationEmailError() string {
 // written, and the identity login page has REDEEMED a user invitation the
 // whole time -- stage `needs_invite` posts form=invite and binds the token
 // into the magic-link flow. Nothing ever ISSUED one. The only writer of
-// invitation rows was the guest-space flow, no `mutate invitation ...` existed
+// invitation rows was the guest-space flow, no `mutation invitation ...` existed
 // in any DSL file, and this envelope carried profile / role / suspend / tokens
 // / settings / enrolment / recovery-key and no invite.
 //

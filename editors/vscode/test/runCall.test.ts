@@ -16,11 +16,9 @@ import { buildNamedCall, callKeywordFor, extractErrorId, renderMemqlValue } from
 // The keyword mapping
 // -----------------------------------------------------------------------------
 
-test("callKeywordFor -- `mutate` is declared, `mutation` is invoked", () => {
-  // The DSL declares with `mutate`; the engine's named-call parser wants
-  // `mutation`. Passing the declaration keyword through produces a parse
-  // failure at the engine with no hint about which side is confused.
-  assert.equal(callKeywordFor("mutate"), "mutation");
+test("callKeywordFor -- a mutation is declared and called `mutation`", () => {
+  // One word declares and calls (D13): the call keyword is the kind.
+  assert.equal(callKeywordFor("mutation"), "mutation");
   assert.equal(callKeywordFor("query"), "query");
   assert.equal(callKeywordFor("logic"), "logic");
 });
@@ -97,7 +95,7 @@ test("buildNamedCall -- arguments follow the DECLARED order, not object key orde
   // object key order is an implementation detail nobody should have to
   // reason about for a string the engine parses.
   const call = buildNamedCall(
-    "mutate",
+    "mutation",
     "createSpace",
     ["spaceId", "name", "kind"],
     { name: "Ops", kind: "daily", spaceId: "s1" },

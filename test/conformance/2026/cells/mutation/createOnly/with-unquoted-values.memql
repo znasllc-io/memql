@@ -1,6 +1,6 @@
 /// Open a ticket. Staging the same id again keeps the status and attempt count another writer moved on.
 @createOnly(status, attempts)
-mutate ticket openTicketCreateOnly {
+mutation ticket openTicketCreateOnly {
   args {
     ticketId  string!
     title     string!

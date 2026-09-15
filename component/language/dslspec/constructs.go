@@ -13,7 +13,7 @@ import (
 // DERIVED from the parser wherever the parser can say it (memql#5359):
 //   - the SET of constructs is parser.ConstructKeywords, the one table of
 //     words that open a top-level statement -- the struct-form rewriter's
-//     family (query / mutate / logic / automation), the parser's top-level
+//     family (query / mutation / logic / automation), the parser's top-level
 //     dispatch, and the `use` import -- which the parser's refusal of any
 //     other word and the load gate construct_unknown read too (memql#5356);
 //   - each construct's BodyBlocks are parser.BodyClauses -- the clauses the
@@ -134,9 +134,9 @@ func constructCatalog() []Construct {
 			ConceptInSignature: true,
 		},
 		{
-			Keyword:            "mutate",
+			Keyword:            "mutation",
 			Category:           CategoryFunction,
-			Doc:                "Write function on a bound concept: declared `mutate <Concept> <name>` with exactly one insert{} OR update{} block. (`mutate` is the declaration keyword -- rewriter.go mutationStructHeader / memql#2041; `mutation` is the invocation-step prefix only.)",
+			Doc:                "Write function on a bound concept: declared `mutation <Concept> <name>` with exactly one insert{} OR update{} block, and called `mutation <name>(...)` -- the one word declares and calls (D13).",
 			AnnotationReceiver: "Mutation",
 			ConceptInSignature: true,
 		},

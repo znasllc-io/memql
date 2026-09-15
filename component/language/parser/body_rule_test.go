@@ -109,7 +109,7 @@ query participant queryParticipants {
 func TestBodyRule_MutationWithBody_Rejected(t *testing.T) {
 	src := `use cognition.concepts.{ space }
 @description("bad mutation")
-mutate space mutateSpace {
+mutation space mutateSpace {
   args {
     spaceId string @required
   }
@@ -145,7 +145,9 @@ action tagRelease {
 // its statements follow its args block directly.
 func TestBodyRule_LogicAndAutomationWithBody_Rejected(t *testing.T) {
 	for _, src := range []string{
+		// memqlmigrate:keep -- the retired body wrapper is the case.
 		"logic decideThing {\n  args {\n    x string!\n  }\n  body {\n    return args.x\n  }\n}",
+		// memqlmigrate:keep -- the retired body wrapper is the case.
 		"@trigger(event=\"system.startup\")\nautomation onStartup {\n  body {\n    run := logic doThing(event: event)\n  }\n}",
 	} {
 		_, err := rewriteAndParse(t, src)

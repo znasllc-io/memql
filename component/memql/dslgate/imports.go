@@ -102,7 +102,7 @@ var flatKinds = map[string]bool{
 // declared nowhere -- after which pass 1 has no namespace for them and every
 // cross-namespace use of one is silently passed over. A predicate's USE is a
 // call, `isX(row)`, which callRe reads.
-var declLineRe = regexp.MustCompile(`(?m)^(query|mutate|mutation|logic|spec|trait|shape|tool|prompt|provider|builtin|policy|rule|seed|concept|automation|action|capability)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?\s*[{(=]`)
+var declLineRe = regexp.MustCompile(`(?m)^(query|mutation|logic|spec|trait|shape|tool|prompt|provider|builtin|policy|rule|seed|concept|automation|action|capability)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?\s*[{(=]`)
 
 var useLineRe = regexp.MustCompile(`(?m)^\s*use\s+([a-zA-Z0-9_.]+)\.\{([^}]*)\}`)
 
@@ -197,9 +197,6 @@ func scanCrossNamespaceImports(files []SourceFile, opts Options) []Violation {
 	for _, p := range paths {
 		for _, m := range declLineRe.FindAllStringSubmatch(code[p], -1) {
 			kind := m[1]
-			if kind == "mutate" {
-				kind = "mutation"
-			}
 			name := m[2]
 			if m[3] != "" {
 				name = m[3] // two-identifier signature: `query <Concept> <name>`

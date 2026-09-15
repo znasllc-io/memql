@@ -322,7 +322,7 @@ func TestVerify_ZeroImportFileNeverProvablyMissing(t *testing.T) {
 	tree := loadTree(t, fstest.MapFS{
 		"myapp/mutations.memql": file(`@enabled
 @description("Binds an engine concept without any import; boots green when the bundle mounts alongside the engine tree.")
-mutate space productCreateSpace {
+mutation space productCreateSpace {
   args {
     spaceId string @required
   }
@@ -349,7 +349,7 @@ concept thing {
 
 @enabled
 @description("Valid file binding the concept declared in the broken sibling.")
-mutate thing createThing {
+mutation thing createThing {
   args {
     thingId string @required
   }
@@ -571,7 +571,7 @@ func TestVerify_InsertFieldNotOnSchema(t *testing.T) {
 
 @enabled
 @description("Writes a field the concept does not declare.")
-mutate item createItem {
+mutation item createItem {
   args {
     itemId  string  @required
     name    string  @required
@@ -598,7 +598,7 @@ func TestVerify_InsertCleanFormsPass(t *testing.T) {
 
 @enabled
 @description("Every write form that must lint clean.")
-mutate item upsertItem {
+mutation item upsertItem {
   args {
     itemId  string  @required
     name    string  @required
@@ -628,7 +628,7 @@ func TestVerify_ObjectArgContributesField(t *testing.T) {
 
 @enabled
 @description("Object-typed bare arg that is NOT the payload splat.")
-mutate item configureItem {
+mutation item configureItem {
   args {
     itemId    string  @required
     settings  object  @required
@@ -650,7 +650,7 @@ func TestVerify_UpdateFieldNotOnSchema(t *testing.T) {
 
 @enabled
 @description("Partial update writing an undeclared field.")
-mutate item renameItem {
+mutation item renameItem {
   args {
     itemId  string  @required
     title   string  @required

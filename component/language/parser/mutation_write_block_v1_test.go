@@ -58,7 +58,7 @@ func entryKeys(m *ast.MapExpr) map[string]string {
 // TestV1MutationBareMirrorExpandsToAnExplicitEntry: a bare `args.name` line in
 // a longhand block reaches the v1 map as `name: args.name`, and parses.
 func TestV1MutationBareMirrorExpandsToAnExplicitEntry(t *testing.T) {
-	stmt, payload := v1MutationPayload(t, `mutate space createSpace {
+	stmt, payload := v1MutationPayload(t, `mutation space createSpace {
   args {
     spaceId  string!
     name     string!
@@ -87,7 +87,7 @@ func TestV1MutationBareMirrorExpandsToAnExplicitEntry(t *testing.T) {
 // explicit entries; both parse as v1 map literals.
 func TestV1MutationAcceptStampEmitsExplicitEntries(t *testing.T) {
 	for name, src := range map[string]string{
-		"nested": `mutate space createSpace {
+		"nested": `mutation space createSpace {
   args {
     spaceId  string!
     name     string!
@@ -102,7 +102,7 @@ func TestV1MutationAcceptStampEmitsExplicitEntries(t *testing.T) {
     }
   }
 }`,
-		"top-level": `mutate space createSpace {
+		"top-level": `mutation space createSpace {
   args {
     spaceId  string!
     name     string!
@@ -131,7 +131,7 @@ func TestV1MutationAcceptStampEmitsExplicitEntries(t *testing.T) {
 // TestBareMirrorExpansionIsAnExplicitEntry: the rewriter's output carries the
 // bare mirror as its explicit entry, the text the payload parser reads.
 func TestBareMirrorExpansionIsAnExplicitEntry(t *testing.T) {
-	out, err := NormaliseMutationSource(`mutate space createSpace {
+	out, err := NormaliseMutationSource(`mutation space createSpace {
   args {
     name  string!
   }
@@ -152,7 +152,7 @@ func TestBareMirrorExpansionIsAnExplicitEntry(t *testing.T) {
 // only; a dotted path has no one key to infer, so the rewriter refuses it,
 // naming the explicit spelling.
 func TestBareMirrorOfANestedArgIsRefused(t *testing.T) {
-	_, err := NormaliseMutationSource(`mutate space createSpace {
+	_, err := NormaliseMutationSource(`mutation space createSpace {
   args {
     user  object!
   }

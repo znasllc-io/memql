@@ -4,7 +4,7 @@
 // files cover the other construct kinds.
 
 /// Synthetically check a data record, updating check count and validation state
-mutate record checkRecord {
+mutation record checkRecord {
   args {
     recordId       string!
     identityId     string!
@@ -45,7 +45,7 @@ mutate record checkRecord {
 //
 
 /// Human confirm a data record, updating confirm count and validation state
-mutate record confirmRecord {
+mutation record confirmRecord {
   args {
     recordId         string!
     identityId       string!
@@ -98,7 +98,7 @@ mutate record confirmRecord {
 //
 
 /// Create a data record in draft validation state awaiting check and confirmation
-mutate record createRecord {
+mutation record createRecord {
   args {
     recordId            string!
     partitionId             string!
@@ -165,7 +165,7 @@ mutate record createRecord {
 
 /// Create a single data record from a batch import in draft validation state (called once per
 /// record)
-mutate record createRecordBatch {
+mutation record createRecordBatch {
   args {
     recordId            string!
     partitionId             string!
@@ -209,7 +209,7 @@ mutate record createRecordBatch {
 //
 
 /// Soft-delete a data record (sets active=false)
-mutate record deleteRecord {
+mutation record deleteRecord {
   args {
     recordId  string!
   }
@@ -249,7 +249,7 @@ mutate record deleteRecord {
 //
 
 /// Revert a data record to a previous validation state with counter reset
-mutate record revertRecord {
+mutation record revertRecord {
   args {
     recordId      string!
     toState       string!
@@ -294,7 +294,7 @@ mutate record revertRecord {
 //
 
 /// Create or update a validation policy for a record type
-mutate policy setPolicy {
+mutation policy setPolicy {
   args {
     policyId               string!
     targetRecordType       string!
@@ -345,7 +345,7 @@ mutate policy setPolicy {
 //
 
 /// Update a data record (resets validation state to draft)
-mutate record updateRecord {
+mutation record updateRecord {
   args {
     recordId         string!
     data             object

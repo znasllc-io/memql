@@ -46,7 +46,7 @@ func TestParity_ConstructClassificationCoversSoT(t *testing.T) {
 // for it. If one table is updated without the other, this fails.
 func TestParity_BehavioralMatchesInvocationKeywords(t *testing.T) {
 	// "Call verbs" are the parser's invocation-kind keywords (query / mutation /
-	// logic / capability / ...), as opposed to a mutate body's WRITE verbs
+	// logic / capability / ...), as opposed to a mutation body's WRITE verbs
 	// (insert / update), which are not invocation keywords. Deriving the set from
 	// the parser SoT -- rather than hardcoding {query,mutation,logic} -- means a
 	// behavioral construct that legitimately invokes a DIFFERENT verb (e.g. an

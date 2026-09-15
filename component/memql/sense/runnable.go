@@ -51,7 +51,7 @@ import (
 // extension (memql#3309); field semantics must not drift without changing both
 // sides together.
 type RunnableConstruct struct {
-	// Kind is the authored construct keyword: query, mutate, logic, tool, or
+	// Kind is the authored construct keyword: query, mutation, logic, tool, or
 	// automation. These five are the whole runnable set -- spec / trait /
 	// prompt / seed / concept / shape / provider / builtin each need an
 	// execution semantic decided (which row does a spec evaluate against; who
@@ -98,7 +98,7 @@ type RunnableArg struct {
 	Enum []string
 	// Description is the arg's documentation.
 	//
-	// Sourcing note: for query / mutate / logic args this is the `///` doc
+	// Sourcing note: for query / mutation / logic args this is the `///` doc
 	// comment above the field, which is the ONLY per-arg documentation channel
 	// -- an args-field @description(...) has no AST slot and is REJECTED at
 	// load (memql#3336). For tool fields it is the field's @description(...)
@@ -109,7 +109,7 @@ type RunnableArg struct {
 	//
 	// Reported per-field so a client can mark the one or two fields it applies
 	// to, instead of disclaiming the whole form (memql#3333). Only a `tool`
-	// field can carry it -- query / mutate / logic args have no such annotation
+	// field can carry it -- query / mutation / logic args have no such annotation
 	// -- so it is always false for the other kinds.
 	//
 	// The field stays in Args rather than being filtered out here: dropping it
@@ -133,7 +133,7 @@ type RunnableTrigger struct {
 // RunnableConstruct.Kind for why it is exactly these five.
 var runnableKeywords = map[string]bool{
 	"query":      true,
-	"mutate":     true,
+	"mutation":   true,
 	"logic":      true,
 	"tool":       true,
 	"automation": true,

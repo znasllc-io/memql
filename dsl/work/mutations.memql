@@ -30,7 +30,7 @@
 /// synthetic cluster actor with no actor.userId to scope to.
 @serverOnly
 @actor
-mutate run createWorkRun {
+mutation run createWorkRun {
   args {
     runId                  string!
     goalId                 string
@@ -71,7 +71,7 @@ mutate run createWorkRun {
 /// actor.userId scoping would let a caller close somebody's run as succeeded so long as it was
 /// their own.
 @serverOnly
-mutate run updateWorkRun {
+mutation run updateWorkRun {
   args {
     runId            string!
     status           string
@@ -110,7 +110,7 @@ mutate run updateWorkRun {
 /// actor.userId scoping narrows the wrong axis.
 @serverOnly
 @actor
-mutate step createWorkStep {
+mutation step createWorkStep {
   args {
     stepId          string!
     runId           string!
@@ -140,7 +140,7 @@ mutate step createWorkStep {
 /// @serverOnly: the receipt is the engine's testimony about its own execution; a caller scoped to
 /// actor.userId could still mark their own failed step done, which is the whole failure mode.
 @serverOnly
-mutate step updateWorkStep {
+mutation step updateWorkStep {
   args {
     stepId             string!
     status             string
@@ -175,7 +175,7 @@ mutate step updateWorkStep {
 /// scoped to actor.userId, which is exactly why this one does not have to pretend to be.
 @serverOnly
 @actor
-mutate goal createWorkGoal {
+mutation goal createWorkGoal {
   args {
     goalId            string!
     statement         string!
@@ -215,7 +215,7 @@ mutate goal createWorkGoal {
 /// population this construct exists for would be the population it could never reach. The
 /// client-reachable lifecycle act is cancelGoal, which epic A2 adds with its own gate.
 @serverOnly
-mutate goal updateWorkGoal {
+mutation goal updateWorkGoal {
   args {
     goalId       string!
     status       string
@@ -237,7 +237,7 @@ mutate goal updateWorkGoal {
 /// actor.userId at the call site: the router runs inside the engine.
 @serverOnly
 @actor
-mutate modelCall createWorkModelCall {
+mutation modelCall createWorkModelCall {
   args {
     modelCallId    string!
     runId          string!
@@ -270,7 +270,7 @@ mutate modelCall createWorkModelCall {
 /// would only mean the caller poisons their own recall, which is still the defect.
 @serverOnly
 @actor
-mutate observation createWorkObservation {
+mutation observation createWorkObservation {
   args {
     observationId  string!
     runId          string!
@@ -293,7 +293,7 @@ mutate observation createWorkObservation {
 /// gate against their own run and then answer it.
 @serverOnly
 @actor
-mutate approval createWorkApproval {
+mutation approval createWorkApproval {
   args {
     approvalId    string!
     /// Empty ONLY for kind routingReview, which a sweep raises rather than a
@@ -326,7 +326,7 @@ mutate approval createWorkApproval {
 /// which is true and beside the point -- what must hold is that decidedBy IS the verified actor,
 /// and epic A2's caller-facing form stamps it from the envelope rather than accepting it.
 @serverOnly
-mutate approval decideWorkApproval {
+mutation approval decideWorkApproval {
   args {
     approvalId  string!
     decision    string!

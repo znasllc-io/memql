@@ -5,7 +5,7 @@
 // type -- and the extension's run path types both more narrowly. Getting
 // either wrong is invisible until someone tries to run something:
 //
-//   the kind: the catalog says `mutation`, the run path says `mutate`;
+//   the kind: the catalog's word is the run path's word, for the kinds that run;
 //   the arg type: the catalog says `string`, the form binds a six-value union.
 //
 // The third thing asserted here is the set of states, because every one of
@@ -60,13 +60,13 @@ function construct(over: Partial<Construct> = {}): Construct {
 // seam 1: the kind
 // -----------------------------------------------------------------------------
 
-test("a mutation is runnable as `mutate`, which is what the run path calls it", () => {
-  // The catalog reports the kind; the run path knows it by the keyword it is
-  // AUTHORED under, and only this one differs. Getting it wrong means every
-  // mutation in the tree silently loses its run affordance.
+test("a mutation is runnable as `mutation`, the word it is declared and called with", () => {
+  // The catalog reports the kind; the run path knows it by the same word.
+  // Getting it wrong means every mutation in the tree silently loses its run
+  // affordance.
   const c = toCatalogConstruct(construct({ kind: "mutation", name: "createSpace" }));
   assert.equal(c.kind, "mutation");
-  assert.equal(c.runnableKind, "mutate");
+  assert.equal(c.runnableKind, "mutation");
 });
 
 test("the other four runnable kinds map to themselves", () => {
@@ -249,7 +249,7 @@ const SOURCE = [
   "query participant spaceParticipantsByRole {",
   "}",
   "",
-  "mutate space createSpace {",
+  "mutation space createSpace {",
   "}",
   "",
   "concept space {",
@@ -258,7 +258,7 @@ const SOURCE = [
 
 test("the signature line is found through the binding identifier", () => {
   // `query participant spaceParticipants` -- three identifiers, because
-  // query/mutate/shape/spec/seed carry a signature binding.
+  // query/mutation/shape/spec/seed carry a signature binding.
   assert.equal(signatureLine(SOURCE, "query", "spaceParticipants"), 3);
 });
 
@@ -269,8 +269,8 @@ test("a longer name that starts the same is not mistaken for it", () => {
 });
 
 test("a mutation is searched under the keyword it is AUTHORED with", () => {
-  // The catalog says `mutation`; the file says `mutate`. Searching for the
-  // catalog spelling finds nothing.
+  // The catalog says `mutation`, and so does the file (D13): the search finds
+  // the declaration.
   assert.equal(signatureLine(SOURCE, "mutation", "createSpace"), 10);
 });
 

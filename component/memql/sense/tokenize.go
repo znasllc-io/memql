@@ -50,7 +50,7 @@ func (s *Service) Tokenize(source string) []Token {
 // identifiers actually sit in a keyword position, and which identifier a
 // declaration signature binds as a concept.
 //
-// The lowercase construct keywords (shape / mutate / action / capability /
+// The lowercase construct keywords (shape / mutation / action / capability /
 // ...) lex as plain identifiers, so membership in constructKeywords alone
 // cannot tell a declaration header from a payload field that happens to
 // share the spelling -- `capability` is both a construct keyword and a
@@ -119,7 +119,7 @@ func classifyConstructPositions(tokens []parser.Token) (keywordPos, conceptPos m
 // or data keys rather than clauses. A bare identifier inside one names
 // data and never introduces a construct, so a field that happens to be
 // spelled like a construct keyword must not color as one. Everything not
-// listed here (query / mutate / logic / automation bodies) holds clauses
+// listed here (query / mutation / logic / automation bodies) holds clauses
 // and keeps keyword coloring -- `shape participantFull` inside a query is
 // a genuine clause keyword.
 var fieldListBlocks = map[string]bool{
@@ -164,7 +164,7 @@ func blockLabelBefore(tokens []parser.Token, i int) string {
 }
 
 // markSignatureConcept records the concept a declaration signature binds.
-// The two-identifier signature (`shape <Concept> <name>`, `mutate
+// The two-identifier signature (`shape <Concept> <name>`, `mutation
 // <Concept> <name>`, `spec <Bound> <name>`) carries it in the middle
 // slot; `concept <Name>` declares one outright. Every other header
 // (`trait isActiveRecord`, `provider chat54Mini`) names only itself.
@@ -243,10 +243,9 @@ func mapTokenType(pt parser.Token, isKeywordPos, isConceptPos bool) Token {
 			// keyword introducing it.
 			tokenType = "concept"
 		case isKeywordPos:
-			// Lowercase construct keywords (query / mutate / logic / action /
+			// Lowercase construct keywords (query / mutation / logic / action /
 			// capability / shape / concept / ...) AND invocation kind prefixes
-			// (notably `mutation`, whose declaration keyword is `mutate` --
-			// E6, memql#2392) lex as identifiers -- the core lexer only
+			// (E6, memql#2392) lex as identifiers -- the core lexer only
 			// keywords the capitalized receiver forms (Query / Mutation /
 			// ...). Color them at the Sense layer, sourced from dslspec
 			// (constructKeywords) so a future grammar epic inherits coloring.

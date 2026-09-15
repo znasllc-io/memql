@@ -20,7 +20,7 @@ func TestReceiverFilteredAnnotations(t *testing.T) {
 			want: []string{"cache", "unbounded", "actor"}, absent: []string{"mergeFields", "trigger", "handler"},
 		},
 		{
-			name: "mutation preamble", src: "@\nmutate todo createTodo {\n}\n", line: 1, col: 2,
+			name: "mutation preamble", src: "@\nmutation todo createTodo {\n}\n", line: 1, col: 2,
 			want: []string{"mergeFields", "createOnly", "actor"}, absent: []string{"cache", "trigger"},
 		},
 		{
@@ -88,8 +88,8 @@ func TestConstructScopedBodyCompletion(t *testing.T) {
 			want: []string{"args", "filter", "shape", "sort", "paginate", "asOf", "count"}, absent: []string{"insert", "update", "body"},
 		},
 		{
-			name: "mutate body offers write blocks",
-			src:  "mutate todo createTodo {\n  ",
+			name: "mutation body offers write blocks",
+			src:  "mutation todo createTodo {\n  ",
 			want: []string{"args", "insert", "update", "accept", "stamp"}, absent: []string{"filter", "shape", "body"},
 		},
 		// A logic's and an automation's statements are the body (epic

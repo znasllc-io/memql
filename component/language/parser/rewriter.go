@@ -641,11 +641,11 @@ type structFormStep struct {
 // `args { ... }` block.
 var structFormSteps = []structFormStep{
 	{"query", LooksLikeStructQuery, NormaliseQuerySource},
-	// The author keyword is `mutate` (mutationStructHeader matches `mutate`,
-	// C1/memql#2041); `mutation` is the invocation-step prefix only. The step
-	// name IS the author-facing keyword StructFormKeywords reports, so it must
-	// be `mutate` -- the #2124 drift test pins dslspec's construct keyword to it.
-	{"mutate", LooksLikeStructMutation, NormaliseMutationSource},
+	// The step name IS the author-facing keyword StructFormKeywords reports
+	// -- the #2124 drift test pins dslspec's construct keyword to it. A
+	// mutation is declared and called with the one word `mutation` (D13,
+	// epic memql#5370).
+	{"mutation", LooksLikeStructMutation, NormaliseMutationSource},
 	{"file-top args", LooksLikeFileTopArgs, NormaliseFileTopArgs},
 }
 
@@ -655,7 +655,7 @@ var structFormSteps = []structFormStep{
 var statementConstructKeywords = []string{"logic", "automation"}
 
 // StructFormKeywords is the set of author-facing construct keywords of the
-// struct form, in declaration order: query / mutate, which the rewriter
+// struct form, in declaration order: query / mutation, which the rewriter
 // expands to the internal func form, then logic / automation, which the
 // parser reads as written. It is the single source the #2124 drift test
 // compares dslspec's "function" category constructs against. Derived from
@@ -676,7 +676,7 @@ var StructFormKeywords = func() []string {
 }()
 
 // NormaliseAll runs every struct-form rewriter in sequence: query,
-// mutate, logic, automation, file-top args. Each stage is a no-op
+// mutation, file-top args. Each stage is a no-op
 // when the source doesn't match its detector. Errors from any
 // stage are wrapped with the stage name and returned immediately.
 func NormaliseAll(source string) (string, error) {
@@ -1080,12 +1080,11 @@ func buildStructQueryExpr(conceptId, filter, shape, sort, paginate, asOf, refine
 // mutationStructHeader matches the canonical struct-form mutation
 // header; mirrors queryStructHeader.
 //
-// The declaration keyword is `mutate` (the descriptive verb introduced
-// by C1 / memql#2041 of the grammar redesign, epic #2031), which maps to
-// the internal ReceiverMutation kind. The transitional `mutation` noun
-// alias was dropped by C6 (memql#2036) once the .memql tree was swept to
-// `mutate`.
-var mutationStructHeader = regexp.MustCompile(`(?m)^[ \t]*mutate[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
+// The declaration keyword is `mutation`, the word a call spells too (D13,
+// epic memql#5370), which maps to the internal ReceiverMutation kind. The
+// retired verb `mutate` is refused as a statement no construct opens
+// (retiredStatements, construct_keywords.go).
+var mutationStructHeader = regexp.MustCompile(`(?m)^[ \t]*mutation[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
 
 // LooksLikeStructMutation reports whether the source declares a
 // struct-form mutation.
@@ -1093,7 +1092,7 @@ func LooksLikeStructMutation(source string) bool {
 	return mutationStructHeader.MatchString(source)
 }
 
-// NormaliseMutationSource rewrites every `mutate NAME { ... }`
+// NormaliseMutationSource rewrites every `mutation NAME { ... }`
 // block to the procedural form.
 func NormaliseMutationSource(source string) (string, error) {
 	return rewriteEachBlock(source, mutationStructHeader, "struct-form mutation", true, emitMutation)
@@ -1128,7 +1127,7 @@ func emitMutation(name, conceptId, body, _preamble string) (string, error) {
 			expected = conceptId[idx+1:]
 		}
 		if parsed.writeTarget != expected {
-			return "", refuseClause(parsed.writeKind, fmt.Errorf("%s target %q does not match the concept binding %q -- drop the restated concept and write the bare `%s { ... }` (the target comes from the `mutate %s <name>` signature)", parsed.writeKind, parsed.writeTarget, expected, parsed.writeKind, expected))
+			return "", refuseClause(parsed.writeKind, fmt.Errorf("%s target %q does not match the concept binding %q -- drop the restated concept and write the bare `%s { ... }` (the target comes from the `mutation %s <name>` signature)", parsed.writeKind, parsed.writeTarget, expected, parsed.writeKind, expected))
 		}
 	}
 
@@ -1207,8 +1206,8 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 		b := &blocks[i]
 		if b.named != "" {
 			// The named form `<kind> <Concept> { ... }` is retired (#988): the
-			// write target comes from the `mutate <Concept> <name>` signature.
-			return nil, refuseAtBody(b.at, len(b.keyword), fmt.Errorf("`%s %s { ... }` is retired -- drop the restated concept and write the bare `%s { ... }` (the target comes from the `mutate <Concept> <name>` signature)", b.keyword, b.named, b.keyword))
+			// write target comes from the `mutation <Concept> <name>` signature.
+			return nil, refuseAtBody(b.at, len(b.keyword), fmt.Errorf("`%s %s { ... }` is retired -- drop the restated concept and write the bare `%s { ... }` (the target comes from the `mutation <Concept> <name>` signature)", b.keyword, b.named, b.keyword))
 		}
 		switch b.keyword {
 		case "args":
@@ -1245,7 +1244,7 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 	// `filter x == 1` (or any clause a mutation does not take) was dropped
 	// without a word.
 	if topStray != "" {
-		return nil, fmt.Errorf("mutation body: unexpected %q at the top level -- a mutation body takes %s", topStray, clauseSpellings("mutate"))
+		return nil, fmt.Errorf("mutation body: unexpected %q at the top level -- a mutation body takes %s", topStray, clauseSpellings("mutation"))
 	}
 
 	// Nested accept/stamp live inside the write block; scan its inner with the
@@ -1538,8 +1537,7 @@ func NormaliseFileTopArgs(source string) (string, error) {
 // inside the body of a struct-form construct.
 // Accepts both `<kind> <name> {` and the post-migration
 // `<kind> <Concept> <name> {` (signature-bound concept; PR #48/49).
-// `mutate` is the C1 (memql#2041) verb alias for `mutation`.
-var structConstructHeaderForArgs = regexp.MustCompile(`(?m)^[ \t]*(query|mutate)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
+var structConstructHeaderForArgs = regexp.MustCompile(`(?m)^[ \t]*(query|mutation)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
 
 func isInsideStructConstructHeader(source string, argsLoc int) bool {
 	for _, m := range structConstructHeaderForArgs.FindAllStringIndex(source[:argsLoc], -1) {

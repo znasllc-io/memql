@@ -1,7 +1,7 @@
 
 /// Write agent- or operator-authored product copy. The row is MemQL's; the
 /// push to Shopify is the outbox's job, triggered by the row change.
-mutate productContent upsertProductContent {
+mutation productContent upsertProductContent {
   args {
     contentId    string!
     storeId      string!
@@ -32,7 +32,7 @@ mutate productContent upsertProductContent {
 /// names nobody -- and `live` is a claim about the far end that only the
 /// code which talked to it can make.
 @serverOnly
-mutate productContent setProductContentStatus {
+mutation productContent setProductContentStatus {
   args {
     contentId  string!
     status     string!
@@ -44,7 +44,7 @@ mutate productContent setProductContentStatus {
 }
 
 /// Write an internal note about a customer.
-mutate customerNote upsertCustomerNote {
+mutation customerNote upsertCustomerNote {
   args {
     noteId       string!
     storeId      string!
@@ -65,7 +65,7 @@ mutate customerNote upsertCustomerNote {
 }
 
 /// Write an internal note about a company location.
-mutate companyLocationNote upsertCompanyLocationNote {
+mutation companyLocationNote upsertCompanyLocationNote {
   args {
     noteId              string!
     storeId             string!
@@ -86,7 +86,7 @@ mutate companyLocationNote upsertCompanyLocationNote {
 }
 
 /// Set a company location's credit limit.
-mutate creditLimit upsertCreditLimit {
+mutation creditLimit upsertCreditLimit {
   args {
     creditLimitId       string!
     storeId             string!
@@ -114,7 +114,7 @@ mutate creditLimit upsertCreditLimit {
 }
 
 /// Move a credit limit between enforced, held and waived.
-mutate creditLimit setCreditLimitStatus {
+mutation creditLimit setCreditLimitStatus {
   args {
     creditLimitId  string!
     status         string!
@@ -130,7 +130,7 @@ mutate creditLimit setCreditLimitStatus {
 }
 
 /// Create a quote in draft.
-mutate quote createQuote {
+mutation quote createQuote {
   args {
     quoteId             string!
     storeId             string!
@@ -167,7 +167,7 @@ mutate quote createQuote {
 }
 
 /// Edit a draft quote's lines and terms.
-mutate quote updateQuote {
+mutation quote updateQuote {
   args {
     quoteId      string!
     lines        []object
@@ -188,7 +188,7 @@ mutate quote updateQuote {
 /// The transitions themselves are checked in Go (component-side, where the
 /// approval chain is evaluated); this mutation records the outcome and the
 /// timestamps that go with it.
-mutate quote setQuoteStatus {
+mutation quote setQuoteStatus {
   args {
     quoteId  string!
     status   string!
@@ -200,7 +200,7 @@ mutate quote setQuoteStatus {
 }
 
 /// Stamp the moment a quote was sent to the buyer.
-mutate quote markQuoteSent {
+mutation quote markQuoteSent {
   args {
     quoteId  string!
   }
@@ -216,7 +216,7 @@ mutate quote markQuoteSent {
 /// about what the connector created in the store, and a client-callable
 /// version would let a caller assert an order that does not exist.
 @serverOnly
-mutate quote markQuoteAccepted {
+mutation quote markQuoteAccepted {
   args {
     quoteId        string!
     draftOrderGid  string!
@@ -230,7 +230,7 @@ mutate quote markQuoteAccepted {
 }
 
 /// Define or update an approval chain.
-mutate approvalChain upsertApprovalChain {
+mutation approvalChain upsertApprovalChain {
   args {
     chainId          string!
     storeId          string!
@@ -258,7 +258,7 @@ mutate approvalChain upsertApprovalChain {
 
 /// Record one approver's decision and, when the chain is finished, its
 /// outcome.
-mutate approvalChain recordApprovalDecision {
+mutation approvalChain recordApprovalDecision {
   args {
     chainId  string!
     steps    []object
@@ -274,7 +274,7 @@ mutate approvalChain recordApprovalDecision {
 }
 
 /// Create or update a sales rep.
-mutate salesRep upsertSalesRep {
+mutation salesRep upsertSalesRep {
   args {
     repId        string!
     storeId      string!
@@ -297,7 +297,7 @@ mutate salesRep upsertSalesRep {
 }
 
 /// Create or update a territory.
-mutate territory upsertTerritory {
+mutation territory upsertTerritory {
   args {
     territoryId          string!
     storeId              string!
@@ -318,7 +318,7 @@ mutate territory upsertTerritory {
 }
 
 /// Create or update a saved reorder list.
-mutate reorderList upsertReorderList {
+mutation reorderList upsertReorderList {
   args {
     listId              string!
     storeId             string!
@@ -343,7 +343,7 @@ mutate reorderList upsertReorderList {
 }
 
 /// Stamp a reorder list as ordered from.
-mutate reorderList markReorderListOrdered {
+mutation reorderList markReorderListOrdered {
   args {
     listId  string!
   }

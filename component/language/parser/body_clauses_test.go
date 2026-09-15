@@ -26,8 +26,8 @@ var clauseDispatch = map[string]struct {
 	// The query's `args { }` block is cut out by argsBlockHeader before the
 	// line switch runs; its `concept` arm refuses the retired inline concept
 	// line.
-	"query":  {file: "rewriter.go", fn: "parseStructQueryBody", beforeSwitch: []string{"args"}, refusalArms: []string{"concept"}},
-	"mutate": {file: "rewriter.go", fn: "parseStructMutationBody"},
+	"query":    {file: "rewriter.go", fn: "parseStructQueryBody", beforeSwitch: []string{"args"}, refusalArms: []string{"concept"}},
+	"mutation": {file: "rewriter.go", fn: "parseStructMutationBody"},
 	"action": {file: "parser.go", fn: "parseActionDecl", tag: "key",
 		refusalArms: []string{"intent", "params", "argTemplate", "body"}, notClauses: []string{"capability"}},
 	"capability": {file: "parser.go", fn: "parseCapabilityDecl", tag: "p.current.Literal", refusalArms: []string{"body"}},
@@ -152,12 +152,12 @@ var bodyClauseFixtures = map[string]map[string]string{
 		"asOf":     "query thing probe {\n  filter row => row.id != \"\"\n  asOf latest\n}",
 		"count":    "query thing probe {\n  filter row => row.id != \"\"\n  count\n}",
 	},
-	"mutate": {
-		"args":   "mutate thing probe {\n  args {\n    id string!\n  }\n  insert {\n    id: args.id\n  }\n}",
-		"insert": "mutate thing probe {\n  insert {\n    id: \"x\"\n  }\n}",
-		"update": "mutate thing probe {\n  update {\n    id: \"x\"\n  }\n}",
-		"accept": "mutate thing probe {\n  args {\n    name string!\n  }\n  accept { name }\n}",
-		"stamp":  "mutate thing probe {\n  args {\n    name string!\n  }\n  accept { name }\n  stamp { createdAt: now }\n}",
+	"mutation": {
+		"args":   "mutation thing probe {\n  args {\n    id string!\n  }\n  insert {\n    id: args.id\n  }\n}",
+		"insert": "mutation thing probe {\n  insert {\n    id: \"x\"\n  }\n}",
+		"update": "mutation thing probe {\n  update {\n    id: \"x\"\n  }\n}",
+		"accept": "mutation thing probe {\n  args {\n    name string!\n  }\n  accept { name }\n}",
+		"stamp":  "mutation thing probe {\n  args {\n    name string!\n  }\n  accept { name }\n  stamp { createdAt: now }\n}",
 	},
 	"logic": {
 		"args": "logic probe {\n  args {\n    x string\n  }\n  return args.x\n}",
@@ -209,7 +209,7 @@ func TestBodyClausesMatchWhatTheParsersAccept(t *testing.T) {
 // where a probed clause goes.
 var bodyProbeFixtures = map[string]string{
 	"query":      "query thing probe {\n  filter row => row.id != \"\"\n  %s\n}",
-	"mutate":     "mutate thing probe {\n  insert {\n    id: \"x\"\n  }\n  %s\n}",
+	"mutation":   "mutation thing probe {\n  insert {\n    id: \"x\"\n  }\n  %s\n}",
 	"logic":      "logic probe {\n  %s\n  return 1\n}",
 	"automation": "automation probe {\n  %s\n  run := mutation createThing(id: \"x\")\n}",
 	"action":     "action probe {\n  %s\n  capability script(script: \"x\")\n}",

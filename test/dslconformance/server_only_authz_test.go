@@ -231,4 +231,4 @@ func constructNameAfter(src string, from int) (string, bool) {
 // attributed an annotation above the spec to that construct: the automation
 // defect above, for another brace-less form.
 var namedConstructHeaderRe = regexp.MustCompile(
-	`(?m)^[ \t]*(query|mutate|seed|logic|automation|concept|builtin|shape|spec|trait|tool|prompt|provider|action|capability)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*(?:\{|=[^=>])`)
+	`(?m)^[ \t]*(query|mutation|seed|logic|automation|concept|builtin|shape|spec|trait|tool|prompt|provider|action|capability)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*(?:\{|=[^=>])`)

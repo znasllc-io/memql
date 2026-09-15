@@ -205,7 +205,7 @@ func TestParseDefinition_UnknownKeyword_SuggestsNearest(t *testing.T) {
 	}{
 		{"@description(\"x\")\nquer participant qFoo { }", "did you mean query?"},
 		{"use cognition.concepts.{ space }\n\nshaep space s { row.id }", "did you mean shape?"},
-		{"@enabled\nmutaton space createSpace { }", "did you mean mutate?"},
+		{"@enabled\nmutaton space createSpace { }", "did you mean mutation?"},
 	}
 	for _, tc := range cases {
 		_, err := ParseFile(tc.src)

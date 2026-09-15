@@ -8,7 +8,7 @@ query thing things {
   filter row => row.n > 0
 }
 
-mutate thing saveThing {
+mutation thing saveThing {
   args {
     label  string  @required
   }

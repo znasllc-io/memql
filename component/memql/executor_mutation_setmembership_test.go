@@ -140,7 +140,7 @@ func TestMutationTemplate_SetAnnotationPlumbing(t *testing.T) {
 	src := `
 @description("probe")
 @addToSet("tags")
-mutate thing probeAddTag {
+mutation thing probeAddTag {
   args {
     thingId string!
     tag     string!
@@ -201,7 +201,7 @@ func TestSetAnnotationsAreRefusedOnAnInsert(t *testing.T) {
 		src := `
 @description("probe")
 @` + attr + `("tags")
-mutate thing probeInsert {
+mutation thing probeInsert {
   args {
     thingId string!
     tag     string!

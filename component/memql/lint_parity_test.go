@@ -59,7 +59,7 @@ concept gizmo {
 
 @enabled
 @description("Create a gizmo.")
-mutate gizmo createGizmo {
+mutation gizmo createGizmo {
   args {
     gizmoId  string  @required
     label    string  @required
@@ -123,7 +123,7 @@ concept widget {
 
 @enabled
 @description("Create a widget; declares an arg the body never references.")
-mutate widget createWidget {
+mutation widget createWidget {
   args {
     widgetId   string  @required
     label      string  @required
@@ -258,7 +258,7 @@ concept widget {
 
 @enabled
 @description("Create a widget.")
-mutate widget createWidget {
+mutation widget createWidget {
   args {
     widgetId  string  @required
     label     string  @required
@@ -276,7 +276,7 @@ mutate widget createWidget {
 
 @enabled
 @description("Create a widget -- a duplicate name in a second file.")
-mutate widget createWidget {
+mutation widget createWidget {
   args {
     widgetId  string  @required
     label     string  @required

@@ -7,7 +7,7 @@ query backorder pendingBackorders {
   filter row => row.status == "pending"
 }
 
-mutate backorder flagBacklog {
+mutation backorder flagBacklog {
   args {
     level  string  @required
   }

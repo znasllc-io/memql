@@ -118,7 +118,7 @@ type Violation struct {
 	Gate      Gate
 	File      string // path within the scanned tree
 	Line      int    // 1-based; 0 when the gate cannot place it
-	Kind      string // construct keyword (query / mutate / seed), when known
+	Kind      string // construct keyword (query / mutation / seed), when known
 	Construct string // construct name, when known
 	Detail    string // operator-facing sentence, including the remedy
 }

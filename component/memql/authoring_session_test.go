@@ -20,7 +20,7 @@ concept mcpWidget {
 const sessionMutationSrc = `use mcpsess.concepts.{ mcpWidget }
 
 @description("Create a session widget")
-mutate mcpWidget mutationCreateMcpWidget {
+mutation mcpWidget mutationCreateMcpWidget {
   args {
     widgetId  string  @required
   }

@@ -3,7 +3,7 @@ concept measure {
   size  string
 }
 
-mutate measure recordSize {
+mutation measure recordSize {
   args {
     size  string  @required
   }

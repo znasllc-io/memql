@@ -96,7 +96,7 @@ var ErrLanguageLineRefused = errors.New("the domain's language line is refused, 
 // one) -- and for anything that is not a .memql file.
 //
 // It also takes a loader origin -- "unified:<path>", which the functions
-// loader puts on every query, mutate and logic ("unified:shop/queries.memql"),
+// loader puts on every query, mutation and logic ("unified:shop/queries.memql"),
 // or "unified:<path>:<name>" ("unified:shop/queries.memql:list") -- and
 // answers for the path inside it, which is how LanguageLines.For, and so
 // MemQLEngine.LanguageLineFor, is asked about a construct. No other prefix

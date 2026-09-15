@@ -16,7 +16,7 @@ type SignatureConceptRef struct {
 }
 
 // SignatureConceptRefs returns every two-identifier signature-bound concept
-// (`query|mutate|shape|seed <Concept> <name> {`) in source, each with the byte
+// (`query|mutation|shape|seed <Concept> <name> {`) in source, each with the byte
 // offset of its <Concept>. Comments are blanked before matching (BlankComments
 // preserves offsets), mirroring the boot loader, so a commented-out signature is
 // not reported and the offsets still index the original source.

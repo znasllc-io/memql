@@ -7,7 +7,7 @@ query signup recentSignups {
   filter row => row.email != ""
 }
 
-mutate signup announceGrowth {
+mutation signup announceGrowth {
   args {
     size  string  @required
   }

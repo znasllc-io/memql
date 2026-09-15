@@ -33,7 +33,7 @@ query participant spaceParticipants {
 }
 
 @description("Create a cognition space")
-mutate space mutationCreateSpace {
+mutation space mutationCreateSpace {
   args {
     spaceId  string  @required
     name     string  @required
@@ -148,7 +148,7 @@ func TestRunnableConstructs_FindsEveryRunnableKind(t *testing.T) {
 
 	want := []string{
 		"query spaceParticipants",
-		"mutate mutationCreateSpace",
+		"mutation mutationCreateSpace",
 		"logic logicProvisionDailySpace",
 		"tool searchUsers",
 		"automation bootstrapSession",
@@ -179,7 +179,7 @@ func TestRunnableConstructs_SignatureRanges(t *testing.T) {
 	got := newRunnableService().RunnableConstructs(runnableFixture)
 	for _, tc := range []struct{ name, signature string }{
 		{"spaceParticipants", "query participant spaceParticipants"},
-		{"mutationCreateSpace", "mutate space mutationCreateSpace"},
+		{"mutationCreateSpace", "mutation space mutationCreateSpace"},
 		{"logicProvisionDailySpace", "logic logicProvisionDailySpace"},
 		{"searchUsers", "tool searchUsers"},
 		{"bootstrapSession", "automation bootstrapSession"},
@@ -199,7 +199,7 @@ func TestRunnableConstructs_SignatureConcept(t *testing.T) {
 		t.Errorf("query concept = %q; want %q", c, "participant")
 	}
 	if c := byName(t, got, "mutationCreateSpace").Concept; c != "space" {
-		t.Errorf("mutate concept = %q; want %q", c, "space")
+		t.Errorf("mutation concept = %q; want %q", c, "space")
 	}
 	// logic / tool / automation signatures carry no concept binding.
 	for _, name := range []string{"logicProvisionDailySpace", "searchUsers", "bootstrapSession"} {
@@ -238,7 +238,7 @@ func TestRunnableConstructs_ToolFieldsAreTheSchema(t *testing.T) {
 func TestRunnableConstructs_MutationArgsAreRequired(t *testing.T) {
 	rc := byName(t, newRunnableService().RunnableConstructs(runnableFixture), "mutationCreateSpace")
 	if len(rc.Args) != 2 {
-		t.Fatalf("mutate args = %+v; want 2", rc.Args)
+		t.Fatalf("mutation args = %+v; want 2", rc.Args)
 	}
 	for _, a := range rc.Args {
 		if !a.Required {
@@ -410,7 +410,7 @@ logic brokenLogic {
 }
 
 @description("Also healthy")
-mutate space healthyMutation {
+mutation space healthyMutation {
   args {
     spaceId  string  @required
   }
@@ -421,7 +421,7 @@ mutate space healthyMutation {
 }
 `
 	got := newRunnableService().RunnableConstructs(src)
-	want := []string{"query healthyQuery", "mutate healthyMutation"}
+	want := []string{"query healthyQuery", "mutation healthyMutation"}
 	if !reflect.DeepEqual(names(got), want) {
 		t.Errorf("constructs = %v; want %v (the broken logic is dropped, the rest survive)", names(got), want)
 	}
@@ -432,7 +432,7 @@ mutate space healthyMutation {
 // by ONE, not by its UTF-8 byte width. Getting this wrong puts the CodeLens
 // anchor past the end of the line.
 //
-// The fixture uses a tool because the struct-form lowering that query / mutate
+// The fixture uses a tool because the struct-form lowering that query / mutation
 // / logic / automation go through matches ASCII-only name patterns, so a
 // non-ASCII name is only reachable on the natively-parsed declaration kinds.
 func TestRunnableConstructs_SignatureColumnsCountRunes(t *testing.T) {
@@ -473,7 +473,7 @@ query participant firstQuery {
 }
 
 @description("Créer un espace")
-mutate space secondMutation {
+mutation space secondMutation {
   args {
     spaceId  string  @required
   }
@@ -492,7 +492,7 @@ logic thirdLogic {
 }
 `
 	got := newRunnableService().RunnableConstructs(src)
-	want := []string{"query firstQuery", "mutate secondMutation", "logic thirdLogic"}
+	want := []string{"query firstQuery", "mutation secondMutation", "logic thirdLogic"}
 	if !reflect.DeepEqual(names(got), want) {
 		t.Fatalf("constructs = %v; want %v (rune-offset slicing)", names(got), want)
 	}
@@ -553,7 +553,7 @@ func TestRunnableConstructs_CoversTheLiveCorpus(t *testing.T) {
 		t.Skipf("dsl tree not reachable from here: %v", err)
 	}
 	headerRe := regexp.MustCompile(
-		`(?m)^(query|mutate|logic|tool|automation)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*[{@]`)
+		`(?m)^(query|mutation|logic|tool|automation)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*[{@]`)
 
 	svc := newRunnableService()
 	scanned, missing := 0, []string{}
@@ -657,7 +657,7 @@ func TestRunnableConstructs_ToolAutoInjectedFieldsAreFlagged(t *testing.T) {
 	}
 }
 
-// query / mutate / logic args have no @autoInjected annotation at all, so the
+// query / mutation / logic args have no @autoInjected annotation at all, so the
 // flag must never come back true for them -- a client that marks an ordinary
 // arg as engine-supplied tells the developer their value is ignored when it is
 // not.

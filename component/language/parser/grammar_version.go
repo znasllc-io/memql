@@ -215,13 +215,17 @@ package parser
 //     included [body_positional_argument];
 //   - on a trigger: `partition=` [trigger_partition_retired] and the
 //     `@schedule(...)` synonym [trigger_schedule_synonym_retired];
-//     `@trigger(schedule=...)` is the one spelling.
+//     `@trigger(schedule=...)` is the one spelling;
+//   - the declaration verb `mutate` [construct_unknown]: a mutation is
+//     declared with the word a call spells, `mutation <Concept> <name> {`
+//     (D13).
 //
 // WIDENINGS. The statements themselves: `if` / `else if` / `else`, `for x in
 // <source> if <filter>`, `switch` with literal `case` labels, `parallel`
 // branches with `wait any`, `publish "<topic>" { ... }` in an automation, and
 // the trailing `retry(n)`, `on error continue` and `on surface(...)`
 // clauses. A name bound in an if or switch block is readable after it.
+// `mutation` opens a mutation's declaration.
 
 import (
 	"crypto/sha256"
@@ -236,7 +240,7 @@ import (
 // The digest suffix is not decoration: TestGrammarVersionCarriesTheSurfaceDigest
 // recomputes it and requires this string to end with it, which is what makes a
 // grammar move impossible to land without editing this line (memql#3089).
-const GrammarVersion = "2026.09-dsl-v1-bodies-c863e266"
+const GrammarVersion = "2026.09-dsl-v1-bodies-568b89f9"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test

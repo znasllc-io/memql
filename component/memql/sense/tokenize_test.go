@@ -146,17 +146,17 @@ func TestTokenize_ConstructKeywordsColored(t *testing.T) {
 	svc := &Service{}
 
 	// A deployment-bundle-shaped snippet: an action declaration whose body is a
-	// single capability call, with an annotation, a bound-concept mutate decl,
+	// single capability call, with an annotation, a bound-concept mutation decl,
 	// and string args.
 	src := "@description(\"cut a release\")\n" +
 		"action tagRelease {\n" +
 		"  capability script(script: \"deploy.tag\")\n" +
 		"}\n" +
-		"mutate space recordDeploy { insert { id: \"x\" } }"
+		"mutation space recordDeploy { insert { id: \"x\" } }"
 	tokens := svc.Tokenize(src)
 
 	// Construct keywords render as `keyword`.
-	for _, kw := range []string{"action", "capability", "mutate"} {
+	for _, kw := range []string{"action", "capability", "mutation"} {
 		if got := firstTokenType(tokens, kw); got != "keyword" {
 			t.Errorf("construct keyword %q rendered as %q, want keyword", kw, got)
 		}
@@ -320,11 +320,11 @@ func TestKeywordDocsFreeOfRetiredForms(t *testing.T) {
 	}
 }
 
-// E6 (memql#2392): invocation kind prefixes color as keywords -- notably
-// `mutation`, whose DECLARATION keyword is `mutate` (so it is absent from the
-// dslspec construct set). The set is sourced from the parser's authoritative
-// invocationKindKeywords via parser.InvocationKindKeywords(), drift-proof by
-// construction; this test pins the wiring end-to-end.
+// E6 (memql#2392): invocation kind prefixes color as keywords -- `mutation`
+// among them, which is the declaration keyword too. The set is sourced from
+// the parser's authoritative invocationKindKeywords via
+// parser.InvocationKindKeywords(), drift-proof by construction; this test pins
+// the wiring end-to-end.
 func TestTokenize_InvocationKindPrefixesAreKeywords(t *testing.T) {
 	src := `automation deploy {
   record := mutation createDeployment(deploymentId: x)

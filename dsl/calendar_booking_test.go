@@ -35,11 +35,11 @@ func TestCalendarBookingIsCoreNotAPack(t *testing.T) {
 func TestCalendarBookingWritePath(t *testing.T) {
 	mut := calendarDSL(t, "mutations.memql")
 	for _, name := range []string{
-		"mutate bookingHours createBookingHours",
-		"mutate bookingHours setBookingHours",
-		"mutate booking takeBooking",
-		"mutate booking cancelBooking",
-		"mutate booking rescheduleBooking",
+		"mutation bookingHours createBookingHours",
+		"mutation bookingHours setBookingHours",
+		"mutation booking takeBooking",
+		"mutation booking cancelBooking",
+		"mutation booking rescheduleBooking",
 	} {
 		if !strings.Contains(mut, name) {
 			t.Fatalf("missing %s", name)

@@ -45,6 +45,9 @@ var retiredStatements = map[string]string{
 	// before epic memql#5356; no loader ever read it, and a construct is
 	// imported by name with a `use` line.
 	"import": "the import ( ... ) block is retired: a construct is imported with a file-top use line, use <domain>.<file>.{ names }",
+	// A mutation is declared with the word a call spells, `mutation` (D13,
+	// epic memql#5370).
+	"mutate": "mutate is retired in edition 2026: a mutation is declared mutation <Concept> <name> { ... } (" + bodyMigrator + " rewrites it)",
 }
 
 // ConstructKeywords is every word that may open a top-level statement: the

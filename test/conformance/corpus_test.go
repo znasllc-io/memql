@@ -893,7 +893,7 @@ func corpusNamesDomain(msg, domain string) bool {
 // `query ticket openTickets {`, `capability fs.list {`, `seed skill a-b {`,
 // and the brace-less edition-2026 spec or trait, `spec ticket isOpen = row =>`
 // and `trait isOpen = row =>`.
-var corpusConstructHeader = regexp.MustCompile(`(?m)^[ \t]*(?:query|mutate|logic|automation|action|capability|spec|trait|tool|builtin|prompt|provider|shape|policy|rule|seed|concept)[ \t]+(?:[A-Za-z_][\w]*[ \t]+)?([A-Za-z_][\w.-]*)[ \t]*(?:\{|=)`)
+var corpusConstructHeader = regexp.MustCompile(`(?m)^[ \t]*(?:query|mutation|logic|automation|action|capability|spec|trait|tool|builtin|prompt|provider|shape|policy|rule|seed|concept)[ \t]+(?:[A-Za-z_][\w]*[ \t]+)?([A-Za-z_][\w.-]*)[ \t]*(?:\{|=)`)
 
 // corpusDeclaredNames maps every construct name the runs declare, in their
 // cases and fixtures, to the one run that declares it. A name more than one

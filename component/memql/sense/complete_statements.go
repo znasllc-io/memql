@@ -474,10 +474,8 @@ func (s *Service) statementExpressionItems(ctx CursorContext, source string, lin
 // with: the function's own kind, or "" for one no statement calls by name.
 func statementCallKind(kind string) string {
 	switch k := strings.ToLower(strings.TrimSpace(kind)); k {
-	case "query", "logic", "builtin", "automation", "action":
+	case "query", "mutation", "logic", "builtin", "automation", "action":
 		return k
-	case "mutation", "mutate":
-		return "mutation"
 	}
 	return ""
 }

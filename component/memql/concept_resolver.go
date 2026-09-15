@@ -125,7 +125,7 @@ func (r *ConceptResolver) ResolveFileWithSignatureConceptsInDomain(file *languag
 }
 
 // ResolveSignatureConceptInNamespace resolves ONE signature-bound bare concept
-// name (`mutate <Concept> <name> { ... }`) for a file whose assembly directory
+// name (`mutation <Concept> <name> { ... }`) for a file whose assembly directory
 // is `dir` and whose declared namespace is `declaredNS`.
 //
 // It is the SINGLE definition of that resolution, and being single is the point

@@ -40,7 +40,7 @@
 /// Create an audience owned by the caller. Owned: ownerUserId is stamped from actor.userId, so a
 /// caller can only ever create their own audiences.
 @actor
-mutate audience createAudience {
+mutation audience createAudience {
   args {
     audienceId   string!
     name         string!
@@ -62,7 +62,7 @@ mutate audience createAudience {
 /// engine's row-authz write guard refuses the update outright when the target row's owner is
 /// somebody else.
 @actor
-mutate audience archiveAudience {
+mutation audience archiveAudience {
   args {
     audienceId  string!
   }
@@ -76,7 +76,7 @@ mutate audience archiveAudience {
 /// Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the
 /// concept's @default, which is never applied on insert.
 @actor
-mutate recipient addRecipient {
+mutation recipient addRecipient {
   args {
     recipientId  string!
     audienceId   string!
@@ -109,7 +109,7 @@ mutate recipient addRecipient {
 /// an unsubscribe forwarded by support) and stamping the clock would date every one of those to
 /// the moment the operator got round to it.
 @actor
-mutate recipient setRecipientSubscription {
+mutation recipient setRecipientSubscription {
   args {
     recipientId         string!
     subscriptionStatus  string!
@@ -127,7 +127,7 @@ mutate recipient setRecipientSubscription {
 /// Create an email template owned by the caller. Lands as a draft; an operator marks it ready with
 /// updateTemplate once the copy is finished. Owned.
 @actor
-mutate template createTemplate {
+mutation template createTemplate {
   args {
     templateId  string!
     name        string!
@@ -148,7 +148,7 @@ mutate template createTemplate {
 
 /// Edit a template's copy or move it along its lifecycle (draft -> ready -> archived). Owned.
 @actor
-mutate template updateTemplate {
+mutation template updateTemplate {
   args {
     templateId  string!
     name        string!
@@ -170,7 +170,7 @@ mutate template updateTemplate {
 /// Create a campaign: one audience, one template, an optional intended time. Lands as a draft with
 /// its counters zeroed. Owned.
 @actor
-mutate campaign createCampaign {
+mutation campaign createCampaign {
   args {
     campaignId   string!
     name         string!
@@ -204,7 +204,7 @@ mutate campaign createCampaign {
 /// field: lifecycle moves through scheduleCampaign / cancelCampaign, and the counters belong to the
 /// sending engine. Owned.
 @actor
-mutate campaign updateCampaign {
+mutation campaign updateCampaign {
   args {
     campaignId   string!
     name         string!
@@ -243,7 +243,7 @@ mutate campaign updateCampaign {
 /// preflight; this write is the last step of that, not an operation of its own.
 @actor
 @serverOnly
-mutate campaign scheduleCampaign {
+mutation campaign scheduleCampaign {
   args {
     campaignId   string!
     scheduledAt  datetime!
@@ -261,7 +261,7 @@ mutate campaign scheduleCampaign {
 /// Cancel a campaign. Terminal by intent: a cancelled campaign is kept for its history rather than
 /// deleted, and re-running it means authoring a new one. Owned.
 @actor
-mutate campaign cancelCampaign {
+mutation campaign cancelCampaign {
   args {
     campaignId  string!
   }
@@ -289,7 +289,7 @@ mutate campaign cancelCampaign {
 /// preflight; this write is the last step of that, not an operation of its own.
 @actor
 @serverOnly
-mutate campaign startCampaign {
+mutation campaign startCampaign {
   args {
     campaignId  string!
   }
@@ -315,7 +315,7 @@ mutate campaign startCampaign {
 /// preflight; this write is the last step of that, not an operation of its own.
 @actor
 @serverOnly
-mutate campaign pauseCampaign {
+mutation campaign pauseCampaign {
   args {
     campaignId  string!
   }
@@ -339,7 +339,7 @@ mutate campaign pauseCampaign {
 /// preflight; this write is the last step of that, not an operation of its own.
 @actor
 @serverOnly
-mutate campaign resumeCampaign {
+mutation campaign resumeCampaign {
   args {
     campaignId  string!
   }
@@ -367,7 +367,7 @@ mutate campaign resumeCampaign {
 /// preflight; this write is the last step of that, not an operation of its own.
 @actor
 @serverOnly
-mutate campaign updateCampaignProgress {
+mutation campaign updateCampaignProgress {
   args {
     campaignId      string!
     status          string
@@ -410,7 +410,7 @@ mutate campaign updateCampaignProgress {
 /// preflight; this write is the last step of that, not an operation of its own.
 @actor
 @serverOnly
-mutate delivery recordCampaignDelivery {
+mutation delivery recordCampaignDelivery {
   args {
     campaignId         string!
     recipientId        string!
@@ -458,7 +458,7 @@ mutate delivery recordCampaignDelivery {
 ///
 /// clusterOwner tier, so no actor and no owner stamp: these rows have no owner, and reaching them at
 /// all requires the engine's own operator identity.
-mutate sendJob enqueueCampaignSend {
+mutation sendJob enqueueCampaignSend {
   args {
     campaignId           string!
     campaignOwnerUserId  string!
@@ -485,7 +485,7 @@ mutate sendJob enqueueCampaignSend {
 
 /// ENGINE: stamp a send job's progress or lifecycle transition. Called by the drain worker after
 /// each batch and on every terminal outcome. clusterOwner tier.
-mutate sendJob updateSendJob {
+mutation sendJob updateSendJob {
   args {
     sendJobId       string!
     status          string
@@ -519,7 +519,7 @@ mutate sendJob updateSendJob {
 /// is written and dating it earlier would claim a protection that was not in force.
 ///
 /// clusterOwner tier: a caller who could write this could silently suppress a competitor's audience.
-mutate suppression recordSuppression {
+mutation suppression recordSuppression {
   args {
     emailDigest       string!
     reason            enum("unsubscribed", "hard_bounce", "complaint", "manual")!
@@ -549,7 +549,7 @@ mutate suppression recordSuppression {
 /// total" correct rather than duplicating.
 ///
 /// clusterOwner tier: these are the deployment's numbers, not an operator's.
-mutate reputationWindow recordReputationWindow {
+mutation reputationWindow recordReputationWindow {
   args {
     sendingIdentity  string!
     domain           string!
@@ -581,7 +581,7 @@ mutate reputationWindow recordReputationWindow {
 /// read why rather than guess.
 ///
 /// clusterOwner tier.
-mutate warmupState recordWarmupState {
+mutation warmupState recordWarmupState {
   args {
     sendingIdentity  string!
     step             int
@@ -606,7 +606,7 @@ mutate warmupState recordWarmupState {
 /// Append a consent grant. No update path exists on consentEvent -- a later
 /// withdraw is a new row. Owned: ownerUserId is stamped from actor.userId.
 @actor
-mutate consentEvent recordConsentGrant {
+mutation consentEvent recordConsentGrant {
   args {
     eventId      string!
     emailDigest  string!
@@ -633,7 +633,7 @@ mutate consentEvent recordConsentGrant {
 
 /// Append a consent withdraw (unsubscribe / opt-out). Append-only.
 @actor
-mutate consentEvent recordConsentWithdraw {
+mutation consentEvent recordConsentWithdraw {
   args {
     eventId      string!
     emailDigest  string!
@@ -660,7 +660,7 @@ mutate consentEvent recordConsentWithdraw {
 
 /// Append a provider bounce event. Append-only.
 @actor
-mutate consentEvent recordConsentBounce {
+mutation consentEvent recordConsentBounce {
   args {
     eventId      string!
     emailDigest  string!
@@ -687,7 +687,7 @@ mutate consentEvent recordConsentBounce {
 
 /// Append a provider complaint event. Append-only.
 @actor
-mutate consentEvent recordConsentComplaint {
+mutation consentEvent recordConsentComplaint {
   args {
     eventId      string!
     emailDigest  string!
@@ -716,7 +716,7 @@ mutate consentEvent recordConsentComplaint {
 /// reason is inexpressible on this path. Send-time suppression list is
 /// unchanged (recordSuppression).
 @actor
-mutate consentEvent recordConsentSuppress {
+mutation consentEvent recordConsentSuppress {
   args {
     eventId      string!
     emailDigest  string!
@@ -757,7 +757,7 @@ mutate consentEvent recordConsentSuppress {
 /// shape and header safety before it is stored: it becomes a From header and a URL path segment, and
 /// a CR or LF in it would be header injection into every message the identity ever sends.
 @actor
-mutate senderIdentity createSenderIdentity {
+mutation senderIdentity createSenderIdentity {
   args {
     senderIdentityId  string!
     address           string!
@@ -780,7 +780,7 @@ mutate senderIdentity createSenderIdentity {
 /// enabling and disabling an identity is a deliverability decision with a send-time consequence, and
 /// `setSenderIdentityStatus` is the call that makes it, so the two never overlap in what they accept.
 @actor
-mutate senderIdentity updateSenderIdentity {
+mutation senderIdentity updateSenderIdentity {
   args {
     senderIdentityId  string!
     address           string!
@@ -802,7 +802,7 @@ mutate senderIdentity updateSenderIdentity {
 /// name the row, and the reputation and warmup history are keyed on its address, so deleting it
 /// would orphan the evidence a deliverability review is made of.
 @actor
-mutate senderIdentity setSenderIdentityStatus {
+mutation senderIdentity setSenderIdentityStatus {
   args {
     senderIdentityId  string!
     status            string!
@@ -837,7 +837,7 @@ mutate senderIdentity setSenderIdentityStatus {
 /// match nothing while looking correct. The owner comes out of the signed token, not the request.
 @actor
 @serverOnly
-mutate engagementEvent recordEngagementEvent {
+mutation engagementEvent recordEngagementEvent {
   args {
     campaignId  string!
     deliveryId  string!
@@ -873,7 +873,7 @@ mutate engagementEvent recordEngagementEvent {
 /// so writing this row can never by itself mail anybody -- the same "the row existing is not
 /// permission to send" stance v1:campaigns:sendJob's `scheduled` status takes.
 @actor
-mutate emailRule createEmailRule {
+mutation emailRule createEmailRule {
   args {
     emailRuleId       string!
     name              string!
@@ -905,7 +905,7 @@ mutate emailRule createEmailRule {
 /// engine's account of what it made of the form, and a caller who could write them could claim a
 /// rule was active with nothing behind it.
 @actor
-mutate emailRule updateEmailRule {
+mutation emailRule updateEmailRule {
   args {
     emailRuleId       string!
     name              string!
@@ -942,7 +942,7 @@ mutate emailRule updateEmailRule {
 /// firedCount would be editing the evidence. The rule's FORM stays client-writable next door.
 @actor
 @serverOnly
-mutate emailRule recordEmailRuleGeneration {
+mutation emailRule recordEmailRuleGeneration {
   args {
     emailRuleId    string!
     status         string!
@@ -969,7 +969,7 @@ mutate emailRule recordEmailRuleGeneration {
 /// firedCount would be editing the evidence. The rule's FORM stays client-writable next door.
 @actor
 @serverOnly
-mutate emailRule recordEmailRuleFiring {
+mutation emailRule recordEmailRuleFiring {
   args {
     emailRuleId  string!
     firedCount   int!
@@ -991,7 +991,7 @@ mutate emailRule recordEmailRuleFiring {
 /// the circuit breaker tripping -- and all three are visible as distinct statuses so nobody has to
 /// guess which one happened.
 @actor
-mutate emailRule setEmailRuleStatus {
+mutation emailRule setEmailRuleStatus {
   args {
     emailRuleId  string!
     status       string!

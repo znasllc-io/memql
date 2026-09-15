@@ -352,7 +352,7 @@ func extractReceiverBody(source string) string {
 //   - `func (Receiver) name(<args>) <returns> {`
 //
 // The author-facing struct-form headers of the constructs the rewriter
-// rewrites (`query NAME {` / `mutate NAME {` -- parser.StructFormKeywords)
+// rewrites (`query NAME {` / `mutation NAME {` -- parser.StructFormKeywords)
 // cannot reach here: the snapshot every caller of extractFunctionBody is fed
 // (`rawSourceForUsage` in function_loader.go) is taken AFTER NormaliseAll,
 // which has already rewritten each of those keywords into the

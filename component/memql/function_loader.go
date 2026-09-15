@@ -294,7 +294,7 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 		// a query's `concept ==` filter. Handing it DomainFromFilePath's LAST
 		// segment is a widening, not a near miss -- for
 		// agents/tools/askSpecialist.memql the hint becomes `tools`, so a
-		// signature `mutate widget ...` binds a foreign `v1:tools:widget` with
+		// signature `mutation widget ...` binds a foreign `v1:tools:widget` with
 		// no import, on the path that derives row ids, while assembly for that
 		// same file can only ever emit `v1:agents:*`.
 		if err := resolver.ResolveFileWithSignatureConceptsInDomain(
@@ -776,11 +776,10 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 // that rewrites `<Concept>.X` references in the construct body to
 // `payload.X` before the expression parser tokenises.
 //
-// The mutation declaration keyword is the C1 (memql#2041) verb `mutate`;
-// it binds the signature concept the same way query/shape/seed do. The
-// transitional `mutation` noun alias was dropped by C6 (memql#2036).
+// A mutation's declaration binds the signature concept the same way
+// query/shape/seed do.
 var signatureConceptRe = regexp.MustCompile(
-	`(?m)^[ \t]*(?:query|mutate|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`,
+	`(?m)^[ \t]*(?:query|mutation|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`,
 )
 
 // extractAllSignatureConceptNames scans raw .memql source for every

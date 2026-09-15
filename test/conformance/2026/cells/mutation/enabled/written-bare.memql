@@ -1,6 +1,6 @@
 /// Retitle one ticket. @enabled restates the default.
 @enabled
-mutate ticket retitleTicketEnabled {
+mutation ticket retitleTicketEnabled {
   args {
     ticketId  string!
     title     string!

@@ -1,6 +1,6 @@
 /// Close a ticket. Once set, closedAt is never taken back to empty.
 @noUnset(closedAt)
-mutate ticket closeTicketNoUnset {
+mutation ticket closeTicketNoUnset {
   args {
     ticketId  string!
   }

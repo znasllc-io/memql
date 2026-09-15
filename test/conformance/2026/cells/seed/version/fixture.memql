@@ -5,7 +5,7 @@ concept escalationRule {
 }
 
 /// The mutation the seed materializer writes this concept's rows through: create<Concept>.
-mutate escalationRule createEscalationRule {
+mutation escalationRule createEscalationRule {
   args {
     escalationRuleId  string!
     name              string!

@@ -72,7 +72,7 @@ func TestInvocation_ConceptBodySuppressed(t *testing.T) {
 }
 
 func TestInvocation_MutateWriteBlockSuppressed(t *testing.T) {
-	// mutate is not behavioral; an insert/accept key named `query` is a write
+	// mutation is not behavioral; an insert/accept key named `query` is a write
 	// field, not an invocation.
 	rp := &stubRegistry{
 		functions: map[string]*FunctionInfo{
@@ -81,8 +81,8 @@ func TestInvocation_MutateWriteBlockSuppressed(t *testing.T) {
 		},
 		concepts: map[string]*ConceptInfo{"v1:orders:order": {Name: "v1:orders:order"}},
 	}
-	if firedInvocation(completeAtEnd(New(rp), "mutate order place {\n  insert {\n    query ")) {
-		t.Error("invocation fired in a mutate insert block")
+	if firedInvocation(completeAtEnd(New(rp), "mutation order place {\n  insert {\n    query ")) {
+		t.Error("invocation fired in a mutation insert block")
 	}
 }
 

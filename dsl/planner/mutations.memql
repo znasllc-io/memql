@@ -17,7 +17,7 @@
 /// the archetype: recurring carries schedule, reactive carries condition, standing carries neither.
 /// Single write path for responsibility creation.
 @actor
-mutate responsibility createResponsibility {
+mutation responsibility createResponsibility {
   args {
     responsibilityId  string
     statement         string!
@@ -49,7 +49,7 @@ mutate responsibility createResponsibility {
 /// change; required fields inherit from the prior row. ownerUserId re-stamped from actor.userId
 /// (owned tier) so a caller can only rewrite their own rows.
 @actor
-mutate responsibility updateResponsibility {
+mutation responsibility updateResponsibility {
   args {
     responsibilityId  string!
     statement         string
@@ -76,7 +76,7 @@ mutate responsibility updateResponsibility {
 /// Transition a v1:planner:responsibility's lifecycle status (draft / active / paused / archived).
 /// Partial-update via update(); ownerUserId re-stamped from actor.userId (owned tier).
 @actor
-mutate responsibility setResponsibilityStatus {
+mutation responsibility setResponsibilityStatus {
   args {
     responsibilityId  string!
     status            enum("draft", "active", "paused", "archived")!
@@ -93,7 +93,7 @@ mutate responsibility setResponsibilityStatus {
 /// a reactive condition check, a recurring scheduled tick, or a standing review. ownerUserId
 /// re-stamped from actor.userId (owned tier).
 @actor
-mutate responsibility recordResponsibilityEvaluation {
+mutation responsibility recordResponsibilityEvaluation {
   args {
     responsibilityId  string!
     lastResult        string!
@@ -114,7 +114,7 @@ mutate responsibility recordResponsibilityEvaluation {
 /// can only rewrite the row's own owner -- the poller impersonates the responsibility's owner in
 /// the AccessContext before calling, so this lands as an owned write.
 @actor
-mutate responsibility assignResponsibility {
+mutation responsibility assignResponsibility {
   args {
     responsibilityId  string!
     targetKind        enum("assistant", "specialist")!
@@ -150,7 +150,7 @@ mutate responsibility assignResponsibility {
 /// multi-node race) doesn't run the responsibilityIntake prompt twice -- intakeStatus flips '' ->
 /// 'pending'. System write (system:planner actor): no ownerUserId re-stamp, no user-scope
 /// reference, so it's engine-internal bookkeeping on a row the human already owns.
-mutate responsibility markResponsibilityIntakePending {
+mutation responsibility markResponsibilityIntakePending {
   args {
     responsibilityId  string!
   }
@@ -168,7 +168,7 @@ mutate responsibility markResponsibilityIntakePending {
 /// intakeStatus='awaitingAnswers' + intakeRequest so the row parks for the user (mirrors the Plan
 /// awaitingFeedback surfacing). Partial-update: only the supplied fields change. System write -- no
 /// ownerUserId re-stamp.
-mutate responsibility applyResponsibilityIntake {
+mutation responsibility applyResponsibilityIntake {
   args {
     responsibilityId  string!
     trigger           enum("reactive", "standing", "recurring")
@@ -196,7 +196,7 @@ mutate responsibility applyResponsibilityIntake {
 /// then writes the final trigger / schedule / condition / targetKind / assignedRoleSlug /
 /// successCriteria / notifyHow, records intakeResponse for audit, sets intakeStatus='applied', and
 /// flips status='active'. System write -- no ownerUserId re-stamp.
-mutate responsibility foldResponsibilityIntakeAnswers {
+mutation responsibility foldResponsibilityIntakeAnswers {
   args {
     responsibilityId  string!
     intakeResponse    object!

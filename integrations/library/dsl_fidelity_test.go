@@ -74,10 +74,10 @@ var (
 	// createArtifactHeaderRe locates the mutation DECLARATION, not just any
 	// mention of the name -- mutations.memql's doc comments say
 	// "createArtifact" in prose ("...an automation folds it into ... via
-	// createArtifact.") without the preceding "mutate artifact", so this
+	// createArtifact.") without the preceding "mutation artifact", so this
 	// exact phrase is what keeps the match pinned to the one real
 	// declaration.
-	createArtifactHeaderRe = regexp.MustCompile(`\bmutate\s+artifact\s+createArtifact\b`)
+	createArtifactHeaderRe = regexp.MustCompile(`\bmutation\s+artifact\s+createArtifact\b`)
 
 	// argsHeaderRe locates the `args {` sub-block header inside a mutation
 	// body. It deliberately requires a literal '{' right after "args" (up
@@ -169,7 +169,7 @@ func deriveArtifactFullShapeFields(src []byte) ([]string, error) {
 }
 
 // deriveArtifactEnumValues parses every `<field> enum(<values>)` argument
-// declared inside the REAL `mutate artifact createArtifact { args { ... } }`
+// declared inside the REAL `mutation artifact createArtifact { args { ... } }`
 // block in dsl/library/mutations.memql. Returns an error -- never an
 // empty map, and never a field mapped to zero values -- when the mutation,
 // its args block, or any individual enum's value list cannot be found.
@@ -178,7 +178,7 @@ func deriveArtifactEnumValues(src []byte) (map[string][]string, error) {
 
 	headerLoc := createArtifactHeaderRe.FindStringIndex(text)
 	if headerLoc == nil {
-		return nil, fmt.Errorf("no `mutate artifact createArtifact` declaration found in %s", dslMutationsPath)
+		return nil, fmt.Errorf("no `mutation artifact createArtifact` declaration found in %s", dslMutationsPath)
 	}
 	relOpen := strings.IndexByte(text[headerLoc[1]:], '{')
 	if relOpen < 0 {

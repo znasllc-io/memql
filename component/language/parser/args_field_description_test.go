@@ -69,10 +69,10 @@ query participant spaceParticipants {
 }`,
 		},
 		{
-			name: "mutate",
+			name: "mutation",
 			src: `use cognition.concepts.{ space }
 @description("create a space")
-mutate space createSpace {
+mutation space createSpace {
   args {
     spaceId string @required @description("the space id")
   }

@@ -24,7 +24,7 @@ package dslimports
 //     runtime-dynamic (`mcp.*`) are exempt from the symbol check -- boot
 //     binds capability imports textually, and mcp verbs are never declared.
 //  2. SIGNATURE CONCEPTS -- the two-identifier signature binding
-//     (`query <Concept> <name>`, `mutate <Concept> <name>`,
+//     (`query <Concept> <name>`, `mutation <Concept> <name>`,
 //     `shape <Concept> <name>`, `seed <Concept> <name>`; mirrors the boot
 //     loader's extraction) must resolve to a concept. Boot resolves these
 //     through the GLOBAL concept registry (no import required), so the lane
@@ -126,7 +126,7 @@ var openCapabilityNamespaces = map[string]bool{
 // by a two-identifier construct signature. Kept in sync by
 // TestSignatureConceptRegexMatchesBootLoader.
 var signatureConceptRe = regexp.MustCompile(
-	`(?m)^[ \t]*(?:query|mutate|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`,
+	`(?m)^[ \t]*(?:query|mutation|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`,
 )
 
 // useDeclRe matches a full Form B use declaration, including a brace list

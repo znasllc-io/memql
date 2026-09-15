@@ -1,5 +1,5 @@
 /// Retitle a ticket, reading an arg the block does not declare.
-mutate ticket mvMisspelledArg {
+mutation ticket mvMisspelledArg {
   args {
     ticketId  string  @required
     title     string

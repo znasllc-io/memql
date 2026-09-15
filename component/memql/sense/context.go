@@ -501,11 +501,11 @@ func checkInvocationContext(tokens []parser.Token, prefix string) (CursorContext
 		return CursorContext{}, false
 	}
 	// Only a BEHAVIORAL construct (logic / automation / action) invokes others.
-	// In a concept / query / mutate / shape / seed body a `<verb> <ident>` pair
+	// In a concept / query / mutation / shape / seed body a `<verb> <ident>` pair
 	// is a field or clause declaration -- a field literally named `query` must
 	// not misfire. Gating on the enclosing construct (which also implies body
-	// depth) covers those, plus the mutate write-sugar blocks (accept / stamp /
-	// insert / update) since mutate is not behavioral.
+	// depth) covers those, plus the mutation write-sugar blocks (accept / stamp /
+	// insert / update) since mutation is not behavioral.
 	enc, ok := resolveEnclosingConstruct(tokens)
 	if !ok || !behavioralConstruct[enc.Keyword] {
 		return CursorContext{}, false
@@ -553,7 +553,7 @@ var behavioralConstruct = map[string]bool{
 // a construct added to the grammar cannot silently inherit a default
 // classification. When adding a construct, put it in exactly one of these.
 var nonBehavioralConstruct = map[string]bool{
-	"concept": true, "query": true, "mutate": true, "capability": true,
+	"concept": true, "query": true, "mutation": true, "capability": true,
 	"spec": true, "trait": true, "shape": true, "tool": true, "prompt": true,
 	"provider": true, "builtin": true, "policy": true, "seed": true, "use": true,
 	// A rule's body is EMPTY -- every part of it is a leading annotation --
@@ -756,7 +756,7 @@ func isIdentStart(c byte) bool {
 
 // enclosingSignatureConceptRe captures the concept short-name of the
 // nearest preceding concept-binding construct header.
-var enclosingSignatureConceptRe = regexp.MustCompile(`(?m)^[ \t]*(?:query|mutate|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
+var enclosingSignatureConceptRe = regexp.MustCompile(`(?m)^[ \t]*(?:query|mutation|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
 
 // enclosingSignatureConcept returns the signature concept of the last
 // construct header above the cursor, or "" (automations/logic carry

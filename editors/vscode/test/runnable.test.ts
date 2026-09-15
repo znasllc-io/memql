@@ -164,7 +164,7 @@ test("parseRunnableConstructs -- an empty trigger object is not carried", () => 
 
 test("isSessionDefinable -- only the plain construct family", () => {
   assert.equal(isSessionDefinable("query"), true);
-  assert.equal(isSessionDefinable("mutate"), true);
+  assert.equal(isSessionDefinable("mutation"), true);
   assert.equal(isSessionDefinable("logic"), true);
   // A tool is bound to a Go handler and an automation is event-triggered;
   // neither can be injected from a buffer, and treating either as definable
@@ -174,7 +174,7 @@ test("isSessionDefinable -- only the plain construct family", () => {
 });
 
 test("isWriteKind -- mutations and automations", () => {
-  assert.equal(isWriteKind("mutate"), true);
+  assert.equal(isWriteKind("mutation"), true);
   // memql#3310: an automation run executes the automation's whole action
   // chain -- writes, LLM calls, downstream automations -- so it earns the
   // non-local confirmation several times over.

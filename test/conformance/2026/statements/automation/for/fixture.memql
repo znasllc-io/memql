@@ -8,7 +8,7 @@ query line lineItems {
   filter row => row.quantity > 0
 }
 
-mutate line recordLine {
+mutation line recordLine {
   args {
     sku  string  @required
   }

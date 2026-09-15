@@ -43,7 +43,7 @@ function construct(over: Partial<CatalogConstruct> = {}): CatalogConstruct {
 // -----------------------------------------------------------------------------
 
 test("the four arg-form kinds get a target", () => {
-  for (const runnableKind of ["query", "mutate", "logic", "tool"] as const) {
+  for (const runnableKind of ["query", "mutation", "logic", "tool"] as const) {
     const target = catalogRunTarget(construct({ runnableKind }));
     assert.notEqual(target, undefined, runnableKind);
     assert.equal(target?.kind, runnableKind);

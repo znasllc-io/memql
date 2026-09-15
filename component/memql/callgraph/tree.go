@@ -54,11 +54,12 @@ var dslSpec = dslspec.Build()
 // Both facts are READ FROM component/language/dslspec rather than restated
 // here. dslspec is the single source of truth for the construct vocabulary,
 // and its drift test already hard-fails if the write-function keyword is ever
-// the retired `mutation` noun again. Restating the vocabulary in this file is
+// the retired `mutate` verb again. Restating the vocabulary in this file is
 // what made every mutation rule dead against the tree (memql#3043): the
 // keyword was renamed `mutation` -> `mutate` in memql#2041 and this regex was
 // never moved with it, so splitConstructs matched nothing in any real
-// mutations.memql and the rules ran against zero constructs.
+// mutations.memql and the rules ran against zero constructs. (Epic memql#5370
+// renamed it back, D13 -- read from dslspec, the move cost this file nothing.)
 //
 // The internal kind names ("mutation") deliberately keep their noun spelling
 // -- they name the construct, not the keyword, and Finding.Kind is a stable
@@ -112,8 +113,8 @@ var headerREs = func() map[string]*regexp.Regexp {
 }()
 
 // headerRE returns the construct-header matcher for a restricted kind. Group 1
-// is the construct name. mutate/query carry a concept segment in the signature
-// (`mutate <Concept> <name> {`); logic and action do not.
+// is the construct name. mutation/query carry a concept segment in the
+// signature (`mutation <Concept> <name> {`); logic and action do not.
 func headerRE(kind string) *regexp.Regexp {
 	return headerREs[kind]
 }

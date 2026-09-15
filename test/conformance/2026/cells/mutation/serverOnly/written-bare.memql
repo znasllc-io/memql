@@ -1,6 +1,6 @@
 /// Retitle one ticket, for server-side callers only.
 @serverOnly
-mutate ticket retitleTicketServerOnly {
+mutation ticket retitleTicketServerOnly {
   args {
     ticketId  string!
     title     string!

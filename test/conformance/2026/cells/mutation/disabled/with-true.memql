@@ -1,6 +1,6 @@
 /// Retitle one ticket. Switched off: not loaded while @disabled stays.
 @disabled(true)
-mutate ticket retitleTicketDisabled {
+mutation ticket retitleTicketDisabled {
   args {
     ticketId  string!
     title     string!

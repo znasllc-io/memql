@@ -25,7 +25,7 @@ import (
 // in the DSL is the whole of the authorization, so the row selection has to be
 // the actor.
 //
-// Scoped to this one mutation on purpose. The other ten `mutate user`
+// Scoped to this one mutation on purpose. The other ten `mutation user`
 // constructs also select by `args.userId`, and several must: createUser and
 // createUserOnFirstLogin run during provisioning before an actor exists, and
 // the account-lifecycle writes are administrative by nature. A blanket rule
@@ -45,7 +45,7 @@ func TestComputerUseKillSwitchIsActorScoped(t *testing.T) {
 	}
 	src := string(raw)
 
-	start := strings.Index(src, "mutate user toggleComputerUseEnabled")
+	start := strings.Index(src, "mutation user toggleComputerUseEnabled")
 	if start < 0 {
 		t.Fatalf("toggleComputerUseEnabled is no longer declared in %s; if it moved or was renamed this guard must follow it, not be deleted", killSwitchMutation)
 	}

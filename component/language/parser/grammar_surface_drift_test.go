@@ -108,7 +108,7 @@ var grammarSurfaceCorpus = []struct {
   filter row => row.id != ""
   asOf args.at ?? latest
 }`},
-	{"struct mutation: insert", true, `mutate thing probe {
+	{"struct mutation: insert", true, `mutation thing probe {
   args {
     id string @required
   }
@@ -117,7 +117,7 @@ var grammarSurfaceCorpus = []struct {
     createdAt: now
   }
 }`},
-	{"struct mutation: update", true, `mutate thing probe {
+	{"struct mutation: update", true, `mutation thing probe {
   args {
     id string @required
   }
@@ -126,7 +126,7 @@ var grammarSurfaceCorpus = []struct {
     updatedAt: now
   }
 }`},
-	{"struct mutation: accept + stamp sugar", true, `mutate thing probe {
+	{"struct mutation: accept + stamp sugar", true, `mutation thing probe {
   args {
     name string @required
   }
@@ -195,7 +195,7 @@ automation probe {
   n := 5
   return args.x + n
 }`},
-	{"struct mutation: edition-2026 values", true, `mutate thing probe {
+	{"struct mutation: edition-2026 values", true, `mutation thing probe {
   args {
     id string @required
     name string
@@ -287,7 +287,7 @@ automation probe {
   filter row => row.id != ""
   project name
 }`},
-	{"named write block `insert <Concept> { }` (memql#988)", false, `mutate thing probe {
+	{"named write block `insert <Concept> { }` (memql#988)", false, `mutation thing probe {
   args {
     id string @required
   }
@@ -295,7 +295,7 @@ automation probe {
     id: args.id
   }
 }`},
-	{"two write blocks in one mutation", false, `mutate thing probe {
+	{"two write blocks in one mutation", false, `mutation thing probe {
   args {
     id string @required
   }
@@ -366,7 +366,7 @@ automation probe {
   }
   return 1
 }`},
-	{"a stray top-level line in a mutation body (memql#5359)", false, `mutate thing probe {
+	{"a stray top-level line in a mutation body (memql#5359)", false, `mutation thing probe {
   insert {
     id: "x"
   }
@@ -458,7 +458,7 @@ automation probe {
   }
   return args.x == null
 }`},
-	{"struct mutation: concat(a, b) value (retired_concat_call)", false, `mutate thing probe {
+	{"struct mutation: concat(a, b) value (retired_concat_call)", false, `mutation thing probe {
   args {
     id string @required
   }
@@ -466,7 +466,7 @@ automation probe {
     id: concat("thing-", args.id)
   }
 }`},
-	{"struct mutation: a quoted map key", false, `mutate thing probe {
+	{"struct mutation: a quoted map key", false, `mutation thing probe {
   args {
     id string @required
   }
@@ -487,6 +487,12 @@ automation probe {
 	// Legal until the tree's migration made the statement body the only
 	// body grammar; each is now refused by the statement parser, by name,
 	// naming its replacement and memqlmigrate --rewrite=bodies.
+	// memqlmigrate:keep -- the retired declaration verb is the case.
+	{"a mutation declared with the retired verb `mutate` (construct_unknown)", false, `mutate thing probe {
+  insert {
+    id: "x"
+  }
+}`},
 	{"logic: a `body { }` block (body_block_retired)", false, `logic probe {
   args {
     x string!

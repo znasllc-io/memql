@@ -81,7 +81,7 @@ var formWords = []struct {
 }
 
 // ReceiverName is the name the attribute matrix gives a receiver: the
-// construct keyword for a construct receiver ("query", "mutate"), both
+// construct keyword for a construct receiver ("query", "mutation"), both
 // keywords where two constructs share one ("spec and trait"), "concept" for
 // the concept body, and the kind of field for a field receiver ("args field").
 func ReceiverName(r annotations.Receiver) string {

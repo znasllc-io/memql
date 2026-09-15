@@ -277,7 +277,7 @@ const lateBoundCaller = `logic onSecondActiveHuman {
 }
 `
 
-const lateBoundDeclaration = `mutate canvasState mutationCreateCanvasState {
+const lateBoundDeclaration = `mutation canvasState mutationCreateCanvasState {
   args {
     stateId  string
     space    string

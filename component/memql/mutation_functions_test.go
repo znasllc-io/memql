@@ -60,7 +60,7 @@ func TestMutationInsertShorthand_ArgsRefInfersKey(t *testing.T) {
 	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{
 		"v1:cognition:space": {Name: "v1:cognition:space"},
 	})
-	src := `mutate space mutationCreateSpaceShorthand {
+	src := `mutation space mutationCreateSpaceShorthand {
   args {
     partitionId  string  @required
     name     string  @required
@@ -113,7 +113,7 @@ func TestSignatureBoundMutationAcceptsMultipleFileTopUses(t *testing.T) {
 	src := `use cognition.concepts.{ space }
 use identity.concepts.{ request }
 
-mutate space mutationCreateDailySpace {
+mutation space mutationCreateDailySpace {
   args {
     partitionId       string  @required
     name          string  @required

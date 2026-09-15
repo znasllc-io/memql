@@ -61,8 +61,8 @@ func scanStatementBodies(files []SourceFile) []Violation {
 			switch m[1] {
 			case "spec", "trait":
 				predicates[name] = true
-			case "query", "mutate", "mutation", "logic", "builtin":
-				constructs[name] = strings.Replace(m[1], "mutate", "mutation", 1)
+			case "query", "mutation", "logic", "builtin":
+				constructs[name] = m[1]
 			}
 		}
 	}

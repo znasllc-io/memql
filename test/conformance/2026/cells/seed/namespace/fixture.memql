@@ -4,7 +4,7 @@ concept helpArticle {
 }
 
 /// The mutation the seed materializer writes this concept's rows through: create<Concept>.
-mutate helpArticle createHelpArticle {
+mutation helpArticle createHelpArticle {
   args {
     helpArticleId  string!
     title          string!

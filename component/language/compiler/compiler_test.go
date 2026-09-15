@@ -48,7 +48,7 @@ query user activeUsers {
 // `+` on strings).
 func TestCompileSource_V1MutationValues(t *testing.T) {
 	result, err := CompileSource(`
-mutate thing createThing {
+mutation thing createThing {
   args {
     id    string!
     name  string

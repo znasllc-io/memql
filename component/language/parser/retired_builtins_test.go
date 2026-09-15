@@ -86,7 +86,7 @@ func TestRetiredCallsRefusedAtEveryV1Position(t *testing.T) {
 		{"a #2707 builtin in a logic return", logic("return month(args.a)"), "#2707"},
 		{"caller() in a logic statement", logic("x := caller()\n  return x"), "caller.X is retired"},
 		{"asOf in a logic return", logic("return asOf(things, latest)"), "query-only clause and cannot appear in a logic body"},
-		{"a #2707 builtin in a mutation value", "mutate thing probe {\n  args {\n    a string\n  }\n  insert {\n    id: args.a\n    n: memqlVersion()\n  }\n}\n", "#2707"},
+		{"a #2707 builtin in a mutation value", "mutation thing probe {\n  args {\n    a string\n  }\n  insert {\n    id: args.a\n    n: memqlVersion()\n  }\n}\n", "#2707"},
 		{"a #2707 builtin in a call argument", "@trigger(event=\"node.created\", concept=\"v1:probe:thing\")\nautomation probe {\n  args {\n    at any\n  }\n  run := logic f(x: quarter(args.at))\n}\n", "#2707"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

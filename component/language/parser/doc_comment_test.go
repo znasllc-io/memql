@@ -98,7 +98,7 @@ query candidate probeQuery {
   filter row => row.planId == args.planId && row.ownerUserId == actor.userId
 }`,
 		"mutation": doc + `
-mutate candidate probeMutation {
+mutation candidate probeMutation {
   args {
     widgetId string @required
   }

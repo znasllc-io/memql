@@ -1,5 +1,5 @@
 /// Retitle a ticket, reading an argument the args block does not declare.
-mutate ticket retitleFromName {
+mutation ticket retitleFromName {
   args {
     ticketId  string!
   }

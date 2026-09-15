@@ -580,8 +580,8 @@ func (p *Parser) parseV1Name() (v1Expr, error) {
 		case wordThenName && root.text == "trait":
 			return v1Expr{}, v1Retired(tok, ruleTraitReference)
 		case wordThenName && p.peekAhead(2).Type == TokenParenOpen:
-			// memql#2358: `mutate createNode(...)` -- the declaration verb
-			// where the invocation noun belongs -- would otherwise read as a
+			// memql#2358: `mutate createNode(...)` -- the retired declaration
+			// verb where `mutation` belongs -- would otherwise read as a
 			// name and a separate call, dropping the call's kind silently.
 			return v1Expr{}, v1Errorf(tok, "%q is not a construct-invocation kind, so the call %s(...) would be silently dropped -- a kind-prefixed call must lead with one of %s%s",
 				root.text, next.Literal, renderKeywordList(invocationKindKeywordList()), didYouMean(root.text, kindSuggestionCandidates()))

@@ -7,7 +7,7 @@ query ticket ticketsAwaitingReply {
   filter row => row.status == "open"
 }
 
-mutate ticket escalate {
+mutation ticket escalate {
   args {
     reason  string  @required
   }

@@ -273,14 +273,14 @@ func prefixNameGateExempt(rel string) bool {
 // for every callable construct in the DSL tree.
 //
 // The header shape mirrors sdk/gen's constructHeader: column 0, the kind
-// keyword, an optional signature-bound concept, then the name. `mutate` is the
-// surface keyword; `mutation` only ever appears as the retired prefix, which is
-// what makes the two directions distinguishable.
+// keyword, an optional signature-bound concept, then the name. A declaration
+// is found by its keyword and a prefixed name by its prefix, so the two stay
+// distinguishable although `mutation` spells both.
 func docsDeclaredConstructs(t *testing.T) map[string]string {
 	t.Helper()
 
 	declHeader := regexp.MustCompile(
-		`(?m)^(query|mutate|logic)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
+		`(?m)^(query|mutation|logic)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
 	)
 
 	declared := map[string]string{}
@@ -346,7 +346,7 @@ func docsResolvePrefixed(written string, declared map[string]string) (name, orig
 	case strings.HasPrefix(written, "query"):
 		kind, rest = "query", written[len("query"):]
 	case strings.HasPrefix(written, "mutation"):
-		kind, rest = "mutate", written[len("mutation"):]
+		kind, rest = "mutation", written[len("mutation"):]
 	case strings.HasPrefix(written, "logic"):
 		kind, rest = "logic", written[len("logic"):]
 	default:

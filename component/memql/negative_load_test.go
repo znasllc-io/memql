@@ -53,7 +53,7 @@ func TestNegativeLoad_MalformedBodyPerKind(t *testing.T) {
 		{"shape", "x/shapes.memql", "@row\nshape s {\n  row.id\n  123 456 789\n}\n"},
 		{"spec", "x/specs.memql", "@enabled\nspec activeRowTrait s = row => row.status ==== \"x\" &&&& true\n"},
 		{"trait", "x/traits.memql", "@enabled\ntrait t = row => row.active ==== true\n"},
-		{"mutation", "x/mutations.memql", "use cognition.concepts.{ space }\nmutate space m {\n  ?? !! garbage\n}\n"},
+		{"mutation", "x/mutations.memql", "use cognition.concepts.{ space }\nmutation space m {\n  ?? !! garbage\n}\n"},
 		{"query", "x/queries.memql", "use cognition.concepts.{ space }\nquery space q {\n  filter row => @@@ !!! broken\n  shape spaceFull\n}\n"},
 		{"logic", "x/logic.memql", "logic l {\n  args { event object @required }\n  x :=\n  return 1\n}\n"}, // a binding with no value
 		{"automation", "x/automations.memql", "@trigger(event=)\nautomation a {\n  run := logic doThing(event: event)\n}\n"},
@@ -169,8 +169,8 @@ func TestNegativeLoad_DuplicateNamesWarnSkip(t *testing.T) {
 // pipeline (dslimports.Load / memqllint) and engine load run through.
 func TestHOLE_TwoWritesPerMutationNotCaughtAtLint(t *testing.T) {
 	cases := map[string]string{
-		"two-inserts": "use cognition.concepts.{ space }\nmutate space m {\n  args { x string @required }\n  insert { name: args.x }\n  insert { name: args.x }\n}\n",
-		"two-updates": "use cognition.concepts.{ space }\nmutate space m {\n  args { x string @required }\n  update { id: args.x\n    name: args.x }\n  update { id: args.x\n    name: args.x }\n}\n",
+		"two-inserts": "use cognition.concepts.{ space }\nmutation space m {\n  args { x string @required }\n  insert { name: args.x }\n  insert { name: args.x }\n}\n",
+		"two-updates": "use cognition.concepts.{ space }\nmutation space m {\n  args { x string @required }\n  update { id: args.x\n    name: args.x }\n  update { id: args.x\n    name: args.x }\n}\n",
 	}
 	for label, src := range cases {
 		t.Run(label, func(t *testing.T) {
