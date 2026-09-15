@@ -54,7 +54,7 @@
 //          episodesSeen: cursor.episodesSeen + batch.count())
 //
 // The bump / decay / dedup-merge helpers are pure functions, unit-
-// tested in component/memql/harness_consolidation_test.go so the
+// tested in component/memql/memory_consolidation_test.go so the
 // decisions (when to reinforce vs. create, how confidence moves, when
 // to prune) are covered without a DB; the scheduled + LLM-distill path
 // is integration-covered. Steps 4's reinforce-vs-create branch is the

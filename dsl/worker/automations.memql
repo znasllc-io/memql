@@ -13,10 +13,9 @@ use work.builtins.{ cancelComputerUseRuns }
 // citing its query's own doc comment: `args.event.payload.id ?? ""` reached
 // argument validation as an unevaluated CoalesceExpr (memql#2870). That was
 // true until 8ef364cd7 fixed it on 2026-07-27, six weeks before the deletion.
-// The comment survived its own fix and was read as current.
-// component/memql/nested_call_arg_eval_test.go drives the sibling cases
-// through the real resolver and they pass on main, so this is a RESTORATION of
-// a control that was live, not the construction of one that never was.
+// The comment survived its own fix and was read as current, so this is a
+// RESTORATION of a control that was live, not the construction of one that
+// never was.
 //
 // The other two findings stand, and shaped what replaced it:
 //

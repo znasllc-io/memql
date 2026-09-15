@@ -19,7 +19,7 @@ import (
 // Nothing counted owners on the deletion path. `accountDeletionSweep` runs
 // daily and calls `deleteUserHard` unconditionally for every user whose
 // 30-day cooldown has elapsed (dsl/identity/logic.memql: "the automation's
-// forEach hard-deletes each unconditionally"). If the last owner was among
+// `for` loop hard-deletes each unconditionally"). If the last owner was among
 // them, the cluster woke up with no owner at all -- and no owner means no
 // route back to owner, because promoting somebody requires an owner.
 //
