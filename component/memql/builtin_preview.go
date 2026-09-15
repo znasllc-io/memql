@@ -23,7 +23,7 @@ func CheckBuiltinPreview(executor string) error {
 		BuiltinExecutorValidate, BuiltinExecutorFunctions, BuiltinExecutorTools,
 		BuiltinExecutorHelp, BuiltinExecutorShapeTemplates, BuiltinExecutorShapeHelp,
 		BuiltinExecutorContentId, BuiltinExecutorPreviewInsert,
-		BuiltinExecutorServiceVersion, BuiltinExecutorError:
+		BuiltinExecutorServiceVersion:
 		return nil
 	default:
 		return fmt.Errorf("dry-run refused builtin executor %q: it is not classified as side-effect free", executor)
