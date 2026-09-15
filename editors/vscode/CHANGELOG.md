@@ -25,6 +25,9 @@ someone deciding whether to install rather than for someone reading the repo.
   running: `single` refuses the new fire, `queued` makes it wait its turn,
   `restart` cancels the run in flight, and `parallel` runs both. `max` bounds
   how many may wait or run at once, and the editor underlines a `max` below 1.
+- Completing an annotation key that takes no value, such as a `@mode` or
+  `@rowAuthz`'s `clusterOwner`, now inserts the key alone. It used to add an
+  `=` that the engine refuses.
 
 ## 0.4.0
 
