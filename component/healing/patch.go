@@ -13,12 +13,12 @@
 //   - insert-guard     : set / AND a boolean condition onto a step (or a
 //     precondition's check). Heals "a step ran when it should not have."
 //   - relativize-literal: replace a machine-specific literal (a path, an id,
-//     an endpoint) with a relative reference ($config.X / $event.payload.X).
+//     an endpoint) with a relative reference (config.X / event.payload.X).
 //     The PORTABILITY heal: the literal that does not hold on this machine is
 //     made relative so the construct travels. This is the literal-that-does-
 //     not-hold-elsewhere lever the whole epic turns on.
 //   - rebind-param     : rebind a param / arg reference from one source to
-//     another ($steps.a.result -> $steps.b.result, or a renamed field).
+//     another (a -> b, or a renamed field).
 //     Heals "the value came from the wrong place."
 //
 // A patch is Apply'd to a deep COPY of the base (the base is immutable -- it
@@ -38,6 +38,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/language/ast"
+	"github.com/znasllc-io/memql/component/language/parser"
 )
 
 // PatchKind is the (closed) set of typed-patch kinds.
@@ -68,8 +71,8 @@ type Patch struct {
 	// applies. Required for every kind except add-precondition (which always
 	// appends to preconditions[]). Examples:
 	//   insert-guard:        "steps.run"            (the step to guard)
-	//   relativize-literal:  "steps.run.input.path" (the literal to relativize)
-	//   rebind-param:        "steps.run.input.from" (the ref to rebind)
+	//   relativize-literal:  "steps.run.function.args.path" (the literal to relativize)
+	//   rebind-param:        "steps.run.function.args.from" (the ref to rebind)
 	Target string `json:"target,omitempty"`
 
 	// Precondition is the guard to append (add-precondition only).
@@ -88,8 +91,8 @@ type Patch struct {
 
 	// Replacement is the relative reference that replaces the literal
 	// (relativize-literal) or the new binding (rebind-param). Required for
-	// both. Examples: "$config.MEMQL_ENGINE_DIGEST", "$event.payload.path",
-	// "$steps.fetch.result.id".
+	// both. Examples: "config.MEMQL_ENGINE_DIGEST", "event.payload.path",
+	// "fetch.id".
 	Replacement string `json:"replacement,omitempty"`
 
 	// Reason is human-readable context carried into the healed override's
@@ -151,6 +154,11 @@ func (p *Patch) Validate() error {
 		}
 	default:
 		return fmt.Errorf("patch: unknown kind %q (want one of add-precondition, insert-guard, relativize-literal, rebind-param)", p.Kind)
+	}
+	if p.Kind == PatchRelativizeLiteral || p.Kind == PatchRebindParam {
+		if _, err := parser.ParseV1Expression(p.Replacement); err != nil {
+			return fmt.Errorf("patch %s: replacement must be a v1 expression: %w", p.Kind, err)
+		}
 	}
 	return nil
 }
@@ -258,7 +266,7 @@ func (p *Patch) applyRelativizeLiteral(out map[string]any) error {
 			return fmt.Errorf("patch %s: literal mismatch at %q -- expected %q, found %q (the construct changed under the patch)", p.Kind, p.Target, p.Literal, cur)
 		}
 	}
-	parent[key] = p.Replacement
+	parent[key] = p.encodedReplacement()
 	return nil
 }
 
@@ -274,8 +282,15 @@ func (p *Patch) applyRebindParam(out map[string]any) error {
 	if err != nil {
 		return fmt.Errorf("patch %s: %w", p.Kind, err)
 	}
-	parent[key] = p.Replacement
+	parent[key] = p.encodedReplacement()
 	return nil
+}
+
+// Argument and payload leaves distinguish expressions from string literals.
+// Apply has already validated the replacement before reaching this encoder.
+func (p *Patch) encodedReplacement() map[string]any {
+	expr, _ := parser.ParseV1Expression(p.Replacement)
+	return map[string]any{"$expr": ast.FormatExpr(expr)}
 }
 
 // --- construct navigation -------------------------------------------------
@@ -286,32 +301,23 @@ func (p *Patch) applyRebindParam(out map[string]any) error {
 // the path or an error if any segment is absent / not a map.
 func resolveTargetMap(root map[string]any, target string) (map[string]any, error) {
 	cur := any(root)
-	segs := strings.Split(target, ".")
-	for i, seg := range segs {
-		m, ok := cur.(map[string]any)
-		if !ok {
-			return nil, fmt.Errorf("target %q: segment %q is not a map", target, seg)
-		}
-		// Special-case stepwise descent: "steps.<id>" selects the array
-		// element whose "id" matches.
-		if seg == "steps" && i+1 < len(segs) {
-			step, ok := findStepById(m["steps"], segs[i+1])
+	for _, seg := range strings.Split(target, ".") {
+		switch node := cur.(type) {
+		case map[string]any:
+			next, present := node[seg]
+			if !present {
+				return nil, fmt.Errorf("target %q: segment %q absent", target, seg)
+			}
+			cur = next
+		case []any:
+			step, ok := findStepById(node, seg)
 			if !ok {
-				return nil, fmt.Errorf("target %q: no step with id %q", target, segs[i+1])
+				return nil, fmt.Errorf("target %q: no step with id %q", target, seg)
 			}
 			cur = step
-			// consume the id segment too
-			if i+1 == len(segs)-1 {
-				return step, nil
-			}
-			// continue from after the id segment
-			return resolveTargetMap(step, strings.Join(segs[i+2:], "."))
+		default:
+			return nil, fmt.Errorf("target %q: segment %q is not a map or statement list", target, seg)
 		}
-		next, present := m[seg]
-		if !present {
-			return nil, fmt.Errorf("target %q: segment %q absent", target, seg)
-		}
-		cur = next
 	}
 	m, ok := cur.(map[string]any)
 	if !ok {
@@ -356,7 +362,7 @@ func findStepById(steps any, id string) (map[string]any, bool) {
 		if !ok {
 			continue
 		}
-		if strings.EqualFold(stringField(m, "id"), id) {
+		if stringField(m, "id") == id {
 			return m, true
 		}
 	}

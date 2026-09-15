@@ -34,9 +34,9 @@ func TestSelfHealing_EndToEnd(t *testing.T) {
 			map[string]any{
 				"id":   "run",
 				"type": "function",
-				"input": map[string]any{
+				"function": map[string]any{"name": "run", "kind": "builtin", "args": map[string]any{
 					"path": "/Users/alice/engine/digest",
-				},
+				}},
 			},
 		},
 	}
@@ -60,7 +60,7 @@ func TestSelfHealing_EndToEnd(t *testing.T) {
 	// 2. REPAIR-LOOP PROPOSAL via a STUB model (E4.4): the model proposes a
 	//    relativize-literal patch -- the portability heal.
 	stub := &stubProvider{respond: `{"patches":[
-		{"kind":"relativize-literal","target":"steps.run.input.path","literal":"/Users/alice/engine/digest","replacement":"$config.MEMQL_ENGINE_DIGEST","reason":"relativize the machine-specific engine path"}
+		{"kind":"relativize-literal","target":"steps.run.function.args.path","literal":"/Users/alice/engine/digest","replacement":"config.MEMQL_ENGINE_DIGEST","reason":"relativize the machine-specific engine path"}
 	]}`}
 	loop := NewRepairLoop(stub)
 	proposals, err := loop.Propose(context.Background(), miss, base)
@@ -134,14 +134,14 @@ func TestSelfHealing_EndToEnd(t *testing.T) {
 		t.Fatalf("resolved override should carry the captured version 2, got %+v", post.Override)
 	}
 	step, _ := findStepById(post.Definition["steps"], "run")
-	input, _ := step["input"].(map[string]any)
-	if input["path"] != "$config.MEMQL_ENGINE_DIGEST" {
+	input, _ := step["function"].(map[string]any)["args"].(map[string]any)
+	if input["path"].(map[string]any)["$expr"] != "config.MEMQL_ENGINE_DIGEST" {
 		t.Errorf("resolved healed definition missing the relativized literal: %v", input["path"])
 	}
 
 	// The base tier is untouched throughout (immutable, never LLM-healed).
 	bstep, _ := findStepById(base["steps"], "run")
-	binput, _ := bstep["input"].(map[string]any)
+	binput, _ := bstep["function"].(map[string]any)["args"].(map[string]any)
 	if binput["path"] != "/Users/alice/engine/digest" {
 		t.Errorf("the base construct was mutated by the heal: %v", binput["path"])
 	}
