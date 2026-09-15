@@ -14,7 +14,12 @@ package events
 // the hop (component/node's EventForward), because a depth that reset to zero
 // at every node boundary would let a two-node ping-pong run forever.
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/znasllc-io/memql/core/num"
+)
 
 // Cause is an event's causal lineage: the automation run whose work published
 // it, the chain it belongs to, and how deep that chain is. The zero value is a
@@ -95,4 +100,73 @@ func CauseFromContext(ctx context.Context) (Cause, bool) {
 		return Cause{}, false
 	}
 	return c.Clone(), true
+}
+
+// CauseFromMap reads a Cause back from its JSON shape: the object a run's
+// journal records as triggerEvent.cause (component/automations' openRun), so
+// that a resumed run, or a recovery that adopts the row, runs at the depth its
+// first attempt did rather than as a new root. A nil or empty map is the zero
+// cause -- a run that recorded none was triggered by a root event.
+//
+// The fields arrive as whatever decoded them: a depth is a float64 from
+// encoding/json, a json.Number from a decoder that keeps numbers, an int from a
+// Go caller. A chain entry that is not an object names no run, and is skipped
+// rather than invented.
+func CauseFromMap(m map[string]any) Cause {
+	if len(m) == 0 {
+		return Cause{}
+	}
+	c := Cause{Depth: causeDepth(m["depth"])}
+	c.CausationId, _ = m["causationId"].(string)
+	c.CorrelationId, _ = m["correlationId"].(string)
+	switch chain := m["chain"].(type) {
+	case []any:
+		for _, entry := range chain {
+			if link, ok := entry.(map[string]any); ok {
+				c.Chain = append(c.Chain, linkFromMap(link))
+			}
+		}
+	case []map[string]any:
+		for _, link := range chain {
+			c.Chain = append(c.Chain, linkFromMap(link))
+		}
+	}
+	return c
+}
+
+func linkFromMap(m map[string]any) Link {
+	var l Link
+	l.Automation, _ = m["automation"].(string)
+	l.RunId, _ = m["runId"].(string)
+	return l
+}
+
+// causeDepth narrows a decoded depth to an int.
+//
+// narrowing: SATURATE -- a depth orders a chain against the cap, so a value too
+// large for an int must stay larger than every cap: saturated, it is refused;
+// wrapped, it would be admitted as a small one. A negative depth is no depth,
+// and reads as the root's 0.
+func causeDepth(v any) int {
+	d := 0
+	switch n := v.(type) {
+	case float64:
+		d = num.ClampFloat64(n)
+	case int:
+		d = n
+	case int64:
+		d = num.ClampInt64(n)
+	case int32:
+		d = int(n)
+	case json.Number:
+		if i, err := n.Int64(); err == nil {
+			d = num.ClampInt64(i)
+		} else if f, err := n.Float64(); err == nil {
+			d = num.ClampFloat64(f)
+		}
+	}
+	if d < 0 {
+		return 0
+	}
+	return d
 }

@@ -1,7 +1,11 @@
 package events
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"math"
+	"reflect"
 	"testing"
 )
 
@@ -150,5 +154,78 @@ func TestEventWithCauseReturnsACopy(t *testing.T) {
 	}
 	if withCause.Cause.CausationId != "run-1" || withCause.Cause.Depth != 1 {
 		t.Fatalf("WithCause did not set the cause: got %+v", withCause.Cause)
+	}
+}
+
+// TestCauseFromMapReadsTheJSONShape: a run's triggerEvent.cause is written as
+// Cause's JSON and read back as whatever the decoder made of it -- a float64
+// depth, a []any chain of maps. What comes out must be the cause that went in,
+// or a resumed run leaves its chain.
+func TestCauseFromMapReadsTheJSONShape(t *testing.T) {
+	want := Cause{
+		CausationId:   "run-2",
+		CorrelationId: "evt-1",
+		Depth:         2,
+		Chain:         []Link{{Automation: "a", RunId: "run-1"}, {Automation: "b", RunId: "run-2"}},
+	}
+	raw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if _, isFloat := decoded["depth"].(float64); !isFloat {
+		t.Fatalf("the fixture must carry the depth as encoding/json decodes it (float64); got %T", decoded["depth"])
+	}
+	if got := CauseFromMap(decoded); !reflect.DeepEqual(got, want) {
+		t.Fatalf("CauseFromMap(float64 depth) = %+v, want %+v", got, want)
+	}
+
+	// A decoder told to keep numbers as json.Number reads the same cause.
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var numbered map[string]any
+	if err := dec.Decode(&numbered); err != nil {
+		t.Fatal(err)
+	}
+	if got := CauseFromMap(numbered); !reflect.DeepEqual(got, want) {
+		t.Fatalf("CauseFromMap(json.Number depth) = %+v, want %+v", got, want)
+	}
+
+	// A Go caller's int depth, and a chain built as []map[string]any.
+	built := map[string]any{
+		"causationId": "run-2", "correlationId": "evt-1", "depth": 2,
+		"chain": []map[string]any{{"automation": "a", "runId": "run-1"}, {"automation": "b", "runId": "run-2"}},
+	}
+	if got := CauseFromMap(built); !reflect.DeepEqual(got, want) {
+		t.Fatalf("CauseFromMap(int depth) = %+v, want %+v", got, want)
+	}
+}
+
+func TestCauseFromMapOfNothingIsARoot(t *testing.T) {
+	for _, m := range []map[string]any{nil, {}, {"unrelated": true}} {
+		if got := CauseFromMap(m); !got.IsZero() {
+			t.Errorf("CauseFromMap(%v) = %+v, want the zero cause: a run with no recorded cause was a root", m, got)
+		}
+	}
+}
+
+// A depth is an ordering against the cap, so an out-of-range one saturates:
+// a corrupt row's depth is refused, never wrapped into a small one that is
+// admitted. A negative depth is no depth.
+func TestCauseFromMapNarrowsTheDepthTowardTheCap(t *testing.T) {
+	if got := CauseFromMap(map[string]any{"depth": 1e30}).Depth; got != math.MaxInt {
+		t.Errorf("depth 1e30 read as %d, want it saturated at MaxInt", got)
+	}
+	if got := CauseFromMap(map[string]any{"depth": float64(-4)}).Depth; got != 0 {
+		t.Errorf("depth -4 read as %d, want 0", got)
+	}
+	// A chain entry that is not an object names no run and is skipped.
+	got := CauseFromMap(map[string]any{"depth": float64(1), "chain": []any{"junk", map[string]any{"automation": "a", "runId": "run-1"}}})
+	if len(got.Chain) != 1 || got.Chain[0] != (Link{Automation: "a", RunId: "run-1"}) {
+		t.Errorf("chain = %+v, want the one real link", got.Chain)
 	}
 }

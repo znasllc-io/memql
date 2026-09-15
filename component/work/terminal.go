@@ -80,11 +80,24 @@ const (
 	// something is still in flight when the row it came from says it is
 	// finished and broken.
 	TerminalCompositionFailed = "composition_failed"
+
+	// TerminalLoopDepthExceeded is a chain of automation runs that passed its
+	// depth bound: MEMQL_AUTOMATION_MAX_CHAIN_DEPTH, or an @loop's maxDepth
+	// (epic memql#5380, D-C of the loop protection plan).
+	//
+	// It is terminal because a loop is terminal by construction. The refused
+	// run records it itself and never reaches the symptom table; the code is
+	// here for the run that DOES reach it -- a parent whose sub-automation
+	// step was refused, whose failure carries the child's refusal in its
+	// message. Classified as a blip, that parent would park on a retry, and
+	// the retry would run the same chain into the same bound.
+	TerminalLoopDepthExceeded = "loop_depth_exceeded"
 )
 
 // terminalFailureCodes is the matcher's set. Longest first, so a code is
 // never shadowed by a shorter one sharing its prefix.
 var terminalFailureCodes = []string{
+	TerminalLoopDepthExceeded,
 	TerminalCompositionFailed,
 	TerminalSelfTimeout,
 }
@@ -127,7 +140,7 @@ func TerminalFailureCode(errorMessage string) (string, bool) {
 }
 
 // TerminalReason is the verdict in words a person reads on the run. It says
-// what is true and, for both codes, why another attempt is not the answer --
+// what is true and, for every code, why another attempt is not the answer --
 // because the reader's first instinct on seeing `failed` is to press retry.
 func TerminalReason(code string) string {
 	switch code {
@@ -135,6 +148,8 @@ func TerminalReason(code string) string {
 		return "the composition recorded its own failure, so the document does not exist and re-running the step reads the same failed record"
 	case TerminalSelfTimeout:
 		return "a deadline this system set for itself ran out; the work was not given longer, and another attempt would be given the same deadline"
+	case TerminalLoopDepthExceeded:
+		return "A chain of automations passed its depth bound. Another attempt runs the same chain into the same bound: the fix is in the automations, a converging @filter or an @loop, and the chain on this run names them."
 	default:
 		return "the work this step was doing cannot end differently on another attempt"
 	}

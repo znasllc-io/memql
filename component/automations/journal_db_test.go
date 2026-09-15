@@ -30,6 +30,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -152,7 +153,7 @@ func TestJournal_DB_AnUnfinishedStepIsResumable(t *testing.T) {
 
 	// Open the run and write the INTENT only -- no receipt, no close. That is
 	// exactly the state a killed pod leaves behind.
-	j.openRun(context.Background(), auto, exec, nil)
+	j.openRun(context.Background(), auto, exec, nil, events.Cause{})
 	j.stepRunning(context.Background(), exec, auto.Steps[0], 0, 1)
 
 	journal, err := LoadRunJournal(context.Background(), engine, runId)

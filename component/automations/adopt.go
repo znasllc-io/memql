@@ -141,12 +141,10 @@ func (e *Executor) ExecuteAdopted(ctx context.Context, automation *Automation, a
 	if j := adopt.Journal; j != nil && j.GoalId == "" {
 		callerSupplied = j.CallerSuppliedPayload
 		adopt.TriggeredBy = j.TriggeredBy
-		trigger = nil
-		if j.TriggerEvent != nil {
-			payload, _ := j.TriggerEvent["payload"].(map[string]any)
-			topic, _ := j.TriggerEvent["topic"].(string)
-			trigger = &events.Event{Topic: topic, Payload: payload}
-		}
+		// The trigger the run recorded, its parent cause included, so the
+		// recovered run keeps its place in its causal chain (epic
+		// memql#5380). Nil when it recorded none: a cron or manual run.
+		trigger = journalTriggerEvent(j.TriggerEvent)
 	}
 	return e.executeWithEvent(ctx, automation, adopt.TriggeredBy, trigger, callerSupplied, &adopt)
 }
