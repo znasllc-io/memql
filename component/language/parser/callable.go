@@ -250,6 +250,7 @@ func parseRetiredExprBuiltin(name string) func(p *Parser) (ExpressionNode, error
 // the code body_accessor_retired. memqlmigrate has no rewrite for them -- no
 // tree wrote one in a statement body.
 var retiredBodyAccessors = map[string]string{
+	"error": "use error(\"message\") to raise an error; onError accessors are gone",
 	"step":  "a statement's name is its value: `x := <call>`, then read `x`",
 	"input": "an automation declares its arguments in `args { }` and reads `args.<name>`",
 	"item":  "a loop names its element, `for x in <source>`, and reads `x`",

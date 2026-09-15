@@ -392,8 +392,6 @@ func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr
 	case *FunctionCallExpression:
 		// Functions should be expanded during parsing; if we reach here, something went wrong
 		return nil, fmt.Errorf("function %q was not expanded during parsing; this is a bug", node.Name)
-	case *ErrorRefExpression:
-		return nil, fmt.Errorf("error() cannot be evaluated in query context; it is only valid in automation onError handlers")
 	case *ErrorExpression:
 		return nil, fmt.Errorf("error() cannot be evaluated in query context; it is only valid in automation control flow")
 	case *NotExpression:

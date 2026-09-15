@@ -52,7 +52,6 @@ type (
 	VarRefExpr            = ast.VarRefExpr
 	EventRefExpr          = ast.EventRefExpr
 	CallerRefExpr         = ast.CallerRefExpr
-	ErrorRefExpr          = ast.ErrorRefExpr
 	ErrorExpr             = ast.ErrorExpr
 	TimestampExprFunc     = ast.TimestampExprFunc
 	FieldRefExpr          = ast.FieldRefExpr

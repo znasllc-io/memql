@@ -565,7 +565,6 @@ func TestCompiler_ExpressionToString_NoArgAccessors(t *testing.T) {
 	}{
 		{"now", `func (Query) ts() { now }`, "timestamp()"},
 		{"event", `func (Query) ev() { event() }`, "event()"},
-		{"error", `func (Query) err() { error() }`, "error()"},
 	}
 
 	for _, tt := range tests {

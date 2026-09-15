@@ -265,8 +265,6 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 		}
 	case *CallerRefExpression:
 		return &CallerRefExpression{}
-	case *ErrorRefExpression:
-		return &ErrorRefExpression{}
 	case *ErrorExpression:
 		return &ErrorExpression{Message: cloneExpressionNode(node.Message)}
 	default:
