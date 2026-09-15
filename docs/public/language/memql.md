@@ -644,11 +644,11 @@ names the position by the name in its first column.
 | `sort` | `sort "row.createdAt", "desc"` | Pushed down to SQL | A literal, and nothing else | No |
 | `specBody` | `spec c name = row => ...`, `trait name = row => ...` | Pushed down to SQL | Every expression except a construct call; unary `-`, arithmetic, `??`, a map literal and an in-process function only on values that do not read the row | Yes |
 | `rowAuthzArgument` | `@rowAuthz(owner="ownerUserId")` | Pushed down to SQL | A literal, and nothing else | No |
-| `automationCondition` | `if`, `forEach ... where`, `switch` and `check:` in an automation | In process | Every expression except a construct call | Yes |
+| `automationCondition` | an automation's `if` and `else if` conditions, a `for` filter, a `switch` subject and a precondition's `check:` | In process | Every expression except a construct call | Yes |
 | `triggerFilter` | `@filter(row => ...)` over the triggering row | In process | Every expression except a construct call | Yes |
 | `logicBody` | a statement or a `return` in a logic body | In process | Every expression | Yes |
 | `mutationValue` | `key: <value>` in `insert`, `update` or `stamp` | In process | Every expression except a construct call | Yes |
-| `stepArgument` | an argument of a call in an automation step | In process | Every expression | Yes |
+| `stepArgument` | an argument of a call statement in an automation | In process | Every expression | Yes |
 | `toolDefault` | a tool field's `@default("...")` | In process | A literal, and nothing else | No |
 | `promptInput` | a value bound into a prompt's input | In process | Every expression except a construct call | No |
 | `queryRefine` | `refine row => ...` after `paginate` | In process | Every expression except a construct call | Yes |

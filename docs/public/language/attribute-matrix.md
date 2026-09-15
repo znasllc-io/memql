@@ -23,7 +23,7 @@ One table per family of constructs, and one for the fields a construct declares.
 
 ### Functions
 
-| Annotation | query | mutate | logic | automation |
+| Annotation | query | mutation | logic | automation |
 |---|---|---|---|---|
 | [`@actor`](#actor) | flag | flag | flag | flag |
 | [`@addToSet`](#addtoset) |  | strings |  |  |
@@ -165,7 +165,7 @@ Every construct and every kind of field, with each annotation it accepts, how th
 
 The fields of its `args` block take the annotations under [args field](#args-field).
 
-### mutate
+### mutation
 
 | Annotation | Written as | Example |
 |---|---|---|
@@ -391,7 +391,7 @@ Written after a field's type in the body of a `concept`.
 
 ### args field
 
-Written after a field's type in the `args` block of a `query`, `mutate`, `logic`, `automation`, `action` or `capability`.
+Written after a field's type in the `args` block of a `query`, `mutation`, `logic`, `automation`, `action` or `capability`.
 
 | Annotation | Written as | Example |
 |---|---|---|
@@ -442,7 +442,7 @@ One entry per annotation, in alphabetical order: where it is accepted and how it
 
 | On | Written as | Example |
 |---|---|---|
-| [query](#query), [mutate](#mutate), [logic](#logic), [automation](#automation), [shape](#shape) | no arguments | `@actor` |
+| [query](#query), [mutation](#mutation), [logic](#logic), [automation](#automation), [shape](#shape) | no arguments | `@actor` |
 
 - On a query, a mutation, a logic or an automation: Declares that the body reads the authenticated actor (actor.userId, actor.role, actor.identityId, actor.isClusterOwner, actor.primaryEmail, actor.now). The actor-binding load rule refuses a body that reads actor.* without it (memql#2621).
 - On a shape: Shape kind marker: the shape projects the authenticated actor's envelope (actor.userId / actor.role / ...), and carries no signature concept.
@@ -451,7 +451,7 @@ One entry per annotation, in alphabetical order: where it is accepted and how it
 
 | On | Written as | Example |
 |---|---|---|
-| [mutate](#mutate) | one or more strings | `@addToSet("disabledDeployables")` |
+| [mutation](#mutation) | one or more strings | `@addToSet("disabledDeployables")` |
 
 On an update mutation: treat the named array-typed payload fields as SETS and UNION the written elements into the stored array -- deduped, existing order kept, new members appended in the order given. The membership half @appendFields is not: append is not deduped and has no counterpart that removes, so a toggle built on it duplicates on a double click. Pairs with @removeFromSet. Format: @addToSet("disabledDeployables"). See memql#4951.
 
@@ -483,7 +483,7 @@ Restrict the tool to a set of agent roles.
 
 | On | Written as | Example |
 |---|---|---|
-| [mutate](#mutate) | one or more strings | `@appendFields("attachmentIds")` |
+| [mutation](#mutation) | one or more strings | `@appendFields("attachmentIds")` |
 
 On an update mutation: append the named array-typed payload fields' elements to the stored array instead of replacing it wholesale, so a single-writer mutation can accumulate list items (e.g. attach one id). Format: @appendFields("attachmentIds").
 
@@ -555,7 +555,7 @@ The Materializer's mark (epic memql#4977, D2): this concept's rows are worth com
 
 | On | Written as | Example |
 |---|---|---|
-| [mutate](#mutate) | one or more strings | `@createOnly("status", "attempts")` |
+| [mutation](#mutation) | one or more strings | `@createOnly("status", "attempts")` |
 
 On an insert (create-or-upsert) mutation: write the named payload fields ONLY when creating the row. If the target id already exists, the fields are dropped from the delta before the engine read-merge, so the stored value is preserved rather than clobbered -- making a deterministic-id re-stage idempotent for lifecycle fields another writer owns after creation (e.g. stageOutboundRequest seeds status but must not reset a row the outbound worker moved to sent). The inverse of @mergeFields/@appendFields: only valid on insert-kind mutations. Format: @createOnly("status", "attempts"). See fylo#63.
 
@@ -599,7 +599,7 @@ Default AI provider for prompt execution: an explicit pin that wins over every r
 | On | Written as | Example |
 |---|---|---|
 | [query](#query) | one string | `@description("List the caller's open tickets, newest first.")` |
-| [mutate](#mutate) | one string | `@description("Rename one of the caller's tickets.")` |
+| [mutation](#mutation) | one string | `@description("Rename one of the caller's tickets.")` |
 | [logic](#logic) | one string | `@description("Close every ticket that has been idle for a week.")` |
 | [automation](#automation) | one string | `@description("On a new ticket, notify its owner.")` |
 | [concept](#concept) | one string | `@description("A support ticket raised by a customer.")` |
@@ -637,7 +637,7 @@ Mark a tool as destructive (mutates/deletes); the tool loop gates it behind a co
 
 | On | Written as | Example |
 |---|---|---|
-| [query](#query), [mutate](#mutate), [logic](#logic), [automation](#automation), [spec and trait](#spec-and-trait), [seed](#seed), [prompt](#prompt), [provider](#provider), [rule](#rule), [tool](#tool), [builtin](#builtin), [action](#action), [capability](#capability) | no arguments | `@disabled` |
+| [query](#query), [mutation](#mutation), [logic](#logic), [automation](#automation), [spec and trait](#spec-and-trait), [seed](#seed), [prompt](#prompt), [provider](#provider), [rule](#rule), [tool](#tool), [builtin](#builtin), [action](#action), [capability](#capability) | no arguments | `@disabled` |
 
 Takes the construct out of service without deleting it. Every construct is enabled by default and `@enabled` is an accepted no-op, so `@disabled` is the only off switch. A disabled construct stays in the tree, is still maintained, and must stay valid, because re-enabling it is only removing the annotation. What it does depends on the construct:
 
@@ -670,7 +670,7 @@ Rendering hints for concept-agnostic clients (memql#160): the field shown as a r
 
 | On | Written as | Example |
 |---|---|---|
-| [query](#query), [mutate](#mutate), [logic](#logic), [automation](#automation), [spec and trait](#spec-and-trait), [seed](#seed), [prompt](#prompt), [provider](#provider), [rule](#rule), [tool](#tool), [builtin](#builtin), [action](#action), [capability](#capability) | no arguments | `@enabled` |
+| [query](#query), [mutation](#mutation), [logic](#logic), [automation](#automation), [spec and trait](#spec-and-trait), [seed](#seed), [prompt](#prompt), [provider](#provider), [rule](#rule), [tool](#tool), [builtin](#builtin), [action](#action), [capability](#capability) | no arguments | `@enabled` |
 
 Accepted explicit no-op: definitions are enabled by default. Use @disabled to deactivate.
 
@@ -823,7 +823,7 @@ On a rule: evaluate before every unlocked rule regardless of precedence. Accepte
 
 | On | Written as | Example |
 |---|---|---|
-| [query](#query), [mutate](#mutate), [automation](#automation), [tool](#tool) | no arguments | `@mcp` |
+| [query](#query), [mutation](#mutation), [automation](#automation), [tool](#tool) | no arguments | `@mcp` |
 
 Expose this construct on the MCP connector surface. On a query/mutation/automation it promotes the construct into its own first-class MCP tool (otherwise it stays reachable via the generic run_query / run_mutation / run_automation dispatchers). On a tool it opts the tool into the curated connector allowlist: once ANY tool carries @mcp, tools/list reflects only @mcp tools (otherwise -- zero tagged -- the full tool surface is reflected, so the annotation is inert until the curated set is tagged).
 
@@ -831,7 +831,7 @@ Expose this construct on the MCP connector surface. On a query/mutation/automati
 
 | On | Written as | Example |
 |---|---|---|
-| [mutate](#mutate) | one or more strings | `@mergeFields("preferences")` |
+| [mutation](#mutation) | one or more strings | `@mergeFields("preferences")` |
 
 On an update mutation: deep-merge the named object-typed payload fields into the stored object instead of replacing them wholesale, so sibling keys survive a single-key write. Format: @mergeFields("preferences").
 
@@ -899,7 +899,7 @@ Opt this query OUT of caching entirely (force "never cache"). Clearer alias for 
 
 | On | Written as | Example |
 |---|---|---|
-| [mutate](#mutate) | one or more strings | `@noUnset("bootstrappedAt")` |
+| [mutation](#mutation) | one or more strings | `@noUnset("bootstrappedAt")` |
 
 On any mutation: declare the named payload fields ONE-WAY -- a write may set them or change one non-empty value to another, but may never take a stored non-empty value back to empty. On the read-merge path a named field arriving empty is dropped from the delta when the stored row holds a non-empty value. Closes the gap read-merge cannot (it only inherits fields ABSENT from a delta, so a body writing `f: args.f ?? ""` blanks the stored value with an explicit empty string). Distinct from @createOnly, which forbids any post-create write; @noUnset forbids only set -> unset, so a legitimately-later stamp still lands. Format: @noUnset("bootstrappedAt"). See memql#3415.
 
@@ -975,7 +975,7 @@ Required on a policy: the first entry the AI Router resolves. A provider name, a
 
 | On | Written as | Example |
 |---|---|---|
-| [query](#query), [mutate](#mutate) | no arguments | `@public` |
+| [query](#query), [mutation](#mutation) | no arguments | `@public` |
 
 Per-row-authz marker: this query/mutation is intentionally callable without a caller-scope filter (concept catalogs, pre-auth login paths). See [per-row-authz-audit.md](../operate/auth/per-row-authz-audit.md).
 
@@ -1017,7 +1017,7 @@ Foreign-key relationship metadata. Format: @relationship(type="parent", field="x
 
 | On | Written as | Example |
 |---|---|---|
-| [mutate](#mutate) | one or more strings | `@removeFromSet("disabledDeployables")` |
+| [mutation](#mutation) | one or more strings | `@removeFromSet("disabledDeployables")` |
 
 On an update mutation: treat the named array-typed payload fields as SETS and REMOVE the written elements from the stored array, keeping the order of what remains. Removing something absent is a no-op rather than an error, so the mutation is idempotent and two callers removing the same member both succeed. Pairs with @addToSet, and the pair is what lets a set be edited one member at a time instead of read-modify-written whole. Format: @removeFromSet("disabledDeployables"). See memql#4951.
 
@@ -1043,7 +1043,7 @@ Both follow the same rules:
 | On | Written as | Example |
 |---|---|---|
 | [query](#query) | one or more strings | `@requiresCapability("read", "principal")` |
-| [mutate](#mutate) | one or more strings | `@requiresCapability("execute", "app:deployables/publish")` |
+| [mutation](#mutation) | one or more strings | `@requiresCapability("execute", "app:deployables/publish")` |
 | [logic](#logic), [builtin](#builtin) | one or more strings | `@requiresCapability("execute", "app:deployables/deploy")` |
 
 The CAPABILITY a caller must hold to invoke the construct -- @requiresCapability("read", "principal") (epic memql#5166, D11). The sibling of @requiresRank, and the difference is the point: a RANK is a floor on the cluster's ladder, a CAPABILITY is a (verb x resource) grant a role was given, and a cluster can hold one without the other -- developer ranks above admin and holds strictly fewer principal verbs. Declared together, BOTH must pass. VALIDATED AT LOAD against the five verbs and the resource kinds any role in this cluster holds a grant on, so a misspelling refuses boot rather than gating a surface into silence; ENFORCED at execution through the runtime capability catalog, on the direct call and on every plan that expands the construct. It replaces the slug-comparing specs (requiresAdmin, requiresOwnerOrAdmin, requiresDeveloperOrAbove), which could not see a custom role at all: `role == "admin"` is false for a rank-250 role holding every principal verb. It gates WHO MAY CALL; @rowAuthz still decides WHICH ROWS come back.
@@ -1061,7 +1061,7 @@ Require explicit user confirmation before the tool executes.
 | On | Written as | Example |
 |---|---|---|
 | [query](#query) | one string | `@requiresRank("developer")` |
-| [mutate](#mutate), [logic](#logic) | one string | `@requiresRank("admin")` |
+| [mutation](#mutation), [logic](#logic) | one string | `@requiresRank("admin")` |
 
 The actor-rank FLOOR: only a caller holding this role, or one ranked above it, may invoke the construct -- @requiresRank("developer") (epic memql#4832, D6). ENFORCED at execution and VALIDATED AT LOAD against the role ladder in dsl/rbac, so a typo refuses boot rather than gating on rank 0 and admitting everyone. This is the server-side counterpart to MemQL OS's per-surface role requirement: the shell keeps hiding what a caller cannot reach (hiding an action beats letting them click it and reading a refusal) and this makes the hidden surface a REFUSED one. Declared on the CONSTRUCT because a surface is a set of constructs and an app id from a browser is a claim, not a fact. It gates WHO MAY CALL; @rowAuthz still decides WHICH ROWS come back.
 
@@ -1124,7 +1124,7 @@ Authorization scopes the tool requires.
 
 | On | Written as | Example |
 |---|---|---|
-| [mutate](#mutate) | no arguments | `@scrubPii` |
+| [mutation](#mutation) | no arguments | `@scrubPii` |
 
 On an update mutation (the hard-delete / data-deletion path): after the partial payload merges, zero EVERY field the bound concept marks @pii. The field set is derived from the schema, so a newly-annotated PII field is scrubbed automatically with no change to the mutation. Bare flag, no arguments. See memql#1711.
 
@@ -1168,7 +1168,7 @@ So `@secret` stops a credential leaking through a validation diagnostic. It is n
 
 | On | Written as | Example |
 |---|---|---|
-| [query](#query), [mutate](#mutate) | no arguments | `@serverOnly` |
+| [query](#query), [mutation](#mutation) | no arguments | `@serverOnly` |
 
 Bars the construct from client-originated calls while leaving server-side Go free to call it (memql#2800). ENFORCED at execution against auth.CallOrigin -- unlike the retired @internal, which only hid a construct from discovery. Use only when caller-scoping is impossible: the auth path resolving `sub` -> user before an actor exists, or an automation acting on a user other than the actor. Callers must stamp auth.ContextWithInternalOrigin.
 
@@ -1318,7 +1318,7 @@ A retired name is refused where the table says, with `annotation_retired` and a 
 | [`@row`](#row) | [spec and trait](#spec-and-trait) | It is a shape-only marker since epic #2281 -- to predicate on row metadata, bind a @row shape in the signature (`spec <shape> <name>`) and read its projected key by bare name. |
 | `@schedule` | [automation](#automation) | A scheduled automation is written @trigger(schedule="&lt;cron>"), the one spelling (D15, epic memql#5370); memqlmigrate --rewrite=bodies rewrites it. |
 | [`@scope`](#scope) | [concept](#concept) | Remove the annotation; every concept lives in the default partition post-#56. |
-| `@shape` | [spec and trait](#spec-and-trait) | A spec binds its shape or concept in the signature (epic #2281): `spec <boundName> <name> { return <bool> }`, with boundName resolved through the file-top `use` import. |
+| `@shape` | [spec and trait](#spec-and-trait) | A spec binds its shape or concept in the signature (epic #2281): `spec <boundName> <name> = row => <predicate>`, with boundName resolved through the file-top `use` import. |
 | [`@sideEffect`](#sideeffect) | [action](#action) | The authoritative side-effect class lives on the capability declaration the action calls, where an action cannot overstate or understate it; remove it from the action. |
 | `@timeout` | everywhere | Removed from the allow-lists in memql#989; nothing reads it -- delete the annotation. |
 | `@useX`, for any `X` that starts with an upper-case letter | everywhere | Declare the dependency with a file-top `use <module>.{ ... }` import instead, and put a bound concept in the signature (`query <Concept> <name> { ... }`). |
