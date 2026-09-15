@@ -12,6 +12,9 @@ owner: platform
 The install wizard places everything MemQL needs. There is a short list it
 deliberately does not, and this page is that list plus the reasoning.
 
+The wizard supports **Linux x64 and Apple Silicon macOS**. Other packaged
+extension platforms do not imply local-cluster installer support.
+
 ## What you do first
 
 **Docker, installed and running.**

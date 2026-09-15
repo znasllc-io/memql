@@ -20,6 +20,11 @@ name at a call site is a release every time your fleet changes.
 
 ---
 
+The policy-composition changes described by
+[Supervised Visual Composition](supervised-visual-composition.md) are under local
+validation. This page describes the baseline engine contract; a preview of a
+new editor does not establish its availability on your cluster.
+
 ## The three nouns
 
 ### Level

@@ -1,6 +1,7 @@
 # Documentation Index
 
-The complete map of MemQL documentation. Layout + rules:
+Start with [the documentation home](docs/public/overview/index.md) for a guided
+path, or use this detailed reference index. Layout + rules:
 [docs/DOCS_STANDARD.md](docs/DOCS_STANDARD.md).
 
 - **`docs/public/`** — user/developer-facing reference. This is the
@@ -15,6 +16,9 @@ The complete map of MemQL documentation. Layout + rules:
 ## Public docs (`docs/public/`)
 
 ### Overview (`overview/`)
+
+- [Documentation home](docs/public/overview/index.md) — paths by task.
+- [Status and direction](docs/public/overview/roadmap.md) — implemented capabilities and pending designs.
 - [What Is MemQL](docs/public/overview/what-is-memql.md) — the platform: modules it runs, clients you build on it, the memory graph underneath.
 - [The Harness](docs/public/overview/why-memql-harness.md) — the proof-driven tour of the work spine: the journal, resume, budgets, memory consolidation. Each claim names the test that backs it, and the ones not yet proven are listed as such.
 - [MemQL vs. Agent Libraries and Frameworks](docs/public/overview/vs-other-harnesses.md) — honest comparison with the Go + Python field.
@@ -34,13 +38,15 @@ The complete map of MemQL documentation. Layout + rules:
 - [Data Origins: Mirror, Origin, Native](docs/public/concepts/data-origins.md) -- what MemQL's relationship is to a concept's data. **Mirror**: an external system owns it and MemQL's copy is read-only BY CONSTRUCTION. **Origin**: MemQL owns it and pushes changes out to external mirrors through a durable **outbox**. **Native**: MemQL owns it and nobody else has a copy. Declared with `@origin` / `@mirroredTo`; a **connector** is the integration that fills a mirror or drains an outbox, and runs as a named actor admitted only to the concepts that name it
 
 ### The Language (`language/`)
+
+- [Your first MemQL program](docs/public/language/first-program.md) — a complete reading list, validated offline and run in VS Code.
 - [MemQL Language](docs/public/language/memql.md) — the DSL reference (also embedded in the binary; see `docs/embed.go`).
 - [Functions](docs/public/language/functions.md) · [Authoring Rules](docs/public/language/authoring-rules.md) — read before writing `.memql`.
 - [MemQL Sense & the DSL Spec](docs/public/language/sense.md) — language intelligence (tokenize/complete/diagnose/hover) + the `dslspec` source of truth, drift guard, and portable JSON export.
 - [MemQL in VS Code](docs/public/language/vscode.md) — the offline VS Code extension + language server (`cmd/memql-lsp`), a second Sense consumer.
 - [VS Code Runtime Panel](docs/public/language/vscode-runtime-panel.md) — the extension's activity-bar panel: **Deployments** (what you operate, at what version, and the runs that changed it), **Clusters** (what you can reach, as whom), and a generic, live-updating concept browser. The extension/console boundary that decides which surface a question belongs to is stated in [the Deployments surface design](docs/superpowers/specs/2026-08-14-vscode-deployments-surface-design.md) and in the extension's README.
 - [VS Code Runtime Panel — Manual Verification Checklist](docs/public/language/vscode-runtime-panel-verification.md) — what a human presses F5 and works through, and where that sits relative to `make vscode-test` (unit) and `make vscode-test-host` (the Extension Development Host smoke lane).
-- [Training Constructs Into a Running Cluster](docs/public/language/training.md) — **seeded** (loaded from disk at boot; needs a rollout), **staged** (in the database, durable, callable by its author alone), and **trained** (in the database, live for everyone in seconds), and the per-construct states an editor reports against a connected cluster: **untrained**, **drifted**, **trained**, **staged**, **seeded**, **unknown**. The five actions (dry-run, try in session, stage, promote, demote) and what each commits you to — staging is the promote path with the cross-node broadcast omitted, and **that omission is the tier**; training a staged construct is the same Promote, flipping the same row. Why **saving is not promoting**; why a **concept cannot be staged**; concepts specifically — demote **retires** a concept that has rows and **removes** only an empty one, and a re-promote whose schema changed is **classified** so additive lands and breaking is refused with the field named; the read-only rule (a file is read-only exactly when editing it cannot change what the cluster runs); and why a separate installation is trained separately.
+- [Training Constructs Into a Running Cluster](docs/public/language/training.md) — **seeded** (loaded from disk at boot; needs a rollout), **staged** (in the database, durable, callable by its author alone), and **trained** (in the database, live for everyone in seconds), and the per-construct states an editor reports against a connected cluster: **untrained**, **drifted**, **trained**, **staged**, **seeded**, **edited**, **unknown**. The five actions (dry-run, try in session, stage, promote, demote) and what each commits you to — staging is the promote path with the cross-node broadcast omitted, and **that omission is the tier**; training a staged construct is the same Promote, flipping the same row. Why **saving is not promoting**; why a **concept cannot be staged**; concepts specifically — demote **retires** a concept that has rows and **removes** only an empty one, and a re-promote whose schema changed is **classified** so additive lands and breaking is refused with the field named; the read-only rule (a file is read-only exactly when editing it cannot change what the cluster runs); and why a separate installation is trained separately.
 - [Result caching](docs/public/language/memql.md#cache-behavior) — **on by default**: a pure read with no annotation is cached for 60s (memql#1970). `@cache(N)` overrides, `@nocache` opts out, `v1:identity:` is denylisted from the default path, and `MEMQL_CACHE_MAX_TTL=0` (the default) means **no clamp**, not "caching off". Freshness is event-driven — a write evicts its concept's dependent entries on the writing node synchronously and broadcasts `cache.invalidate.<concept>` to the mesh — so the TTL is a backstop rather than the mechanism. Authoring guidance, including the narrow cases that genuinely want `@nocache`, is in [Authoring Rules](docs/public/language/authoring-rules.md); the reviewed per-query adoption table is in [the caching design record](docs/superpowers/specs/2026-08-25-caching-and-live-data-architecture-design.md).
 - [Naming Conventions](docs/public/language/naming-conventions.md) · [Reserved Identifiers](docs/public/language/reserved.md) · [Specifications](docs/public/language/specifications.md) · [Attribute Matrix](docs/public/language/attribute-matrix.md)
 
@@ -53,6 +59,8 @@ The complete map of MemQL documentation. Layout + rules:
 - Generated reference (DSL constructs + concept catalog) lands in `docs/public/reference/_generated/` at release time (docs-gen).
 
 ### Operate (`operate/`)
+
+- [Supervised Visual Composition](docs/public/operate/supervised-visual-composition.md) — approved OS design direction and rollout boundaries.
 - **[Minimum Requirements (running beyond local)](docs/public/operate/minimum-requirements.md)** — what you need to run MemQL outside the local dev cluster: self-hosted CloudNativePG (the only supported DB provider), the pooler/connection model, k8s, secrets, images, GitOps. Start here.
 - [Before you install a local cluster](docs/public/operate/install-prerequisites.md) — the short list of things the install wizard deliberately does not place for you, and why.
 - [Reproduce the cloud locally (k3d + ArgoCD)](docs/public/operate/reproduce-the-cloud-locally.md) — the blessed local dev topology: same Kustomize base, same ArgoCD-reconciled manifests as the cloud cluster.

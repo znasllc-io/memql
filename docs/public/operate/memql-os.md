@@ -9,22 +9,29 @@ owner: platform
 
 # MemQL OS -- operator guide
 
-MemQL OS is the platform's own graphical operations console: a static SPA
-served by the edge as a `v1:platform:site` row (memql#4705) -- the same site
-resolution, bundle opener and headers as any customer site, at its own
-hostname -- dialing the same `/memql/ws` gRPC bridge every other client uses.
-This page covers what an operator has to configure to make it usable, and
-records the design decisions that shape that configuration.
+MemQL OS is the browser workspace for one MemQL cluster. Open its apps to
+manage execution resources, inspect data, work with artifacts, and follow agent
+work. The engine performs the operations and enforces authorization; the OS
+presents them through a shared desktop, session, and connection.
 
-It replaces `portal.md`. The MemQL Portal held this role until epic
-[memql#4984](https://github.com/znasllc-io/memql/issues/4984) retired it; the
-inventory of what moved, what was retired and what was deferred is
+For the default local cluster, open `https://os.memql.localhost/`. Sign in with
+that cluster's identity service. If setup appears, follow
+[first-run setup](first-run.md). App availability follows your account's grants
+and the cluster's configuration; a hidden app is not proof its data is absent.
+
+Start with [the app map](#the-apps). The rest of this page retains the operator
+and authentication reference.
+
+The approved design direction is
+[Supervised Visual Composition](supervised-visual-composition.md): direct visual
+composition and supervised proposals in a shared workspace. Fleet changes are
+under local validation; proposed Settings/Logs and Deployables layouts are not
+documented here as shipped functionality.
+
+Related: [identity](auth/identity-service.md), [access](auth/access-model.md),
+[environment parity](environment-parity.md), [front door](front-door.md).
+The former portal's migration history remains in
 [the retirement record](../../superpowers/specs/2026-09-06-portal-removal-design.md).
-
-Related: [identity-service.md](auth/identity-service.md),
-[access-model.md](auth/access-model.md),
-[environment-parity.md](environment-parity.md),
-[front-door.md](front-door.md).
 
 ---
 
@@ -33,8 +40,9 @@ Related: [identity-service.md](auth/identity-service.md),
 **The one it was served by. There is no cluster registry, and that is
 deliberate.**
 
-The VS Code panel and the Cockpit read `~/.memql/clusters.yaml` and
-authenticate with a PAT from that file. A browser can do neither: it has no
+The VS Code panel reads `~/.memql/clusters.yaml` and authenticates with an
+identity-issued JWT access token. Refresh credentials use editor SecretStorage.
+A PAT does not authenticate this engine connection. A browser can do neither: it has no
 filesystem, and a long-lived PAT where page JavaScript can read it would be
 strictly worse than the OAuth flow the identity service already runs.
 
@@ -233,65 +241,50 @@ Two consequences worth knowing:
 
 ## The apps
 
-| App | What it is for | Floor |
-|---|---|---|
-| Files | The Library as a live folder tree, with each file's provenance, versions and backups | none |
-| Deployables | What serves where: the map, each deployable's source, build, domains, traffic and history | none |
-| Fleet | Machines (with the guided cockpit install), routing policy and call history, workbenches | none |
-| Users | People, roles, sessions, invitations and enrolment links | admin |
-| Accounts | The client registry -- who this instance does work for | admin |
-| Campaigns | Mail: audiences, templates, senders, rules and send control | none |
-| Training | Teach MemQL from Library files; the review queue and knowledge domains | writer |
-| Nexus | Goals, runs and the step spine; automations and the approvals queue | none |
-| Materializer | Compose data from the memory graph into a file | none |
-| Logs | The cluster log store, following and windowed search | admin |
-| Bin | The archive destination; restore from here | none |
-| Settings | Everything below | mixed |
+| App | Use it for |
+|---|---|
+| **Fleet** | Machines, models and app execution resources, routing, and workbenches |
+| **Files** | Library folders, artifact content, provenance, and versions |
+| **Deployables** | Sources, builds, domains, serving state, traffic, and deployment history |
+| **Nexus** | Goals, runs, steps, automations, and approvals |
+| **Concepts** | Declared concepts, field definitions, and rows visible to your account |
+| **Cluster** | Readiness, modules, data origins, agents, and the audit trail |
+| **Training** | Training from Library files and reviewing knowledge |
+| **Materializer** | Composing data into a file |
+| **Campaigns** | Mail audiences, templates, senders, rules, and sending |
+| **Stores** | Shopify store configuration, health, subscriptions, and mirror state |
+| **Users** | People, roles, invitations, enrolment, and sessions |
+| **Accounts** | Accounts the cluster works for and their configuration |
+| **Logs** | Cluster log search and following events |
+| **Bin** | Archived items and supported restoration |
+| **Settings** | Appearance, access, AI configuration, identity policy, and diagnostics |
+
+**Ask** is a shared interaction surface and desk widget. Inference and voice
+availability depend on configuration. It does not imply generalized autonomous
+control of every app.
+
+Access is granted by app and section through the engine's access model, not by a
+single universal role floor. The current roster is declared in
+`clients/os/src/apps/registry.tsx`. An app's presence does not grant permission
+to its operations. See [app access](auth/access-model.md).
 
 ### Settings
 
-| Section | What it is for | Floor |
-|---|---|---|
-| About | Who you are signed in as, and what this shell is | none |
-| Appearance | Light / dark / system, and the theme pack | none |
-| Ask | How the Ask surface behaves | none |
-| Apps | The installed roster, and what each one's sections are | none |
-| Cluster | Cluster and identity facts, versions, mail sender -- and the editable **Policy** form | admin |
-| AI providers | Anthropic federation and API keys, OpenAI keys, the per-provider registry, Verify and Apply | owner |
-| Tokens | Every personal access token and node credential, with revoke | admin |
-| Keys | The published JWKS keyset, whether the replicas agree on it, and the rotation history | admin |
-| Integrations | What this cluster can talk to and what each one needs | owner or developer |
-| Benchmarks | What the platform measures about itself across releases, and what it does not | admin |
-| Diagnostics | Connection and permission facts, and a report to paste into a thread | none |
-| Logs | This app's own lines | admin |
+Settings groups general preferences (About, Appearance, Ask, Apps), Access,
+Cluster identity policy, Diagnostics, Benchmarks, Integrations, AI configuration,
+Tokens, Keys, and this app's Logs. Which sections you see follows your grants.
 
-Four of those arrived when the portal was retired, and each carries a rule
-worth stating:
+The AI sections are **Doors**, **Levels**, **Rules**, and **Decisions**: where
+inference can run, what a call needs, how it routes, and what actually happened.
+Follow [AI settings](ai-settings.md) for the current controls and
+[AI routing](ai-routing.md) for engine behavior. Older instructions to paste
+OpenAI or Anthropic API keys into an OS "AI providers" page are superseded by
+these source-specific setup flows.
 
-- **AI providers.** A secret is write-only in both directions: the field posts
-  a value and nothing renders one back -- what returns is a fingerprint. A
-  cluster with no provider configured is the NORMAL first state, not a fault.
-  Federation leads the Anthropic block because the two paths are not equivalent
-  options: federation leaves no credential at rest anywhere. **A save is not an
-  Apply** -- saving writes the row, and Apply is what makes every node
-  re-resolve its registry.
-- **Tokens.** Personal access tokens and node credentials are kept apart
-  because they are different kinds of thing revoked through different ops. A
-  revoked row shows no Revoke button rather than a disabled one. The personal
-  half is a bounded fan-out over the people list (there is no cluster-wide PAT
-  read) and it **says how far it reached**, so a token you cannot find is never
-  mistaken for a token that does not exist.
-- **Keys.** It leads with whether the identity replicas AGREE on their keyset,
-  not with a key table: divergent keysets fail roughly half of all auth
-  (memql#3400) while every manifest looks correct. Four independent reads;
-  disagreement is proof, agreement is evidence, and the sentence says which.
-  There is no rotate control, because where the key arrives sealed in the
-  environment envelope rotating it is a re-seal and a roll.
-- **Cluster -> Policy.** Registration mode, the role an internal person gets on
-  first sign-in, the four lifetimes, the cookie policy and the identity pages'
-  brand. Lifetimes are asked in minutes and days and stored in seconds; blank
-  means the cluster's own default. A change applies to the next token minted or
-  link issued -- it does not shorten a session somebody already has.
+Tokens distinguish personal and node credentials. Keys shows published identity
+keysets and whether replicas agree. Cluster policy configures registration and
+identity behavior; changes to token lifetimes apply when new credentials are
+issued. Existing credentials do not silently acquire a new lifetime.
 
 ### What is deliberately NOT here
 

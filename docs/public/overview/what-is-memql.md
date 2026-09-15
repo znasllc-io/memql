@@ -1,5 +1,5 @@
 ---
-title: What Is MemQL
+title: What is MemQL?
 audience: public
 status: stable
 area: overview
@@ -7,72 +7,87 @@ sinceVersion: 0.20.0
 owner: znas
 ---
 
-# What Is MemQL
+# What is MemQL?
 
-MemQL is an **open-source AI platform**: agents, automations,
-campaigns, and hosted sites, running as one deployable system on a
-**time-series memory graph**. You declare behavior in the MemQL DSL --
-concepts, queries, mutations, tools, prompts, automations -- and a mesh of
-specialized nodes executes it, remembers it, and lets you inspect it.
+MemQL is an open-source AI platform for applications that need AI to act on
+structured data and external systems. You declare data and behavior in `.memql`
+files; the engine executes them on a cluster. You can inspect that work through
+MemQL OS, VS Code, or your own client.
 
-It is a platform in the operational sense, not the marketing one: it is
-the thing you install, and everything else is a module of it or a client
-on it.
+## The mental model
 
-## The three-layer mental model
+**The engine runs the system. MemQL OS is an application connected to it.**
+Individual OS apps are views and controls for particular jobs, not separate
+engines. The VS Code extension is another client, with offline language support
+and an optional connection to one of your clusters.
 
-```
-  clients          what you BUILD ON the platform
-                   SPAs, websites, consoles, apps -- one repo per client
-                   (the MemQL Portal is the worked example)
-  ------------------------------------------------------------------
-  modules          what the platform RUNS
-                   components (engine internals) . integrations (talk to
-                   other systems) . packs (product features, per-instance
-                   enable/disable) . node-type modules (identity, bff,
-                   agent, planner, workbench, mcp, edge)
-  ------------------------------------------------------------------
-  memory graph     what the platform REMEMBERS ON
-                   PostgreSQL + TimescaleDB; append-only, versioned,
-                   time-series nodes -- provenance and replay built in
+```text
+MemQL OS apps       VS Code        Your sites and applications
+      \                |                 /
+             Authenticated engine API
+                        |
+  Data and relationships · Tools and automations · Agent work
+                        |
+       Versioned memory graph and execution records
 ```
 
-- **The memory graph** is the substrate. MemQL is *built on* a
-  time-series memory graph: every record carries its own history, a
-  write adds a version rather than overwriting, and retrieval can blend
-  semantic similarity with recency. (MemQL is not a database, and does
-  not position itself as one -- the graph is the substrate the platform
-  runs on, embedded and managed for you.)
-- **Modules** are the platform's own capabilities. The
-  [harness](why-memql-harness.md) -- the work spine that executes agent
-  turns, enforces budgets, and consolidates memory -- is one module.
-  Campaigns is another. Product features ship as packs, and an
-  operator can enable or disable a pack per instance. See
-  [Modules](../concepts/modules.md) for the full mental model.
-- **Clients** are what you build: a SPA, a website, a mobile app
-  (Android/iOS are planned, not shipped), a console. One repo per
-  client, stamped from the `memql-project` template; the engine stays
-  product-agnostic. See [Clients](../concepts/clients.md).
+## What the engine supports
 
-## What running it looks like
+| Capability | What you can do | Start here |
+|---|---|---|
+| Typed data and history | Declare concepts, validate fields, query rows, and retain versions and relationships | [First program](../language/first-program.md), [versioning](../concepts/concept-versioning.md) |
+| Reusable behavior | Declare queries, mutations, logic, tools, prompts, and event/schedule automations in the same language | [Language](../language/memql.md), [specifications](../language/specifications.md) |
+| AI routing | Route a call's required level through policies and rules to compatible configured sources, including local models | [Routing](../operate/ai-routing.md), [local models](../operate/local-models.md) |
+| Durable agent work | Inspect goals, runs, steps, approvals, budgets, and recovery records | [Harness](why-memql-harness.md), [measured results](proving-scorecard.md) |
+| Files and knowledge | Store versioned artifacts, train from Library files, and retrieve knowledge | [Library](../operate/library.md), [document history](../concepts/document-version-history.md) |
+| External systems | Connect integrations; distinguish mirrored, original, and native data; deliver changes through an outbox | [Data origins](../concepts/data-origins.md), [outbound delivery](../operate/outbound-delivery.md) |
+| Sites and applications | Serve static bundles by hostname; manage sources, builds, and deployments | [Hosting](../operate/site-hosting.md), [Deployables](../operate/deployables.md) |
+| Communication | Use the implemented audio stream and campaign sending surfaces when their providers and delivery configuration are ready | [Audio](../build/audio-streaming.md), [campaigns](../operate/campaign-sending.md) |
+| Access and operations | Authenticate users, grant app access, inspect logs, and manage the cluster | [Access model](../operate/auth/access-model.md), [MemQL OS](../operate/memql-os.md) |
 
-One installation shape everywhere: a k3d + ArgoCD cluster locally, the
-same manifests reconciled on a cloud cluster. gRPC-first API on a single
-multiplexed stream, with a WebSocket bridge for browsers. An in-house
-identity service (magic link, passkeys, JWT/JWKS). Per-row authorization
-classified and test-enforced. Cost and safety guardrails on by default.
-The [Quickstart](quickstart.md) gets a local cluster up in five minutes;
-the [Tech Stack](tech-stack.md) page states the opinionated choices.
+A capability being implemented does not mean a new cluster has it configured.
+Model calls need a compatible inference source; mail delivery needs a sender;
+external integrations need their own configuration and permissions. Use
+[configuration readiness](../operate/configuration-readiness.md) to see what is
+missing.
 
-## Where it stands
+## The memory graph
 
-MemQL is Apache-2.0 licensed and developed in the open. It is pre-1.0:
-the DSL, engine API, and wire surface still evolve, and the README's
-status banner is the honest statement of maturity at any moment. A full
-production product runs on MemQL today -- the platform is extracted from
-real operation, not designed on a whiteboard -- but you should expect
-breaking changes between releases until 1.0.
+MemQL is built on a time-series memory graph, backed by PostgreSQL, TimescaleDB,
+and pgvector. Concepts describe record types. Queries select data; mutations
+write versions. Relationships connect records. Authorization depends on the
+declared concept tier and the operation: do not assume every concept is private
+by default. [Learn the access model](../operate/auth/access-model.md).
 
-> Next: [Why MemQL ships a harness](why-memql-harness.md) -- the
-> proof-driven tour of the module that runs agents, or the
-> [Quickstart](quickstart.md) if you would rather run it first.
+The agent harness uses that same system for its work records. It is built into
+the platform's work lifecycle, not a pack you can switch off. Its evidence is
+scoped to the tests and runs in the [proving scorecard](proving-scorecard.md);
+a replay result is not a guarantee about every external side effect.
+
+## Modules, clients, and apps
+
+- **Modules** describe what an operator can inspect in the engine: components,
+  integrations, packs, and node types. Only packs have the pack enable/disable
+  switch, and changing it takes effect at node restart. [Modules](../concepts/modules.md).
+- **Clients** connect to the engine. MemQL OS is the browser client included in
+  this repository; product-specific clients live in their own repositories.
+  [Clients](../concepts/clients.md).
+- **OS apps** organize a person's work inside that client. Fleet, Files,
+  Deployables, Nexus, and Concepts share a session and cluster connection.
+  [Find the right app](../operate/memql-os.md#the-apps).
+
+The approved OS design direction is
+[Supervised Visual Composition](../operate/supervised-visual-composition.md).
+That page distinguishes the current interface, Fleet work under local validation,
+and designs that have not shipped.
+
+## What to expect today
+
+MemQL is alpha and pre-1.0. APIs and language syntax can change between releases.
+The local runtime is a Docker-backed k3d cluster managed through ArgoCD; a cloud
+installation follows the same GitOps topology. It is a multi-service system,
+not a single editor process. Offline editing is available before installing it.
+
+[Get started](quickstart.md), or choose a route from the
+[documentation home](index.md). See [status and direction](roadmap.md) for the
+boundary between implemented capabilities and upcoming work.

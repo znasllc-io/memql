@@ -208,7 +208,7 @@ install states the second command up front -- `memql worker setup --inference`,
 run once the installer prints SUCCESS -- and its Checks stop offers **Pull the
 recommended models** the moment the machine reports a runtime, then **Ask it
 something** the moment a model is served (the guided install is described in
-the [workers runbook](workers-runbook.md#55-pairing-a-machine-from-memql-os)).
+the [workers runbook](workers-runbook.md#55-pairing-a-machine-from-memql-os-the-guided-install)).
 MemQL then uses it for planning, routing, suggestions and embeddings. Nothing is billed
 per token and no prompt leaves your hardware.
 

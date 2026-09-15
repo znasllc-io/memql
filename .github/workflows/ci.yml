@@ -182,6 +182,8 @@ jobs:
             # `ci` and `go` are BOTH false, so every Go file these trees also
             # contain is inert. Under-matching is the defect.
             gates:
+              # The tutorial/source/edition parity gate reads this manifest.
+              - 'examples/reading-list/memql.toml'
               - '**/*.md'
               - '**/*.memql'
               # .claude/settings.json is TRACKED on purpose (the .gitignore

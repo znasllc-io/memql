@@ -1,0 +1,19 @@
+{
+  "name": "memql-vscode-site",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Static, source-grounded landing page for MemQL for VS Code",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "node build.mjs --check",
+    "preview": "python3 -m http.server 4317 --bind 127.0.0.1 --directory dist",
+    "test:browser": "node test-browser.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

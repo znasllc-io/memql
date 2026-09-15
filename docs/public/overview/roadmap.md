@@ -1,41 +1,44 @@
 ---
-title: memQL Roadmap
+title: MemQL status and direction
 audience: public
 status: stable
 area: overview
-sinceVersion: 0.15.0
+sinceVersion: 0.20.0
 owner: znas
 ---
 
-# memQL Roadmap
+# MemQL status and direction
 
-What is in, what is next, and what comes later. The project manager keeps this
-page current. Rough timing only — month or quarter, not a date we
-will miss. Bugs and design live on GitHub, not here.
+MemQL is alpha and pre-1.0. This page separates implemented surfaces from design
+work; it does not promise release dates. Status recorded **2026-09-15**.
 
-## In
+## Implemented in the repository
 
-On the local overlay as of August 2026 (`2aaa768`):
+- Typed concepts, queries, mutations, logic, tools, prompts, and automations.
+- Durable agent work and a [scorecard](proving-scorecard.md) that states its measurement limits.
+- [MemQL OS](../operate/memql-os.md), with apps for data, artifacts, sites, Fleet, work, identity, and operations.
+- [VS Code authoring](../language/vscode.md), offline language intelligence, and authenticated runtime tools.
+- [Pack enablement](../concepts/modules.md), [site hosting](../operate/site-hosting.md), and [client repositories](../concepts/clients.md).
 
-- Sign in as the operator and stay signed in
-- Live portal stream (not a dead Connecting chip)
-- Concept registry with real rows
-- Reviews as a pack; Shopify as a thin catalog index; campaigns,
-  calendar, and todos as core
+Availability on a particular cluster depends on its release, configuration,
+permissions, and healthy dependencies. Repository presence is not a production
+readiness certification.
 
-## Next
+## Under validation or review
 
-This working session (August 2026):
+[Supervised Visual Composition](../operate/supervised-visual-composition.md) is
+the approved OS design direction. Fleet is the first implementation under local
+validation. New Settings/Logs layouts await prototype approval; Deployables
+composition is separate prototype work. Do not infer that these changes have
+shipped to every cluster.
 
-- Owner walkthrough of every portal surface — pass / fail /
-  confounder per section
-- Public proving log so a PM can see what was validated and when
-  ([proving.md](proving.md))
-- This roadmap page
-- Small portal fixes found on that walk (not engine or DSL)
+## Future work
 
-## Later
+General autonomous driving of OS interfaces and coordinated voice operation of
+those interfaces remain future work. Native mobile application delivery is also
+outside the currently served static-site contract; see
+[Deployables](../operate/deployables.md) for its exact boundaries.
 
-- One repo per client from the project template
-- Turn packs on or off per instance
-- Hosted vs self-hosted client clusters
+Follow [GitHub issues](https://github.com/znasllc-io/memql/issues) and the release
+notes for changes. Historical walkthroughs remain in the [proving log](proving.md);
+they describe what was observed at the recorded commit, not the current interface.

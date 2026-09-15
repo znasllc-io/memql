@@ -514,7 +514,8 @@ indistinguishable from "this plan has no workspace".
 
 ### 11.3 Where to look
 
-`/fleet/workbenches` in the portal lists the workbench replicas and the
-workspaces living on each, live and released, with the release reason spelled
-out. A cluster owner can widen it to every workspace in the cluster. See
+**MemQL OS → Fleet → Workbenches** lists workbench replicas and the caller's
+workspaces, with a control to include released workspaces and their release
+reasons. This surface is caller-scoped; it does not offer a cluster-wide
+workspace switch. See
 [memql-os.md](memql-os.md).

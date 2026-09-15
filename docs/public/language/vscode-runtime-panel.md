@@ -28,8 +28,12 @@ leaves to a human.
 - A cluster in `~/.memql/clusters.yaml` with an endpoint and an
   identity-issued JWT access token. A Personal Access Token does not work
   here and cannot -- see [Authentication](#authentication) below. If there is
-  no cluster yet, the **+** installs one (see
+  no cluster yet, the **+** opens the add-cluster flow, which offers local installation (see
   [Installing a local cluster](#installing-a-local-cluster)).
+
+For normal setup, use **Add Cluster** and **Sign In**; the editor discovers
+endpoints and obtains tokens for you. The registry/token details below are
+reference for troubleshooting and migration, not prerequisites you must hand-edit.
 
 ## Clusters
 
