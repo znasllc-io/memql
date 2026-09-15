@@ -1140,6 +1140,10 @@ These spellings are gone:
 - **Step-result reads.** `steps.decide.result` and `decide.result` read
   a step's record; a statement's name is its value, so write `decide`.
   `steps.<id>` is refused at parse.
+- **The step bodies' accessors.** `step("decide")`, `input()`, `item()`
+  and `index()` are refused at parse (`body_accessor_retired`): a
+  statement's name is its value, an argument is `args.<name>`, and a loop
+  names its element, `for x in s`, and has no index.
 - **A bare argument.** `folderId` for `args.folderId` (G2, memql#2364)
   is refused (`body_unknown_name`, whose hint says `args.folderId`): an
   argument reads the same way in every position, and a bare name is a

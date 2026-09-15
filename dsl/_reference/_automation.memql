@@ -321,6 +321,10 @@ automation referenceRouteRequest {
 //       - `partition="*"` on @trigger (trigger_partition_retired) -> delete it
 //       - `@schedule(cron="...")` (trigger_schedule_synonym_retired)
 //                                          -> `@trigger(schedule="...")`
+//     The step bodies' accessors are refused at parse the same way
+//     (body_accessor_retired), with no rewrite: `step("x")` -> `x`,
+//     `input()` -> `args.<name>`, `item()` / `index()` -> the loop's own
+//     name, `for x in s`.
 //
 // See `_logic.memql` for pure decisions and `_action.memql` for the
 // external-capability construct each `action` statement calls.

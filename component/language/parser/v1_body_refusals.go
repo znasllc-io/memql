@@ -29,6 +29,7 @@ const (
 	codeBodyForRangeRetired          = "body_for_range_retired"
 	codeBodyConditionalAssignRetired = "body_conditional_assign_retired"
 	codeBodyPublishEventRetired      = "body_publish_event_retired"
+	codeBodyAccessorRetired          = "body_accessor_retired"
 	codeBodyCallKindMissing          = "body_call_kind_missing"
 	codeBodyPositionalArgument       = "body_positional_argument"
 	codeBodyCallInExpression         = "body_call_in_expression"
@@ -53,7 +54,8 @@ func BodyRefusalCodes() []string {
 	out := []string{
 		codeBodyStepRetired, codeBodyBlockRetired, codeBodyTerseRetired,
 		codeBodyStepsReferenceRetired, codeBodyForEachRetired, codeBodyForRangeRetired,
-		codeBodyConditionalAssignRetired, codeBodyPublishEventRetired, codeBodyCallKindMissing,
+		codeBodyConditionalAssignRetired, codeBodyPublishEventRetired, codeBodyAccessorRetired,
+		codeBodyCallKindMissing,
 		codeBodyPositionalArgument, codeBodyCallInExpression, codeBodyOneStatementPerLine,
 		codeBodyElsePlacement, codeBodyRetryPlacement, codeBodyOnErrorPlacement,
 		codeBodySurfacePlacement, codeBodyClauseOrder, codeBodyDefaultClause,

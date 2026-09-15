@@ -178,9 +178,8 @@ func (s *Service) completeExpression(ctx CursorContext, source string, line, col
 		})
 	}
 
-	// 3. The reserved roots this position evaluates with -- in a statement body
-	// the load gate's (compiler.IsBodyRoot), which retire the step graph's
-	// steps, item, index and input.
+	// 3. The reserved roots this position evaluates with -- in a statement body,
+	// those the load gate admits (compiler.IsBodyRoot).
 	for _, r := range positionRoots[pos] {
 		if seen[r] || (statements && !compiler.IsBodyRoot(ctx.Enclosing.Keyword, r)) {
 			continue
@@ -576,10 +575,6 @@ var rootDefs = map[string]rootDef{
 	"now":    {"the evaluation clock", "The RFC 3339 timestamp captured when evaluation began.", "now"},
 	"config": {"allow-listed configuration", "Configuration values the engine exposes to the language.", "config."},
 	"event":  {"the triggering event", "The event envelope: topic, kind, payload, actor, timestamp.", "event."},
-	"steps":  {"earlier step results", "The results of the steps this run has already taken.", "steps."},
-	"item":   {"the loop element", "The element of the enclosing forEach.", "item"},
-	"index":  {"the loop index", "The position of the element in the enclosing forEach.", "index"},
-	"input":  {"the automation input", "The rows the automation's input query loaded.", "input"},
 }
 
 // rootDefAt is a root's completion entry at a position. A trigger filter has

@@ -427,32 +427,6 @@ type VarRefExpr struct {
 func (*VarRefExpr) node()           {}
 func (*VarRefExpr) expressionNode() {}
 
-// StepRefExpr references a previous step's result: step("id")
-type StepRefExpr struct {
-	StepId string
-}
-
-func (*StepRefExpr) node()           {}
-func (*StepRefExpr) expressionNode() {}
-
-// InputRefExpr references the automation input: input()
-type InputRefExpr struct{}
-
-func (*InputRefExpr) node()           {}
-func (*InputRefExpr) expressionNode() {}
-
-// ItemRefExpr references the current forEach item: item()
-type ItemRefExpr struct{}
-
-func (*ItemRefExpr) node()           {}
-func (*ItemRefExpr) expressionNode() {}
-
-// IndexRefExpr references the current forEach index: index()
-type IndexRefExpr struct{}
-
-func (*IndexRefExpr) node()           {}
-func (*IndexRefExpr) expressionNode() {}
-
 // EventRefExpr references the trigger event: event()
 type EventRefExpr struct{}
 

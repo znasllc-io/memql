@@ -613,6 +613,8 @@ func (p *Parser) parseV1Name() (v1Expr, error) {
 // query (core-builtins ADR §2.3). Without them an in-process position -- a
 // logic statement, an if-condition, a step argument -- would read each as a
 // call to a function nothing defines, and the migration hint would be gone.
+// The step bodies' accessors -- `step("x")`, `input()`, `item()`, `index()`
+// -- are refused the same way, by their shape, with body_accessor_retired.
 func (p *Parser) parseV1FunctionCall() (v1Expr, error) {
 	nameTok := p.v1Take()
 	name := nameTok.Literal
@@ -641,6 +643,16 @@ func (p *Parser) parseV1FunctionCall() (v1Expr, error) {
 	args, named, closeTok, err := p.parseV1CallArgs(name, "", true)
 	if err != nil {
 		return v1Expr{}, err
+	}
+	if isRetiredBodyAccessorCall(lower, args, named) {
+		spelling := "`" + name + "()`"
+		instead := retiredBodyAccessors[lower]
+		if lower == "step" {
+			id := args[0].(*ast.LiteralExpr).Value.(string)
+			spelling = "`" + name + "(\"" + id + "\")`"
+			instead = "a statement's name is its value, so write `" + id + "`"
+		}
+		return v1Expr{}, bodyRefuse(nameTok, codeBodyAccessorRetired, "%s is retired in edition 2026: %s", spelling, instead)
 	}
 	// `contains` is two things by shape: with a lambda (and an optional
 	// leading label) it is the graph traversal, which stays; with two plain

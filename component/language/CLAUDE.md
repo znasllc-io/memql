@@ -87,7 +87,9 @@ terse `=> logic` header, `steps.<id>` reads, `forEach`, `publishEvent(...)`,
 a call with no kind, the argument pun, `partition=` on `@trigger` and the
 `@schedule` annotation -- are refused by the statement parser, each by name
 with a code (`parser/v1_body_refusals.go`) and `memqlmigrate --rewrite=bodies`
-as the fix (`component/language/bodymigrate`).
+as the fix (`component/language/bodymigrate`). The step bodies' accessors,
+`step("x")`, `input()`, `item()` and `index()`, are refused by name as well
+(`body_accessor_retired`), with no rewrite.
 
 The retired author-side forms (`func (Query) NAME(ctx any)`, the `@use*`
 annotation family, `@concepts(...)`, `@input { ... }`, `include` in a shape

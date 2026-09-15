@@ -59,6 +59,12 @@
       "verdict": "refuse_parse",
       "code": "body_terse_retired",
       "message": "the terse `automation terseHeader @trigger(...) => logic L` form is retired in edition 2026: write @trigger(...) above `automation terseHeader { logic L(event: event) }`"
+    },
+    {
+      "file": "accessor.memql",
+      "verdict": "refuse_parse",
+      "code": "body_accessor_retired",
+      "message": "`item()` is retired in edition 2026: a loop names its element, `for x in <source>`, and reads `x`"
     }
   ]
 }

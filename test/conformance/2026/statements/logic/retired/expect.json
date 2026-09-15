@@ -35,6 +35,12 @@
       "verdict": "refuse_parse",
       "code": "body_block_retired",
       "message": "`body { }` is retired in edition 2026: a logic's statements follow its args block directly"
+    },
+    {
+      "file": "accessor.memql",
+      "verdict": "refuse_parse",
+      "code": "body_accessor_retired",
+      "message": "`step(\"first\")` is retired in edition 2026: a statement's name is its value, so write `first`"
     }
   ]
 }

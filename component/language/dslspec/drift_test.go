@@ -833,18 +833,12 @@ func TestParserRecognisedCallablesAreAllClassified(t *testing.T) {
 	}
 }
 
-// TestBuiltinAccessorsAreParserAccessors asserts every parser accessor (plus the
-// documented `index` exception) is modelled in dslspec -- as a
-// CategoryBuiltinAccessor entry, or as the catalog function it also is (var and
-// error: a v1 expression calls them as functions) -- and that dslspec's
-// accessors are all parser accessors. `index` is special-cased in
-// parseFunctionCall (the no-arg form is the loop accessor, index(arr,i) reads an
-// array element) so it is NOT in callableParsers / CallableAccessors, but Sense
-// still offers it as a call -- hence the explicit exception.
+// TestBuiltinAccessorsAreParserAccessors asserts every parser accessor is
+// modelled in dslspec -- as a CategoryBuiltinAccessor entry, or as the catalog
+// function it also is (var and error: a v1 expression calls them as
+// functions) -- and that dslspec's accessors are all parser accessors.
 func TestBuiltinAccessorsAreParserAccessors(t *testing.T) {
-	const indexException = "index"
-
-	parserAcc := map[string]bool{indexException: true}
+	parserAcc := map[string]bool{}
 	for _, n := range parser.CallableAccessors {
 		parserAcc[n] = true
 	}
@@ -859,7 +853,7 @@ func TestBuiltinAccessorsAreParserAccessors(t *testing.T) {
 
 	for n := range parserAcc {
 		if !specAcc[n] && !catalog[n] {
-			t.Errorf("DRIFT: parser recognises accessor %q (or the index exception) but dslspec models it "+
+			t.Errorf("DRIFT: parser recognises accessor %q but dslspec models it "+
 				"neither as a CategoryBuiltinAccessor entry nor as a catalog function -- add it in "+
 				"component/language/dslspec/builtins.go", n)
 		}
@@ -872,8 +866,8 @@ func TestBuiltinAccessorsAreParserAccessors(t *testing.T) {
 	for n := range specAcc {
 		if !parserAcc[n] {
 			t.Errorf("DRIFT: dslspec.Builtins marks %q CategoryBuiltinAccessor but the parser does not "+
-				"recognise it as an accessor (not in parser.CallableAccessors, and not the index "+
-				"exception) -- re-check the category or wire callable.go", n)
+				"recognise it as an accessor (not in parser.CallableAccessors) -- re-check the "+
+				"category or wire callable.go", n)
 		}
 	}
 }

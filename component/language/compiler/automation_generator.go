@@ -458,18 +458,6 @@ func (c *Compiler) expressionToString(expr parser.ExpressionNode) string {
 	case *parser.VarRefExpr:
 		return "var(" + parser.QuoteString(e.Name) + ")"
 
-	case *parser.StepRefExpr:
-		return "step(" + parser.QuoteString(e.StepId) + ")"
-
-	case *parser.InputRefExpr:
-		return "input()"
-
-	case *parser.ItemRefExpr:
-		return "item()"
-
-	case *parser.IndexRefExpr:
-		return "index()"
-
 	case *parser.EventRefExpr:
 		return "event()"
 

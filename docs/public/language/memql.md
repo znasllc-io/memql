@@ -1892,6 +1892,8 @@ These forms are refused at parse, each refusal naming its replacement, and `memq
 | `@schedule(cron="<cron>")` | `@trigger(schedule="<cron>")` |
 | `mutate <Concept> <name> { ... }` | `mutation <Concept> <name> { ... }` |
 
+The step bodies' accessors are refused at parse too (`body_accessor_retired`), and the rewrite leaves them to the author: `step("n")` is `n`, `input()` is `args.<name>`, and `item()` and `index()` are the loop's own name, `for x in s` -- a loop has no index.
+
 ## Logic
 
 A logic is a procedure an automation or another logic calls. It reads its arguments as `args.<name>`, runs its [statements](#bodies) in order, and ends with `return`:

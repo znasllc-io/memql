@@ -4207,9 +4207,10 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 		return p.parseCollectionMethodCall(recvPath, method)
 	}
 
-	// index() with no args = the retired loop-index accessor (refused at load); index(arr, i) = array element (general parsing)
+	// index() with no args is the retired loop-index accessor; index(arr, i)
+	// reads an array element (general parsing).
 	if lname == "index" && p.check(TokenParenClose) {
-		return p.parseIndexAccessor()
+		return nil, retiredBodyAccessorError(p, "index")
 	}
 
 	// shape() has two forms: shape(expr, template) and shape({ source,
@@ -5471,21 +5472,6 @@ func (p *Parser) parseVarAccessor() (ExpressionNode, error) {
 	return &VarRefExpr{Name: varName}, nil
 }
 
-// parseStepAccessor parses step("id") - step result reference.
-func (p *Parser) parseStepAccessor() (ExpressionNode, error) {
-	if !p.check(TokenString) {
-		return nil, newParseErrorf(&p.current, "step() requires a string argument, got %q", p.current.Literal)
-	}
-	stepId := p.current.Literal
-	p.advance()
-
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-
-	return &StepRefExpr{StepId: stepId}, nil
-}
-
 // parseFieldAccessor parses field(obj, "key") - field access on object.
 func (p *Parser) parseFieldAccessor() (ExpressionNode, error) {
 	// First argument: expression
@@ -5511,32 +5497,6 @@ func (p *Parser) parseFieldAccessor() (ExpressionNode, error) {
 	}
 
 	return &FieldRefExpr{Object: obj, Key: key}, nil
-}
-
-// parseInputAccessor parses input() - automation input reference.
-func (p *Parser) parseInputAccessor() (ExpressionNode, error) {
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-	return &InputRefExpr{}, nil
-}
-
-// parseItemAccessor parses item() -- the retired loop-item accessor, refused
-// at load in every position.
-func (p *Parser) parseItemAccessor() (ExpressionNode, error) {
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-	return &ItemRefExpr{}, nil
-}
-
-// parseIndexAccessor parses index() -- the retired loop-index accessor,
-// refused at load in every position.
-func (p *Parser) parseIndexAccessor() (ExpressionNode, error) {
-	if err := p.expect(TokenParenClose); err != nil {
-		return nil, err
-	}
-	return &IndexRefExpr{}, nil
 }
 
 // parseEventAccessor parses event() - trigger event reference.

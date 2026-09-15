@@ -556,6 +556,32 @@ automation probe {
 automation probe {
   logic probe(x: 1)
 }`},
+	// The step bodies' accessors parsed as calls to functions nothing
+	// defines, and were refused only at load; they are refused by name now.
+	{"logic: the step(\"x\") accessor (body_accessor_retired)", false, `logic probe {
+  first := query activeThings(status: "active")
+  return step("first")
+}`},
+	{"automation: the input() accessor (body_accessor_retired)", false, `automation probe {
+  mutation touchThing(id: input())
+}`},
+	{"automation: the item() accessor (body_accessor_retired)", false, `automation probe {
+  args {
+    items []object!
+  }
+  for x in args.items {
+    mutation touchThing(id: item())
+  }
+}`},
+	{"logic: the index() accessor (body_accessor_retired)", false, `logic probe {
+  args {
+    items []object!
+  }
+  for x in args.items {
+    n := index()
+  }
+  return 0
+}`},
 
 	// NOT in this corpus: the retired procedural `func (Query) name(ctx any)`
 	// author-side form. It is refused, but NOT by NormaliseAll + ParseFile --

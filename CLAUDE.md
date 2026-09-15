@@ -1309,7 +1309,9 @@ see one in an old diff:
   the `@schedule` annotation (`@trigger(schedule=...)` is the one spelling),
   and `mutate` as the mutation declaration keyword (it is `mutation`, D13).
   `memqlmigrate --rewrite=bodies` rewrites each; the language reference lists
-  them ([memql.md](docs/public/language/memql.md#retired-forms)).
+  them ([memql.md](docs/public/language/memql.md#retired-forms)). The step
+  bodies' accessors -- `step("x")`, `input()`, `item()`, `index()` -- are
+  refused too, and have no rewrite: no tree wrote one in a statement body.
 
 Only `dsl/_reference/*.memql` still shows these, deliberately, as
 don't-do-this skeletons.

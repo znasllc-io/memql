@@ -50,10 +50,6 @@ type (
 	LiteralExpr           = ast.LiteralExpr
 	AIExpr                = ast.AIExpr
 	VarRefExpr            = ast.VarRefExpr
-	StepRefExpr           = ast.StepRefExpr
-	InputRefExpr          = ast.InputRefExpr
-	ItemRefExpr           = ast.ItemRefExpr
-	IndexRefExpr          = ast.IndexRefExpr
 	EventRefExpr          = ast.EventRefExpr
 	CallerRefExpr         = ast.CallerRefExpr
 	ErrorRefExpr          = ast.ErrorRefExpr

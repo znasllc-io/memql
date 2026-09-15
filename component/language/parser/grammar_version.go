@@ -218,7 +218,11 @@ package parser
 //     `@trigger(schedule=...)` is the one spelling;
 //   - the declaration verb `mutate` [construct_unknown]: a mutation is
 //     declared with the word a call spells, `mutation <Concept> <name> {`
-//     (D13).
+//     (D13);
+//   - the step bodies' accessors, `step("x")`, `input()`, `item()` and
+//     `index()` [body_accessor_retired]: they parsed as calls to functions
+//     nothing defines and were refused only at load. No tree wrote one in a
+//     statement body, so the migrator has no rewrite for them.
 //
 // WIDENINGS. The statements themselves: `if` / `else if` / `else`, `for x in
 // <source> if <filter>`, `switch` with literal `case` labels, `parallel`
@@ -240,7 +244,7 @@ import (
 // The digest suffix is not decoration: TestGrammarVersionCarriesTheSurfaceDigest
 // recomputes it and requires this string to end with it, which is what makes a
 // grammar move impossible to land without editing this line (memql#3089).
-const GrammarVersion = "2026.09-dsl-v1-bodies-568b89f9"
+const GrammarVersion = "2026.09-dsl-v1-bodies-8fef9e94"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test

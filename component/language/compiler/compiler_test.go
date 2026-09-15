@@ -449,26 +449,6 @@ func (Query) getDefault() {
 	}
 }
 
-func TestCompiler_ExpressionToString_StepRef(t *testing.T) {
-	source := `
-func (Query) checkResult() {
-	step("checkUser")
-}`
-
-	result, err := CompileSource(source)
-	if err != nil {
-		t.Fatalf("CompileSource error: %v", err)
-	}
-
-	if len(result.Functions) != 1 {
-		t.Fatalf("Expected 1 function, got %d", len(result.Functions))
-	}
-
-	if !strings.Contains(result.Functions[0].Query, "step(") {
-		t.Errorf("Expected query to contain 'step(', got %q", result.Functions[0].Query)
-	}
-}
-
 func TestCompiler_ExpressionToString_ConcatExpr(t *testing.T) {
 	source := `
 func (Query) makeId() {
@@ -493,7 +473,7 @@ func (Query) makeId() {
 func TestCompiler_ExpressionToString_CoalesceExpr(t *testing.T) {
 	source := `
 func (Query) fallback() {
-	coalesce(step("create"), step("existing"))
+	coalesce(args.create, args.existing)
 }`
 
 	result, err := CompileSource(source)
@@ -556,7 +536,7 @@ func (Query) conditional() {
 func TestCompiler_ExpressionToString_FieldRef(t *testing.T) {
 	source := `
 func (Query) getField() {
-	field(item(), "name")
+	field(args.row, "name")
 }`
 
 	result, err := CompileSource(source)
@@ -572,8 +552,8 @@ func (Query) getField() {
 	if !strings.Contains(query, "field(") {
 		t.Errorf("Expected query to contain 'field(', got %q", query)
 	}
-	if !strings.Contains(query, "item()") {
-		t.Errorf("Expected query to contain 'item()', got %q", query)
+	if !strings.Contains(query, `arg("row")`) {
+		t.Errorf("Expected query to contain 'arg(\"row\")', got %q", query)
 	}
 }
 
@@ -584,9 +564,6 @@ func TestCompiler_ExpressionToString_NoArgAccessors(t *testing.T) {
 		expected string
 	}{
 		{"now", `func (Query) ts() { now }`, "timestamp()"},
-		{"input", `func (Query) inp() { input() }`, "input()"},
-		{"item", `func (Query) it() { item() }`, "item()"},
-		{"index", `func (Query) idx() { index() }`, "index()"},
 		{"event", `func (Query) ev() { event() }`, "event()"},
 		{"error", `func (Query) err() { error() }`, "error()"},
 	}

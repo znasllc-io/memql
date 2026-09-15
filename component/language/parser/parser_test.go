@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
@@ -473,31 +474,6 @@ func TestParser_VarAccessor(t *testing.T) {
 	}
 }
 
-func TestParser_StepAccessor(t *testing.T) {
-	input := `step("checkUser")`
-
-	lexer := NewLexer(input)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Lexer error: %v", err)
-	}
-
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parser error: %v", err)
-	}
-
-	stepRef, ok := ast.(*StepRefExpr)
-	if !ok {
-		t.Fatalf("Expected StepRefExpr, got %T", ast)
-	}
-
-	if stepRef.StepId != "checkUser" {
-		t.Errorf("Expected step ID 'checkUser', got %q", stepRef.StepId)
-	}
-}
-
 func TestParser_ArgAccessor(t *testing.T) {
 	input := `args.authorizerId`
 
@@ -565,7 +541,7 @@ func TestParser_ConcatFunction(t *testing.T) {
 }
 
 func TestParser_CoalesceFunction(t *testing.T) {
-	input := `coalesce(step("create"), step("existing"))`
+	input := `coalesce(args.create, args.existing)`
 
 	lexer := NewLexer(input)
 	tokens, err := lexer.Tokenize()
@@ -637,8 +613,8 @@ func TestParser_FirstLastFunctions(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{`first(step("users"))`, "first"},
-		{`last(step("users"))`, "last"},
+		{`first(args.users)`, "first"},
+		{`last(args.users)`, "last"},
 	}
 
 	for _, tt := range tests {
@@ -708,9 +684,6 @@ func TestParser_NoArgAccessors(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{`input()`, "input"},
-		{`item()`, "item"},
-		{`index()`, "index"},
 		{`event()`, "event"},
 		{`error()`, "error"},
 	}
@@ -730,18 +703,6 @@ func TestParser_NoArgAccessors(t *testing.T) {
 			}
 
 			switch tt.expected {
-			case "input":
-				if _, ok := ast.(*InputRefExpr); !ok {
-					t.Fatalf("Expected InputRefExpr, got %T", ast)
-				}
-			case "item":
-				if _, ok := ast.(*ItemRefExpr); !ok {
-					t.Fatalf("Expected ItemRefExpr, got %T", ast)
-				}
-			case "index":
-				if _, ok := ast.(*IndexRefExpr); !ok {
-					t.Fatalf("Expected IndexRefExpr, got %T", ast)
-				}
 			case "event":
 				if _, ok := ast.(*EventRefExpr); !ok {
 					t.Fatalf("Expected EventRefExpr, got %T", ast)
@@ -755,8 +716,27 @@ func TestParser_NoArgAccessors(t *testing.T) {
 	}
 }
 
+// The step-block bodies' accessors are refused by name, each naming what
+// replaced it (epic memql#5370).
+func TestParser_RetiredBodyAccessors(t *testing.T) {
+	for input, want := range map[string]string{
+		`step("checkUser")`: "`step()` is retired in edition 2026: a statement's name is its value",
+		`input()`:           "`input()` is retired in edition 2026: an automation declares its arguments",
+		`item()`:            "`item()` is retired in edition 2026: a loop names its element",
+		`index()`:           "`index()` is retired in edition 2026: a loop names its element",
+	} {
+		tokens, err := NewLexer(input).Tokenize()
+		if err != nil {
+			t.Fatalf("%s: lexer error: %v", input, err)
+		}
+		if _, err := NewParser(tokens).Parse(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: want the refusal %q, got %v", input, want, err)
+		}
+	}
+}
+
 func TestParser_FieldAccessor(t *testing.T) {
-	input := `field(item(), "name")`
+	input := `field(args.row, "name")`
 
 	lexer := NewLexer(input)
 	tokens, err := lexer.Tokenize()
@@ -779,9 +759,8 @@ func TestParser_FieldAccessor(t *testing.T) {
 		t.Errorf("Expected key 'name', got %q", fieldRef.Key)
 	}
 
-	_, ok = fieldRef.Object.(*ItemRefExpr)
-	if !ok {
-		t.Errorf("Expected object to be ItemRefExpr, got %T", fieldRef.Object)
+	if fieldRef.Object == nil {
+		t.Error("Expected the field accessor's object to be parsed")
 	}
 }
 

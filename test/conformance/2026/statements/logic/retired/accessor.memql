@@ -1,0 +1,4 @@
+logic accessorRead {
+  first := logic other()
+  return step("first")
+}

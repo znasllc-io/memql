@@ -5,14 +5,15 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/core/baseparser"
 )
 
 // callable.go is the introspectable, table-driven source of truth for every
 // bare-function name the expression grammar recognises in parseFunctionCall:
 // the editor-callable expression builtins (concat / coalesce / hash / ...),
-// the accessor functions (item / event / step / input / field / index / var /
-// actor / timestamp / now / error), the keyword-functions (case / default),
+// the accessor functions (event / field / var / actor / error), the
+// keyword-functions (case / default),
 // the query directives (paginate / sort / select / asOf / withDepth / shape /
 // count), and the relationship wrapper functions (parentOf / childOf / ...).
 //
@@ -42,11 +43,9 @@ const (
 	// the names dslspec.Builtins models and Sense offers in completion.
 	CallableBuiltin CallableKind = iota
 	// CallableAccessor is a context accessor whose name is a reserved engine
-	// identifier or a loop/step/automation accessor (item / event / step /
-	// input / field / index / var / actor / timestamp / now / error). The
-	// reserved ones (now / actor / ...) are modelled by dslspec's keywords();
-	// the rest are loop/automation accessors. Either way they are NOT
-	// expression builtins.
+	// identifier or an automation accessor (event / field / var / actor /
+	// error). The reserved ones (actor / ...) are modelled by dslspec's
+	// keywords(). Either way they are NOT expression builtins.
 	CallableAccessor
 	// CallableKeywordFunc is a keyword-function: case() / default(). These read
 	// like control-flow inside an expression, not as a regular builtin call.
@@ -93,18 +92,22 @@ type callableEntry struct {
 //     expression-first form and the object form is taken inline.
 func buildCallableParsers() map[string]callableEntry {
 	return map[string]callableEntry{
-		// --- Accessors (loop / step / automation / reserved-identifier) ---
+		// --- Accessors (automation / reserved-identifier) ---
 		"var":   {CallableAccessor, (*Parser).parseVarAccessor},
-		"step":  {CallableAccessor, (*Parser).parseStepAccessor},
 		"field": {CallableAccessor, (*Parser).parseFieldAccessor},
-		"input": {CallableAccessor, (*Parser).parseInputAccessor},
-		"item":  {CallableAccessor, (*Parser).parseItemAccessor},
 		"event": {CallableAccessor, (*Parser).parseEventAccessor},
 		"actor": {CallableAccessor, (*Parser).parseActorAccessor},
 		"error": {CallableAccessor, (*Parser).parseErrorAccessor},
 
 		// --- Retired (recognised only to emit a migration hint) ---
 		"caller": {CallableRetired, (*Parser).parseCallerRetired},
+		// The statement bodies' accessors (epic memql#5370): a statement's
+		// value is read by its name, an argument by args.x, and a loop names
+		// its element. index() with arguments reads an array element and is
+		// parsed in parseFunctionCall; only its no-argument form is retired.
+		"step":  {CallableRetired, parseRetiredBodyAccessor("step")},
+		"input": {CallableRetired, parseRetiredBodyAccessor("input")},
+		"item":  {CallableRetired, parseRetiredBodyAccessor("item")},
 		// now() / timestamp() call-forms retired in favour of the bare
 		// reserved identifier `now` (epic #2298 / #2301). `now` is the one
 		// clock primitive; it is parsed directly to TimestampExprFunc in
@@ -241,6 +244,54 @@ func parseRetiredExprBuiltin(name string) func(p *Parser) (ExpressionNode, error
 	}
 }
 
+// retiredBodyAccessors maps each accessor of the step-block bodies to what
+// replaced it in a body written in statements. Both grammars refuse them: the
+// internal query form here, and an authored body in parseV1FunctionCall, with
+// the code body_accessor_retired. memqlmigrate has no rewrite for them -- no
+// tree wrote one in a statement body.
+var retiredBodyAccessors = map[string]string{
+	"step":  "a statement's name is its value: `x := <call>`, then read `x`",
+	"input": "an automation declares its arguments in `args { }` and reads `args.<name>`",
+	"item":  "a loop names its element, `for x in <source>`, and reads `x`",
+	"index": "a loop names its element, `for x in <source>`, and has no index",
+}
+
+// parseRetiredBodyAccessor is the dispatch target for a retired accessor of
+// the step-block bodies.
+func parseRetiredBodyAccessor(name string) func(p *Parser) (ExpressionNode, error) {
+	return func(p *Parser) (ExpressionNode, error) {
+		return nil, retiredBodyAccessorError(p, name)
+	}
+}
+
+// retiredBodyAccessorError refuses a retired accessor at the current token.
+func retiredBodyAccessorError(p *Parser, name string) error {
+	return newParseErrorf(&p.current, "`%s()` is retired in edition 2026: %s", name, retiredBodyAccessors[name])
+}
+
+// isRetiredBodyAccessorCall reports whether a parsed bare call is one of the
+// step bodies' accessors in the shape it was written: `step("<id>")`, and
+// `input()`, `item()` or `index()` with no arguments. Any other shape is an
+// ordinary call -- `index(list, i)` reads an element -- and the engine
+// resolves its name against the position.
+func isRetiredBodyAccessorCall(lower string, args []ast.ExpressionNode, named []ast.NamedArg) bool {
+	if _, ok := retiredBodyAccessors[lower]; !ok || len(named) > 0 {
+		return false
+	}
+	if lower == "step" {
+		if len(args) != 1 {
+			return false
+		}
+		lit, ok := args[0].(*ast.LiteralExpr)
+		if !ok {
+			return false
+		}
+		_, isString := lit.Value.(string)
+		return isString
+	}
+	return len(args) == 0
+}
+
 // parseClockCallFormRetired is the dispatch target for the retired now() /
 // timestamp() call-forms (epic #2298 / #2301). The clock is one primitive
 // spelled as the bare reserved identifier `now`; the call-forms are gone from
@@ -255,8 +306,8 @@ func (p *Parser) parseClockCallFormRetired() (ExpressionNode, error) {
 // names (CallableBuiltin kind) derived from callableParsers. It is the
 // authoritative, introspectable list dslspec.Builtins is pinned against by the
 // #2155 drift test, so the editor's builtin surface cannot drift from the
-// grammar. It deliberately EXCLUDES accessors (item / event / now / actor /
-// ...), keyword-functions (case / default), query directives (sort / shape /
+// grammar. It deliberately EXCLUDES accessors (event / field / actor / ...),
+// keyword-functions (case / default), query directives (sort / shape /
 // count / ...), relationship wrappers (parentOf / ...), and the retired
 // caller() -- those are routed to the drift test's documented allow-list.
 //
