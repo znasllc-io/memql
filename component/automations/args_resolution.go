@@ -69,7 +69,7 @@ func v1FreeNames(n ast.ExpressionNode, bound map[string]bool, visit func(*ast.Id
 			visit(e)
 		}
 	case *ast.LambdaExpr:
-		inner := make(map[string]bool, len(bound)+len(e.Params))
+		inner := make(map[string]bool, len(bound))
 		for k := range bound {
 			inner[k] = true
 		}

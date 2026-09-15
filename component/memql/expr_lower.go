@@ -446,7 +446,7 @@ func (l *lowerer) dependsIn(n ast.ExpressionNode, local map[string]bool) bool {
 		if e == nil {
 			return false
 		}
-		inner := make(map[string]bool, len(local)+len(e.Params))
+		inner := make(map[string]bool, len(local))
 		for k, v := range local {
 			inner[k] = v
 		}
@@ -1740,7 +1740,7 @@ func (l *lowerer) walkPlanConstant(n ast.ExpressionNode, local map[string]bool, 
 			l.walkPlanConstant(a, local, errp)
 		}
 	case *ast.LambdaExpr:
-		inner := make(map[string]bool, len(local)+len(e.Params))
+		inner := make(map[string]bool, len(local))
 		for k, v := range local {
 			inner[k] = v
 		}

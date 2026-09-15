@@ -833,6 +833,9 @@ func exprPlus(e *ast.BinaryExpr, l, r any) (any, error) {
 	ll, llist := l.([]any)
 	rl, rlist := r.([]any)
 	if llist && rlist {
+		if len(ll) > math.MaxInt-len(rl) {
+			return nil, exprErr(e, "arithmetic_overflow", "joined list is too large")
+		}
 		out := make([]any, 0, len(ll)+len(rl))
 		out = append(out, ll...)
 		return append(out, rl...), nil

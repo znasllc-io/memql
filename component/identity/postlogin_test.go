@@ -38,6 +38,9 @@ func TestSafeRelativeRedirectRejectsEverythingElse(t *testing.T) {
 		"crlf header split":    "/device\r\nLocation: https://evil.test",
 		"newline":              "/device\nSet-Cookie: x=y",
 		"null byte":            "/device\x00",
+		"tab before host":      "/\t/evil.test",
+		"carriage return host": "/\r/evil.test",
+		"backslash pair":       "/\\\\evil.test",
 		"whitespace then host": "  https://evil.test",
 	}
 	for name, in := range cases {

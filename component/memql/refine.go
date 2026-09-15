@@ -258,7 +258,7 @@ func validateRefineIn(fn *Function, refine *RefineExpression, lookup func(string
 				walk(a.Value, local)
 			}
 		case *ast.LambdaExpr:
-			inner := make(map[string]bool, len(local)+len(x.Params))
+			inner := make(map[string]bool, len(local))
 			for k, v := range local {
 				inner[k] = v
 			}

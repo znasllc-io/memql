@@ -381,7 +381,7 @@ func diffLines(a, b []string) []hunk {
 		return nil
 	}
 	n, m := len(am), len(bm)
-	if n == 0 || m == 0 || n*m > 1<<20 {
+	if n == 0 || m == 0 || n > 1<<20 || m > 1<<20 || n > (1<<20)/m {
 		return []hunk{{p, p + n, p, p + m}}
 	}
 	// lcs[i][j] is the length of the longest common subsequence of am[i:] and
