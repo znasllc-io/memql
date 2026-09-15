@@ -98,6 +98,12 @@ type AuthoredScheduler struct {
 	mu      sync.Mutex
 	cron    *cron.Cron
 	entries map[string]*authoredEntry // keyed by authoredEntryKey(owner, name)
+
+	// shipped caches the tree's automations the static loop check judges a
+	// candidate beside (loop_check.go), loaded on the first activation.
+	shippedMu     sync.Mutex
+	shipped       []*Automation
+	shippedLoaded bool
 }
 
 // NewAuthoredScheduler builds the authored scheduler. Loader, EventBus and Run
@@ -181,6 +187,11 @@ func (s *AuthoredScheduler) Activate(construct *memql.AuthoredConstruct) error {
 	}
 	if automation.Name != construct.Name {
 		return fmt.Errorf("authored scheduler: construct name %q does not match automation name %q in source", construct.Name, automation.Name)
+	}
+	// An authored automation that closes a cycle no @loop covers is refused
+	// here, as the load refuses one in the tree (memql#5381).
+	if err := s.refuseCandidateCycle(automation, origin); err != nil {
+		return err
 	}
 
 	// Replace any prior subscription for this (owner, name) before re-wiring.

@@ -131,6 +131,9 @@ func (a *App) engineAndBus() {
 	a.automationLoader = automations.NewLoader(automations.LoaderOptions{
 		Logger:   nil,
 		Registry: a.registry,
+		// The static loop check reads what each automation writes from the
+		// engine's function registry, loaded by Init above (memql#5381).
+		Functions: a.engine.Functions(),
 	})
 
 	// Strict automation boot (memql#2830). The scheduler loads automations

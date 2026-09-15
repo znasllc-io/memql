@@ -288,6 +288,16 @@ func (l *Loader) loadFromTree(tree fs.FS) ([]*Automation, error) {
 		return out, fmt.Errorf("walk unified DSL tree: %w", err)
 	}
 
+	// The static loop check (memql#5381) over every automation the walk
+	// loaded. REPORT-ONLY for now: its problems are logged, not appended,
+	// until the tree's own cycles are fixed.
+	if l.functions != nil {
+		g, loopProblems := l.checkLoops(out)
+		l.logLoopCheck(g, loopProblems)
+	} else {
+		l.logLoopCheck(nil, nil)
+	}
+
 	// Strict automation boot (memql#2830). Before this gate every compile
 	// error was swallowed by the `continue` above: a malformed automation
 	// was dropped with a WARN and the node booted green, silently missing
@@ -323,7 +333,7 @@ func (l *Loader) loadFromTree(tree fs.FS) ([]*Automation, error) {
 type automationLoadProblem struct {
 	Path  string // automations.memql file in the DSL tree
 	Name  string // automation name (empty for whole-file problems)
-	Phase string // "read" | "terseLowering" | "extract" | "compile"
+	Phase string // "read" | "terseLowering" | "extract" | "compile" | "loops"
 	Err   string
 }
 

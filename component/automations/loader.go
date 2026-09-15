@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/language/ast"
@@ -23,12 +24,20 @@ var inlineOperationCallPattern = regexp.MustCompile(`:=\s*(?:if\s+[^{]+\{\s*)?(q
 type Loader struct {
 	logger   *slog.Logger
 	registry memoryNodes.Registry
+	// functions is what the static loop check walks (loop_check.go), and
+	// loopLogOnce keeps its log to the loader's first load.
+	functions   *memql.FunctionRegistry
+	loopLogOnce sync.Once
 }
 
 // LoaderOptions configures the automation loader.
 type LoaderOptions struct {
 	Logger   *slog.Logger
 	Registry memoryNodes.Registry
+	// Functions is the engine's function registry, from which the static
+	// loop check reads what each automation writes (memql#5381). Without it
+	// the check does not run, and the load logs that it did not.
+	Functions *memql.FunctionRegistry
 }
 
 // NewLoader creates a new automation loader using embedded files.
@@ -41,8 +50,9 @@ func NewLoader(opts LoaderOptions) *Loader {
 	}
 
 	return &Loader{
-		logger:   logger,
-		registry: opts.Registry,
+		logger:    logger,
+		registry:  opts.Registry,
+		functions: opts.Functions,
 	}
 }
 
