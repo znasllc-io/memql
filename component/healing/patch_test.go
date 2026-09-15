@@ -5,6 +5,33 @@ import (
 	"testing"
 )
 
+func TestPatchRejectsRetiredAndMalformedReplacementExpressions(t *testing.T) {
+	for _, replacement := range []string{"$config.X", "$event.payload.X", "$steps.a.result", "args."} {
+		for _, kind := range []PatchKind{PatchRelativizeLiteral, PatchRebindParam} {
+			p := Patch{Kind: kind, Target: "steps.run.function.args.path", Replacement: replacement}
+			if _, err := p.Apply(baseAutomation()); err == nil {
+				t.Errorf("%s accepted replacement %q", kind, replacement)
+			}
+		}
+	}
+}
+
+func TestPatchSelectsNestedStatementByExactID(t *testing.T) {
+	base := map[string]any{"steps": []any{map[string]any{
+		"id": "for_rows", "type": "forEach", "forEach": map[string]any{
+			"do": baseAutomation()["steps"],
+		},
+	}}}
+	p := Patch{Kind: PatchRebindParam, Target: "steps.for_rows.forEach.do.run.function.args.path", Replacement: "args.path"}
+	if _, err := p.Apply(base); err != nil {
+		t.Fatal(err)
+	}
+	p.Target = "steps.for_rows.forEach.do.RUN.function.args.path"
+	if _, err := p.Apply(base); err == nil {
+		t.Fatal("a different case selected the statement")
+	}
+}
+
 // Epic 4 / memql#2141: the typed-patch model.
 //
 // Each of the four patch kinds applies to a base construct to produce a
@@ -17,16 +44,16 @@ func baseAutomation() map[string]any {
 	return map[string]any{
 		"name": "deployStaging",
 		"preconditions": []any{
-			map[string]any{"id": "envIsStaging", "check": `$config.MEMQL_ENV == "staging"`},
+			map[string]any{"id": "envIsStaging", "check": `config.MEMQL_ENV == "staging"`},
 		},
 		"steps": []any{
 			map[string]any{
 				"id":   "run",
 				"type": "function",
-				"input": map[string]any{
+				"function": map[string]any{"name": "run", "kind": "builtin", "args": map[string]any{
 					"path": "/Users/alice/engine/digest",
-					"from": "$steps.fetch.result.id",
-				},
+					"from": map[string]any{"$expr": "fetch.id"},
+				}},
 			},
 		},
 	}
@@ -124,17 +151,17 @@ func TestApply_RelativizeLiteral(t *testing.T) {
 	base := baseAutomation()
 	p := &Patch{
 		Kind:        PatchRelativizeLiteral,
-		Target:      "steps.run.input.path",
+		Target:      "steps.run.function.args.path",
 		Literal:     "/Users/alice/engine/digest",
-		Replacement: "$config.MEMQL_ENGINE_DIGEST",
+		Replacement: "config.MEMQL_ENGINE_DIGEST",
 	}
 	out, err := p.Apply(base)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	step, _ := findStepById(out["steps"], "run")
-	input, _ := step["input"].(map[string]any)
-	if input["path"] != "$config.MEMQL_ENGINE_DIGEST" {
+	input, _ := step["function"].(map[string]any)["args"].(map[string]any)
+	if input["path"].(map[string]any)["$expr"] != "config.MEMQL_ENGINE_DIGEST" {
 		t.Errorf("literal not relativized: %v", input["path"])
 	}
 }
@@ -143,9 +170,9 @@ func TestApply_RelativizeLiteral_MismatchRejected(t *testing.T) {
 	base := baseAutomation()
 	p := &Patch{
 		Kind:        PatchRelativizeLiteral,
-		Target:      "steps.run.input.path",
+		Target:      "steps.run.function.args.path",
 		Literal:     "/some/other/path", // does not match the current value
-		Replacement: "$config.X",
+		Replacement: "config.X",
 	}
 	if _, err := p.Apply(base); err == nil {
 		t.Fatalf("expected rejection when the named literal does not match the current value")
@@ -154,7 +181,7 @@ func TestApply_RelativizeLiteral_MismatchRejected(t *testing.T) {
 
 func TestApply_RelativizeLiteral_AbsentFieldRejected(t *testing.T) {
 	base := baseAutomation()
-	p := &Patch{Kind: PatchRelativizeLiteral, Target: "steps.run.input.nope", Replacement: "$config.X"}
+	p := &Patch{Kind: PatchRelativizeLiteral, Target: "steps.run.function.args.nope", Replacement: "config.X"}
 	if _, err := p.Apply(base); err == nil {
 		t.Fatalf("expected rejection for relativizing an absent field")
 	}
@@ -166,16 +193,16 @@ func TestApply_RebindParam(t *testing.T) {
 	base := baseAutomation()
 	p := &Patch{
 		Kind:        PatchRebindParam,
-		Target:      "steps.run.input.from",
-		Replacement: "$steps.lookup.result.id",
+		Target:      "steps.run.function.args.from",
+		Replacement: "lookup.id",
 	}
 	out, err := p.Apply(base)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 	step, _ := findStepById(out["steps"], "run")
-	input, _ := step["input"].(map[string]any)
-	if input["from"] != "$steps.lookup.result.id" {
+	input, _ := step["function"].(map[string]any)["args"].(map[string]any)
+	if input["from"].(map[string]any)["$expr"] != "lookup.id" {
 		t.Errorf("param not rebound: %v", input["from"])
 	}
 }
@@ -193,10 +220,10 @@ func TestValidate_RejectsMalformed(t *testing.T) {
 		{"add-precondition no check", &Patch{Kind: PatchAddPrecondition, Precondition: &PatchPrecondition{ID: "x"}}},
 		{"insert-guard no target", &Patch{Kind: PatchInsertGuard, Guard: "x"}},
 		{"insert-guard no guard", &Patch{Kind: PatchInsertGuard, Target: "steps.run"}},
-		{"relativize no target", &Patch{Kind: PatchRelativizeLiteral, Replacement: "$config.X"}},
-		{"relativize no replacement", &Patch{Kind: PatchRelativizeLiteral, Target: "steps.run.input.path"}},
+		{"relativize no target", &Patch{Kind: PatchRelativizeLiteral, Replacement: "config.X"}},
+		{"relativize no replacement", &Patch{Kind: PatchRelativizeLiteral, Target: "steps.run.function.args.path"}},
 		{"rebind no target", &Patch{Kind: PatchRebindParam, Replacement: "$x"}},
-		{"rebind no replacement", &Patch{Kind: PatchRebindParam, Target: "steps.run.input.from"}},
+		{"rebind no replacement", &Patch{Kind: PatchRebindParam, Target: "steps.run.function.args.from"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -211,8 +238,8 @@ func TestValidate_AcceptsWellFormed(t *testing.T) {
 	good := []*Patch{
 		{Kind: PatchAddPrecondition, Precondition: &PatchPrecondition{ID: "a", Check: "x == y"}},
 		{Kind: PatchInsertGuard, Target: "steps.run", Guard: "x == y"},
-		{Kind: PatchRelativizeLiteral, Target: "steps.run.input.path", Replacement: "$config.X"},
-		{Kind: PatchRebindParam, Target: "steps.run.input.from", Replacement: "$steps.b.result"},
+		{Kind: PatchRelativizeLiteral, Target: "steps.run.function.args.path", Replacement: "config.X"},
+		{Kind: PatchRebindParam, Target: "steps.run.function.args.from", Replacement: "b"},
 	}
 	for _, p := range good {
 		if err := p.Validate(); err != nil {
@@ -288,9 +315,9 @@ func TestPatchResultResolvesAsOverlay(t *testing.T) {
 	base := baseAutomation()
 	p := &Patch{
 		Kind:        PatchRelativizeLiteral,
-		Target:      "steps.run.input.path",
+		Target:      "steps.run.function.args.path",
 		Literal:     "/Users/alice/engine/digest",
-		Replacement: "$config.MEMQL_ENGINE_DIGEST",
+		Replacement: "config.MEMQL_ENGINE_DIGEST",
 	}
 	overrideData, err := p.Apply(base)
 	if err != nil {
@@ -318,13 +345,13 @@ func TestPatchResultResolvesAsOverlay(t *testing.T) {
 		t.Fatalf("tier = %q, want overlay (the patched override must shadow base)", got.Tier)
 	}
 	step, _ := findStepById(got.Definition["steps"], "run")
-	input, _ := step["input"].(map[string]any)
-	if input["path"] != "$config.MEMQL_ENGINE_DIGEST" {
+	input, _ := step["function"].(map[string]any)["args"].(map[string]any)
+	if input["path"].(map[string]any)["$expr"] != "config.MEMQL_ENGINE_DIGEST" {
 		t.Errorf("resolved definition does not carry the healed (relativized) literal: %v", input["path"])
 	}
 	// And the base tier is untouched -- base still has the machine literal.
 	bstep, _ := findStepById(base["steps"], "run")
-	binput, _ := bstep["input"].(map[string]any)
+	binput, _ := bstep["function"].(map[string]any)["args"].(map[string]any)
 	if binput["path"] != "/Users/alice/engine/digest" {
 		t.Errorf("base construct was mutated by the patch: %v", binput["path"])
 	}
