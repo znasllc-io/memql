@@ -49,7 +49,7 @@ var senseRewriteRefusalCases = []struct {
 	{"a second id", "mutate thing m {\n  args {\n    id string @required\n  }\n  insert {\n    id: args.id\n    id: args.id\n  }\n}\n", "id:", 2, "duplicate `id:` line"},
 	{"a bare mirror of a path", "mutate thing m {\n  args {\n    id string @required\n    user object\n  }\n  insert {\n    id: args.id\n    args.user.id\n  }\n}\n", "args.user.id", 1, "has no key"},
 	{"an update with no id", "mutate thing m {\n  args {\n    name string\n  }\n  update {\n    name: args.name\n  }\n}\n", "update", 1, "update block requires an `id: <expr>` line"},
-	{"a body block in a mutation", "mutate thing m {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"},
+	{"a body block in a mutation", "mutate thing m {\n  body {\n    return 1\n  }\n}\n", "body", 1, "must not declare a `body { }` block"}, // memqlmigrate:keep
 
 	// A logic and an automation are not the rewriter's: the statement parser
 	// reads them as written, and their refusals are its own and the load

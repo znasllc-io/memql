@@ -455,7 +455,7 @@ func TestGrantEnforcementNegativeControlRoleOnlyResolver(t *testing.T) {
 
 // TestSingleStatementLogicClearsItsFloors pins the hole the capability probe
 // exposed (epic memql#5296). A pre-2026 single-statement logic -- `return
-// cond(...)` -- never hoisted to plan.LogicCall (that needs LogicSteps); it
+// cond(...)` -- never hoisted to plan.LogicCall (that took a multi-step body); it
 // expanded to a literal at plan.Root and returned from one of executeWith's
 // seven early branches BEFORE the plan-level rank and capability gates ran.
 // So a `@requiresRank` or `@requiresCapability` on it was recorded on the plan

@@ -52,18 +52,8 @@ func TestAmbientRootsMatchEnvelopeKeys(t *testing.T) {
 		require.Truef(t, ok,
 			"isAmbientRoot accepts %q but buildAmbientEnvelope never supplies it, so "+
 				"substituteArgRefValue folds %q.* to nil and the comparison becomes a CONSTANT -- "+
-				"the memql#2962 silent gate, reintroduced. Either supply the key or move %q to "+
-				"reservedUnsuppliedRoots so it is refused at load.", root, root, root)
-	}
-
-	// The two sets must not overlap, or a root would be both resolvable and
-	// refused depending on which check ran first.
-	for root := range reservedUnsuppliedRoots {
-		require.Falsef(t, isAmbientRoot(root),
-			"%q is in BOTH ambientEnvelopeRoots and reservedUnsuppliedRoots", root)
-		_, ok := envelope[root]
-		require.Falsef(t, ok,
-			"%q is listed as unsupplied but buildAmbientEnvelope supplies it", root)
+				"the memql#2962 silent gate, reintroduced. Either supply the key or drop %q from "+
+				"ambientEnvelopeRoots.", root, root, root)
 	}
 }
 
