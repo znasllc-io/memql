@@ -19,6 +19,7 @@ MemQL is alpha; use the docs for the same release as your cluster and extension.
 | Understand the product | [What is MemQL?](what-is-memql.md) |
 | Get an achievable first result | [Getting started](quickstart.md) |
 | Write and run a `.memql` file | [Your first MemQL program](../language/first-program.md) |
+| Compose retrieval, AI, caching, and automation | [Research-brief workflow](../language/research-workflow.md) |
 | Install the editor extension | [MemQL in VS Code or Cursor](../language/vscode.md) |
 | Find the right cluster app | [MemQL OS](../operate/memql-os.md#the-apps) |
 

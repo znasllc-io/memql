@@ -7,10 +7,10 @@ const description = document.querySelector("#example-description");
 const copy = document.querySelector("#copy-code");
 const status = document.querySelector("#copy-status");
 const descriptions = [
-  "Declare the shape of a reading item and its ownership tier. The engine supplies intrinsic fields such as id.",
-  "Accept the title from the caller. Stamp the owner from the authenticated actor, and create the item as unfinished. Running this mutation writes a real row.",
-  "Filter by the authenticated owner and an optional completion flag. Return the newest 50 rows on the first page.",
-  "Expose the same query through a described tool interface. The declaration does not grant an agent access or configure a model provider.",
+  "ENGINE · Embed the question and retrieve matching file passages. librarySimilarArtifacts applies the caller’s ownership checks and ranks files by their best matching chunk. EDITOR · Completion and go-to-definition help you inspect the imported builtin and its arguments.",
+  "ENGINE · A configured agent turns retrieved passages into a draft. The agent’s model routing and tools remain its configuration. EDITOR · Trace the logic’s inputs, read diagnostics, then inspect a connected execution result.",
+  "ENGINE · @cache(300) sets a five-minute TTL on this saved-draft query. Writes to its read concept invalidate cached results. It does not cache agent calls. EDITOR · Run the query with your account and inspect the returned rows.",
+  "ENGINE · A new request triggers retrieval, skips the model when there are no sources, and saves a draft under the same ID. EDITOR · Inspect the automation and its event form before an explicit run; saving source alone does not register a trigger.",
 ];
 let selected = 0;
 let resetCopy;
@@ -19,7 +19,7 @@ let resetCopy;
 function highlight(source) {
   const fragment = document.createDocumentFragment();
   const tokens =
-    /("(?:\\.|[^"\\])*"|\/\/[^\n]*|@[A-Za-z]+|\b(?:concept|query|mutation|tool|args|filter|sort|paginate|insert|accept|stamp)\b|\b(?:string|bool|boolean)\b!?)/g;
+    /("(?:\\.|[^"\\])*"|\/\/[^\n]*|@[A-Za-z]+|\b(?:concept|query|mutation|tool|logic|automation|builtin|args|filter|sort|paginate|insert|accept|stamp|return|if)\b|\b(?:string|bool|boolean|object|int)\b!?)/g;
   let end = 0;
   for (const match of source.matchAll(tokens)) {
     fragment.append(document.createTextNode(source.slice(end, match.index)));
@@ -31,7 +31,7 @@ function highlight(source) {
         ? "string"
         : token.startsWith("@")
           ? "annotation"
-          : /^(string|bool|boolean)!?$/.test(token)
+          : /^(string|bool|boolean|object|int)!?$/.test(token)
             ? "type"
             : "keyword";
     span.textContent = token;
@@ -77,7 +77,7 @@ copy.addEventListener("click", async () => {
     await navigator.clipboard.writeText(examples[selected]);
     copy.textContent = "Copied";
     status.textContent =
-      "Snippet copied. Download the complete file for all four constructs.";
+      "Snippet copied. Download the complete file for all definitions and imports.";
   } catch {
     copy.textContent = "Select text to copy";
     status.textContent =

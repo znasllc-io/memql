@@ -21,7 +21,6 @@ from the engine's core DSL to keep your tutorial definitions distinct.
 
 ```memql
 /// A reading-list item owned by the signed-in person.
-@namespace("reading")
 @rowAuthz(owner="ownerUserId")
 @displayCard(primary="title", status="finished")
 concept readingItem {
@@ -78,8 +77,9 @@ tool listReadingItems {
 - **Tool:** gives the query a described argument surface. A tool declaration does
   not by itself grant an agent permission to use it or configure an AI provider.
 
-`@namespace("reading")` pins the concept's namespace so this standalone example
-has the same identity outside the repository's usual `dsl/<namespace>/` layout.
+The adjacent `namespace.pin` file contains `reading`, so this example retains
+its namespace when the folder is named `reading-list`. Keep it with the source
+and manifest when copying the example.
 The concept is `v1:reading:readingItem`. Names and imports are covered in
 [naming conventions](naming-conventions.md).
 
@@ -99,12 +99,12 @@ With a checkout of this repository and the Go toolchain declared by its
 `go.mod`, run from the repository root:
 
 ```bash
-go run ./cmd/memqllint examples/reading-list/reading.memql
+go run ./cmd/memqllint examples/reading-list
 ```
 
-For your own copy, replace the path with your file's path. A single-file lint
-checks parsing and local references. It does not test cluster authorization,
-persistence, or whether your definitions conflict with an existing cluster.
+For your own copy, replace the path with the example folder. Directory-mode
+lint also runs engine load-time validation against the embedded core tree. It
+does not test cluster authorization, persistence, or live execution.
 The extension also reports diagnostics as you edit.
 
 ## Run it in VS Code or Cursor

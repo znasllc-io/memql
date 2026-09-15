@@ -45,7 +45,7 @@ Status recorded **2026-09-15**:
 | Existing OS apps | Available according to their current engine APIs, app grants, and configuration. Manual controls remain the baseline. |
 | Fleet composition | Available: visual composition, persistent routing-policy editing, shared activity targets, and typed Ask policy proposal review. Proposal generation requires configured compatible inference. |
 | New Settings and per-app Logs layouts | Proposed; awaiting prototype approval. Existing Settings and Logs remain the current surfaces. |
-| Deployables composition redesign | Approved; implementation is underway. The redesign has not yet deployed. |
+| Deployables composition redesign | Implemented and verified on the local deployment. Availability on other clusters depends on their deployed revision. |
 | General autonomous UI driving and voice orchestration | Future work. Activity hooks and a policy proposal do not establish this broader capability. |
 
 When evaluating a preview, distinguish real service activity from labeled

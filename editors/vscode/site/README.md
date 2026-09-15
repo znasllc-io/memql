@@ -1,7 +1,7 @@
 # MemQL for Visual Studio Code and Cursor landing page
 
 A static product page for the existing extension. It uses canonical brand fonts
-colours and artwork, shows the actual reading-list source, and links to repository docs.
+colours and artwork, shows the actual research-brief source, and links to repository docs.
 It has no cluster connection, external font dependency, analytics, or server runtime.
 
 ## Build and preview
@@ -24,15 +24,16 @@ python3 -m http.server 4318 --bind 127.0.0.1 --directory editors/vscode/site/dis
 ```
 
 The build copies static files plus shared `brand/` assets and generates the
-code-theme CSS from the committed native editor themes and interactive panels from `examples/reading-list/reading.memql`. The source
-manifest is included beside the downloadable example. Run its actual linter:
+code-theme CSS from the committed native editor themes and interactive panels from `examples/research-desk/research/brief.memql`. The source
+manifest and complete setup guide are included beside the downloadable example. Run its actual linter:
 
 ```bash
-go run ./cmd/memqllint examples/reading-list/reading.memql
+go run ./cmd/memqllint examples/research-desk
 ```
 
 `build.mjs --check` verifies asset paths, internal anchors, source/output parity,
-and the absence of inline scripts. It does not check live external URLs or run
+and the absence of inline scripts. The code tabs are extracted from marked
+regions in the complete sample rather than maintained as separate snippets. It does not check live external URLs or run
 the example against a cluster.
 
 ## Browser verification
@@ -63,7 +64,7 @@ slash. Relative asset paths support either. No SPA fallback is required.
 For MemQL hosting, publish the built directory through the existing Deployables /
 site bundle workflow, then associate the resulting bundle with the intended site
 and hostname. The source tree needs the repository root as build context because
-it reads `brand/`, `editors/vscode/themes/`, and `examples/reading-list/`; the output directory is
+it reads `brand/`, `editors/vscode/themes/`, and `examples/research-desk/`; the output directory is
 `editors/vscode/site/dist`. Do not use `editors/vscode/site` alone as the build
 context. The edge must be able to read the published bundle; a developer's local
 filesystem path is not a path inside the edge pod.
@@ -82,8 +83,8 @@ not been performed by this build.
   `scripts/lib/platform.sh`, and the existing release workflow. No marketplace
   URL or hosted VSIX is invented.
 - Code illustration: a labeled illustration, not a screenshot or live run.
-  Tabs and downloads use the canonical reading-list example. A snippet may
-  depend on another construct; the download contains all four.
+  Tabs and downloads use the canonical research-brief example. A snippet may
+  depend on another construct; the download contains all definitions and imports.
 - Shared visual identity: fonts, colour tokens, mark, and favicon are copied
   from `brand/` at build time. Marks resolve the chosen page accent; code colours
   come from the generated native editor themes.

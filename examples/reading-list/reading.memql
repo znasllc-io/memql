@@ -1,5 +1,4 @@
 /// A reading-list item owned by the signed-in person.
-@namespace("reading")
 @rowAuthz(owner="ownerUserId")
 @displayCard(primary="title", status="finished")
 concept readingItem {

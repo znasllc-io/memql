@@ -136,39 +136,36 @@ try {
     assert.ok(
       (await page.locator("#example-code").innerText()).includes(
         [
-          "concept readingItem",
-          "mutation readingItem",
-          "query readingItem",
-          "tool listReadingItems",
+          "logic relevantResearchFiles",
+          "logic draftResearchAnswer",
+          "query researchBrief",
+          "automation prepareResearchBrief",
         ][i],
       ),
     );
   }
-  await page.locator("#tab-concept").focus();
+  await page.locator("#tab-search").focus();
   await page.keyboard.press("ArrowDown");
   assert.equal(
-    await page.locator("#tab-mutation").getAttribute("aria-selected"),
+    await page.locator("#tab-ai").getAttribute("aria-selected"),
     "true",
   );
-  assert.equal(
-    await page.evaluate(() => document.activeElement.id),
-    "tab-mutation",
-  );
+  assert.equal(await page.evaluate(() => document.activeElement.id), "tab-ai");
   await page.keyboard.press("End");
   assert.equal(
     await page.evaluate(() => document.activeElement.id),
-    "tab-tool",
+    "tab-automation",
   );
   await page.keyboard.press("Home");
   assert.equal(
     await page.evaluate(() => document.activeElement.id),
-    "tab-concept",
+    "tab-search",
   );
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.locator("#copy-code").click();
   assert.ok(
     (await page.evaluate(() => navigator.clipboard.readText())).includes(
-      "concept readingItem",
+      "logic relevantResearchFiles",
     ),
   );
   await page.evaluate(() =>
@@ -183,21 +180,39 @@ try {
       document.querySelector("#copy-code").textContent ===
       "Select text to copy",
   );
-  for (const name of ["reading.memql", "memql.toml"]) {
+  for (const name of ["brief.memql", "memql.toml"]) {
     const response = await context.request.get(url + name);
     assert.equal(response.status(), 200);
     assert.equal(
       await response.text(),
       await readFile(
-        path.join(here, "../../../examples/reading-list", name),
+        path.join(here, "../../../examples/research-desk/research", name),
         "utf8",
       ),
     );
   }
+  const guideResponse = await context.request.get(url + "research-guide.md");
+  assert.equal(guideResponse.status(), 200);
+  assert.ok(
+    (await guideResponse.text()).includes("Prerequisites for a real run"),
+  );
   await page.locator(".run-guide summary").click();
   assert.equal(await page.locator(".run-guide").getAttribute("open"), "");
   await page.locator(".run-guide summary").click();
-  await page.locator("#tab-query").click();
+  await page.locator("#tab-cache").click();
+  // The longest tab must remain readable at narrow widths too.
+  await page.locator("#tab-automation").click();
+  for (const width of [1440, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: 1000 });
+    assert.equal(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth > innerWidth,
+      ),
+      false,
+      `automation overflow at ${width}px`,
+    );
+  }
+  await page.locator("#tab-cache").click();
   const sizes = [1440, 1024, 768, 390, 320];
   for (const appearance of ["light", "dark"]) {
     await choose(appearance);
@@ -296,7 +311,7 @@ try {
   await plainPage.goto(url);
   assert.ok(
     (await plainPage.locator("#example-code").innerText()).includes(
-      "concept readingItem",
+      "logic relevantResearchFiles",
     ),
   );
   assert.equal(await plainPage.locator("a[download]").count(), 2);

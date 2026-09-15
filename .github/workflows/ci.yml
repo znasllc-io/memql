@@ -184,6 +184,8 @@ jobs:
             gates:
               # The tutorial/source/edition parity gate reads this manifest.
               - 'examples/reading-list/memql.toml'
+              - 'examples/reading-list/namespace.pin'
+              - 'examples/research-desk/research/memql.toml'
               - '**/*.md'
               - '**/*.memql'
               # .claude/settings.json is TRACKED on purpose (the .gitignore

@@ -40,7 +40,6 @@ A concept describes a kind of record. A query names a reusable read operation.
 Here is a caller-owned reading list:
 
 ```memql
-@namespace("reading")
 @rowAuthz(owner="ownerUserId")
 concept readingItem {
   ownerUserId  string!
@@ -83,8 +82,8 @@ is the approved design direction: compose objects and their relationships
 with mouse and keyboard, and review MemQL's proposals in the same visible
 workspace. Fleet provides visual composition, persistent routing-policy editing,
 and review of typed Ask proposals; generating proposals requires compatible
-inference to be configured. The approved Deployables redesign is being
-implemented. New Settings/Logs layouts await approval; generalized autonomous
+inference to be configured. The approved Deployables redesign is implemented and
+verified locally. New Settings/Logs layouts await approval; generalized autonomous
 UI driving is future work.
 
 ## Does it work?

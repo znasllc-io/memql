@@ -66,9 +66,9 @@
           </p>
           <h1 id="hero-title">Your engine.<br />Your editor.</h1>
           <p class="lead">
-            Bring MemQL into VS Code and Cursor. Write with offline language
-            intelligence. Connect to a cluster to inspect, run, and put your
-            definitions to work.
+            Define data, search by meaning, call AI, and compose automations in
+            MemQL. Author the DSL in VS Code or Cursor with offline language
+            intelligence; connect to the engine to inspect and run your work.
           </p>
           <div class="actions">
             <a class="button primary" href="#install">Build &amp; install</a
@@ -84,19 +84,19 @@
           <div class="editor">
             <div class="editor-title">
               <span class="file-dot" aria-hidden="true"></span
-              ><span>reading.memql</span><span class="editor-mode">MemQL</span>
+              ><span>brief.memql</span><span class="editor-mode">MemQL</span>
             </div>
             <div
               class="editor-code"
-              aria-label="Reading-list concept code example"
+              aria-label="Research brief concept code example"
             >
-              <pre><code><span class="comment">/// Your reading list, with an owner.</span>
-<span class="annotation">@namespace</span>(<span class="string">"reading"</span>)
+              <pre><code><span class="comment">/// A research brief you can inspect and review.</span>
 <span class="annotation">@rowAuthz</span>(owner=<span class="string">"ownerUserId"</span>)
-<span class="keyword">concept</span> readingItem {
+<span class="keyword">concept</span> researchBrief {
   ownerUserId  <span class="type">string!</span>
-  title        <span class="type">string!</span>
-  finished     <span class="type">bool</span>
+  question     <span class="type">string!</span>
+  answer       <span class="type">string</span>
+  sources      []<span class="type">object</span>
 }</code></pre>
             </div>
             <div class="editor-explanation">
@@ -115,8 +115,8 @@
             </div>
           </div>
           <figcaption>
-            Code illustration using the bundled MemQL editor theme. No live
-            cluster connection.
+            Excerpt from the complete research-brief example, using the bundled
+            MemQL theme. No live cluster connection.
           </figcaption>
         </figure>
       </section>
@@ -161,8 +161,9 @@
             A shorter path from<br />definition to understanding.
           </h2>
           <p>
-            Stay close to the source, with a clear boundary between what is on
-            your machine and what the cluster knows.
+            MemQL is an AI platform with a typed, versioned memory graph and an
+            execution engine. The extension brings its language and connected
+            tools into your editor.
           </p>
         </div>
         <div class="workflow-body">
@@ -241,11 +242,12 @@
         <div class="wrap">
           <div class="section-intro">
             <h2 id="example-title">
-              One file.<br />Four useful building blocks.
+              From a question<br />to a research draft.
             </h2>
             <p>
-              A personal reading list: define a record, add an item, read your
-              list, and expose the query as a tool. No model call required.
+              Search your indexed Files, ask a configured agent to draft from
+              the evidence, and save the result for review. Four pieces of one
+              workflow, written in the DSL.
             </p>
           </div>
           <div class="example-layout">
@@ -253,51 +255,55 @@
               <div
                 class="example-tabs"
                 role="tablist"
-                aria-label="Reading-list constructs"
+                aria-label="Research workflow"
                 aria-orientation="vertical"
               >
                 <button
                   role="tab"
-                  id="tab-concept"
+                  id="tab-search"
                   aria-controls="code-panel"
                   aria-selected="true"
                   data-example="0"
                 >
-                  <span>Concept</span><small>Describe a reading item</small>
+                  <span>Similarity search</span
+                  ><small>Find passages by meaning</small>
                 </button>
                 <button
                   role="tab"
-                  id="tab-mutation"
+                  id="tab-ai"
                   aria-controls="code-panel"
                   aria-selected="false"
                   tabindex="-1"
                   data-example="1"
                 >
-                  <span>Mutation</span><small>Add an item for the caller</small>
+                  <span>AI in the DSL</span
+                  ><small>Turn evidence into a draft</small>
                 </button>
                 <button
                   role="tab"
-                  id="tab-query"
+                  id="tab-cache"
                   aria-controls="code-panel"
                   aria-selected="false"
                   tabindex="-1"
                   data-example="2"
                 >
-                  <span>Query</span><small>Read the caller's list</small>
+                  <span>Cached reads</span
+                  ><small>Set TTL on saved results</small>
                 </button>
                 <button
                   role="tab"
-                  id="tab-tool"
+                  id="tab-automation"
                   aria-controls="code-panel"
                   aria-selected="false"
                   tabindex="-1"
                   data-example="3"
                 >
-                  <span>Tool</span><small>Reuse the query</small>
+                  <span>Whole automation</span><small>Connect the steps</small>
                 </button>
               </div>
               <p class="example-note">
-                Interactive code example.<br />This page does not execute MemQL.
+                Focused excerpts from one program.<br />This page does not
+                execute MemQL.
               </p>
               <noscript
                 ><p class="example-note">
@@ -311,79 +317,81 @@
               id="code-panel"
               role="tabpanel"
               tabindex="0"
-              aria-labelledby="tab-concept"
+              aria-labelledby="tab-search"
             >
               <div class="example-code-title">
-                <span>reading.memql</span
+                <span>brief.memql</span
                 ><button class="copy" id="copy-code" hidden>
                   Copy snippet
                 </button>
               </div>
-              <pre><code id="example-code">@namespace("reading")
-@rowAuthz(owner="ownerUserId")
-@displayCard(primary="title", status="finished")
-concept readingItem {
-  ownerUserId  string!
-  title        string!
-  finished     bool
+              <pre><code id="example-code">@actor
+logic relevantResearchFiles {
+  args { question string! }
+  matches := builtin librarySimilarArtifacts(
+    text: args.question, limit: 5
+  )
+  return matches.select(file =&gt; {
+    title: file.title, snippet: file.snippet,
+    artifactId: file.artifactId
+  })
 }</code></pre>
               <p id="example-description">
-                Declare the shape of a reading item and its ownership tier. The
-                engine supplies intrinsic fields such as id.
+                Search indexed Files by meaning with the caller’s ownership
+                checks. The complete source includes imports, schema, mutations,
+                and the automation.
               </p>
               <p id="copy-status" class="sr-only" role="status"></p>
             </div>
           </div>
           <div class="example-next">
-            <a href="reading.memql" download
-              >Download the complete .memql file</a
-            >
+            <a href="brief.memql" download>Download the complete .memql file</a>
             <a href="memql.toml" download>Download its language manifest</a>
           </div>
+          <p class="showcase-setup">
+            Needs indexed Files, matching embedding configuration, and an agent
+            with compatible inference on an agent node. The output is a draft
+            for human review.
+          </p>
           <details class="run-guide">
-            <summary>Run this example in VS Code or Cursor</summary>
+            <summary>Setup and run the complete workflow</summary>
             <ol>
               <li>
-                Download both files into a new folder. Open it in either editor
-                with the MemQL extension installed.
+                Open the complete example in either editor. Its source includes
+                the schema, both mutations, imports, and the four constructs
+                above.
               </li>
               <li>
-                To validate offline from the repository, run
-                <code
-                  >go run ./cmd/memqllint
-                  examples/reading-list/reading.memql</code
-                >. Use your own file's path for the downloaded copy.
+                Validate the bundle offline with
+                <code>go run ./cmd/memqllint examples/research-desk</code>. The
+                directory check uses the engine loader.
               </li>
               <li>
-                Connect a trusted workspace to a development cluster. Sign in
-                with an account allowed to author constructs.
+                On a development cluster, configure Files indexing and an agent,
+                then load the domain as described in the guide. Model execution
+                requires the cluster’s permissions and compatible inference.
               </li>
               <li>
-                Dry-run and promote <code>readingItem</code> using its training
-                action. Concepts cannot be privately staged. The schema is
-                shared; its rows have the declared ownership tier.
-              </li>
-              <li>
-                Run <code>addReadingItem</code> from CodeLens. Give it a fresh
-                <code>itemId</code> and a <code>title</code>. This writes a real
-                row.
-              </li>
-              <li>
-                Run <code>readingItems</code> with
-                <code>finished: false</code> to see the item. The tool
-                <code>listReadingItems</code> calls that same query.
+                Run <code>requestResearchBrief</code> with a fresh
+                <code>briefId</code>, a question, and your configured
+                <code>agentId</code>. Inspect the saved draft with
+                <code>researchBriefs</code>.
               </li>
             </ol>
             <p>
-              Running local definitions uses the editor's authoring session; it
-              does not automatically promote them. To retain supported queries
-              or tools beyond the session, explicitly stage or promote them.
-              <a
-                href="https://github.com/znasllc-io/memql/blob/main/docs/public/language/training.md"
-                >Read about training and scope.</a
+              <a href="research-guide.md"
+                >Complete setup and execution guide (Markdown) →</a
               >
             </p>
           </details>
+          <p class="showcase-links">
+            <a href="research-guide.md">Read the full setup guide</a>
+            ·
+            <a
+              href="https://github.com/znasllc-io/memql/blob/main/docs/public/language/first-program.md"
+              >Start with a simpler first program</a
+            >
+          </p>
         </div>
       </section>
 

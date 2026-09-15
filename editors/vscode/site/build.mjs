@@ -32,14 +32,26 @@ async function check() {
     await stat(file);
   }
   const example = await readFile(
-    path.join(root, "examples/reading-list/reading.memql"),
+    path.join(root, "examples/research-desk/research/brief.memql"),
     "utf8",
   );
-  if (
-    (await readFile(path.join(output, "reading.memql"), "utf8")) !== example
-  ) {
+  if ((await readFile(path.join(output, "brief.memql"), "utf8")) !== example) {
     throw new Error("Download differs from canonical example; rebuild");
   }
+  const expectedData = `export const examples = ${JSON.stringify(showcasePieces(example), null, 2)};\n`;
+  if (
+    (await readFile(path.join(output, "example-data.js"), "utf8")) !==
+    expectedData
+  )
+    throw new Error("Showcase excerpts differ from canonical source; rebuild");
+  if (
+    (await readFile(path.join(output, "memql.toml"), "utf8")) !==
+    (await readFile(
+      path.join(root, "examples/research-desk/research/memql.toml"),
+      "utf8",
+    ))
+  )
+    throw new Error("Language manifest differs from canonical source; rebuild");
   for (const name of assets) {
     if (
       (await readFile(path.join(output, name), "utf8")) !==
@@ -70,6 +82,11 @@ async function check() {
     (await readFile(path.join(root, "brand/tokens.css"), "utf8"))
   )
     throw new Error("Canonical brand tokens are stale; rebuild");
+  if (
+    (await readFile(path.join(output, "research-guide.md"), "utf8")) !==
+    (await researchGuide())
+  )
+    throw new Error("Setup guide differs from the canonical example; rebuild");
   const sizes = await walk(output);
   return {
     files: sizes.length,
@@ -122,6 +139,28 @@ async function editorThemeCSS() {
   );
 }
 
+function showcasePieces(example) {
+  return ["search", "ai", "cache", "automation"].map((name) => {
+    const start = `// showcase:${name}:start\n`;
+    const end = `// showcase:${name}:end`;
+    const chunk = example.split(start)[1]?.split(end)[0]?.trim();
+    if (!chunk || !example.includes(end))
+      throw new Error(`Missing showcase region: ${name}`);
+    return chunk;
+  });
+}
+
+async function researchGuide() {
+  const text = await readFile(
+    path.join(root, "examples/research-desk/README.md"),
+    "utf8",
+  );
+  return text
+    .replaceAll("(research/brief.memql)", "(brief.memql)")
+    .replaceAll("(research/memql.toml)", "(memql.toml)")
+    .replaceAll("](../../", "](https://github.com/znasllc-io/memql/blob/main/");
+}
+
 async function build() {
   // dist is the generated artifact, never source or browser-test evidence.
   await rm(output, { recursive: true, force: true });
@@ -154,21 +193,21 @@ async function build() {
     mark.replace(/<!--[\s\S]*?-->/g, ""),
   );
   const example = await readFile(
-    path.join(root, "examples/reading-list/reading.memql"),
+    path.join(root, "examples/research-desk/research/brief.memql"),
     "utf8",
   );
-  await writeFile(path.join(output, "reading.memql"), example);
-  const pieces = example.trim().split(/\n\n(?=\/\/\/)/);
-  if (pieces.length !== 4)
-    throw new Error(
-      "Expected concept, mutation, query and tool in the example",
-    );
+  await writeFile(path.join(output, "brief.memql"), example);
+  await writeFile(
+    path.join(output, "research-guide.md"),
+    await researchGuide(),
+  );
+  const pieces = showcasePieces(example);
   await writeFile(
     path.join(output, "example-data.js"),
     `export const examples = ${JSON.stringify(pieces, null, 2)};\n`,
   );
   await cp(
-    path.join(root, "examples/reading-list/memql.toml"),
+    path.join(root, "examples/research-desk/research/memql.toml"),
     path.join(output, "memql.toml"),
   );
 }

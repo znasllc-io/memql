@@ -29,8 +29,8 @@ readiness certification.
 [Supervised Visual Composition](../operate/supervised-visual-composition.md) is
 the approved OS design direction. Fleet provides visual composition, persistent
 policy editing, and typed Ask proposal review. Ask generation requires configured
-compatible inference. The Deployables redesign is approved and being implemented;
-it has not yet deployed. New Settings/Logs layouts await prototype approval.
+compatible inference. The approved Deployables redesign is implemented and
+verified on the local deployment; other clusters depend on their deployed revision. New Settings/Logs layouts await prototype approval.
 
 ## Future work
 

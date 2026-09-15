@@ -27,7 +27,7 @@ The approved design direction is
 composition and supervised proposals in a shared workspace. Fleet provides
 visual composition, persistent routing-policy editing, and typed Ask proposal
 review. Proposal generation requires configured compatible inference. The
-approved Deployables redesign is being implemented and has not yet deployed;
+approved Deployables redesign is implemented and verified on the local deployment;
 proposed Settings/Logs layouts still await approval.
 
 Related: [identity](auth/identity-service.md), [access](auth/access-model.md),
