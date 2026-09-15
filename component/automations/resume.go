@@ -341,6 +341,12 @@ func (e *Executor) ResumeFrom(
 	exec.SourceTrusted = automation.Trusted && !journal.CallerSuppliedPayload
 	exec.CallerSuppliedPayload = journal.CallerSuppliedPayload
 
+	// The resumed run keeps its place in its causal chain (epic memql#5380):
+	// the parent its first attempt recorded on triggerEvent, one deeper, under
+	// the same run id -- so what it writes and publishes carries the depth
+	// the first attempt's did. See journalRunCause.
+	ctx = events.ContextWithCause(ctx, journalRunCause(ctx, automation, exec.ID, journal.TriggerEvent))
+
 	// Set up evaluator
 	evaluator := NewEvaluator()
 	bindActorEnvelope(ctx, evaluator)

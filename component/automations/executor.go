@@ -481,6 +481,15 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		exec.ID = adopt.RunId
 	}
 
+	// The run's place in its causal chain (epic memql#5380): its parent -- the
+	// triggering event's cause, else the calling run's for a sub-automation --
+	// and its own, one deeper. The loop bound is decided here and acted on
+	// after the dedup gates below; until then the fire runs under the cause
+	// contextWithRunCause picks. See loop_runtime.go.
+	parentCause, cause := runCause(ctx, automation, exec.ID, triggeringEvent)
+	loopRefusal := loopBound(automation, cause, maxChainDepth())
+	ctx = contextWithRunCause(ctx, parentCause, cause, loopRefusal)
+
 	// Global execution budget (memql#1142). The storm WARN above is a
 	// SIGNAL; this is the STOP. A process-global, cross-executor ceiling
 	// (total + per-automation executions/window) hard-skips the execution
@@ -702,6 +711,12 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		}
 	}
 
+	// The loop bound (epic memql#5380), after the dedup gates and the cluster
+	// guard's claim so one event refused on two replicas is recorded once.
+	if loopRefusal != nil {
+		return e.stopLoop(ctx, automation, exec, triggeringEvent, parentCause, loopRefusal, adopt != nil)
+	}
+
 	// Open the run row before the first step, so every later write has a
 	// home. An automation whose trigger names a v1:work:* concept is NOT
 	// journaled: its own step rows would re-fire it, and a feedback loop
@@ -717,7 +732,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	if adopt != nil {
 		journal.adoptRun(ctx, automation, exec)
 	} else {
-		journal.openRun(ctx, automation, exec, triggeringEvent)
+		journal.openRun(ctx, automation, exec, triggeringEvent, parentCause)
 	}
 
 	// Execute steps

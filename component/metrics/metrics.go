@@ -242,6 +242,7 @@ func init() {
 		resultCacheInvalidationEvents,
 		resultCacheQueryReads,
 		cacheCollector{},
+		automationLoopsStopped,
 	)
 	// Explicit zero so the series exists before the first keyset is
 	// observed; an alert on a missing series is harder to reason about

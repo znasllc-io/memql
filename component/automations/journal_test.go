@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/work"
 )
@@ -163,7 +164,7 @@ func TestJournal_RunAndStepLifecycle(t *testing.T) {
 	exec.ID = "run-1"
 	exec.StartedAt = time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
 
-	j.openRun(context.Background(), auto, exec, nil)
+	j.openRun(context.Background(), auto, exec, nil, events.Cause{})
 	j.stepRunning(context.Background(), exec, auto.Steps[0], 0, 1)
 	res := &StepResult{StepId: "one", Status: "completed", Result: map[string]any{"rows": 3}, StartedAt: exec.StartedAt, CompletedAt: exec.StartedAt.Add(20 * time.Millisecond), Duration: 20 * time.Millisecond}
 	j.stepFinished(context.Background(), exec, auto.Steps[0], res, "")
@@ -235,7 +236,7 @@ func TestJournal_FailedStepAndFailedRun(t *testing.T) {
 
 func TestJournal_NilIsANoOp(t *testing.T) {
 	var j *workJournal
-	j.openRun(context.Background(), &Automation{Name: "x"}, NewExecution("x", "t"), nil)
+	j.openRun(context.Background(), &Automation{Name: "x"}, NewExecution("x", "t"), nil, events.Cause{})
 	j.closeRun(context.Background(), NewExecution("x", "t"), "")
 	if newWorkJournal(nil, nil) != nil {
 		t.Fatal("no executor means no journal")

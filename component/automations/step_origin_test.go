@@ -618,7 +618,7 @@ func TestRunRowCarriesTheCallerSuppliedFlag(t *testing.T) {
 			exec.CallerSuppliedPayload = tc.callerPayload
 
 			rec := &recordingJournalExecutor{}
-			newWorkJournal(rec, nil).openRun(context.Background(), auto, exec, ev)
+			newWorkJournal(rec, nil).openRun(context.Background(), auto, exec, ev, events.Cause{})
 			if len(rec.calls) != 1 {
 				t.Fatalf("openRun rendered %d calls, want 1", len(rec.calls))
 			}
