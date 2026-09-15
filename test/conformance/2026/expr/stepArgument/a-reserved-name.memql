@@ -1,4 +1,4 @@
-/// A work-spine template whose step passes the ticket's time under a reserved name.
+/// A work-spine template whose statement passes the ticket's time under a reserved name.
 @template
 automation raiseTicketAtNow {
   args {

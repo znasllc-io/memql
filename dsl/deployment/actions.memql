@@ -118,9 +118,9 @@ action argoSync {
 }
 
 // runDeployGate -- run the post-deploy gate and return a structured result
-// carrying `passed`. The deploy automation (I10) branches success/rollback on
-// logic deployGateGreen, which reads this action's `passed`. Backend:
-// scripts/deploy/deploy-gate.sh.
+// carrying `passed`. The deploy automation (I10) passes that `passed` to logic
+// deployOutcomeLabel and deployRollbackTarget and branches success/rollback on
+// their answers. Backend: scripts/deploy/deploy-gate.sh.
 /// Execute the post-deploy verification gate and return a structured pass/fail result indicating
 /// whether the deployment is healthy. The provider selects the litmus -- docker-local runs the k3d
 /// mesh check, azure runs the in-cluster gate.
@@ -134,8 +134,8 @@ action runDeployGate {
 }
 
 // revertOverlay -- roll an overlay back to a previous deployment's pinned
-// digests (owner-only via the deploy automation's spec gate). Backend:
-// scripts/deploy/revert-overlay.sh.
+// digests. The deploy automation runs it when deployRollbackTarget names a
+// deployment to revert to. Backend: scripts/deploy/revert-overlay.sh.
 /// Restore the overlay's image digests to those of a prior deployment so ArgoCD rolls the cluster
 /// back (rollback).
 action revertOverlay {

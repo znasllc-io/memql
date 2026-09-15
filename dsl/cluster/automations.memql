@@ -17,14 +17,14 @@
 //     olderThan); the per-row terminal write is a `for` statement.
 
 // Bootstrap cluster, database, and identity provider records on startup.
-// The pure bootstrapCluster logic decides `create` (existingCluster() empty
-// AND node.type == "bff") and gates the cluster create, so that row is
-// written once; clusterInfraRefresh gates the database and identity-provider
-// creates on every bff start (memql#4766), and the identityProvider row lands
-// only when the startup envelope carries one. Every create field binds an
-// explicit key + a `??` fallback (a multi-segment path like database.host is
-// nil when absent, and a nil @required arg trips validation), mirroring
-// registerNode/deregisterNode.
+// The pure bootstrapCluster logic decides whether to create (existingCluster()
+// empty AND the startup node's type is "bff"), and `decide` gates the cluster
+// create, so that row is written once; clusterInfraRefresh gates the database
+// and identity-provider creates on every bff start (memql#4766), and the
+// identityProvider row lands only when the startup envelope carries one. Every
+// create field binds an explicit key + a `??` fallback (a multi-segment path
+// like args.database.host is nil when absent, and a nil @required arg trips
+// validation), mirroring registerNode/deregisterNode.
 /// Bootstrap cluster, database, and identity provider records on first startup
 @trigger(event="system.startup")
 automation bootstrapCluster {
@@ -42,8 +42,6 @@ automation bootstrapCluster {
   // every time a bff starts. Sharing one gate is what made these rows
   // uncompletable.
   refreshInfra := logic clusterInfraRefresh(event: event)
-  // Steps renamed (was database / identityProvider): G2 shadowing rule vs the
-  // synthesized args fields of the same names (#2364/#2367).
   // ===========================================================================
   // THE THREE IDS ARE LITERALS, AND THAT IS WHAT MAKES THE LINKS POSSIBLE
   // ===========================================================================
@@ -73,7 +71,7 @@ automation bootstrapCluster {
       port:              args.database.port ?? 5432,
       // Probed from the live connection at startup (app/cluster.go). Absent
       // when the probe could not run, which is why each has a fallback
-      // rather than making the step conditional -- a database row with no
+      // rather than making the write conditional -- a database row with no
       // version is still worth having.
       engineVersion:     args.database.engineVersion ?? "",
       extensions:        args.database.extensions ?? [],
@@ -89,7 +87,7 @@ automation bootstrapCluster {
       clientIdPrefix:     args.identityProvider.clientIdPrefix ?? "",
       redirectUrl:        args.identityProvider.redirectUrl ?? "",
       // These two were COMPUTED by parseIdentityProviderInfo and dropped
-      // here -- the step forwarded four fields out of six (memql#4766).
+      // here -- the call forwarded four fields out of six (memql#4766).
       acceptedAudiences:  args.identityProvider.acceptedAudiences ?? [],
       jwksUrl:            args.identityProvider.jwksUrl ?? ""
     )
@@ -114,7 +112,7 @@ automation bootstrapCluster {
 // was a single inline write (ADR S2.1 logic-purity violation); the write is
 // now this automation's `mutation` statement and the logic is gone (#2235). Every field is
 // bound with an explicit key + a `??` fallback: a multi-segment path like
-// node.id evaluates to nil when absent, and passing nil for a @required
+// args.node.id evaluates to nil when absent, and passing nil for a @required
 // mutation arg (nodeId / nodeType / action) trips "required argument missing"
 // at validation; `?? ""` guarantees a non-nil string.
 /// Record node shutdown in the database
@@ -142,7 +140,7 @@ automation deregisterNode {
 // explicit key + a `??` fallback for the same reason as deregisterNode above: a
 // multi-segment path is nil when absent and would trip the @required check.
 // version/address are not createSpawnEvent args (they already live on the node
-// record from createNode), so the spawn step carries only the flat event fields.
+// record from createNode), so the `spawn` statement carries only the flat event fields.
 /// Register this node in the database on startup
 @trigger(event="system.startup")
 automation registerNode {
@@ -153,8 +151,6 @@ automation registerNode {
     region any
   }
 
-  // Step renamed record (was node): the G2 shadowing rule (#2364) forbids a
-  // step id colliding with the args field of the same name.
   record := mutation createNode(
     id:           args.node.id ?? "",
     nodeType:     args.node.type ?? "",

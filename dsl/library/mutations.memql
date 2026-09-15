@@ -72,11 +72,6 @@ mutate artifact createArtifact {
     args.producedByWorkerId
     args.producedByWorkerName
     validationStatus: args.validationStatus ?? "none"
-    // now, NOT bare `now`: this mutation is invoked from the index
-    // automations (indexGeneratedOutput et al.), and the automation step
-    // resolver only evaluates the function-call forms now/now -- a
-    // bare `now` passes through as the literal string "now" and fails the
-    // artifact's updatedAt date-time format. (memql#980)
     updatedAt: now
   }
 }
@@ -188,10 +183,8 @@ mutate documentVersion appendDocumentVersion {
     args.parentVersionId
     args.producedByRunId
     args.partitionId
-    // now, NOT bare `now`: this mutation is invoked from the Go
-    // edit/restore handlers; the hypertable time dimension + history
-    // ordering key must be a real RFC3339 timestamp (same gotcha as
-    // createArtifact.updatedAt, memql#980).
+    // createdAt is the hypertable time dimension and the history's ordering
+    // key, stamped from `now` rather than taken from a caller.
     createdAt: now
   }
 }
@@ -290,8 +283,7 @@ mutate file createLibraryFile {
       // number would let an upload claim to be version 40 of a file with no
       // history, and versionUploadedAt is the field the history reads as
       // "uploaded", which must be the moment the engine saw the bytes rather
-      // than a moment a client chose. now() rather than a bare `now` for the
-      // memql#980 reason the artifact index records.
+      // than a moment a client chose.
       versionNumber: 1
       versionUploadedAt: now
     }

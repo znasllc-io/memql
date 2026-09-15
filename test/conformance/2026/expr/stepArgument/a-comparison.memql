@@ -1,4 +1,4 @@
-/// A work-spine template whose step passes a comparison as the ticket's title.
+/// A work-spine template whose statement passes a comparison as the ticket's title.
 @template
 automation raiseTicketTitledByComparison {
   args {

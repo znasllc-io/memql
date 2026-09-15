@@ -3,8 +3,8 @@
 // Workspace lifecycle is driven by the parent RUN's terminal status. When a run
 // reaches succeeded / failed / cancelled / abandoned, the workbench workspace is
 // released and its filesystem state is torn down. The Go integration owns the
-// on-disk teardown; this automation flips the concept's lifecycle bit and emits
-// the event the integration listens for.
+// on-disk teardown; this automation flips the concept's lifecycle bit and calls
+// the integration's teardown builtin.
 //
 // It was keyed on a Plan until memql#5053. Two things changed with the subject,
 // and neither is a rename:
@@ -17,15 +17,15 @@
 //     boundary, so `graph.node.updated.v1:work:run` fires orders of magnitude
 //     more often than the Plan topic did -- and without the filter this
 //     automation would execute on every one of them to decide it had nothing to
-//     do. The steps still gate on the terminal scalar; the filter is what stops
-//     the run from being paid for.
+//     do. The statements still gate on the terminal scalar; the filter is what
+//     stops the run from being paid for.
 
 /// When a run transitions to a terminal status (succeeded / failed / cancelled / abandoned),
 /// release the associated workbench workspace if one exists and tear down its on-disk directory.
-/// terminal (pure logic runIsTerminal) owns the terminal-status vocabulary ONCE (#2370); decide
-/// (pure) returns the run's workspaces; apply releases each still-provisioned one and teardown
-/// removes the directory tree (even when no concept row exists -- the integration provisions
-/// without writing the row), both gated on the terminal scalar.
+/// `terminal` (pure logic runIsTerminal) owns the terminal-status vocabulary ONCE (#2370); `decide`
+/// (pure) returns the run's workspaces; the `for` loop releases each still-provisioned one and
+/// `teardown` removes the directory tree (even when no concept row exists -- the integration
+/// provisions without writing the row), both gated on the terminal scalar.
 @trigger(event="graph.node.updated.v1:work:run")
 @filter(row => row.status != "running" && row.status != "compiling" && row.status != "waiting")
 automation releaseWorkspaceOnRunTerminal {

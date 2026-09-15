@@ -25,9 +25,7 @@
 //   payload  : validated against the automation's `args { }` block below --
 //              THE machine-checked emitter/consumer contract (G5, #2367).
 //              A missing @required field or an @enum violation makes the
-//              automation REFUSE to fire loudly (G1 fire-time validation);
-//              field semantics are documented as @description annotations
-//              on the args fields themselves.
+//              automation REFUSE to fire loudly (G1 fire-time validation).
 //
 // WHO EMITS IT -- NOBODY, AS OF memql#4550. Read this before concluding
 // either that the topic is live or that it is safe to delete.
@@ -62,23 +60,19 @@
 // `status: historical`.
 //
 // TOPIC SHAPE. `deploy.requested` is a RAW application topic, not graph CDC, so
-// it carries no concept segment. This trigger used to read
-// `@trigger(event="deploy.requested", concept="v1:cluster:deployment",
-// partition="*")`; those two kwargs are consumed only by the structured
-// node.created/updated/deleted rewrite, so on an unrecognised event kind they
-// were silently discarded and the compiled topic was the bare
-// `deploy.requested` all along (memql#3614 item 1). The kwargs are gone; the
-// compiled topic is byte-identical to what shipped. The concept the payload
-// concerns is stated by the writes themselves (createDeployment /
-// updateDeploymentStatus on v1:cluster:deployment).
+// it carries no concept segment, and the trigger names no concept: `concept=`
+// is consumed only by the structured node.created/updated/deleted form, and
+// the loader refuses it on any other event kind (memql#3614 item 1). The
+// concept the payload concerns is stated by the writes themselves
+// (createDeployment / updateDeploymentStatus on v1:cluster:deployment).
 //
 // AUTHORIZATION. `authorize` records the pure forward-deploy role decision
 // (logic deploymentForwardAllowed, mirroring spec requiresDeveloperOrAbove,
 // #1876). The HARD gate is upstream + at the writes: createDeployment /
 // updateDeploymentStatus are only ever reached through the Go-gated deploy RPCs
 // (deploycontrol.authorize), so the deploy-start write and every transition
-// inherit that authorization (specs.memql). The step keeps the decision visible
-// + greppable in the run record.
+// inherit that authorization (specs.memql). The `authorize` statement keeps the
+// decision visible + greppable in the run record.
 //
 // =============================================================================
 //   deployEngineCluster -- the one orchestration
@@ -87,21 +81,26 @@
 // Sequence (decide -> record -> clone -> build -> place -> gate -> finish):
 //
 //   authorize       logic deploymentForwardAllowed        (decide: role gate)
-//   record          createDeployment                      (persist: one write)
+//   record          mutation createDeployment             (persist: one write)
 //   clone           action cloneRepoAtVersion             (act: checkout the ref)
-//   (build)         for nt: action buildEngineImage       (act: one image / node)
-//   (import)        for nt if docker-local:               (act: local placement --
-//                     action importImageToK3d               per-node k3d import)
-//   (place)         switch provider { docker-local { }    (act: cloud placement --
-//                     default { pinOverlayDigests,          GitOps)
-//                               argoSync } }
+//   (build)         for nt in args.engineNodeTypes {      (act: one image / node)
+//                     action buildEngineImage }
+//   (import)        for nt in ... if docker-local {       (act: local placement --
+//                     action importImageToK3d }             per-node k3d import)
+//   (place)         switch args.provider {                (act: cloud placement --
+//                     case "docker-local" { }               GitOps)
+//                     default { action pinOverlayDigests,
+//                               action argoSync } }
 //   gate            action runDeployGate                  (act: post-deploy gate)
 //   outcome         logic deployOutcomeLabel              (decide: succeeded/failed)
 //   (finish)        switch outcome {                      (persist + act)
-//                     succeeded { updateDeploymentStatus succeeded; notifyDeploy }
-//                     default   { updateDeploymentStatus failed; notifyDeploy } }
+//                     case "succeeded" { mutation updateDeploymentStatus succeeded;
+//                                        action notifyDeploy }
+//                     default { mutation updateDeploymentStatus failed;
+//                               action notifyDeploy } }
 //   rollbackTarget  logic deployRollbackTarget            (decide: revert to?)
-//   (rollback)      switch rollbackTarget { "" { } default { revertOverlay } }
+//   (rollback)      switch rollbackTarget {
+//                     case "" { } default { action revertOverlay } }
 //
 // EXECUTION ORDER. The statements run in the order they are written (epic
 // memql#5370): the deploy is an ordered side-effect pipeline, and its order is
@@ -125,15 +124,9 @@
 // which `MEMQL_DEPLOY_PROVIDER` sets and `v1:cluster:deployment.provider`
 // records. It was always outside the environment gate for exactly this reason.
 //
-// The alternative -- a logic statement mapping provider -> app name -- was
-// rejected before edition 2026 for a reason that no longer holds: the compiler
-// then ordered steps by their references, and a data edge the other phases
-// lacked would have reordered the pipeline. Statements run as written now; the
-// switch on provider stays because it names the one thing that varies.
-//
-// The `importImageToK3d(cluster: "memql")` above is NOT the Application name
-// wearing the same clothes: that is the k3d CLUSTER name on a developer's
-// laptop.
+// The `action importImageToK3d(cluster: "memql")` above is NOT the
+// Application name wearing the same clothes: that is the k3d CLUSTER name on
+// a developer's laptop.
 //
 // LIFECYCLE record. record -> finalize is the deployment timeline the bundle
 // persists: createDeployment (in_progress) at start, updateDeploymentStatus
@@ -226,8 +219,8 @@ automation deployEngineCluster {
 // automation, driven by an event, recorded on the graph.
 //
 // COMPOSITION. `bringUpInstance` calls `provisionInstance` and then
-// `installInstance` as SUB-AUTOMATIONS -- the `automation <name>( ... )` step
-// form, the same kind-prefixed invocation shape as `logic <name>( ... )`. That
+// `installInstance` as SUB-AUTOMATIONS -- the `automation <name>(...)` call
+// statement, the same kind-prefixed call as `logic <name>(...)`. That
 // keeps each verb independently runnable (an operator repairing an instance
 // must not have to run provisioning to get there) while the common path stays
 // one event.
@@ -297,7 +290,7 @@ automation provisionInstance {
 // a first install (there is no previous ref to diff against) and ON for an
 // update, which is what `requireRenderDiff` states.
 //
-// THE ESO CLIENT ID AND TENANT ARE ARGS, not read out of provisioning's step
+// THE ESO CLIENT ID AND TENANT ARE ARGS, not read out of provisioning's
 // result, because provisionInstance is a SEPARATE VERB by design: an operator
 // installing onto substrate that already exists must not have to re-run
 // provisioning to obtain them. provisionAzureInfrastructure reports both in its
@@ -340,8 +333,8 @@ automation installInstance {
   )
   switch verdict {
     // The gate was required and did not pass. Nothing is applied, and the
-    // run record carries the diff -- which is the whole product of this
-    // step, since what it found is not discoverable any other way.
+    // run record carries the diff -- which is the whole product of the
+    // `gate` statement, since what it found is not discoverable any other way.
     case "blocked" { }
     default {
       action installClusterOperators(
@@ -439,7 +432,7 @@ automation repairInstance {
   // is executing. Nesting this under the verdict would withhold the report
   // precisely on the runs that motivate reading one.
   //
-  // It reports and never refuses. Divergence here is usually correct, so a step
+  // It reports and never refuses. Divergence here is usually correct, so a check
   // that failed on difference would fail on almost every healthy instance --
   // the same mistake memql#4475 names about reading the first Degraded as
   // failure.
@@ -475,8 +468,8 @@ automation repairInstance {
 // THE HANDOFF VALUES RIDE THROUGH AS ARGS. tenantId and esoClientId are what
 // the instance overlay binds its service accounts to;
 // provisionAzureInfrastructure reports esoClientId in its result envelope. They
-// are threaded as arguments rather than read out of the substrate step's result
-// because each verb has to stay independently runnable -- an operator
+// are threaded as arguments rather than read out of the `substrate` statement's
+// value because each verb has to stay independently runnable -- an operator
 // installing onto substrate that already exists must not have to re-run
 // provisioning to obtain a value they can read off the vault.
 //

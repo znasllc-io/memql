@@ -12,14 +12,9 @@
 // trips the v1:library:artifact "expected string, got null" rejection (the
 // #1626 failure), so the optional fields coalesce to "".
 //
-// sourceConceptRef binds event.payload.id DIRECTLY. The earlier
-// `canonicalId(event.payload.id, <concept>)` form resolved to nil in a
-// top-level call argument (the concept-ref builtin did not evaluate there), so
-// createArtifact failed with "required argument sourceConceptRef is missing" --
-// silently breaking Library promotion (proven on a seeded DB; forward-fixes
-// #2265's canonicalId-in-step bug). canonicalId is unnecessary anyway: a
-// node.created event's payload.id IS the stored canonical concept id
-// (e.g. v1:library:memory:mem-...), so the direct bind yields the identical ref.
+// sourceConceptRef binds args.id, the created row's id, DIRECTLY: a
+// node.created event's payload id IS the stored canonical concept id
+// (e.g. v1:library:memory:mem-...), so no canonicalId() wrapping is needed.
 // The #2235 library-index-promotion conformance dimension guards all five paths.
 
 /// On generated-output creation, promote the new v1:library:generatedOutput into the Library as an
@@ -176,11 +171,10 @@ automation indexMemoryOnCreate {
 // forward the way integrations/library's touchArtifact does.
 /// On file creation, promote the new v1:library:file into the Library as an artifact index row
 /// (lens=artifact, kind=file). The sixth promotion, and the shape of the five above: sourceConceptRef
-/// binds event.payload.id directly, the optional fields coalesce so no nil reaches a string field,
-/// and the derived id makes a re-run version the same row rather than add a second one. format is
-/// carried from the file row, where the writer that knew the MIME wrote it -- an automation step
-/// argument has no conditional form, so the mapping lives in Go and its answer lives on the row.
-/// memql#4340.
+/// binds args.id directly, the optional fields coalesce so no nil reaches a string field, and the
+/// derived id makes a re-run version the same row rather than add a second one. format is carried
+/// from the file row, where the writer that knew the MIME wrote it: the mapping lives in Go and its
+/// answer lives on the row. memql#4340.
 @trigger(event="node.created", concept="v1:library:file")
 @filter(row => row.status == "stored")
 automation indexFileOnCreate {

@@ -96,9 +96,9 @@ automation provisionInstanceOnCreate {
 /// byte-identical files and ArgoCD reconciles nothing.
 ///
 /// A SEPARATE AUTOMATION FROM ITS CREATE TWIN rather than one with two triggers, because the two
-/// events carry different meanings even where they run identical steps: this one is the tier-change
-/// path, and the day it needs to differ -- draining connections before a downgrade, say -- it is
-/// already its own construct rather than a branch inside a shared one.
+/// events carry different meanings even where they run identical statements: this one is the
+/// tier-change path, and the day it needs to differ -- draining connections before a downgrade, say
+/// -- it is already its own construct rather than a branch inside a shared one.
 @trigger(event="node.updated", concept="v1:fleet:instance")
 automation reRenderInstanceOnShapeChange {
   args {

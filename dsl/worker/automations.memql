@@ -44,10 +44,8 @@ use work.builtins.{ cancelComputerUseRuns }
 @filter(row => row.preferences.computerUseEnabled == false)
 automation killSwitchCancelsComputerUseRuns {
   // The trigger payload binds INTO this contract at fire time, and the field
-  // is then read BARE. Its predecessor reached for `args.event.payload.id ??
-  // ""` instead, which is the retired dotted form -- and the coalesce inside
-  // it is what memql#2870 could not evaluate. Declaring the field is what
-  // makes the id a checked input rather than a path walked at runtime.
+  // is then read as `args.id`. Declaring the field is what makes the id a
+  // checked input rather than a path walked at runtime.
   args {
     id any
   }
@@ -69,14 +67,13 @@ automation killSwitchCancelsComputerUseRuns {
 // security signals are not. Operators tune via the
 // WORKER_INVOCATION_RETENTION_DAYS env var.
 //
-// MemQL parser limitations:
-//   - The filter side of expiredWorkerInvocations can't push
-//     the duration math into the query (no `>` operator on
-//     datetime). Per-row gating uses
-//       addDuration(item.createdAt, "P{retention}D") < now
+// The retention cutoff (now minus the window, addDuration with a
+// negative ISO-8601 duration) is computed in the
+// workerInvocationRetentionSweep logic and passed to
+// expiredWorkerInvocations as `createdBefore`, so the comparison runs
+// in the query's filter.
 /// Daily 02:30 UTC sweep: soft-delete worker-invocation rows past WORKER_INVOCATION_RETENTION_DAYS.
-/// decide (pure) returns the candidate rows; window reads the retention var; the forEach apply
-/// gates each row on createdAt + P{N}D < now (#2256/#2254 evaluator fix) and soft-deletes it.
+/// `decide` (pure) returns the rows past the window; the `for` loop over them soft-deletes each.
 @trigger(schedule="0 30 2 * * *")
 automation workerInvocationRetentionSweep {
   decide := logic workerInvocationRetentionSweep(event: event)
@@ -104,13 +101,13 @@ automation workerInvocationRetentionSweep {
 // work cannot know whose work was abandoned before it looks. Without the
 // principal the read returns zero rows and no error, and a cluster full of
 // stuck pulls sweeps nothing every two minutes, forever, in silence.
-/// Every two minutes: fail the model pulls no replica is driving. decide (pure) returns the
-/// candidates, judged against two separate cutoffs; the forEach closes each one.
+/// Every two minutes: fail the model pulls no replica is driving. `decide` (pure) returns the
+/// candidates, judged against two separate cutoffs; the `for` loop closes each one.
 ///
-/// ONE SENTENCE FOR BOTH SHAPES OF ABANDONMENT, deliberately. The decide step distinguishes them
-/// -- a `requested` row nobody claimed from a `running` row that stopped reporting -- but a
-/// forEach writes one literal, so a message naming a single cause would be wrong half the time.
-/// The remedy is identical either way, which is what the sentence says instead.
+/// ONE SENTENCE FOR BOTH SHAPES OF ABANDONMENT, deliberately. The logic behind `decide`
+/// distinguishes them -- a `requested` row nobody claimed from a `running` row that stopped
+/// reporting -- but the loop writes one literal, so a message naming a single cause would be wrong
+/// half the time. The remedy is identical either way, which is what the sentence says instead.
 @trigger(schedule="0 */2 * * * *")
 automation workerModelPullStaleSweep {
   decide := logic workerModelPullStaleSweep(event: event)
@@ -146,10 +143,10 @@ automation workerModelPullStaleSweep {
 // principal the read returns zero rows and no error, and a cluster full of
 // stuck probes sweeps nothing every two minutes, forever, in silence.
 
-/// Every two minutes: fail the model probes no replica is driving. decide (pure) returns the
-/// candidates, judged against two separate cutoffs; the forEach closes each one.
+/// Every two minutes: fail the model probes no replica is driving. `decide` (pure) returns the
+/// candidates, judged against two separate cutoffs; the `for` loop closes each one.
 ///
-/// ONE SENTENCE FOR BOTH SHAPES OF ABANDONMENT, deliberately -- a forEach writes one literal, so a
+/// ONE SENTENCE FOR BOTH SHAPES OF ABANDONMENT, deliberately -- the loop writes one literal, so a
 /// message naming a single cause would be wrong half the time, and the remedy is identical either
 /// way. The sentence says what a person actually needs: nothing was measured, so nothing was
 /// recorded, and running it again costs only the time.

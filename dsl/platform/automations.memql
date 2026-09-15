@@ -61,9 +61,10 @@ automation reconcileCustomDomains {
 /// The same sweep for an account's reserved MemQL name (epic memql#5168), on the same schedule and
 /// for the same reasons.
 ///
-/// A SEPARATE AUTOMATION rather than a second step on the one above. Steps in an automation run in
-/// order and a failing one stops what follows, so folding these would make a DNS provider timing
-/// out on one client's own domain the reason another client's front door stopped being reconciled.
+/// A SEPARATE AUTOMATION rather than a second statement on the one above. Statements in an
+/// automation run in order and a failed one ends the run, so folding these would make a DNS provider
+/// timing out on one client's own domain the reason another client's front door stopped being
+/// reconciled.
 /// They are independent sweeps over independent concepts and they fail independently.
 ///
 /// TWO MINUTES, matched to its sibling: a door's three CNAMEs and a client's own domain propagate
