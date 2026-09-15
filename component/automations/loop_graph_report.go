@@ -11,8 +11,12 @@ import (
 )
 
 // cycleFix is the refusal's closing advice: the two ways out of a cycle.
+//
+// The first-version half names BOTH steps. A filter reads `args` through the
+// args block, so `args.firstVersion` in an automation that does not declare
+// it is absent, and the filter it was advised to write would never fire.
 const cycleFix = "Permit it with @loop(maxDepth=<n>, until=row => <done>) on one automation of the cycle, with its negation in that automation's @filter; " +
-	"or give an automation a @filter this write cannot satisfy -- a trigger for first versions only is @filter(row => args.firstVersion == true)"
+	"or give an automation a @filter this write cannot satisfy -- a trigger for first versions only declares `firstVersion bool` in its args block and filters `@filter(row => args.firstVersion == true)`"
 
 // kindWord names a write's kind in an edge's reason.
 func kindWord(kind string) string {

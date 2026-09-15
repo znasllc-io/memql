@@ -761,6 +761,7 @@ func (b *graphBuilder) reachedBuiltins(name string) []string {
 func (b *graphBuilder) edge(from, to *Automation, prods []production) (GraphEdge, bool) {
 	pattern := to.Trigger.Event
 	filter, filterErr := triggerFilterLambda(to)
+	args := declaredArgs(to)
 	best, bestDecided := -1, false
 	var bestTri tri
 	var bestWhy string
@@ -778,7 +779,7 @@ func (b *graphBuilder) edge(from, to *Automation, prods []production) (GraphEdge
 		if filterErr != "" {
 			t, why = triUnknown, filterErr
 		} else if filter != nil {
-			t, why = decideFilter(filter, p.row)
+			t, why = decideFilter(filter, p.row, args)
 		}
 		if t == triFalse {
 			continue
@@ -804,6 +805,21 @@ func (b *graphBuilder) edge(from, to *Automation, prods []production) (GraphEdge
 		Decided: bestDecided,
 		Reason:  edgeReason(from, to, p, bestTri, bestWhy),
 	}, true
+}
+
+// declaredArgs is the field set an automation's args block declares, which
+// is all a trigger filter's `args` binds (bindEventArgs); nil for no block.
+func declaredArgs(a *Automation) map[string]bool {
+	if a.Args == nil || len(a.Args.Fields) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(a.Args.Fields))
+	for _, f := range a.Args.Fields {
+		if f != nil && strings.TrimSpace(f.Name) != "" {
+			out[f.Name] = true
+		}
+	}
+	return out
 }
 
 // triggerFilterLambda is an automation's @filter as its lambda: the one

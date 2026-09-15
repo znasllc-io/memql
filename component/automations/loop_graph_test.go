@@ -274,6 +274,65 @@ automation c {
 	}
 }
 
+// A filter's `args` binds only the fields the JUDGED automation's args block
+// declares (bindEventArgs), and nothing with no block: an undeclared field is
+// absent at run time whatever the write sets. So `args.status != "done"`
+// fires on a write stamping "done", and that edge must stay; and a
+// first-version filter on an automation that does not declare firstVersion
+// never fires, so no write reaches it.
+func TestLoopGraph_UndeclaredArgsReadAbsent(t *testing.T) {
+	finisher := `@trigger(event="tick.a")
+automation a {
+  step finish {
+    mutation finishThing()
+  }
+}`
+	reader := func(args string) string {
+		return `@trigger(event="node.created", concept="v1:t:thing")
+@filter(row => args.status != "done")
+automation b {
+` + args + `  step record {
+    mutation recordOther()
+  }
+}`
+	}
+	for name, args := range map[string]string{
+		"no args block":                "",
+		"an args block without status": "  args {\n    id any\n  }\n",
+	} {
+		g := BuildLoopGraph(graphAutomations(t, finisher, reader(args)), fakeSource{thingReg()}, 0)
+		if e := graphEdge(g, "a", "b"); e == nil || !e.Decided {
+			t.Errorf("%s: args.status is absent at run time, so != \"done\" holds and b fires: edge = %+v", name, e)
+		}
+	}
+	// The control: declared, args.status is the "done" the write stamps.
+	g := BuildLoopGraph(graphAutomations(t, finisher, reader("  args {\n    status any\n  }\n")), fakeSource{thingReg()}, 0)
+	if e := graphEdge(g, "a", "b"); e != nil {
+		t.Errorf("b declares status, which reads \"done\", yet a -> b: %+v", e)
+	}
+
+	creator := `@trigger(event="tick.c")
+automation c {
+  step create {
+    mutation createThing()
+  }
+}`
+	firstOnly := `@trigger(event="node.created", concept="v1:t:thing")
+@filter(row => args.firstVersion == true)
+automation f {
+  args {
+    id any
+  }
+  step record {
+    mutation recordOther(id: id)
+  }
+}`
+	g = BuildLoopGraph(graphAutomations(t, creator, firstOnly), fakeSource{thingReg()}, 0)
+	if e := graphEdge(g, "c", "f"); e != nil {
+		t.Errorf("f does not declare firstVersion, so its filter reads absent and never holds, yet c -> f: %+v", e)
+	}
+}
+
 // libraryGraph is the library's archive pair as the tree ships it, compiled
 // from the embedded tree, over its real mutations (loop_graph_source.go
 // reads them from the loaded function registry), plus any extra automations.
@@ -655,7 +714,7 @@ func TestLoopGraph_RefusalText(t *testing.T) {
 	g := BuildLoopGraph(as, fakeSource{reg}, 0)
 	want := "automation cycle not covered by @loop: routeRequest -> routeRequest\n" +
 		"  routeRequest -> routeRequest: routeRequest writes v1:forge:request through advanceRequest (update), which publishes graph.node.created.v1:forge:request, and routeRequest triggers on it with no @filter\n" +
-		"  Permit it with @loop(maxDepth=<n>, until=row => <done>) on one automation of the cycle, with its negation in that automation's @filter; or give an automation a @filter this write cannot satisfy -- a trigger for first versions only is @filter(row => args.firstVersion == true) [loop_cycle]"
+		"  Permit it with @loop(maxDepth=<n>, until=row => <done>) on one automation of the cycle, with its negation in that automation's @filter; or give an automation a @filter this write cannot satisfy -- a trigger for first versions only declares `firstVersion bool` in its args block and filters `@filter(row => args.firstVersion == true)` [loop_cycle]"
 	if len(g.Problems) != 1 || g.Problems[0].Message != want {
 		t.Fatalf("problems = %+v\nwant the message\n%s", g.Problems, want)
 	}

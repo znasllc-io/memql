@@ -83,24 +83,26 @@ func (r knownRow) why(field string) string {
 }
 
 // decideFilter decides a trigger filter -- a one-parameter lambda over the
-// triggering row -- against what a write is known to set. A nil filter holds
-// for every write. An unknown answer carries the reason: the first field the
-// filter reads that the write leaves unknown, in the row's words, or the node
-// the rules do not cover.
-func decideFilter(filter *ast.LambdaExpr, row knownRow) (tri, string) {
+// triggering row -- against what a write is known to set. args is the field
+// set the judged automation's args block declares (nil for no block). A nil
+// filter holds for every write. An unknown answer carries the reason: the
+// first field the filter reads that the write leaves unknown, in the row's
+// words, or the node the rules do not cover.
+func decideFilter(filter *ast.LambdaExpr, row knownRow, args map[string]bool) (tri, string) {
 	if filter == nil {
 		return triTrue, ""
 	}
 	if len(filter.Params) != 1 {
 		return triUnknown, fmt.Sprintf("%s is not a one-parameter lambda", ast.FormatExpr(filter))
 	}
-	d := filterDecider{param: filter.Params[0], row: row}
+	d := filterDecider{param: filter.Params[0], row: row, args: args}
 	return d.cond(filter.Body)
 }
 
 type filterDecider struct {
 	param string
 	row   knownRow
+	args  map[string]bool
 }
 
 // pkind is how much is known about one value.
@@ -318,7 +320,16 @@ var graphEventEnvelopeKeys = map[string]bool{"id": true, "nodeId": true, "nodeTy
 
 // argField reads an args binding, which binds from the event payload by
 // name: the written payload, flattened, plus the envelope.
+//
+// It binds ONLY the fields the judged automation's args block declares
+// (bindEventArgs), and with no block `args` itself is absent (the run
+// scope's reserved root). So a field the automation does not declare --
+// firstVersion included -- reads absent, exactly, whatever the write sets:
+// `args.status != "done"` fires on a write stamping "done" there.
 func (d filterDecider) argField(f string) pval {
+	if !d.args[f] {
+		return absentP
+	}
 	switch {
 	case f == "firstVersion":
 		switch d.row.FirstVersion {

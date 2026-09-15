@@ -30,6 +30,43 @@ type filterCase struct {
 	want   tri
 	// why, when set, must appear in the reason of an unknown answer.
 	why string
+	// declares is the judged automation's args block: nil declares every
+	// field the filter reads through args; an empty, non-nil list declares
+	// none of them.
+	declares []string
+}
+
+// declaredArgsOf is the args block a case's automation declares.
+func declaredArgsOf(t *testing.T, tc filterCase) map[string]bool {
+	t.Helper()
+	names := tc.declares
+	if names == nil {
+		names = argsRead(mustLambda(t, tc.filter))
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, n := range names {
+		out[n] = true
+	}
+	return out
+}
+
+// argsRead is every top-level field a filter reads through args, sorted.
+func argsRead(lam *ast.LambdaExpr) []string {
+	set := map[string]bool{}
+	ast.MemberPaths(lam.Body, func(root string, fields []string) {
+		if root == "args" && len(fields) > 0 {
+			set[fields[0]] = true
+		}
+	})
+	out := make([]string, 0, len(set))
+	for f := range set {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out
 }
 
 const filterConcept = "v1:t:thing"
@@ -143,6 +180,21 @@ func filterCases() []filterCase {
 		{name: "args.concept of an update", filter: `row => args.concept == "v1:t:thing"`, row: updateRow(nil), want: triUnknown, why: "concept"},
 		{name: "a parameter of another name", filter: `x => x.status == "open"`, row: newRow(map[string]any{"status": "open"}), want: triTrue},
 
+		// An args field the judged automation does not declare is absent at
+		// run time (args binds declared fields only; with no block, args is
+		// absent), whatever the write sets -- firstVersion included.
+		{name: "undeclared args.f != a value the write sets", filter: `row => args.status != "done"`, row: updateRow(map[string]any{"status": "done"}), declares: []string{}, want: triTrue},
+		{name: "undeclared args.f == a value the write sets", filter: `row => args.status == "done"`, row: newRow(map[string]any{"status": "done"}), declares: []string{}, want: triFalse},
+		{name: "undeclared args.f is absent over an unknown row", filter: `row => args.status == "open"`, row: updateRow(nil), declares: []string{}, want: triFalse},
+		{name: "undeclared args.f == nil", filter: `row => args.status == nil`, row: newRow(map[string]any{"status": "open"}), declares: []string{}, want: triTrue},
+		{name: "undeclared args.f under !", filter: `row => !(args.status == "done")`, row: newRow(map[string]any{"status": "done"}), declares: []string{}, want: triTrue},
+		{name: "undeclared args.f under ??", filter: `row => (args.status ?? "none") == "none"`, row: newRow(map[string]any{"status": "done"}), declares: []string{}, want: triTrue},
+		{name: "undeclared firstVersion != true", filter: `row => args.firstVersion != true`, row: newRow(nil), declares: []string{}, want: triTrue},
+		{name: "undeclared firstVersion == true never holds", filter: `row => args.firstVersion == true`, row: newRow(nil), declares: []string{}, want: triFalse},
+		{name: "undeclared args.concept", filter: `row => args.concept == "v1:t:thing"`, row: newRow(nil), declares: []string{}, want: triFalse},
+		{name: "a declared field beside an undeclared one", filter: `row => args.kind == "a" && args.status != "done"`, row: newRow(map[string]any{"kind": "a", "status": "done"}), declares: []string{"kind"}, want: triTrue},
+		{name: "an undeclared field beside a declared unknown one", filter: `row => args.kind == "a" || args.status == "done"`, row: updateRow(map[string]any{"status": "done"}), declares: []string{"kind"}, want: triUnknown, why: "kind"},
+
 		// Reads through an object.
 		{name: "through a set object", filter: `row => row.meta.kind == "a"`, row: newRow(map[string]any{"meta": map[string]any{"kind": "a"}}), want: triTrue},
 		{name: "through an absent object", filter: `row => row.?meta.kind == "a"`, row: newRow(nil), want: triFalse},
@@ -170,9 +222,9 @@ func mustLambda(t *testing.T, src string) *ast.LambdaExpr {
 func TestDecideFilter(t *testing.T) {
 	for _, tc := range filterCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			got, why := decideFilter(mustLambda(t, tc.filter), tc.row)
+			got, why := decideFilter(mustLambda(t, tc.filter), tc.row, declaredArgsOf(t, tc))
 			if got != tc.want {
-				t.Fatalf("%s over %+v = %s (%s), want %s", tc.filter, tc.row, got, why, tc.want)
+				t.Fatalf("%s over %+v (declaring %v) = %s (%s), want %s", tc.filter, tc.row, tc.declares, got, why, tc.want)
 			}
 			if got == triUnknown && !strings.Contains(why, tc.why) {
 				t.Errorf("the reason %q does not name %q", why, tc.why)
@@ -186,7 +238,7 @@ func TestDecideFilter(t *testing.T) {
 
 // A nil filter holds for every write: the automation has no @filter.
 func TestDecideFilterNoFilterHolds(t *testing.T) {
-	if got, _ := decideFilter(nil, updateRow(nil)); got != triTrue {
+	if got, _ := decideFilter(nil, updateRow(nil), nil); got != triTrue {
 		t.Fatalf("no filter = %s, want true", got)
 	}
 }
@@ -196,7 +248,7 @@ func TestDecideFilterNoFilterHolds(t *testing.T) {
 func TestDecideFilterAsksTheRowWhy(t *testing.T) {
 	row := updateRow(nil)
 	row.explain = func(field string) string { return "advanceThing leaves " + field + " as stored" }
-	_, why := decideFilter(mustLambda(t, `row => row.status == "open"`), row)
+	_, why := decideFilter(mustLambda(t, `row => row.status == "open"`), row, nil)
 	if why != "advanceThing leaves status as stored" {
 		t.Fatalf("reason = %q", why)
 	}
@@ -209,41 +261,82 @@ var completionValues = []any{absentCompletion{}, nil, "", "  ", "open", "done", 
 // absentCompletion marks a field left out of the completed row.
 type absentCompletion struct{}
 
+// gateVariant is one way the soundness gate judges a case: the event the
+// write publishes, and the args block of the automation judged.
+type gateVariant struct {
+	name string
+	// updated judges the graph.node.updated event an update publishes,
+	// which carries no firstVersion of its own; else graph.node.created.
+	updated bool
+	// block is the judged automation's args block: "case" declares what the
+	// case declares, "unrelated" one field the filter never reads, "none"
+	// no block at all -- the two ways a field ends up undeclared.
+	block string
+}
+
+var gateVariants = []gateVariant{
+	{name: "created", block: "case"},
+	{name: "updated", updated: true, block: "case"},
+	{name: "created, an unrelated args block", block: "unrelated"},
+	{name: "created, no args block", block: "none"},
+	{name: "updated, no args block", updated: true, block: "none"},
+}
+
 // TestDecideFilterAgreesWithTheRuntime is the soundness gate. For every case
-// the table DECIDES, each field the filter reads that the row does not know is
-// filled with every value of completionValues -- one field at a time and all
-// together -- and the completed write is turned into the graph event
-// executeWrite publishes, which the runtime's own filter (evaluateTriggerFilter,
-// the path the scheduler fires through) must answer the same way.
+// and every variant the graph DECIDES, each field the filter reads that the
+// row does not know is filled with every value of completionValues -- one
+// field at a time and all together -- and the completed write is turned into
+// the graph event executeWrite publishes, which the runtime's own filter
+// (evaluateTriggerFilter, the path the scheduler fires through) must answer
+// the same way. The variants hold the judged automation's args block to the
+// runtime too: a field it does not declare is not bound, and neither is any
+// with no block.
 func TestDecideFilterAgreesWithTheRuntime(t *testing.T) {
-	checked := 0
+	checked := map[string]int{}
 	for _, tc := range filterCases() {
 		lam := mustLambda(t, tc.filter)
-		got, _ := decideFilter(lam, tc.row)
-		if got == triUnknown {
-			continue
-		}
-		unknown := unknownFieldsRead(lam, tc.row)
-		for _, completion := range completions(unknown) {
-			ev, a := completedEvent(t, tc, completion)
-			bound, _, err := bindEventArgs(a, ev)
-			if err != nil {
-				t.Fatalf("%s: bind: %v", tc.name, err)
+		for _, v := range gateVariants {
+			declares := declaredArgsOf(t, tc)
+			switch v.block {
+			case "unrelated":
+				declares = map[string]bool{"unrelatedArg": true}
+			case "none":
+				declares = nil
 			}
-			fires, err := evaluateTriggerFilter(a, ev, bound)
-			if err != nil {
-				// A filter the runtime refuses does not fire.
-				fires = false
+			row := tc.row
+			if v.updated {
+				// What writeRow says of the updated topic: the event carries
+				// no firstVersion of its own.
+				row.FirstVersion = triUnknown
 			}
-			if fires != (got == triTrue) {
-				t.Errorf("%s: decideFilter says %s, the runtime says %v for the completion %v", tc.name, got, fires, completion)
+			got, _ := decideFilter(lam, row, declares)
+			if got == triUnknown {
+				continue
 			}
-			checked++
+			for _, completion := range completions(unknownFieldsRead(lam, row)) {
+				ev, a := completedEvent(t, tc, row, completion, v.updated, declares)
+				bound, _, err := bindEventArgs(a, ev)
+				if err != nil {
+					t.Fatalf("%s (%s): bind: %v", tc.name, v.name, err)
+				}
+				fires, err := evaluateTriggerFilter(a, ev, bound)
+				if err != nil {
+					// A filter the runtime refuses does not fire.
+					fires = false
+				}
+				if fires != (got == triTrue) {
+					t.Errorf("%s (%s): decideFilter says %s, the runtime says %v for the completion %v", tc.name, v.name, got, fires, completion)
+				}
+				checked[v.name]++
+			}
 		}
 	}
-	if checked < 50 {
-		t.Fatalf("checked %d completions -- the gate went blind", checked)
+	for _, v := range gateVariants {
+		if checked[v.name] < 50 {
+			t.Fatalf("checked %d completions for %q -- the gate went blind: %v", checked[v.name], v.name, checked)
+		}
 	}
+	t.Logf("completions checked against the runtime, per variant: %v", checked)
 }
 
 // unknownFieldsRead is every top-level field the filter reads, through its
@@ -285,13 +378,15 @@ func completions(fields []string) []map[string]any {
 	return out
 }
 
-// completedEvent is the graph.node.created event executeWrite publishes for
-// the case's row with completion filled in, and an automation declaring every
-// field the filter reads through args.
-func completedEvent(t *testing.T, tc filterCase, completion map[string]any) (*events.Event, *Automation) {
+// completedEvent is the event executeWrite publishes for row with completion
+// filled in -- graph.node.created, carrying the write's firstVersion after
+// the flattened payload, or graph.node.updated, carrying none -- and an
+// automation on it whose args block declares exactly declares (none, for
+// nil).
+func completedEvent(t *testing.T, tc filterCase, row knownRow, completion map[string]any, updated bool, declares map[string]bool) (*events.Event, *Automation) {
 	t.Helper()
 	stored := map[string]any{}
-	for k, v := range tc.row.Fields {
+	for k, v := range row.Fields {
 		stored[k] = v
 	}
 	for k, v := range completion {
@@ -300,31 +395,29 @@ func completedEvent(t *testing.T, tc filterCase, completion map[string]any) (*ev
 		}
 		stored[k] = v
 	}
-	payload := map[string]any{"id": "x-1", "nodeId": "x-1", "concept": tc.row.Concept, "nodeType": "instance"}
+	payload := map[string]any{"id": "x-1", "nodeId": "x-1", "concept": row.Concept, "nodeType": "instance"}
 	for k, v := range stored {
 		payload[k] = v
 	}
 	payload["payload"] = stored
-	switch tc.row.FirstVersion {
-	case triTrue:
-		payload["firstVersion"] = true
-	case triFalse:
-		payload["firstVersion"] = false
+	base := events.TopicGraphNodeUpdated
+	if !updated {
+		base = events.TopicGraphNodeCreated
+		switch row.FirstVersion {
+		case triTrue:
+			payload["firstVersion"] = true
+		case triFalse:
+			payload["firstVersion"] = false
+		}
 	}
-	topic := events.BuildTopicWithConcept(events.TopicGraphNodeCreated, tc.row.Concept)
+	topic := events.BuildTopicWithConcept(base, row.Concept)
 	ev := &events.Event{Topic: topic, Payload: payload}
 
-	argNames := map[string]bool{}
-	ast.MemberPaths(mustLambda(t, tc.filter).Body, func(root string, fields []string) {
-		if root == "args" && len(fields) > 0 {
-			argNames[fields[0]] = true
-		}
-	})
 	a := &Automation{Name: "probe", Trigger: &TriggerConfig{Event: topic, Filter: tc.filter}}
-	if len(argNames) > 0 {
+	if len(declares) > 0 {
 		a.Args = &ArgsSchema{}
-		names := make([]string, 0, len(argNames))
-		for n := range argNames {
+		names := make([]string, 0, len(declares))
+		for n := range declares {
 			names = append(names, n)
 		}
 		sort.Strings(names)
