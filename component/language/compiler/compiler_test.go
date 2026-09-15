@@ -674,15 +674,17 @@ logic logicEnsureDailySpaceOnAuthSession {
 	}
 	file := ast.(*parser.File)
 	var body *parser.AutomationDef
+	var args *parser.ArgsSchema
 	for _, def := range file.Definitions {
 		if fd, ok := def.(*parser.FunctionDef); ok && fd.Type == parser.FunctionTypeLogic {
 			body = fd.Body.(*parser.AutomationDef)
+			args = fd.ArgsSchema
 		}
 	}
 	if body == nil {
 		t.Fatal("no logic body parsed")
 	}
-	fakeFunc := &parser.FunctionDef{Name: "logicEnsureDailySpaceOnAuthSession", Type: parser.FunctionTypeAutomation, Body: body}
+	fakeFunc := &parser.FunctionDef{Name: "logicEnsureDailySpaceOnAuthSession", Type: parser.FunctionTypeAutomation, Body: body, ArgsSchema: args}
 	c := New(Config{})
 	result, err := c.CompileFile(&parser.File{Definitions: []parser.Node{fakeFunc}})
 	if err != nil {
