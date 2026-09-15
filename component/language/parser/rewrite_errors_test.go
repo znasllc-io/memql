@@ -190,7 +190,7 @@ func TestLegacyProceduralFormRefusalNamesItsFunc(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "legacy procedural form `func (Query) ...` is retired") {
 		t.Fatalf("got %v", err)
 	}
-	if !strings.HasPrefix(err.Error(), "rewrite error at line 3, column 3: ") {
-		t.Fatalf("got %q, want the refusal placed at the `func` on line 3, column 3", err.Error())
+	if !strings.HasPrefix(err.Error(), "rewrite error at line 2, column 3: ") {
+		t.Fatalf("got %q, want the refusal placed at the `func` on line 2, column 3", err.Error())
 	}
 }

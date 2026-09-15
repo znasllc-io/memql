@@ -27,7 +27,7 @@ var clauseDispatch = map[string]struct {
 	// line switch runs; its `concept` arm refuses the retired inline concept
 	// line.
 	"query":      {file: "rewriter.go", fn: "parseStructQueryBody", beforeSwitch: []string{"args"}, refusalArms: []string{"concept"}},
-	"mutate":     {file: "rewriter.go", fn: "parseStructMutationBody"},
+	"mutation":   {file: "rewriter.go", fn: "parseStructMutationBody"},
 	"logic":      {file: "rewriter.go", fn: "logicBodyClause"},
 	"automation": {file: "rewriter.go", fn: "automationBodyClause"},
 	"action": {file: "parser.go", fn: "parseActionDecl", tag: "key",
@@ -144,7 +144,7 @@ var bodyClauseFixtures = map[string]map[string]string{
 		"asOf":     "query thing probe {\n  filter row => row.id != \"\"\n  asOf latest\n}",
 		"count":    "query thing probe {\n  filter row => row.id != \"\"\n  count\n}",
 	},
-	"mutate": {
+	"mutation": {
 		"args":   "mutation thing probe {\n  args {\n    id string!\n  }\n  insert {\n    id: args.id\n  }\n}",
 		"insert": "mutation thing probe {\n  insert {\n    id: \"x\"\n  }\n}",
 		"update": "mutation thing probe {\n  update {\n    id: \"x\"\n  }\n}",
@@ -203,7 +203,7 @@ func TestBodyClausesMatchWhatTheParsersAccept(t *testing.T) {
 // where a probed clause goes.
 var bodyProbeFixtures = map[string]string{
 	"query":      "query thing probe {\n  filter row => row.id != \"\"\n  %s\n}",
-	"mutate":     "mutation thing probe {\n  insert {\n    id: \"x\"\n  }\n  %s\n}",
+	"mutation":   "mutation thing probe {\n  insert {\n    id: \"x\"\n  }\n  %s\n}",
 	"logic":      "logic probe {\n  %s\n  body {\n    return 1\n  }\n}",
 	"automation": "automation probe {\n  %s\n  step run {\n    mutation createThing (id: \"x\")\n  }\n}",
 	"action":     "action probe {\n  %s\n  capability script(script: \"x\")\n}",

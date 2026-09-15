@@ -138,7 +138,11 @@ func TestBuiltinFieldKeepsItsSchemaAnnotations(t *testing.T) {
 // identical sets.
 func TestOneFieldAllowListForEveryBody(t *testing.T) {
 	for _, r := range []annotations.Receiver{annotations.ToolField, annotations.PromptField, annotations.BuiltinField} {
-		for _, want := range []string{"required", "description", "default", "enum"} {
+		// The shared core. @default is NOT in it: a tool and a prompt field
+		// carry one, a builtin field does not, and neither does an args field
+		// (it is retired there, never applied). D16 is about a field body
+		// being a SCHEMA, not about the three sets being identical.
+		for _, want := range []string{"required", "description", "enum"} {
 			if _, ok := annotations.Lookup(r, want); !ok {
 				t.Errorf("%s should accept @%s -- its body IS the schema handed to the model", r, want)
 			}
