@@ -5517,8 +5517,8 @@ func (p *Parser) parseActorAccessor() (ExpressionNode, error) {
 	return &CallerRefExpr{}, nil
 }
 
-// parseErrorAccessor parses error("message") and refuses the retired accessor.
-func (p *Parser) parseErrorAccessor() (ExpressionNode, error) {
+// parseErrorFunction parses error("message") and refuses the retired accessor.
+func (p *Parser) parseErrorFunction() (ExpressionNode, error) {
 	// Check for no-arg accessor: error()
 	if p.check(TokenParenClose) {
 		return nil, bodyRefuse(p.current, codeBodyAccessorRetired, "`error()` is retired in edition 2026: use error(\"message\") to raise an error; onError accessors are gone")

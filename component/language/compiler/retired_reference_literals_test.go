@@ -8,7 +8,7 @@ import (
 
 func TestRetiredRuntimeReferencesRemainStringLiterals(t *testing.T) {
 	c := NewDefault()
-	for _, value := range []string{"$steps.a.result", "$item.id", "$input.path", "$var.X", "$timestamp", "$error", "item.id", "input.path"} {
+	for _, value := range []string{"$steps.a.result", "$item.id", "$input.path", "$var.X", "$timestamp", "$error", "item.id", "input.path", " input.path "} {
 		if got := c.valueToString(value); got != parser.QuoteString(value) {
 			t.Errorf("valueToString(%q)=%q; want a quoted string", value, got)
 		}

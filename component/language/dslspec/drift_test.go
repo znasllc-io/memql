@@ -668,10 +668,9 @@ func lowered[V any](m map[string]V) map[string]bool {
 //
 // Categories (all keyed by the parser's LOWERCASED dispatch name):
 //
-//   - Accessors (parser.CallableAccessors): item / event / step / input /
-//     field / var / actor / error. Context accessors; var and error are ALSO
-//     catalog functions, which TestBuiltinAccessorsAreParserAccessors accounts
-//     for.
+//   - Accessors (parser.CallableAccessors): event / field / var / actor.
+//     Context accessors; var is also a catalog function, which
+//     TestBuiltinAccessorsAreParserAccessors accounts for.
 //   - Keyword-functions: case / default -- control-flow-shaped, modelled
 //     nowhere as a plain builtin.
 //   - Query directives: paginate / sort / select / asof / withdepth / count /
@@ -835,8 +834,8 @@ func TestParserRecognisedCallablesAreAllClassified(t *testing.T) {
 
 // TestBuiltinAccessorsAreParserAccessors asserts every parser accessor is
 // modelled in dslspec -- as a CategoryBuiltinAccessor entry, or as the catalog
-// function it also is (var and error: a v1 expression calls them as
-// functions) -- and that dslspec's accessors are all parser accessors.
+// function it also is (var: a v1 expression calls it as a function) -- and
+// that dslspec's accessors are all parser accessors.
 func TestBuiltinAccessorsAreParserAccessors(t *testing.T) {
 	parserAcc := map[string]bool{}
 	for _, n := range parser.CallableAccessors {
