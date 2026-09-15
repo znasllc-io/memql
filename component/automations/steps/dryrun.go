@@ -25,6 +25,9 @@ package steps
 //     That covers a `mutation` call, a `logic` call (its statements run
 //     through the same sandbox), a publish, an action and a sub-automation.
 //   - a step type with NO classification is REFUSED, not forwarded.
+//   - builtin executors must be classified as side-effect free. Others are
+//     refused, including calls nested inside queries. A refused call makes
+//     the preview incomplete instead of fabricating a successful result.
 //
 // That last point is load-bearing, and was not true until memql#2943. This
 // comment claimed "zero rows land in the live graph" while the sandbox
