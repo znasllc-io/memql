@@ -1,0 +1,107 @@
+{
+  "description": "A two-concept mirror loop, refused unless every cycle crosses the bounded mirror.",
+  "domain": "looppair",
+  "files": {
+    "concepts.memql": "/// A loop scenario row.\n@namespace(\"looppair\")\nconcept left {\n  key string\n  status string\n  n int\n}\n/// A loop scenario row.\n@namespace(\"looppair\")\nconcept right {\n  key string\n  status string\n  n int\n}\n",
+    "mutations.memql": "/// Write a scenario row.\nmutation left loopPairCreateLeft {\n  args {\n    id string!\n    status string\n    n int\n  }\n  insert {\n    id: args.id\n    key: args.id\n    status: args.status\n    n: args.n\n  }\n}\n/// Write a scenario row.\nmutation right loopPairCreateRight {\n  args {\n    id string!\n    status string\n    n int\n  }\n  insert {\n    id: args.id\n    key: args.id\n    status: args.status\n    n: args.n\n  }\n}\n/// Write a scenario row.\nmutation left loopPairWriteLeft {\n  args {\n    id string!\n    status string\n    n int\n  }\n  update {\n    id: args.id\n    key: args.id\n    status: args.status\n    n: args.n\n  }\n}\n/// Write a scenario row.\nmutation right loopPairWriteRight {\n  args {\n    id string!\n    status string\n    n int\n  }\n  update {\n    id: args.id\n    key: args.id\n    status: args.status\n    n: args.n\n  }\n}\n",
+    "memql.toml": "memql = \"1.0\"\nedition = \"2026\"\n"
+  },
+  "scenarios": [
+    {
+      "name": "refused-at-load",
+      "automations": "/// Exercise a causal loop.\n@trigger(event=\"node.created\", concept=\"v1:looppair:left\")\n@filter(row => row.status != \"done\")\nautomation loopPairForward {\n  args {\n    id any\n    key any\n    status any\n    n any\n  }\n  mutation loopPairWriteRight(id: args.key, n: args.n + 1, status: args.n >= 1 ? \"done\" : \"open\")\n}\n/// Exercise a causal loop.\n@trigger(event=\"node.created\", concept=\"v1:looppair:right\")\n@filter(row => row.status != \"done\")\nautomation loopPairMirror {\n  args {\n    id any\n    key any\n    status any\n    n any\n  }\n  mutation loopPairWriteLeft(id: args.key, n: args.n + 1, status: args.n >= 1 ? \"done\" : \"open\")\n}\n",
+      "expect": {
+        "loadError": "loop_cycle",
+        "messageContains": [
+          "loopPairForward",
+          "loopPairMirror"
+        ]
+      }
+    },
+    {
+      "name": "converging",
+      "automations": "/// Exercise a causal loop.\n@trigger(event=\"node.created\", concept=\"v1:looppair:left\")\n@filter(row => row.status != \"done\")\nautomation loopPairForward {\n  args {\n    id any\n    key any\n    status any\n    n any\n  }\n  mutation loopPairWriteRight(id: args.key, n: args.n + 1, status: args.n >= 1 ? \"done\" : \"open\")\n}\n/// Exercise a causal loop.\n@trigger(event=\"node.created\", concept=\"v1:looppair:right\")\n@filter(row => row.status != \"done\")\n@loop(maxDepth=4, until=row => row.status == \"done\")\nautomation loopPairMirror {\n  args {\n    id any\n    key any\n    status any\n    n any\n  }\n  mutation loopPairWriteLeft(id: args.key, n: args.n + 1, status: args.n >= 1 ? \"done\" : \"open\")\n}\n",
+      "seed": [
+        {
+          "mutation": "loopPairCreateRight",
+          "args": {
+            "id": "{id}",
+            "n": 0,
+            "status": "done"
+          }
+        },
+        {
+          "mutation": "loopPairCreateLeft",
+          "args": {
+            "id": "{id}",
+            "n": 0,
+            "status": "open"
+          }
+        }
+      ],
+      "expect": {
+        "runs": 2,
+        "counters": [
+          {
+            "automation": "loopPairForward",
+            "reason": "depth",
+            "delta": 0
+          },
+          {
+            "automation": "loopPairForward",
+            "reason": "loop_bound",
+            "delta": 0
+          },
+          {
+            "automation": "loopPairForward",
+            "reason": "echo",
+            "delta": 0
+          },
+          {
+            "automation": "loopPairForward",
+            "reason": "row_budget",
+            "delta": 0
+          },
+          {
+            "automation": "loopPairForward",
+            "reason": "mode",
+            "delta": 0
+          },
+          {
+            "automation": "loopPairMirror",
+            "reason": "depth",
+            "delta": 0
+          },
+          {
+            "automation": "loopPairMirror",
+            "reason": "loop_bound",
+            "delta": 0
+          },
+          {
+            "automation": "loopPairMirror",
+            "reason": "echo",
+            "delta": 0
+          },
+          {
+            "automation": "loopPairMirror",
+            "reason": "row_budget",
+            "delta": 0
+          },
+          {
+            "automation": "loopPairMirror",
+            "reason": "mode",
+            "delta": 0
+          }
+        ],
+        "row": {
+          "concept": "v1:looppair:left",
+          "payload": {
+            "n": 2,
+            "status": "done"
+          }
+        }
+      },
+      "removeLoopRefuses": true
+    }
+  ]
+}

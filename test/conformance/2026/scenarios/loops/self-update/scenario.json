@@ -1,0 +1,188 @@
+{
+  "description": "A row update loop: refused, converging, annotation-bound and opaque global-depth stops.",
+  "domain": "loopself",
+  "files": {
+    "concepts.memql": "/// A loop scenario row.\n@namespace(\"loopself\")\nconcept ticket {\n  key string\n  status string\n  n int\n}\n",
+    "mutations.memql": "/// Write a scenario row.\nmutation ticket loopSelfCreate {\n  args {\n    id string!\n    status string\n    n int\n  }\n  insert {\n    id: args.id\n    key: args.id\n    status: args.status\n    n: args.n\n  }\n}\n/// Write a scenario row.\nmutation ticket loopSelfUpdate {\n  args {\n    id string!\n    status string\n    n int\n  }\n  update {\n    id: args.id\n    key: args.id\n    status: args.status\n    n: args.n\n  }\n}\n",
+    "memql.toml": "memql = \"1.0\"\nedition = \"2026\"\n"
+  },
+  "scenarios": [
+    {
+      "name": "refused-at-load",
+      "automations": "/// Exercise a causal loop.\n@trigger(event=\"node.created\", concept=\"v1:loopself:ticket\")\nautomation loopSelfAdvance {\n  args {\n    id any\n    key any\n    status any\n    n any\n  }\n  mutation loopSelfUpdate(id: args.key, n: args.n + 1, status: args.n >= 1 ? \"done\" : \"open\")\n}\n",
+      "expect": {
+        "loadError": "loop_cycle",
+        "messageContains": [
+          "loopSelfAdvance"
+        ]
+      }
+    },
+    {
+      "name": "converging",
+      "automations": "/// Exercise a causal loop.\n@trigger(event=\"node.created\", concept=\"v1:loopself:ticket\")\n@filter(row => row.status != \"done\")\n@loop(maxDepth=4, until=row => row.status == \"done\")\nautomation loopSelfAdvance {\n  args {\n    id any\n    key any\n    status any\n    n any\n  }\n  mutation loopSelfUpdate(id: args.key, n: args.n + 1, status: args.n >= 1 ? \"done\" : \"open\")\n}\n",
+      "seed": [
+        {
+          "mutation": "loopSelfCreate",
+          "args": {
+            "id": "{id}",
+            "n": 0,
+            "status": "open"
+          }
+        }
+      ],
+      "expect": {
+        "runs": 2,
+        "counters": [
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "depth",
+            "delta": 0
+          },
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "loop_bound",
+            "delta": 0
+          },
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "echo",
+            "delta": 0
+          },
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "row_budget",
+            "delta": 0
+          },
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "mode",
+            "delta": 0
+          }
+        ],
+        "row": {
+          "concept": "v1:loopself:ticket",
+          "payload": {
+            "n": 2,
+            "status": "done"
+          }
+        }
+      },
+      "removeLoopRefuses": true
+    },
+    {
+      "name": "stopped-at-loop-bound",
+      "automations": "/// Exercise a causal loop.\n@trigger(event=\"node.created\", concept=\"v1:loopself:ticket\")\n@filter(row => row.status != \"done\")\n@loop(maxDepth=4, until=row => row.status == \"done\")\nautomation loopSelfAdvance {\n  args {\n    id any\n    key any\n    status any\n    n any\n  }\n  mutation loopSelfUpdate(id: args.key, n: args.n + 1, status: \"open\")\n}\n",
+      "seed": [
+        {
+          "mutation": "loopSelfCreate",
+          "args": {
+            "id": "{id}",
+            "n": 0,
+            "status": "open"
+          }
+        }
+      ],
+      "expect": {
+        "runs": 4,
+        "counters": [
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "depth",
+            "delta": 0
+          },
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "loop_bound",
+            "delta": 1
+          },
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "echo",
+            "delta": 0
+          },
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "row_budget",
+            "delta": 0
+          },
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "mode",
+            "delta": 0
+          }
+        ],
+        "row": {
+          "concept": "v1:loopself:ticket",
+          "payload": {
+            "n": 4,
+            "status": "open"
+          }
+        },
+        "stop": {
+          "automation": "loopSelfAdvance",
+          "reason": "loop_bound",
+          "depth": 5,
+          "cap": 4
+        }
+      }
+    },
+    {
+      "name": "opaque-write-stopped-at-depth",
+      "automations": "/// Exercise a causal loop.\n@trigger(event=\"node.created\", concept=\"v1:loopself:ticket\")\nautomation loopSelfAdvance {\n  args {\n    id any\n    key any\n    status any\n    n any\n  }\n  builtin loopScenarioOpaqueWrite(id: args.key, n: args.n + 1, status: \"open\")\n}\n",
+      "seed": [
+        {
+          "mutation": "loopSelfCreate",
+          "args": {
+            "id": "{id}",
+            "n": 0,
+            "status": "open"
+          }
+        }
+      ],
+      "opaqueMutation": "loopSelfUpdate",
+      "expect": {
+        "runs": 16,
+        "counters": [
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "depth",
+            "delta": 1
+          },
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "loop_bound",
+            "delta": 0
+          },
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "echo",
+            "delta": 0
+          },
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "row_budget",
+            "delta": 0
+          },
+          {
+            "automation": "loopSelfAdvance",
+            "reason": "mode",
+            "delta": 0
+          }
+        ],
+        "row": {
+          "concept": "v1:loopself:ticket",
+          "payload": {
+            "n": 16,
+            "status": "open"
+          }
+        },
+        "stop": {
+          "automation": "loopSelfAdvance",
+          "reason": "depth",
+          "depth": 17,
+          "cap": 16
+        }
+      }
+    }
+  ]
+}

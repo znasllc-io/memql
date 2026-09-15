@@ -1,0 +1,112 @@
+{
+  "description": "A raw-topic feedback loop, converging by filter or stopped at the global cap through an opaque publisher.",
+  "domain": "looppublish",
+  "files": {
+    "concepts.memql": "/// A loop scenario row.\n@namespace(\"looppublish\")\nconcept unused {\n  status string\n  n int\n}\n",
+    "memql.toml": "memql = \"1.0\"\nedition = \"2026\"\n"
+  },
+  "scenarios": [
+    {
+      "name": "refused-at-load",
+      "automations": "/// Exercise a causal loop.\n@trigger(event=\"loop.scenario.tick\")\nautomation loopPublishTick {\n  args {\n    id any\n    status any\n    n any\n  }\n  publish \"loop.scenario.tick\" { id: args.id, n: args.n + 1, status: args.n >= 1 ? \"done\" : \"open\" }\n}\n",
+      "expect": {
+        "loadError": "loop_cycle",
+        "messageContains": [
+          "loopPublishTick"
+        ]
+      }
+    },
+    {
+      "name": "converging",
+      "automations": "/// Exercise a causal loop.\n@trigger(event=\"loop.scenario.tick\")\n@filter(row => row.status != \"done\")\n@loop(maxDepth=4, until=row => row.status == \"done\")\nautomation loopPublishTick {\n  args {\n    id any\n    status any\n    n any\n  }\n  publish \"loop.scenario.tick\" { id: args.id, n: args.n + 1, status: args.n >= 1 ? \"done\" : \"open\" }\n}\n",
+      "event": {
+        "topic": "loop.scenario.tick",
+        "payload": {
+          "id": "{id}",
+          "n": 0,
+          "status": "open"
+        }
+      },
+      "expect": {
+        "runs": 2,
+        "counters": [
+          {
+            "automation": "loopPublishTick",
+            "reason": "depth",
+            "delta": 0
+          },
+          {
+            "automation": "loopPublishTick",
+            "reason": "loop_bound",
+            "delta": 0
+          },
+          {
+            "automation": "loopPublishTick",
+            "reason": "echo",
+            "delta": 0
+          },
+          {
+            "automation": "loopPublishTick",
+            "reason": "row_budget",
+            "delta": 0
+          },
+          {
+            "automation": "loopPublishTick",
+            "reason": "mode",
+            "delta": 0
+          }
+        ]
+      },
+      "removeLoopRefuses": true
+    },
+    {
+      "name": "opaque-publish-stopped-at-depth",
+      "automations": "/// Exercise a causal loop.\n@trigger(event=\"loop.scenario.tick\")\nautomation loopPublishTick {\n  args {\n    id any\n    status any\n    n any\n  }\n  builtin loopScenarioOpaquePublish(id: args.id, n: args.n + 1, status: \"open\")\n}\n",
+      "event": {
+        "topic": "loop.scenario.tick",
+        "payload": {
+          "id": "{id}",
+          "n": 0,
+          "status": "open"
+        }
+      },
+      "opaqueTopic": "loop.scenario.tick",
+      "expect": {
+        "runs": 16,
+        "counters": [
+          {
+            "automation": "loopPublishTick",
+            "reason": "depth",
+            "delta": 1
+          },
+          {
+            "automation": "loopPublishTick",
+            "reason": "loop_bound",
+            "delta": 0
+          },
+          {
+            "automation": "loopPublishTick",
+            "reason": "echo",
+            "delta": 0
+          },
+          {
+            "automation": "loopPublishTick",
+            "reason": "row_budget",
+            "delta": 0
+          },
+          {
+            "automation": "loopPublishTick",
+            "reason": "mode",
+            "delta": 0
+          }
+        ],
+        "stop": {
+          "automation": "loopPublishTick",
+          "reason": "depth",
+          "depth": 17,
+          "cap": 16
+        }
+      }
+    }
+  ]
+}
