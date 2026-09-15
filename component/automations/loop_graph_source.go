@@ -34,7 +34,10 @@ type FunctionSource interface {
 }
 
 // registrySource is a FunctionSource over a registry built once.
-type registrySource struct{ reg work.Registry }
+type registrySource struct {
+	reg       work.Registry
+	functions map[string]*memql.Function
+}
 
 func (s registrySource) Registry() work.Registry { return s.reg }
 
@@ -59,7 +62,7 @@ func NewFunctionSource(fns *memql.FunctionRegistry) FunctionSource {
 func newFunctionSource(fns *memql.FunctionRegistry, concepts memoryNodes.Registry) FunctionSource {
 	reg := work.Registry{}
 	if fns == nil {
-		return registrySource{reg}
+		return registrySource{reg: reg}
 	}
 	for name, fn := range fns.LookupIndex() {
 		if fn == nil {
@@ -69,7 +72,7 @@ func newFunctionSource(fns *memql.FunctionRegistry, concepts memoryNodes.Registr
 			reg[name] = t
 		}
 	}
-	return registrySource{reg}
+	return registrySource{reg: reg, functions: fns.LookupIndex()}
 }
 
 // functionTarget is one function as a node of the call graph. A kind the

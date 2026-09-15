@@ -16,6 +16,8 @@ type executionDedup struct {
 }
 
 type dedupEntry struct {
+	identity  string
+	inFlight  bool
 	execId    string
 	expiresAt time.Time
 }
@@ -68,9 +70,41 @@ func (d *executionDedup) register(automationName, initialHead, execId string) {
 	if d.seen[automationName] == nil {
 		d.seen[automationName] = make(map[string]dedupEntry)
 	}
+	identity := d.seen[automationName][initialHead].identity
 	d.seen[automationName][initialHead] = dedupEntry{
+		identity:  identity,
 		execId:    execId,
 		expiresAt: time.Now().Add(d.ttl),
+	}
+}
+
+// claimOrDuplicate atomically registers a fire before any step executes.
+func (d *executionDedup) claimOrDuplicate(name, key, identity, execId string) (bool, bool) {
+	if d == nil {
+		return false, false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.seen[name] == nil {
+		d.seen[name] = map[string]dedupEntry{}
+	}
+	if v, ok := d.seen[name][key]; ok && (v.inFlight || time.Now().Before(v.expiresAt)) {
+		return true, v.identity != identity
+	}
+	d.seen[name][key] = dedupEntry{identity: identity, execId: execId, inFlight: true, expiresAt: time.Now().Add(d.ttl)}
+	return false, false
+}
+func (d *executionDedup) release(name, key, execId string) {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if v, ok := d.seen[name][key]; ok && v.execId == execId {
+		delete(d.seen[name], key)
+		if len(d.seen[name]) == 0 {
+			delete(d.seen, name)
+		}
 	}
 }
 
@@ -95,7 +129,7 @@ func (d *executionDedup) cleanupExpired() {
 	now := time.Now()
 	for automationName, byHead := range d.seen {
 		for head, entry := range byHead {
-			if now.After(entry.expiresAt) {
+			if !entry.inFlight && now.After(entry.expiresAt) {
 				delete(byHead, head)
 			}
 		}

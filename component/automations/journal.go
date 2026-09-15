@@ -119,6 +119,7 @@ func journalContext(ctx context.Context) context.Context {
 	// run opens at the logic's first write (logic_statements.go), and the
 	// journal writes that open it must not count as another (release).
 	ctx = common.ContextWithoutWriteObserver(ctx)
+	ctx = events.ContextWithCause(ctx, events.Cause{})
 	claims := map[string]any{"sub": workJournalActor, "role": "system"}
 	ctx = auth.ContextWithToken(ctx, &auth.TokenInfo{Subject: workJournalActor, Claims: claims})
 	ctx = auth.ContextWithAccess(ctx, &auth.AccessContext{

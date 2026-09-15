@@ -11,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/component/provenance"
 	"github.com/znasllc-io/memql/core/common"
 )
@@ -425,6 +426,27 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		return nil, err
 	}
 
+	exec := NewExecution(automation.Name, triggeredBy)
+	if adopt != nil {
+		exec.ID = adopt.RunId
+	}
+	modeCtx, releaseMode, modeErr := sharedModeGate.acquire(ctx, automation, exec.ID)
+	if modeErr != nil {
+		if refusal, ok := modeErr.(*ModeRefusal); ok {
+			if e.logger != nil {
+				e.logger.Warn("automation mode refused fire", "automation", automation.Name, "error", refusal)
+			}
+			metrics.AutomationLoopStopped(automation.Name, metrics.LoopStopMode)
+			exec.Status = "skipped"
+			exec.Error = refusal.Error()
+			exec.CompletedAt = time.Now()
+			exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
+			return exec, nil
+		}
+		return nil, modeErr
+	}
+	ctx = modeCtx
+	defer releaseMode()
 	// Acquire concurrency slot (blocks if limit reached)
 	// This prevents database connection exhaustion during event storms
 	select {
@@ -463,7 +485,6 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	}
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Automation(automation.Name, trigger))
 
-	exec := NewExecution(automation.Name, triggeredBy)
 	// Internal origin requires a trusted SOURCE and a trigger payload the
 	// caller did not supply. See ExecuteWithClientEvent for why the source
 	// alone is not enough (memql#2888).
@@ -494,8 +515,8 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	// hundreds of times a minute and drive unbounded plan/LLM churn. Checked
 	// here (after the concurrency slot, before any step work) so a skipped
 	// run is cheap; the deferred concurrency-slot release still fires.
-	if allowed, reason := sharedAutomationBudget.admit(automation.Name); !allowed {
-		if reason != "" && e.logger != nil {
+	if allowed, reason, alert := sharedAutomationBudget.admitRow(automation.Name, budgetRowId(triggeringEvent)); !allowed {
+		if alert && e.logger != nil {
 			e.logger.Error("automation execution budget exceeded -- SKIPPING executions to stop a storm (memql#1142)",
 				"component", ComponentName,
 				"automation", automation.Name,
@@ -504,6 +525,10 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		}
 		exec.Status = "skipped"
 		exec.Error = "automation execution budget exceeded (memql#1142)"
+		if reason == "per-row" {
+			metrics.AutomationLoopStopped(automation.Name, metrics.LoopStopRowBudget)
+			exec.Error = "automation execution budget exceeded for this row (per-row, memql#5382)"
+		}
 		exec.CompletedAt = time.Now()
 		exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
 		return exec, nil
@@ -612,7 +637,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		exec.StepOrder = make([]string, 0, len(automation.Steps))
 
 		// Build event data for fingerprinting
-		eventData := eventFingerprintData(triggeringEvent)
+		eventData := chainEventData(triggeringEvent, automation, cause.CorrelationId)
 
 		// Fingerprint input if present
 		if exec.Input != nil {
@@ -643,7 +668,25 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		// is its run id, and its claim is held by the caller (the work
 		// integration's Postgres-backed ClusterExecutionGuard, keyed on that
 		// id), which is both stronger and the right grain.
-		if adopt == nil && e.dedupEnabled && e.dedup != nil && e.dedup.isDuplicate(automation.Name, exec.InitialChainHead) {
+		duplicate, echo := false, false
+		if adopt == nil && e.dedupEnabled && e.dedup != nil {
+			identity := cause.CorrelationId
+			if !parentCause.IsZero() {
+				identity = rootCorrelation(triggeringEvent)
+			}
+			duplicate, echo = e.dedup.claimOrDuplicate(automation.Name, exec.InitialChainHead, identity, exec.ID)
+			if !duplicate {
+				defer func() {
+					if exec.Status != "completed" {
+						e.dedup.release(automation.Name, exec.InitialChainHead, exec.ID)
+					}
+				}()
+			}
+		}
+		if duplicate {
+			if echo {
+				metrics.AutomationLoopStopped(automation.Name, metrics.LoopStopEcho)
+			}
 			if e.logger != nil {
 				e.logger.Info("skipping duplicate execution",
 					"component", ComponentName,
@@ -802,6 +845,12 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 	stepExecCtx := e.withRunContext(originForSource(ctx, trusted), stepCtx, step)
 	result, err := e.stepRegistry.Execute(stepExecCtx, step, stepCtx)
 
+	// A cancelled executor may return no result. Lifecycle reporting must not
+	// turn cooperative cancellation into a nil-pointer panic.
+	var stepDuration time.Duration
+	if result != nil {
+		stepDuration = result.Duration
+	}
 	// Publish step completed/failed event
 	var stepTopic string
 	var stepKind events.Kind
@@ -817,7 +866,7 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 		"executionId":    stepCtx.Execution.ID,
 		"stepId":         step.ID,
 		"stepType":       string(step.Type),
-		"duration":       result.Duration.Milliseconds(),
+		"duration":       stepDuration.Milliseconds(),
 	})
 
 	return result, err

@@ -188,7 +188,7 @@ and [../operate/auth/openai-federation.md](../operate/auth/openai-federation.md)
 A misfiring automation (one that re-fires on its own failure, or a
 plan-level loop that re-creates a plan each cycle) is a runaway *multiplier*:
 each execution can drive fresh LLM calls. Storm detection used to be
-log-only; now a process-global, cross-executor budget (total + per-automation
+log-only; now a process-global, cross-executor budget (total, per-automation and per-row
 executions/window) **skips** the execution once a storm blows past it, and
 the cluster guard's fail-open path is **bounded** (it admits a capped number
 of unguarded executions per window during a DB outage, then fails closed).
@@ -312,6 +312,9 @@ went with memql#5000.
 | `MEMQL_AUTOMATION_BUDGET_ENABLED` | true |
 | `MEMQL_MAX_AUTOMATION_EXECUTIONS_PER_WINDOW` | 600 |
 | `MEMQL_MAX_AUTOMATION_EXECUTIONS_PER_AUTOMATION` | 120 |
+| `MEMQL_MAX_AUTOMATION_EXECUTIONS_PER_ROW` | 30 |
+| `MEMQL_AUTOMATION_MAX_CHAIN_DEPTH` | 16 |
+| `MEMQL_AUTOMATION_QUEUED_MODE_DEFAULT_MAX` | 10 |
 | `MEMQL_AUTOMATION_BUDGET_WINDOW_SECONDS` | 60 |
 | `MEMQL_MAX_UNGUARDED_AUTOMATION_EXECUTIONS_PER_WINDOW` | 50 |
 
