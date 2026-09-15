@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"testing"
 
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/compiler"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
@@ -47,8 +48,8 @@ func evalV1Cond(t *testing.T, e *Evaluator, src string) (bool, error) {
 }
 
 // TestRunScopeResolution walks the lookup order in run_scope.go's file
-// comment, one root at a time, over an evaluator seeded as the executor
-// seeds one.
+// comment -- the statement frames, then the roots -- over an evaluator seeded
+// as the executor seeds one.
 func TestRunScopeResolution(t *testing.T) {
 	e := NewEvaluator()
 	e.SetCustom("event", map[string]any{
@@ -56,26 +57,24 @@ func TestRunScopeResolution(t *testing.T) {
 		"payload": map[string]any{"x": "hello", "n": float64(2)},
 	})
 	e.SetCustom("args", map[string]any{"x": "argX"})
-	e.SetCustom("argsDeclared", map[string]bool{"x": true, "opt": true})
-	e.SetCustom("timestamp", "2026-09-13T10:00:00Z")
+	e.SetCustom("now", "2026-09-13T10:00:00Z")
 	e.SetCustom("actor", map[string]any{"userId": "user-7"})
-	e.SetStepResult("rows", &StepResult{StepId: "rows", Status: "success",
-		Result: map[string]any{"Bundle": map[string]any{"nodes": []any{
-			map[string]any{"id": "r1", "payload": map[string]any{"active": true}},
-			map[string]any{"id": "r2", "payload": map[string]any{"active": false}},
-		}}}})
-	e.SetStepResult("flat", &StepResult{StepId: "flat", Status: "success", Result: map[string]any{"y": "Y"}})
-	e.SetStepResult("failed", &StepResult{StepId: "failed", Status: "failed", Error: "kaboom"})
 	e.SetVariableResolver(func(_ context.Context, name string) (string, error) {
 		if name == "known" {
 			return "value", nil
 		}
 		return "", errors.New("no such variable")
 	})
+	e.enterStatements()
+	e.Bind("rows", functionStatementValue("query", rowsResult(
+		map[string]any{"id": "r1", "payload": map[string]any{"active": true}},
+		map[string]any{"id": "r2", "payload": map[string]any{"active": false}},
+	)))
+	e.Bind("flat", map[string]any{"y": "Y"})
+	e.names.declare("skipped")
 
-	item := e.Clone()
-	item.SetItem(map[string]any{"name": "it"}, "thing")
-	item.SetCustom("index", 3)
+	item := e.ChildFrame()
+	item.Bind("thing", map[string]any{"name": "it"})
 
 	cases := []struct {
 		name string
@@ -84,26 +83,20 @@ func TestRunScopeResolution(t *testing.T) {
 		want any
 	}{
 		{"event root", e, "event.payload.x", "hello"},
-		{"event retry: an envelope key read bare", e, "payload.x", "hello"},
 		{"args root", e, "args.x", "argX"},
-		{"bare args field (G2)", e, "x", "argX"},
-		{"declared absent optional field is unset", e, "opt ?? \"fallback\"", "fallback"},
+		{"an args field the run did not bind is absent", e, "args.opt ?? \"fallback\"", "fallback"},
 		{"actor", e, "actor.userId", "user-7"},
-		{"a bare step is its rows", e, "rows.count()", int64(2)},
-		{"rows are node maps", e, "rows.first().id", "r1"},
-		{"a lambda over the rows", e, "rows.where(r => r.payload.active).count()", int64(1)},
-		{"step accessors under steps", e, "steps.rows.status", "success"},
-		{"steps.x.result of a flat result", e, "steps.flat.result.y", "Y"},
-		{"a flat step read bare", e, "flat.y", "Y"},
-		{"a step accessor read bare", e, "failed.error", "kaboom"},
-		{"Ran", e, "steps.flat.Ran", true},
-		{"automation.errors", e, "automation.errors", []any{"failed: kaboom"}},
-		{"var resolves", e, "var.known", "value"},
-		{"an unresolved var is absent", e, "var.missing ?? \"off\"", "off"},
-		{"the loop variable under its name", item, "thing.name", "it"},
-		{"index", item, "index", 3},
+		{"a statement name is its rows", e, "rows.count()", int64(2)},
+		{"a row reads its intrinsics", e, "rows.first().id", "r1"},
+		{"a row reads its payload fields directly", e, "rows.where(r => r.active).count()", int64(1)},
+		{"a statement name is its value", e, "flat.y", "Y"},
+		{"a name no statement bound is absent", e, "skipped ?? \"absent\"", "absent"},
+		{"var() resolves", e, "var(\"known\")", "value"},
+		{"the loop variable in its own frame", item, "thing.name", "it"},
+		{"the frames around the loop's", item, "flat.y", "Y"},
 		{"the run clock", e, "now", "2026-09-13T10:00:00Z"},
-		{"an unseeded reserved root is absent", e, "error ?? \"none\"", "none"},
+		{"an unseeded root is absent", e, "partition ?? \"none\"", "none"},
+		{"an unseeded actor is the denying envelope", NewEvaluator(), "actor.isClusterOwner", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -117,37 +110,49 @@ func TestRunScopeResolution(t *testing.T) {
 		})
 	}
 
-	t.Run("an unknown name is an error, never its own text", func(t *testing.T) {
-		_, err := evalV1Src(t, e, "typo == \"typo\"")
-		var ee *memql.ExprError
-		if !errors.As(err, &ee) || ee.Code != "unknown_name" {
-			t.Fatalf("want unknown_name, got %v", err)
-		}
-	})
+	// An unknown name is an error, never its own text -- and so is each tier
+	// the statement runtime retired: the step-result roots, the loop item, the
+	// input and error roots, a bare args field, a loop variable outside its
+	// loop.
+	for _, src := range []string{
+		`typo == "typo"`,
+		`steps.rows.status`,
+		`automation.errors`,
+		`item.name`,
+		`input`,
+		`ctx.input`,
+		`error`,
+		`x`,
+		`payload.x`,
+		`thing.name`,
+	} {
+		t.Run("unknown: "+src, func(t *testing.T) {
+			_, err := evalV1Src(t, e, src)
+			var ee *memql.ExprError
+			if !errors.As(err, &ee) || ee.Code != "unknown_name" {
+				t.Fatalf("%s: want unknown_name, got %v", src, err)
+			}
+		})
+	}
 }
 
-// TestRunScopeEmptyRead: a query step that read no rows stands for the empty
-// row list, not for its envelope -- an empty bundle's JSON omits `nodes`, so
-// GetStepNodes finds none -- in both the engine's result and its decoded
-// map. The string evaluator's accessors read it as zero rows; so must an
-// expression, or `rows.empty()` over an empty read is false and
-// `rows.nodes()` is a list holding the envelope. Found by the logic-body
-// equivalence corpus (component/automations/steps).
+// TestRunScopeEmptyRead: a query statement that read no rows reads as no
+// rows, whichever form the engine's empty answer takes -- no bundle, a bundle
+// with no nodes, an empty flat output.
 func TestRunScopeEmptyRead(t *testing.T) {
-	for name, empty := range map[string]any{
-		"an ExecuteResult":        &memql.ExecuteResult{},
-		"a decoded envelope":      map[string]any{"Bundle": map[string]any{}},
-		"an envelope with no key": map[string]any{"Bundle": nil},
+	for name, empty := range map[string]*memql.ExecuteResult{
+		"no bundle":         {},
+		"a bundle, no rows": {Bundle: &memqlv1.GraphBundle{}},
+		"an empty output":   memql.NewResultWithOutput([]any{}),
 	} {
 		t.Run(name, func(t *testing.T) {
 			e := NewEvaluator()
-			e.SetStepResult("rows", &StepResult{StepId: "rows", Status: "success", Result: empty})
+			e.enterStatements()
+			e.Bind("rows", functionStatementValue("query", empty))
 			for src, want := range map[string]any{
 				"rows.empty()":             true,
-				"rows.nodes()":             []any{},
 				"rows.count()":             int64(0),
 				"rows.first() ?? \"none\"": "none",
-				"rows":                     []any{},
 			} {
 				got, err := evalV1Src(t, e, src)
 				if err != nil {

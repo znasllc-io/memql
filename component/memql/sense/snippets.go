@@ -122,13 +122,13 @@ var constructSkeletons = []struct {
 	},
 	{
 		keyword: "logic", label: "logic <name> { ... }",
-		doc:  "A callable behavioral construct: args plus a body of named steps ending in return.",
-		body: "logic ${1:name} {\n\targs {\n\t\t${2:field} string!\n\t}\n\tbody {\n\t\t$0\n\t}\n}",
+		doc:  "A callable behavioral construct: args, then its statements, ending in return.",
+		body: "logic ${1:name} {\n\targs {\n\t\t${2:field} string!\n\t}\n\t$0\n}",
 	},
 	{
-		keyword: "automation", label: "automation <name> @trigger(...) => logic <name>",
-		doc:  "The terse single-step automation form (#2619): make one logic reactive.",
-		body: "automation ${1:name} @trigger(event=\"${2:topic}\") => logic ${3:logicName}$0",
+		keyword: "automation", label: "automation <name> { ... }",
+		doc:  "A reactive construct: its trigger, then its statements.",
+		body: "@trigger(event=\"${1:topic}\")\nautomation ${2:name} {\n\tlogic ${3:logicName}(event: event)$0\n}",
 	},
 	{
 		keyword: "concept", label: "concept <name> { ... }",

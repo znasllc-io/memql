@@ -59,32 +59,9 @@ func TestCompileSource_ForEachStep(t *testing.T) {
 }
 
 func TestCompileSource_ForEachStep_Diagnostics(t *testing.T) {
-	cases := []struct {
-		name    string
-		body    string
-		wantErr string
-	}{
-		{
-			name:    "missing in keyword",
-			body:    `forEach node decide.result { automation y { } }`,
-			wantErr: "expected `in`",
-		},
-		{
-			name:    "empty body",
-			body:    `forEach node in decide.result { }`,
-			wantErr: "the loop body is empty",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			src := "@description(\"bad\")\nautomation bad {\n  step s {\n    " + tc.body + "\n  }\n}"
-			_, err := newTestLoader().CompileSource(src, "test:foreach-bad")
-			if err == nil {
-				t.Fatalf("expected error containing %q, got nil", tc.wantErr)
-			}
-			if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErr)
-			}
-		})
+	src := "@description(\"bad\")\n@trigger(event=\"system.startup\")\nautomation bad {\n  decide := automation findStaleNodes()\n  for node decide {\n    automation retireNode(id: node.id)\n  }\n}"
+	_, err := newTestLoader().CompileSource(src, "test:foreach-bad")
+	if err == nil || !strings.Contains(err.Error(), "expected `in` after the loop variable") {
+		t.Fatalf("a `for` without `in` must be refused naming it, got %v", err)
 	}
 }

@@ -12,7 +12,7 @@ import (
 // not about what a step does.
 func adoptProbeAutomation() *Automation {
 	return &Automation{Name: "demo", Steps: []*Step{
-		{ID: "a", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}},
+		{ID: "a", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}},
 	}}
 }
 
@@ -166,13 +166,11 @@ func containsName(names []string, want string) bool {
 }
 
 type adoptionContextProbe struct {
-	event    any
-	ctxInput any
+	event any
 }
 
 func (p *adoptionContextProbe) Execute(_ context.Context, step *Step, ctx *StepContext) (*StepResult, error) {
 	p.event, _ = evalV1(ctx.Evaluator, "event")
-	p.ctxInput, _ = evalV1(ctx.Evaluator, "ctx.input")
 	return &StepResult{StepId: step.ID, Status: "completed"}, nil
 }
 
@@ -203,8 +201,8 @@ func TestExecuteAdoptedRestoresSchedulerContextWithoutPromotingGoalInputs(t *tes
 				t.Fatalf("trusted=%v want %v", exec.SourceTrusted, tc.trusted)
 			}
 			if tc.goal == "" && tc.event != nil {
-				if !reflect.DeepEqual(probe.event, saved) || !reflect.DeepEqual(probe.ctxInput, saved) {
-					t.Fatalf("lost saved event: event=%v ctx=%v", probe.event, probe.ctxInput)
+				if !reflect.DeepEqual(probe.event, saved) {
+					t.Fatalf("lost saved event: event=%v", probe.event)
 				}
 			}
 			if tc.goal != "" {

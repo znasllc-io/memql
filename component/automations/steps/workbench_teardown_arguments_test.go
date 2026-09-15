@@ -61,10 +61,12 @@ func TestShippedWorkbenchTeardownReachesIntegrationWithRunID(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, runID := range []string{"run-1", "v1:work:run:run-2"} {
-		eval := automations.NewEvaluator()
-		eval.SetCustom("args", map[string]any{"id": runID, "status": "succeeded"})
-		eval.SetCustom("argsDeclared", map[string]bool{"id": true, "status": true})
-		eval.SetStepResult("terminal", &automations.StepResult{Status: "success", Result: true})
+		run := automations.NewEvaluator()
+		run.SetCustom("args", map[string]any{"id": runID, "status": "succeeded"})
+		// The body's frame, with `terminal` bound as its logic statement
+		// binds it.
+		eval := run.ChildFrame()
+		eval.Bind("terminal", true)
 		if ok, err := eval.StepCondition(context.Background(), teardown); err != nil || !ok {
 			t.Fatalf("terminal run must reach teardown: %v, %v", ok, err)
 		}

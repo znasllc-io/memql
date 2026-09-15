@@ -34,7 +34,7 @@ func runShippedGate(t *testing.T, name, body string, role auth.Role) any {
 	t.Helper()
 	src := "@actor\n@description(\"shipped gate under test\")\nlogic " + name + " {\n" + body + "\n}\n"
 	_, steps := compiledLogic(t, src)
-	r := NewLogicRunner(&memql.MemQLEngine{}, &bundleStepRegistry{}, nil)
+	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
 	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "u1", Role: role})
 	out, err := r.RunLogicBody(ctx, name, steps, map[string]any{})
 	if err != nil {
@@ -99,7 +99,7 @@ func TestDeploymentRollbackAllowed_ResolvesActorRole(t *testing.T) {
 func TestDeployGates_NoActorDeniesWithEmptyRole(t *testing.T) {
 	src := "@actor\n@description(\"no-actor probe\")\nlogic noActorProbe {\n  role := actor.role ?? \"\"\n  return role\n}\n"
 	_, steps := compiledLogic(t, src)
-	r := NewLogicRunner(&memql.MemQLEngine{}, &bundleStepRegistry{}, nil)
+	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
 	out, err := r.RunLogicBody(context.Background(), "noActorProbe", steps, map[string]any{})
 	if err != nil {
 		t.Fatalf("RunLogicBody: %v", err)

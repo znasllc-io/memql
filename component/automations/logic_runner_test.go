@@ -2,49 +2,27 @@ package automations
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// inProcessStep runs a step the way the real step registry runs an
-// in-process expression: steps.QueryExecutor evaluates a query step that is
-// not a construct call over the run (Evaluator.InProcessQuery), with no
-// engine round trip. handled is false for every other step -- the ones that
-// reach the engine, which a stub registry records instead.
-func inProcessStep(ctx context.Context, step *Step, sc *StepContext) (result *StepResult, handled bool, err error) {
-	if sc == nil || sc.Evaluator == nil {
-		return nil, false, nil
-	}
-	v, inProcess, err := sc.Evaluator.InProcessQuery(ctx, step)
-	if !inProcess {
-		return nil, false, nil
-	}
-	now := time.Now()
-	if err != nil {
-		return &StepResult{StepId: step.ID, Status: "failed", Error: err.Error(), StartedAt: now, CompletedAt: now}, true, err
-	}
-	return &StepResult{StepId: step.ID, Status: "success", StartedAt: now, CompletedAt: now, Result: v}, true, nil
-}
-
 // recordingStepRegistry is a minimal StepExecutorRegistry stub for the
-// logic-runner end-to-end tests. An in-process expression step evaluates as
-// the real query executor evaluates it (inProcessStep); every other step --
-// one that would reach the engine -- is recorded and answered with a canned
-// success result, so a Logic body's side-effect steps run without a live
-// engine / DB. `dispatched` is therefore exactly the steps that would make
-// an engine round trip.
+// logic-runner end-to-end tests. Every step that reaches it -- a construct
+// call, the one kind of statement that would reach the engine -- is recorded
+// and answered with a canned success result, so a logic's calls run without a
+// live engine / DB. An expression or return statement never reaches it: the
+// sequence runner evaluates those in process. `dispatched` is therefore
+// exactly the statements that would make an engine round trip.
 type recordingStepRegistry struct {
 	dispatched []string
 }
 
-func (r *recordingStepRegistry) Execute(ctx context.Context, step *Step, sc *StepContext) (*StepResult, error) {
-	if res, handled, err := inProcessStep(ctx, step, sc); handled {
-		return res, err
-	}
+func (r *recordingStepRegistry) Execute(_ context.Context, step *Step, _ *StepContext) (*StepResult, error) {
 	r.dispatched = append(r.dispatched, step.ID)
 	now := time.Now()
 	return &StepResult{
@@ -56,437 +34,97 @@ func (r *recordingStepRegistry) Execute(ctx context.Context, step *Step, sc *Ste
 	}, nil
 }
 
-// parseLogicBody is the test helper. Given a Logic source string, it
-// runs the struct-form normaliser + parser and returns the parsed
-// *AutomationDef body that the function loader would store as
-// fn.LogicSteps for a multi-step Logic. This is the same shape
-// LogicRunner.RunLogic receives in production.
-func parseLogicBody(t *testing.T, src string) *languageParser.AutomationDef {
-	t.Helper()
-
-	normalised, err := languageParser.NormaliseAll(src)
-	if err != nil {
-		t.Fatalf("NormaliseAll: %v", err)
-	}
-	lexer := languageParser.NewLexer(normalised)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Tokenize: %v", err)
-	}
-	parser := languageParser.NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	file, ok := ast.(*languageParser.File)
-	if !ok {
-		t.Fatalf("expected *File, got %T", ast)
-	}
-	for _, def := range file.Definitions {
-		fd, ok := def.(*languageParser.FunctionDef)
-		if !ok {
-			continue
-		}
-		if fd.Type != languageParser.FunctionTypeLogic {
-			continue
-		}
-		body, ok := fd.Body.(*languageParser.AutomationDef)
-		if !ok {
-			t.Fatalf("expected *AutomationDef body, got %T", fd.Body)
-		}
-		return body
-	}
-	t.Fatalf("no logic function found in source")
-	return nil
-}
-
-// TestLogicRunner_CompilesMultiStepBody pins F.5's compile path:
-// a parsed multi-step Logic body translates cleanly to a runtime
-// *Automation through the compiler + JSON loader. This is the
-// path RunLogic walks before dispatching steps via the registry.
-// The runtime *Automation must carry one runtime *Step per parsed
-// step (excluding the synthetic `_return` step, which compiles to
-// its own `_return` step on the output side) and the steps must
-// arrive in topological dependency order.
-func TestLogicRunner_CompilesMultiStepBody(t *testing.T) {
-	src := `@description("test")
-logic doStuff {
-  args {
-    partitionId  string  @required
-  }
-  body {
-    first := queryFoo( partitionId: args.partitionId )
-    second := queryBar( id: first.first().id )
-    return second.first() ?? first.first()
-  }
-}`
-	body := parseLogicBody(t, src)
-
-	runner := &LogicRunner{
-		compiler: nil, // populated below
-		loader:   nil,
-	}
-	// Populate via the real constructor wiring (engine + registry
-	// optional for this test; compileBodyToAutomation doesn't touch
-	// them) so the same code path RunLogic uses in production runs.
+// TestLogicRunner_BindsCallerArgsAndTheAmbientRoots pins the evaluator a
+// logic's statements read: the caller's args under `args` -- an event the
+// logic acts on arrives as an argument and is read args.event -- and the
+// ambient roots every body may read, with the denying actor when the call
+// carries no auth context.
+func TestLogicRunner_BindsCallerArgsAndTheAmbientRoots(t *testing.T) {
 	r := NewLogicRunner(nil, nil, nil)
-	runner.compiler = r.compiler
-	runner.loader = r.loader
-
-	auto, err := runner.compileBodyToAutomation("doStuff", body)
-	if err != nil {
-		t.Fatalf("compileBodyToAutomation: %v", err)
-	}
-	if auto == nil {
-		t.Fatalf("expected non-nil *Automation")
-	}
-	if len(auto.Steps) < 2 {
-		t.Fatalf("expected at least 2 steps (first, second [+ _return]); got %d", len(auto.Steps))
-	}
-
-	// Topological order means `first` lands before `second`.
-	idsInOrder := make([]string, 0, len(auto.Steps))
-	for _, s := range auto.Steps {
-		if s != nil {
-			idsInOrder = append(idsInOrder, s.ID)
-		}
-	}
-	firstIdx, secondIdx := -1, -1
-	for i, id := range idsInOrder {
-		switch id {
-		case "first":
-			firstIdx = i
-		case "second":
-			secondIdx = i
-		}
-	}
-	if firstIdx < 0 || secondIdx < 0 {
-		t.Fatalf("expected both `first` and `second` steps in the compiled output, got %v", idsInOrder)
-	}
-	if firstIdx >= secondIdx {
-		t.Errorf("expected `first` before `second` (it's a dependency); got order %v", idsInOrder)
-	}
-}
-
-// TestLogicRunner_HandlesConditionalSteps pins that a Logic body
-// using the `name := if <cond> { funcCall(...) }` shape -- which is
-// the dominant pattern across cluster/cognition/identity logics --
-// compiles into a runtime *Step carrying a non-empty Condition
-// string. The runner's step loop evaluates the condition before
-// dispatching, mirroring the automation executor's behaviour.
-func TestLogicRunner_HandlesConditionalSteps(t *testing.T) {
-	src := `@description("test")
-logic provisionThing {
-  args {
-    name  string  @required
-  }
-  body {
-    existing := queryThing( name: args.name )
-    created := if existing.empty() {
-      mutationCreateThing( name: args.name )
-    }
-    return created ?? existing.first()
-  }
-}`
-	body := parseLogicBody(t, src)
-
-	r := NewLogicRunner(nil, nil, nil)
-	auto, err := r.compileBodyToAutomation("provisionThing", body)
-	if err != nil {
-		t.Fatalf("compileBodyToAutomation: %v", err)
-	}
-
-	var createdStep *Step
-	for _, s := range auto.Steps {
-		if s != nil && s.ID == "created" {
-			createdStep = s
-			break
-		}
-	}
-	if createdStep == nil {
-		t.Fatalf("expected `created` step in compiled output")
-	}
-	if createdStep.Condition == "" {
-		t.Errorf("expected `created` step to carry a Condition; got empty string")
-	}
-	if !strings.Contains(createdStep.Condition, "existing") {
-		t.Errorf("expected condition to reference the `existing` step; got %q", createdStep.Condition)
-	}
-}
-
-// TestLogicRunner_SeedsCallerArgsEverywhere pins the evaluator setup:
-// caller args are addressable via $args, $ctx.input, and (when an
-// `event` key is present) $event, so step expressions written for
-// any of those forms resolve. This matters because real Logic bodies
-// reference `args.event.payload.X` while step expressions sometimes
-// compile to `$event.payload.X` after the compiler's rewrite.
-func TestLogicRunner_SeedsCallerArgsEverywhere(t *testing.T) {
-	r := NewLogicRunner(nil, nil, nil)
-	args := map[string]any{
-		"event": map[string]any{
-			"payload": map[string]any{"id": "user-123"},
-		},
-		"partitionId": "space-abc",
-	}
-	evaluator := r.newEvaluatorForLogic(context.Background(), args)
-
-	// `args` custom variable
-	val, err := evalV1(evaluator, `args.partitionId`)
-	if err != nil {
-		t.Fatalf("evaluate args.partitionId: %v", err)
-	}
-	if val != "space-abc" {
-		t.Errorf("args.partitionId = %#v, want %q", val, "space-abc")
-	}
-
-	// `event` custom variable plumbed from args
-	val, err = evalV1(evaluator, `event.payload.id`)
-	if err != nil {
-		t.Fatalf("evaluate event.payload.id: %v", err)
-	}
-	if val != "user-123" {
-		t.Errorf("event.payload.id = %#v, want %q", val, "user-123")
-	}
-
-	// `ctx.input` mirrors args
-	val, err = evalV1(evaluator, `ctx.input.partitionId`)
-	if err != nil {
-		t.Fatalf("evaluate ctx.input.partitionId: %v", err)
-	}
-	if val != "space-abc" {
-		t.Errorf("ctx.input.partitionId = %#v, want %q", val, "space-abc")
-	}
-}
-
-// TestLogicRunner_EventBindingIsFirstClass pins the memql#1706 first-class
-// event-context binding: the triggering event is resolvable from step
-// argument expressions via BOTH the author-facing `args.event.payload.X`
-// path and the bare `event.payload.X` root, with the SAME object backing
-// both spellings -- this is exactly what nested-step argument resolution
-// reads when threading the event into a step's args.
-func TestLogicRunner_EventBindingIsFirstClass(t *testing.T) {
-	r := NewLogicRunner(nil, nil, nil)
-	args := map[string]any{
+	ev := r.newEvaluatorForLogic(context.Background(), map[string]any{
 		"event": map[string]any{
 			"topic":   "node.created",
 			"payload": map[string]any{"activePartitionId": "space-xyz", "id": "user-2"},
 		},
-	}
-	ev := r.newEvaluatorForLogic(context.Background(), args)
-
-	for _, expr := range []string{
-		`args.event.payload.activePartitionId`, // author-facing form in the live logics
-		`event.payload.activePartitionId`,      // the bare event root
+		"partitionId": "space-abc",
+	})
+	for src, want := range map[string]any{
+		`args.partitionId`:                     "space-abc",
+		`args.event.payload.activePartitionId`: "space-xyz",
+		`actor.isClusterOwner`:                 false,
 	} {
-		val, err := evalV1(ev, expr)
+		val, err := evalV1(ev, src)
 		if err != nil {
-			t.Fatalf("evaluate %s: %v", expr, err)
+			t.Fatalf("evaluate %s: %v", src, err)
 		}
-		if val != "space-xyz" {
-			t.Errorf("%s = %#v, want %q (event must thread into step arg scope)", expr, val, "space-xyz")
-		}
-	}
-}
-
-// TestLogicRunner_EventBindingSeededWhenAbsent pins the defensive fallback:
-// even when the caller passes NO `event` arg, the bare `event` root is
-// seeded with a well-formed empty envelope so `event.payload.X` resolves to
-// empty rather than failing on an unbound root. Before #1706 the `event`
-// root was seeded only when an `event` arg was present, so this resolution
-// had no root to walk.
-func TestLogicRunner_EventBindingSeededWhenAbsent(t *testing.T) {
-	r := NewLogicRunner(nil, nil, nil)
-	ev := r.newEvaluatorForLogic(context.Background(), map[string]any{"partitionId": "space-abc"})
-
-	// The envelope itself is a well-formed object (not nil).
-	envelope, err := evalV1(ev, `event`)
-	if err != nil {
-		t.Fatalf("evaluate event: %v", err)
-	}
-	if _, ok := envelope.(map[string]any); !ok {
-		t.Fatalf("event = %#v (%T), want a well-formed envelope object", envelope, envelope)
-	}
-
-	// A missing payload field resolves cleanly to absent -- no unbound-root error.
-	val, err := evalV1(ev, `event.payload.id`)
-	if err != nil {
-		t.Fatalf("evaluate event.payload.id with no event arg: %v (must degrade to absent, not error)", err)
-	}
-	if !memql.IsAbsent(val) {
-		t.Errorf("event.payload.id = %#v, want absent for the synthetic envelope", val)
-	}
-}
-
-// TestLogicRunner_PreservesReturnStep pins the compile->JSON->loader
-// round-trip: the compiler peels the parser's synthetic `_return`
-// step out of the steps slice and emits it as a top-level
-// `_return` JSON field, the automations.Loader has no struct field
-// for it, and a vanilla unmarshal drops it on the floor. The
-// runtime then refuses to run the Logic with "logic %q has no
-// `_return` step (body must end with `return <expr>`)". Every
-// multi-statement Logic across the DSL trees hit this -- including
-// revokeExpiredDelegations, the cluster/identity sweeps, etc.
-// compileBodyToAutomation re-attaches a synthetic Step at the end
-// of the slice; this test guards that fix.
-//
-// The queryFoo argument is named "asOf". It read "now" until memql#3626 --
-// a reserved engine name no args block may declare, so queryFoo could never
-// have received it and the value was dropped. This fixture is about the
-// _return step, so the argument name only has to be a legal one.
-func TestLogicRunner_PreservesReturnStep(t *testing.T) {
-	src := `@description("repro")
-logic logicSweep {
-  args {
-    asOf string @required
-  }
-  body {
-    rows := queryFoo( asOf: args.asOf )
-    for item := range rows.nodes() {
-      tick := mutationBar( id: item.id )
-    }
-    return rows.count()
-  }
-}`
-	body := parseLogicBody(t, src)
-	r := NewLogicRunner(nil, nil, nil)
-
-	auto, err := r.compileBodyToAutomation("logicSweep", body)
-	if err != nil {
-		t.Fatalf("compileBodyToAutomation: %v", err)
-	}
-
-	var returnStep *Step
-	for _, s := range auto.Steps {
-		if s != nil && s.ID == "_return" {
-			returnStep = s
-			break
+		if val != want {
+			t.Errorf("%s = %#v, want %#v", src, val, want)
 		}
 	}
-	if returnStep == nil {
-		t.Fatalf("expected a _return step in compiled automation; got %d steps without one (the JSON round-trip drops the compiler's top-level `_return` field unless stitched back)",
-			len(auto.Steps))
-	}
-	if returnStep.Type != StepTypeQuery {
-		t.Errorf("_return step type = %v, want %v", returnStep.Type, StepTypeQuery)
-	}
-	if returnStep.Query == nil || strings.TrimSpace(returnStep.Query.Query) == "" {
-		t.Errorf("_return step missing Query expression: %+v", returnStep.Query)
+	if val, err := evalV1(ev, `now`); err != nil || val == "" {
+		t.Errorf("now = %#v (err %v), want the run clock", val, err)
 	}
 }
 
-// TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod pins the
-// pure step-method short-circuit: `<stepName>.<method>()` in a
-// Logic's `return` expression resolves against the bound step
-// result via the local Evaluator, bypassing engine.Execute (which
-// doesn't recognise the dotted shape and would fail with
-// `function "stepName.method" not found`).
-//
-// This is the path that lets revokeExpiredDelegations,
-// purgeExpiredArchivedSpaces, and the rest of the
-// `return X.count()` family run end-to-end.
-func TestLogicRunner_ReturnPureStepMethod(t *testing.T) {
-	evaluator := NewEvaluator()
-	evaluator.SetStepResult("expiredDelegations", &StepResult{
-		Status: "success",
-		Result: map[string]any{
-			"Bundle": map[string]any{
-				"nodes": []any{
-					map[string]any{"id": "d1"},
-					map[string]any{"id": "d2"},
-					map[string]any{"id": "d3"},
-				},
-			},
-		},
-	})
-
-	// .count() -> count of nodes
-	val, err := evalV1(evaluator, "expiredDelegations.count()")
-	if err != nil {
-		t.Fatalf("expiredDelegations.count(): %v", err)
+// TestLogicRunner_ReturnsOverAQuerysRows pins the `return X.count()` family:
+// `<name>.<method>()` in a logic's return resolves against the rows the
+// query statement bound, in process -- the path revokeExpiredDelegations,
+// purgeExpiredArchivedSpaces and the rest of the sweeps take.
+func TestLogicRunner_ReturnsOverAQuerysRows(t *testing.T) {
+	rows := []map[string]any{
+		{"id": "d1", "payload": map[string]any{}},
+		{"id": "d2", "payload": map[string]any{}},
+		{"id": "d3", "payload": map[string]any{}},
 	}
-	if !numericEquals(val, 3) {
-		t.Errorf(".count() = %#v, want 3", val)
-	}
-
-	// .empty() -> false (3 nodes)
-	val, err = evalV1(evaluator, "expiredDelegations.empty()")
-	if err != nil || val != false {
-		t.Errorf(".empty() = %#v (err %v); want false", val, err)
-	}
-
-	// .first() -> the first node
-	val, err = evalV1(evaluator, "expiredDelegations.first()")
-	if err != nil {
-		t.Fatalf("expiredDelegations.first(): %v", err)
-	}
-	if m, ok := val.(map[string]any); !ok || m["id"] != "d1" {
-		t.Errorf(".first() = %#v, want first node {id: d1}", val)
+	for ret, want := range map[string]any{
+		"expiredDelegations.count()": int64(3),
+		"expiredDelegations.empty()": false,
+		"expiredDelegations.first()": rows[0],
+	} {
+		got := runChainLogic(t, `logic sweep {
+  expiredDelegations := query expired()
+  return `+ret+`
+}`, map[string]any{"expired": rowsResult(rows...)})
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("return %s = %#v, want %#v", ret, got, want)
+		}
 	}
 }
 
-// TestLogicRunner_ReturnBareStepVariable pins the memql#363 regression
-// fix: a `return nodeRecord` after a `nodeRecord := mutation...` step must
-// resolve to the step's value, not surface as `unknown spec "nodeRecord"`
-// when the engine's query parser treats the bare identifier as a spec name.
-// Evaluated, a bare step name over a Bundle-backed result stands for its
-// node list (run_scope.go).
-func TestLogicRunner_ReturnBareStepVariable(t *testing.T) {
-	evaluator := NewEvaluator()
-	evaluator.SetStepResult("nodeRecord", &StepResult{
-		Status: "success",
-		Result: map[string]any{
-			"Bundle": map[string]any{
-				"nodes": []any{map[string]any{"id": "v1:cluster:node:bff-local"}},
-			},
-		},
-	})
-
-	val, err := evalV1(evaluator, "nodeRecord")
-	if err != nil {
-		t.Fatalf("nodeRecord: %v", err)
-	}
-	nodes, ok := val.([]any)
-	if !ok || len(nodes) != 1 {
-		t.Fatalf("bare step-variable return: got %#v, want the one-node list", val)
-	}
-	if n, _ := nodes[0].(map[string]any); n["id"] != "v1:cluster:node:bff-local" {
-		t.Errorf("bare step-variable return: node = %#v", nodes[0])
+// TestLogicRunner_ReturnsTheRowAMutationWrote pins the memql#363 regression
+// fix: a `return nodeRecord` after a `nodeRecord := mutation ...` statement
+// resolves to the row the mutation wrote, never to a spec or a literal.
+func TestLogicRunner_ReturnsTheRowAMutationWrote(t *testing.T) {
+	node := map[string]any{"id": "v1:cluster:node:bff-local", "payload": map[string]any{"health": "ok"}}
+	got := runChainLogic(t, `logic registerNode {
+  nodeRecord := mutation createNode(id: "bff-local")
+  return nodeRecord
+}`, map[string]any{"createNode": rowsResult(node)})
+	if !reflect.DeepEqual(got, node) {
+		t.Fatalf("return nodeRecord = %#v, want the row the mutation wrote", got)
 	}
 }
 
-// TestLogicRunner_RejectsNilBody pins that the runner errors on a
-// nil body rather than panicking. Production never hits this path
-// (the function loader only stamps LogicSteps when there's a multi-
-// step body) but the defensive check matters for direct callers.
-func TestLogicRunner_RejectsNilBody(t *testing.T) {
-	r := NewLogicRunner(nil, nil, nil)
-	_, err := r.RunLogic(nil, "x", nil, nil)
-	if err == nil {
-		t.Fatalf("expected error for nil body, got nil")
-	}
-	if !strings.Contains(err.Error(), "logic body is nil") {
-		t.Errorf("expected `logic body is nil` error, got %v", err)
+// TestLogicRunner_RefusesWithoutARegistry pins that a runner wired with no
+// step registry refuses a call rather than panicking.
+func TestLogicRunner_RefusesWithoutARegistry(t *testing.T) {
+	_, body := compiledLogic(t, `logic x {
+  return 1
+}`)
+	_, err := NewLogicRunner(nil, nil, nil).RunLogicBody(context.Background(), "x", body, nil)
+	if err == nil || !strings.Contains(err.Error(), "no step registry") {
+		t.Fatalf("want the no-step-registry refusal, got %v", err)
 	}
 }
 
-// TestLogicRunner_RunLogic_SeedThenLiteralReturn reproduces the exact
-// staging-confirmed memql#1090 shape end-to-end through RunLogic: a Logic
-// body with a side-effect step followed by `return 1` --
-//
-//	logic logicSeedKnowledgeDomains {
-//	  body {
-//	    seed := knowledgeSeedStandardDomains()
-//	    return 1
-//	  }
-//	}
-//
-// Before the fix, the "1" return string was dispatched through the step
-// registry into engine.Execute, where the unbounded-query guard rejected
-// it ("query must include at least one filter or relationship
-// expression") -- the automation failed at boot. After the fix, RunLogic
-// resolves the literal locally and returns it, and ONLY the side-effect
-// step reaches the registry.
-func TestLogicRunner_RunLogic_SeedThenLiteralReturn(t *testing.T) {
+// TestLogicRunner_SeedThenLiteralReturn reproduces the exact
+// staging-confirmed memql#1090 shape end-to-end through RunLogicBody: a logic
+// with a side-effect statement followed by `return 1`. The "1" was once
+// dispatched through the step registry into engine.Execute, where the
+// unbounded-query guard rejected it ("query must include at least one filter
+// or relationship expression") -- the automation failed at boot. The literal
+// resolves locally, and ONLY the side-effect statement reaches the registry.
+func TestLogicRunner_SeedThenLiteralReturn(t *testing.T) {
 	src := `@enabled
 @description("repro of logicSeedKnowledgeDomains shape")
 logic logicSeedKnowledgeDomains {
@@ -502,7 +140,7 @@ logic logicSeedKnowledgeDomains {
 	// A zero-value engine is enough: the side-effect step is served by the
 	// stub registry, and the literal `return 1` is resolved locally before
 	// any engine.Execute call. EventBus() on a zero-value engine is nil,
-	// which RunLogic tolerates.
+	// which RunLogicBody tolerates.
 	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
 
 	out, err := r.RunLogicBody(context.Background(), "logicSeedKnowledgeDomains", bodySteps, map[string]any{
@@ -512,7 +150,7 @@ logic logicSeedKnowledgeDomains {
 		t.Fatalf("RunLogicBody returned error (memql#1090 regression): %v", err)
 	}
 	if out != int64(1) {
-		t.Errorf("RunLogic return = %#v, want int64(1)", out)
+		t.Errorf("return = %#v, want int64(1)", out)
 	}
 	// Only the side-effect step should have reached the registry; the
 	// literal return must NOT have been dispatched into engine.Execute.
@@ -521,28 +159,16 @@ logic logicSeedKnowledgeDomains {
 	}
 }
 
-// TestLogicRunner_RunLogic_CollectionChainStepRHS pins gap 2 (#2317)
-// END-TO-END: a multi-statement logic body whose intermediate step RHS is a
-// collection-method / lambda chain over a caller arg --
-//
-//	logic logicProbe {
-//	  args { members []object @required }
-//	  body {
-//	    active := args.members.where(m => m.active)
-//	    return active.count()
-//	  }
-//	}
-//
-// must LOAD (the parser emits a query step carrying the chain's verbatim
-// source instead of rejecting the *ast.MethodCallExpr RHS) AND EVALUATE (the
-// LogicRunner's collection-chain branch resolves `args.members`, runs the
-// `where(m => m.active)` filter in-memory, binds the filtered collection as
-// the `active` step result, and the trailing `active.count()` counts it).
-// Neither the chain step nor the count return reaches the step registry --
-// both resolve locally -- so a zero-value engine + stub registry is enough.
-func TestLogicRunner_RunLogic_CollectionChainStepRHS(t *testing.T) {
+// TestLogicRunner_CollectionChainStatement pins gap 2 (#2317) END-TO-END: a
+// multi-statement logic whose intermediate statement is a collection-method /
+// lambda chain over a caller arg must LOAD and EVALUATE: `args.members`
+// resolves, the `where(m => m.active)` filter runs in memory, `active` binds
+// the filtered collection, and the trailing `active.count()` counts it.
+// Neither statement reaches the step registry -- both resolve locally -- so a
+// zero-value engine + stub registry is enough.
+func TestLogicRunner_CollectionChainStatement(t *testing.T) {
 	src := `@enabled
-@description("collection-chain step RHS probe (#2317)")
+@description("collection-chain statement probe (#2317)")
 logic logicProbe {
   args {
     members []object @required
@@ -564,13 +190,13 @@ logic logicProbe {
 		"members": members,
 	})
 	if err != nil {
-		t.Fatalf("RunLogicBody returned error (#2317 collection-chain step RHS must load + evaluate): %v", err)
+		t.Fatalf("RunLogicBody returned error (#2317 collection-chain statement must load + evaluate): %v", err)
 	}
 	if !numericEquals(out, 2) {
-		t.Errorf("RunLogic return = %#v (%T), want 2 (the active member count)", out, out)
+		t.Errorf("return = %#v (%T), want 2 (the active member count)", out, out)
 	}
-	// Neither the chain step nor the count return should have hit the
-	// registry -- both are resolved in-memory by the LogicRunner.
+	// Neither statement should have hit the registry -- both are resolved
+	// in memory by the sequence runner.
 	if len(registry.dispatched) != 0 {
 		t.Errorf("dispatched steps = %v, want none (the collection chain + count resolve locally)", registry.dispatched)
 	}
@@ -592,21 +218,16 @@ func numericEquals(v any, n int) bool {
 	}
 }
 
-// emptyQueryStepRegistry is a step-registry stub whose every engine-bound
-// step returns a result with zero rows, so a downstream `existing.empty()`
-// guard evaluates true (the first-boot path where the seeded records do not
-// yet exist and the conditional mutation steps must fire). An in-process
-// expression step evaluates as the real query executor evaluates it
-// (inProcessStep). It records each engine-bound step ID so a test can
-// assert exactly which steps reached the engine.
+// emptyQueryStepRegistry is a step-registry stub whose every call returns a
+// read of zero rows, so a downstream `existing.empty()` guard evaluates true
+// (the first-boot path where the seeded records do not yet exist and the
+// conditional mutations must run). It records each call's step ID so a test
+// can assert exactly which statements reached the engine.
 type emptyQueryStepRegistry struct {
 	dispatched []string
 }
 
-func (r *emptyQueryStepRegistry) Execute(ctx context.Context, step *Step, sc *StepContext) (*StepResult, error) {
-	if res, handled, err := inProcessStep(ctx, step, sc); handled {
-		return res, err
-	}
+func (r *emptyQueryStepRegistry) Execute(_ context.Context, step *Step, _ *StepContext) (*StepResult, error) {
 	r.dispatched = append(r.dispatched, step.ID)
 	now := time.Now()
 	return &StepResult{
@@ -614,120 +235,72 @@ func (r *emptyQueryStepRegistry) Execute(ctx context.Context, step *Step, sc *St
 		Status:      "success",
 		StartedAt:   now,
 		CompletedAt: now,
-		// Empty Bundle -> GetStepNodes returns zero nodes -> .empty() == true.
-		Result: map[string]any{"Bundle": map[string]any{"nodes": []any{}}},
+		Result:      &memql.ExecuteResult{Bundle: &memqlv1.GraphBundle{}},
 	}, nil
 }
 
-// TestLogicRunner_RunLogic_WelcomeCurriculumShape reproduces the second
-// staging seed automation that failed at boot with the SAME filterless-query
-// guard error -- `logicSeedWelcomeCurriculum` (memql#1129). Its body has a
-// distinct shape from logicSeedKnowledgeDomains: a lookup query, then several
-// CONDITIONAL mutation steps gated on `existing.empty()`, then a bare literal
-// `return 1` --
-//
-//	logic logicSeedWelcomeCurriculum {
-//	  body {
-//	    existing := queryCurriculumBySlug( slug: "..." )
-//	    insertCurriculum := if existing.empty() { mutationCreateCurriculum(...) }
-//	    insertGreeting    := if existing.empty() { mutationCreateSegment(...) }
-//	    return 1
-//	  }
-//	}
-//
-// memql#1090 fixed the literal-return guard but only regression-pinned the
-// simpler logicSeedKnowledgeDomains shape (`seed := <builtin>; return 1`). The
-// welcome curriculum -- query + conditional mutations + literal return -- was
-// never covered, yet it tripped the identical "query must include at least one
-// filter or relationship expression" ERROR on staging because the trailing
-// `return 1` was dispatched through engine.Execute. This pins that the whole
-// shape resolves cleanly: the conditionals fire on the empty-query first-boot
-// path, and the literal return is resolved locally (never reaching the
-// unbounded-query guard).
-func TestLogicRunner_RunLogic_WelcomeCurriculumShape(t *testing.T) {
+// TestLogicRunner_WelcomeCurriculumShape reproduces the second staging seed
+// automation that failed at boot with the SAME filterless-query guard error --
+// `logicSeedWelcomeCurriculum` (memql#1129): a lookup query, then CONDITIONAL
+// mutations gated on `existing.empty()`, then a literal `return 1`. The
+// conditionals run on the empty-query first-boot path, and the literal return
+// is resolved locally (never reaching the unbounded-query guard).
+func TestLogicRunner_WelcomeCurriculumShape(t *testing.T) {
 	src := `@enabled
 @description("repro of logicSeedWelcomeCurriculum shape")
 logic logicSeedWelcomeCurriculum {
   args {
     event object @required
   }
-  body {
-    existing := queryCurriculumBySlug( slug: "exampleapp.welcome.v1" )
-    insertCurriculum := if existing.empty() {
-      mutationCreateCurriculum(
-        curriculumId: "v1:curriculum:curriculum:exampleapp-welcome-v1",
-        slug: "exampleapp.welcome.v1",
-        name: "Welcome to ExampleApp",
-        version: 1,
-        active: true
-      )
-    }
-    insertGreeting := if existing.empty() {
-      mutationCreateSegment(
-        segmentId: "v1:curriculum:segment:exampleapp-welcome-v1-greeting",
-        curriculumId: "v1:curriculum:curriculum:exampleapp-welcome-v1",
-        slug: "greeting",
-        recommendedSteps: "[{\"name\":\"uiHighlight\",\"arguments\":{\"target\":null}}]",
-        orderHint: 1
-      )
-    }
-    return 1
+  existing := query queryCurriculumBySlug(slug: "exampleapp.welcome.v1")
+  if existing.empty() {
+    insertCurriculum := mutation mutationCreateCurriculum(
+      curriculumId: "v1:curriculum:curriculum:exampleapp-welcome-v1",
+      slug: "exampleapp.welcome.v1",
+      name: "Welcome to ExampleApp",
+      version: 1,
+      active: true
+    )
+    insertGreeting := mutation mutationCreateSegment(
+      segmentId: "v1:curriculum:segment:exampleapp-welcome-v1-greeting",
+      curriculumId: "v1:curriculum:curriculum:exampleapp-welcome-v1",
+      slug: "greeting",
+      recommendedSteps: "[{\"name\":\"uiHighlight\",\"arguments\":{\"target\":null}}]",
+      orderHint: 1
+    )
   }
+  return 1
 }
 `
-	body := parseLogicBody(t, src)
+	_, bodySteps := compiledLogic(t, src)
 	registry := &emptyQueryStepRegistry{}
-	// A zero-value engine is enough: the lookup + conditional mutation steps
+	// A zero-value engine is enough: the lookup and the conditional mutations
 	// are served by the stub registry, and the literal `return 1` is resolved
-	// locally before any engine.Execute call.
+	// locally.
 	r := NewLogicRunner(&memql.MemQLEngine{}, registry, nil)
 
-	out, err := r.RunLogic(context.Background(), "logicSeedWelcomeCurriculum", body, map[string]any{
+	out, err := r.RunLogicBody(context.Background(), "logicSeedWelcomeCurriculum", bodySteps, map[string]any{
 		"event": map[string]any{"payload": map[string]any{"id": "u1"}},
 	})
 	if err != nil {
-		t.Fatalf("RunLogic returned error (memql#1129 regression -- filterless-query guard must not trip on the welcome-curriculum shape): %v", err)
+		t.Fatalf("RunLogicBody returned error (memql#1129 regression -- filterless-query guard must not trip on the welcome-curriculum shape): %v", err)
 	}
 	if out != int64(1) {
-		t.Errorf("RunLogic return = %#v, want int64(1)", out)
+		t.Errorf("return = %#v, want int64(1)", out)
 	}
-	// The lookup + BOTH conditional mutations must have reached the registry
-	// (the empty-query first-boot path fires the guards); the literal `return
-	// 1` must NOT have been dispatched -- it is resolved locally.
-	want := []string{"existing", "insertCurriculum", "insertGreeting"}
-	if len(registry.dispatched) != len(want) {
-		t.Fatalf("dispatched steps = %v, want %v (literal return must bypass the engine; conditionals must fire on empty query)", registry.dispatched, want)
-	}
-	got := map[string]bool{}
-	for _, id := range registry.dispatched {
-		got[id] = true
-		if id == "_return" {
-			t.Errorf("the literal `return 1` step reached the engine (memql#1090/#1129 regression); it must resolve locally")
-		}
-	}
-	for _, id := range want {
-		if !got[id] {
-			t.Errorf("expected step %q to be dispatched; got %v", id, registry.dispatched)
-		}
+	// The lookup + BOTH conditional mutations reached the registry (the
+	// empty-query first-boot path runs the branch); the literal return did not.
+	if want := []string{"existing", "insertCurriculum", "insertGreeting"}; !reflect.DeepEqual(registry.dispatched, want) {
+		t.Fatalf("dispatched = %v, want %v (the literal return must bypass the engine; the branch must run on an empty read)", registry.dispatched, want)
 	}
 }
 
-// TestLogicRunner_RunLogic_TerminalReturnArithmetic pins #2542 item 1
-// END-TO-END: a multi-step logic whose terminal return is binary arithmetic
-// over prior step results --
-//
-//	logic aov {
-//	  body {
-//	    r := args.revenue ?? 0
-//	    o := args.orders ?? 1
-//	    return r / o
-//	  }
-//	}
-//
-// must LOAD AND EVALUATE (both step operands resolve in process under the
-// #2316 numeric rules). Nothing reaches the engine: the `??` steps and the
-// return all evaluate in process.
-func TestLogicRunner_RunLogic_TerminalReturnArithmetic(t *testing.T) {
+// TestLogicRunner_TerminalReturnArithmetic pins #2542 item 1 END-TO-END: a
+// logic whose terminal return is binary arithmetic over the names its prior
+// statements bound must LOAD AND EVALUATE (both operands resolve in process
+// under the #2316 numeric rules). Nothing reaches the engine: the `??`
+// statements and the return all evaluate in process.
+func TestLogicRunner_TerminalReturnArithmetic(t *testing.T) {
 	src := `@enabled
 @description("aov-style terminal-return arithmetic (#2542)")
 logic aov {
@@ -752,7 +325,7 @@ logic aov {
 		t.Fatalf("RunLogicBody returned error (#2542 terminal-return arithmetic must evaluate): %v", err)
 	}
 	if !numericEquals(out, 25) {
-		t.Errorf("RunLogic return = %#v (%T), want 25 (100 / 4)", out, out)
+		t.Errorf("return = %#v (%T), want 25 (100 / 4)", out, out)
 	}
 	if len(registry.dispatched) != 0 {
 		t.Errorf("dispatched steps = %v, want none (coalesce + arithmetic resolve locally)", registry.dispatched)
@@ -761,7 +334,7 @@ logic aov {
 
 // Division by zero must surface as a clean logic error naming the failure,
 // never a panic and never a silent nil return.
-func TestLogicRunner_RunLogic_TerminalReturnArithmetic_DivisionByZero(t *testing.T) {
+func TestLogicRunner_TerminalReturnArithmetic_DivisionByZero(t *testing.T) {
 	src := `@enabled
 @description("division by zero surfaces cleanly")
 logic ratio {
@@ -779,7 +352,7 @@ logic ratio {
 
 	_, err := r.RunLogicBody(context.Background(), "ratio", bodySteps, map[string]any{"a": 10, "b": 0})
 	if err == nil {
-		t.Fatalf("RunLogic succeeded on x / 0; want a division-by-zero error")
+		t.Fatalf("RunLogicBody succeeded on x / 0; want a division-by-zero error")
 	}
 	if !strings.Contains(err.Error(), "division_by_zero") {
 		t.Errorf("error = %q, want the division_by_zero refusal", err.Error())
@@ -788,7 +361,7 @@ logic ratio {
 
 // Modulo requires whole-number operands: a fractional operand must surface
 // the operand_type refusal, not compute a bogus value.
-func TestLogicRunner_RunLogic_TerminalReturnArithmetic_FloatModulo(t *testing.T) {
+func TestLogicRunner_TerminalReturnArithmetic_FloatModulo(t *testing.T) {
 	src := `@enabled
 @description("float modulo surfaces cleanly")
 logic remainder {
@@ -806,33 +379,20 @@ logic remainder {
 
 	_, err := r.RunLogicBody(context.Background(), "remainder", bodySteps, map[string]any{"a": 10.5, "b": 3})
 	if err == nil {
-		t.Fatalf("RunLogic succeeded on float %% int; want an integer-operands error")
+		t.Fatalf("RunLogicBody succeeded on float %% int; want an integer-operands error")
 	}
 	if !strings.Contains(err.Error(), "needs whole numbers") {
 		t.Errorf("error = %q, want the operand_type whole-numbers refusal", err.Error())
 	}
 }
 
-// TestLogicRunner_RunLogic_TerminalReturnComparison pins #2542 item 5
-// END-TO-END for the MULTI-STEP path: a logic whose terminal return is an
-// expression-led comparison over a computed intermediate --
-//
-//	logic isProfitable {
-//	  body {
-//	    delta := args.revenue - args.cost
-//	    return delta - 5 > 0
-//	  }
-//	}
-//
-// must EVALUATE to the boolean (the LogicRunner's comparison branch resolves
-// both operands locally and applies the ordering operator) rather than falling
-// through to the step registry -- where the engine rejects a
-// BinaryComparisonExpression with the `only available in logic` scope error.
-// Nothing reaches the registry: the arithmetic step and the comparison return
-// both resolve locally. The engine single-return path already handles the
-// single-return boolean shape (engine.go plan-root branch); this is its
-// multi-step counterpart.
-func TestLogicRunner_RunLogic_TerminalReturnComparison(t *testing.T) {
+// TestLogicRunner_TerminalReturnComparison pins #2542 item 5 END-TO-END: a
+// logic whose terminal return is an expression-led comparison over a computed
+// intermediate must EVALUATE to the boolean, both operands resolved locally
+// and the ordering operator applied, rather than reaching the step registry.
+// Nothing reaches the registry: the arithmetic statement and the comparison
+// return both resolve locally.
+func TestLogicRunner_TerminalReturnComparison(t *testing.T) {
 	src := `@enabled
 @description("expression-led comparison terminal return (#2542 item 5)")
 logic isProfitable {
@@ -866,24 +426,23 @@ logic isProfitable {
 				"cost":    tc.cost,
 			})
 			if err != nil {
-				t.Fatalf("RunLogic (#2542 comparison terminal return must evaluate): %v", err)
+				t.Fatalf("RunLogicBody (#2542 comparison terminal return must evaluate): %v", err)
 			}
 			if out != tc.want {
-				t.Errorf("RunLogic return = %#v (%T), want %v", out, out, tc.want)
+				t.Errorf("return = %#v (%T), want %v", out, out, tc.want)
 			}
 			if len(registry.dispatched) != 0 {
-				t.Errorf("dispatched steps = %v, want none (arithmetic step + comparison return resolve locally)", registry.dispatched)
+				t.Errorf("dispatched steps = %v, want none (arithmetic statement + comparison return resolve locally)", registry.dispatched)
 			}
 		})
 	}
 }
 
-// TestLogicRunner_RunLogic_TerminalReturnComparison_LiteralLed pins the
-// literal-led shape (`0 < delta`) -- the other half of the expression-led
-// comparison grammar (parser's non-identifier-led left side). It must evaluate
-// through the same LogicRunner comparison branch, never dispatch to the
-// registry.
-func TestLogicRunner_RunLogic_TerminalReturnComparison_LiteralLed(t *testing.T) {
+// TestLogicRunner_TerminalReturnComparison_LiteralLed pins the literal-led
+// shape (`0 < delta`) -- the other half of the expression-led comparison
+// grammar (the parser's non-identifier-led left side). It must evaluate in
+// process as well, never dispatch to the registry.
+func TestLogicRunner_TerminalReturnComparison_LiteralLed(t *testing.T) {
 	src := `@enabled
 @description("literal-led comparison terminal return (#2542 item 5)")
 logic hasSurplus {
@@ -901,22 +460,22 @@ logic hasSurplus {
 
 	out, err := r.RunLogicBody(context.Background(), "hasSurplus", bodySteps, map[string]any{"revenue": 10, "cost": 4})
 	if err != nil {
-		t.Fatalf("RunLogic (literal-led comparison must evaluate): %v", err)
+		t.Fatalf("RunLogicBody (literal-led comparison must evaluate): %v", err)
 	}
 	if out != true {
-		t.Errorf("RunLogic return = %#v (%T), want true (0 < 6)", out, out)
+		t.Errorf("return = %#v (%T), want true (0 < 6)", out, out)
 	}
 	if len(registry.dispatched) != 0 {
 		t.Errorf("dispatched steps = %v, want none", registry.dispatched)
 	}
 }
 
-// TestLogicRunner_RunLogic_DateBuiltinStepValueAndReturn pins #2541
-// END-TO-END: date builtins bound as step VALUES (`delta := daysBetween(...)`,
-// `y := year(...)`) and read back through the terminal return. This is the
-// day-delta half of the issue's minimal date surface (streak logic: "is today
-// exactly one day after the last").
-func TestLogicRunner_RunLogic_DateBuiltinStepValueAndReturn(t *testing.T) {
+// TestLogicRunner_DateBuiltinStepValueAndReturn pins #2541 END-TO-END: a date
+// builtin bound as a statement's value (`delta := daysBetween(...)`) and read
+// back through the terminal return. This is the day-delta half of the issue's
+// minimal date surface (streak logic: "is today exactly one day after the
+// last").
+func TestLogicRunner_DateBuiltinStepValueAndReturn(t *testing.T) {
 	src := `@enabled
 @description("day-delta between two datetimes (#2541)")
 logic streakDelta {
@@ -937,18 +496,19 @@ logic streakDelta {
 		"curr": "2026-07-14T22:00:00Z",
 	})
 	if err != nil {
-		t.Fatalf("RunLogicBody returned error (#2541 date-builtin step value must evaluate): %v", err)
+		t.Fatalf("RunLogicBody returned error (#2541 date-builtin statement value must evaluate): %v", err)
 	}
 	if !numericEquals(out, 1) {
-		t.Errorf("RunLogic return = %#v (%T), want 1 (one day apart)", out, out)
+		t.Errorf("return = %#v (%T), want 1 (one day apart)", out, out)
 	}
 	if len(registry.dispatched) != 0 {
 		t.Errorf("dispatched steps = %v, want none (the date builtin resolves locally)", registry.dispatched)
 	}
 }
 
-// A date builtin in the TERMINAL RETURN position, over a prior step result.
-func TestLogicRunner_RunLogic_DateBuiltinTerminalReturn(t *testing.T) {
+// A date builtin in the TERMINAL RETURN position, over a prior statement's
+// value.
+func TestLogicRunner_DateBuiltinTerminalReturn(t *testing.T) {
 	src := `@enabled
 @description("addDuration in terminal return (#2541)")
 logic boundary {
@@ -969,14 +529,14 @@ logic boundary {
 		t.Fatalf("RunLogicBody returned error (#2541 date builtin in terminal return must evaluate): %v", err)
 	}
 	if out != "2026-03-11T00:00:00Z" {
-		t.Errorf("RunLogic return = %#v, want 2026-03-11T00:00:00Z", out)
+		t.Errorf("return = %#v, want 2026-03-11T00:00:00Z", out)
 	}
 }
 
 // A date builtin nested INSIDE terminal-return arithmetic:
 // `return daysBetween(a, b) / 7` (weeks between two dates). Exercises the
 // arithmetic operand walker's date-builtin dispatch.
-func TestLogicRunner_RunLogic_DateBuiltinInsideArithmeticReturn(t *testing.T) {
+func TestLogicRunner_DateBuiltinInsideArithmeticReturn(t *testing.T) {
 	src := `@enabled
 @description("daysBetween inside terminal-return arithmetic (#2541/#2542)")
 logic weeksBetween {
@@ -999,15 +559,15 @@ logic weeksBetween {
 		t.Fatalf("RunLogicBody returned error: %v", err)
 	}
 	if !numericEquals(out, 2) {
-		t.Errorf("RunLogic return = %#v (%T), want 2 (14 days / 7)", out, out)
+		t.Errorf("return = %#v (%T), want 2 (14 days / 7)", out, out)
 	}
 }
 
-// TestLogicRunner_CompileRoundTrip_ArithmeticAndDateBuiltins pins the
-// serializer half of #2541/#2542: the compiled `_return` string carries
-// canonical v1 source -- re-parseable, never the `<<unsupported expression
-// %T>>` marker, and never rewritten into another dialect (no `$args`).
-func TestLogicRunner_CompileRoundTrip_ArithmeticAndDateBuiltins(t *testing.T) {
+// TestLogicRunner_CompiledReturnIsCanonicalSource pins the serializer half of
+// #2541/#2542: a compiled return carries canonical v1 source -- re-parseable,
+// never an `<<unsupported expression %T>>` marker, and never rewritten into
+// another dialect (no `$args`).
+func TestLogicRunner_CompiledReturnIsCanonicalSource(t *testing.T) {
 	cases := []struct {
 		name       string
 		ret        string
@@ -1018,45 +578,38 @@ func TestLogicRunner_CompileRoundTrip_ArithmeticAndDateBuiltins(t *testing.T) {
 		{"addDuration", `return addDuration(r, "P1D")`, `addDuration(r, "P1D")`},
 		{"daysBetween_args", "return daysBetween(args.a, args.b)", "daysBetween(args.a, args.b)"},
 		{"date_in_arithmetic", "return daysBetween(args.a, args.b) / 7", "daysBetween(args.a, args.b) / 7"},
+		{"ternary_over_chain", "return r.count() > 0 ? r.count() : 0", "r.count() > 0 ? r.count() : 0"},
+		{"lambda_chain", "return o.where(m => m.vip).count()", "o.where(m => m.vip).count()"},
+		{"projection", "return o.groupBy(s => s.worker).select(g => {worker: g.key, n: g.items.count()})", "o.groupBy(s => s.worker).select(g => {worker: g.key, n: g.items.count()})"},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			src := `@enabled
+			_, steps := compiledLogic(t, `@enabled
 @description("round-trip probe")
 logic probe {
   args {
     a string @required
     b string @required
   }
-  body {
-    r := args.a ?? ""
-    o := args.b ?? ""
-    ` + tc.ret + `
-  }
-}
-`
-			body := parseLogicBody(t, src)
-			r := NewLogicRunner(nil, nil, nil)
-			auto, err := r.compileBodyToAutomation("probe", body)
-			if err != nil {
-				t.Fatalf("compileBodyToAutomation: %v", err)
-			}
-			var ret *Step
-			for _, s := range auto.Steps {
-				if s != nil && s.ID == "_return" {
-					ret = s
+  r := args.a ?? ""
+  o := args.b ?? ""
+  `+tc.ret+`
+}`)
+			var got string
+			for _, s := range steps {
+				if s["type"] == "return" {
+					ret, _ := s["return"].(map[string]any)
+					got, _ = ret["value"].(string)
 				}
 			}
-			if ret == nil || ret.Query == nil {
-				t.Fatalf("no _return step in compiled automation")
+			if got == "" {
+				t.Fatalf("no return step in the compiled body: %v", steps)
 			}
-			got := strings.TrimSpace(ret.Query.Query)
-			if strings.Contains(got, "<<unsupported") {
-				t.Fatalf("_return = %q still carries the unsupported-expression marker", got)
+			if strings.Contains(got, "<<unsupported") || strings.Contains(got, "$args") {
+				t.Fatalf("return = %q is not canonical v1 source", got)
 			}
 			if got != tc.wantReturn {
-				t.Errorf("_return = %q, want %q", got, tc.wantReturn)
+				t.Errorf("return = %q, want %q", got, tc.wantReturn)
 			}
 		})
 	}

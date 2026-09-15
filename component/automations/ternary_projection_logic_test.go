@@ -8,15 +8,15 @@ import (
 	"github.com/znasllc-io/memql/component/memql"
 )
 
-// cond_projection_logic_test.go drives #2542 items 2 (cond over a collection
-// chain) and 3 (arithmetic in a groupBy-projection object-literal value), plus
-// the lambda-carrying-chain terminal-return serializer gap, END-TO-END through
+// ternary_projection_logic_test.go drives #2542 items 2 (a ternary over a
+// collection chain) and 3 (arithmetic in a groupBy-projection object-literal
+// value), plus a lambda-carrying chain in terminal return, END-TO-END through
 // the REAL logic path: the statement body compiled as the function loader
 // compiles it (compiledLogic) and run by RunLogicBody. A stub step registry
 // stands in for the DB; every case below resolves locally, so nothing is
-// dispatched -- the assertions pin that the compiled body evaluates.
-// (TestRunLogic_CompileRoundTrip_CondAndProjection still drives the retired
-// body grammar's serializer, and goes with it.)
+// dispatched -- the assertions pin that the compiled body evaluates. The
+// serializer half -- each of these returns compiles to canonical source -- is
+// TestLogicRunner_CompiledReturnIsCanonicalSource.
 
 func runProjectionLogic(t *testing.T, src, fn string, args map[string]any) (any, []string) {
 	t.Helper()
@@ -30,12 +30,12 @@ func runProjectionLogic(t *testing.T, src, fn string, args map[string]any) (any,
 	return out, registry.dispatched
 }
 
-// --- Item 2: cond over a collection chain (terminal return) ---
+// --- Item 2: a ternary over a collection chain (terminal return) ---
 
-func TestRunLogic_CondOverChain_TerminalReturn(t *testing.T) {
+func TestLogicBody_TernaryOverChain_TerminalReturn(t *testing.T) {
 	src := `@enabled
-@description("cond over a collection-chain aggregate (#2542 item 2)")
-logic condReturn {
+@description("ternary over a collection-chain aggregate (#2542 item 2)")
+logic ternaryReturn {
   args {
     members []object @required
   }
@@ -43,7 +43,7 @@ logic condReturn {
   return active.count() > 0 ? active.count() : 0
 }
 `
-	out, dispatched := runProjectionLogic(t, src, "condReturn", map[string]any{
+	out, dispatched := runProjectionLogic(t, src, "ternaryReturn", map[string]any{
 		"members": []any{
 			map[string]any{"name": "a", "active": true},
 			map[string]any{"name": "b", "active": false},
@@ -51,19 +51,19 @@ logic condReturn {
 		},
 	})
 	if !numericEquals(out, 2) {
-		t.Errorf("return = %#v, want 2 (active count via cond then-branch)", out)
+		t.Errorf("return = %#v, want 2 (active count via the then-branch)", out)
 	}
 	if len(dispatched) != 0 {
-		t.Errorf("dispatched = %v, want none (cond + chain resolve locally)", dispatched)
+		t.Errorf("dispatched = %v, want none (ternary + chain resolve locally)", dispatched)
 	}
 }
 
 // The else branch is selected (and is itself a chain) when the predicate is
 // false.
-func TestRunLogic_CondOverChain_ElseBranch(t *testing.T) {
+func TestLogicBody_TernaryOverChain_ElseBranch(t *testing.T) {
 	src := `@enabled
-@description("cond else-branch chain")
-logic condElse {
+@description("ternary else-branch chain")
+logic ternaryElse {
   args {
     members []object @required
   }
@@ -71,7 +71,7 @@ logic condElse {
   return active.count() > 0 ? "some-active" : "none-active"
 }
 `
-	out, _ := runProjectionLogic(t, src, "condElse", map[string]any{
+	out, _ := runProjectionLogic(t, src, "ternaryElse", map[string]any{
 		"members": []any{
 			map[string]any{"name": "a", "active": false},
 		},
@@ -81,12 +81,12 @@ logic condElse {
 	}
 }
 
-// --- Item 2: cond as a STEP value ---
+// --- Item 2: a ternary as a statement's value ---
 
-func TestRunLogic_CondOverChain_StepValue(t *testing.T) {
+func TestLogicBody_TernaryOverChain_StepValue(t *testing.T) {
 	src := `@enabled
-@description("cond as a step value over a chain (#2542 item 2)")
-logic condStep {
+@description("ternary as a statement value over a chain (#2542 item 2)")
+logic ternaryStep {
   args {
     members []object @required
   }
@@ -95,7 +95,7 @@ logic condStep {
   return label
 }
 `
-	out, dispatched := runProjectionLogic(t, src, "condStep", map[string]any{
+	out, dispatched := runProjectionLogic(t, src, "ternaryStep", map[string]any{
 		"members": []any{
 			map[string]any{"name": "a", "active": true},
 		},
@@ -104,16 +104,15 @@ logic condStep {
 		t.Errorf("return = %#v, want \"has-active\"", out)
 	}
 	if len(dispatched) != 0 {
-		t.Errorf("dispatched = %v, want none (cond step resolves locally, not via FunctionExecutor)", dispatched)
+		t.Errorf("dispatched = %v, want none (the ternary statement resolves locally)", dispatched)
 	}
 }
 
-// A cond predicate that is a comparison over a step scalar (parseable today)
-// evaluates through the condition machinery.
-func TestRunLogic_CondScalarComparisonPredicate(t *testing.T) {
+// A ternary whose predicate is a comparison over a bound scalar.
+func TestLogicBody_TernaryScalarComparisonPredicate(t *testing.T) {
 	src := `@enabled
-@description("cond with a scalar-comparison predicate")
-logic condScalar {
+@description("ternary with a scalar-comparison predicate")
+logic ternaryScalar {
   args {
     revenue int @required
   }
@@ -121,26 +120,22 @@ logic condScalar {
   return r > 50 ? "high" : "low"
 }
 `
-	if out, _ := runProjectionLogic(t, src, "condScalar", map[string]any{"revenue": 100}); out != "high" {
+	if out, _ := runProjectionLogic(t, src, "ternaryScalar", map[string]any{"revenue": 100}); out != "high" {
 		t.Errorf("revenue 100 -> %#v, want \"high\"", out)
 	}
-	if out, _ := runProjectionLogic(t, src, "condScalar", map[string]any{"revenue": 10}); out != "low" {
+	if out, _ := runProjectionLogic(t, src, "ternaryScalar", map[string]any{"revenue": 10}); out != "low" {
 		t.Errorf("revenue 10 -> %#v, want \"low\"", out)
 	}
 }
 
-// TestRunLogic_CondComparisonOverChain_TerminalReturn is the #2542 item-2
-// headline through the REAL source path (parse -> compile/serialize -> re-parse
-// -> RunLogic): a cond whose predicate is a comparison over a collection-chain
-// aggregate. Wave 3's parseExpressionArg relational-comparison extension makes
-// the predicate parse; the compiler serializes the CondExpr with its
-// BinaryComparisonExpr predicate, and evaluateCondPredicate routes the
-// serialized comparison string through the condition evaluator. Resolves
-// locally -- no step dispatch.
-func TestRunLogic_CondComparisonOverChain_TerminalReturn(t *testing.T) {
+// TestLogicBody_TernaryComparisonOverChain_TerminalReturn is the #2542 item-2
+// headline through the REAL source path (parse -> compile -> RunLogicBody): a
+// ternary whose predicate is a comparison over a collection-chain aggregate.
+// Resolves locally -- no call.
+func TestLogicBody_TernaryComparisonOverChain_TerminalReturn(t *testing.T) {
 	src := `@enabled
-@description("cond over a comparison of a collection-chain aggregate (#2542 item 2)")
-logic condChainCmp {
+@description("ternary over a comparison of a collection-chain aggregate (#2542 item 2)")
+logic ternaryChainCmp {
   args {
     members []object @required
   }
@@ -153,12 +148,12 @@ logic condChainCmp {
 		map[string]any{"name": "b", "active": false},
 		map[string]any{"name": "c", "active": true},
 	}}
-	out, dispatched := runProjectionLogic(t, src, "condChainCmp", members)
+	out, dispatched := runProjectionLogic(t, src, "ternaryChainCmp", members)
 	if out != "many" {
 		t.Errorf("return = %#v, want \"many\" (2 active > 1)", out)
 	}
 	if len(dispatched) != 0 {
-		t.Errorf("dispatched = %v, want none (cond comparison-over-chain resolves locally)", dispatched)
+		t.Errorf("dispatched = %v, want none (ternary comparison-over-chain resolves locally)", dispatched)
 	}
 
 	// Predicate false -> else branch.
@@ -166,18 +161,17 @@ logic condChainCmp {
 		map[string]any{"name": "a", "active": true},
 		map[string]any{"name": "b", "active": false},
 	}}
-	if out, _ := runProjectionLogic(t, src, "condChainCmp", fewMembers); out != "few" {
+	if out, _ := runProjectionLogic(t, src, "ternaryChainCmp", fewMembers); out != "few" {
 		t.Errorf("return = %#v, want \"few\" (1 active, not > 1)", out)
 	}
 }
 
-// The comparison-over-chain cond predicate also works as a STEP value (bound to
-// an intermediate `:=` step, then returned) -- reached through
-// reconstructPositionalBuiltinCall rather than the terminal-return path.
-func TestRunLogic_CondComparisonOverChain_StepValue(t *testing.T) {
+// The comparison-over-chain ternary also works as a statement's value (bound by
+// an intermediate `:=` statement, then returned).
+func TestLogicBody_TernaryComparisonOverChain_StepValue(t *testing.T) {
 	src := `@enabled
-@description("cond comparison-over-chain as a step value (#2542 item 2)")
-logic condChainCmpStep {
+@description("ternary comparison-over-chain as a statement value (#2542 item 2)")
+logic ternaryChainCmpStep {
   args {
     members []object @required
   }
@@ -191,26 +185,27 @@ logic condChainCmpStep {
 		map[string]any{"name": "b", "active": true},
 		map[string]any{"name": "c", "active": false},
 	}}
-	out, dispatched := runProjectionLogic(t, src, "condChainCmpStep", members)
+	out, dispatched := runProjectionLogic(t, src, "ternaryChainCmpStep", members)
 	if out != "quorum" {
 		t.Errorf("return = %#v, want \"quorum\" (2 active >= 2)", out)
 	}
 	if len(dispatched) != 0 {
-		t.Errorf("dispatched = %v, want none (cond step resolves locally)", dispatched)
+		t.Errorf("dispatched = %v, want none (the ternary statement resolves locally)", dispatched)
 	}
 }
 
 // TestTernaryComparisonOverChain pins the headline shape -- a ternary whose
 // predicate is a comparison over a collection-chain aggregate -- evaluated
 // over the run. The end-to-end source path is exercised by
-// TestRunLogic_CondComparisonOverChain_TerminalReturn above.
+// TestLogicBody_TernaryComparisonOverChain_TerminalReturn above.
 func TestTernaryComparisonOverChain(t *testing.T) {
 	eval := NewEvaluator()
-	eval.SetStepResult("rows", &StepResult{StepId: "rows", Status: "success", Result: []any{
+	eval.enterStatements()
+	eval.Bind("rows", []any{
 		map[string]any{"active": true},
 		map[string]any{"active": false},
 		map[string]any{"active": true},
-	}})
+	})
 	out, err := evalV1(eval, `rows.where(r => r.active).count() > 0 ? rows.count() : 0`)
 	if err != nil {
 		t.Fatalf("true case: %v", err)
@@ -234,7 +229,7 @@ func TestTernaryComparisonOverChain(t *testing.T) {
 
 // --- Lambda-carrying chain in TERMINAL RETURN (serializer gap) ---
 
-func TestRunLogic_LambdaChainTerminalReturn(t *testing.T) {
+func TestLogicBody_LambdaChainTerminalReturn(t *testing.T) {
 	src := `@enabled
 @description("lambda-carrying chain in terminal return (serializer gap)")
 logic lambdaReturn {
@@ -262,7 +257,7 @@ logic lambdaReturn {
 
 // --- Item 3: arithmetic in a groupBy-projection object-literal value ---
 
-func TestRunLogic_GroupByProjection_MethodCallValue(t *testing.T) {
+func TestLogicBody_GroupByProjection_MethodCallValue(t *testing.T) {
 	src := `@enabled
 @description("groupBy projection with a method-call value (#2542 item 3)")
 logic projCount {
@@ -296,7 +291,7 @@ logic projCount {
 // integer-arithmetic projection ratio: all operands stay integers, so the
 // compiled source carries no float literal to lose. The true fractional
 // (float) ratio via a `* 1.0` operand is pinned by
-// TestRunLogic_GroupByProjection_FloatRatio below.
+// TestLogicBody_GroupByProjection_FloatRatio below.
 //
 // A ratio over a per-group FILTERED count -- `g.items.where(...).count()`
 // inside the select -- is a collection scan nested in another over lists
@@ -304,7 +299,7 @@ logic projCount {
 // tiers.MaxStaticCost; TestPrepareExpressionsRefuses). The denominator is
 // therefore an argument here, and the arithmetic in the projection value is
 // what is under test.
-func TestRunLogic_GroupByProjection_ArithmeticRatioPercent(t *testing.T) {
+func TestLogicBody_GroupByProjection_ArithmeticRatioPercent(t *testing.T) {
 	src := `@enabled
 @description("per-group share percent in a projection (#2542 item 3)")
 logic accuracy {
@@ -336,13 +331,13 @@ logic accuracy {
 	}
 }
 
-// TestRunLogic_GroupByProjection_FloatRatio pins the FRACTIONAL (float) ratio
+// TestLogicBody_GroupByProjection_FloatRatio pins the FRACTIONAL (float) ratio
 // idiom -- `count / (total * 1.0)` -- END-TO-END through the compile/re-parse
 // boundary. The `* 1.0` operand is a whole-valued float literal; the compiled
 // source must keep it a float, else it re-parses as an integer and the
 // division silently collapses to INTEGER division, yielding 0 instead of 0.75
 // -- the memqllint-green/runtime-wrong class #2542 eliminates.
-func TestRunLogic_GroupByProjection_FloatRatio(t *testing.T) {
+func TestLogicBody_GroupByProjection_FloatRatio(t *testing.T) {
 	src := `@enabled
 @description("per-group fractional ratio via a float operand (#2542 item 3)")
 logic accuracyRatio {
@@ -380,7 +375,7 @@ logic accuracyRatio {
 
 // Division by zero in a projection value surfaces cleanly through the full
 // logic path (never a panic).
-func TestRunLogic_GroupByProjection_DivisionByZero(t *testing.T) {
+func TestLogicBody_GroupByProjection_DivisionByZero(t *testing.T) {
 	src := `@enabled
 @description("projection division by zero")
 logic ratioZero {
@@ -403,63 +398,5 @@ logic ratioZero {
 	}
 	if !strings.Contains(err.Error(), "division_by_zero") {
 		t.Errorf("error = %q, want the division_by_zero refusal", err.Error())
-	}
-}
-
-// TestRunLogic_CompileRoundTrip_CondAndProjection pins the SERIALIZER half:
-// every #2542 item-2/3 return compiles to re-parseable MemQL, never an
-// `<<unsupported expression ...>>` placeholder (the lambda-serializer gap this
-// wave closes). The arrow-form lambda + parenthesized-arithmetic projection
-// body must round-trip.
-func TestRunLogic_CompileRoundTrip_CondAndProjection(t *testing.T) {
-	cases := []struct {
-		name string
-		body string
-		want []string // substrings the serialized _return must contain
-	}{
-		{
-			name: "cond_over_chain",
-			body: "active := args.members.where(m => m.active)\n    return active.count() > 0 ? active.count() : 0",
-			want: []string{"active.count() > 0 ? active.count() : 0"},
-		},
-		{
-			name: "lambda_chain_return",
-			body: "rows := args.members.where(m => m.active)\n    return rows.where(m => m.vip).count()",
-			want: []string{"rows.where(m => m.vip).count()"},
-		},
-		{
-			name: "projection_arithmetic",
-			body: "rows := args.scans.where(s => s.done)\n    return rows.groupBy(s => s.worker).select(g => {worker: g.key, n: (g.items.count() / g.items.count())})",
-			want: []string{"groupBy(s => s.worker)", "select(g =>", "(g.items.count() / g.items.count())"},
-		},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			src := "@enabled\nlogic probe {\n  args {\n    members []object @required\n    scans []object @required\n  }\n  body {\n    " + tc.body + "\n  }\n}\n"
-			body := parseLogicBody(t, src)
-			r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
-			auto, err := r.compileBodyToAutomation("probe", body)
-			if err != nil {
-				t.Fatalf("compileBodyToAutomation: %v", err)
-			}
-			var retStr string
-			for _, s := range auto.Steps {
-				if s != nil && s.ID == "_return" && s.Query != nil {
-					retStr = s.Query.Query
-				}
-			}
-			if retStr == "" {
-				t.Fatalf("no _return step compiled")
-			}
-			if strings.Contains(retStr, "<<unsupported") {
-				t.Fatalf("_return carries an unsupported-expression placeholder: %q", retStr)
-			}
-			for _, want := range tc.want {
-				if !strings.Contains(retStr, want) {
-					t.Errorf("_return = %q, want it to contain %q", retStr, want)
-				}
-			}
-		})
 	}
 }

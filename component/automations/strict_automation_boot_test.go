@@ -242,6 +242,7 @@ func TestStrictAutomationBoot_TerseHeaderRefusesBoot(t *testing.T) {
 	const domain = "s2830fixtureterseheader"
 	fixture := fstest.MapFS{
 		"automations.memql": {Data: []byte(
+			// memqlmigrate:keep -- the retired terse header is the case.
 			"automation fixtureTerse @trigger(event=\"system.startup\") => logic logicSomething\n")},
 	}
 	memqldsl.RegisterTree(domain, withLanguageLine(fixture))
@@ -327,15 +328,11 @@ func TestStrictAutomationBoot_UnextractableHeaderRefusesLoad(t *testing.T) {
 	cases := map[string]string{
 		"unbalanced braces": "@trigger(event=\"system.startup\")\n" +
 			"automation fixtureUnbalanced {\n" +
-			"  step persist {\n" +
-			"    mutation createSpawnEvent (nodeId: \"a\", nodeType: \"b\", action: \"stopped\", reason: \"r\")\n" +
-			"  }\n",
+			"  persist := mutation createSpawnEvent(nodeId: \"a\", nodeType: \"b\", action: \"stopped\", reason: \"r\")\n",
 		"brace on next line": "@trigger(event=\"system.startup\")\n" +
 			"automation fixtureBraceNextLine\n" +
 			"{\n" +
-			"  step persist {\n" +
-			"    mutation createSpawnEvent (nodeId: \"a\", nodeType: \"b\", action: \"stopped\", reason: \"r\")\n" +
-			"  }\n" +
+			"  persist := mutation createSpawnEvent(nodeId: \"a\", nodeType: \"b\", action: \"stopped\", reason: \"r\")\n" +
 			"}\n",
 	}
 	for name, src := range cases {

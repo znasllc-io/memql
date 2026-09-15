@@ -60,9 +60,6 @@ func stepIDs(a *automations.Automation) []string {
 // TestInstallInstanceGatesTheWholeInstall pins claim 1.
 func TestInstallInstanceGatesTheWholeInstall(t *testing.T) {
 	a := loadInstallAutomation(t, "installInstance")
-	if !a.IsStatementBody() {
-		t.Fatal("installInstance did not load as a statement body")
-	}
 
 	// The render-diff gate, then its verdict, then the install -- which is
 	// the switch on the verdict, flattened: each install step carries the

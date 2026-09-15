@@ -24,7 +24,7 @@ func exprLeaf(t *testing.T, src string) *automations.ExprLeaf {
 // would read as a string greater than every ISO timestamp.
 func TestFunctionDateArgumentsResolveBeforeRendering(t *testing.T) {
 	evaluator := automations.NewEvaluator()
-	evaluator.SetCustom("timestamp", "2026-09-09T06:00:00Z")
+	evaluator.SetCustom("now", "2026-09-09T06:00:00Z")
 	evaluator.SetCustom("args", map[string]any{})
 	for _, tc := range []struct {
 		name, expr string

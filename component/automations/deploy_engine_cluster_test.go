@@ -68,10 +68,6 @@ func TestDeployEngineClusterCompiles(t *testing.T) {
 		t.Fatalf("expected a deploy.requested trigger, got %+v", auto.Trigger)
 	}
 
-	if !auto.IsStatementBody() {
-		t.Fatalf("deployEngineCluster did not load as a statement body")
-	}
-
 	// A statement body compiles to its steps in the order written: a `for` is
 	// one forEach step, and an if or a switch flattens into the steps of its
 	// branches, each carrying its branch's condition. So the pipeline order is

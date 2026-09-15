@@ -1,9 +1,9 @@
 package automations
 
 // expressions_v1_test.go -- a v1 automation end to end through this
-// package's callers (memql#5367): the load (PrepareExpressions and the name
-// rules), and the data model every caller evaluates over -- the executor's
-// step conditions and arguments, the onError hook, resume, the trigger
+// package's callers (memql#5367): the load (PrepareExpressions and the
+// outer-expression name rule), and the data model every caller evaluates over
+// -- the executor's statement conditions and arguments, resume, the trigger
 // filter and the LogicRunner. Each data-model test drives the REAL caller
 // with a probe step registry that evaluates the step's parsed arguments over
 // the Evaluator the caller seeded, so what is asserted is what a step
@@ -35,15 +35,16 @@ import (
 
 // loadV1 turns compiled v1 JSON into a prepared Automation the way the
 // LogicRunner's body compile does (parseJSON runs PrepareExpressions), then
-// applies the load-time name rules the tree loader applies.
+// applies the load-time name rule the tree loader applies to the trigger
+// filter and the preconditions.
 func loadV1(t *testing.T, js string) *Automation {
 	t.Helper()
 	a, err := NewLoader(LoaderOptions{}).parseJSON([]byte(js), "test:v1")
 	if err != nil {
 		t.Fatalf("load v1 automation: %v", err)
 	}
-	if err := validateArgsResolution(a); err != nil {
-		t.Fatalf("v1 name rules: %v", err)
+	if err := validateOuterExpressionNames(a); err != nil {
+		t.Fatalf("v1 name rule: %v", err)
 	}
 	return a
 }
@@ -58,9 +59,8 @@ type v1ProbeCall struct {
 
 // v1ProbeRegistry stands in for the step executors: a function step's
 // arguments and an event step's topic and payload are evaluated exactly as the
-// real executors' v1 halves evaluate them (ResolveV1Map / EvalV1), and a query
-// step's in-process expression is evaluated as the query executor evaluates
-// it. results serves a function step's result by name; fail fails one.
+// real executors evaluate them (ResolveV1Map / EvalV1). results serves a
+// function step's result by name; fail fails one.
 type v1ProbeRegistry struct {
 	mu      sync.Mutex
 	calls   []v1ProbeCall
@@ -92,15 +92,6 @@ func (r *v1ProbeRegistry) Execute(ctx context.Context, step *Step, stepCtx *Step
 			call.values, err = stepCtx.Evaluator.ResolveV1Map(ctx, step.Event.Payload)
 			result = map[string]any{"topic": V1Text(topic), "payload": call.values}
 		}
-	case step.Query != nil:
-		call.name = "expression"
-		var v any
-		v, err = stepCtx.Evaluator.EvalV1(ctx, step.Exprs.Query)
-		if v == memql.Absent {
-			v = nil
-		}
-		call.values = map[string]any{"value": v}
-		result = v
 	default:
 		err = fmt.Errorf("the probe does not run a %s step", step.Type)
 	}
@@ -196,15 +187,12 @@ func wantNowNear(t *testing.T, c v1ProbeCall, key string) {
 }
 
 // probeDataModelArgs are the value leaves the per-caller tests evaluate: one
-// per root of the run's data model.
+// per root of the run's data model, and the name a statement bound.
 const probeDataModelArgs = `{
 	"eventPayload": {"$expr": "event.payload.x"},
 	"eventTopic":   {"$expr": "event.topic"},
-	"stepsResult":  {"$expr": "steps.s.result"},
-	"stepsStatus":  {"$expr": "steps.s.status"},
-	"bareStep":     {"$expr": "s.y"},
+	"bound":        {"$expr": "s.y"},
 	"argsX":        {"$expr": "args.x"},
-	"bareArg":      {"$expr": "x"},
 	"actorUser":    {"$expr": "actor.userId"},
 	"clock":        {"$expr": "now"},
 	"cfg":          {"$expr": "config"},
@@ -212,17 +200,17 @@ const probeDataModelArgs = `{
 }`
 
 // probeDataModelAutomation is a v1 automation declaring `x`, whose first
-// step `s` yields {y: "Y"} and whose second step, gated on s, probes the data
-// model.
+// statement binds `s` to {y: "Y"} and whose second, gated on s, probes the
+// data model.
 func probeDataModelAutomation(name string) string {
 	return `{
 	"name": "` + name + `",
 	"args": {"fields": [{"name": "x", "type": "string", "optional": true}]},
 	"steps": [
-		{"id": "s", "type": "function", "function": {"name": "seed"}},
+		{"id": "s", "type": "function", "binds": "s", "function": {"name": "seed", "kind": "builtin"}},
 		{"id": "probe", "type": "function",
-		 "condition": "steps.s.result.y == \"Y\" && s.y == \"Y\" && steps.s.status == \"success\"",
-		 "function": {"name": "probe", "args": ` + probeDataModelArgs + `}}
+		 "condition": "s.y == \"Y\"",
+		 "function": {"name": "probe", "kind": "builtin", "args": ` + probeDataModelArgs + `}}
 	]
 }`
 }
@@ -371,47 +359,11 @@ func mustJSONString(s string) string {
 	return string(b)
 }
 
-// TestV1NameRules: the load-time name rules read the parsed nodes -- a lambda
-// parameter is bound, not an unknown name; an unknown name in an args-block
-// automation is refused; a step named for a reserved root is refused.
-func TestV1NameRules(t *testing.T) {
-	const argsBlock = `"args": {"fields": [{"name": "x", "type": "string", "optional": true}]}`
-	ok := `{"name":"n",` + argsBlock + `,"steps":[
-		{"id":"rows","type":"function","function":{"name":"f"}},
-		{"id":"g","type":"function","condition":"rows.where(r => r.active).count() > 0 && x != nil","function":{"name":"g","args":{"v":{"$expr":"rows.first().id"}}}}]}`
-	loadV1(t, ok)
-
-	for name, c := range map[string]struct{ js, want string }{
-		"unknown name": {
-			`{"name":"n",` + argsBlock + `,"steps":[{"id":"g","type":"function","condition":"typo == 1","function":{"name":"g"}}]}`,
-			`unknown name "typo"`,
-		},
-		"unknown name in a value": {
-			`{"name":"n",` + argsBlock + `,"steps":[{"id":"g","type":"function","function":{"name":"g","args":{"v":{"$expr":"typo"}}}}]}`,
-			`unknown name "typo"`,
-		},
-		"step named for a root": {
-			`{"name":"n","steps":[{"id":"now","type":"function","function":{"name":"g"}}]}`,
-			`reserved root`,
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			a, err := NewLoader(LoaderOptions{}).parseJSON([]byte(c.js), "test:v1")
-			if err == nil {
-				err = validateArgsResolution(a)
-			}
-			if err == nil || !strings.Contains(err.Error(), c.want) {
-				t.Fatalf("want a refusal containing %q, got %v", c.want, err)
-			}
-		})
-	}
-}
-
 // ---------------------------------------------------------------------------
 // the data model, caller by caller
 // ---------------------------------------------------------------------------
 
-// TestV1DataModel_Executor: the executor's step condition and step arguments.
+// TestV1DataModel_Executor: the executor's statement condition and arguments.
 func TestV1DataModel_Executor(t *testing.T) {
 	probe := probeRegistry()
 	a := loadV1(t, probeDataModelAutomation("dataModelExecutor"))
@@ -424,15 +376,12 @@ func TestV1DataModel_Executor(t *testing.T) {
 	if exec.Status == "failed" {
 		t.Fatalf("run failed: %s", exec.Error)
 	}
-	c := probe.call(t, "probe") // ran: the condition over steps.s held
+	c := probe.call(t, "probe") // ran: the condition over s held
 	wantValues(t, c, map[string]any{
 		"eventPayload": "hello",
 		"eventTopic":   "probe.fired",
-		"stepsResult":  map[string]any{"y": "Y"},
-		"stepsStatus":  "success",
-		"bareStep":     "Y",
+		"bound":        "Y",
 		"argsX":        "hello",
-		"bareArg":      "hello",
 		"actorUser":    "user-7",
 		"cfg":          wantPresent,
 		"literal":      "event.payload.x",
@@ -440,49 +389,8 @@ func TestV1DataModel_Executor(t *testing.T) {
 	wantNowNear(t, c, "clock")
 }
 
-// TestV1DataModel_OnError: the onError hook reads the error, the event, the
-// automation's args and the steps the failed run recorded.
-func TestV1DataModel_OnError(t *testing.T) {
-	probe := probeRegistry()
-	probe.fail = map[string]string{"boom": "kaboom"}
-	a := loadV1(t, `{
-		"name": "dataModelOnError",
-		"args": {"fields": [{"name": "x", "type": "string", "optional": true}]},
-		"steps": [
-			{"id": "s", "type": "function", "function": {"name": "seed"}},
-			{"id": "b", "type": "function", "function": {"name": "boom"}}
-		],
-		"onError": {"id": "handler", "type": "function", "function": {"name": "handler", "args": {
-			"err": {"$expr": "error"},
-			"eventPayload": {"$expr": "event.payload.x"},
-			"argsX": {"$expr": "args.x"},
-			"prior": {"$expr": "s.y"},
-			"failed": {"$expr": "steps.b.error"},
-			"errors": {"$expr": "automation.errors"},
-			"actorUser": {"$expr": "actor.userId"},
-			"clock": {"$expr": "now"}
-		}}}
-	}`)
-	ctx := auth.ContextWithUserActor(context.Background(), "user-7")
-	ev := events.NewEvent("probe.fired", events.KindMessage, map[string]any{"x": "hello"})
-	_, _ = NewExecutor(ExecutorOptions{StepRegistry: probe}).ExecuteWithEvent(ctx, a, "test", &ev)
-	c := probe.call(t, "handler")
-	wantValues(t, c, map[string]any{
-		"eventPayload": "hello",
-		"argsX":        "hello",
-		"prior":        "Y",
-		"failed":       "kaboom",
-		"errors":       []any{"b: kaboom"},
-		"actorUser":    "user-7",
-	})
-	if s, _ := c.values["err"].(string); !strings.Contains(s, "kaboom") {
-		t.Errorf("error = %#v, want the run's error", c.values["err"])
-	}
-	wantNowNear(t, c, "clock")
-}
-
 // TestV1DataModel_Resume: a resumed run reads the journal's event, the args
-// bound from it, and the steps it completed before the failure.
+// bound from it, and the names its statements bound before the failure.
 func TestV1DataModel_Resume(t *testing.T) {
 	probe := probeRegistry()
 	a := loadV1(t, probeDataModelAutomation("dataModelResume"))
@@ -490,13 +398,14 @@ func TestV1DataModel_Resume(t *testing.T) {
 		RunId:          "run-resume-1",
 		AutomationName: a.Name,
 		FailedStep:     "probe",
+		StepStates:     states("s", StepState{Status: "done"}, "probe", StepState{Status: "failed", Attempt: 1}),
 		Steps: map[string]*MinimalStepResult{
-			"s": {StepId: "s", Status: "success", Result: map[string]any{"y": "Y"}},
+			"s": {StepId: "s", Status: "success", Result: map[string]any{"y": "Y"}, Value: map[string]any{"y": "Y"}},
 		},
 		TriggerEvent: map[string]any{"topic": "probe.fired", "kind": "message", "payload": map[string]any{"x": "hello"}},
 	}
 	ctx := auth.ContextWithUserActor(context.Background(), "user-7")
-	exec, err := NewExecutor(ExecutorOptions{StepRegistry: probe}).ResumeFrom(ctx, journal, a, &ResumeOptions{AllowSideEffects: true})
+	exec, err := NewExecutor(ExecutorOptions{StepRegistry: probe}).ResumeFrom(ctx, journal, a, &ResumeOptions{})
 	if err != nil {
 		t.Fatalf("resume: %v", err)
 	}
@@ -507,135 +416,81 @@ func TestV1DataModel_Resume(t *testing.T) {
 	wantValues(t, c, map[string]any{
 		"eventPayload": "hello",
 		"eventTopic":   "probe.fired",
-		"stepsResult":  map[string]any{"y": "Y"},
-		"bareStep":     "Y",
+		"bound":        "Y",
 		"argsX":        "hello",
-		"bareArg":      "hello",
 		"actorUser":    "user-7",
 		"cfg":          wantPresent,
 		"literal":      "event.payload.x",
 	})
 	wantNowNear(t, c, "clock")
 	if probe.ran("seed") {
-		t.Error("resume re-ran the completed step `s`")
+		t.Error("resume re-ran the completed statement `s`")
 	}
 }
 
-// parseV1Logic parses a logic source and returns the body RunLogic receives.
-func parseV1Logic(t *testing.T, src string) *languageParser.AutomationDef {
-	t.Helper()
-	normalised, err := languageParser.NormaliseAll(src)
-	if err != nil {
-		t.Fatalf("NormaliseAll: %v", err)
-	}
-	f, err := languageParser.ParseFile(normalised)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
-	}
-	for _, d := range f.Definitions {
-		if fn, ok := d.(*languageParser.FunctionDef); ok {
-			if body, ok := fn.Body.(*languageParser.AutomationDef); ok {
-				return body
-			}
-		}
-	}
-	t.Fatal("no logic body in the source")
-	return nil
-}
-
-// TestV1DataModel_LogicRunner: a v1 logic body -- compiled, loaded and run by
-// the LogicRunner -- reads its args (and the event under them and bare), the
-// actor, the clock and earlier steps; an in-process expression step and the
-// return evaluate without an engine round trip.
+// TestV1DataModel_LogicRunner: a logic's statements -- compiled and run by
+// the LogicRunner -- read their args (the event under them), the actor, the
+// clock and the names earlier statements bound; an expression statement and
+// the return evaluate without an engine round trip.
 func TestV1DataModel_LogicRunner(t *testing.T) {
-	body := parseV1Logic(t, `logic probeLogic {
+	name, body := compiledLogic(t, `logic probeLogic {
   args {
     event object!
     x string
   }
-  body {
-    s := seed()
-    total := 1 + 2
-    r := probe(eventPayload: event.payload.x, argsEvent: args.event.payload.x, argsX: args.x, actorUser: actor.userId, clock: now, bareStep: s.y, total: total, cfg: config)
-    return s.y + "!"
-  }
+  s := builtin seed()
+  total := 1 + 2
+  builtin probe(argsEvent: args.event.payload.x, argsX: args.x, actorUser: actor.userId, clock: now, bound: s.y, total: total, cfg: config)
+  return s.y + "!"
 }`)
 	probe := probeRegistry()
 	runner := NewLogicRunner(&memql.MemQLEngine{}, probe, nil)
 	ctx := auth.ContextWithUserActor(context.Background(), "user-7")
-	out, err := runner.RunLogic(ctx, "probeLogic", body, map[string]any{
+	out, err := runner.RunLogicBody(ctx, name, body, map[string]any{
 		"event": map[string]any{"topic": "t", "payload": map[string]any{"x": "hello"}},
 		"x":     "ex",
 	})
 	if err != nil {
-		t.Fatalf("RunLogic: %v", err)
+		t.Fatalf("RunLogicBody: %v", err)
 	}
 	if out != "Y!" {
 		t.Fatalf("return = %#v, want \"Y!\" (an expression return evaluated in process)", out)
 	}
 	c := probe.call(t, "probe")
 	wantValues(t, c, map[string]any{
-		"eventPayload": "hello",
-		"argsEvent":    "hello",
-		"argsX":        "ex",
-		"actorUser":    "user-7",
-		"bareStep":     "Y",
-		"total":        int64(3),
-		"cfg":          wantPresent,
+		"argsEvent": "hello",
+		"argsX":     "ex",
+		"actorUser": "user-7",
+		"bound":     "Y",
+		"total":     int64(3),
+		"cfg":       wantPresent,
 	})
 	wantNowNear(t, c, "clock")
 }
 
-// TestV1LogicReturnOfAStepIsItsRecordedResult: `return <step>` hands back the
-// step's recorded result, as the legacy bare-step return did, so a logic's
-// output keeps its shape across the two grammars.
-func TestV1LogicReturnOfAStepIsItsRecordedResult(t *testing.T) {
-	body := parseV1Logic(t, `logic returnsStep {
-  args {
-    event object!
-  }
-  body {
-    rows := seed()
-    return rows
-  }
-}`)
-	envelope := map[string]any{"Bundle": map[string]any{"nodes": []any{map[string]any{"id": "a"}}}}
-	probe := &v1ProbeRegistry{results: map[string]any{"seed": envelope}}
-	out, err := NewLogicRunner(&memql.MemQLEngine{}, probe, nil).RunLogic(context.Background(), "returnsStep", body, map[string]any{"event": map[string]any{}})
-	if err != nil {
-		t.Fatalf("RunLogic: %v", err)
-	}
-	if !reflect.DeepEqual(out, envelope) {
-		t.Fatalf("return = %#v, want the step's recorded result %#v", out, envelope)
-	}
-}
-
-// TestV1LogicCodemodShapes: the shapes the expressions codemod writes into a
-// logic body run as the legacy spellings they replace meant them -- `(p ? a
-// : b)` for cond(p, a, b), `a + b` for concat(a, b), `x != nil` for
-// exists(x), `??` and `nil` -- as statements, as a construct call's named
+// TestV1LogicStatementShapes: the shapes a logic's statements use for choice,
+// concatenation and presence -- `(p ? a : b)`, `a + b`, `x != nil`, `??` and
+// `nil` -- run as expression statements, as a construct call's named
 // arguments, inside a map literal with explicit keys, and as the condition of
-// a bare call.
-func TestV1LogicCodemodShapes(t *testing.T) {
-	body := parseV1Logic(t, `logic shapes {
+// an `if`.
+func TestV1LogicStatementShapes(t *testing.T) {
+	name, body := compiledLogic(t, `logic shapes {
   args {
     p bool
     a string
     b string
     maybe string
   }
-  body {
-    pick := (args.p ? args.a : args.b)
-    nested := args.p ? (args.a == "x" ? "ax" : "a") : "b"
-    joined := "P-" + (args.maybe ?? "30") + "D"
-    known := args.maybe != nil
-    unset := args.maybe ?? nil
-    r := probe(pick: pick, nested: nested, joined: joined, known: known, unset: unset, payload: { userId: args.a, flags: { known: known, none: nil } })
-    if args.p && known {
-      note(pick: pick)
-    }
-    return { pick: pick, joined: joined, known: known }
+  pick := (args.p ? args.a : args.b)
+  nested := args.p ? (args.a == "x" ? "ax" : "a") : "b"
+  joined := "P-" + (args.maybe ?? "30") + "D"
+  known := args.maybe != nil
+  unset := args.maybe ?? nil
+  builtin probe(pick: pick, nested: nested, joined: joined, known: known, unset: unset, payload: { userId: args.a, flags: { known: known, none: nil } })
+  if args.p && known {
+    builtin note(pick: pick)
   }
+  return { pick: pick, joined: joined, known: known }
 }`)
 	for _, tc := range []struct {
 		args map[string]any
@@ -656,17 +511,17 @@ func TestV1LogicCodemodShapes(t *testing.T) {
 		},
 	} {
 		probe := &v1ProbeRegistry{}
-		out, err := NewLogicRunner(&memql.MemQLEngine{}, probe, nil).RunLogic(context.Background(), "shapes", body, tc.args)
+		out, err := NewLogicRunner(&memql.MemQLEngine{}, probe, nil).RunLogicBody(context.Background(), name, body, tc.args)
 		if err != nil {
-			t.Fatalf("RunLogic(%v): %v", tc.args, err)
+			t.Fatalf("RunLogicBody(%v): %v", tc.args, err)
 		}
 		wantValues(t, probe.call(t, "probe"), tc.want)
-		// A bare call is a statement of its own, run under the if's condition.
+		// A call is a statement of its own, run under the if's condition.
 		if ran := probe.ran("note"); ran != (tc.args["p"] == true && tc.args["maybe"] != nil) {
-			t.Fatalf("RunLogic(%v): the bare call under the if ran=%v", tc.args, ran)
+			t.Fatalf("RunLogicBody(%v): the call under the if ran=%v", tc.args, ran)
 		}
 		if !reflect.DeepEqual(out, tc.ret) {
-			t.Fatalf("RunLogic(%v) = %#v, want %#v", tc.args, out, tc.ret)
+			t.Fatalf("RunLogicBody(%v) = %#v, want %#v", tc.args, out, tc.ret)
 		}
 	}
 }
@@ -755,6 +610,7 @@ func TestTriggerFilterStartsWithLoadsAndFires(t *testing.T) {
 // TestTriggerFilterScope: beside its row, a v1 filter reads the rest of the
 // filter's state -- the args binding validated before it, the event envelope
 // and the actor, which for a bus trigger is the denying no-caller envelope.
+// An args field is read args.<field>: a bare name is refused at load.
 func TestTriggerFilterScope(t *testing.T) {
 	const concept = "v1:probe:thing"
 	a := loadV1(t, `{
@@ -762,7 +618,7 @@ func TestTriggerFilterScope(t *testing.T) {
 		"args": {"fields": [{"name": "status", "type": "string", "optional": true}]},
 		"trigger": {
 			"event": "graph.node.created.`+concept+`",
-			"filter": "row => row.status == args.status && status == \"archived\" && event.topic startsWith \"graph.node.created.\" && actor.userId == \"\" && !actor.isClusterOwner"
+			"filter": "row => row.status == args.status && args.status == \"archived\" && event.topic startsWith \"graph.node.created.\" && actor.userId == \"\" && !actor.isClusterOwner"
 		},
 		"steps": [{"id": "fire", "type": "function", "function": {"name": "fire"}}]
 	}`)
@@ -803,7 +659,7 @@ func TestTriggerRow(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// the legacy spellings
+// the retired spellings
 // ---------------------------------------------------------------------------
 
 // TestEveryAutomationIsPreparedAsV1: every automation is edition 2026 -- its
@@ -826,42 +682,35 @@ func TestEveryAutomationIsPreparedAsV1(t *testing.T) {
 	}
 
 	for name, cond := range map[string]string{
-		"bare word":        `event.payload.status == active`,
-		"dollar reference": `$event.payload.status == "active"`,
+		"bare word":        `args.status == active`,
+		"dollar reference": `$args.status == "active"`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			js := `{"name": "legacyGate", "args": {"fields": [{"name": "x", "type": "string", "optional": true}]},
-				"steps": [{"id": "gate", "type": "function", "condition": ` + strconvQuote(cond) + `, "function": {"name": "f"}}]}`
-			a, err := NewLoader(LoaderOptions{}).parseJSON([]byte(js), "test:legacy")
-			if err == nil {
-				err = validateArgsResolution(a)
-			}
-			if err == nil {
-				t.Fatalf("the legacy spelling %s loaded; it must be refused at load, not decided at run time", cond)
+			src := `@trigger(event="probe.fired")
+automation retiredGate {
+  args {
+    status string
+  }
+  if ` + cond + ` {
+    builtin f()
+  }
+}`
+			if _, err := NewLoader(LoaderOptions{}).CompileSource(src, "test:retired"); err == nil {
+				t.Fatalf("the retired spelling %s loaded; it must be refused at load, not decided at run time", cond)
 			}
 		})
 	}
 }
 
-// strconvQuote is a JSON string literal for s.
-func strconvQuote(s string) string {
-	b, _ := json.Marshal(s)
-	return string(b)
-}
-
 // TestV1StringFieldsAreValueLeaves: a string-typed field that holds a value
-// (an event topic, a webhook url and headers, a mutation id) carries a value
-// leaf -- a JSON literal or `{"$expr": ...}` -- which the Go config decodes
-// and re-encodes unchanged, and which PrepareExpressions turns into a node:
-// a literal node for a literal, the parsed expression for an expression. A
-// legacy automation carrying one is refused.
+// (an event topic) carries a value leaf -- a JSON literal or `{"$expr": ...}`
+// -- which the Go config decodes and re-encodes unchanged, and which
+// PrepareExpressions turns into a node: a literal node for a literal, the
+// parsed expression for an expression.
 func TestV1StringFieldsAreValueLeaves(t *testing.T) {
 	const js = `{"name":"leaves","steps":[
 		{"id":"pub","type":"event","event":{"topic":{"$expr":"\"app.\" + args.kind"},"payload":{"a":1}}},
-		{"id":"lit","type":"event","event":{"topic":"app.static"}},
-		{"id":"hook","type":"webhook","webhook":{"url":"https://example.invalid/x",
-			"headers":{"X-Static":"s","X-Dyn":{"$expr":"args.token"}}}},
-		{"id":"put","type":"mutation","mutation":{"concept":"v1:probe:thing","id":42,"parent":{"$expr":"args.parent"},"payload":{"n":{"$expr":"args.n"}}}}
+		{"id":"lit","type":"event","event":{"topic":"app.static"}}
 	]}`
 	a := loadV1(t, js)
 	byID := map[string]*Step{}
@@ -875,17 +724,6 @@ func TestV1StringFieldsAreValueLeaves(t *testing.T) {
 	}
 	if byID["lit"].Event.Topic != "app.static" {
 		t.Errorf("a literal topic decodes into the Go field: got %q", byID["lit"].Event.Topic)
-	}
-	hook := byID["hook"].Exprs
-	if ast.FormatExpr(hook.URL) != `"https://example.invalid/x"` || ast.FormatExpr(hook.Headers["X-Static"]) != `"s"` || ast.FormatExpr(hook.Headers["X-Dyn"]) != "args.token" {
-		t.Errorf("webhook nodes: url %s, headers %v", ast.FormatExpr(hook.URL), hook.Headers)
-	}
-	put := byID["put"].Exprs
-	if ast.FormatExpr(put.ID) != "42.0" && ast.FormatExpr(put.ID) != "42" {
-		t.Errorf("mutation id node = %s, want the number literal", ast.FormatExpr(put.ID))
-	}
-	if ast.FormatExpr(put.Parent) != "args.parent" {
-		t.Errorf("mutation parent node = %s", ast.FormatExpr(put.Parent))
 	}
 
 	// The configs re-encode to the compiled JSON.
@@ -903,7 +741,7 @@ func TestV1StringFieldsAreValueLeaves(t *testing.T) {
 	}
 	for i, s := range original["steps"].([]any) {
 		orig := s.(map[string]any)
-		for _, cfg := range []string{"event", "webhook", "mutation"} {
+		for _, cfg := range []string{"event"} {
 			if want, ok := orig[cfg]; ok {
 				if !reflect.DeepEqual(steps[i][cfg], want) {
 					t.Errorf("step %v %s re-encodes as %#v, want %#v", orig["id"], cfg, steps[i][cfg], want)
@@ -912,16 +750,12 @@ func TestV1StringFieldsAreValueLeaves(t *testing.T) {
 		}
 	}
 
-	// Evaluated, the topic and the header are values.
+	// Evaluated, the topic is a value.
 	e := NewEvaluator()
-	e.SetCustom("args", map[string]any{"kind": "done", "token": "tok"})
+	e.SetCustom("args", map[string]any{"kind": "done"})
 	if v, err := e.EvalV1(context.Background(), byID["pub"].Exprs.Topic); err != nil || v != "app.done" {
 		t.Errorf("topic = %#v, %v", v, err)
 	}
-	if v, err := e.EvalV1(context.Background(), hook.Headers["X-Dyn"]); err != nil || v != "tok" {
-		t.Errorf("header = %#v, %v", v, err)
-	}
-
 }
 
 // TestTriggerFilterMustBeALambda: a trigger filter is a one-parameter lambda

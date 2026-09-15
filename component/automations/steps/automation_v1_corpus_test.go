@@ -74,11 +74,11 @@ const automationGoldenDir = "testdata/automation_corpus"
 // automationProbe is the automation corpus's step registry: the logic
 // corpus's probeRegistry, plus what only an automation's steps reach -- an
 // action and a sub-automation call, answered by the probe, which records them
-// -- and a logic call, which runs for real. Containers are built here, their
-// children dispatched back to this registry.
+// -- and a logic call, which runs for real. A parallel is built here, its
+// branches dispatched back to this registry; a `for` and a block run their
+// lists on the executor's sequence runner, whose registry this is.
 type automationProbe struct {
 	*probeRegistry
-	fakes *probeFakes
 }
 
 func (r *automationProbe) Execute(ctx context.Context, step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
@@ -86,12 +86,8 @@ func (r *automationProbe) Execute(ctx context.Context, step *automations.Step, s
 		return nil, fmt.Errorf("probe: step %q runs outside a run", step.ID)
 	}
 	switch step.Type {
-	case automations.StepTypeForEach:
-		return (&ForEachExecutor{Registry: r.real, Dispatch: r.Execute}).Execute(ctx, step, stepCtx)
 	case automations.StepTypeParallel:
 		return (&ParallelExecutor{Registry: r.real, Dispatch: r.Execute}).Execute(ctx, step, stepCtx)
-	case automations.StepTypeSwitch:
-		return (&SwitchExecutor{Registry: r.real, Dispatch: r.Execute}).Execute(ctx, step, stepCtx)
 	case automations.StepTypeAction:
 		if step.Action == nil {
 			break
@@ -159,8 +155,8 @@ func probeActionAnswer(ref string) map[string]any {
 }
 
 // runLogic runs a logic call for real: the call its step would send, through
-// the engine, whose LogicRunner answers the logic's own steps from the probe
-// (and whose one-`return` logic reach the probe through probeFakes).
+// the engine, whose LogicRunner answers the logic's own statements from the
+// probe.
 func (r *automationProbe) runLogic(ctx context.Context, step *automations.Step, stepCtx *automations.StepContext) (*automations.StepResult, error) {
 	args, err := stepCtx.Evaluator.ResolveV1Map(ctx, step.Function.Args)
 	if err != nil {
@@ -170,47 +166,7 @@ func (r *automationProbe) runLogic(ctx context.Context, step *automations.Step, 
 	if err != nil {
 		return nil, err
 	}
-	return &automations.StepResult{StepId: step.ID, Status: "success", Result: r.constructEnvelope(step.Function.Name, res)}, nil
-}
-
-// constructEnvelope is a one-`return` logic's result in the envelope
-// production hands its caller when the logic returns a query or a mutation: a
-// bundle of rows, which an automation reads with `decide.nodes()`. probeFakes
-// stands a builtin in for the construct, and a builtin's result comes back as
-// flat nodes; any other logic's result is its own.
-func (r *automationProbe) constructEnvelope(logic string, res *memql.ExecuteResult) *memql.ExecuteResult {
-	fn, ok := r.engine.Functions().Lookup(logic)
-	if !ok || res == nil || fn.LogicSteps != nil || fn.LogicBody != nil {
-		return res
-	}
-	call, ok := fn.Expr.(*memql.FunctionCallExpression)
-	if !ok {
-		return res
-	}
-	kind := r.kinds[call.Name]
-	if kind != "query" && kind != "mutation" {
-		return res
-	}
-	flat, has := res.FlatOutput()
-	nodes, isNodes := flat.(map[string]memorynodes.MemoryNode)
-	if !has || !isNodes {
-		return res
-	}
-	ids := make([]string, 0, len(nodes))
-	for id := range nodes {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	rows := make([]any, 0, len(ids))
-	for _, id := range ids {
-		var payload map[string]any
-		_ = json.Unmarshal(nodes[id].Payload, &payload)
-		rows = append(rows, map[string]any{"id": id, "concept": nodes[id].Concept, "payload": payload})
-	}
-	if kind == "mutation" && len(rows) == 1 {
-		return stepResultFor(kind, rows[0]).(*memql.ExecuteResult)
-	}
-	return stepResultFor("query", rows).(*memql.ExecuteResult)
+	return &automations.StepResult{StepId: step.ID, Status: "success", Result: res}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +242,6 @@ func newAutomationArm(t *testing.T, name string, pick func(*corpusSource) string
 		byName[a.Name] = a
 	}
 
-	built := map[string]*memql.Function{}
 	for _, f := range sources {
 		for _, slice := range memql.ExtractFunctionSlices(pick(f)) {
 			if slice.Kind != languageParser.FunctionTypeLogic {
@@ -295,12 +250,10 @@ func newAutomationArm(t *testing.T, name string, pick func(*corpusSource) string
 			fn, err := memql.BuildFunctionConstruct(pick(f), slice.Name, "unified:"+f.Path, memorynodes.DefaultRegistry())
 			require.NoErrorf(t, err, "%s arm: %s does not build", name, slice.Name)
 			require.NoError(t, eng.Functions().Upsert(fn))
-			built[f.Path+" "+slice.Name] = fn
 		}
 	}
 
-	reg := &automationProbe{probeRegistry: &probeRegistry{real: NewRegistry(), engine: eng, kinds: kinds}, fakes: &probeFakes{kinds: kinds}}
-	reg.fakes.install(t, eng, built)
+	reg := &automationProbe{probeRegistry: &probeRegistry{real: NewRegistry(), engine: eng, kinds: kinds}}
 	eng.SetLogicRunner(automations.NewLogicRunner(eng, reg, logger))
 	exec := automations.NewExecutor(automations.ExecutorOptions{
 		Logger: logger, Engine: eng, EventBus: bus, StepRegistry: reg, SandboxRun: true,
@@ -315,8 +268,8 @@ func (arm automationArm) run(fx automationFixture, now time.Time) logicRecord {
 		return logicRecord{Refused: true, Result: "the arm has no automation " + fx.Name}
 	}
 	probe := &logicProbe{rows: fx.Rows, now: now}
-	arm.reg.probe, arm.reg.fakes.probe = probe, probe
-	defer func() { arm.reg.probe, arm.reg.fakes.probe = nil, nil }()
+	arm.reg.probe = probe
+	defer func() { arm.reg.probe = nil }()
 	var event *events.Event
 	if fx.Event != nil {
 		e := *fx.Event

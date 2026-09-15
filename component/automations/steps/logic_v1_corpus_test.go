@@ -37,7 +37,7 @@ package steps
 // runner: a construct call's answer is given in the statement's own
 // terms -- a query answers its rows (a []any of row maps), a builtin its
 // result, a logic its return value, a mutation the row it wrote -- which each
-// arm adapts to its runner (probeRegistry and probeFakes do it for today's).
+// arm adapts to its runner (probeRegistry does it for today's).
 // Calls are compared in order, the order the legacy topological sort ran
 // them. Journal writes are not calls: only construct calls and published
 // events are recorded.
@@ -82,7 +82,6 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
-	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/language/bodymigrate"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
@@ -446,29 +445,22 @@ func engineArm(t *testing.T, name string, v1, statements bool, pick func(*corpus
 	moved := func(path, logic string) bool { return !declared[path+" "+logic] }
 
 	// Every logic construct of the tree builds, up front: a construct that
-	// does not is the arm's failure, not one fixture's, and the builds name
-	// the constructs a one-`return` body reaches through fn.Expr (probeFakes).
-	built := map[string]*memql.Function{}
+	// does not is the arm's failure, not one fixture's.
 	var failures []string
 	for _, f := range sources {
 		for _, slice := range memql.ExtractFunctionSlices(f.Current) {
 			if slice.Kind != languageParser.FunctionTypeLogic || moved(f.Path, slice.Name) {
 				continue
 			}
-			fn, err := build(pick(f), f.Path, slice.Name)
-			if err != nil {
+			if _, err := build(pick(f), f.Path, slice.Name); err != nil {
 				failures = append(failures, f.Path+" "+slice.Name+": "+err.Error())
-				continue
 			}
-			built[f.Path+" "+slice.Name] = fn
 		}
 	}
 	require.Emptyf(t, failures, "%s arm: %d logic constructs do not build:\n%s", name, len(failures), strings.Join(failures, "\n"))
 
 	reg := &probeRegistry{real: NewRegistry(), engine: eng, kinds: kinds}
 	eng.SetLogicRunner(automations.NewLogicRunner(eng, reg, slog.New(slog.NewTextHandler(io.Discard, nil))))
-	fakes := &probeFakes{kinds: kinds}
-	fakes.install(t, eng, built)
 
 	return logicArm{
 		name:   name,
@@ -482,100 +474,20 @@ func engineArm(t *testing.T, name string, v1, statements bool, pick func(*corpus
 			if err := eng.Functions().Upsert(fn); err != nil {
 				return nil, err
 			}
-			reg.probe, fakes.probe = probe, probe
-			defer func() { reg.probe, fakes.probe = nil, nil }()
+			reg.probe = probe
+			defer func() { reg.probe = nil }()
 			return eng.Execute(ctx, logic+"("+renderV1NamedArgs(args)+")")
 		},
 		moved: moved,
 	}
 }
 
-// probeFakes stands a probe in for every construct a one-`return` logic
-// calls, which the engine reaches through fn.Expr rather than a step: each
-// becomes a builtin, with the construct's own argument schema, whose executor
-// asks the probe. So the call's arguments are validated as the real
-// construct's would be, and what the probe records is what argument expansion
-// handed it.
-type probeFakes struct {
-	kinds map[string]string
-	probe *logicProbe
-}
-
-type probeIntegration struct{ caps []memql.IntegrationCapability }
-
-func (p *probeIntegration) IntegrationName() string                     { return "logicprobe" }
-func (p *probeIntegration) Capabilities() []memql.IntegrationCapability { return p.caps }
-
-func (f *probeFakes) install(t *testing.T, eng *memql.MemQLEngine, built map[string]*memql.Function) {
-	t.Helper()
-	targets := map[string]bool{}
-	for _, fn := range built {
-		if call, ok := fn.Expr.(*memql.FunctionCallExpression); ok && fn.LogicSteps == nil {
-			if _, known := f.kinds[call.Name]; known && f.kinds[call.Name] != "logic" {
-				targets[call.Name] = true
-			}
-		}
-	}
-	names := make([]string, 0, len(targets))
-	for n := range targets {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	integration := &probeIntegration{}
-	for _, n := range names {
-		real, ok := eng.Functions().Lookup(n)
-		require.Truef(t, ok, "%s is called and not registered", n)
-		kind := f.kinds[n]
-		construct := n
-		integration.caps = append(integration.caps, memql.IntegrationCapability{
-			Name: construct,
-			Handler: func(_ context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-				if f.probe == nil {
-					return nil, fmt.Errorf("probe: %s called outside a run", construct)
-				}
-				return answerNodes(f.probe.answer(kind, construct, canonicalArgs(args)))
-			},
-		})
-		require.NoError(t, eng.Functions().Upsert(&memql.Function{
-			Name:         construct,
-			Origin:       real.Origin,
-			FunctionKind: memql.FunctionTypeBuiltin,
-			Executor:     "integration.logicprobe." + construct,
-			Enabled:      true,
-			ArgsSchema:   real.ArgsSchema,
-		}))
-	}
-	require.NoError(t, eng.RegisterIntegration(integration))
-}
-
-// answerNodes is a probe answer as a builtin executor's nodes: rows are rows,
-// and any other answer is one node carrying it (canonicalResult reads it back).
-func answerNodes(answer any) ([]memorynodes.MemoryNode, error) {
-	if rows, ok := answer.([]any); ok {
-		out := make([]memorynodes.MemoryNode, 0, len(rows))
-		for _, r := range rows {
-			m := r.(map[string]any)
-			payload, err := json.Marshal(m["payload"])
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, memorynodes.MemoryNode{ID: m["id"].(string), Concept: probeRowConcept, Type: "node", Payload: payload})
-		}
-		return out, nil
-	}
-	payload, err := json.Marshal(answer)
-	if err != nil {
-		return nil, err
-	}
-	return []memorynodes.MemoryNode{{ID: probeAnswerConcept + ":1", Concept: probeAnswerConcept, Type: "node", Payload: payload}}, nil
-}
-
 // probeRegistry is the LogicRunner's step registry for today's arms: every
 // step runs on its real executor except a construct call, which the probe
 // answers with the arguments the real executor would have sent -- rendered
 // as it renders them and read back as the engine reads them -- and a
-// published event, which runs for real and is recorded. Containers are built
-// here with Dispatch pointed back at Execute, so a nested step re-enters it
+// published event, which runs for real and is recorded. A parallel is built
+// here with Dispatch pointed back at Execute, so a branch re-enters it
 // (child_dispatch.go).
 type probeRegistry struct {
 	real   *Registry
@@ -589,12 +501,8 @@ func (r *probeRegistry) Execute(ctx context.Context, step *automations.Step, ste
 		return nil, fmt.Errorf("probe: step %q runs outside a run", step.ID)
 	}
 	switch step.Type {
-	case automations.StepTypeForEach:
-		return (&ForEachExecutor{Registry: r.real, Dispatch: r.Execute}).Execute(ctx, step, stepCtx)
 	case automations.StepTypeParallel:
 		return (&ParallelExecutor{Registry: r.real, Dispatch: r.Execute}).Execute(ctx, step, stepCtx)
-	case automations.StepTypeSwitch:
-		return (&SwitchExecutor{Registry: r.real, Dispatch: r.Execute}).Execute(ctx, step, stepCtx)
 	case automations.StepTypeEvent:
 		res, err := r.real.Execute(ctx, step, stepCtx)
 		if err == nil && res != nil {
@@ -614,24 +522,11 @@ func (r *probeRegistry) Execute(ctx context.Context, step *automations.Step, ste
 			return nil, err
 		}
 		return r.call(step, step.Function.Name+"("+renderV1CallArgs(args)+")")
-	case automations.StepTypeQuery:
-		x := step.Exprs
-		if step.Query == nil || x == nil || x.Query == nil {
-			return r.real.Execute(ctx, step, stepCtx) // the real executor refuses it
-		}
-		call, ok := ast.Unparen(x.Query).(*ast.CallExpr)
-		if !ok || call.Kind == "" {
-			return r.real.Execute(ctx, step, stepCtx) // evaluated in process
-		}
-		text, err := v1ConstructCallText(ctx, stepCtx.Evaluator, call)
-		if err != nil {
-			return nil, err
-		}
-		return r.call(step, text)
-	case automations.StepTypeMutation, automations.StepTypeWebhook, automations.StepTypeAction,
-		automations.StepTypeAutomation, automations.StepTypeEmitConceptCard:
+	case automations.StepTypeAction, automations.StepTypeAutomation:
 		return nil, fmt.Errorf("probe: step %q is a %s step, which this corpus has no answer for -- teach probeRegistry to record it", step.ID, step.Type)
 	}
+	// A `for` and a block run their lists on the executor's sequence runner,
+	// whose registry is this one, so every statement in them re-enters it.
 	return r.real.Execute(ctx, step, stepCtx)
 }
 

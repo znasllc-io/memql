@@ -133,19 +133,23 @@ automation gather {
 	}
 }
 
-// A gated branch inside an authored parallel is skip-gated by the executor:
-// the branch whose condition is false records status "skipped" and its
-// sub-automation never runs, while the sibling still executes.
+// A gated statement inside a branch of an authored parallel is gated there
+// alone: its sub-automation never runs, while the sibling branch still does.
 func TestParallelExecutor_AuthoredDSL_BranchConditionSkips(t *testing.T) {
 	const src = `@description("Gated branch probe.")
 @trigger(event="system.startup")
 automation gather {
-  step layer0 {
-    parallel {
-      branches: [
-        step a { if steps.prep.status == "success" { automation fetchA { } } },
-        step b { automation fetchB { } }
-      ]
+  args {
+    go any
+  }
+  parallel {
+    branch a {
+      if args.go == true {
+        automation fetchA()
+      }
+    }
+    branch b {
+      automation fetchB()
     }
   }
 }`
@@ -159,31 +163,15 @@ automation gather {
 	rec := &recordingExecutor{}
 	reg := NewRegistry()
 	reg.Register(automations.StepTypeAutomation, rec)
-	exec := &ParallelExecutor{Registry: reg}
-
-	// prep recorded as FAILED -> branch a's gate is false -> skipped.
-	eval := automations.NewEvaluator()
-	eval.SetStepResult("prep", &automations.StepResult{StepId: "prep", Status: "failed"})
-
-	res, err := exec.Execute(context.Background(), auto.Steps[0], &Context{Evaluator: eval})
+	ev := events.NewEvent("system.startup", events.KindMessage, map[string]any{"go": false})
+	exec, err := automations.NewExecutor(automations.ExecutorOptions{Logger: logger, StepRegistry: reg}).ExecuteWithEvent(context.Background(), auto, "test", &ev)
 	if err != nil {
 		t.Fatalf("parallel execution failed: %v", err)
 	}
-	got := rec.executed()
-	if len(got) != 1 || got[0] != "layer0.b" {
-		t.Fatalf("only the ungated branch must run, got %v", got)
+	if exec.Status != "completed" {
+		t.Fatalf("want status completed, got %q", exec.Status)
 	}
-	if len(res.Children) != 2 {
-		t.Fatalf("want 2 child results, got %d", len(res.Children))
-	}
-	statuses := map[string]string{}
-	for _, child := range res.Children {
-		statuses[child.StepId] = child.Status
-	}
-	if statuses["layer0.a"] != "skipped" {
-		t.Errorf("gated branch must be skipped, got %q", statuses["layer0.a"])
-	}
-	if statuses["layer0.b"] != "success" {
-		t.Errorf("ungated branch must succeed, got %q", statuses["layer0.b"])
+	if got := rec.executed(); len(got) != 1 || got[0] != "fetchB" {
+		t.Fatalf("only the ungated branch's call must run, got %v", got)
 	}
 }
