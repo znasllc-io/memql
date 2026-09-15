@@ -17,8 +17,8 @@ package steps
 // core uses -- but with the side-effect interception layer wired in via a
 // SANDBOX STEP REGISTRY (sandbox_registry.go) that wraps the real registry:
 //
-//   - reads (queries, ai(), similarTo, webSearch, fetchUrl) DELEGATE to the
-//     real executors -> real engine.Execute -> real + metered.
+//   - queries and classified read/pure builtins delegate to the real
+//     executors and are metered. Integration web builtins remain unclassified.
 //   - WRITE-BEARING statements are ISOLATED: the would-be write is evaluated +
 //     recorded into the manifest under the run's ephemeral sandbox partition,
 //     and never reaches engine.Execute, so zero rows land in the live graph.
