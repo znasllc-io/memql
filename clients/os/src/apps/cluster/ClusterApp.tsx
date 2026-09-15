@@ -7,6 +7,7 @@ import { Head, Panel } from "../../kit";
 import { AgentsSection } from "./agents/AgentsSection";
 import { AuditSection } from "./audit/AuditSection";
 import { ModulesSection } from "./modules/ModulesSection";
+import { AutomationsSection } from "./automations/AutomationsSection";
 import { OriginsSection } from "./origins/OriginsSection";
 import { ReadinessSection } from "./readiness/ReadinessSection";
 import {
@@ -103,6 +104,7 @@ export function ClusterApp({
     );
   }
   if (sectionId === "modules") return <ModulesSection />;
+  if (sectionId === "automations") return <AutomationsSection />;
   if (sectionId === "origins") return <OriginsSection />;
   if (sectionId === "agents") return <AgentsSection showInactive={settings.showInactiveAgents} />;
   if (sectionId === "audit") return <AuditSection />;

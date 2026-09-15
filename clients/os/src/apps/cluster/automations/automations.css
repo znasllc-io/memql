@@ -1,0 +1,49 @@
+.os-automations { display:flex; flex-direction:column; min-height:0; height:100%; container-type:inline-size; gap:12px; }
+.os-automation-body { display:grid; grid-template-columns:minmax(0,1fr) 320px; min-height:0; flex:1; }
+.os-automation-overview,.os-automation-detail { min-width:0; overflow:auto; padding:0 16px 20px; }
+.os-automation-detail { border-left:1px solid var(--os-line); }
+.os-automation-canvas { overflow:auto; }
+.os-automation-map { display:block; overflow:visible; }
+.os-automation-column { fill:var(--os-raised); }
+.os-automation-map text { fill:var(--os-ink); font-family:var(--os-font-mono); font-size:var(--os-text-sm); }
+.os-automation-map .os-automation-numeral { font-family:var(--os-font-display); font-size:var(--os-text-lg); fill:var(--os-muted); }
+.os-automation-map .os-automation-caption { font-family:var(--os-font); font-size:var(--os-text-xs); fill:var(--os-muted); }
+.os-automation-cycle { fill:var(--os-accent-soft); stroke:var(--os-accent); }
+.os-automation-cycle.is-refused { stroke:var(--os-error); }
+.os-automation-card { cursor:pointer; transition:opacity var(--os-duration-fast) var(--os-ease); }
+.os-automation-card rect { fill:var(--os-plate); stroke:var(--os-line); }
+.os-automation-card.is-selected rect,.os-automation-card:focus rect { stroke:var(--os-accent); stroke-width:2; }
+.os-automation-card:focus-visible { outline:2px solid var(--os-accent); outline-offset:3px; }
+.os-automation-loop { fill:none; stroke:var(--os-accent); stroke-width:2; }
+.os-automation-edge path { fill:none; stroke:var(--os-muted); stroke-width:1.25; }
+.os-automation-edge.is-undecided path { stroke:var(--os-warn); stroke-dasharray:4 3; }
+.os-automation-edge.is-selected path { stroke:var(--os-accent); stroke-width:2; }
+.os-automation-edge text { font-size:var(--os-text-xs); paint-order:stroke; stroke:var(--os-plate); stroke-width:5; stroke-linejoin:round; }
+.os-automation-edge { transition:opacity var(--os-duration-fast) var(--os-ease); }
+.os-automation-map .is-dim { opacity:.35; }
+.os-automation-alone,.os-automation-stops { padding-top:20px; }
+.os-automation-alone > div { display:flex; flex-wrap:wrap; gap:4px 8px; }
+.os-automation-alone button,.os-automation-name,.os-automation-relation button { font-family:var(--os-font-mono); overflow-wrap:anywhere; }
+.os-automation-facts { margin:16px 0 0; font-size:var(--os-text-sm); }
+.os-automation-facts dt { color:var(--os-muted); margin-top:20px; }
+.os-automation-facts dd { margin:6px 0 0; overflow-wrap:anywhere; }
+.os-automation-facts pre { white-space:pre-wrap; font-size:var(--os-text-xs); background:var(--os-raised); padding:10px; border-radius:var(--os-radius-sm); }
+.os-automation-facts code,.os-automation-chain code { font-family:var(--os-font-mono); font-size:var(--os-text-xs); }
+.os-automation-stops ol { list-style:none; padding:0; margin:0; }
+.os-automation-stops li { padding:14px 0; border-bottom:1px solid var(--os-line); }
+.os-automation-stops time { font-family:var(--os-font-mono); font-size:var(--os-text-xs); color:var(--os-muted); }
+.os-automation-chain { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:8px 0; overflow-wrap:anywhere; }
+.os-automation-chain code + code::before { content:""; display:inline-block; width:10px; border-top:1px solid var(--os-line); margin-right:8px; vertical-align:middle; }
+.os-automation-chain .os-automation-stop { color:var(--os-error); border-left:2px solid var(--os-error); padding-left:8px; }
+.os-automation-back { display:none; }
+@container (max-width: 719px) {
+ .os-automation-body { display:block; overflow:auto; }
+ .os-automation-overview,.os-automation-detail { height:100%; }
+ .os-automation-detail { display:none; border:0; }
+ .has-selection .os-automation-detail,.has-selection .os-automation-back { display:block; }
+ .has-selection .os-automation-overview { display:none; }
+}
+@media (prefers-reduced-motion:reduce) { .os-automation-card,.os-automation-edge { transition:none; } }
+
+.os-automation-map .os-automation-mode { font-family:var(--os-font); font-size:var(--os-text-xs); fill:var(--os-muted); }
+.os-automation-chain .os-automation-stop::before { display:none; }
