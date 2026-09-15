@@ -166,6 +166,27 @@ try {
       "spec researchBrief hasResearchAnswer",
     ),
   );
+  const predicateText = await page.locator("#core-code").innerText();
+  assert.ok(predicateText.includes('row.answer != nil && row.answer != ""'));
+  assert.ok(predicateText.includes("row =>"));
+  assert.equal(
+    await page.locator("pre, code, code *").evaluateAll((elements) =>
+      elements.every((element) => {
+        const style = getComputedStyle(element);
+        return (
+          style.fontVariantLigatures === "none" &&
+          ["liga", "clig", "calt"].every((feature) =>
+            style.fontFeatureSettings.includes(`"${feature}" 0`),
+          )
+        );
+      }),
+    ),
+    true,
+    "code blocks, inline code, and highlighted tokens retain literal operators",
+  );
+  await page.locator("#core-panel").screenshot({
+    path: path.join(artifacts, "literal-operators.png"),
+  });
   for (let i = 0; i < 4; i++) {
     await page.locator("[data-example]").nth(i).click();
     assert.equal(
@@ -202,10 +223,10 @@ try {
   );
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.locator("#copy-code").click();
-  assert.ok(
-    (await page.evaluate(() => navigator.clipboard.readText())).includes(
-      "logic relevantResearchFiles",
-    ),
+  assert.equal(
+    await page.evaluate(() => navigator.clipboard.readText()),
+    await page.locator("#example-code").innerText(),
+    "copied example exactly matches displayed source",
   );
   await page.evaluate(() =>
     Object.defineProperty(navigator, "clipboard", {

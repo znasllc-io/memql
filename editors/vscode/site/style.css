@@ -229,6 +229,12 @@ h1 {
   color: var(--editor-comment);
   font-size: 10px;
 }
+pre,
+code {
+  /* Keep DSL operators identical to their source and copied text. */
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "clig" 0, "calt" 0;
+}
 pre {
   margin: 0;
   font-family: "JetBrains Mono", monospace;
