@@ -579,7 +579,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	}
 
 	// Publish automation started event
-	e.publishEvent(events.TopicAutomationStarted, events.KindAutomationStarted, map[string]any{
+	e.publishEvent(ctx, events.TopicAutomationStarted, events.KindAutomationStarted, map[string]any{
 		"automationName": automation.Name,
 		"executionId":    exec.ID,
 		"triggeredBy":    triggeredBy,
@@ -617,7 +617,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	// cross-machine portability signal: a literal asserted here that does
 	// not hold on this machine is a precondition that misses here.
 	if missed, isMiss := EvaluatePreconditions(automation.Preconditions, evaluator); isMiss {
-		e.emitPreconditionMiss(automation, exec, triggeringEvent, missed)
+		e.emitPreconditionMiss(ctx, automation, exec, triggeringEvent, missed)
 		exec.Status = "skipped"
 		exec.Error = fmt.Sprintf("precondition %q missed", missed.ID)
 		exec.CompletedAt = time.Now()
@@ -955,7 +955,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	if e.chainTrackingEnabled && exec.ChainHead != "" {
 		completedPayload["chainHead"] = exec.ChainHead
 	}
-	e.publishEvent(events.TopicAutomationCompleted, events.KindAutomationCompleted, completedPayload)
+	e.publishEvent(ctx, events.TopicAutomationCompleted, events.KindAutomationCompleted, completedPayload)
 
 	return exec, nil
 }
@@ -1019,7 +1019,7 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 	}
 
 	// Publish step started event
-	e.publishEvent(events.TopicAutomationStepStarted, events.KindAutomationStepStarted, map[string]any{
+	e.publishEvent(ctx, events.TopicAutomationStepStarted, events.KindAutomationStepStarted, map[string]any{
 		"automationName": stepCtx.Execution.AutomationName,
 		"executionId":    stepCtx.Execution.ID,
 		"stepId":         step.ID,
@@ -1079,7 +1079,7 @@ func (e *Executor) executeStep(ctx context.Context, step *Step, stepCtx *StepCon
 		stepTopic = events.TopicAutomationStepCompleted
 		stepKind = events.KindAutomationStepCompleted
 	}
-	e.publishEvent(stepTopic, stepKind, map[string]any{
+	e.publishEvent(ctx, stepTopic, stepKind, map[string]any{
 		"automationName": stepCtx.Execution.AutomationName,
 		"executionId":    stepCtx.Execution.ID,
 		"stepId":         step.ID,
@@ -1206,7 +1206,7 @@ func (e *Executor) handleAutomationError(ctx context.Context, automation *Automa
 	}
 
 	// Publish automation failed event
-	e.publishEvent(events.TopicAutomationFailed, events.KindAutomationFailed, map[string]any{
+	e.publishEvent(ctx, events.TopicAutomationFailed, events.KindAutomationFailed, map[string]any{
 		"automationName": automation.Name,
 		"executionId":    exec.ID,
 		"error":          err.Error(),
@@ -1214,12 +1214,21 @@ func (e *Executor) handleAutomationError(ctx context.Context, automation *Automa
 	})
 }
 
-// publishEvent publishes an automation event to the event bus.
-func (e *Executor) publishEvent(topic string, kind events.Kind, payload map[string]any) {
+// publishEvent publishes an automation event to the event bus, stamping the
+// run's cause (component/events/cause.go, epic memql#5380) onto it when ctx
+// carries one. These are the executor's own lifecycle events
+// (automation.started/completed/failed, the per-step started/completed/failed
+// pair) and the precondition-missed signal -- every one of them a downstream
+// consequence of the run in ctx, so they belong on its chain exactly as a
+// step's own writes and publishes do.
+func (e *Executor) publishEvent(ctx context.Context, topic string, kind events.Kind, payload map[string]any) {
 	if e.eventBus == nil {
 		return
 	}
 	event := events.NewEvent(topic, kind, payload)
+	if cause, ok := events.CauseFromContext(ctx); ok {
+		event = event.WithCause(cause)
+	}
 	e.eventBus.Publish(event)
 }
 
@@ -1235,7 +1244,7 @@ func (e *Executor) publishEvent(topic string, kind events.Kind, payload map[stri
 // the deterministic check that failed, the asserted machine-specific
 // literal, and the triggering event payload (the concrete value that did
 // not satisfy the check on THIS machine).
-func (e *Executor) emitPreconditionMiss(automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, missed *Precondition) {
+func (e *Executor) emitPreconditionMiss(ctx context.Context, automation *Automation, exec *AutomationExecution, triggeringEvent *events.Event, missed *Precondition) {
 	if missed == nil {
 		return
 	}
@@ -1262,7 +1271,7 @@ func (e *Executor) emitPreconditionMiss(automation *Automation, exec *Automation
 			payload["partition"] = triggeringEvent.Partition
 		}
 	}
-	e.publishEvent(events.TopicPreconditionMissed, events.KindPreconditionMissed, payload)
+	e.publishEvent(ctx, events.TopicPreconditionMissed, events.KindPreconditionMissed, payload)
 }
 
 // navigatePath navigates a dot-separated path in a value.

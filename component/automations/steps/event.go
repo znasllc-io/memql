@@ -98,8 +98,13 @@ func (e *EventExecutor) Execute(ctx context.Context, step *automations.Step, ste
 		)
 	}
 
-	// Publish event
+	// Publish event, carrying the run's cause forward (epic memql#5380) when
+	// ctx holds one -- so an automation this event triggers is judged against
+	// the same chain rather than starting a new one.
 	event := events.NewEvent(topic, kind, payload)
+	if cause, ok := events.CauseFromContext(ctx); ok {
+		event = event.WithCause(cause)
+	}
 	stepCtx.EventBus.Publish(event)
 
 	result.Status = "success"
