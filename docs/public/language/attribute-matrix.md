@@ -1211,7 +1211,6 @@ A retired name is refused where the table says, with `annotation_retired` and a 
 | `@retry` | everywhere | Removed from the allow-lists in memql#989; nothing reads it -- delete the annotation; run `memqlmigrate --rewrite=attributes`. |
 | `@role` | everywhere | Buried (#2631 ruling / #2709); it was documented but never enforced (nothing ever checked the value at runtime; the load gate rejects it) -- access control lives at the actor layer (RBAC + the @public per-row-authz classification). |
 | [`@row`](#row) | [spec and trait](#spec-and-trait) | It is a shape-only marker since epic #2281 -- to predicate on row metadata, bind a @row shape in the signature (`spec <shape> <name>`) and read its projected key by bare name. |
-| `@schedule` | everywhere | Memql#5375: write @trigger(schedule="0 0 * * * *") -- one annotation declares how an automation is reached, which is what lets @template be refused beside it coherently; run `memqlmigrate --rewrite=attributes`. |
 | `@schedule` | [automation](#automation) | A scheduled automation is written @trigger(schedule="&lt;cron>"), the one spelling (D15, epic memql#5370); memqlmigrate --rewrite=bodies rewrites it. |
 | [`@scope`](#scope) | [concept](#concept) | Remove the annotation; every concept lives in the default partition post-#56. |
 | `@scopes` | everywhere | Memql#5375: Tool.Scopes was advertised on the gRPC tool descriptor and checked nowhere, so it read as an authorization gate while gating nothing -- delete it; use @requiresCapability for a real one; run `memqlmigrate --rewrite=attributes`. |

@@ -47,7 +47,7 @@ concept credential {
 // violate. The trigger is the ONLY place the concept is named -- that binding
 // is what markSecretArgsFields resolves the @secret set through.
 const secretArgsAutomationSource = `
-@trigger(event="node.created", concept="v1:identity:credential", partition="*")
+@trigger(event="node.created", concept="v1:identity:credential")
 @description("refuses on a credential row that violates its args contract")
 automation rotateCredential {
   args {

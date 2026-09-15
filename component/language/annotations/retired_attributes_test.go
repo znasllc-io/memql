@@ -13,7 +13,7 @@ import (
 // d17Everywhere is the epic's retirement set that applies to every receiver.
 var d17Everywhere = []string{
 	"deprecated", "timeout", "retry", "idempotent", "audit",
-	"latestMode", "enabled", "nocache", "schedule",
+	"latestMode", "enabled", "nocache",
 	"rateLimit", "scopes", "namespace",
 	// No surviving home, so they are retired everywhere rather than on the
 	// concept field alone -- otherwise @unique written anywhere else reads
@@ -26,6 +26,15 @@ var d17Everywhere = []string{
 // field body IS the JSON schema handed to the model, so `default` there is a
 // value the model reads.
 var d17OnConceptField = []string{"default"}
+
+// d17OnAutomation is @schedule, which BOTH this epic and #5370 (dsl-v1-bodies)
+// retire -- convergently. #5370's entry is receiver-scoped, which is more
+// precise (Automation was the only receiver it ever had) and its hint names
+// --rewrite=bodies, the codemod that actually rewrites it now. So the single
+// surviving entry is that one, and this gate follows it rather than duplicating
+// the name into retiredEverywhere, where Retirements() would list it twice and
+// disagree with what Check answers.
+var d17OnAutomation = []string{"schedule"}
 
 // TestEveryRetiredFormNamesTheRewrite is the D17 acceptance gate: "Every
 // retired form refuses with the migrator's name." A hint that explains the
@@ -45,6 +54,11 @@ func TestEveryRetiredFormNamesTheRewrite(t *testing.T) {
 		if !strings.Contains(hint, AttributeRewriteHint) {
 			t.Errorf("@%s: hint does not name the rewrite.\n  got:  %s\n  want: a hint containing %q",
 				name, hint, AttributeRewriteHint)
+		}
+	}
+	for _, name := range d17OnAutomation {
+		if _, ok := retiredOn[retiredKey{Automation, name}]; !ok {
+			t.Errorf("automation @%s should be retired (D17/#5370) but is not in retiredOn", name)
 		}
 	}
 	for _, name := range d17OnConceptField {
@@ -76,6 +90,11 @@ func TestRetiredSetIsTheD17Set(t *testing.T) {
 	for _, name := range d17OnConceptField {
 		if _, ok := retiredOn[retiredKey{ConceptField, name}]; !ok {
 			t.Errorf("concept-field @%s should be retired (D17) but is not in retiredOn", name)
+		}
+	}
+	for _, name := range d17OnAutomation {
+		if _, ok := retiredOn[retiredKey{Automation, name}]; !ok {
+			t.Errorf("automation @%s should be retired (D17/#5370) but is not in retiredOn", name)
 		}
 	}
 	for _, tc := range []struct{ name, reader string }{
