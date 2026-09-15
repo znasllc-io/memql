@@ -133,7 +133,7 @@ func TestLoopRefusals(t *testing.T) {
 		wantLoopRefusal(t, err, "loop_max_depth_range", "maxDepth=")
 	})
 	t.Run("loop_not_event_triggered: a scheduled automation", func(t *testing.T) {
-		_, err := compileLoopProbe(t, `@schedule(cron="0 0 * * * *")
+		_, err := compileLoopProbe(t, `@trigger(schedule="0 0 * * * *")
 @loop(maxDepth=4, until=row => row.status == "done")`)
 		wantLoopRefusal(t, err, "loop_not_event_triggered", "advanceProbe", "@trigger(event=")
 	})
@@ -215,7 +215,7 @@ func TestModeLoadsOntoTheAutomation(t *testing.T) {
 	}
 	// A scheduled automation may carry a mode: it governs concurrent fires,
 	// whatever fires them.
-	a, err := compileLoopProbe(t, `@schedule(cron="0 0 * * * *")
+	a, err := compileLoopProbe(t, `@trigger(schedule="0 0 * * * *")
 @mode(single)`)
 	if err != nil || a.Mode == nil || a.Mode.Kind != ModeSingle {
 		t.Fatalf("a scheduled @mode(single): %+v, %v", a, err)
@@ -252,7 +252,7 @@ func TestLoopAndModeOnAnAutomationBuiltInGo(t *testing.T) {
 		return &Automation{
 			Name:    "goBuiltLoop",
 			Trigger: &TriggerConfig{Event: "graph.node.created.v1:probe:ticket", Filter: `row => row.status != "done"`},
-			Steps:   []*Step{{ID: "noop", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "1"}}},
+			Steps:   []*Step{{ID: "noop", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}}},
 			Loop:    loop,
 			Mode:    mode,
 		}

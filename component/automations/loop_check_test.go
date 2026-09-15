@@ -54,7 +54,7 @@ func TestCheckLoops_AProblemOnTheAutomationsFile(t *testing.T) {
 	t.Setenv(memql.AllowSkipsEnvVar, "")
 	logger, logs := captureLogger()
 	l := NewLoader(LoaderOptions{Logger: logger, Functions: forgeFunctions(t)})
-	loaded, err := l.loadFromTree(loopTree(selfUpdating))
+	loaded, err := l.LoadFromTree(loopTree(selfUpdating))
 	// REPORT-ONLY: the load is not refused for the cycle yet, and says so.
 	if err != nil {
 		t.Fatalf("the loop check is report-only, yet the load was refused: %v", err)
@@ -67,7 +67,7 @@ func TestCheckLoops_AProblemOnTheAutomationsFile(t *testing.T) {
 	}
 	// The node's loader re-walks the tree on every LoadByName; the check is
 	// logged by its first load only.
-	if _, err := l.loadFromTree(loopTree(selfUpdating)); err != nil {
+	if _, err := l.LoadFromTree(loopTree(selfUpdating)); err != nil {
 		t.Fatalf("second load: %v", err)
 	}
 	if n := strings.Count(logs.String(), "static loop analysis: problem"); n != 1 {
@@ -100,7 +100,7 @@ func TestCheckLoops_NotRunWithoutFunctions(t *testing.T) {
 	t.Setenv(memql.AllowSkipsEnvVar, "")
 	logger, logs := captureLogger()
 	l := NewLoader(LoaderOptions{Logger: logger})
-	if _, err := l.loadFromTree(loopTree(selfUpdating)); err != nil {
+	if _, err := l.LoadFromTree(loopTree(selfUpdating)); err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	if !strings.Contains(logs.String(), "static loop analysis not run: the loader has no function registry") {

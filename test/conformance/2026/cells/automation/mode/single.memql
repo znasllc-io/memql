@@ -1,8 +1,6 @@
 /// When a node joins the cluster, open a ticket; a fire while one runs is refused with a warning.
-@trigger(event="node.created", concept="v1:cluster:node", partition="*")
+@trigger(event="node.created", concept="v1:cluster:node")
 @mode(single)
 automation welcomeNodeMode {
-  step raise {
-    mutation raiseTicketMode (title: "A node joined the cluster")
-  }
+  raise := mutation raiseTicketMode(title: "A node joined the cluster")
 }

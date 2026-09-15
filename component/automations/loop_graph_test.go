@@ -179,9 +179,7 @@ automation a {
     id any
     x any
   }
-  step advance {
-    mutation advanceThing(id: id, s: `+sArg+`)
-  }
+  advance := mutation advanceThing(id: args.id, s: `+sArg+`)
 }`,
 		`@trigger(event="node.created", concept="v1:t:thing")
 @filter(row => row.status == "open")
@@ -194,7 +192,7 @@ automation b {
 }
 
 func TestLoopGraph_Undecided(t *testing.T) {
-	g := BuildLoopGraph(undecidedPair(t, "x"), fakeSource{thingReg()}, 0)
+	g := BuildLoopGraph(undecidedPair(t, "args.x"), fakeSource{thingReg()}, 0)
 	e := graphEdge(g, "a", "b")
 	if e == nil {
 		t.Fatal("an undecided filter must keep the edge")
@@ -271,9 +269,7 @@ automation a {
 		return `@trigger(event="node.created", concept="v1:t:thing")
 @filter(row => args.status != "done")
 automation b {
-` + args + `  step record {
-    mutation recordOther()
-  }
+` + args + `  record := mutation recordOther()
 }`
 	}
 	for name, args := range map[string]string{
@@ -472,9 +468,7 @@ automation a {
 	reader := func(name, on, writes string) string {
 		return `@trigger(event="node.created", concept="v1:t:` + on + `")
 automation ` + name + ` {
-  step s {
-    mutation ` + writes + `()
-  }
+  s := mutation ` + writes + `()
 }`
 	}
 	g := BuildLoopGraph(graphAutomations(t, source, reader("b", "one", "createTwo"), reader("c", "two", "createThree")), fakeSource{reg}, 0)
@@ -489,20 +483,37 @@ automation ` + name + ` {
 	}
 }
 
+// rComputedTopicAutomation is r from TestLoopGraph_TopicEdges, built directly
+// in Go rather than compiled from source. Its retired body was
+// `publishEvent(topic: "x." + kind, payload: {a: 1})` inside a step block: a
+// computed (non-literal) topic. epic 3's statement-form `publish` requires a
+// literal topic, so that shape has no DSL spelling any more -- but the static
+// graph still reads an event step's topic as an expression when one is
+// prepared (loop_graph.go's eventPublishOf, over Step.Exprs.Topic), which an
+// automation built in Go (e.g. a sandbox candidate compiled ahead of the
+// statements flip) can still carry. This keeps that path under test: same
+// trigger, same computed topic, same expectation that it reaches every
+// raw-topic automation undecided.
+func rComputedTopicAutomation(t *testing.T) *Automation {
+	t.Helper()
+	const stepJSON = `{"id": "s", "type": "event", "event": {"topic": {"$expr": "\"x.\" + args.kind"}, "payload": {"a": 1}}}`
+	var step Step
+	if err := json.Unmarshal([]byte(stepJSON), &step); err != nil {
+		t.Fatalf("unmarshal r's step: %v", err)
+	}
+	a := &Automation{Name: "r", Trigger: &TriggerConfig{Event: "graph.node.created.v1:t:source2"}, Steps: []*Step{&step}}
+	if err := PrepareExpressions(a); err != nil {
+		t.Fatalf("PrepareExpressions: %v", err)
+	}
+	a.Origin = "test:" + a.Name
+	return a
+}
+
 func TestLoopGraph_TopicEdges(t *testing.T) {
 	as := graphAutomations(t,
 		`@trigger(event="node.created", concept="v1:t:source")
 automation p {
   publish "x.y" {a: 1}
-}`,
-		`@trigger(event="node.created", concept="v1:t:source2")
-automation r {
-  args {
-    kind any
-  }
-  step s {
-    publishEvent(topic: "x." + kind, payload: {a: 1})
-  }
 }`,
 		`@trigger(event="x.y")
 automation q {
@@ -521,6 +532,7 @@ automation v {
 automation u {
   s := mutation recordOther()
 }`)
+	as = append(as, rComputedTopicAutomation(t))
 	g := BuildLoopGraph(as, fakeSource{thingReg()}, 0)
 	if e := graphEdge(g, "p", "q"); e == nil || !e.Decided || e.Topic != "x.y" {
 		t.Errorf("a publish of x.y reaches the automation on x.y: %+v", e)
@@ -678,59 +690,22 @@ automation routeSubmitted {
 	}
 }
 
-// An automation built in Go -- a sandbox bundle, a LogicRunner body -- can
-// carry the two write shapes the compiler does not emit for a v1 automation:
-// a query step whose expression is a construct call, which the query executor
-// runs on the engine, and an inline mutation step, which inserts. Both are
-// writes, read the same way prepared or not.
-func TestLoopGraph_StepsBuiltInGo(t *testing.T) {
-	build := func(prepare bool) []*Automation {
-		as := []*Automation{
-			{Name: "q", Origin: "test:q", Trigger: &TriggerConfig{Event: "tick.q"}, Steps: []*Step{
-				{ID: "s", Type: StepTypeQuery, Query: &QueryStepConfig{Query: `mutation advanceThing(id: "t-1", s: "open")`}},
-			}},
-			{Name: "m", Origin: "test:m", Trigger: &TriggerConfig{Event: "tick.m"}, Steps: []*Step{
-				{ID: "ins", Type: StepTypeMutation, Mutation: &MutationStepConfig{Concept: "v1:t:other", Payload: map[string]any{
-					"status": "new",
-					"tags":   []any{"a", "b"},
-					"meta":   map[string]any{"k": "v"},
-					"who":    map[string]any{exprLeafKey: "actor.userId"},
-				}}},
-			}},
-			{Name: "readThing", Origin: "test:readThing", Trigger: &TriggerConfig{Event: "graph.node.created.v1:t:thing", Filter: `row => row.status == "open"`}},
-			{Name: "readNew", Origin: "test:readNew", Trigger: &TriggerConfig{Event: "graph.node.created.v1:t:other", Filter: `row => row.status == "new" && row.note == nil`}},
-			{Name: "readOld", Origin: "test:readOld", Trigger: &TriggerConfig{Event: "graph.node.created.v1:t:other", Filter: `row => row.status == "old"`}},
-			{Name: "readWho", Origin: "test:readWho", Trigger: &TriggerConfig{Event: "graph.node.created.v1:t:other", Filter: `row => row.who == "x"`}},
-		}
-		if prepare {
-			for _, a := range as {
-				if err := PrepareExpressions(a); err != nil {
-					t.Fatalf("prepare %s: %v", a.Name, err)
-				}
-			}
-		}
-		return as
-	}
-	for _, prepared := range []bool{false, true} {
-		g := BuildLoopGraph(build(prepared), fakeSource{thingReg()}, 0)
-		if e := graphEdge(g, "q", "readThing"); e == nil || !e.Decided || strings.Join(e.Via, ",") != "advanceThing" {
-			t.Errorf("prepared=%v: a query step's construct call writes through advanceThing with s \"open\": %+v", prepared, e)
-		}
-		// A new row: status is the literal, note is absent.
-		if e := graphEdge(g, "m", "readNew"); e == nil || !e.Decided || strings.Join(e.Via, ",") != "step ins" {
-			t.Errorf("prepared=%v: an inline insert of a new row writes status \"new\" and no note: %+v", prepared, e)
-		}
-		if e := graphEdge(g, "m", "readOld"); e != nil {
-			t.Errorf("prepared=%v: status \"new\" refutes row.status == \"old\", yet: %+v", prepared, e)
-		}
-		if e := graphEdge(g, "m", "readWho"); e == nil || e.Decided {
-			t.Errorf("prepared=%v: who is an expression, so the edge stays undecided: %+v", prepared, e)
-		}
-		if w := graphNode(t, g, "m").Writes; strings.Join(w, ",") != "v1:t:other" {
-			t.Errorf("prepared=%v: m writes %v", prepared, w)
-		}
-	}
-}
+// TestLoopGraph_StepsBuiltInGo used to pin two write shapes a Go-built
+// automation could carry that the v1 compiler never emitted: a "query" step
+// whose raw expression happened to be a construct call, and an inline
+// "mutation" step that inserted a literal payload with no named construct.
+// Both step kinds -- StepTypeQuery/QueryStepConfig and
+// StepTypeMutation/MutationStepConfig -- were deleted outright in the
+// statements flip (memql#5372, commit 96cbd0360: "query, mutation, shape,
+// webhook, switch, detectLeadSignal and emitConceptCard steps and their
+// executors are deleted"), with no successor encoding for either: a
+// StepTypeFunction call always names a registered construct, so there is no
+// way to spell "an inline insert with no named mutation" any more, and
+// recasting the query case as a StepTypeFunction call would just duplicate
+// the ordinary call-step coverage exercised elsewhere in this file. The
+// scenario this test existed to cover no longer exists in the type system,
+// so the test was deleted rather than forced into a shape that would silently
+// test something else (memql#5380 merge-port).
 
 // problemThrough judges one automation: refused for a cycle through it no
 // @loop covers, and for nothing else -- not a cycle it carries the @loop of,

@@ -5,7 +5,7 @@ concept ticket {
 }
 
 /// Move a ticket to a status.
-mutate ticket advanceTicketLoopCell {
+mutation ticket advanceTicketLoopCell {
   args {
     id      string!
     status  string

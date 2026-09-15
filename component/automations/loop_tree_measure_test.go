@@ -19,15 +19,83 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/component"
+	"github.com/znasllc-io/memql/core/repowalk"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
+
+// bundleTrees is every DSL bundle the repository ships beside the engine
+// tree, each as the tree the engine mounts it as: deploy/fleet/dsl, whose
+// subdirectories are its domains, and every examples/**/dsl, a pack's tree
+// mounted as one domain named for the pack. Nothing else compiles their
+// automations -- memqllint does not, and the fleet's bundle test checks
+// structure only -- which is how every fleet automation came to fail to
+// compile unnoticed (memql#5367). Ported from the pre-flip step_order_test.go
+// (deleted in the statements flip, memql#5372/commit 96cbd0360, along with
+// the legacy step-order helpers that had no successor) since this is a plain
+// filesystem-mounting helper with no dependency on the retired step grammar,
+// and this file is its only caller left in the package.
+func bundleTrees(t *testing.T) map[string]fs.FS {
+	t.Helper()
+	root := filepath.Join("..", "..")
+	trees := map[string]fs.FS{"deploy/fleet/dsl": os.DirFS(filepath.Join(root, "deploy", "fleet", "dsl"))}
+	examples := os.DirFS(filepath.Join(root, "examples"))
+	err := fs.WalkDir(examples, ".", func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !d.IsDir() || path == "." {
+			return nil
+		}
+		if base := d.Name(); strings.HasPrefix(base, "_") || strings.HasPrefix(base, ".") || repowalk.SkipDir(base) {
+			return fs.SkipDir
+		}
+		if d.Name() != "dsl" {
+			return nil
+		}
+		sub, err := fs.Sub(examples, path)
+		if err != nil {
+			return err
+		}
+		pack := filepath.Base(filepath.Dir(path))
+		trees["examples/"+path] = mountedAs(pack, sub)
+		return fs.SkipDir
+	})
+	if err != nil {
+		t.Fatalf("walk examples: %v", err)
+	}
+	return trees
+}
+
+// mountedFS is fsys as the single domain `domain/` of a tree.
+type mountedFS struct {
+	domain string
+	fsys   fs.FS
+}
+
+func mountedAs(domain string, fsys fs.FS) fs.FS { return mountedFS{domain, fsys} }
+
+func (m mountedFS) Open(name string) (fs.File, error) {
+	if name == "." {
+		return fs.FS(fstest.MapFS{m.domain: &fstest.MapFile{Mode: fs.ModeDir}}).Open(".")
+	}
+	if name == m.domain {
+		return m.fsys.Open(".")
+	}
+	if rest, ok := strings.CutPrefix(name, m.domain+"/"); ok {
+		return m.fsys.Open(rest)
+	}
+	return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrNotExist}
+}
 
 // loopMeasurement is one tree's check.
 type loopMeasurement struct {
@@ -71,7 +139,7 @@ func measureLoops(t *testing.T, bundle fs.FS) loopMeasurement {
 	}
 
 	l := NewLoader(LoaderOptions{Logger: quiet, Registry: registry, Functions: eng.Functions()})
-	loaded, err := l.loadFromTree(memqldsl.Tree())
+	loaded, err := l.LoadFromTree(memqldsl.Tree())
 	if err != nil {
 		t.Logf("  load: %v", err)
 	}

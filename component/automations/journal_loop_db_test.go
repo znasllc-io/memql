@@ -140,8 +140,8 @@ func TestLoopDepth_DB_AResumedRunKeepsItsDepth(t *testing.T) {
 	e := NewExecutor(ExecutorOptions{Engine: engine, StepRegistry: reg})
 	defer e.Close()
 	auto := &Automation{Name: fmt.Sprintf("loopResumeProbe%d", time.Now().UnixNano()), Trigger: &TriggerConfig{Event: loopProbeTopic}, Steps: []*Step{
-		{ID: "a", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}},
-		{ID: "b", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}, OnError: ErrorStrategyStop},
+		{ID: "a", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}},
+		{ID: "b", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}, OnError: ErrorStrategyStop},
 	}}
 	parent := chainOf(fmt.Sprintf("evt-resume%d", time.Now().UnixNano()), "x", "y", "z")
 	ev := &events.Event{Topic: loopProbeTopic, Kind: events.KindNodeUpdated, Payload: map[string]any{"id": "ticket-1"}, Cause: parent}

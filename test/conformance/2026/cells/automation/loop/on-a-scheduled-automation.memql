@@ -1,10 +1,8 @@
 use loopcell.concepts.{ ticket }
 
 /// Every hour, move the first ticket to done -- a schedule, which no write can fire again.
-@schedule(cron="0 0 * * * *")
+@trigger(schedule="0 0 * * * *")
 @loop(maxDepth=4, until=row => row.status == "done")
 automation advanceTicketLoopCell {
-  step advance {
-    mutation advanceTicketLoopCell (id: "ticket-1", status: "done")
-  }
+  advance := mutation advanceTicketLoopCell(id: "ticket-1", status: "done")
 }

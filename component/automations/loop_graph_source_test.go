@@ -75,20 +75,26 @@ func functionsFromSource(t *testing.T, origin, src string, names ...string) *mem
 }
 
 // treeAutomation compiles one automation of the embedded tree, as the tree
-// loader compiles it, with the origin the loader stamps.
+// loader compiles it, with the origin the loader stamps. It runs the same
+// LoadFromTree walk the unified loader boots with -- treeAutomationSlices,
+// the lighter-weight slice-only walk this used to run, went with
+// step_order_test.go in the statements flip (memql#5373); a full load and a
+// lookup by origin is what the other tests in this package already do
+// (LoadAll / LoadFromUnifiedTree) to reach a real tree automation.
 func treeAutomation(t *testing.T, path, name string) *Automation {
 	t.Helper()
 	origin := "unified:" + path + ":" + name
-	slice, ok := treeAutomationSlices(t, memqldsl.Tree(), false)[origin]
-	if !ok {
-		t.Fatalf("the tree has no automation %s", origin)
-	}
-	a, err := NewLoader(LoaderOptions{}).compileUnifiedSlice(slice.authored, slice.automationSlice, origin)
+	all, err := NewLoader(LoaderOptions{}).LoadFromTree(memqldsl.Tree())
 	if err != nil {
-		t.Fatalf("compile %s: %v", origin, err)
+		t.Fatalf("load tree: %v", err)
 	}
-	a.Origin = origin
-	return a
+	for _, a := range all {
+		if a.Origin == origin {
+			return a
+		}
+	}
+	t.Fatalf("the tree has no automation %s", origin)
+	return nil
 }
 
 func TestFunctionSource_AMutationIsItsWrite(t *testing.T) {

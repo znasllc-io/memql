@@ -274,7 +274,7 @@ func (p *causeProbeRegistry) Execute(ctx context.Context, step *Step, _ *StepCon
 }
 
 func causeProbeAutomation(name string) *Automation {
-	return &Automation{Name: name, Steps: []*Step{{ID: "a", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}}}}
+	return &Automation{Name: name, Steps: []*Step{{ID: "a", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}}}}
 }
 
 // TestResumeKeepsTheRunsPlaceInItsChain: a resumed run is the same run
