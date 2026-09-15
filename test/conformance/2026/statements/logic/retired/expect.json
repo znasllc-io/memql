@@ -41,6 +41,12 @@
       "verdict": "refuse_parse",
       "code": "body_accessor_retired",
       "message": "`step(\"first\")` is retired in edition 2026: a statement's name is its value, so write `first`"
+    },
+    {
+      "file": "error-accessor.memql",
+      "verdict": "refuse_parse",
+      "code": "body_accessor_retired",
+      "message": "`error()` is retired in edition 2026: use error(\"message\") to raise an error; onError accessors are gone"
     }
   ]
 }

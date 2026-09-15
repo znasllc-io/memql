@@ -284,8 +284,9 @@ func buildRepairMessages(miss PreconditionMiss, remediations []Remediation) []co
 	sys.WriteString("preferring the smallest change. The ONLY patch kinds are: ")
 	sys.WriteString("add-precondition (append a deterministic guard), ")
 	sys.WriteString("insert-guard (gate a step with a boolean condition), ")
-	sys.WriteString("relativize-literal (replace a machine-specific literal with a relative reference like $config.X or $event.payload.X), ")
+	sys.WriteString("relativize-literal (replace a machine-specific literal with a relative reference like config.X or event.payload.X), ")
 	sys.WriteString("rebind-param (rebind a parameter reference to the correct source). ")
+	sys.WriteString("Targets select compiled statements by exact id, for example steps.run.function.args.path. Use the construct's existing fields. Replacements are v1 expressions: config.X, args.x, event.payload.X, or a preceding statement's bound name (fetch.id). Do not use dollar-prefixed references or steps.name.result. ")
 	sys.WriteString("relativize-literal is the portability heal and is usually the right choice when a precondition asserts a machine-specific literal. ")
 	sys.WriteString("Do not invent other kinds. Return only the patches.")
 

@@ -17,11 +17,8 @@ import (
 	_ "github.com/znasllc-io/memql/component/automations/steps"
 )
 
-// dryRunMeteredAutomation issues two web reads (webSearch + fetchUrl) as direct
-// function steps -- the metered web tier from the issue's read list. Both are
-// real reads, so without a DB/provider the underlying delegate may fail;
-// metering records the calls UP FRONT so the manifest reflects the read intent
-// regardless of the delegate outcome.
+// dryRunMeteredAutomation requests integration web reads. These executors have
+// no preview classification and must be refused before execution or metering.
 const dryRunMeteredAutomation = `
 @trigger(event="node.created", concept="v1:authoring:bundle")
 @description("Sandbox: read-heavy automation")
@@ -30,10 +27,9 @@ automation sandboxReadHeavy {
   fetch := builtin fetchUrl(url: "https://example.com/doc")
 }`
 
-// TestDryRun_MetersWebReads: a webSearch() and a fetchUrl() read each record a
-// webCalls entry with the resolved target. The run itself may not be OK (no
-// provider/DB wired for the real read), but metering is captured up front.
-func TestDryRun_MetersWebReads(t *testing.T) {
+// TestDryRun_RefusesUnclassifiedWebReads drives the full automation executor
+// so a refused builtin must produce a failed report and trace without a panic.
+func TestDryRun_RefusesUnclassifiedWebReads(t *testing.T) {
 	eng := newDryRunEngine(t)
 
 	report, err := memql.RunBundleDryRun(t.Context(), eng, memql.DryRunRequest{
@@ -46,31 +42,15 @@ func TestDryRun_MetersWebReads(t *testing.T) {
 		t.Fatalf("RunBundleDryRun returned error: %v", err)
 	}
 
+	if report.OK || !strings.Contains(report.FailureReason, "not classified as side-effect free") {
+		t.Fatalf("expected builtin refusal, got %+v", report)
+	}
+	if len(report.Trace) != 2 || report.Trace[0].Status != "failed" || !report.Trace[0].Intercepted || report.Trace[1].Status != "notRun" {
+		t.Fatalf("expected a refused first step and an unrun second step, got %+v", report.Trace)
+	}
 	mani := report.SideEffectManifest
-	if len(mani.WebCalls) < 1 {
-		t.Fatalf("expected metered web calls, got %d: %+v", len(mani.WebCalls), mani.WebCalls)
-	}
-	byFn := map[string]memql.RecordedWebCall{}
-	for _, w := range mani.WebCalls {
-		byFn[w.Function] = w
-	}
-	search, ok := byFn["webSearch"]
-	if !ok {
-		t.Fatalf("expected a webSearch web call, got %+v", mani.WebCalls)
-	}
-	if !strings.Contains(search.Target, "memql dry run") {
-		t.Errorf("expected the resolved query as webSearch target, got %q", search.Target)
-	}
-	if fetch, ok := byFn["fetchUrl"]; ok {
-		if !strings.Contains(fetch.Target, "example.com/doc") {
-			t.Errorf("expected the resolved url as fetchUrl target, got %q", fetch.Target)
-		}
-	}
-
-	// Zero prod writes -- a read-only automation records nothing in mutations,
-	// and web reads carry no token cost.
-	if n := len(mani.Mutations); n != 0 {
-		t.Errorf("expected no mutations on a read-only automation, got %d", n)
+	if len(mani.WebCalls) != 0 || len(mani.Mutations) != 0 {
+		t.Fatalf("refused builtin must not record performed reads or writes: %+v", mani)
 	}
 }
 

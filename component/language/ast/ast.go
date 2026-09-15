@@ -449,12 +449,6 @@ func (*EventRefExpr) expressionNode() {}
 func (*CallerRefExpr) node()           {}
 func (*CallerRefExpr) expressionNode() {}
 
-// ErrorRefExpr references the current error in onError context: $error
-type ErrorRefExpr struct{}
-
-func (*ErrorRefExpr) node()           {}
-func (*ErrorRefExpr) expressionNode() {}
-
 // ErrorExpr creates an error with a message: error("message")
 // Used for early returns: return error("something went wrong")
 type ErrorExpr struct {

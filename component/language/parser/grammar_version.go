@@ -244,7 +244,11 @@ import (
 // The digest suffix is not decoration: TestGrammarVersionCarriesTheSurfaceDigest
 // recomputes it and requires this string to end with it, which is what makes a
 // grammar move impossible to land without editing this line (memql#3089).
-const GrammarVersion = "2026.09-dsl-v1-bodies-8fef9e94"
+// # 2026.09-retire-error-accessor (memql#5446)
+//
+// Retire the no-argument onError accessor; error("message") remains live.
+// No rewrite exists because statement bodies have no onError context to read.
+const GrammarVersion = "2026.09-retire-error-accessor-78765bad"
 
 // GrammarFingerprint is a drift detector over the author-facing keyword
 // surface: when the invocation-kind keyword set changes, the pinned test

@@ -699,7 +699,6 @@ func TestParser_NoArgAccessors(t *testing.T) {
 		expected string
 	}{
 		{`event()`, "event"},
-		{`error()`, "error"},
 	}
 
 	for _, tt := range tests {
@@ -721,10 +720,7 @@ func TestParser_NoArgAccessors(t *testing.T) {
 				if _, ok := ast.(*EventRefExpr); !ok {
 					t.Fatalf("Expected EventRefExpr, got %T", ast)
 				}
-			case "error":
-				if _, ok := ast.(*ErrorRefExpr); !ok {
-					t.Fatalf("Expected ErrorRefExpr, got %T", ast)
-				}
+
 			}
 		})
 	}
@@ -1038,7 +1034,7 @@ func TestParser_ErrorFunction(t *testing.T) {
 }
 
 func TestParser_ErrorFunctionEmpty(t *testing.T) {
-	// Test error() with no args (references current error)
+	// The old current-error accessor is refused with its replacement.
 	input := `error()`
 
 	lexer := NewLexer(input)
@@ -1048,15 +1044,11 @@ func TestParser_ErrorFunctionEmpty(t *testing.T) {
 	}
 
 	parser := NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parser error: %v", err)
+	_, err = parser.Parse()
+	if err == nil || !strings.Contains(err.Error(), "body_accessor_retired") {
+		t.Fatalf("want retired accessor refusal, got %v", err)
 	}
 
-	_, ok := ast.(*ErrorRefExpr)
-	if !ok {
-		t.Fatalf("Expected ErrorRefExpr for empty error(), got %T", ast)
-	}
 }
 
 func TestParser_SpecDefinition(t *testing.T) {
