@@ -192,19 +192,18 @@ func chainEventData(ev *events.Event, a *Automation, correlation string) map[str
 		return nil
 	}
 	payload := ev.Payload
-	if strings.HasPrefix(ev.Topic, "graph.node.") {
+	if a.Reads != nil {
 		payload = map[string]any{}
-		if a.Reads != nil {
-			for _, key := range a.Reads {
-				if value, ok := ev.Payload[key]; ok {
-					payload[key] = value
-				}
+		for _, key := range a.Reads {
+			if value, ok := ev.Payload[key]; ok {
+				payload[key] = value
 			}
-		} else {
-			for key, value := range ev.Payload {
-				if key != "createdAt" {
-					payload[key] = value
-				}
+		}
+	} else if strings.HasPrefix(ev.Topic, "graph.node.") {
+		payload = map[string]any{}
+		for key, value := range ev.Payload {
+			if key != "createdAt" {
+				payload[key] = value
 			}
 		}
 	}

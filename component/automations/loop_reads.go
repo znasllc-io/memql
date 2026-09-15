@@ -34,7 +34,7 @@ func computeReads(a *Automation, source FunctionSource) []string {
 					} else {
 						fields[path[1]] = true
 					}
-				case "actor", "system", "now":
+				case "actor", "system", "now", "config", "partition":
 					pure = false
 				case "args":
 					if len(path) == 0 {
@@ -53,8 +53,17 @@ func computeReads(a *Automation, source FunctionSource) []string {
 				}
 				return false
 			}
-			if id, ok := e.(*ast.IdentExpr); ok && (id.Name == "event" || id.Name == "actor") {
-				pure = false
+			if id, ok := e.(*ast.IdentExpr); ok {
+				switch id.Name {
+				case "event", "actor", "system", "now", "config", "partition":
+					pure = false
+				}
+			}
+			if call, ok := e.(*ast.CallExpr); ok && call.Receiver == nil {
+				switch call.Name {
+				case "var", "systemVar", "secret", "systemSecret":
+					pure = false
+				}
 			}
 			return true
 		})

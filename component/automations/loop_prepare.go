@@ -124,11 +124,11 @@ func prepareLoop(a *Automation) error {
 	case filter == nil:
 		return refuseLoopMode(languageParser.RuleLoopUntilNotInFilter,
 			"automation %q: it has no @filter, so nothing excludes the rows @loop's until (%s) holds on and a converged row would fire it again -- add %s",
-			a.Name, loop.Until, suggestedLoopFilter(nil, lam))
+			a.Name, ast.FormatExpr(lam), suggestedLoopFilter(nil, lam))
 	case !untilInFilter(filter, lam):
 		return refuseLoopMode(languageParser.RuleLoopUntilNotInFilter,
 			"automation %q: its @filter does not exclude the rows @loop's until (%s) holds on, so a converged row would fire it again -- hold the negation as a top-level conjunct: %s",
-			a.Name, loop.Until, suggestedLoopFilter(filter, lam))
+			a.Name, ast.FormatExpr(lam), suggestedLoopFilter(filter, lam))
 	}
 	return nil
 }

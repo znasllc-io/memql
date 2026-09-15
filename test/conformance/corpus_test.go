@@ -974,8 +974,13 @@ func corpusAutomationProblems(t *testing.T, tree fs.FS) []string {
 	}
 	var lines []string
 	for _, l := range strings.Split(err.Error(), "\n") {
-		if l = strings.TrimSpace(l); strings.HasPrefix(l, "- ") {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "- ") {
 			lines = append(lines, strings.TrimPrefix(l, "- "))
+		} else if l != "" && len(lines) > 0 {
+			// Loop refusals include the cycle, origins and remedy on separate
+			// lines. Keep their trailing rule code with the same diagnostic.
+			lines[len(lines)-1] += "\n" + l
 		}
 	}
 	if len(lines) == 0 {

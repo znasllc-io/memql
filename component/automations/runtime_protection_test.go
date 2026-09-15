@@ -243,3 +243,33 @@ func TestBeforeWriteCannotExecuteAsIndependentRun(t *testing.T) {
 		t.Fatalf("before-write created independent run: %+v %v", run, err)
 	}
 }
+
+func TestReadsRejectAmbientExpressions(t *testing.T) {
+	source := registrySource{reg: work.Registry{}}
+	for _, expr := range []string{`now`, `config`, `partition`, `var("x")`, `systemVar("x")`, `secret("x")`, `systemSecret("x")`} {
+		t.Run(expr, func(t *testing.T) {
+			a := &Automation{Name: "ambient", Steps: []*Step{{ID: "value", Type: StepTypeExpression, Expression: expr}}}
+			if err := PrepareExpressions(a); err != nil {
+				t.Fatal(err)
+			}
+			if got := computeReads(a, source); got != nil {
+				t.Fatalf("ambient %s narrowed to %v", expr, got)
+			}
+		})
+	}
+}
+
+func TestRawTopicUsesReadProjectionButRetainsImpureClock(t *testing.T) {
+	a := &Automation{Name: "raw", Reads: []string{"status"}}
+	ev := events.NewEvent("raw.topic", events.KindUnspecified, map[string]any{"status": "open", "noise": 1, "createdAt": "first"})
+	first := chainEventData(&ev, a, "chain")
+	ev.Payload["noise"] = 2
+	second := chainEventData(&ev, a, "chain")
+	if ComputeInitialChainHead(a.Name, "event", first, "") != ComputeInitialChainHead(a.Name, "event", second, "") {
+		t.Fatal("raw payload ignored its read projection")
+	}
+	a.Reads = nil
+	if got := chainEventData(&ev, a, "chain")["payload"].(map[string]any)["createdAt"]; got != "first" {
+		t.Fatalf("raw createdAt was stripped: %v", got)
+	}
+}
