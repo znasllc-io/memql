@@ -171,6 +171,17 @@ var (
 	scheduleKeys = []ArgSpec{
 		{Name: "cron", Type: "string", Doc: "Cron schedule, e.g. \"0 0 * * * *\". Synonym for @trigger(schedule=...)."},
 	}
+	loopKeys = []ArgSpec{
+		{Name: "maxDepth", Type: "int", Doc: "The most runs of this automation one causal chain may hold. An integer from 1 to the depth cap (MEMQL_AUTOMATION_MAX_CHAIN_DEPTH, default 16)."},
+		{Name: "until", Type: "expression", Doc: "The convergence predicate: a lambda of one parameter over the triggering row, until=row => row.status == \"done\". The automation's @filter must hold its negation as a top-level conjunct, which is what stops the loop."},
+	}
+	modeKeys = []ArgSpec{
+		{Name: "single", Type: "flag", Doc: "One run at a time in this process; a fire while one runs is refused with a warning."},
+		{Name: "queued", Type: "flag", Doc: "Fires wait their turn in order; more than max waiting are refused."},
+		{Name: "restart", Type: "flag", Doc: "A fire cancels the run in flight and starts again."},
+		{Name: "parallel", Type: "flag", Doc: "Runs concurrently; more than max at once are refused. The default when no @mode is written, with no max."},
+		{Name: "max", Type: "int", Doc: "With queued, the most fires that may wait (default 10); with parallel, the most runs at once."},
+	}
 	handlerKeys = []ArgSpec{
 		{Name: "type", Type: "string", Doc: "Handler type: \"function\", \"query\", \"webhook\" or \"delegate\". Required."},
 		{Name: "name", Type: "string", Doc: "Function or builtin name (with type=\"function\")."},
@@ -286,7 +297,9 @@ var placementTable = concat(
 	[]Placement{
 		{Receiver: Automation, Name: "actor", Forms: FormFlag, Example: "@actor", Doc: docActorOnFunction},
 		{Receiver: Automation, Name: "filter", Forms: FormExpression, Example: `@filter(row => row.status == "open")`},
+		{Receiver: Automation, Name: "loop", Forms: FormKeywords, Keys: loopKeys, Example: `@loop(maxDepth=4, until=row => row.status == "done")`},
 		{Receiver: Automation, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
+		{Receiver: Automation, Name: "mode", Forms: FormKeywords, Keys: modeKeys, Example: `@mode(queued, max=10)`},
 		{Receiver: Automation, Name: "schedule", Forms: FormKeywords | FormString, Keys: scheduleKeys, Example: `@schedule(cron="0 0 * * * *")`},
 		{Receiver: Automation, Name: "template", Forms: FormFlag, Example: "@template"},
 		{Receiver: Automation, Name: "trigger", Forms: FormKeywords, Keys: triggerKeys, Example: `@trigger(event="node.created", concept="v1:cluster:node")`},
@@ -486,6 +499,8 @@ var Docs = map[string]string{
 	"filter":   "Filter for automation triggers: a lambda of one parameter over the triggering row, as in @filter(row => row.status == \"open\").",
 	"template": "On an automation: this is a work-spine TEMPLATE, invoked by a v1:work:run that named it rather than fired by the graph (memql#5048). It is the third way an automation can be reachable, alongside an event trigger and a schedule. A @template automation must carry NEITHER @trigger nor @schedule -- the load-time gate refuses both combinations, so \"called\" and \"triggered\" stay distinct.",
 	"schedule": "Cron schedule for a scheduled automation. Format: @schedule(cron=\"0 0 * * * *\"). Synonym for @trigger(schedule=...); folds to the same scheduler field (#2712).",
+	"loop":     "On an automation that closes a deliberate cycle: permits the cycle the load would otherwise refuse, bounds it to maxDepth runs of this automation per causal chain, and names the predicate that ends it. The @filter must exclude the rows where until holds.",
+	"mode":     "How concurrent fires of this automation behave in one process: single, queued, restart or parallel, with max for queued and parallel. Without it an automation runs every fire in parallel.",
 	// Capability (memql#2218, behavioral-constructs ADR §2.3).
 	"sideEffect": "On a capability: the coarse risk class @sideEffect(\"read\"|\"write\"|\"exec\"). It is the authoritative side-effect class: it lives on the capability, not on the action that calls it, and must equal the class of the Go capability the declaration names, so an authored or generated action cannot claim a lower one.",
 	// Pagination opt-out (epic 5, memql#1965).

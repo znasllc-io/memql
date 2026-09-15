@@ -3,6 +3,29 @@
 The Marketplace renders this file on the extension's page, so it is written for
 someone deciding whether to install rather than for someone reading the repo.
 
+## 0.5.0
+
+**The MemQL it speaks**
+- This release speaks MemQL edition 2026, grammar
+  `2026.09-dsl-v1-loop-protection-930e046b`: its highlighting, completion and
+  diagnostics are that grammar's. A cluster on this grammar names this release
+  to an older editor that connects to it.
+
+**Writing automations**
+- Automations can declare `@loop` and `@mode`; completion and diagnostics know
+  both. Completion offers each annotation and its keys, and hovering a key
+  explains it.
+- `@loop(maxDepth=4, until=row => row.status == "done")` marks an automation
+  that triggers itself on purpose, such as one that moves a row forward a step
+  at a time. `until` names the state that ends the cycle, and `maxDepth` bounds
+  how many times the automation may run in one chain. The editor underlines an
+  `until` that is not a lambda over the row and a `maxDepth` that is not a
+  whole number.
+- `@mode` says what happens when an automation fires while it is already
+  running: `single` refuses the new fire, `queued` makes it wait its turn,
+  `restart` cancels the run in flight, and `parallel` runs both. `max` bounds
+  how many may wait or run at once, and the editor underlines a `max` below 1.
+
 ## 0.4.0
 
 **The MemQL it speaks, and the cluster's**

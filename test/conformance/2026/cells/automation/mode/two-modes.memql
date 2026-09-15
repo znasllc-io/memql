@@ -1,0 +1,8 @@
+/// When a node joins the cluster, open a ticket -- two modes, so a reader cannot tell which governs.
+@trigger(event="node.created", concept="v1:cluster:node", partition="*")
+@mode(single, queued)
+automation welcomeNodeMode {
+  step raise {
+    mutation raiseTicketMode (title: "A node joined the cluster")
+  }
+}

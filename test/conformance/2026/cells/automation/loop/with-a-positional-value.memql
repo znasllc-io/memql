@@ -1,0 +1,15 @@
+use loopcell.concepts.{ ticket }
+
+/// Move a new ticket to done -- the depth given positionally.
+@trigger(event="node.created", concept="v1:loopcell:ticket")
+@filter(row => row.status != "done")
+@loop(4)
+automation advanceTicketLoopCell {
+  args {
+    id     any
+    status any
+  }
+  step advance {
+    mutation advanceTicketLoopCell (id: id, status: "done")
+  }
+}

@@ -1,0 +1,15 @@
+use loopcell.concepts.{ ticket }
+
+/// Move a new ticket to done. The update fires this automation again, and its filter stops it once the ticket is done.
+@trigger(event="node.created", concept="v1:loopcell:ticket")
+@filter(row => row.status != "done")
+@loop(maxDepth=4, until=row => row.status == "done")
+automation advanceTicketLoopCell {
+  args {
+    id     any
+    status any
+  }
+  step advance {
+    mutation advanceTicketLoopCell (id: id, status: "done")
+  }
+}

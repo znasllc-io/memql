@@ -215,13 +215,24 @@ var prepareOnDemand sync.Mutex
 // is left as it is. Without its parsed nodes a step's expressions would be
 // text nothing reads -- a condition that never gates, an argument that is
 // never passed -- which is the outcome this rules out.
+//
+// Its @loop and @mode are held to the rules the load holds them to
+// (prepareLoopAndMode). One it refuses is left unprepared, so every run
+// refuses it rather than only the first.
 func ensurePrepared(a *Automation) error {
 	prepareOnDemand.Lock()
 	defer prepareOnDemand.Unlock()
 	if a.exprsPrepared {
 		return nil
 	}
-	return PrepareExpressions(a)
+	if err := PrepareExpressions(a); err != nil {
+		return err
+	}
+	if err := prepareLoopAndMode(a); err != nil {
+		a.exprsPrepared = false
+		return err
+	}
+	return nil
 }
 
 // bindRunAmbient binds the ambient roots of a run: `config` (the allow-listed

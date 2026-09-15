@@ -184,8 +184,9 @@ func (p *Parser) v1FilterLambdaAhead() bool {
 // parseAttributeArgValue parses one named attribute argument's value.
 // @trigger's filter= takes the edition-2026 lambda @filter takes (memql#5364),
 // stored as the node; any other value is the retired raw-text filter and is
-// refused, as a raw-text @filter is. Every other argument takes the attribute
-// value grammar.
+// refused, as a raw-text @filter is. @loop's until= takes the same lambda
+// (epic memql#5380), and any other value is refused as loop_until_form
+// (loop_mode.go). Every other argument takes the attribute value grammar.
 func (p *Parser) parseAttributeArgValue(attrName, argName string, argTok Token) (any, error) {
 	if attrName == AttrTrigger && argName == "filter" {
 		if p.v1FilterLambdaAhead() {
@@ -196,6 +197,13 @@ func (p *Parser) parseAttributeArgValue(attrName, argName string, argTok Token) 
 			return lam, nil
 		}
 		return nil, v1Retired(argTok, ruleFilterAnnotation)
+	}
+	if attrName == AttrLoop && argName == "until" {
+		lam, err := p.parseLoopUntil()
+		if err != nil {
+			return nil, err
+		}
+		return lam, nil
 	}
 	return p.parseValue()
 }

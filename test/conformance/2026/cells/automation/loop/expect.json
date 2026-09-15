@@ -1,0 +1,46 @@
+{
+  "cases": [
+    {
+      "file": "permits-a-converging-self-cycle.memql",
+      "verdict": "load_ok",
+      "note": "The automation moves the ticket that triggered it, and the update fires it again: a deliberate cycle. The @filter holds until's negation, so the write that makes the ticket done is the last one it fires for, and maxDepth bounds the chain whatever happens."
+    },
+    {
+      "file": "a-filter-that-does-not-exclude-until.memql",
+      "verdict": "refuse_load",
+      "code": "loop_until_not_in_filter",
+      "message": "@filter(row => row.status == \"open\" && row.status != \"done\")",
+      "note": "The refusal prints the @filter that would stop the loop: the author's own, and until's negation."
+    },
+    {
+      "file": "a-max-depth-of-zero.memql",
+      "verdict": "refuse_load",
+      "code": "loop_max_depth_range",
+      "message": "@loop maxDepth=0 is outside 1 to 16, the depth cap (MEMQL_AUTOMATION_MAX_CHAIN_DEPTH)"
+    },
+    {
+      "file": "a-misspelled-key.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_key",
+      "message": "@loop on an automation has no key depth"
+    },
+    {
+      "file": "an-until-that-is-not-a-lambda.memql",
+      "verdict": "refuse_parse",
+      "code": "loop_until_form",
+      "message": "@loop's until= takes a lambda of one parameter over the triggering row"
+    },
+    {
+      "file": "on-a-scheduled-automation.memql",
+      "verdict": "refuse_load",
+      "code": "loop_not_event_triggered",
+      "message": "only an event-triggered automation can be in one"
+    },
+    {
+      "file": "with-a-positional-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@loop on an automation takes keyword arguments"
+    }
+  ]
+}

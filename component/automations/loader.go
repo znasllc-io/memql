@@ -351,6 +351,11 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 	if err := prepareExpressions(&automation, l.registry); err != nil {
 		return nil, err
 	}
+	// @loop and @mode (epic memql#5380), judged against the trigger filter
+	// prepareExpressions just parsed (loop_prepare.go).
+	if err := prepareLoopAndMode(&automation); err != nil {
+		return nil, err
+	}
 
 	// G2 (memql#2364, ADR Decision 3): for args-block automations, reject
 	// shadowing and unresolvable bare identifiers at compile time -- both the
