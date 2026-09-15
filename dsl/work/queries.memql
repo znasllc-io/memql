@@ -69,6 +69,23 @@ query run workRunsForAutomation {
   shape   workRunFull
 }
 
+/// The latest 50 runs the loop protection stopped, newest first, for the automationLoopStops
+/// builtin. @serverOnly because caller scoping cannot work here: a refused run is a system run with
+/// a present-and-empty owner, so an actor.userId conjunct matches none of them, and a stop is a
+/// fact about the cluster's wiring rather than about a person. The builtin checks the caller's
+/// capability first and then reads this as the engine, under its own synthetic cluster actor, and
+/// its narrow shape keeps the input, variables and triggering event out of the read.
+@serverOnly
+@actor
+query run workRunsStoppedByLoops {
+  // "loop_depth_exceeded" is work.TerminalLoopDepthExceeded (component/work/terminal.go),
+  // spelled out because the DSL cannot name a Go constant.
+  filter   row => row.errorCode == "loop_depth_exceeded" && actor.isClusterOwner == true
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape    workRunLoopStop
+}
+
 /// Every model call of one run, for replay. Bounded by the run. @serverOnly: replay reads the
 /// journal as the engine, and the rows of a system run have no owner for actor.userId to match.
 @serverOnly

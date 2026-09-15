@@ -63,6 +63,19 @@ shape run workRunFull {
   summary
 }
 
+/// What a run the loop protection stopped says about the stop, and nothing else: the fields the
+/// automationLoopStops builtin projects from (outcome holds the loop record), with the input, the
+/// variables and the triggering event deliberately left out.
+@row
+shape run workRunLoopStop {
+  row.id
+  row.createdAt
+  automationName
+  errorCode
+  finishedAt
+  outcome
+}
+
 /// Every step field.
 @row
 shape step workStepFull {

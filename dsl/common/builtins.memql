@@ -572,6 +572,34 @@ builtin dateKeyInTimezone {
 @description("List every registered concept with its data state (mirror | origin | native), the system where its changes are made, and the connectors it depends on. Produced from the live concept registry, never persisted. Feeds the portal's Data origins page.")
 builtin dataOrigins { }
 
+// ---- The automation graph and the loops it stopped (epic memql#5380) ----
+//
+// The two reads behind MemQL OS's Cluster > Automations section, and @sdk for
+// the reason dataOrigins is: a typed method keeps that section from
+// hand-building call strings. Neither is a row read with a tier to gate it --
+// the graph is a projection of the answering node's scheduler, and the stops
+// are read by the engine under its own cluster actor, because a system run's
+// row has no owner a caller could be matched against -- so the capability on
+// each IS the wall, enforced before the executor runs.
+
+/// The static loop graph over the automations this node registered, one v1:platform:automationNode
+/// row per automation: its trigger, filter, writes, the calls the graph cannot see into, its @loop
+/// and @mode, the automations it starts and why, its stratum, and the cycle it lies on. Built once
+/// per registered set and never persisted. Carries no run and no payload.
+@sdk
+@executor("automationGraph")
+@requiresCapability("read", "app:cluster/automations")
+builtin automationGraph { }
+
+/// The latest 50 runs the loop protection stopped, newest first, one v1:platform:automationLoopStop
+/// row each: the chain of automation names and run ids that led to the stop, the bound it passed,
+/// and when. Read by the engine under its own cluster actor and projected without payloads -- no
+/// input, variables or triggering event reaches the reply.
+@sdk
+@executor("automationLoopStops")
+@requiresCapability("read", "app:cluster/automations")
+builtin automationLoopStops { }
+
 // ---- Local models on the fleet (epic memql#4676) ----
 //
 // Here with the other registry-projecting readers; the row SHAPES live in

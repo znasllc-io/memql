@@ -311,6 +311,13 @@ func (a *App) engineAndBus() {
 	// node is the truth rather than a gap.
 	a.engine.SetAutomationCataloger(a.automationScheduler)
 
+	// The same seam, for the automation graph MemQL OS's Cluster >
+	// Automations section draws (memql#5384): the static loop graph over the
+	// automations this scheduler registered, built once per registered set.
+	// Unwired, the automationGraph builtin refuses rather than answering an
+	// empty graph.
+	a.engine.SetAutomationGraphSource(a.automationScheduler)
+
 	a.Dependencies = append(a.Dependencies, a.engine)
 	a.Dependencies = append(a.Dependencies, a.automationScheduler)
 

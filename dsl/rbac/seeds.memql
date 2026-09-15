@@ -337,6 +337,12 @@ seed capability cap-owner-read-app-cluster-logs { roleSlug: "owner"  verb: "read
 seed capability cap-developer-read-app-cluster-logs { roleSlug: "developer"  verb: "read"  resourceType: "app:cluster/logs"  predefined: true }
 @description("admin: open the logs section of the cluster app -- reproduces the OS registry floor min admin (memql#5300).")
 seed capability cap-admin-read-app-cluster-logs { roleSlug: "admin"  verb: "read"  resourceType: "app:cluster/logs"  predefined: true }
+@description("owner: open the automations section of the cluster app -- the automation graph and the loops it stopped, the capability automationGraph and automationLoopStops require (memql#5384).")
+seed capability cap-owner-read-app-cluster-automations { roleSlug: "owner"  verb: "read"  resourceType: "app:cluster/automations"  predefined: true }
+@description("developer: open the automations section of the cluster app -- the automation graph and the loops it stopped, the capability automationGraph and automationLoopStops require (memql#5384).")
+seed capability cap-developer-read-app-cluster-automations { roleSlug: "developer"  verb: "read"  resourceType: "app:cluster/automations"  predefined: true }
+@description("admin: open the automations section of the cluster app -- the automation graph and the loops it stopped, the capability automationGraph and automationLoopStops require (memql#5384).")
+seed capability cap-admin-read-app-cluster-automations { roleSlug: "admin"  verb: "read"  resourceType: "app:cluster/automations"  predefined: true }
 
 // ---- app:concepts (registry floor: min admin) ----
 @description("owner: open the concepts app -- reproduces the OS registry floor min admin (memql#5300).")
