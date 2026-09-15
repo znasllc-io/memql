@@ -58,8 +58,12 @@ func appendAutomationGraph(m *model.Model, g *automations.LoopGraph) error {
 				delete(attrs, key)
 			}
 		}
-		file := strings.TrimSuffix(strings.TrimPrefix(a.Origin, "unified:"), ":"+a.Name)
-		m.Nodes = append(m.Nodes, model.Node{ID: model.AutomationID(a.Name), Kind: model.KindAutomation, Name: a.Name, Parent: cluster, Source: &model.SourceRef{File: file}, Attrs: attrs})
+		var source *model.SourceRef
+		if strings.HasPrefix(a.Origin, "unified:") {
+			file := strings.TrimSuffix(strings.TrimPrefix(a.Origin, "unified:"), ":"+a.Name)
+			source = &model.SourceRef{File: "dsl/" + file}
+		}
+		m.Nodes = append(m.Nodes, model.Node{ID: model.AutomationID(a.Name), Kind: model.KindAutomation, Name: a.Name, Parent: cluster, Source: source, Attrs: attrs})
 		m.Edges = append(m.Edges, model.Edge{From: cluster, To: model.AutomationID(a.Name), Kind: model.EdgeContains})
 	}
 	for _, e := range g.Edges {

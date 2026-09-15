@@ -23,7 +23,7 @@ func TestAppendAutomationGraph(t *testing.T) {
 		t.Fatalf("graph not preserved: %+v", m)
 	}
 	first := m.Nodes[1]
-	if first.ID != model.AutomationID("first") || first.Parent != m.Nodes[0].ID || first.Attrs["mode"] != "queued max=3" || first.Source.File != "demo/automations.memql" {
+	if first.ID != model.AutomationID("first") || first.Parent != m.Nodes[0].ID || first.Attrs["mode"] != "queued max=3" || first.Source.File != "dsl/demo/automations.memql" {
 		t.Fatalf("first node: %+v", first)
 	}
 	e := m.Edges[2]

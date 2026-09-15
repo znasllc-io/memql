@@ -2095,7 +2095,12 @@ or sub-automation, or assign an intrinsic or nested field. These restrictions
 are checked through transitive calls. The adjusted row produces one stored
 version and the normal write events, with no separate automation run row.
 
-The **Cluster → Automations** section in MemQL OS shows the graph, filters,
+An activated authored before-write automation applies only to its author's own
+writes. It runs with client authority and may adjust public payload fields;
+server-set, ownership, account-scope and relationship fields are protected.
+Activation and deactivation take effect without restarting the writing engine.
+
+The **Cluster → Automations** section in MemQL OS shows loaded platform automations, their graph, filters,
 bounds, execution modes and recent depth-related stops. Operators can inspect
 the stopped chain to find the write that re-fired the automation.
 
