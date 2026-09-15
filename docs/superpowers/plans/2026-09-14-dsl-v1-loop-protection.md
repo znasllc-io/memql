@@ -225,44 +225,59 @@ A loader with no function registry reports the check as not run (a log line plus
 - It is read on demand with `useReading`, not a live feed, because nothing broadcasts the graph.
 - It is drawn as plain SVG, one column per stratum, with the frontend-design skill (Task 12). No WebGL.
 
-### D-M. The before-write body (Phase B, reviewed with memql-22 before it is written)
+### D-M. The before-write body (Phase B; shape reviewed by the epic-3 session on 2026-09-14)
 
-The surface is one statement block, which is then the automation's ONLY statement:
+The timing goes on the TRIGGER, because it is WHEN the automation runs (D15 keeps triggers as annotations). A `before write { }` wrapper block is refused, as epic 3's owner ruling refused the `body { }` wrapper. The body is the ordinary statement list. The one new statement kind is the field write `row.<field> = <expr>`: `:=` binds a name, `=` writes a field of the row being written.
 
 ```memql
-@trigger(event="node.created", concept="v1:forge:request")
-@filter(row => args.firstVersion == true)
+@trigger(before="create", concept="v1:forge:request")
 automation routeRequest {
-  args {
-    firstVersion    bool
-    submitterRole   any
-    submitterUserId any
-  }
-  before write {
-    decided := logic requestRouteStatus(submitterRole: args.submitterRole)
-    row.status = decided
-    if decided == "queued" {
-      row.approvedByUserId = args.submitterUserId
-    }
+  decided := logic requestRouteStatus(submitterRole: row.submitterRole)
+  row.status = decided
+  if decided == "queued" {
+    row.approvedByUserId = row.submitterUserId
   }
 }
 ```
 
-**What the block may contain.** Epic 3's statements, restricted to:
+**`@trigger(before=..., concept=...)`.** `before` is `"create"`, `"update"` or `"write"`. This is a new `@trigger` key: the registry's `triggerKeys` gains `before`, and `before` excludes `event` and `schedule`.
+- `create`: the write materializes the row's first version.
+- `update`: a prior version exists (an `update()`, or an insert onto an existing id).
+- `write`: both.
+- An optional `@filter(row => ...)` is evaluated against the incoming row, before the body runs.
+
+**What the body may contain:**
 - binds to an expression, or to a `logic`/`query` call whose transitive footprint writes nothing
 - `if` / `else`
-- `return` (ends the block)
-- the assignment `row.<field> = <expr>`, legal only here
+- `return`, which ends the body
+- field writes `row.<field> = <expr>`
 
-`<field>` must be a declared top-level field of the trigger concept. Intrinsics and nested paths are refused.
+`row` is a root only in a before-write automation. It is the row as it will be written: the read-merged payload plus this write's delta, with the earlier field writes applied. `args`, when declared, bind from that same payload.
 
-**What is refused** (`before_write_writes`, naming the call): a mutation, a builtin, an action, an automation or a publish. So a before-write body that writes another concept refuses at load, per the acceptance criteria.
-
-**What `row` reads.** The row as it will be written: the read-merged payload plus this write's delta, with earlier assignments applied.
+**Refusal codes:**
+- `before_write_writes`, naming the call: a mutation, builtin, action, automation or publish anywhere in the body. So a before-write body that writes another concept refuses at load, per the acceptance criteria.
+- `before_write_field`: an intrinsic, a nested path, or a field the trigger concept does not declare.
+- `before_write_outside`: a field write in an automation that is not before-write.
+- `before_write_trigger`: `before` combined with `event` or `schedule`, or `before` with no `concept`.
 
 **When it runs.**
-- In-process, inside `executeWrite` on the node doing the write, after the read-merge and before schema validation. It runs on every write whose concept and kind match the trigger (created: every write; updated: update writes) and whose `@filter` holds on the incoming row. Matching automations run in name order.
-- One row version is written and one event published. There is no `v1:work:run` row, because that would be a second write.
+- In-process, inside `executeWrite` on the node doing the write, after the read-merge and before schema validation. It runs on every write to the concept whose kind matches `before` and whose `@filter` holds. Matching automations run in name order.
+- One row version is written and one event is published. There is no `v1:work:run` row, because that would be a second write.
+- The automation is never subscribed on the bus.
+
+**The breadth of a new statement kind.** It touches every walker that switches on `ast.BodyStatementKinds`:
+- `ast/body_test.go` and `compiler/body_compile_test.go` pin the set.
+- `compiler/body_scope.go` and the body compile.
+- `component/memql/callgraph` (`statementConditions` and the D14 table).
+- `component/automations` (`validateSteps`, step types).
+- sense (`complete_statements.go`), memql-lsp, and dslspec (lexicon, constructs, nextrules).
+- `grammar_surface_drift_test.go` (a corpus entry per new legal form) and the GrammarVersion digest.
+- `component/language/tiers`: the field-write value is a new expression position. It needs a manifest row plus its `writtenAs` text (`tiers/docs_test.go`), then `-update-docs` for the memql.md region.
+
+Parser hook points:
+- `v1_body.go` `parseV1Statement` sends an identifier to `parseV1Assign`. `row` followed by `.` parses the member path and requires `=`.
+- `body_scope.go` adds `row` to the roots when the construct is before-write, and refuses a field write elsewhere.
+- The body compile emits a new step type carrying the field plus an expression leaf.
 
 **Journal shape: settled in Task 14, and the PR says which.**
 - The adjusted row carries the adjustment in its row metadata (`component/metadata` LineageMeta, if that column exists): automation name plus fields set.
@@ -1113,23 +1128,21 @@ automation cycle not covered by @loop: routeRequest -> routeRequest
 
 ## Task 14: The before-write body (Phase B, #5383)
 
-- [ ] **Step 1:** Send memql-22 the D-M shape, meaning the statement, its position in `v1_body.go`, and the scope and compile rules in `body_scope.go` / `body_compile.go`, and wait for the review. Record their answer in the checkpoint.
-- [ ] **Step 2: Grammar.**
-  - `before write { ... }` is a statement legal only as an automation's single statement.
-  - `row.<field> = <expr>` is legal only inside it.
-  - Refusals:
-    - `before_write_not_alone`: another statement beside it
-    - `before_write_assign_outside`: an assignment outside it
-    - `before_write_field`: an intrinsic, a nested path, or an undeclared field
-    - `before_write_writes`: a mutation, builtin, action, automation or publish, or a logic or query whose footprint writes
-  - Corpus cells: `cells/automation/before-write/`, plus `negative/automation/` for each code.
-- [ ] **Step 3: Compile.** The statement compiles to `Automation.BeforeWrite *BeforeWriteBody` (the statement list plus assignments). It is excluded from the event subscription: a before-write automation is not subscribed on the bus.
+- [ ] **Step 1:** DONE 2026-09-14: the epic-3 session reviewed the shape, and D-M records the answer (timing on the trigger, no wrapper block).
+- [ ] **Step 2: Grammar (D-M).**
+  - The `triggerKeys` registry gains `before` (`"create"|"update"|"write"`). `before` excludes `event` and `schedule` and requires `concept`.
+  - The field-write statement kind `row.<field> = <expr>` (`ast.FieldWriteStatement{Field string; Value ExpressionNode; Span}`, kind `"fieldWrite"` in `BodyStatementKinds`) is parsed in `parseV1Assign`'s identifier path.
+  - `row` is a root in a before-write automation.
+  - Update every walker D-M lists, the drift corpus entries, and the tiers manifest row plus `writtenAs`.
+  - Refusals: `before_write_writes`, `before_write_field`, `before_write_outside`, `before_write_trigger`.
+  - Corpus cells: `cells/automation/trigger/` gains the `before=` cases, plus a `negative/automation/` case for each code.
+- [ ] **Step 3: Compile.** A before-write automation compiles to `Automation.BeforeWrite = &BeforeWriteConfig{On: "create"|"update"|"write", Concept}` with its steps, where a field write is a new step type `fieldWrite {field, value leaf}`. The scheduler never subscribes it.
 - [ ] **Step 4: Runtime.**
   - `component/memql/before_write.go` holds `SetBeforeWriteHooks(map[concept][]BeforeWriteHook)` on the engine.
   - `executeWrite` calls the hooks for the written concept and write kind after the read-merge and before validation. Each hook evaluates its filter on the incoming row, runs the statements through epic 3's in-process evaluator (`memql.EvalExpr` over a scope with `row` and `args` bound from the merged payload), and applies assignments to the payload.
   - Every node type's boot must register them (check which `app/build_*.go` run `engineAndBus`); add a test that a write on a node with automations loaded applies the hook.
 - [ ] **Step 5:** The journal shape per D-M, the metric `memql_automation_before_writes_total{automation}`, and the static graph: a before-write automation has no out-edges (its writes are the triggering row's own version), and the check refuses `before_write_writes`.
-- [ ] **Step 6: Forge.** `routeRequest` becomes the D-M form: its advance moves into the before-write body. The `routed` audit event moves to a first-version automation `recordRouted` that inserts the `requestEvent`, a different concept, so no cycle.
+- [ ] **Step 6: Forge.** `routeRequest` becomes the D-M form (`@trigger(before="create", concept="v1:forge:request")`, field writes for `status` and `approvedByUserId`); its advance mutation call goes. The `routed` audit event moves to a first-version automation `recordRouted` (`@trigger(event="node.created", concept="v1:forge:request")`, `@filter(row => args.firstVersion == true)`), which inserts the `requestEvent`, a different concept, so no cycle.
   - Test: submitting a request publishes exactly ONE `graph.node.created.v1:forge:request` event (capture the bus), the stored row carries the routed status, and the `requestEvent` row exists.
   - Test: a before-write body calling a mutation on another concept refuses at load (`before_write_writes`), which is the acceptance.
 - [ ] **Step 7:** Bump the grammar on top of epic 3's: `GrammarVersion` gets the new slug and digest, `EditorRelease` moves to epic 3's release plus one minor, and `package.json`, the CHANGELOG entry and the drift and parity tests move with it. Run `make docs-matrix` if the matrix changes.
