@@ -24,6 +24,7 @@ func TestBodyRule_LogicWithoutBodyIsTheStatementForm(t *testing.T) {
 // A logic WITH the retired `body { }` wrapper is flagged, as the parser
 // refuses it (body_block_retired).
 func TestBodyRule_LogicWithBodyFlagged(t *testing.T) {
+	// memqlmigrate:keep -- the retired body wrapper is the case.
 	src := `logic decideThing {
   args { x string! }
   body {
@@ -39,6 +40,7 @@ func TestBodyRule_LogicWithBodyFlagged(t *testing.T) {
 // A query WITH a `body { }` block is flagged; a query is a representative
 // procedural kind.
 func TestBodyRule_QueryWithBodyFlagged(t *testing.T) {
+	// memqlmigrate:keep -- the forbidden body block is the case.
 	src := `query participant queryParticipants {
   args { spaceId string @required }
   body {
@@ -55,6 +57,7 @@ func TestBodyRule_QueryWithBodyFlagged(t *testing.T) {
 // flows through the authoring-sandbox cross-reference pass): a spec carrying a
 // `body { }` block is flagged.
 func TestBodyRule_SpecWithBodyFlagged(t *testing.T) {
+	// memqlmigrate:keep -- the forbidden body block is the case.
 	src := `spec participant specIsHuman {
   body {
     return participantType == "human"
@@ -69,6 +72,7 @@ func TestBodyRule_SpecWithBodyFlagged(t *testing.T) {
 // A DECLARATIVE construct (concept) carrying a nested object field named
 // `body` is NOT flagged -- a field named body is not a body block.
 func TestBodyRule_DeclarativeBodyFieldNotFlagged(t *testing.T) {
+	// memqlmigrate:keep -- a concept field named body is the case, not a body block.
 	src := `concept message {
   body {
     text string @required

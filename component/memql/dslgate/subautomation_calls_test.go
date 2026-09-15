@@ -10,8 +10,8 @@ import (
 //
 // The rule: `automation <name>( ... )` names an automation, and a name that
 // resolves to nothing is a LOAD problem rather than a mid-run one. These tests
-// pin the rule, the three declaration forms it must recognise, and the two
-// mistakes that would make it either useless or an outage.
+// pin the rule, the declaration forms it must recognise, and the two mistakes
+// that would make it either useless or an outage.
 
 // subGateOn runs the sub-automation gate over an in-memory corpus. Paths are
 // sorted before the scan, matching every real caller (both entry points source
@@ -123,18 +123,18 @@ func TestSubAutomationResolvesAcrossFiles(t *testing.T) {
 	}
 }
 
-// TestEveryDeclarationFormIsRecognised. Three forms are live in the tree, and a
-// declaration index that knows only `automation NAME {` produces a CONFIDENT
-// FALSE POSITIVE on the other two -- a refused boot naming an automation that
-// is right there in the file.
+// TestEveryDeclarationFormIsRecognised. Two forms parse, and a declaration
+// index that knows only `automation NAME {` produces a CONFIDENT FALSE
+// POSITIVE on the other -- a refused boot naming an automation that is right
+// there in the file. (The terse `automation NAME @trigger(...) => logic X` is
+// retired: the parser refuses it, body_terse_retired.)
 func TestEveryDeclarationFormIsRecognised(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		decl string
 	}{
 		{"strict", "automation calleeVerb {\n  s := logic noop(x: 1)\n}\n"},
-		{"loose brace on the next line", "automation calleeVerb\n{\n  step s {\n    logic noop( x: 1 )\n  }\n}\n"},
-		{"terse", "automation calleeVerb @trigger(event=\"a.b\") => logic noop\n"},
+		{"loose brace on the next line", "automation calleeVerb\n{\n  s := logic noop(x: 1)\n}\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := subGateOn(t, map[string]string{
@@ -142,8 +142,8 @@ func TestEveryDeclarationFormIsRecognised(t *testing.T) {
 				"b/automations.memql": "automation caller {\n  s := automation calleeVerb(x: 1)\n}\n",
 			})
 			if len(got) != 0 {
-				t.Fatalf("violations = %v, want none -- the %s declaration form is live in the "+
-					"tree, and not recognising it refuses a boot over correct DSL", got, tc.name)
+				t.Fatalf("violations = %v, want none -- the %s declaration form parses, "+
+					"and not recognising it refuses a boot over correct DSL", got, tc.name)
 			}
 		})
 	}
@@ -200,7 +200,7 @@ automation third {
 		t.Fatalf("violations = %v, want 1", got)
 	}
 	if got[0].Construct != "third" {
-		t.Errorf("construct = %q, want \"third\" -- the terse declaration between them must not "+
+		t.Errorf("construct = %q, want \"third\" -- the declarations between them must not "+
 			"be skipped when the enclosing automation is resolved", got[0].Construct)
 	}
 }

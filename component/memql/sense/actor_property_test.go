@@ -23,7 +23,7 @@ func TestActorUnknownPropertyRule(t *testing.T) {
 		"valid-now":       "@actor\nquery todo todos {\n  filter row => row.dueAt < actor.now\n}\n",
 		"prose-rank":      "// governance compares actor.rank to target.rank\nquery todo todos {\n  filter row => row.done == false\n}\n",
 		"string-prose":    "@description(\"reads actor.displayName internally\")\nquery todo todos {\n  filter row => row.done == false\n}\n",
-		"event-stamp":     "@trigger(event=\"x.y\")\nautomation onThing {\n  step run {\n    who := event.actor.id\n  }\n}\n",
+		"event-stamp":     "logic onThing {\n  args {\n    event object!\n  }\n  return args.event.actor.id\n}\n",
 	} {
 		if got := actorUnknownPropertyRule(clean); len(got) != 0 {
 			t.Errorf("%s: want no diagnostics, got %+v", name, got)

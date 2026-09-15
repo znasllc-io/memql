@@ -16,8 +16,8 @@ import (
 // at runtime with `unsupported expression node *memql.LiteralValueNode`.
 //
 // Since edition 2026 such a body no longer reaches the literal root at all: a
-// logic that returns an expression runs on the LogicRunner, which evaluates
-// it with EvalExpr (logic_body_v1.go). The engine-side handling below stays,
+// logic's statement body runs on the LogicRunner, which evaluates a returned
+// expression with EvalExpr. The engine-side handling below stays,
 // because a bare literal query still folds to one
 // (TestExecute_BareLiteralReturnsScalar); the end-to-end logic reproduction
 // went with the path it reproduced.

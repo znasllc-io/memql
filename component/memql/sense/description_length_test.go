@@ -108,19 +108,19 @@ func TestDescriptionLengthRule(t *testing.T) {
 	t.Run("anchors-on-declaration-not-call-site", func(t *testing.T) {
 		src := "logic caller {\n" +
 			"  args {\n    a string @required\n  }\n" +
-			"  body {\n    return lengthProbe(a: args.a)\n  }\n" +
+			"  return logic lengthProbe(a: args.a)\n" +
 			"}\n\n" +
 			"/// " + long + "\n" +
 			"logic lengthProbe {\n" +
 			"  args {\n    a string @required\n  }\n" +
-			"  body {\n    return args.a ?? \"\"\n  }\n" +
+			"  return args.a ?? \"\"\n" +
 			"}\n"
 		file := parseWithDocs(t, src)
 		diags := descriptionLengthRule(file, src)
 		if len(diags) != 1 {
 			t.Fatalf("want exactly one hint, got %+v", diags)
 		}
-		declLine := 1 + strings.Count(src[:strings.Index(src, "logic lengthProbe")], "\n")
+		declLine := 1 + strings.Count(src[:strings.Index(src, "logic lengthProbe {")], "\n")
 		if diags[0].Range.Start.Line != declLine {
 			t.Errorf("hint anchors at line %d; the declaration is at line %d (must not anchor on the call site)", diags[0].Range.Start.Line, declLine)
 		}
@@ -148,7 +148,7 @@ func TestDescriptionLengthRule(t *testing.T) {
 			"    /// " + long + "\n" +
 			"    a string @required\n" +
 			"  }\n" +
-			"  body {\n    return args.a ?? \"\"\n  }\n" +
+			"  return args.a ?? \"\"\n" +
 			"}\n"
 		file := parseWithDocs(t, src)
 		diags := descriptionLengthRule(file, src)

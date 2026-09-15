@@ -9,13 +9,13 @@ import (
 )
 
 // funcCallSource builds a logic body whose cursor sits just after `name(` on
-// line 3, so analyzeCursorContext reports ContextFuncCallArgs with ParentFunc
+// line 2, so analyzeCursorContext reports ContextFuncCallArgs with ParentFunc
 // == name. Returns the source, the 1-based cursor line, and column.
 func funcCallSource(name string) (string, int, int) {
-	line3 := "    return " + name + "("
-	src := "logic wp8 {\n  body {\n" + line3 + "\n  }\n}"
-	// Column is 1-based and points just past the '(' (== len(line3)+1).
-	return src, 3, len(line3) + 1
+	line2 := "  return " + name + "("
+	src := "logic wp8 {\n" + line2 + "\n}"
+	// Column is 1-based and points just past the '(' (== len(line2)+1).
+	return src, 2, len(line2) + 1
 }
 
 func TestSignatureHelp_UserFunctionFromArgsSchema(t *testing.T) {
@@ -63,9 +63,9 @@ func TestSignatureHelp_ActiveParameterTracksComma(t *testing.T) {
 	}}
 	s := New(reg)
 	// Cursor after `f(x, ` -> second argument (index 1).
-	line3 := "    return f(x, "
-	src := "logic wp8 {\n  body {\n" + line3 + "\n  }\n}"
-	res := s.SignatureHelp(src, 3, len(line3)+1)
+	line2 := "  return f(x, "
+	src := "logic wp8 {\n" + line2 + "\n}"
+	res := s.SignatureHelp(src, 2, len(line2)+1)
 	if res == nil {
 		t.Fatal("expected a signature result")
 	}
@@ -214,18 +214,18 @@ func TestSignatureHelpContainsIsTheTraversal(t *testing.T) {
 // argument already is the match.
 func TestSignatureHelpContainsHighlightsTheMatch(t *testing.T) {
 	s := New(nil)
-	for line3, want := range map[string]int{
-		`    return contains(`:            0,
-		`    return contains("members", `: 1,
-		`    return contains(p => p.`:     1,
+	for line2, want := range map[string]int{
+		`  return contains(`:            0,
+		`  return contains("members", `: 1,
+		`  return contains(p => p.`:     1,
 	} {
-		src := "logic x {\n  body {\n" + line3 + "\n  }\n}"
-		res := s.SignatureHelp(src, 3, len(line3)+1)
+		src := "logic x {\n" + line2 + "\n}"
+		res := s.SignatureHelp(src, 2, len(line2)+1)
 		if res == nil {
-			t.Fatalf("no signature help at %q", line3)
+			t.Fatalf("no signature help at %q", line2)
 		}
 		if res.ActiveParameter != want {
-			t.Errorf("at %q ActiveParameter = %d, want %d", line3, res.ActiveParameter, want)
+			t.Errorf("at %q ActiveParameter = %d, want %d", line2, res.ActiveParameter, want)
 		}
 	}
 }

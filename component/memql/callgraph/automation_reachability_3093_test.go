@@ -50,21 +50,15 @@ automation probe {
 	}
 }
 
-// TestCheckFile_ReachesBodilessAutomationFilter is the other half of
-// reachability, and the half that a restrictedKinds entry alone does NOT buy.
-//
-// The braced-header matcher anchors on `{`. Ten of the tree's 31 walked
-// automations are the bodiless `automation <name> @trigger(...) => logic <name>`
-// delegation, and @filter -- one of the three condition surfaces the P4 rules
-// inspect -- is where their conditions live. Two of the tree's three live
-// @filter annotations sit on that form. Without the bodiless matcher the arm
-// reports "reachable" while skipping the majority of the tree's automation
-// conditions, which is memql#3043's failure mode reproduced inside the fix for
-// memql#3093.
-func TestCheckFile_ReachesBodilessAutomationFilter(t *testing.T) {
+// TestCheckFile_ReachesAutomationFilter is the other half of reachability:
+// @filter -- one of the three condition surfaces the P4 rules inspect, and
+// the one a trigger's relevance check lives in -- must be inspected through
+// CheckFile as well as a statement's if. Reporting the arm "reachable" while
+// skipping a surface is memql#3043's failure mode reproduced inside the fix
+// for memql#3093.
+func TestCheckFile_ReachesAutomationFilter(t *testing.T) {
 	src := `@trigger(event="node.created", concept="v1:data:record")
 @filter(row => (row.kind ?? "regular") == "daily")
-@trigger(schedule="0 0 2 * * *")
 automation conflictDetection {
   logic conflictDetection(event: event)
 }
@@ -72,7 +66,7 @@ automation conflictDetection {
 
 	findings := CheckFile("data/automations.memql", src, noSideEffects)
 	if !containsRule(findings, "automation-condition-builtin") {
-		t.Fatalf("a bodiless `=> logic` automation's @filter condition must be inspected; got %d findings: %v", len(findings), ruleNames(findings))
+		t.Fatalf("an automation's @filter condition must be inspected; got %d findings: %v", len(findings), ruleNames(findings))
 	}
 	for _, f := range findings {
 		if f.Construct != "conflictDetection" {
@@ -81,24 +75,21 @@ automation conflictDetection {
 	}
 }
 
-// TestSplitConstructs_AttributesAnnotationsToTheRightAutomation pins the
-// interleaving hazard the two matchers create. Each construct's text is
-// "everything since the previous construct ended", so if the two shapes were
-// collected without being re-sorted into SOURCE order, a braced construct's
-// preamble would swallow an earlier bodiless declaration -- and that
-// declaration's @filter would be reported against the wrong construct.
-// dsl/identity/automations.memql interleaves both shapes, so this is the real
-// tree's layout, not a synthetic one.
+// TestSplitConstructs_AttributesAnnotationsToTheRightAutomation pins source
+// order. Each construct's text is "everything since the previous construct
+// ended", so an annotation belongs to the declaration it precedes: the first
+// automation's @filter must be reported against it, never against the second.
+// dsl/identity/automations.memql carries eight automations in one file, so
+// this is the real tree's layout, not a synthetic one.
 func TestSplitConstructs_AttributesAnnotationsToTheRightAutomation(t *testing.T) {
-	src := `@trigger(schedule="0 5 9 * * *")
+	src := `@trigger(event="node.created", concept="v1:data:record")
 @filter(row => (row.kind ?? "regular") == "daily")
-@trigger(schedule="0 5 9 * * *")
-automation firstBodiless {
-  logic firstBodiless(event: event)
+automation first {
+  logic first(event: event)
 }
 
 @trigger(event="node.created", concept="v1:identity:user")
-automation secondBraced {
+automation second {
   apply := logic doThing(event: event)
 }
 `
@@ -106,26 +97,26 @@ automation secondBraced {
 	if len(constructs) != 2 {
 		t.Fatalf("want 2 automations split, got %d: %+v", len(constructs), names(constructs))
 	}
-	if constructs[0].name != "firstBodiless" || constructs[1].name != "secondBraced" {
+	if constructs[0].name != "first" || constructs[1].name != "second" {
 		t.Fatalf("wrong names/order: %v", names(constructs))
 	}
 	// The @filter belongs to the FIRST declaration and must not leak into the
 	// second's text.
 	if !strings.Contains(constructs[0].text, "@filter") {
-		t.Error("the bodiless declaration lost its own @filter annotation")
+		t.Error("the first declaration lost its own @filter annotation")
 	}
 	if strings.Contains(constructs[1].text, "@filter") {
-		t.Error("the braced declaration absorbed the previous declaration's @filter -- source-order interleaving is broken")
+		t.Error("the second declaration absorbed the previous declaration's @filter -- source order is broken")
 	}
 
 	// And the finding lands on the right construct.
 	findings := CheckFile("identity/automations.memql", src, noSideEffects)
 	if !containsRule(findings, "automation-condition-builtin") {
-		t.Fatalf("interleaved file: want the bodiless @filter finding, got %v", ruleNames(findings))
+		t.Fatalf("want the first automation's @filter finding, got %v", ruleNames(findings))
 	}
 	for _, f := range findings {
-		if f.Rule == "automation-condition-builtin" && f.Construct != "firstBodiless" {
-			t.Errorf("automation-condition-builtin attributed to %q, want %q", f.Construct, "firstBodiless")
+		if f.Rule == "automation-condition-builtin" && f.Construct != "first" {
+			t.Errorf("automation-condition-builtin attributed to %q, want %q", f.Construct, "first")
 		}
 	}
 }
@@ -135,18 +126,17 @@ automation secondBraced {
 // sanctions. This is what lets the tree's own 31 automations come back clean
 // and be believed.
 func TestCheckFile_SanctionedAutomationShapesAreClean(t *testing.T) {
-	src := `@trigger(event="node.updated", concept="v1:identity:user", partition="*")
-@filter(row => event.node.payload.preferences.computerUseEnabled == false)
+	src := `@trigger(event="node.updated", concept="v1:identity:user")
+@filter(row => row.preferences.computerUseEnabled == false)
 automation killSwitchSuspendsRunningPlans {
-  step decide {
-    logic killSwitchSuspendsRunningPlans ( event: event )
-  }
-  step apply {
-    forEach item in decide.nodes() {
-      updatePlanStatus ( planId: item.id, status: "paused" )
-    }
+  decide := logic killSwitchSuspendsRunningPlans(event: event)
+  for item in decide {
+    mutation updatePlanStatus(planId: item.id, status: "paused")
   }
 }`
+	if _, ok := statementConditions(src); !ok {
+		t.Fatal("the sanctioned shape must parse, or its conditions are never judged")
+	}
 	if findings := CheckFile("worker/automations.memql", src, noSideEffects); len(findings) != 0 {
 		t.Errorf("sanctioned automation shape reported %d findings: %v", len(findings), ruleNames(findings))
 	}

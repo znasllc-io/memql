@@ -118,9 +118,9 @@ func installGrantTestCatalog(t *testing.T) {
 // installGrantProbes registers the two gated constructs on an engine and
 // removes them when the test ends.
 //
-// It also wires a LogicRunner for them. An edition-2026 logic body that
-// returns an expression runs on the LogicRunner (logic_body_v1.go), which
-// component/automations provides and this package cannot import. The probes
+// It also wires a LogicRunner for them. A logic's statement body runs on the
+// LogicRunner, which component/automations provides and this package cannot
+// import. The probes
 // are about the GATES, which the engine decides before it hands a call to the
 // runner, so a runner that only reports it was reached is the whole of what
 // an admitted call needs here. Restored when the test ends: the engine may be
@@ -177,7 +177,7 @@ func grantEngine(t *testing.T) *MemQLEngine {
 // reaching it is the proof the gates admitted the call.
 type gateProbeLogicRunner struct{}
 
-func (gateProbeLogicRunner) RunLogic(_ context.Context, fnName string, _ *langparser.AutomationDef, _ map[string]any) (any, error) {
+func (gateProbeLogicRunner) RunLogicBody(_ context.Context, fnName string, _ []map[string]any, _ map[string]any) (any, error) {
 	return map[string]any{"ran": fnName}, nil
 }
 
@@ -455,7 +455,7 @@ func TestGrantEnforcementNegativeControlRoleOnlyResolver(t *testing.T) {
 
 // TestSingleStatementLogicClearsItsFloors pins the hole the capability probe
 // exposed (epic memql#5296). A pre-2026 single-statement logic -- `return
-// cond(...)` -- never hoisted to plan.LogicCall (that needs LogicSteps); it
+// cond(...)` -- never hoisted to plan.LogicCall (that took a multi-step body); it
 // expanded to a literal at plan.Root and returned from one of executeWith's
 // seven early branches BEFORE the plan-level rank and capability gates ran.
 // So a `@requiresRank` or `@requiresCapability` on it was recorded on the plan

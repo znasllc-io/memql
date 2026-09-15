@@ -124,11 +124,11 @@ func TestActorRuleColumnsSurviveInvalidUTF8(t *testing.T) {
 // byte-based Start with a rune-based End and reports a mixed-unit range.
 func TestFindInSourceColumnsCountRunes(t *testing.T) {
 	line := `  x := coalesce("naïve", sort("a"))`
-	src := "logic l {\n  body {\n" + line + "\n  }\n}\n"
+	src := "logic l {\n" + line + "\n}\n"
 	pos := findInSource(src, "sort(")
 	want := wantRuneColumn(t, line, "sort(")
-	if pos.Line != 3 || pos.Column != want {
-		t.Errorf("findInSource = %d:%d, want 3:%d (rune column; a byte column would be %d)",
+	if pos.Line != 2 || pos.Column != want {
+		t.Errorf("findInSource = %d:%d, want 2:%d (rune column; a byte column would be %d)",
 			pos.Line, pos.Column, want, strings.Index(line, "sort(")+1)
 	}
 }

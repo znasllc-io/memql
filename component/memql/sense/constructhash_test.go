@@ -150,27 +150,6 @@ func TestConstructHashesKeepsTheAnnotationPreamble(t *testing.T) {
 	}
 }
 
-// TestConstructHashesCoversTheTerseAutomationForm: the brace-less single-step
-// automation is a declaration like any other and gets a real hash. The engine
-// had no slice for this form at all until memql#3758, which stamped an empty
-// hash and made all ten of them read as drifted forever.
-func TestConstructHashesCoversTheTerseAutomationForm(t *testing.T) {
-	const src = `/// Nightly.
-automation nightly @trigger(schedule="0 0 2 * * *") => logic nightly
-`
-	found := ConstructHashes(src)
-	if len(found) != 1 || found[0].Name != "nightly" || found[0].Kind != "automation" {
-		t.Fatalf("the terse automation form was not located: %+v", found)
-	}
-	if found[0].SourceHash == "" {
-		t.Fatal("the terse automation hashed to nothing; an empty hash can never compare equal to a real one")
-	}
-	edited := replaceFirst(src, "/// Nightly.", "/// Nightly, at 02:00.")
-	if hashOf(t, edited, "nightly") == found[0].SourceHash {
-		t.Error("the terse automation's doc comment is outside its slice")
-	}
-}
-
 // TestConstructHashesOnAnEmptyOrUnparseableBuffer: the editor asks this on
 // every keystroke, so a half-typed buffer is the ordinary case. Unlike the
 // runnable projection -- which withholds an argument form it cannot vouch for

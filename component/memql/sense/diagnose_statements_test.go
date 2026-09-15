@@ -31,6 +31,7 @@ func TestDiagnose_StatementRefusalLandsOnTheAuthorsText(t *testing.T) {
 		nth               int
 		code, want        string
 	}{
+		// memqlmigrate:keep -- the retired body block is the case.
 		{"a body block in an automation", probeTrigger + "automation a {\n  body {\n    x := 1\n  }\n}\n",
 			"body", 1, "body_block_retired", "`body { }` is retired in edition 2026"},
 		{"an automation with no statement", probeTrigger + "automation noSteps {\n  args {\n    x string\n  }\n}\n",

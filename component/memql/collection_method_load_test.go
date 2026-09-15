@@ -17,12 +17,11 @@ func collectionLoadRegistry(t *testing.T) memoryNodes.Registry {
 	})
 }
 
-// TestLogicCollectionMethodLoads proves a single-statement logic body using
-// the Story 4 (#2302 / ADR §2.2) collection surface loads end-to-end through
-// the real function loader. An edition-2026 body that returns an expression
-// runs on the LogicRunner, which evaluates it with EvalExpr (logic_body_v1.go):
-// its fn.Expr is the expression itself, as a PlanConstExpression, and that
-// expression answers the count the collection surface promises.
+// TestLogicCollectionMethodLoads proves a logic returning the Story 4 (#2302 /
+// ADR §2.2) collection surface loads end-to-end through the real function
+// loader. Its compiled body is the return, whose value the LogicRunner parses
+// and evaluates with EvalExpr -- and that value answers the count the
+// collection surface promises.
 func TestLogicCollectionMethodLoads(t *testing.T) {
 	src := strings.Join([]string{
 		"@enabled",
@@ -31,21 +30,17 @@ func TestLogicCollectionMethodLoads(t *testing.T) {
 		"  args {",
 		"    members object @required",
 		"  }",
-		"  body {",
-		"    return args.members.where(m => m.active).count()",
-		"  }",
+		"  return args.members.where(m => m.active).count()",
 		"}",
 	}, "\n")
 
 	fn, err := tryParseNewFunctionSyntax("logicCountActiveMembers", "logic", src, "common.logic.memql", collectionLoadRegistry(t))
 	require.NoError(t, err, "load logic with collection method")
-	require.NotNil(t, fn.LogicSteps, "a body returning an expression runs on the LogicRunner")
-	pc, ok := fn.Expr.(*PlanConstExpression)
-	require.Truef(t, ok, "fn.Expr = %T, want the returned expression as a *PlanConstExpression", fn.Expr)
-	require.Equal(t, "args.members.where(m => m.active).count()", ast.FormatExpr(pc.Expr))
+	ret := statementReturnExpr(t, fn)
+	require.Equal(t, "args.members.where(m => m.active).count()", ast.FormatExpr(ret))
 
 	members := []any{map[string]any{"active": true}, map[string]any{"active": false}, map[string]any{"active": true}}
-	got, err := EvalExpr(context.Background(), pc.Expr, MapScope{"args": map[string]any{"members": members}}, EvalOptions{})
+	got, err := EvalExpr(context.Background(), ret, MapScope{"args": map[string]any{"members": members}}, EvalOptions{})
 	require.NoError(t, err)
 	require.Equal(t, int64(2), got)
 }

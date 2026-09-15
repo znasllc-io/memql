@@ -98,7 +98,9 @@ func bundleConstructs(owner, bundleId string) []memql.AuthoringConstructRow {
 	return []memql.AuthoringConstructRow{
 		{Id: "c-auto", OwnerUserId: owner, BundleId: bundleId, Kind: "automation", Name: "draftRefundReply", TargetNamespace: "authored", Source: `@enabled
 @trigger(event="graph.node.created.*.v1:cognition:utterance")
-automation draftRefundReply { step s { } }`},
+automation draftRefundReply {
+  draft := logic draftRefundReply(event: event)
+}`},
 		{Id: "c-spec", OwnerUserId: owner, BundleId: bundleId, Kind: "trait", Name: "isRefundEscalation", TargetNamespace: "authored", Source: `trait isRefundEscalation = row => row.kind == "refund"`},
 	}
 }

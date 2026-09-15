@@ -22,27 +22,40 @@ func has(fs []Finding, rule string) bool {
 	return false
 }
 
-// D14: a logic reads and writes through queries and mutations, and never
-// touches the world -- an action call produces a finding, and the query and
-// the mutation it calls do not.
-func TestLogicCallingActionIsFlagged(t *testing.T) {
+// D14: a logic reads and writes through queries and mutations, so a logic
+// calling both is clean.
+func TestLogicCallingMutationIsClean(t *testing.T) {
 	src := `use cluster.mutations.{ createNode }
 use cluster.queries.{ existingCluster }
-use deployment.actions.{ tagRelease }
-logic registerBad {
+logic register {
   args { event object @required }
   existing := query existingCluster()
   node := mutation createNode(id: args.event.payload.id)
-  tagged := action tagRelease(version: "1")
   return node
+}`
+	if fs := CheckFile("dsl/cluster/logic.memql", src, nil); len(fs) != 0 {
+		t.Fatalf("a logic may call a query and a mutation (D14); got %v", rules(fs))
+	}
+}
+
+// A logic never touches the world: an action call produces a finding, and
+// the query beside it none.
+func TestLogicCallingActionIsFlagged(t *testing.T) {
+	src := `use deployment.actions.{ cloneRepo }
+use cluster.queries.{ existingCluster }
+logic touchBad {
+  args { ref string @required }
+  existing := query existingCluster()
+  cloned := action cloneRepo(ref: args.ref)
+  return cloned
 }`
 	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
 	if !has(fs, "logic-purity") {
 		t.Fatalf("expected logic-purity finding (logic calls an action); got %v", rules(fs))
 	}
 	for _, f := range fs {
-		if strings.Contains(f.Message, "existingCluster") || strings.Contains(f.Message, "createNode") {
-			t.Fatalf("a logic reads and writes through queries and mutations; flagged: %s", f.Message)
+		if strings.Contains(f.Message, "existingCluster") {
+			t.Fatalf("calling a query must not be flagged: %s", f.Message)
 		}
 	}
 }
@@ -90,6 +103,9 @@ logic onStartupBad {
 // I2 acceptance: a side-effecting builtin in a query produces a finding (the
 // classifier is what I7 will source from sideEffectClass; here it is injected).
 func TestSideEffectingBuiltinInQueryIsFlagged(t *testing.T) {
+	// A query has no statements, so no spelling of a builtin call in one is
+	// valid; the rule reads the construct's text.
+	// memqlmigrate:keep
 	src := `use cluster.builtins.{ tagRelease }
 query node q {
   args { x string }
@@ -142,13 +158,13 @@ automation deploy {
 
 // Multiple constructs in one file are split and judged independently.
 func TestSplitsMultipleConstructs(t *testing.T) {
-	src := `use deployment.actions.{ tagRelease }
+	src := `use deployment.actions.{ cloneRepo }
 logic clean {
   return 1
 }
 logic dirty {
-  tagged := action tagRelease(version: "1")
-  return tagged
+  cloned := action cloneRepo(ref: "x")
+  return cloned
 }`
 	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
 	if len(fs) != 1 || fs[0].Construct != "dirty" {

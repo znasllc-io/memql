@@ -52,9 +52,7 @@ logic logicProvisionDailySpace {
   args {
     event object @required
   }
-  body {
-    return ensureDailySpaceForUser(userId: args.event.payload.id)
-  }
+  return builtin ensureDailySpaceForUser(userId: args.event.payload.id)
 }
 
 @enabled
@@ -67,21 +65,17 @@ tool searchUsers {
 }
 
 /// Auto-creates a session when a participant joins a space.
-@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
+@trigger(event="node.created", concept="v1:cognition:participant")
 automation bootstrapSession {
   args {
     id any
   }
-  step decide {
-    logic bootstrapSession ( event )
-  }
+  decide := logic bootstrapSession(event: event)
 }
 
 @trigger(schedule="0 */10 * * * *")
 automation sweepStalePlans {
-  step decide {
-    logic sweepStalePlans ( event )
-  }
+  decide := logic sweepStalePlans(event: event)
 }
 
 @enabled
@@ -494,9 +488,7 @@ logic thirdLogic {
   args {
     event object @required
   }
-  body {
-    return ensureDailySpaceForUser(userId: args.event.payload.id)
-  }
+  return builtin ensureDailySpaceForUser(userId: args.event.payload.id)
 }
 `
 	got := newRunnableService().RunnableConstructs(src)
@@ -546,71 +538,6 @@ automation noPreamble {
 	}
 	if tr := byName(t, got, "noPreamble").Trigger; tr != nil {
 		t.Errorf("trigger for an un-annotated automation = %+v; want nil", tr)
-	}
-}
-
-// The terse single-step automation form declares no body at all:
-//
-//	automation NAME @trigger(...) => logic targetLogic
-//
-// Ten of them live in dsl/. They are runnable automations, and -- because
-// their `@trigger` sits at depth 0 with no body to close -- failing to
-// recognise one also strands its annotation as a preamble that swallows the
-// NEXT declaration. Both halves are asserted here.
-func TestRunnableConstructs_TerseAutomationForm(t *testing.T) {
-	const src = `use identity.concepts.{ user }
-
-/// Soft-revoke expired delegations every 5 minutes.
-@trigger(schedule="0 */5 * * * *")
-automation expireDelegations {
-  logic revokeExpiredDelegations(event: event)
-}
-
-/// React to a new delegation row.
-@trigger(event="node.created", concept="v1:identity:delegation")
-automation onDelegationCreated {
-  logic onDelegationCreated(event: event)
-}
-
-@description("A block-form automation immediately after two terse ones")
-@trigger(event="node.updated", concept="v1:identity:user")
-automation onUserUpdated {
-  decide := logic onUserUpdated(event: event)
-}
-`
-	got := newRunnableService().RunnableConstructs(src)
-	want := []string{
-		"automation expireDelegations",
-		"automation onDelegationCreated",
-		"automation onUserUpdated",
-	}
-	if !reflect.DeepEqual(names(got), want) {
-		t.Fatalf("constructs = %v; want %v", names(got), want)
-	}
-
-	terse := byName(t, got, "expireDelegations")
-	if terse.SignatureRange != wantSignatureRange(t, src, "automation expireDelegations") {
-		t.Errorf("terse signature range = %+v; want the `automation NAME` span", terse.SignatureRange)
-	}
-	if w := (&RunnableTrigger{Schedule: "0 */5 * * * *"}); !reflect.DeepEqual(terse.Trigger, w) {
-		t.Errorf("terse trigger = %+v; want %+v", terse.Trigger, w)
-	}
-	if len(terse.Args) != 0 {
-		t.Errorf("terse automation args = %+v; want empty", terse.Args)
-	}
-
-	evented := byName(t, got, "onDelegationCreated")
-	wantTrigger := &RunnableTrigger{Event: "node.created", Concept: "v1:identity:delegation"}
-	if !reflect.DeepEqual(evented.Trigger, wantTrigger) {
-		t.Errorf("terse event trigger = %+v; want %+v", evented.Trigger, wantTrigger)
-	}
-
-	// The block automation after them must keep its OWN trigger, proving the
-	// terse declarations did not strand a preamble that ran into it.
-	block := byName(t, got, "onUserUpdated")
-	wantBlock := &RunnableTrigger{Event: "node.updated", Concept: "v1:identity:user"}
-	if !reflect.DeepEqual(block.Trigger, wantBlock) {
-		t.Errorf("block automation trigger = %+v; want %+v", block.Trigger, wantBlock)
 	}
 }
 
@@ -696,11 +623,9 @@ query space disabledSpaceLookup {
 }
 
 @disabled
-@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
+@trigger(event="node.created", concept="v1:cognition:participant")
 automation disabledBootstrap {
-  step decide {
-    logic bootstrapSession ( event )
-  }
+  decide := logic bootstrapSession(event: event)
 }
 
 @enabled
@@ -709,9 +634,7 @@ logic enabledLogic {
   args {
     event object @required
   }
-  body {
-    return ensureDailySpaceForUser(userId: args.event.payload.id)
-  }
+  return builtin ensureDailySpaceForUser(userId: args.event.payload.id)
 }
 `
 
