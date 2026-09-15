@@ -21,22 +21,11 @@ func TestBodyRule_LogicWithoutBodyIsTheStatementForm(t *testing.T) {
 	}
 }
 
-// A conformant logic WITH a `body { }` block produces NO body-rule finding.
-func TestBodyRule_LogicWithBodyClean(t *testing.T) {
-	src := `logic decideThing {
-  args { x string @required }
-  return x
-}`
-	fs := CheckFile("dsl/cluster/logic.memql", src, nil)
-	if has(fs, "body-rule") {
-		t.Fatalf("a logic with a body block must not be flagged; got %v", rules(fs))
-	}
-}
-
 // A non-logic procedural construct WITH a `body { }` block is flagged. The
 // whole-tree gate restricts to {logic, query, mutation, action}; a query is a
 // representative non-logic procedural kind.
 func TestBodyRule_QueryWithBodyFlagged(t *testing.T) {
+	// memqlmigrate:keep -- the forbidden body block is the case.
 	src := `query participant queryParticipants {
   args { spaceId string @required }
   body {
@@ -53,6 +42,7 @@ func TestBodyRule_QueryWithBodyFlagged(t *testing.T) {
 // flows through the authoring-sandbox cross-reference pass): a spec carrying a
 // `body { }` block is flagged.
 func TestBodyRule_SpecWithBodyFlagged(t *testing.T) {
+	// memqlmigrate:keep -- the forbidden body block is the case.
 	src := `spec participant specIsHuman {
   body {
     return participantType == "human"
@@ -67,6 +57,7 @@ func TestBodyRule_SpecWithBodyFlagged(t *testing.T) {
 // A DECLARATIVE construct (concept) carrying a nested object field named
 // `body` is NOT flagged -- a field named body is not the procedural marker.
 func TestBodyRule_DeclarativeBodyFieldNotFlagged(t *testing.T) {
+	// memqlmigrate:keep -- a concept field named body is the case, not a body block.
 	src := `concept message {
   body {
     text string @required

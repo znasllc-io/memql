@@ -18,11 +18,11 @@ import (
 
 // The fylo#44 live-mount law, at the loader altitude: a nested conditional
 // whose predicate compares a coalesced value to a literal must load -- and,
-// since edition 2026 evaluates the returned expression with EvalExpr on the
-// LogicRunner, it must answer the branch the predicate picks. cond() and
-// coalesce() are retired; the one spelling is `? :` over `??`, and `??` binds
-// tighter than `==`, so the unparenthesised predicate compares the coalesced
-// value exactly as the parenthesised one does.
+// since the LogicRunner evaluates the returned expression with EvalExpr, it
+// must answer the branch the predicate picks. cond() and coalesce() are
+// retired; the one spelling is `? :` over `??`, and `??` binds tighter than
+// `==`, so the unparenthesised predicate compares the coalesced value exactly
+// as the parenthesised one does.
 func TestLogicNestedCondCoalescePredicate_Loads(t *testing.T) {
 	for name, predicate := range map[string]string{
 		"operator-spelling": `args.b ?? "" == "y"`,
@@ -36,9 +36,7 @@ func TestLogicNestedCondCoalescePredicate_Loads(t *testing.T) {
 				"    a string @required",
 				"    b string",
 				"  }",
-				"  body {",
-				"    return args.a == \"x\" ? (" + predicate + " ? \"1\" : \"2\") : \"3\"",
-				"  }",
+				"  return args.a == \"x\" ? (" + predicate + " ? \"1\" : \"2\") : \"3\"",
 				"}",
 			}, "\n")
 
@@ -46,10 +44,7 @@ func TestLogicNestedCondCoalescePredicate_Loads(t *testing.T) {
 			if err != nil {
 				t.Fatalf("nested conditional with a %s predicate must load: %v", name, err)
 			}
-			pc, ok := fn.Expr.(*PlanConstExpression)
-			if !ok {
-				t.Fatalf("fn.Expr = %T, want the returned expression as a *PlanConstExpression", fn.Expr)
-			}
+			ret := statementReturnExpr(t, fn)
 			for _, tc := range []struct {
 				args map[string]any
 				want string
@@ -58,7 +53,7 @@ func TestLogicNestedCondCoalescePredicate_Loads(t *testing.T) {
 				{map[string]any{"a": "x"}, "2"},
 				{map[string]any{"a": "z", "b": "y"}, "3"},
 			} {
-				got, err := EvalExpr(context.Background(), pc.Expr, MapScope{"args": tc.args}, EvalOptions{})
+				got, err := EvalExpr(context.Background(), ret, MapScope{"args": tc.args}, EvalOptions{})
 				if err != nil || got != tc.want {
 					t.Errorf("args %v: %#v, %v; want %q", tc.args, got, err, tc.want)
 				}

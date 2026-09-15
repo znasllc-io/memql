@@ -83,18 +83,17 @@ func TestAutomationCondition_SanctionedShapesPass(t *testing.T) {
 		src  string
 	}{
 		{"decide-gate + presence + single fan-out equality", `automation probe {
-  step decide { logic decideThing ( event ) }
-  step apply {
-    forEach item in decide.nodes() {
-      if steps.decide.result == true && item.payload.status == "provisioned" {
-        mutation release ( id: item.id )
-      }
-    }
+  args {
+    id any
   }
-  step teardown {
-    if steps.terminal.result == true && event.node.id != nil {
-      builtin teardown ( planId: event.node.id )
-    }
+  decide := logic decideThing(event: event)
+  rows := query releasable(id: args.id)
+  for item in rows if decide == true && item.status == "provisioned" {
+    mutation release(id: item.id)
+  }
+  terminal := logic isTerminal(event: event)
+  if terminal == true && args.id != nil {
+    builtin teardown(planId: args.id)
   }
 }`},
 		{"relevance @filter equality", `@filter(row => event.node.payload.preferences.computerUseEnabled == false)
@@ -128,6 +127,11 @@ automation probe {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// A body the parser refuses has no conditions to judge, so a
+			// sanctioned shape that stopped parsing would pass here unread.
+			if _, ok := statementConditions(tc.src); !ok {
+				t.Fatalf("the shape must parse, or its conditions are never judged:\n%s", tc.src)
+			}
 			if fs := automationFindings(t, tc.src); len(fs) != 0 {
 				t.Fatalf("sanctioned shape must produce zero findings, got %v", fs)
 			}

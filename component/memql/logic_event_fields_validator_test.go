@@ -27,9 +27,10 @@ func parseLogicForTest(t *testing.T, src, name string) (*languageParser.Function
 	file := node.(*languageParser.File)
 	for _, d := range file.Definitions {
 		if fd, ok := d.(*languageParser.FunctionDef); ok && fd.Name == name {
-			// The loader validates against the NORMALISED source (the
-			// `func (Logic) ... { ... }` body form extractFunctionBody reads),
-			// so the test must pass `content`, not the struct-form `src`.
+			// The loader validates against the NORMALISED source, which
+			// for a logic is the source as written -- the statement parser
+			// reads it, and extractFunctionBody's statement arm finds its
+			// body -- so the test passes `content`, as the loader does.
 			return fd, content
 		}
 	}
@@ -42,9 +43,7 @@ func TestValidateLogicEventFields_AcceptsDeclared(t *testing.T) {
 @eventField("partitionId", "siParticipantId")
 logic logicOk {
   args { event object @required }
-  body {
-    return noop(a: args.event.payload.partitionId, b: args.event.payload.siParticipantId)
-  }
+  return builtin noop(a: args.event.payload.partitionId, b: args.event.payload.siParticipantId)
 }`
 	fd, raw := parseLogicForTest(t, src, "logicOk")
 	if err := validateLogicEventFields(raw, fd); err != nil {
@@ -57,9 +56,7 @@ func TestValidateLogicEventFields_RejectsUnknown(t *testing.T) {
 @eventField("partitionId")
 logic logicBad {
   args { event object @required }
-  body {
-    return noop(a: args.event.payload.partitionId, b: args.event.payload.typooo)
-  }
+  return builtin noop(a: args.event.payload.partitionId, b: args.event.payload.typooo)
 }`
 	fd, raw := parseLogicForTest(t, src, "logicBad")
 	err := validateLogicEventFields(raw, fd)
@@ -76,9 +73,7 @@ func TestValidateLogicEventFields_OptOutWhenNoAnnotation(t *testing.T) {
 	src := `@enabled
 logic logicUnannotated {
   args { event object @required }
-  body {
-    return noop(a: args.event.payload.anythingGoes)
-  }
+  return builtin noop(a: args.event.payload.anythingGoes)
 }`
 	fd, raw := parseLogicForTest(t, src, "logicUnannotated")
 	if err := validateLogicEventFields(raw, fd); err != nil {
@@ -93,10 +88,8 @@ func TestValidateLogicEventFields_NestedAndComments(t *testing.T) {
 @eventField("node")
 logic logicNested {
   args { event object @required }
-  body {
-    // historical: args.event.payload.removedField was dropped
-    return noop(t: args.event.payload.node.type)
-  }
+  // historical: args.event.payload.removedField was dropped
+  return builtin noop(t: args.event.payload.node.type)
 }`
 	fd, raw := parseLogicForTest(t, src, "logicNested")
 	if err := validateLogicEventFields(raw, fd); err != nil {
@@ -110,7 +103,7 @@ func TestValidateLogicEventFields_PayloadPrefixedDeclaration(t *testing.T) {
 @eventField("payload.partitionId")
 logic logicPrefixed {
   args { event object @required }
-  body { return noop(a: args.event.payload.partitionId) }
+  return builtin noop(a: args.event.payload.partitionId)
 }`
 	fd, raw := parseLogicForTest(t, src, "logicPrefixed")
 	if err := validateLogicEventFields(raw, fd); err != nil {

@@ -123,13 +123,13 @@ func TestExpressionPositionsAreDetected(t *testing.T) {
 		{"trigger filter", "@trigger(event=\"graph.node.updated.v1:todos:todo\")\n@filter(row => row.", tiers.PositionTriggerFilter, "row", "todo"},
 		{"trigger filter over a concept kwarg", "@trigger(event=\"node.created\", concept=\"v1:todos:todo\")\n@filter(row => row.done == ", tiers.PositionTriggerFilter, "row", "todo"},
 		{"row-authz argument", "@rowAuthz(owner=\"", tiers.PositionRowAuthzArgument, "", ""},
-		{"automation if", "automation sweep {\n  step decide {\n    if args.windowDays > ", tiers.PositionAutomationCondition, "", ""},
-		{"automation forEach where", "automation sweep {\n  forEach item in rows where item.done == ", tiers.PositionAutomationCondition, "", ""},
+		{"automation if", "automation sweep {\n  if args.windowDays > ", tiers.PositionAutomationCondition, "", ""},
+		{"automation for filter", "automation sweep {\n  for item in rows if item.done == ", tiers.PositionAutomationCondition, "", ""},
 		{"automation switch", "automation sweep {\n  switch ", tiers.PositionAutomationCondition, "", ""},
 		{"automation precondition", "automation sweep {\n  precondition ok {\n    check: ", tiers.PositionAutomationCondition, "", ""},
-		{"step argument", "automation sweep {\n  step record {\n    mutation createTodo(title: ", tiers.PositionStepArgument, "", ""},
-		{"logic body", "logic compute {\n  body {\n    x := ", tiers.PositionLogicBody, "", ""},
-		{"logic return", "logic compute {\n  body {\n    return ", tiers.PositionLogicBody, "", ""},
+		{"step argument", "automation sweep {\n  mutation createTodo(title: ", tiers.PositionStepArgument, "", ""},
+		{"logic body", "logic compute {\n  x := ", tiers.PositionLogicBody, "", ""},
+		{"logic return", "logic compute {\n  return ", tiers.PositionLogicBody, "", ""},
 		{"mutation value", "mutate todo createTodo {\n  insert {\n    title: ", tiers.PositionMutationValue, "", ""},
 		{"stamp value", "mutate todo createTodo {\n  insert {\n    accept { title }\n    stamp {\n      createdBy: ", tiers.PositionMutationValue, "", ""},
 		{"tool default", "tool searchTodos {\n  limit integer @default(\"", tiers.PositionToolDefault, "", ""},
@@ -227,7 +227,7 @@ func TestNestedLambdaParametersAreScoped(t *testing.T) {
 		t.Errorf("Params = %s, want row<>,p<childOf> (t went out of scope when any( closed)", got)
 	}
 
-	src = "logic compute {\n  body {\n    x := args.members.where(m => m."
+	src = "logic compute {\n  x := args.members.where(m => m."
 	line, col = endOf(src)
 	ctx = analyzeCursorContext(src, line, col)
 	if len(ctx.Params) != 1 || ctx.Params[0].Name != "m" || ctx.Params[0].Callee != "args.members.where" {
@@ -357,7 +357,7 @@ func TestCompletionOffersTheTierOfThePosition(t *testing.T) {
 	})
 
 	t.Run("a logic body is in-process and may call constructs", func(t *testing.T) {
-		got := completionItems(t, s, "logic compute {\n  body {\n    return ")
+		got := completionItems(t, s, "logic compute {\n  return ")
 		for _, want := range []string{"lower", "addDuration", "hash", "query", "args", "now"} {
 			if _, ok := got[want]; !ok {
 				t.Errorf("a logic body must offer %q, got %v", want, keys(got))
@@ -369,7 +369,7 @@ func TestCompletionOffersTheTierOfThePosition(t *testing.T) {
 	})
 
 	t.Run("a logic body offers the names bound above the cursor", func(t *testing.T) {
-		body := "logic compute {\n  body {\n    rows := query activeUsers()\n    total := rows.count()\n    return "
+		body := "logic compute {\n  rows := query activeUsers()\n  total := rows.count()\n  return "
 		got := completionItems(t, s, body)
 		for _, want := range []string{"rows", "total"} {
 			if it, ok := got[want]; !ok || it.Detail != "local" {
@@ -377,12 +377,12 @@ func TestCompletionOffersTheTierOfThePosition(t *testing.T) {
 			}
 		}
 		// A name bound BELOW the cursor is not in scope yet.
-		got = completionItems(t, s, "logic compute {\n  body {\n    return ")
+		got = completionItems(t, s, "logic compute {\n  return ")
 		if _, ok := got["rows"]; ok {
 			t.Error("no local is bound above the cursor here")
 		}
 		// A query's result is a list of rows: its members are the list methods.
-		got = completionItems(t, s, "logic compute {\n  body {\n    rows := query activeUsers()\n    return rows.")
+		got = completionItems(t, s, "logic compute {\n  rows := query activeUsers()\n  return rows.")
 		for _, want := range []string{"count", "first", "nodes", "where"} {
 			if _, ok := got[want]; !ok {
 				t.Errorf("a query result must offer the list method %q, got %v", want, keys(got))
@@ -391,7 +391,7 @@ func TestCompletionOffersTheTierOfThePosition(t *testing.T) {
 	})
 
 	t.Run("an automation condition may not call a construct", func(t *testing.T) {
-		got := completionItems(t, s, "automation sweep {\n  step decide {\n    if args.windowDays > 1 && lo")
+		got := completionItems(t, s, "automation sweep {\n  if args.windowDays > 1 && lo")
 		if _, ok := got["lower"]; !ok {
 			t.Errorf("a condition must offer lower, got %v", keys(got))
 		}
@@ -647,7 +647,7 @@ func TestHoverShowsSignatureTierAndLegality(t *testing.T) {
 		t.Errorf("args.owner ?? \"x\" does not read the row, got:\n%s", card)
 	}
 
-	card = hoverOn(t, s, "logic compute {\n  body {\n    return lower(args.x)", "lower")
+	card = hoverOn(t, s, "logic compute {\n  return lower(args.x)", "lower")
 	hoverStyle(t, card)
 	if !strings.Contains(card, "Runs in process.") {
 		t.Errorf("in a logic body lower runs in process, got:\n%s", card)
@@ -692,7 +692,7 @@ func TestHoverShowsSignatureTierAndLegality(t *testing.T) {
 func TestHoverOnOperators(t *testing.T) {
 	s := New(v1Registry())
 	filter := v1Query + "  filter row => row.?lineage.planId == args.owner && !(row.status in [\"a\"]) || row.status != \"\" || row.title startsWith args.tag"
-	logicLine := "logic compute {\n  body {\n    x := args.a ?? (args.flag ? \"y\" : \"n\")"
+	logicLine := "logic compute {\n  x := args.a ?? (args.flag ? \"y\" : \"n\")"
 
 	cases := []struct {
 		src, needle string
@@ -732,21 +732,17 @@ func TestHoverOnOperators(t *testing.T) {
 	}
 
 	// The same spellings that are NOT these operators keep their own meaning.
-	if card := hoverOn(t, s, "automation sweep {\n  forEach item in rows {", " in "); strings.Contains(card, "v in list") {
-		t.Errorf("forEach's `in` is the loop keyword, not membership, got:\n%s", card)
+	if card := hoverOn(t, s, "automation sweep {\n  for item in rows {", " in "); strings.Contains(card, "v in list") {
+		t.Errorf("a for loop's `in` is the loop keyword, not membership, got:\n%s", card)
 	}
-	// memqlmigrate:keep -- the terse arrow is the case.
-	if card := hoverOn(t, s, "@trigger(event=\"x.y\")\nautomation sweep @trigger(event=\"x.y\") => logic handle", "=>"); strings.Contains(card, "parameter") {
-		t.Errorf("the terse automation arrow is not a lambda, got:\n%s", card)
-	}
-	if card := hoverOn(t, s, "logic compute {\n  body {\n    x := {a: 1}", ": 1"); strings.Contains(card, "p ? a : b") {
+	if card := hoverOn(t, s, "logic compute {\n  x := {a: 1}", ": 1"); strings.Contains(card, "p ? a : b") {
 		t.Errorf("a map key colon is not the ternary, got:\n%s", card)
 	}
 }
 
 func TestHoverOnARetiredSpelling(t *testing.T) {
 	s := New(v1Registry())
-	logic := func(expr string) string { return "logic compute {\n  body {\n    return " + expr }
+	logic := func(expr string) string { return "logic compute {\n  return " + expr }
 
 	for _, c := range []struct {
 		src, needle, replacement string
@@ -801,7 +797,7 @@ func TestHoverOnARetiredSpelling(t *testing.T) {
 // with the reason a token scan cannot find it.
 func TestRetiredHoverIsTheParsersTable(t *testing.T) {
 	s := New(v1Registry())
-	logic := func(expr string) string { return "logic compute {\n  body {\n    return " + expr }
+	logic := func(expr string) string { return "logic compute {\n  return " + expr }
 	filter := func(expr string) string { return v1Query + "  filter " + expr }
 	type sample struct {
 		src, needle string
@@ -935,7 +931,7 @@ func TestHoverOnAPredicate(t *testing.T) {
 			"Runs in process before the query, against the caller.",
 			"Replaces `requiresOwner` written bare and `spec requiresOwner`.",
 		}},
-		{"a spec in a logic body", "logic compute {\n  body {\n    return isOverdue(args.todo)", "isOverdue", []string{
+		{"a spec in a logic body", "logic compute {\n  return isOverdue(args.todo)", "isOverdue", []string{
 			"```memql\nisOverdue(row) bool\n```",
 			"Runs in process.",
 		}},

@@ -133,13 +133,12 @@ func TestAllSnippetItemsWellFormed(t *testing.T) {
 	}
 }
 
-// TestNamedBlocksCompleteWithTheirName: `step` and `precondition` carry a
-// name (`step <name> { ... }`), and a nameless block is refused -- so the
-// keyword completion inserts the keyword and a space, never `step {`, and the
-// snippet puts the name first (memql#5359). An automation written in
-// statements has no `step` block (edition 2026, epic memql#5370): only one
-// still holding a step block, which the rewriter expands until the flip, is
-// offered another.
+// TestNamedBlocksCompleteWithTheirName: `precondition` carries a name
+// (`precondition <name> { ... }`), and a nameless block is refused -- so the
+// keyword completion inserts the keyword and a space, never
+// `precondition {`, and the snippet puts the name first (memql#5359). `step`
+// is retired (edition 2026, epic memql#5370): it is never offered, not even
+// in a body still holding a step block.
 func TestNamedBlocksCompleteWithTheirName(t *testing.T) {
 	s := New(&fakeRegistry{})
 	const trigger = "@trigger(event=\"x.y\")\n"
@@ -148,7 +147,8 @@ func TestNamedBlocksCompleteWithTheirName(t *testing.T) {
 		blocks, never []string
 	}{
 		{"a statement body", trigger + "automation onThing {\n  ", []string{"precondition"}, []string{"step"}},
-		{"a body holding a step block", trigger + "automation onThing {\n  step first {\n    mutation m(a: 1)\n  }\n  ", []string{"step", "precondition"}, nil},
+		// memqlmigrate:keep -- the retired step block is the case.
+		{"a body holding a retired step block", trigger + "automation onThing {\n  step first {\n    mutation m(a: 1)\n  }\n  ", []string{"precondition"}, []string{"step"}},
 	}
 	for _, c := range cases {
 		lines := strings.Split(c.src, "\n")

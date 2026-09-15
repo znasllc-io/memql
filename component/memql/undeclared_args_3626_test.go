@@ -184,9 +184,7 @@ mutate user zzargProbeProse {
 func TestLogicUndeclaredEventKeepsItsOwnDiagnosis(t *testing.T) {
 	src := `@description("reads the event but never declares it")
 logic zzargProbeLogicEvent {
-  body {
-    return ensureDailySpaceForUser( userId: args.event.payload.id )
-  }
+  return builtin ensureDailySpaceForUser(userId: args.event.payload.id)
 }`
 	_, err := tryParseNewFunctionSyntax("zzargProbeLogicEvent", "logic", src, "test.memql", undeclaredArgsRegistry())
 	if err == nil {

@@ -11,12 +11,12 @@ import (
 
 func TestRunScopedAuthoredFunctionsReachOrdinaryExecute(t *testing.T) {
 	e, _, _ := sharedReadMergeEngine(t)
-	// An edition-2026 logic body that returns an expression runs on the
-	// LogicRunner (logic_body_v1.go), which component/automations provides and
-	// this package cannot import. This one evaluates the body's return, so the
-	// 42 asserted below is the authored body's own answer, reached through the
-	// run-scoped registry -- not a value the stand-in makes up. Restored when
-	// the test ends: the engine is the shared one.
+	// A logic's statement body runs on the LogicRunner, which
+	// component/automations provides and this package cannot import. This one
+	// evaluates the body's return, so the 42 asserted below is the authored
+	// body's own answer, reached through the run-scoped registry -- not a
+	// value the stand-in makes up. Restored when the test ends: the engine is
+	// the shared one.
 	previous := e.LogicRunner()
 	e.SetLogicRunner(returnEvaluatingLogicRunner{})
 	t.Cleanup(func() { e.SetLogicRunner(previous) })
@@ -46,18 +46,20 @@ func TestRunScopedAuthoredFunctionsReachOrdinaryExecute(t *testing.T) {
 }
 
 // returnEvaluatingLogicRunner stands in for the LogicRunner for a logic body
-// that is one `return <expression>`: it evaluates the return with EvalExpr,
-// over no bindings. A body with intermediate steps is refused -- this is not
-// a second runtime.
+// that is one `return <expression>`: it parses the compiled return's value and
+// evaluates it with EvalExpr, over no bindings. A body with any other step is
+// refused -- this is not a second runtime.
 type returnEvaluatingLogicRunner struct{}
 
-func (returnEvaluatingLogicRunner) RunLogic(ctx context.Context, fnName string, body *languageParser.AutomationDef, _ map[string]any) (any, error) {
-	if nonReturnStepCount(body.Steps) > 0 {
-		return nil, fmt.Errorf("logic %q has steps before its return; the test runner evaluates a lone return only", fnName)
+func (returnEvaluatingLogicRunner) RunLogicBody(ctx context.Context, fnName string, body []map[string]any, _ map[string]any) (any, error) {
+	if len(body) != 1 || body[0]["type"] != "return" {
+		return nil, fmt.Errorf("logic %q is not one return; the test runner evaluates a lone return only: %v", fnName, body)
 	}
-	ret, err := extractLogicReturnExpression(body)
+	ret, _ := body[0]["return"].(map[string]any)
+	src, _ := ret["value"].(string)
+	expr, err := languageParser.ParseV1Expression(src)
 	if err != nil {
 		return nil, err
 	}
-	return EvalExpr(ctx, ret, MapScope{}, EvalOptions{})
+	return EvalExpr(ctx, expr, MapScope{}, EvalOptions{})
 }
