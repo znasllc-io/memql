@@ -262,7 +262,10 @@ func (c *Compiler) compileAutomation(def *parser.FunctionDef) (*AutomationOutput
 	}
 
 	// Trigger (event-based)
-	if automation.Trigger != nil {
+	if automation.Trigger != nil && automation.Trigger.Before != "" {
+		output["beforeWrite"] = map[string]any{"on": automation.Trigger.Before, "concept": automation.Trigger.Concept, "filter": automation.Trigger.Filter}
+	}
+	if automation.Trigger != nil && automation.Trigger.Before == "" {
 		trigger := map[string]any{
 			"event": automation.Trigger.Event,
 		}

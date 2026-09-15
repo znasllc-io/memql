@@ -278,6 +278,10 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 		automation.Preconditions = preconditions
 	}
 
+	if err := l.prepareBeforeWrite(&automation); err != nil {
+		return nil, err
+	}
+
 	// Validate steps
 	if err := l.validateSteps(automation.Steps); err != nil {
 		return nil, fmt.Errorf("invalid steps: %w", err)
@@ -292,6 +296,7 @@ func (l *Loader) compileMemQLFrom(authored, source, path string) (*Automation, e
 	}
 	// @loop and @mode (epic memql#5380), judged against the trigger filter
 	// prepareExpressions just parsed (loop_prepare.go).
+	automation.Reads = computeReads(&automation, newFunctionSource(l.functions, l.registry))
 	if err := prepareLoopAndMode(&automation); err != nil {
 		return nil, err
 	}
@@ -630,6 +635,9 @@ func normalizeStructuredTriggers(file *languageParser.File, registry memoryNodes
 			if attr.Name != languageParser.AttrTrigger {
 				continue
 			}
+			if _, before := attr.Args["before"]; before {
+				continue
+			}
 			eventVal, hasEvent := attr.Args["event"]
 			if !hasEvent {
 				// schedule-only trigger, or a trigger with no wiring at all.
@@ -768,6 +776,10 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 		return nil, fmt.Errorf("automation must have at least one step")
 	}
 
+	if err := l.prepareBeforeWrite(&automation); err != nil {
+		return nil, err
+	}
+
 	// Validate steps
 	if err := l.validateSteps(automation.Steps); err != nil {
 		return nil, fmt.Errorf("invalid steps: %w", err)
@@ -777,6 +789,11 @@ func (l *Loader) parseJSON(data []byte, path string) (*Automation, error) {
 	if err := prepareExpressions(&automation, l.registry); err != nil {
 		return nil, err
 	}
+
+	if err := prepareLoopAndMode(&automation); err != nil {
+		return nil, err
+	}
+	automation.Reads = computeReads(&automation, newFunctionSource(l.functions, l.registry))
 
 	// Validate trigger for potential misconfigurations
 	l.validateTrigger(&automation)
@@ -827,6 +844,10 @@ func (l *Loader) validateSteps(steps []*Step) error {
 
 		// Validate type-specific configuration
 		switch step.Type {
+		case StepTypeFieldWrite:
+			if step.FieldWrite == nil {
+				return fmt.Errorf("step %q: fieldWrite configuration required", step.ID)
+			}
 		case StepTypeEvent:
 			if step.Event == nil {
 				return fmt.Errorf("step %q: event configuration required for type 'event'", step.ID)

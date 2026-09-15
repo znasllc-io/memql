@@ -143,7 +143,8 @@ func (a *App) engineAndBus() {
 	// boot. This is the automation-tree half of the same strict-boot
 	// contract engine.Init enforces for every other construct kind;
 	// MEMQL_DSL_ALLOW_SKIPS is the shared operator break-glass.
-	if _, err := a.automationLoader.LoadAll(); err != nil {
+	loadedAutomations, err := a.automationLoader.LoadAll()
+	if err != nil {
 		a.fatal("automation tree failed to load", "error", err, "component", automations.ComponentName)
 	}
 
@@ -303,6 +304,7 @@ func (a *App) engineAndBus() {
 	// the engine keeps its "no LogicRunner wired" error path and
 	// single-step Logic dispatch continues to work unchanged.
 	a.engine.SetLogicRunner(automations.NewLogicRunner(a.engine, a.stepRegistry, a.Logger))
+	automations.InstallBeforeWriteHooks(a.engine, loadedAutomations, a.stepRegistry, a.Logger)
 
 	// Automations are the one runnable construct kind the engine holds no
 	// registry for -- the scheduler owns them -- so the construct catalog

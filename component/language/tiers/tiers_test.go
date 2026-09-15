@@ -10,11 +10,11 @@ import (
 // eleven the record names plus the refine clause the expression-language epic
 // adds -- a position missing here is a position the conformance corpus stops
 // asking for.
-func TestPositionsAreTheTwelveCorpusDirectories(t *testing.T) {
+func TestPositionsAreTheThirteenCorpusDirectories(t *testing.T) {
 	ident := regexp.MustCompile(`^[a-z][A-Za-z]*$`)
 	got := Positions()
-	if len(got) != 12 {
-		t.Fatalf("Positions() has %d entries, want the record's 11 plus queryRefine: %v", len(got), got)
+	if len(got) != 13 {
+		t.Fatalf("Positions() has %d entries, want the record's 11 plus queryRefine and beforeWriteValue: %v", len(got), got)
 	}
 	seen := map[Position]bool{}
 	for _, p := range got {

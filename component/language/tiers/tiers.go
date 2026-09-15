@@ -20,6 +20,7 @@ package tiers
 type Position string
 
 const (
+	PositionBeforeWriteValue Position = "beforeWriteValue"
 	// PositionQueryFilter is a query's `filter` clause, and the query a tool's
 	// @handler(query=...) runs.
 	PositionQueryFilter Position = "queryFilter"
@@ -60,6 +61,7 @@ const (
 // Positions lists every position, in the order the record names them.
 func Positions() []Position {
 	return []Position{
+		PositionBeforeWriteValue,
 		PositionQueryFilter,
 		PositionSort,
 		PositionSpecBody,

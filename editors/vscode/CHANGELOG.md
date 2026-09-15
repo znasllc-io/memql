@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Support edition 2026 before-write triggers and `row.<field> = <expression>` statements. Grammar: `2026.09-dsl-v1-before-write-23c6a289`.
+
+
 The Marketplace renders this file on the extension's page, so it is written for
 someone deciding whether to install rather than for someone reading the repo.
 

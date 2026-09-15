@@ -192,6 +192,8 @@ func bodyPosition(lines []string, line int, before, cur string, scan textScan, e
 
 	case "automation", "action":
 		switch {
+		case strings.HasPrefix(strings.TrimSpace(code), "row.") && strings.Contains(code, "="):
+			return exprPos{position: tiers.PositionBeforeWriteValue, nested: nestedLambdaParams(code)}
 		case conditionLine(code):
 			return exprPos{position: tiers.PositionAutomationCondition, nested: nestedLambdaParams(code)}
 		case last == "precondition" && strings.HasPrefix(code, "check:"):
@@ -659,6 +661,7 @@ var positionPhrases = map[tiers.Position]string{
 	tiers.PositionLogicBody:           "a logic body",
 	tiers.PositionMutationValue:       "a mutation value",
 	tiers.PositionStepArgument:        "a step argument",
+	tiers.PositionBeforeWriteValue:    "a before-write field value",
 	tiers.PositionToolDefault:         "a tool default",
 	tiers.PositionPromptInput:         "a prompt input",
 	tiers.PositionQueryRefine:         "a refine clause",

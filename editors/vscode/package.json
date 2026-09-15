@@ -2,7 +2,7 @@
   "name": "memql",
   "displayName": "MemQL",
   "description": "Language support for MemQL (.memql): syntax highlighting, diagnostics, completion, hover, and signature help, powered by the offline memql-lsp language server.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "znasllc",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -15,7 +15,7 @@
   },
   "memql": {
     "edition": "2026",
-    "grammarVersion": "2026.09-dsl-v1-loop-protection-cf139af9"
+    "grammarVersion": "2026.09-dsl-v1-before-write-23c6a289"
   },
   "categories": [
     "Programming Languages"

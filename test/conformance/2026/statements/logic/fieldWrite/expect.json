@@ -1,0 +1,10 @@
+{
+  "cases": [
+    {
+      "file": "outside.memql",
+      "verdict": "refuse_load",
+      "code": "before_write_outside",
+      "message": "a row field write requires"
+    }
+  ]
+}

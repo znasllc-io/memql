@@ -150,7 +150,7 @@ func constructCatalog() []Construct {
 		{
 			Keyword:            "automation",
 			Category:           CategoryFunction,
-			Doc:                "Event- or schedule-triggered side-effect (via @trigger). Its statements run in the order written and call every construct kind; the triggering event's payload is bound into its `args { }` block.",
+			Doc:                "Event-, schedule-, or before-write-triggered body (via @trigger). A before-write body adjusts declared fields with `row.<field> = <expression>` before persistence and may call only transitively read-only logic or queries. Its statements run in the order written and call every construct kind; the triggering event's payload is bound into its `args { }` block.",
 			AnnotationReceiver: "Automation",
 			ConceptInSignature: false,
 		},

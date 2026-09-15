@@ -161,6 +161,7 @@ const (
 // Keyword key sets, shared by the placement and its docs.
 var (
 	triggerKeys = []ArgSpec{
+		{Name: "before", Type: "string", Doc: "Adjust the incoming row before create, update, or write; requires concept."},
 		{Name: "event", Type: "string", Doc: "Event pattern, e.g. \"node.created\" (with concept=) or a raw topic such as \"system.startup\"."},
 		{Name: "concept", Type: "string", Doc: "Concept id the triggering event targets; required by the structured node.* event kinds."},
 		{Name: "schedule", Type: "string", Doc: "Cron schedule with a leading seconds field, e.g. \"0 0 * * * *\"."},

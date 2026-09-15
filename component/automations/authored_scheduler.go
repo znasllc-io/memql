@@ -45,9 +45,11 @@ type RunAutomationFunc func(ctx context.Context, automation *Automation, trigger
 
 // AuthoredSchedulerOptions configures the authored scheduler.
 type AuthoredSchedulerOptions struct {
-	Logger   *slog.Logger
-	Loader   *Loader
-	EventBus *events.Bus
+	BeforeWriteEngine   *memql.MemQLEngine
+	BeforeWriteRegistry StepExecutorRegistry
+	Logger              *slog.Logger
+	Loader              *Loader
+	EventBus            *events.Bus
 	// Run executes a compiled authored automation. Required.
 	Run RunAutomationFunc
 	// Breaker, when set, fault-isolates each authored automation: a run that
@@ -87,13 +89,15 @@ type authoredEntry struct {
 // triggers and runs them under the author's authz envelope. It is thread-safe
 // and mutable after startup (activations arrive at runtime).
 type AuthoredScheduler struct {
-	logger     *slog.Logger
-	loader     *Loader
-	eventBus   *events.Bus
-	run        RunAutomationFunc
-	breaker    *AuthoredBreaker
-	ownerGate  func(ownerUserId string) bool
-	globalGate func() bool
+	beforeWriteEngine   *memql.MemQLEngine
+	beforeWriteRegistry StepExecutorRegistry
+	logger              *slog.Logger
+	loader              *Loader
+	eventBus            *events.Bus
+	run                 RunAutomationFunc
+	breaker             *AuthoredBreaker
+	ownerGate           func(ownerUserId string) bool
+	globalGate          func() bool
 
 	activationMu sync.Mutex // Serialize graph check and subscription installation.
 	mu           sync.Mutex
@@ -126,6 +130,7 @@ func NewAuthoredScheduler(opts AuthoredSchedulerOptions) (*AuthoredScheduler, er
 	c := cron.New(cron.WithSeconds())
 	c.Start()
 	return &AuthoredScheduler{
+		beforeWriteEngine: opts.BeforeWriteEngine, beforeWriteRegistry: opts.BeforeWriteRegistry,
 		logger:     logger,
 		loader:     opts.Loader,
 		eventBus:   opts.EventBus,
@@ -188,12 +193,17 @@ func (s *AuthoredScheduler) Activate(construct *memql.AuthoredConstruct) error {
 	if err != nil {
 		return fmt.Errorf("authored scheduler: compile %s: %w", origin, err)
 	}
+	automation.Origin = origin
 	if automation.Name != construct.Name {
 		return fmt.Errorf("authored scheduler: construct name %q does not match automation name %q in source", construct.Name, automation.Name)
 	}
 	// An authored automation that closes a cycle no @loop covers is refused
 	// here, as the load refuses one in the tree (memql#5381).
 	if err := s.refuseCandidateCycle(automation, origin); err != nil {
+		return err
+	}
+
+	if err := s.validateBeforeWriteFields(automation); err != nil {
 		return err
 	}
 
@@ -209,6 +219,11 @@ func (s *AuthoredScheduler) Activate(construct *memql.AuthoredConstruct) error {
 	entry := &authoredEntry{owner: construct.OwnerUserId, automation: automation}
 
 	switch {
+	case automation.BeforeWrite != nil:
+		if s.beforeWriteEngine == nil {
+			return fmt.Errorf("authored scheduler: before-write engine is not wired")
+		}
+		entry.unsub = s.subscribeBeforeWrite(construct.OwnerUserId, automation)
 	case automation.IsEventTriggered():
 		unsub := s.subscribeEvent(construct.OwnerUserId, automation)
 		entry.unsub = unsub

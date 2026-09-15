@@ -24,6 +24,9 @@ import (
 
 // MemQLEngine is the default implementation of the MemQLEngine interface.
 type MemQLEngine struct {
+	beforeWriteMu      sync.RWMutex
+	beforeWriteHooks   map[string][]BeforeWriteHook
+	beforeWriteSources map[string]map[string][]BeforeWriteHook
 	*component.Component
 	// relationships + schemaIdx are DERIVED from concepts (see
 	// deriveConceptRegistryState) and are guarded by conceptStateMu. Read them

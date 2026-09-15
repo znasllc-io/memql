@@ -62,6 +62,9 @@ func (s *RunScope) Lookup(name string) (any, bool) {
 		}
 	}
 	switch name {
+	case "row":
+		v, ok := e.custom[name]
+		return v, ok
 	case "actor":
 		if v, ok := e.custom[name]; ok {
 			return v, true

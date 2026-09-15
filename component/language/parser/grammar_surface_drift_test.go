@@ -82,6 +82,15 @@ var grammarSurfaceCorpus = []struct {
 	src    string
 }{
 	// ---- currently legal forms -------------------------------------------
+	{"before write create", true, `@trigger(before="create", concept="v1:probe:ticket")
+automation adjust { row.status = "queued" }`},
+	{"before write update", true, `@trigger(before="update", concept="v1:probe:ticket")
+automation adjust { row.status = row.label }`},
+	{"before write both", true, `@trigger(before="write", concept="v1:probe:ticket")
+automation adjust { row.status = row.label }`},
+	{"before write excludes event", false, `@trigger(before="write", event="probe", concept="v1:probe:ticket")
+automation adjust { row.status = row.label }`},
+
 	{"concept decl", true, `concept probe {
   a string
 }`},

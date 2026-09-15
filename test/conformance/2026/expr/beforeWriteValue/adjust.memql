@@ -1,0 +1,2 @@
+@trigger(before="write", concept="v1:forge:request")
+automation bwValueAdjust { row.title = row.title ?? "untitled" }

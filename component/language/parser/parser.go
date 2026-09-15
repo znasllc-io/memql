@@ -2922,6 +2922,8 @@ func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Att
 			if d.Trigger == nil {
 				d.Trigger = &TriggerDef{}
 			}
+			d.Trigger.Before = getAttrArgString(attr, "before")
+			d.Trigger.Concept = getAttrArgString(attr, "concept")
 			if v := getAttrArgString(attr, "event"); v != "" {
 				d.Trigger.Event = v
 			}

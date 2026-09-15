@@ -350,7 +350,11 @@ func TestCompileSourceRefusesAStatementBodyWithProblems(t *testing.T) {
 // and requires a step type other than the kind-name fallback, so a statement
 // kind added without teaching the compiler fails here.
 func TestCompileBodyCoversEveryStatementKind(t *testing.T) {
-	seen := map[string]bool{}
+	seen := map[string]bool{"fieldWrite": true}
+	fieldSteps, fieldProblems := CompileBody("beforeWrite", "fieldProbe", nil, body(&ast.FieldWriteStatement{Field: "status", Value: lit("queued")}))
+	if len(fieldProblems) != 0 || len(fieldSteps) != 1 || fieldSteps[0]["type"] != "fieldWrite" {
+		t.Fatalf("field write: %v %v", fieldSteps, fieldProblems)
+	}
 	for name, s := range map[string]ast.BodyStatement{
 		"assign":   set(2, "a", lit(1)),
 		"call":     do(2, "builtin", "b"),

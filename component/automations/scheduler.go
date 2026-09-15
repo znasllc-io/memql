@@ -498,6 +498,9 @@ func (s *Scheduler) run(ctx context.Context) {
 		s.mu.Lock()
 		s.automations[automation.Name] = automation
 		s.mu.Unlock()
+		if automation.BeforeWrite != nil {
+			continue
+		}
 
 		if automation.IsScheduled() {
 			if err := s.scheduleAutomation(automation); err != nil {

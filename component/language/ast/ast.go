@@ -1206,8 +1206,10 @@ type ModeDef struct {
 
 // TriggerDef defines event-based triggers for an automation.
 type TriggerDef struct {
-	Event  string
-	Filter string
+	Before  string
+	Concept string
+	Event   string
+	Filter  string
 	// FilterLambda is the trigger filter, `@filter(row => ...)`
 	// (memql#5364): `row` is the triggering row. Filter holds its canonical
 	// source (ast.FormatExpr). Nil when the automation has no filter.

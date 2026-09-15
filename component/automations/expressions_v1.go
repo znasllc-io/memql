@@ -294,6 +294,10 @@ func (p *exprPreparer) step(s *Step) error {
 		return err
 	}
 	switch {
+	case s.FieldWrite != nil:
+		if s.FieldWrite.Value, err = p.value(at("field write value"), s.FieldWrite.Value); err != nil {
+			return err
+		}
 	case s.Event != nil:
 		ev := s.Event
 		if x.Topic, err = p.leaf(at("event topic"), ev.Topic, ev.leaves["topic"]); err != nil {

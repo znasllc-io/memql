@@ -52,6 +52,7 @@ func loggerLevelKeys() []string {
 
 // Automation represents a complete automation definition.
 type Automation struct {
+	BeforeWrite *BeforeWriteConfig `json:"beforeWrite,omitempty"`
 	// Trusted reports that this automation's SOURCE came from the registered
 	// DSL tree rather than from a caller (memql#2800).
 	//
@@ -416,6 +417,7 @@ const (
 
 // Step represents a single operation in an automation.
 type Step struct {
+	FieldWrite *FieldWriteConfig `json:"fieldWrite,omitempty"`
 	// ID identifies this step within its list: the key its result and its
 	// journal record carry. A statement's value is read by the name it binds
 	// (Binds), never by its id.

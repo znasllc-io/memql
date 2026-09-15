@@ -41,7 +41,7 @@ type StepRecordData struct {
 // RecordStepExecution inserts a v1:memql:automation:step record and returns the retrieval query.
 // Returns empty string if recording fails (errors are logged but not fatal).
 func RecordStepExecution(ctx context.Context, engine *memql.MemQLEngine, data StepRecordData) string {
-	if engine == nil {
+	if engine == nil || memql.InBeforeWrite(ctx) {
 		return ""
 	}
 

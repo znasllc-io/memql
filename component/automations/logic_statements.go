@@ -89,6 +89,9 @@ func (r *LogicRunner) statementLogic(fnName string, body []map[string]any) (*Aut
 
 // RunLogicBody implements memql.LogicRunner (see the file comment).
 func (r *LogicRunner) RunLogicBody(ctx context.Context, fnName string, body []map[string]any, args map[string]any) (any, error) {
+	if memql.InBeforeWrite(ctx) {
+		r = r.WithoutJournal()
+	}
 	if r.stepRegistry == nil {
 		return nil, fmt.Errorf("logic runner has no step registry wired")
 	}

@@ -59,6 +59,7 @@ var statementBlockWords = map[string]bool{
 
 // statementSite is where the cursor sits in a body written in statements.
 type statementSite struct {
+	beforeWrite bool
 	// opener is what opened the innermost block holding the cursor: "" when it
 	// sits directly in the construct, a statementBlockWords word in a
 	// statement's block, and "=" in a brace an expression opened.
@@ -115,6 +116,18 @@ func statementBodySite(source string, line int, cur string, enc EnclosingConstru
 	}
 	if header < 0 || header == line-1 || strings.Contains(view[header], "=>") {
 		return site, false // not found, the cursor on the header itself, or the terse header
+	}
+	for k := header - 1; k >= 0; k-- {
+		raw := strings.TrimSpace(strings.Split(source, "\n")[k])
+		if raw == "" || strings.HasPrefix(raw, "//") {
+			continue
+		}
+		if !strings.HasPrefix(raw, "@") {
+			break
+		}
+		if strings.HasPrefix(raw, "@trigger(") && strings.Contains(raw, "before") {
+			site.beforeWrite = true
+		}
 	}
 	// The whole construct decides whether it is written in statements: a step
 	// block below the cursor makes it a legacy body as surely as one above.
@@ -295,14 +308,30 @@ func (s *Service) statementStartItems(prefix string, enc EnclosingConstruct, sit
 		}
 	}
 
+	if site.beforeWrite {
+		keyword("row.", "adjust a declared payload field before persistence", 1)
+	}
 	for _, kw := range langparser.BodyStatementKeywords() {
+		if site.beforeWrite && kw != "if" && kw != "return" {
+			continue
+		}
 		if (kw == "publish" && enc.Keyword != "automation") || (kw == "return" && site.inBranch) {
 			continue // a logic may not publish (D14), and a parallel branch cannot return
 		}
 		keyword(kw, "statement", 2)
 	}
 
-	return append(items, s.statementCallItems(prefix, enc)...)
+	calls := s.statementCallItems(prefix, enc)
+	if site.beforeWrite {
+		filtered := calls[:0]
+		for _, item := range calls {
+			if strings.HasPrefix(item.InsertText, "logic ") || strings.HasPrefix(item.InsertText, "query ") || item.Label == "logic" || item.Label == "query" {
+				filtered = append(filtered, item)
+			}
+		}
+		calls = filtered
+	}
+	return append(items, calls...)
 }
 
 // statementCallItems is a construct call where a statement may write one: each

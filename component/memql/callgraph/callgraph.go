@@ -510,6 +510,8 @@ func statementConditions(text string) ([]string, bool) {
 		var out []string
 		ast.WalkBody(auto.Body.Statements, func(st ast.BodyStatement) bool {
 			switch s := st.(type) {
+			case *ast.FieldWriteStatement:
+				// A field value is an expression, not a condition or a construct call.
 			case *ast.IfStatement:
 				for _, b := range s.Branches {
 					if b.Cond != nil {

@@ -602,6 +602,7 @@ var positionRoots = map[tiers.Position][]string{
 	tiers.PositionAutomationCondition: {"args", "actor", "now", "config", "event"},
 	tiers.PositionLogicBody:           {"args", "actor", "now", "config"},
 	tiers.PositionMutationValue:       {"args", "actor", "now", "config"},
+	tiers.PositionBeforeWriteValue:    {"row", "args", "actor", "now", "config", "partition"},
 	tiers.PositionStepArgument:        {"args", "actor", "now", "config", "event"},
 	tiers.PositionPromptInput:         {"args", "now", "config"},
 }
