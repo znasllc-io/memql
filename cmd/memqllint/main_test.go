@@ -78,7 +78,6 @@ func writeTreeAsIs(t *testing.T, files map[string]string) string {
 }
 
 const testConcepts = `@version("1.0.0")
-@namespace("demo")
 @description("A demo item.")
 concept item {
   name    string  @required @description("Item name.")
@@ -87,7 +86,6 @@ concept item {
 
 const testQueries = `use demo.concepts.{ item }
 
-@enabled
 @description("A clean query.")
 query item queryItems {
   args {
@@ -169,7 +167,7 @@ func TestRun_AMistypedKeywordIsOneRefusal(t *testing.T) {
 			name:    "a typo'd construct keyword",
 			queries: strings.Replace(testQueries, "query item queryItems", "qurey item queryItems", 1),
 			want: []string{
-				"demo/queries.memql:", "line 5: qurey is not a construct keyword: did you mean query?",
+				"demo/queries.memql:", "line 4: qurey is not a construct keyword: did you mean query?",
 				"The constructs are: " + strings.Join(langparser.ConstructKeywords(), ", ") + " [construct_unknown]",
 			},
 		},
@@ -222,13 +220,12 @@ func TestRun_AMistypedKeywordIsOneRefusal(t *testing.T) {
 // the parity pass, whose query loader parses one construct at a time -- so the
 // parity copy counts its line from the top of that construct ("line 3" here),
 // and the rewriter that lowers the first query moves the parser's own count a
-// line down. memqllint prints the refusal once, naming line 12, the line of
+// line down. memqllint prints the refusal once, naming line 11, the line of
 // the file the author wrote it on.
 func TestRun_ARefusalBothPassesMakeNamesTheFileLine(t *testing.T) {
 	queries := testQueries + `
 
 @bogus
-@enabled
 @description("A second query.")
 query item queryByStatus {
   args {
@@ -236,8 +233,8 @@ query item queryByStatus {
   }
   filter  row => row.status == args.status
 }`
-	if got := strings.Split(queries, "\n")[11]; got != "@bogus" {
-		t.Fatalf("the fixture's line 12 is %q, want @bogus", got)
+	if got := strings.Split(queries, "\n")[10]; got != "@bogus" {
+		t.Fatalf("the fixture's line 11 is %q, want @bogus", got)
 	}
 	code, report, out := jsonReport(t, writeTree(t, map[string]string{
 		"demo/concepts.memql": testConcepts,
@@ -247,7 +244,7 @@ query item queryByStatus {
 		t.Fatalf("one refused annotation: run() = %d, want 1 with exactly one error:\n%s", code, out)
 	}
 	msg := report.Errors[0].Message
-	for _, want := range []string{"demo/queries.memql:", "at line 12, column 1:", `query "queryByStatus": unknown annotation @bogus`, "[annotation_unknown]"} {
+	for _, want := range []string{"demo/queries.memql:", "at line 11, column 1:", `query "queryByStatus": unknown annotation @bogus`, "[annotation_unknown]"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("the refusal must carry %q, got %q", want, msg)
 		}
@@ -458,7 +455,6 @@ func TestRun_ReferentialIntegrityFindingsExitOne(t *testing.T) {
 				"demo/concepts.memql": testConcepts,
 				"demo/queries.memql": `use demo.nonexistentfile.{ ghost }
 
-@enabled
 @description("Ghost module; ghost referenced here: ghost.")
 query item queryItems {
   args {
@@ -474,7 +470,6 @@ query item queryItems {
 				"demo/concepts.memql": testConcepts,
 				"demo/queries.memql": `use demo.concepts.{ item, deletedConcept }
 
-@enabled
 @description("deletedConcept was removed from the module; referenced here: deletedConcept.")
 query item queryItems {
   args {
@@ -490,7 +485,6 @@ query item queryItems {
 				"demo/concepts.memql": testConcepts,
 				"demo/mutations.memql": `use demo.concepts.{ item }
 
-@enabled
 @description("Writes an undeclared field.")
 mutation item createItem {
   args {
@@ -507,7 +501,7 @@ mutation item createItem {
 			name: "stranded import after call rename",
 			files: map[string]string{
 				"demo/concepts.memql": testConcepts,
-				"demo/logic.memql": `@enabled
+				"demo/logic.memql": `
 @description("Decides something.")
 logic decideThing {
   args {
@@ -517,7 +511,6 @@ logic decideThing {
 }`,
 				"demo/automations.memql": `use demo.logic.{ decideThing }
 
-@enabled
 @trigger(event="graph.node.created.v1:demo:item")
 @description("Step call renamed away from the import.")
 automation onItemCreated {
@@ -549,14 +542,12 @@ func TestRun_EngineParityFindings(t *testing.T) {
 	t.Run("non-canonical relationship type", func(t *testing.T) {
 		root := writeTree(t, map[string]string{
 			"warehouse/concepts.memql": `@version("1.0.0")
-@namespace("warehouse")
 @description("A hub other rows point at.")
 concept hub {
   name  string  @required  @description("Hub name.")
 }
 
 @version("1.0.0")
-@namespace("warehouse")
 @description("A gadget pointing at a hub via a NON-canonical relationship type.")
 concept gadget {
   hubId  string  @required  @description("FK to the owning hub.")
@@ -578,14 +569,12 @@ concept gadget {
 	t.Run("declared but unused mutation arg", func(t *testing.T) {
 		root := writeTree(t, map[string]string{
 			"warehouse/concepts.memql": `@version("1.0.0")
-@namespace("warehouse")
 @description("A widget.")
 concept widget {
   label  string  @required  @description("Widget label.")
 }`,
 			"warehouse/mutations.memql": `use warehouse.concepts.{ widget }
 
-@enabled
 @description("Create a widget; declares an arg the body never references.")
 mutation widget createWidget {
   args {
@@ -612,14 +601,12 @@ mutation widget createWidget {
 	t.Run("clean pack exits zero", func(t *testing.T) {
 		root := writeTree(t, map[string]string{
 			"warehouse/concepts.memql": `@version("1.0.0")
-@namespace("warehouse")
 @description("A gizmo.")
 concept gizmo {
   label  string  @required  @description("Gizmo label.")
 }`,
 			"warehouse/mutations.memql": `use warehouse.concepts.{ gizmo }
 
-@enabled
 @description("Create a gizmo.")
 mutation gizmo createGizmo {
   args {
@@ -658,7 +645,6 @@ func TestRun_ReportsParitySkippedDomains(t *testing.T) {
 	// a skip is information, not a diagnostic.
 	coreNamed := map[string]string{
 		"cluster/concepts.memql": `@version("1.0.0")
-@namespace("cluster")
 @description("A bundle-supplied row under a core domain name.")
 concept shadowed {
   name  string  @required  @description("Row name.")
@@ -710,7 +696,6 @@ func TestRun_OrphanedPreambleFindingExitsOne(t *testing.T) {
 @public
 @description("intentionally caller-scope-free")
 /*
-@enabled
 query item queryParked {
   args {
     name  string  @required
@@ -718,7 +703,6 @@ query item queryParked {
   filter  name == args.name
 }
 */
-@enabled
 query item queryItems {
   args {
     name  string  @required
@@ -762,7 +746,6 @@ func TestRun_UnregisteredConnectorRefusesTheMountedBundle(t *testing.T) {
 	t.Run("an origin naming a connector nobody serves", func(t *testing.T) {
 		root := writeTree(t, map[string]string{
 			"storefront/concepts.memql": `@version("1.0.0")
-@namespace("storefront")
 @description("A mirror of a system this build has never heard of.")
 @origin("nowhere")
 concept phantom {
@@ -785,7 +768,6 @@ concept phantom {
 	t.Run("a mirror target nobody drains", func(t *testing.T) {
 		root := writeTree(t, map[string]string{
 			"storefront/concepts.memql": `@version("1.0.0")
-@namespace("storefront")
 @description("MemQL-origin data pushed to a system nothing drains.")
 @mirroredTo("nowhere")
 concept ledger {
@@ -807,7 +789,6 @@ concept ledger {
 	t.Run("a REGISTERED connector name loads", func(t *testing.T) {
 		root := writeTree(t, map[string]string{
 			"storefront/concepts.memql": `@version("1.0.0")
-@namespace("storefront")
 @description("A mirror of a system this build does serve.")
 @origin("shopify")
 concept mirrored {
@@ -831,7 +812,6 @@ concept mirrored {
 func TestRun_V1RefusalNamesTheAuthorsLineAndColumn(t *testing.T) {
 	queries := `use demo.concepts.{ item }
 
-@enabled
 @description("A clean query.")
 query item queryItems {
   args {
@@ -840,7 +820,6 @@ query item queryItems {
   filter  row => row.name == args.name
 }
 
-@enabled
 @description("Items missing a status, written with the retired null.")
 query item unstatusedItems {
   args {
@@ -851,11 +830,9 @@ query item unstatusedItems {
 }`
 	specs := `use demo.concepts.{ item }
 
-@enabled
 @description("An item with a name.")
 spec item isNamed = row => row.name != ""
 
-@enabled
 @description("An item with a status, written with the retired null.")
 spec item hasStatus = row => row.status != null`
 	root := writeTree(t, map[string]string{
@@ -963,7 +940,6 @@ query thing second {
 func TestRun_RewriteRefusalNamesTheAuthorsLineAndColumn(t *testing.T) {
 	files := map[string]string{
 		"probe/concepts.memql": `@version("1.0.0")
-@namespace("probe")
 @description("A probe thing.")
 concept thing {
   a       string  @description("A.")

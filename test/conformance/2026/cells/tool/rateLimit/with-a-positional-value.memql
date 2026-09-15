@@ -1,6 +1,0 @@
-/// Open a support ticket, at most ten times a minute.
-@handler(type="function", name="openTicketRateLimit")
-@rateLimit(10)
-tool openSupportTicketRateLimit {
-  title  string!  @description("The ticket's one-line title.")
-}

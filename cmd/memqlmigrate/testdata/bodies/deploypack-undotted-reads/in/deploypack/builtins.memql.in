@@ -21,7 +21,6 @@
 // the lifecycle's terminal transition is decided by OBSERVING ArgoCD rather
 // than by running an effect (see ../pack.go).
 
-@enabled
 @executor("integration.deploypack.commitOverlay")
 @args(profile="object")
 @description("Model A: stage + commit the kustomize overlay change via the deploycontrol Executor (git). The committed overlay is the GitOps source of truth ArgoCD reconciles. Epic 2 / #2095.")
@@ -29,14 +28,12 @@ builtin deployCommitOverlay {
   message  string  @description("Commit message; a provenance default is used when empty.")
 }
 
-@enabled
 @executor("integration.deploypack.argoSync")
 @args(profile="object")
 @description("Model A: push the committed overlay so ArgoCD reconciles it onto the cluster (via the deploycontrol Executor git push). The pack never bypasses ArgoCD with a direct apply. Epic 2 / #2095.")
 builtin deployArgoSync {
 }
 
-@enabled
 @executor("integration.deploypack.recordBack")
 @args(profile="object")
 @description("Model A record-back: append the reconciled deployment status (+ optional per-node spec) into the deployment concept via the E2.1 mutations, so the data layer mirrors the GitOps-observed state. The committed overlay stays the source of truth. Epic 2 / #2095.")
@@ -49,7 +46,6 @@ builtin deployRecordBack {
   imageDigest   string             @description("Resolved image digest for the node type / deployment. Used only when nodeType is set.")
 }
 
-@enabled
 @executor("integration.deploypack.observeReconciledState")
 @args(profile="object")
 @description("Model A read leg (E2.4): read the ArgoCD application's reconciled state via the deploycontrol Executor (kubectl -n argocd get app -o json) and map it with deploycontrol.MapArgoStatus. Returns synced + healthy + revision + outOfSync so the record-back automation can mirror the GitOps-observed state into the deployment concept. Read-only; never mutates the cluster. Epic 2 / #2097.")

@@ -132,7 +132,7 @@ func TestACorruptFigureReadsAsAbsentRatherThanAsANumber(t *testing.T) {
 	for _, fig := range []any{
 		nil,
 		map[string]any{},
-		map[string]any{"measured": true},                       // no median
+		map[string]any{"measured": true}, // no median
 		map[string]any{"measured": true, "median": "not a num"}, // wrong type
 		"not an object",
 	} {

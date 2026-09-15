@@ -26,7 +26,6 @@ func fileAt(src, cmp string) (line, col int, where string) {
 
 const positionQueries = `use demo.concepts.{ item }
 
-@enabled
 @description("A clean query.")
 query item queryItems {
   args {
@@ -35,7 +34,6 @@ query item queryItems {
   filter  row => row.name == args.name
 }
 
-@enabled
 @description("Items missing a status, written with the retired null.")
 query item unstatusedItems {
   args {
@@ -72,7 +70,6 @@ func TestFunctionSliceRefusalNamesTheFileLine(t *testing.T) {
 func TestSpecSliceRefusalNamesTheFileLine(t *testing.T) {
 	specs := `use demo.concepts.{ item }
 
-@enabled
 @description("An item with a name.")
 spec item isNamed = row => row.name != ""
 
@@ -143,7 +140,6 @@ query widget unstatused {
 func TestRewriteRefusalNamesTheFileAndBundlePosition(t *testing.T) {
 	file := `use demo.concepts.{ item }
 
-@enabled
 @description("A clean query.")
 query item queryItems {
   args {
@@ -152,7 +148,6 @@ query item queryItems {
   filter  row => row.name == args.name
 }
 
-@enabled
 @description("Items refined in process, with no page for refine to run over.")
 query item refinedItems {
   filter row => row.name == "x"

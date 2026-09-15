@@ -66,7 +66,7 @@ type DecisionRecord struct {
 type SimulationChange struct {
 	CallId string
 	// WasPolicy and WouldBePolicy are the before and after.
-	WasPolicy    string
+	WasPolicy     string
 	WouldBePolicy string
 	// WasDoor is where the call actually went. There is deliberately no
 	// "WouldBeDoor": which door a policy resolves to depends on which machines

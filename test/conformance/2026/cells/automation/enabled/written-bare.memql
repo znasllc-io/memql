@@ -1,6 +1,0 @@
-/// When a node joins the cluster, open a ticket to welcome it. @enabled restates the default.
-@trigger(event="node.created", concept="v1:cluster:node")
-@enabled
-automation welcomeNodeEnabled {
-  raise := mutation raiseTicketEnabled(title: "A node joined the cluster")
-}

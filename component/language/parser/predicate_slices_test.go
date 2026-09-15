@@ -13,7 +13,6 @@ func TestExtractPredicateDeclarationSlices(t *testing.T) {
 	src := `use agents.concepts.{ agent }
 
 /// Assistants only.
-@enabled
 spec agent isAssistant = row => row.role == "assistant"
                          && row.kind != "system"   // not the system agent
 
@@ -32,7 +31,7 @@ query agent q {
 	if len(specs) != 1 || specs[0].Name != "isAssistant" {
 		t.Fatalf("spec slices = %+v, want isAssistant alone", specs)
 	}
-	want := "/// Assistants only.\n@enabled\nspec agent isAssistant = row => row.role == \"assistant\"\n                         && row.kind != \"system\""
+	want := "/// Assistants only.\nspec agent isAssistant = row => row.role == \"assistant\"\n                         && row.kind != \"system\""
 	if specs[0].Source != want {
 		t.Errorf("slice = %q\nwant    %q", specs[0].Source, want)
 	}

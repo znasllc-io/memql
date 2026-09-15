@@ -34,7 +34,6 @@ import (
 func TestLintParity_ConceptWithUnknownPropertyType(t *testing.T) {
 	root := fstest.MapFS{
 		"lintbadtype/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("lintbadtype")
 @description("A widget with a mistyped property type.")
 concept widget {
   label    string   @required  @description("Widget label.")
@@ -72,7 +71,6 @@ concept widget {
 func TestLintParity_ConceptWithUnknownElementType(t *testing.T) {
 	root := fstest.MapFS{
 		"lintbadelem/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("lintbadelem")
 @description("A widget whose ELEMENT type is mistyped.")
 concept widget {
   label  string     @required  @description("Widget label.")
@@ -106,7 +104,6 @@ concept widget {
 func TestLintParity_UnknownPropertyTypeNamesItsFile(t *testing.T) {
 	root := fstest.MapFS{
 		"lintbadfile/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("lintbadfile")
 @description("A gadget with a mistyped property type.")
 concept gadget {
   label  string     @required  @description("Gadget label.")
@@ -141,7 +138,7 @@ concept gadget {
 func TestConceptPropertyTypes_AcceptedAndRejectedSets(t *testing.T) {
 	build := func(t *testing.T, ty string) error {
 		t.Helper()
-		src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+		src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 			"concept probe {\n  label string @required @description(\"l\")\n  f " + ty + " @description(\"x\")\n}\n"
 		decls := ExtractConceptDecls(src)
 		if len(decls) == 0 {
@@ -206,7 +203,7 @@ func TestConceptPropertyTypes_AcceptedAndRejectedSets(t *testing.T) {
 // nested `boolean` was in the harmless zone when it drops the whole concept --
 // the exact failure this issue exists to prevent.
 func TestConceptPropertyTypes_NestedBlockPropertiesAreValidated(t *testing.T) {
-	src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+	src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 		"concept probe {\n  label string @required @description(\"l\")\n" +
 		"  cfg {\n    inner boolean @description(\"x\")\n  }\n}\n"
 	decls := ExtractConceptDecls(src)
@@ -248,7 +245,7 @@ func TestConceptPropertyTypes_NestedBlockPropertiesAreValidated(t *testing.T) {
 func TestConceptPropertyTypes_ElementTypesAreValidated(t *testing.T) {
 	buildField := func(t *testing.T, ty string) (map[string]any, error) {
 		t.Helper()
-		src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+		src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 			"concept probe {\n  label string @required @description(\"l\")\n  f " + ty + " @description(\"x\")\n}\n"
 		decls := ExtractConceptDecls(src)
 		if len(decls) == 0 {
@@ -379,7 +376,7 @@ func TestConceptPropertyTypes_ElementTypesAreValidated(t *testing.T) {
 func TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints(t *testing.T) {
 	build := func(t *testing.T, decl string) map[string]any {
 		t.Helper()
-		src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+		src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 			"concept probe {\n  label string @required @description(\"l\")\n  f " + decl + " @description(\"x\")\n}\n"
 		decls := ExtractConceptDecls(src)
 		if len(decls) == 0 {
@@ -502,7 +499,7 @@ func TestConceptPropertyTypes_ElementSafeListCarriesTheSameConstraints(t *testin
 func mustReject(t *testing.T, decl string, bad, good any) {
 	t.Helper()
 	id := "v1:aud:probeReject"
-	src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+	src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 		"concept probeReject {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
 	decls := ExtractConceptDecls(src)
 	if len(decls) == 0 {
@@ -574,7 +571,7 @@ func mustReject(t *testing.T, decl string, bad, good any) {
 func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarkers(t *testing.T) {
 	fieldOf := func(t *testing.T, decl string) map[string]any {
 		t.Helper()
-		src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+		src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 			"concept probe {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
 		decls := ExtractConceptDecls(src)
 		if len(decls) == 0 {
@@ -654,9 +651,9 @@ func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarker
 	t.Run("field markers survive wrapping", func(t *testing.T) {
 		for _, c := range []struct{ name, ann string }{
 			{"description", `@description("x")`},
-			{"default", `@description("x") @default("z")`},
-			{"unique", `@description("x") @unique`},
-			{"immutable", `@description("x") @immutable`},
+			{"default", `@description("x")`},
+			{"unique", `@description("x")`},
+			{"immutable", `@description("x")`},
 			{"secret", `@description("x") @secret`},
 			{"pii", `@description("x") @pii`},
 			{"internal", `@description("x") @internal`},
@@ -687,7 +684,7 @@ func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarker
 	// enters the concept-level `required` list. Wrapping must not change that.
 	t.Run("required survives wrapping", func(t *testing.T) {
 		requiredOf := func(decl string) []any {
-			src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+			src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 				"concept probe {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
 			decls := ExtractConceptDecls(src)
 			if len(decls) == 0 {
@@ -741,7 +738,7 @@ func TestConceptPropertyTypes_AnnotationsSplitIntoValueConstraintsAndFieldMarker
 func TestConceptPropertyTypes_ValueAnnotationsAreCarriedIntoElementPosition(t *testing.T) {
 	schemaFor := func(t *testing.T, decl string) map[string]any {
 		t.Helper()
-		src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+		src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 			"concept probe {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
 		decls := ExtractConceptDecls(src)
 		if len(decls) == 0 {
@@ -880,7 +877,7 @@ func TestConceptPropertyTypes_WrappedElementsAcceptConformingData(t *testing.T) 
 func mustAccept(t *testing.T, decl string, payload any) {
 	t.Helper()
 	id := "v1:aud:probeAccept"
-	src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+	src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 		"concept probeAccept {\n  label string @required @description(\"l\")\n  " + decl + "\n}\n"
 	decls := ExtractConceptDecls(src)
 	if len(decls) == 0 {
@@ -922,18 +919,21 @@ func TestLintParity_SkipsSurviveAHardLoadError(t *testing.T) {
 	root := fstest.MapFS{
 		// Builds, but its schema fails -- a recoverable skip.
 		"zzaaa/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("zzaaa")
 @description("A widget with a mistyped property type.")
 concept widget {
   label    string   @required  @description("Widget label.")
   enabled  boolean             @description("Mistyped.")
 }
 `)},
-		// @namespace disagreeing with the directory is a hard load ERROR
-		// (the moved-file guard, #2614), not a warn-skip.
+		// A RETIRED annotation is a hard load ERROR (epic memql#5375), not a
+		// warn-skip. It used to be @namespace DISAGREEING with the directory
+		// -- the moved-file guard, #2614 -- and the annotation itself is the
+		// refusal now, which is a hard error in the same position and keeps
+		// this fixture measuring what it measures: that skips gathered BEFORE
+		// a hard error survive it.
 		"zzzzz/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("somewhereelse")
-@description("A gadget in the wrong place.")
+@namespace("cluster")
+@description("A gadget carrying a retired annotation.")
 concept gadget {
   label string @required @description("Gadget label.")
 }

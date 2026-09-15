@@ -20,7 +20,7 @@ use identity.concepts.{ user }
 @displayCard(primary="codeReference", secondary="reason", tertiary="setBy", status="level")
 concept codeProfile {
   codeReference  string!  @description("Fully-qualified node id from the architecture model. Format documented in component/architecture/model/ids.go. The single join key shared by static topology, live profile, raw invocations, and aggregate metrics.")
-  level          enum("off", "count", "meta", "verbose")!  @default("off")  @description("Capture verbosity. off = not instrumented. count = duration + error only. meta = + arg types/sizes. verbose = + full arg/return values, subject to redaction.")
+  level          enum("off", "count", "meta", "verbose")!  @description("Capture verbosity. off = not instrumented. count = duration + error only. meta = + arg types/sizes. verbose = + full arg/return values, subject to redaction.")
   sampleRate     float  @description("Fraction of calls to capture at the chosen level. 1.0 = every call (verbose locally / on incident). 0.01 = 1% (verbose-in-prod sampling). The runtime's PRNG draws once per call. Convention: 1.0 -- NOT applied on insert, and no mutation is bound to this concept, so a writer must supply it; an absent value reads as 0.0, which captures nothing.")
   retentionDays  int  @description("How long the resulting code_invocation hypertable rows survive before the retention policy drops them. Aggregates (codeMetric rollups) outlive this -- the trendline is preserved, the forensic detail is short-lived. Convention: 7 -- NOT applied on insert, and no mutation is bound to this concept, so a writer must supply it.")
   redactArgs     []string  @description("Names of arguments to force-redact regardless of value. The default redact-by-name pattern catches obvious cases (pass*, token*, secret*); use this to pin individual params that don't match the pattern. NOTE: a //memql:observe source marker on the function declares the SAFE list (its inverse); when both exist, redactArgs here wins.")
@@ -65,7 +65,7 @@ concept codeMetric {
   windowEnd      datetime!  @description("Exclusive end. windowEnd - windowStart is the bucket size; cockpit reads bucket size from the difference rather than from a separate field.")
   bucket         enum("1m", "1h")!  @description("Bucket size identifier. Mirrors the continuous-aggregate view used to produce the row, kept as a field so consumers don't have to math out the diff.")
   callCount      int!  @description("Number of invocations in [windowStart, windowEnd).")
-  errorCount     int!  @default("0")  @description("Subset of callCount where errorMessage was non-empty.")
+  errorCount     int!  @description("Subset of callCount where errorMessage was non-empty.")
   errorRate      float  @description("Convenience: errorCount / callCount, populated by the materialization step. Consumers can compute it themselves if the row was hand-inserted.")
   p50DurationNs  int  @description("50th-percentile latency in nanoseconds across the bucket.")
   p95DurationNs  int  @description("95th-percentile latency.")

@@ -71,8 +71,9 @@ use common.builtins.{ serviceVersion }
 //
 //   /// text               The description: a doc comment above the
 //                          declaration (@description("text") is the same).
-//   @disabled              Skip the logic at load. (@enabled is the default,
-//                          a no-op.)
+//   @disabled              Skip the logic at load. A construct is enabled by
+//                          default; @enabled was the explicit-on no-op and is
+//                          RETIRED (epic memql#5375).
 //   @actor                 The body reads actor.* (required when it does).
 //   @requiresRank("<role>")
 //   @requiresCapability("<verb>", "<resource>")

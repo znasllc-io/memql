@@ -30,7 +30,6 @@ import (
 // --- fixtures -------------------------------------------------------------
 
 const trainedWidgetSrc = `@version("1.0.0")
-@namespace("trainingns")
 @description("A concept taught to a running cluster")
 concept trainedWidget {
   ownerUserId  string  @required
@@ -131,6 +130,14 @@ func promoteConceptSource(t *testing.T, e *MemQLEngine, source, name string) err
 	return promoteBundleAndLookup(t, e, source, "concept", name)
 }
 
+// promoteConceptSourceFrom is promoteConceptSource with the bundle's ORIGIN
+// named, which is where a concept's namespace comes from since epic memql#5375
+// retired @namespace. An empty origin is the no-namespace case.
+func promoteConceptSourceFrom(t *testing.T, e *MemQLEngine, source, name, origin string) error {
+	t.Helper()
+	return promoteBundleAndLookupFrom(t, e, source, "concept", name, origin)
+}
+
 // promoteBundleAndLookup authors + durably promotes a single named construct,
 // returning the first error from either half.
 //
@@ -141,8 +148,16 @@ func promoteConceptSource(t *testing.T, e *MemQLEngine, source, name string) err
 // firing for the wrong reason.
 func promoteBundleAndLookup(t *testing.T, e *MemQLEngine, source, kind, name string) error {
 	t.Helper()
+	return promoteBundleAndLookupFrom(t, e, source, kind, name, "trainingns/concepts.memql")
+}
+
+// promoteBundleAndLookupFrom is promoteBundleAndLookup with the bundle's ORIGIN
+// named. The origin is where a concept's namespace comes from since epic
+// memql#5375; an empty one is the case where none can be derived.
+func promoteBundleAndLookupFrom(t *testing.T, e *MemQLEngine, source, kind, name, origin string) error {
+	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	res, err := AuthorSessionBundle(reg, "owner-1", source, "")
+	res, err := AuthorSessionBundle(reg, "owner-1", source, origin)
 	if err != nil {
 		var detail []string
 		for _, d := range res.Diagnostics {
@@ -214,7 +229,7 @@ func TestDeriveConceptRegistryState_IsIdempotent(t *testing.T) {
 // nothing to register and refused the kind outright.
 func TestAuthorSessionBundle_CompilesConceptOntoCompiled(t *testing.T) {
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, ok := reg.Lookup("owner-1", "concept", "trainedWidget")
@@ -241,7 +256,7 @@ func TestAuthorSessionBundle_ConceptDoesNotTouchAnyLiveRegistry(t *testing.T) {
 	before := len(memoryNodes.List())
 
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 
@@ -266,7 +281,7 @@ func TestPromoteConcept_MergesIntoLiveRegistryAndPersists(t *testing.T) {
 	}
 
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, _ := reg.Lookup("owner-1", "concept", "trainedWidget")
@@ -394,7 +409,7 @@ func TestPromoteBundleDurable_ConceptAndItsMutationInOneBundle(t *testing.T) {
 	e := promoteConceptEngineOnTheDefaultRegistry(t)
 
 	bundle := trainedWidgetSrc + "\n\n" + trainedWidgetMutationSrc
-	res, err := e.promoteBundleDurableWithStore(context.Background(), &fakePromoteStore{}, "owner-1", bundle, "", false)
+	res, err := e.promoteBundleDurableWithStore(context.Background(), &fakePromoteStore{}, "owner-1", bundle, "trainingns/concepts.memql", false)
 	if err != nil {
 		t.Fatalf("promote bundle: %v (diagnostics %+v)", err, res.Diagnostics)
 	}
@@ -436,12 +451,13 @@ func TestPromoteConcept_CannotShadowACoreConcept(t *testing.T) {
 	}
 
 	shadow := `@version("1.0.0")
-@namespace("identity")
 @description("An impostor")
 concept user {
   label  string
 }`
-	err = promoteConceptSource(t, e, shadow, "user")
+	// The origin is what puts the impostor in the core namespace now: the id
+	// used to come from an explicit @namespace("identity") (epic memql#5375).
+	err = promoteConceptSourceFrom(t, e, shadow, "user", "identity/concepts.memql")
 	if err == nil {
 		t.Fatal("promoting a concept whose canonical id a core concept owns must be refused")
 	}
@@ -465,7 +481,6 @@ func TestPromoteConcept_RepromoteReplacesItsOwnPromotion(t *testing.T) {
 	}
 
 	revised := `@version("1.0.0")
-@namespace("trainingns")
 @description("A concept taught to a running cluster, revised")
 concept trainedWidget {
   ownerUserId  string  @required
@@ -508,7 +523,7 @@ func TestPromoteConcept_RefusesReservedPayloadField(t *testing.T) {
 	for _, field := range []string{"provenance", "actor", "args", "row", "config", "id", "createdAt"} {
 		t.Run(field, func(t *testing.T) {
 			e := promoteConceptEngine(t)
-			src := "@version(\"1.0.0\")\n@namespace(\"trainingns\")\nconcept trainedReserved {\n  " +
+			src := "@version(\"1.0.0\")\nconcept trainedReserved {\n  " +
 				field + "  object\n  label  string\n}"
 
 			err := promoteConceptSource(t, e, src, "trainedReserved")
@@ -531,12 +546,20 @@ func TestPromoteConcept_RefusesConceptWithoutANamespace(t *testing.T) {
 concept trainedNoNamespace {
   label  string
 }`
-	err := promoteConceptSource(t, e, src, "trainedNoNamespace")
+	// A concept still cannot promote without a namespace; what supplies one
+	// changed. It was an explicit @namespace until epic memql#5375 retired the
+	// annotation, and it is the bundle's ORIGIN path now -- so the fixture
+	// withholds the origin rather than the annotation, and the refusal has to
+	// name the path to send instead of an annotation that no longer exists.
+	err := promoteConceptSourceFrom(t, e, src, "trainedNoNamespace", "")
 	if err == nil {
-		t.Fatal("a concept with no @namespace must not promote")
+		t.Fatal("a concept with no derivable namespace must not promote")
 	}
 	if !strings.Contains(err.Error(), "namespace") {
-		t.Errorf("refusal message = %q, want a missing-@namespace refusal", err)
+		t.Errorf("refusal message = %q, want a missing-namespace refusal", err)
+	}
+	if !strings.Contains(err.Error(), "tree-relative path") {
+		t.Errorf("refusal message = %q, want it to name the path to send", err)
 	}
 }
 
@@ -560,7 +583,6 @@ func TestPromoteConcept_RelationshipToACoreConceptIsDerived(t *testing.T) {
 	e := promoteConceptEngine(t)
 
 	src := `@version("1.0.0")
-@namespace("trainingns")
 @description("A trained concept pointing at a core one")
 concept trainedNote {
   ownerUserId  string  @required
@@ -598,7 +620,6 @@ func TestPromoteConcept_RefusesUnresolvableRelationshipTarget(t *testing.T) {
 	e := promoteConceptEngine(t)
 
 	src := `@version("1.0.0")
-@namespace("trainingns")
 concept trainedDangling {
   ownerUserId  string  @required
 
@@ -631,7 +652,6 @@ func TestPromoteConcept_RefusesRelationshipFieldNotDeclared(t *testing.T) {
 	e := promoteConceptEngine(t)
 
 	src := `@version("1.0.0")
-@namespace("trainingns")
 concept trainedTypo {
   ownerUserId  string  @required
 
@@ -661,7 +681,6 @@ func TestPromoteConcept_NodeTypeInvariantsApply(t *testing.T) {
 		{
 			name: "collection without contains",
 			source: `@version("1.0.0")
-@namespace("trainingns")
 @type("collection")
 concept trainedBadBasket {
   ownerUserId  string  @required
@@ -671,7 +690,6 @@ concept trainedBadBasket {
 		{
 			name: "reference without alias or equals",
 			source: `@version("1.0.0")
-@namespace("trainingns")
 @type("reference")
 concept trainedBadPointer {
   ownerUserId  string  @required
@@ -681,7 +699,6 @@ concept trainedBadPointer {
 		{
 			name: "contains on a non-collection",
 			source: `@version("1.0.0")
-@namespace("trainingns")
 concept trainedBadContainer {
   ownerUserId  string  @required
   itemId       string
@@ -718,13 +735,11 @@ func TestPromoteConcept_CollectionWithContainsLands(t *testing.T) {
 	e := promoteConceptEngine(t)
 
 	item := `@version("1.0.0")
-@namespace("trainingns")
 concept trainedItem {
   ownerUserId  string  @required
   label        string
 }`
 	basket := `@version("1.0.0")
-@namespace("trainingns")
 @type("collection")
 concept trainedBasket {
   ownerUserId  string  @required
@@ -813,7 +828,7 @@ func TestPromoteConcept_RefusesAnImmutableRegistry(t *testing.T) {
 func TestRehydratePromotedConcept_SurvivesARestart(t *testing.T) {
 	old := promoteConceptEngine(t)
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, _ := reg.Lookup("owner-1", "concept", "trainedWidget")
@@ -864,7 +879,7 @@ func TestRehydratePromotedConcept_SurvivesARestart(t *testing.T) {
 func TestRehydratePromotedConcept_PropagatesAcrossNodes(t *testing.T) {
 	nodeA := promoteConceptEngine(t)
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, _ := reg.Lookup("owner-1", "concept", "trainedWidget")

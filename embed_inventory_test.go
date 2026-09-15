@@ -103,7 +103,7 @@ var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql/examples/deploypack":    4,   // all:dsl (+memql.toml, the pack's language line -- memql#5357)
 	"github.com/znasllc-io/memql/examples/referencepack": 6,   // all:dsl (+memql.toml, memql#5357)
 	"github.com/znasllc-io/memql/examples/reviewspack":   6,   // all:dsl (memql#4139; +memql.toml, memql#5357)
-	"github.com/znasllc-io/memql/examples/shopifypack":   7,   // all:dsl -- memql#4138 attach/secrets/sync (+memql.toml, memql#5357)
+	"github.com/znasllc-io/memql/examples/shopifypack":   8,   // all:dsl -- memql#4138 attach/secrets/sync (+memql.toml, memql#5357; +namespace.pin -- epic memql#5375 retired @namespace, so a pack whose namespace diverges from its directory states it in a one-line pin instead). MEASURED from the gate, never derived
 	"github.com/znasllc-io/memql/integrations":           1,   // *.json
 	"github.com/znasllc-io/memql/scripts/install/graph":  5,   // install.json uninstall.json (memql#3369; +rebuild.json memql#4245; +install-main.json memql#4430; +update-rebuild.json memql#4578)
 }

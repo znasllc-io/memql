@@ -41,20 +41,17 @@ func differingIdTreeWithPinnedDir(pinnedDir, consumerField string) fstest.MapFS 
 	return fstest.MapFS{
 		pinnedDir + "/namespace.pin": file("cluster\n"),
 		pinnedDir + "/concepts.memql": file(`@version("2.0.0")
-@namespace("cluster")
 @description("Declared under the pinned directory, at a different version.")
 concept widget {
   fromDeploy  string  @required @description("Only on the pinned declaration.")
 }`),
 		"cluster/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("Declared under cluster/, the real directory.")
 concept widget {
   fromCluster  string  @required @description("Only on the cluster declaration.")
 }`),
 		"consumer/queries.memql": file(`use cluster.concepts.{ widget }
 
-@enabled
 @description("Filters on a field one declaration has.")
 query widget consumerWidgets {
   args {

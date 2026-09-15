@@ -73,7 +73,7 @@ automation x ` + bodyStub,
 		},
 		{
 			name: "trigger above a block comment",
-			src: `@enabled
+			src: `
 @trigger(event="node.created", concept="v1:cluster:node")
 /* @description("temporarily removed") */
 automation y ` + bodyStub,
@@ -88,7 +88,7 @@ automation b ` + bodyStub,
 		},
 		{
 			name: "multi-line comment ending on the annotation's line",
-			src: `@enabled
+			src: `
 /* note
    more */ @trigger(event="node.created", concept="v1:cluster:node")
 automation a ` + bodyStub,
@@ -129,7 +129,6 @@ func TestSlicePreambleStopsAtRealCode(t *testing.T) {
 @trigger(event="node.created", concept="v1:cluster:node")
 automation first ` + bodyStub + `
 
-@enabled
 @trigger(event="node.updated", concept="v1:cluster:node")
 automation second ` + bodyStub
 
@@ -142,8 +141,12 @@ automation second ` + bodyStub
 	if strings.Contains(second, "automation first") {
 		t.Errorf("the second slice absorbed the first automation entirely:\n%s", second)
 	}
-	if !strings.Contains(second, "@enabled") {
-		t.Errorf("the second slice lost its own @enabled:\n%s", second)
+	// The second slice must keep its OWN preamble. That was @enabled until
+	// epic memql#5375 retired it; @trigger is the annotation the fixture has
+	// and it tests the same property -- a slice that stops at the construct
+	// boundary above it still starts at its own annotations.
+	if !strings.Contains(second, `@trigger(event="node.updated"`) {
+		t.Errorf("the second slice lost its own annotation preamble:\n%s", second)
 	}
 }
 
@@ -166,7 +169,6 @@ func TestOrdinaryCommentContentDoesNotRefuseBoot(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := tc.comment + `
-@enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation ok ` + bodyStub
 
@@ -189,7 +191,7 @@ func TestGatesStillFireOnRealCode(t *testing.T) {
 	for _, tc := range []struct{ name, src, wantErr string }{
 		{
 			name: "real retired event read",
-			src: `@enabled
+			src: `
 @trigger(event="node.created", concept="v1:cluster:node")
 automation bad {
   s := logic someLogic(status: event.payload.status)
@@ -198,7 +200,7 @@ automation bad {
 		},
 		{
 			name: "real unknown annotation",
-			src: `@enabled
+			src: `
 @public
 @trigger(event="node.created", concept="v1:cluster:node")
 automation bad ` + bodyStub,
@@ -206,7 +208,7 @@ automation bad ` + bodyStub,
 		},
 		{
 			name: "real retired annotation",
-			src: `@enabled
+			src: `
 @useConcept(node)
 @trigger(event="node.created", concept="v1:cluster:node")
 automation bad ` + bodyStub,
@@ -238,13 +240,11 @@ automation bad ` + bodyStub,
 func TestCommentedOutHeaderDoesNotShadowTheAnnotationGate(t *testing.T) {
 	l := &Loader{}
 	src := `/*
-@enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation parkedOldVersion {
   s := logic someLogic(event: event)
 }
 */
-@enabled
 @public
 @trigger(event="node.created", concept="v1:cluster:node")
 automation live ` + bodyStub
@@ -280,22 +280,20 @@ func TestSliceNeverStartsInsideAComment(t *testing.T) {
 	for _, tc := range []struct{ name, src string }{
 		{
 			name: "block comment opener shares a line with code",
-			src: `@enabled
+			src: `
 @trigger(event="node.created", concept="v1:cluster:node")
 automation firstOne ` + bodyStub + ` /* parked 2026-07-01, see #123
      second line of the note */
-@enabled
 @trigger(event="node.updated", concept="v1:cluster:node")
 automation secondOne ` + bodyStub,
 		},
 		{
 			name: "opener shares a line, comment spans three lines",
-			src: `@enabled
+			src: `
 @trigger(event="node.created", concept="v1:cluster:node")
 automation firstOne ` + bodyStub + ` /* one
    two
    three */
-@enabled
 @trigger(event="node.updated", concept="v1:cluster:node")
 automation secondOne ` + bodyStub,
 		},
@@ -346,7 +344,6 @@ precondition envIsStaging {
   description: "Only drive the staging deploy spine in staging."
 }
 */
-@enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation live ` + bodyStub
 
@@ -365,7 +362,7 @@ automation live ` + bodyStub
 
 // TestRealPreconditionStillLoads is the honesty direction for the above.
 func TestRealPreconditionStillLoads(t *testing.T) {
-	src := `@enabled
+	src := `
 @trigger(event="node.created", concept="v1:cluster:node")
 automation live {
   precondition envIsStaging {
@@ -437,7 +434,7 @@ automation y ` + bodyStub,
 // Pre-existing (body comments were always in the slice), but the same defect in
 // the same function whose detection half this PR fixed.
 func TestCommentedOutPreconditionFieldDoesNotWin(t *testing.T) {
-	src := `@enabled
+	src := `
 @trigger(event="node.created", concept="v1:cluster:node")
 automation live {
   precondition p {

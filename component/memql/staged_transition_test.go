@@ -64,7 +64,7 @@ func (s *sharedAuthoringDB) CreatePromoteBundle(_ context.Context, bundleId, tit
 	return nil
 }
 
-func (s *sharedAuthoringDB) CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, status string) error {
+func (s *sharedAuthoringDB) CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, origin, status string) error {
 	owner := ""
 	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
 		owner = ac.UserId
@@ -73,7 +73,7 @@ func (s *sharedAuthoringDB) CreatePromoteConstruct(ctx context.Context, construc
 	defer s.mu.Unlock()
 	s.constructs = append(s.constructs, AuthoringConstructRow{
 		Id: constructId, OwnerUserId: owner, BundleId: bundleId, Kind: kind, Name: name,
-		TargetNamespace: targetNamespace, Source: source, Status: status,
+		TargetNamespace: targetNamespace, Source: source, Origin: origin, Status: status,
 	})
 	for i := range s.bundles {
 		if s.bundles[i].Id == bundleId {
@@ -156,7 +156,7 @@ func (s *sharedAuthoringDB) stampedRows() int {
 func promoteTrainedWidget(t *testing.T, eng *MemQLEngine, db *sharedAuthoringDB, owner string, opts ...PromoteDurableOption) {
 	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, owner, trainedWidgetSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, owner, trainedWidgetSrc, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author concept as %s: %v", owner, err)
 	}
 	c, ok := reg.Lookup(owner, "concept", "trainedWidget")

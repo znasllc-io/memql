@@ -32,7 +32,6 @@ func parseForTest(t *testing.T, src string) *parser.File {
 
 func TestDirectivesInBodyRule_FlagsSortCall(t *testing.T) {
 	src := `
-@enabled
 @description("bad")
 func (Query) bad(args any) (any, error) {
   return sort(concept==v1:platform:partition, "payload.name", "asc"), nil
@@ -53,7 +52,6 @@ func (Query) bad(args any) (any, error) {
 
 func TestDirectivesInBodyRule_IgnoresAllowedCall(t *testing.T) {
 	src := `
-@enabled
 @description("ok")
 func (Query) queryListPartitions(args any) (any, error) {
   return concept==v1:platform:partition, nil
@@ -69,7 +67,6 @@ func (Query) queryListPartitions(args any) (any, error) {
 func TestNameShapeRule_FlagsLongName(t *testing.T) {
 	longName := strings.Repeat("a", 55)
 	src := `
-@enabled
 @description("too long")
 func (Query) ` + longName + `(args any) (any, error) {
   return concept==v1:foo:bar, nil
@@ -87,7 +84,6 @@ func (Query) ` + longName + `(args any) (any, error) {
 
 func TestNameShapeRule_IgnoresShortCamelCase(t *testing.T) {
 	src := `
-@enabled
 @description("fine")
 func (Query) queryListPartitions(args any) (any, error) {
   return concept==v1:platform:partition, nil
@@ -147,16 +143,17 @@ func (Prompt) foo(args any) {}
 	}
 }
 
-// #2610: construct-attached @enabled gets the soft-deprecation hint; a
-// stripped construct and prose mentions do not.
+// Construct-attached @enabled is an ERROR since epic memql#5375 retired the
+// annotation (it was a #2610 soft-deprecation hint while it still loaded); a
+// stripped construct and prose mentions still do not fire.
 func TestRedundantEnabledRule(t *testing.T) {
 	withAnnotation := "@enabled\n@description(\"probe\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n"
 	diags := redundantEnabledRule(withAnnotation)
 	if len(diags) != 1 {
-		t.Fatalf("want 1 hint on a construct-attached @enabled, got %d", len(diags))
+		t.Fatalf("want 1 diagnostic on a construct-attached @enabled, got %d", len(diags))
 	}
-	if diags[0].Code != "redundant-enabled" || diags[0].Severity != SeverityHint {
-		t.Errorf("want redundant-enabled Hint, got %s severity %d", diags[0].Code, diags[0].Severity)
+	if diags[0].Code != "retired-enabled" || diags[0].Severity != SeverityError {
+		t.Errorf("want retired-enabled Error, got %s severity %d", diags[0].Code, diags[0].Severity)
 	}
 	if diags[0].Range.Start.Line != 1 {
 		t.Errorf("hint anchored at line %d, want 1", diags[0].Range.Start.Line)
@@ -172,11 +169,11 @@ func TestRedundantEnabledRule(t *testing.T) {
 		"trailing": "@enabled // temp\nquery Space probeQuery {\n}\n",
 	} {
 		if got := redundantEnabledRule(src); len(got) != 1 {
-			t.Errorf("%s: want 1 hint (gate parity), got %d", name, len(got))
+			t.Errorf("%s: want 1 diagnostic (gate parity), got %d", name, len(got))
 		}
 	}
 
-	clean := "@description(\"probe mentions @enabled in prose\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n// historical note: this construct once carried @enabled\n"
+	clean := "@description(\"probe mentions @enabled in prose\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n// historical note: this construct once carried "
 	if got := redundantEnabledRule(clean); len(got) != 0 {
 		t.Fatalf("prose/comment mentions must not hint, got %d", len(got))
 	}

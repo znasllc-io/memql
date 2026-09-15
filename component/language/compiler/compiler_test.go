@@ -32,7 +32,7 @@ query user activeUsers {
 	}
 	// The internal form carries the filter lambda as its canonical source,
 	// parenthesised as the rewriter joins it, and reads back.
-	if want := `concept=="user";(row => row.active == true)`; fn.Query != want {
+	if want := `concept=="user"&&(row => row.active == true)`; fn.Query != want {
 		t.Errorf("compiled query = %q, want %q", fn.Query, want)
 	}
 	if _, err := parser.ParseExpression(fn.Query); err != nil {
@@ -80,7 +80,6 @@ mutation thing createThing {
 
 func TestCompileSource_Automation(t *testing.T) {
 	source := `
-@enabled
 @trigger(schedule="0 */30 * * * *")
 automation leadProcessor {
   fetchLeads := query activeLeads(limit: 10)
@@ -104,7 +103,6 @@ automation leadProcessor {
 
 func TestTranspileAutomation(t *testing.T) {
 	source := `
-@enabled
 @trigger(event="node.created", concept="v1:probe:thing")
 automation testAuto {
   step1 := query listThings()
@@ -132,7 +130,6 @@ automation testAuto {
 
 func TestTranspileAutomation_ForEachBareVarReferencesNotQuoted(t *testing.T) {
 	source := `
-@enabled
 @trigger(event="node.created", concept="v1:probe:agent")
 automation autoJoinAIExample {
   getAgents := query activeAgents()
@@ -242,7 +239,6 @@ func TestValidateMemQL(t *testing.T) {
 
 func TestCompileSource_FunctionCallStepInAutomation(t *testing.T) {
 	source := `
-@enabled
 @trigger(event="node.created", concept="v1:probe:user")
 automation testAuto {
   args {
@@ -650,7 +646,6 @@ func TestCompiler_ExpressionToString_StringFunctions(t *testing.T) {
 func TestCompiler_LogicCoalesceInFunctionStepResolvesArgRefs(t *testing.T) {
 	source := `
 use common.builtins.{ ensureDailySpaceForUser }
-@enabled
 logic logicEnsureDailySpaceOnAuthSession {
   args {
     event object!

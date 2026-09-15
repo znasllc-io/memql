@@ -1,6 +1,5 @@
 // reviews pack builtins -- Go-backed write/export (memql#4139).
 
-@enabled
 @executor("integration.reviews.recordModerationAction")
 @args(profile="object")
 @description("Append a moderation decision. principalKind must be client; a Provider operator is refused. criterion is a closed enum. Tokens and operator identity never become a criterion.")
@@ -12,7 +11,6 @@ builtin reviewsRecordModerationAction {
   note            string  @description("Optional client note.")
 }
 
-@enabled
 @executor("integration.reviews.exportReview")
 @args(profile="object")
 @description("Export a review including image FILES (bytes + filename). A URL-only image is refused -- export is bytes, not a link.")
@@ -21,7 +19,6 @@ builtin reviewsExportReview {
   images    object  @description("Image list [{name, bytes}]. URL-only entries are refused.")
 }
 
-@enabled
 @executor("integration.reviews.setPublicDisplay")
 @args(profile="object")
 @description("Flip the public display toggle at runtime. This is data, not a .memql edit, and does not require a rebuild.")

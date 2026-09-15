@@ -1761,12 +1761,16 @@ nearest pushdown spelling):
 - `@description` is **not** valid on an args field (rejected at load) -- an arg
   description is the `///` doc comment on the line above it. A `tool` / `prompt`
   / `builtin` field DOES keep its `@description`; those bodies ARE the schema.
-- `@default` is **not** valid on an args field (rejected at load). Apply a
-  default in the body with `args.X ?? <default>`. A concept-field `@default` is
-  NOT a substitute -- it is never applied on insert either, so `??` is the only
-  mechanism that fills a value. `a ?? b ?? c` returns the first operand that
-  does not fall through, the last as the fallback; `coalesce(a, b)` is retired,
-  so `??` is the one spelling.
+- `@default` is **not** valid on an args field, and since epic memql#5375 it is
+  **not valid on a concept field either** (both rejected at load, naming
+  `memqlmigrate --rewrite=attributes`). Neither was ever applied on insert, so a
+  field carrying one did not default -- the concept-field form was published as
+  the JSON-Schema `default` keyword, which no validator applies. Apply a default
+  in the body with `args.X ?? <default>`; `??` is the only mechanism that fills
+  a value. It **stays** on a `tool` / `prompt` / `builtin` field, where the body
+  IS the schema handed to the model and `default` is a value the model reads.
+  `a ?? b ?? c` returns the first operand that does not fall through, the last
+  as the fallback; `coalesce(a, b)` is retired, so `??` is the one spelling.
   **`??` is BLANK-coalescing:** it falls through on an empty OR
   WHITESPACE-ONLY string as well as on absent/null, so a caller who deliberately
   clears a text field gets the default written back; `false` / `0` / `[]` / `{}`
@@ -1871,7 +1875,7 @@ Base providers carry vendor-level auth + type.
 
 ```memql
 @base
-@type("OpenAI")
+@vendor("OpenAI")
 provider openai {
   auth {
     identityProviderId  env("MEMQL_AI_OPENAI_IDENTITY_PROVIDER_ID")
@@ -1893,9 +1897,11 @@ provider chat54Mini {
 }
 ```
 
-**Lifecycle annotations (`@enabled` / `@disabled`).** Providers accept the same
-lifecycle flags as functions / builtins / prompts / specs / seeds. `@enabled` is
-the explicit-on default (a no-op). `@disabled` skips the provider at load --
+**Lifecycle annotation (`@disabled`).** Providers accept the same lifecycle flag
+as functions / builtins / prompts / specs / seeds. `@enabled` was the
+explicit-on form and is RETIRED (epic memql#5375): it was a no-op that read
+like a switch, so it is now refused at load naming
+`memqlmigrate --rewrite=attributes`. `@disabled` skips the provider at load --
 **not registered, no auth resolution attempted** -- so it emits zero "registered
 as unavailable" warnings while staying in the tree for a future re-enable.
 `@disabled` on a `@base` **propagates** to every child that `@extends` it.
@@ -1986,17 +1992,14 @@ site).
 ```memql
 use worker.concepts.{ registration }
 
-@enabled
 @description("Matches revoked machine registrations")
 spec registration isRevokedRegistration = row => row.revokedAt != nil    // concept-bound row-spec
 
 use common.shapes.{ actorEnvelope }
 
-@enabled
 @description("Caller must hold the owner role -- the rollback gate (#1876)")
 spec actorEnvelope requiresOwner = actor => actor.role == "owner"        // @actor-bound context-spec
 
-@enabled
 @description("Matches records with active==true field")
 trait isActiveRecord = row => row.active == true                        // unbound cross-concept trait
 ```
@@ -2015,7 +2018,6 @@ AI-callable tool definitions. The body is a list of input-schema fields with
 types and annotations (`@required`, `@default`, `@enum`, `@description`).
 
 ```memql
-@enabled
 @description("Search for users")
 @handler(type="query", query="paginate(query searchUsers(active: args.active), args.limit)")
 @executionTime("fast")
@@ -2028,8 +2030,11 @@ tool searchUsers {
 **A tool declaration is CHECKED at load.** Four gates, all fail-loud:
 
 - **`@handler` argument names are closed** (`type`, `name`, `query`, `url`,
-  `method`) and `type` is required. `@rateLimit` is closed the same way, and a
-  non-integer value is refused.
+  `method`) and `type` is required. `@rateLimit` and `@scopes` are RETIRED
+  (epic memql#5375): both were stored on the tool, cloned, advertised on the
+  gRPC tool descriptor and enforced nowhere, so each read as a ceiling or an
+  authorization gate while being neither. `@allowedRoles` stays and is the
+  AGENT-role gate, enforced on every path.
 - **The handler is validated at load** -- unknown type, missing function name /
   query / URL -- and a tool must carry a handler at all. A query handler is
   parsed there: ONE construct call, or that call inside `paginate(...)`, whose
@@ -2058,7 +2063,6 @@ The body's field list is the builtin's input schema; the implementation is the
 Go integration named by `@executor`.
 
 ```memql
-@enabled
 @description("Run one command on a per-run workbench workspace")
 @executor("integration.workbench.dispatchHost")
 @args(profile="object")

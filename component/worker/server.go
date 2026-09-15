@@ -339,7 +339,6 @@ func (s *server) upsertRegistration(
 	return registration, nil
 }
 
-
 // findRegistrationByMachineKey returns the owner's unrevoked registration that
 // matches the Register message's stable machine key, or nil when none match.
 // Newest lastSeenAt wins when more than one row shares a key (should not

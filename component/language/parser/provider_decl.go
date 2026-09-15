@@ -56,8 +56,14 @@ func (p *Parser) parseProviderDecl(attrs []*ast.Attribute) (*ast.ProviderDecl, e
 		switch attr.Name {
 		case "description":
 			decl.Description = attrStringValue(attr)
+		case "vendor":
+			// Renamed off @type in memql#5375. A concept's @type is its row
+			// kind; the two annotations shared a spelling and nothing else,
+			// so neither name meant one thing.
+			decl.Vendor = attrStringValue(attr)
 		case "type":
-			decl.Type = attrStringValue(attr)
+			return nil, newParseErrorf(&p.current, "provider %q: @type is retired -- write @vendor(%q) instead. A concept's @type is its row kind, and the two shared a spelling for no reason beyond history (memql#5375). %s",
+				decl.Name, attrStringValue(attr), annotations.AttributeRewriteHint)
 		case "model":
 			decl.Model = attrStringValue(attr)
 		case "modality":
@@ -68,9 +74,8 @@ func (p *Parser) parseProviderDecl(attrs []*ast.Attribute) (*ast.ProviderDecl, e
 			decl.IsBase = true
 		case "extends":
 			decl.Extends = attrStringValue(attr)
-		case ast.AttrEnabled:
-			// @enabled is the explicit-on form -- a no-op default,
-			// kept for symmetry with functions/builtins/prompts.
+		// @enabled was the explicit-on no-op here until memql#5375 retired
+		// it; it falls through to the retired-ledger check below.
 		case ast.AttrDisabled:
 			// @disabled skips the provider at load (loader does not
 			// register it or resolve auth); on a @base it propagates
@@ -216,7 +221,7 @@ func (p *Parser) parseProviderParamsBlock(decl *ast.ProviderDecl) error {
 
 // attrStringValue pulls a single string value off an annotation.
 // Returns "" for flag attributes or attributes whose value isn't a
-// string. Used for `@type("OpenAI")` / `@model("gpt-5-mini")` /
+// string. Used for `@vendor("OpenAI")` / `@model("gpt-5-mini")` /
 // `@extends("openai")` / etc.
 func attrStringValue(attr *ast.Attribute) string {
 	if attr == nil || attr.Value == nil {

@@ -53,7 +53,7 @@ func TestOrdinaryCommentsAboveKeywordConstructsStillParse(t *testing.T) {
 			_, err := languageParser.ParseToolDecl(s)
 			return err
 		}},
-		{"provider", "@base\n@type(\"OpenAI\")\nprovider probeProvider {\n  auth {\n    apiKey env(\"X\")\n  }\n}\n", func(s string) error {
+		{"provider", "@base\n@vendor(\"OpenAI\")\nprovider probeProvider {\n  auth {\n    apiKey env(\"X\")\n  }\n}\n", func(s string) error {
 			_, err := languageParser.ParseProviderDecl(s)
 			return err
 		}},

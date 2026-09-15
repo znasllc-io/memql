@@ -25,21 +25,18 @@ import (
 func twoPinnedDomainsTree() fstest.MapFS {
 	return fstest.MapFS{
 		"cluster/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("The literal directory, declaring its own concept.")
 concept gadget {
   label  string  @required @description("Label.")
 }`),
 		"alpha/namespace.pin": file("cluster\n"),
 		"alpha/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("Pinned into cluster.")
 concept widget {
   label  string  @required @description("Label.")
 }`),
 		"beta/namespace.pin": file("cluster\n"),
 		"beta/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("Also pinned into cluster.")
 concept sprocket {
   label  string  @required @description("Label.")
@@ -134,17 +131,20 @@ func TestIndex_SymbolDeclaredAgreesWithLaneOne(t *testing.T) {
 	}
 }
 
-// The editor must apply the same per-declaration namespace test as the lint.
-// A pinned directory whose decl carries no @namespace assembles under the
-// DIRECTORY, so the namespace does not supply it and the editor must not
-// offer it -- otherwise completion suggests an import boot refuses.
-func TestIndex_DoesNotOfferDeclsThePinDoesNotNamespace(t *testing.T) {
+// The editor must apply the same namespace test as the lint, and the test
+// REVERSED in epic memql#5375: a namespace.pin used to permit an explicit
+// @namespace without applying one, so a decl in a pinned directory assembled
+// under the DIRECTORY. With @namespace retired the pin is the only expression
+// of a divergence, so it APPLIES -- and the editor must now OFFER the import
+// it used to withhold. Withholding it would send an author to write a spelling
+// that is correct.
+func TestIndex_OffersDeclsThePinNamespaces(t *testing.T) {
 	ix := loadTree(t, pinnedDirWithUnannotatedDeclTree()).NewIndex()
 
 	declared, decidable := ix.SymbolDeclared("cluster", "concepts", "widget")
-	if decidable && declared {
-		t.Error("the editor offers `use cluster.concepts.{ widget }` for a decl that assembles " +
-			"v1:deploy:widget -- an import boot refuses. The editor must apply the same " +
-			"per-declaration test as lane 1, or it teaches authors a spelling that fails at boot.")
+	if !decidable || !declared {
+		t.Errorf("the editor withholds `use cluster.concepts.{ widget }` for a decl in a directory "+
+			"pinned to cluster. The pin applies since epic memql#5375, so the decl assembles "+
+			"v1:cluster:widget and boot accepts the import.\n  declared=%v decidable=%v", declared, decidable)
 	}
 }

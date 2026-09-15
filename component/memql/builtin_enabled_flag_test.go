@@ -26,7 +26,6 @@ builtin probeAbsentLifecycle {
   name string @required
 }
 
-@enabled
 @executor("integration.probe.enabled")
 @args(profile="object")
 @description("lifecycle probe, explicit enabled")

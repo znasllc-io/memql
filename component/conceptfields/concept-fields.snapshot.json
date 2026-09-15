@@ -362,6 +362,7 @@
         "kind",
         "lastReinforced",
         "name",
+        "origin",
         "ownerUserId",
         "reinforceCount",
         "reliability",

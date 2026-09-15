@@ -86,6 +86,12 @@ func TestMutationKeywordIsMutation(t *testing.T) {
 // The retired spelling must produce NO constructs, so a fixture that drifts
 // back to `mutate node x {` fails loudly instead of silently exercising the
 // rules against a keyword the parser no longer accepts.
+//
+// The retired word is `mutate` now, not `mutation` -- epic memql#5375
+// reversed which of the pair survives. This test is worth keeping in the
+// reversed form rather than deleting: a detector that matches nothing reports
+// a clean tree, and it is what caught six stale exemptions at once when the
+// keyword moved.
 func TestRetiredMutationSpellingSplitsToNothing(t *testing.T) {
 	retired := `use cluster.concepts.{ node }
 mutate node twoWrites {

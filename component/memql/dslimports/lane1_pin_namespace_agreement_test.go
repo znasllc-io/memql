@@ -28,28 +28,26 @@ import (
 // and boot reports the name as ambiguous against other/'s widget.
 func pinnedDirWithUnannotatedDeclTree() fstest.MapFS {
 	return fstest.MapFS{
-		// The pin is present but does nothing for an un-annotated decl.
+		// The pin IS the namespace for every decl in this directory
+		// (epic memql#5375).
 		"deploy/namespace.pin": file("cluster\n"),
 		"deploy/concepts.memql": file(`@version("1.0.0")
-@description("Pinned directory, but this decl carries no @namespace.")
+@description("Pinned directory, so this decl assembles under the pin.")
 concept widget {
   label  string  @required @description("Label.")
 }`),
 		"cluster/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("The pin target exists but declares no widget.")
 concept gadget {
   label  string  @required @description("Label.")
 }`),
 		"other/concepts.memql": file(`@version("1.0.0")
-@namespace("other")
 @description("A second widget, so the bare name is ambiguous at boot.")
 concept widget {
   name  string  @required @description("Name.")
 }`),
 		"deploy/queries.memql": file(`use cluster.concepts.{ widget }
 
-@enabled
 @description("Imports a namespace this decl does NOT assemble under.")
 query widget deployWidgets {
   args {
@@ -60,24 +58,28 @@ query widget deployWidgets {
 	}
 }
 
-// The regression guard. A pin file alone must not enrol a declaration into a
-// namespace it does not assemble under.
-func TestLane1_PinDoesNotEnrolUnannotatedDecls(t *testing.T) {
+// THE RULE REVERSED, and the test with it.
+//
+// A namespace.pin used to PERMIT an explicit @namespace without APPLYING one,
+// so a decl in a pinned directory assembled under the DIRECTORY and an import
+// naming the pin was a binding boot refused. Epic memql#5375 retired
+// @namespace, which left the pin as the only way to express a divergence at
+// all -- so ast.AssembleConceptIdFromDeclInDir now APPLIES it, and this decl
+// genuinely is in the cluster namespace.
+//
+// What the guard is worth keeping FOR is the direction that did not change:
+// lane 1 must agree with boot. It accepted what boot refused before; it must
+// now accept what boot accepts, and the fixture is the same one either way.
+func TestLane1_PinAppliesToEveryDeclInItsDirectory(t *testing.T) {
 	tree := loadTree(t, pinnedDirWithUnannotatedDeclTree())
 
-	var got string
 	for _, err := range tree.VerifyReferentialIntegrity() {
 		if strings.Contains(err.Error(), "use cluster.concepts") {
-			got = err.Error()
+			t.Fatalf("lane 1 REFUSED `use cluster.concepts.{ widget }` for a decl in a directory "+
+				"pinned to cluster. The pin APPLIES since epic memql#5375, so this decl assembles "+
+				"v1:cluster:widget and boot accepts the binding -- a lint that refuses what boot "+
+				"accepts sends an author to fix a spelling that is correct.\n  got: %v", err)
 		}
-	}
-	if got == "" {
-		t.Fatal("lane 1 accepted `use cluster.concepts.{ widget }` for a decl that assembles " +
-			"v1:deploy:widget. A namespace.pin PERMITS an explicit @namespace, it does not APPLY " +
-			"one, so this decl is not in the cluster namespace and boot refuses the binding " +
-			"(\":cluster:\" matches neither v1:deploy:widget nor v1:other:widget -- boot reports " +
-			"the name ambiguous). A lint that accepts what boot refuses is worse than the bug " +
-			"#2945 fixed: it is green CI over a tree that fails at boot.")
 	}
 }
 
@@ -104,7 +106,6 @@ func TestLane1_NamespaceDoesNotReachAnUnrelatedDirectory(t *testing.T) {
 	root := pinnedNamespaceWithRealDirTree()
 	root["deploy/queries.memql"] = file(`use cluster.concepts.{ widget, sprocket }
 
-@enabled
 @description("sprocket is declared only in other/, which is not in the cluster namespace.")
 query widget deployWidgets {
   args {
@@ -113,7 +114,6 @@ query widget deployWidgets {
   filter  row => row.label == args.label
 }`)
 	root["other/concepts.memql"] = file(`@version("1.0.0")
-@namespace("other")
 @description("Declares sprocket, in a namespace the import does not name.")
 concept widget {
   name  string  @required @description("Name.")
@@ -147,7 +147,6 @@ func TestLane1_ColonScopedPinAgreesWithBoot(t *testing.T) {
 	root := pinnedNamespaceWithRealDirTree()
 	root["deploy/namespace.pin"] = file("cluster:rollout\n")
 	root["deploy/concepts.memql"] = file(`@version("1.0.0")
-@namespace("cluster:rollout")
 @description("Colon-scoped pin: assembles v1:cluster:rollout:widget.")
 concept widget {
   label  string  @required @description("Label.")
@@ -167,7 +166,6 @@ concept widget {
 	scoped["deploy/concepts.memql"] = root["deploy/concepts.memql"]
 	scoped["deploy/queries.memql"] = file(`use cluster:rollout.concepts.{ widget }
 
-@enabled
 @description("Imports by the full pinned namespace.")
 query widget deployWidgets {
   args {
@@ -190,7 +188,7 @@ query widget deployWidgets {
 func TestPinnedDomainRemedyIsValidUseSyntax(t *testing.T) {
 	root := pinnedNamespaceWithRealDirTree()
 	// Drop the import so the unimported-signature-concept diagnostic fires.
-	root["deploy/queries.memql"] = file(`@enabled
+	root["deploy/queries.memql"] = file(`
 @description("No import, so the ambiguity diagnostic fires with its remedy.")
 query widget deployWidgets {
   args {
@@ -236,14 +234,12 @@ concept widget {
   label  string  @required @description("Label.")
 }`),
 		"cluster/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("The pin target exists but declares no widget.")
 concept gadget {
   label  string  @required @description("Label.")
 }`),
 		"deploy/queries.memql": file(`use cluster.concepts.{ widget }
 
-@enabled
 @description("Boot binds this: widget is unique, so the hint is not consulted.")
 query widget deployWidgets {
   args {

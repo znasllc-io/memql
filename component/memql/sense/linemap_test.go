@@ -23,19 +23,19 @@ func TestLineMap_IdentityWhenUnchanged(t *testing.T) {
 // than the author wrote, with the surrounding text preserved verbatim.
 //
 //	authored (4 lines)        rewritten (6 lines)
-//	1 @enabled                1 @enabled            (preserved)
+//	1 @description("d")       1 @description("d")   (preserved)
 //	2 query node q {          2 func (Query) q {    (synthesized)
 //	3   filter x == 1         3   arg block line    (synthesized)
 //	                          4   more synthesized  (synthesized)
 //	4 }                       5 }                    (preserved)
 //	                          6 (trailing)           (preserved)
 func TestLineMap_PreservedExact_SynthesizedWithin(t *testing.T) {
-	authored := "@enabled\nquery node q {\n  filter row => row.x == 1\n}\n"
-	rewritten := "@enabled\nfunc (Query) q {\n  args stuff\n  more synth\n}\n"
+	authored := "@description(\"d\")\nquery node q {\n  filter row => row.x == 1\n}\n"
+	rewritten := "@description(\"d\")\nfunc (Query) q {\n  args stuff\n  more synth\n}\n"
 
 	lm := newLineMap(authored, rewritten)
 
-	// Rewritten line 1 (@enabled) is preserved verbatim -> exact line + col.
+	// Rewritten line 1 (@description) is preserved verbatim -> exact line + col.
 	if got := lm.pos(Position{Line: 1, Column: 4}); got.Line != 1 || got.Column != 4 {
 		t.Errorf("preserved line: got %+v, want {1,4}", got)
 	}

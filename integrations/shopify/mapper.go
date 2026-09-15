@@ -34,7 +34,7 @@ var idEngine = id.NewUntracked()
 // a store id is drawn from a pattern that cannot contain NUL, so the split at
 // the separator is unique.
 func MirrorRowID(storeID, gid string) string {
-	return "shp" + string(idEngine.FromString(storeID+"\x00"+gid))[:24]
+	return "shp" + string(idEngine.FromString(storeID + "\x00" + gid))[:24]
 }
 
 // mapObject turns one fetched object into a MirrorWrite plus the writes for

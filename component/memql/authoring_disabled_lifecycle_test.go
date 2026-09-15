@@ -41,7 +41,7 @@ capability fs.readFile {
 func TestPromoteAuthoredConstruct_DisabledSpec_ActionableMessage(t *testing.T) {
 	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", sessionDisabledSpecSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", sessionDisabledSpecSrc, "authoring/concepts.memql"); err != nil {
 		t.Fatalf("author @disabled session spec (Gate-1 must pass an intentional disable): %v", err)
 	}
 	c, ok := reg.Lookup("owner-1", "spec", "mcpDisabledSpec")
@@ -70,7 +70,7 @@ func TestPromoteAuthoredConstruct_DisabledSpec_ActionableMessage(t *testing.T) {
 func TestPromoteConstructDurable_DisabledSpec_NothingPersisted(t *testing.T) {
 	e := &MemQLEngine{specs: newSpecRegistry(), shapes: coreShapesForTest(t)}
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", sessionDisabledSpecSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", sessionDisabledSpecSrc, "authoring/concepts.memql"); err != nil {
 		t.Fatalf("author @disabled session spec: %v", err)
 	}
 	c, _ := reg.Lookup("owner-1", "spec", "mcpDisabledSpec")
@@ -236,7 +236,7 @@ func TestRehydrate_DisabledName_ReenableByCorrectedPromote(t *testing.T) {
 	}
 
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", sessionCorrectedSpecSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", sessionCorrectedSpecSrc, "authoring/concepts.memql"); err != nil {
 		t.Fatalf("author corrected session spec: %v", err)
 	}
 	c, _ := reg.Lookup("owner-1", "spec", "mcpDisabledSpec")
@@ -360,7 +360,7 @@ func TestRehydrate_DisabledRow_DoesNotLiftCoreReservation(t *testing.T) {
 	}
 
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", sessionCorrectedSpecSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", sessionCorrectedSpecSrc, "authoring/concepts.memql"); err != nil {
 		t.Fatalf("author corrected session spec: %v", err)
 	}
 	c, _ := reg.Lookup("owner-1", "spec", "mcpDisabledSpec")
@@ -396,7 +396,7 @@ func TestRehydrate_ReenabledSpec_SurvivesRefire(t *testing.T) {
 	}
 
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", sessionCorrectedSpecSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", sessionCorrectedSpecSrc, "authoring/concepts.memql"); err != nil {
 		t.Fatalf("author corrected session spec: %v", err)
 	}
 	c, _ := reg.Lookup("owner-1", "spec", "mcpDisabledSpec")

@@ -36,9 +36,16 @@ func TestBuildConceptIndex_RealTreeDefaultVersion(t *testing.T) {
 }
 
 // TestAssembleConceptIdFromPreamble_VersionDefault pins the unit contract:
-// @namespace alone assembles with the major-1 default; an explicit non-default
-// @version still wins; absent @namespace derives the containing directory
-// (#2614, lockstep with AssembleConceptIdFromDeclInDir).
+// absent @version means major 1; an explicit non-default @version wins; and
+// the namespace is whatever the caller resolved (the directory's
+// namespace.pin, else the directory) -- lockstep with
+// AssembleConceptIdFromDeclInDir.
+//
+// The @namespace cases this used to carry are gone with the annotation (epic
+// memql#5375). What replaced them is the `ns` argument: buildConceptIndex
+// resolves pin-else-directory and passes it, so a pinned divergence still
+// reaches the generated SDK -- which is the case the retired annotation
+// existed to cover.
 func TestAssembleConceptIdFromPreamble_VersionDefault(t *testing.T) {
 	cases := []struct {
 		name string
@@ -46,17 +53,17 @@ func TestAssembleConceptIdFromPreamble_VersionDefault(t *testing.T) {
 		want string
 	}{
 		{
-			name: "namespace only defaults to v1",
-			src:  "@namespace(\"cognition\")\nconcept widget {\n}\n",
-			want: "v1:cognition:widget",
+			name: "absent version defaults to v1",
+			src:  "concept widget {\n}\n",
+			want: "v1:gadgets:widget",
 		},
 		{
 			name: "explicit non-default version wins",
-			src:  "@version(\"2.5.7\")\n@namespace(\"cognition\")\nconcept widget {\n}\n",
-			want: "v2:cognition:widget",
+			src:  "@version(\"2.5.7\")\nconcept widget {\n}\n",
+			want: "v2:gadgets:widget",
 		},
 		{
-			name: "missing namespace derives the directory",
+			name: "an explicit 1.0.0 is the default spelled out",
 			src:  "@version(\"1.0.0\")\nconcept widget {\n}\n",
 			want: "v1:gadgets:widget",
 		},

@@ -8,7 +8,6 @@
 // rebuild. On-storefront only; no GBP / marketplace ingest.
 
 @version("1.0.0")
-@namespace("reviews")
 @description("A storefront product review. Merchandising stays on the store; this row is the review body plus optional image attachment ids. Images export as files (bytes), not URLs.")
 @displayCard(primary="title", secondary="body", tertiary="productHandle")
 @rowAuthz(owner="ownerUserId")
@@ -24,7 +23,6 @@ concept review {
 }
 
 @version("1.0.0")
-@namespace("reviews")
 @description("Append-only moderation decision for a review. A new row is a new decision; there is no in-place update and no undo-by-overwrite. decidedBy is a Client principal -- a Provider operator cannot author one. Criterion is a closed enum: no other, no sentiment.")
 @displayCard(primary="criterion", secondary="reviewId", tertiary="decidedBy")
 @rowAuthz(owner="decidedBy")
@@ -37,7 +35,6 @@ concept moderationAction {
 }
 
 @version("1.0.0")
-@namespace("reviews")
 @description("Runtime reviews settings. The public display toggle lives here as data so a client can hide or show reviews without a deploy or .memql edit.")
 @displayCard(primary="publicDisplay", secondary="ownerUserId")
 @rowAuthz(owner="ownerUserId")

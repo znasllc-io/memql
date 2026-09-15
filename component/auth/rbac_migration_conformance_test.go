@@ -97,7 +97,7 @@ func TestRBACMigrationPreservesUnaryHelpers(t *testing.T) {
 	for _, slug := range allSlugs {
 		u := UserContext{ID: "u", Role: slug}
 		checks := []struct {
-			name           string
+			name            string
 			got, wantOracle bool
 		}{
 			{"IsPrivilegedUser", IsPrivilegedUser(u), legacyIsPrivileged(slug)},

@@ -15,7 +15,7 @@ This page lists every annotation the language accepts, the constructs and fields
 
 ## How to read it
 
-Under [At a glance](#at-a-glance), a row is an annotation and a column is a construct or a kind of field: a filled cell says how the annotation is written there, and an empty cell means it is refused there, with one of the codes under [Refusals](#refusals). The words in a cell are argument forms: `flag` means no arguments, `empty` empty parentheses, `string` one string, `strings` one or more strings, `number` one number, `keywords` keyword arguments, `expression` an expression and `bool` true or false. Each annotation links to its entry under [Annotations](#annotations), which shows it written on every construct that accepts it, lists its keys and says what it does.
+Under [At a glance](#at-a-glance), a row is an annotation and a column is a construct or a kind of field: a filled cell says how the annotation is written there, and an empty cell means it is refused there, with one of the codes under [Refusals](#refusals). The words in a cell are argument forms: `flag` means no arguments, `empty` empty parentheses, `string` one string, `strings` one or more strings, `number` one number, `keywords` keyword arguments and `expression` an expression. Each annotation links to its entry under [Annotations](#annotations), which shows it written on every construct that accepts it, lists its keys and says what it does.
 
 ## At a glance
 
@@ -32,13 +32,10 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@createOnly`](#createonly) |  | strings |  |  |
 | [`@description`](#description) | string | string | string | string |
 | [`@disabled`](#disabled) | flag | flag | flag | flag |
-| [`@enabled`](#enabled) | flag | flag | flag | flag |
 | [`@eventField`](#eventfield) |  |  | strings |  |
 | [`@filter`](#filter) |  |  |  | expression |
-| [`@latestMode`](#latestmode) | flag |  |  |  |
 | [`@mcp`](#mcp) | flag | flag |  | flag |
 | [`@mergeFields`](#mergefields) |  | strings |  |  |
-| [`@nocache`](#nocache) | flag |  |  |  |
 | [`@noUnset`](#nounset) |  | strings |  |  |
 | [`@public`](#public) | flag | flag |  |  |
 | [`@removeFromSet`](#removefromset) |  | strings |  |  |
@@ -59,9 +56,7 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@description`](#description) | string | string | string | string |
 | [`@disabled`](#disabled) |  |  | flag | flag |
 | [`@displayCard`](#displaycard) | keywords |  |  |  |
-| [`@enabled`](#enabled) |  |  | flag | flag |
 | [`@mirroredTo`](#mirroredto) | strings |  |  |  |
-| [`@namespace`](#namespace) | string |  |  | string |
 | [`@origin`](#origin) | string |  |  |  |
 | [`@relationship`](#relationship) | keywords, in the body |  |  |  |
 | [`@row`](#row) |  | flag |  |  |
@@ -82,7 +77,6 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@description`](#description) | string | string | string | string | string |
 | [`@destructive`](#destructive) |  |  |  |  | flag |
 | [`@disabled`](#disabled) | flag | flag |  | flag | flag |
-| [`@enabled`](#enabled) | flag | flag |  | flag | flag |
 | [`@exclude`](#exclude) |  |  |  | strings |  |
 | [`@executionTime`](#executiontime) |  |  |  |  | string |
 | [`@extends`](#extends) |  | string |  |  |  |
@@ -97,11 +91,9 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@policy`](#policy-1) |  |  |  | string |  |
 | [`@precedence`](#precedence) |  |  |  | number |  |
 | [`@primary`](#primary) |  |  | string |  |  |
-| [`@rateLimit`](#ratelimit) |  |  |  |  | keywords |
 | [`@requiresConfirmation`](#requiresconfirmation) |  |  |  |  | flag |
-| [`@scopes`](#scopes) |  |  |  |  | strings |
 | [`@templateFile`](#templatefile) | string |  |  |  |  |
-| [`@type`](#type) |  | string |  |  |  |
+| [`@vendor`](#vendor) |  | string |  |  |  |
 | [`@when`](#when) |  |  |  | empty or keywords |  |
 
 ### Capabilities
@@ -112,7 +104,6 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@args`](#args) | keywords |  |  |
 | [`@description`](#description) | string | string | string |
 | [`@disabled`](#disabled) | flag | flag | flag |
-| [`@enabled`](#enabled) | flag | flag | flag |
 | [`@executor`](#executor) | string |  |  |
 | [`@requiresCapability`](#requirescapability) | strings |  |  |
 | [`@sdk`](#sdk) | flag |  |  |
@@ -123,10 +114,9 @@ One table per family of constructs, and one for the fields a construct declares.
 | Annotation | concept field | args field | tool field | prompt field | builtin field |
 |---|---|---|---|---|---|
 | [`@autoInjected`](#autoinjected) |  |  | flag |  |  |
-| [`@default`](#default) | string, number or bool |  | string | string or number |  |
+| [`@default`](#default) |  |  | string | string or number |  |
 | [`@description`](#description) | string |  | string | string | string |
-| [`@enum`](#enum) |  | strings | strings | strings |  |
-| [`@immutable`](#immutable) | flag |  |  |  |  |
+| [`@enum`](#enum) |  | strings | strings | strings | strings |
 | [`@internal`](#internal) | flag |  |  |  |  |
 | [`@maximum`](#maximum) | number | number |  |  |  |
 | [`@maxLength`](#maxlength) | number | number |  |  |  |
@@ -138,7 +128,6 @@ One table per family of constructs, and one for the fields a construct declares.
 | [`@required`](#required) | flag | flag | flag | flag | flag |
 | [`@secret`](#secret) | flag |  |  |  |  |
 | [`@serverSet`](#serverset) | flag |  |  |  |  |
-| [`@unique`](#unique) | flag |  |  |  |  |
 | [`@variant`](#variant) | keywords |  |  |  |  |
 
 ## By construct
@@ -153,10 +142,7 @@ Every construct and every kind of field, with each annotation it accepts, how th
 | [`@cache`](#cache) | one number or keyword arguments | `@cache(300)` |
 | [`@description`](#description) | one string | `@description("List the caller's open tickets, newest first.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
-| [`@enabled`](#enabled) | no arguments | `@enabled` |
-| [`@latestMode`](#latestmode) | no arguments | `@latestMode` |
 | [`@mcp`](#mcp) | no arguments | `@mcp` |
-| [`@nocache`](#nocache) | no arguments | `@nocache` |
 | [`@public`](#public) | no arguments | `@public` |
 | [`@requiresCapability`](#requirescapability) | one or more strings | `@requiresCapability("read", "principal")` |
 | [`@requiresRank`](#requiresrank) | one string | `@requiresRank("developer")` |
@@ -175,7 +161,6 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@createOnly`](#createonly) | one or more strings | `@createOnly("status", "attempts")` |
 | [`@description`](#description) | one string | `@description("Rename one of the caller's tickets.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
-| [`@enabled`](#enabled) | no arguments | `@enabled` |
 | [`@mcp`](#mcp) | no arguments | `@mcp` |
 | [`@mergeFields`](#mergefields) | one or more strings | `@mergeFields("preferences")` |
 | [`@noUnset`](#nounset) | one or more strings | `@noUnset("bootstrappedAt")` |
@@ -195,7 +180,6 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@actor`](#actor) | no arguments | `@actor` |
 | [`@description`](#description) | one string | `@description("Close every ticket that has been idle for a week.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
-| [`@enabled`](#enabled) | no arguments | `@enabled` |
 | [`@eventField`](#eventfield) | one or more strings | `@eventField("id", "status")` |
 | [`@requiresCapability`](#requirescapability) | one or more strings | `@requiresCapability("execute", "app:deployables/deploy")` |
 | [`@requiresRank`](#requiresrank) | one string | `@requiresRank("admin")` |
@@ -209,7 +193,6 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@actor`](#actor) | no arguments | `@actor` |
 | [`@description`](#description) | one string | `@description("On a new ticket, notify its owner.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
-| [`@enabled`](#enabled) | no arguments | `@enabled` |
 | [`@filter`](#filter) | an expression | `@filter(row => row.status == "open")` |
 | [`@mcp`](#mcp) | no arguments | `@mcp` |
 | [`@template`](#template) | no arguments | `@template` |
@@ -225,7 +208,6 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 | [`@description`](#description) | one string | `@description("A support ticket raised by a customer.")` |
 | [`@displayCard`](#displaycard) | keyword arguments | `@displayCard(primary="title", secondary="status")` |
 | [`@mirroredTo`](#mirroredto) | one or more strings | `@mirroredTo("shopify")` |
-| [`@namespace`](#namespace) | one string | `@namespace("support")` |
 | [`@origin`](#origin) | one string | `@origin("memql")` |
 | [`@relationship`](#relationship) | keyword arguments, repeatable, in the body | `@relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")` |
 | [`@rowAuthz`](#rowauthz) | keyword arguments | `@rowAuthz(owner="ownerUserId", clusterOwner)` |
@@ -248,7 +230,6 @@ The fields in its body take the annotations under [concept field](#concept-field
 |---|---|---|
 | [`@description`](#description) | one string | `@description("Matches the rows that are still open.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
-| [`@enabled`](#enabled) | no arguments | `@enabled` |
 
 ### seed
 
@@ -256,8 +237,6 @@ The fields in its body take the annotations under [concept field](#concept-field
 |---|---|---|
 | [`@description`](#description) | one string | `@description("Knowledge baseline for every professional role.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
-| [`@enabled`](#enabled) | no arguments | `@enabled` |
-| [`@namespace`](#namespace) | one string | `@namespace("agents")` |
 | [`@scope`](#scope) | one string | `@scope("perUser")` |
 | [`@templateFile`](#templatefile) | one string | `@templateFile("templates/assistant.tmpl")` |
 | [`@version`](#version) | one string | `@version("1.0.0")` |
@@ -269,7 +248,6 @@ The fields in its body take the annotations under [concept field](#concept-field
 | [`@defaultProvider`](#defaultprovider) | one string | `@defaultProvider("fleet")` |
 | [`@description`](#description) | one string | `@description("Distil a cluster of episodes into one memory.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
-| [`@enabled`](#enabled) | no arguments | `@enabled` |
 | [`@level`](#level) | one string | `@level("fast")` |
 | [`@templateFile`](#templatefile) | one string | `@templateFile("prompts/consolidateMemory.tmpl")` |
 
@@ -283,11 +261,10 @@ The fields in its body take the annotations under [prompt field](#prompt-field).
 | [`@default`](#default) | no arguments | `@default` |
 | [`@description`](#description) | one string | `@description("OpenAI GPT-5.4 Mini -- balanced cost and latency.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
-| [`@enabled`](#enabled) | no arguments | `@enabled` |
 | [`@extends`](#extends) | one string | `@extends("openai")` |
 | [`@modality`](#modality) | one string | `@modality("embedding")` |
 | [`@model`](#model) | one string | `@model("gpt-5.4-mini")` |
-| [`@type`](#type) | one string | `@type("OpenAI")` |
+| [`@vendor`](#vendor) | one string | `@vendor("OpenAI")` |
 
 ### policy
 
@@ -303,7 +280,6 @@ The fields in its body take the annotations under [prompt field](#prompt-field).
 |---|---|---|
 | [`@description`](#description) | one string | `@description("Operator turns reason locally first.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
-| [`@enabled`](#enabled) | no arguments | `@enabled` |
 | [`@exclude`](#exclude) | one or more strings, repeatable | `@exclude("fleet:qwen3.5:7b")` |
 | [`@level`](#level) | one string | `@level("strong")` |
 | [`@locked`](#locked) | no arguments | `@locked` |
@@ -320,13 +296,10 @@ The fields in its body take the annotations under [prompt field](#prompt-field).
 | [`@description`](#description) | one string | `@description("Create a to-do for the caller.")` |
 | [`@destructive`](#destructive) | no arguments | `@destructive` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
-| [`@enabled`](#enabled) | no arguments | `@enabled` |
 | [`@executionTime`](#executiontime) | one string | `@executionTime("fast")` |
 | [`@handler`](#handler) | keyword arguments | `@handler(type="function", name="createTodo")` |
 | [`@mcp`](#mcp) | no arguments | `@mcp` |
-| [`@rateLimit`](#ratelimit) | keyword arguments | `@rateLimit(maxCalls=10, periodSeconds=60)` |
 | [`@requiresConfirmation`](#requiresconfirmation) | no arguments | `@requiresConfirmation` |
-| [`@scopes`](#scopes) | one or more strings | `@scopes("operator")` |
 
 The fields in its body take the annotations under [tool field](#tool-field).
 
@@ -338,7 +311,6 @@ The fields in its body take the annotations under [tool field](#tool-field).
 | [`@args`](#args) | keyword arguments | `@args(profile="object")` |
 | [`@description`](#description) | one string | `@description("Preflight and start a campaign send.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
-| [`@enabled`](#enabled) | no arguments | `@enabled` |
 | [`@executor`](#executor) | one string | `@executor("integration.campaigns.startSend")` |
 | [`@requiresCapability`](#requirescapability) | one or more strings | `@requiresCapability("execute", "app:deployables/deploy")` |
 | [`@sdk`](#sdk) | no arguments | `@sdk` |
@@ -351,7 +323,6 @@ The fields in its body take the annotations under [builtin field](#builtin-field
 |---|---|---|
 | [`@description`](#description) | one string | `@description("Tag a release in the repository.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
-| [`@enabled`](#enabled) | no arguments | `@enabled` |
 
 The fields of its `args` block take the annotations under [args field](#args-field).
 
@@ -361,7 +332,6 @@ The fields of its `args` block take the annotations under [args field](#args-fie
 |---|---|---|
 | [`@description`](#description) | one string | `@description("Create a git tag and a GitHub release for a version.")` |
 | [`@disabled`](#disabled) | no arguments | `@disabled` |
-| [`@enabled`](#enabled) | no arguments | `@enabled` |
 | [`@sideEffect`](#sideeffect) | one string | `@sideEffect("write")` |
 
 The fields of its `args` block take the annotations under [args field](#args-field).
@@ -372,9 +342,7 @@ Written after a field's type in the body of a `concept`.
 
 | Annotation | Written as | Example |
 |---|---|---|
-| [`@default`](#default) | one string, one number or true or false | `@default("open")` |
 | [`@description`](#description) | one string | `@description("The ticket's one-line title.")` |
-| [`@immutable`](#immutable) | no arguments | `@immutable` |
 | [`@internal`](#internal) | no arguments | `@internal` |
 | [`@maximum`](#maximum) | one number | `@maximum(100)` |
 | [`@maxLength`](#maxlength) | one number | `@maxLength(120)` |
@@ -386,7 +354,6 @@ Written after a field's type in the body of a `concept`.
 | [`@required`](#required) | no arguments | `@required` |
 | [`@secret`](#secret) | no arguments | `@secret` |
 | [`@serverSet`](#serverset) | no arguments | `@serverSet` |
-| [`@unique`](#unique) | no arguments | `@unique` |
 | [`@variant`](#variant) | keyword arguments | `@variant(discriminator="kind")` |
 
 ### args field
@@ -432,6 +399,7 @@ Written after a field's type in the body of a `builtin`.
 | Annotation | Written as | Example |
 |---|---|---|
 | [`@description`](#description) | one string | `@description("The campaign to send.")` |
+| [`@enum`](#enum) | one or more strings | `@enum("patch", "minor")` |
 | [`@required`](#required) | no arguments | `@required` |
 
 ## Annotations
@@ -477,7 +445,7 @@ Additional name the builtin is registered under. Repeatable.
 |---|---|---|
 | [tool](#tool) | one or more strings | `@allowedRoles("assistant", "specialist")` |
 
-Restrict the tool to a set of agent roles.
+Restrict the tool to a set of agent roles. Enforced on every path: tool_types.go, component/grpc/server.go and tool_execution.go. It gates the AGENT role (assistant / specialist), which is a different axis from @requiresRank (actor rank) and @requiresCapability (verb over a resource) -- neither can express it.
 
 ### @appendFields
 
@@ -549,7 +517,7 @@ Override the result-cache TTL for the query. Preferred form (#2618): @cache(300)
 | `fields` | string | Comma-separated fields to compose from, e.g. "number,issuedAt,total"; each must be a field the concept declares or a row intrinsic. |
 | `list` | string | The bare name of the query that lists the rows to compose from. |
 
-The Materializer's mark (epic memql#4977, D2): this concept's rows are worth composing a file FROM. Bare, it takes the defaults; as= names the row kind, fields= lists the fields to compose from and list= names the query that lists the rows.
+The Materializer's mark (epic memql#4977, D2): this concept's rows are worth composing a file FROM. Bare, it takes the defaults; as= names the row kind, fields= lists the fields to compose from and list= names the query that lists the rows. Read by clients/os (src/apps/materializer/useCompose.ts) through integration.compose.composableConcepts.
 
 ### @createOnly
 
@@ -564,25 +532,10 @@ On an insert (create-or-upsert) mutation: write the named payload fields ONLY wh
 | On | Written as | Example |
 |---|---|---|
 | [provider](#provider) | no arguments | `@default` |
-| [concept field](#concept-field) | one string, one number or true or false | `@default("open")` |
 | [tool field](#tool-field) | one string | `@default("5")` |
 | [prompt field](#prompt-field) | one string or one number | `@default("en")` |
 
 - On a provider: Mark this provider as the default for its modality.
-- On a concept field: The default the concept schema declares for the field. Declared metadata: it is emitted into the schema and NEVER applied on insert -- `??` in the mutation is what fills a value (memql#2960). The emitted `default` is still read by the SDK, editor hover and form generators, so it has to be right.
-
-  The literal is lowered against the field's declared type, and one that could never be a value of that type is refused at load (memql#3248):
-
-  - `bool`: exactly `true` or `false`.
-  - `int`: a base-10 integer.
-  - `float`: a number; an integer literal is a valid float.
-  - `datetime`: an RFC3339 timestamp, or `""` for unset.
-  - `string` and `enum`: the literal verbatim, never coerced, so `@default("0")` on a string field is the string `"0"`.
-  - `object`, `array`, `map` and `any`: an untyped lowering, because the declaration does not narrow the literal to one reading.
-
-  Bare and quoted spellings are equivalent: `@default(false)` and `@default("false")` both declare the bool `false`, and `@default(7)` declares the number 7.
-
-  A default nothing stamps is caught at authoring time (memql#3038): `TestDefaultIsCoalescedOrStamped` fails when an optional, top-level concept field carries `@default` and no mutation bound to the concept stamps it. Only a stamped value counts -- `f: args.f ?? "v"`, a literal, or a computed expression; `accept { f }`, a bare `args.f` shorthand and a plain `f: args.f` all bind the field to a caller argument, so omitting the argument still writes nothing. Two things are outside the gate: a domain mounted at runtime through `MEMQL_DSL_PATH`, which it never scans, and a `@default` on a leaf inside an object block, which no write form can stamp because a mutation writes the parent object whole.
 - On a tool field: The default the tool's input schema advertises to the model.
 - On a prompt field: The default the prompt's input schema declares for the field.
 
@@ -664,15 +617,7 @@ An authored spec or trait keeps the same state through the authoring lifecycle. 
 | `tertiary` | string | A third field shown in the row's detail line. |
 | `status` | string | The field shown as the row's status. |
 
-Rendering hints for concept-agnostic clients (memql#160): the field shown as a row's title (primary=, required) and the fields for the secondary, tertiary and status slots. Each must be a displayable field the concept declares, checked once the property set is known.
-
-### @enabled
-
-| On | Written as | Example |
-|---|---|---|
-| [query](#query), [mutation](#mutation), [logic](#logic), [automation](#automation), [spec and trait](#spec-and-trait), [seed](#seed), [prompt](#prompt), [provider](#provider), [rule](#rule), [tool](#tool), [builtin](#builtin), [action](#action), [capability](#capability) | no arguments | `@enabled` |
-
-Accepted explicit no-op: definitions are enabled by default. Use @disabled to deactivate.
+Rendering hints for concept-agnostic clients (memql#160): the field shown as a row's title (primary=, required) and the fields for the secondary, tertiary and status slots. Each must be a displayable field the concept declares, checked once the property set is known. Read by clients/os (src/apps/concepts/displayCard.ts, consumed by RowsPanel.tsx); test/dslconformance's displaycard_inventory_test.go requires every concept to declare or decline one.
 
 ### @enum
 
@@ -681,6 +626,7 @@ Accepted explicit no-op: definitions are enabled by default. Use @disabled to de
 | [args field](#args-field) | one or more strings | `@enum("open", "closed")` |
 | [tool field](#tool-field) | one or more strings | `@enum("exec", "fs_read")` |
 | [prompt field](#prompt-field) | one or more strings | `@enum("short", "long")` |
+| [builtin field](#builtin-field) | one or more strings | `@enum("patch", "minor")` |
 
 The closed set of string values the field accepts: @enum("a", "b"). The `enum("a", "b")` type is the same constraint in one statement.
 
@@ -758,14 +704,6 @@ Filter for automation triggers: a lambda of one parameter over the triggering ro
 
 Tool handler configuration. Format: @handler(type="query", query="...") / @handler(type="function", name="...").
 
-### @immutable
-
-| On | Written as | Example |
-|---|---|---|
-| [concept field](#concept-field) | no arguments | `@immutable` |
-
-Declared metadata (memql#2960): emitted as x-immutable in the concept schema; nothing refuses a later write to the field.
-
 ### @internal
 
 | On | Written as | Example |
@@ -773,14 +711,6 @@ Declared metadata (memql#2960): emitted as x-immutable in the concept schema; no
 | [concept field](#concept-field) | no arguments | `@internal` |
 
 On a concept field: server-only (memql#2035) -- never projected by a shape's default projection and never accepted from a mutation's caller args; emitted as x-internal. (On a construct, @internal is retired, #2708.)
-
-### @latestMode
-
-| On | Written as | Example |
-|---|---|---|
-| [query](#query) | no arguments | `@latestMode` |
-
-On a query: marks the query as time-dependent because it reads `asOf latest` (the live tip of the append-only stream), so its result is clock-dependent / not reproducible. The engine AUTO-DERIVES this from an `asOf latest` clause in the body, so the annotation is an explicit, reader-facing restatement of that contract -- not a switch. A query with `asOf <explicit timestamp>` is deterministic and is NOT time-dependent.
 
 ### @level
 
@@ -877,24 +807,6 @@ Provider modality (e.g., "chat", "audio", "image", "embedding").
 
 Model identifier (e.g., "gpt-5.4-mini", "claude-sonnet-4-6").
 
-### @namespace
-
-| On | Written as | Example |
-|---|---|---|
-| [concept](#concept) | one string | `@namespace("support")` |
-| [seed](#seed) | one string | `@namespace("agents")` |
-
-- On a concept: Concept namespace. DEFAULTS to the containing dsl/&lt;domain>/ directory (#2614) -- write it only for a colon-scoped sub-namespace ("cognition:client:tool") or a pinned divergence (namespace.pin). An explicit value must equal the directory, extend it as &lt;dir>:..., or match the domain pin; any other mismatch is a load error (the moved-file guard: file location is id-bearing, so moving a .memql file between domains changes canonical ids).
-- On a seed: Accepted, and read by nothing yet: the seeded row's concept is resolved from the seed's signature (`seed <Concept> <name>`, through the file's use imports), never from this annotation (memql#5426).
-
-### @nocache
-
-| On | Written as | Example |
-|---|---|---|
-| [query](#query) | no arguments | `@nocache` |
-
-Opt this query OUT of caching entirely (force "never cache"). Clearer alias for @cache(ttl="0"); use it for reads that must always be live (auth, monotonic counters, presence). Pure reads cache by default (5.6), so @nocache is the escape for the rare read where even brief staleness is wrong.
-
 ### @noUnset
 
 | On | Written as | Example |
@@ -978,21 +890,6 @@ Required on a policy: the first entry the AI Router resolves. A provider name, a
 | [query](#query), [mutation](#mutation) | no arguments | `@public` |
 
 Per-row-authz marker: this query/mutation is intentionally callable without a caller-scope filter (concept catalogs, pre-auth login paths). See [per-row-authz-audit.md](../operate/auth/per-row-authz-audit.md).
-
-### @rateLimit
-
-| On | Written as | Example |
-|---|---|---|
-| [tool](#tool) | keyword arguments | `@rateLimit(maxCalls=10, periodSeconds=60)` |
-
-`@rateLimit` takes these keys, each written as `key=value`.
-
-| Key | Type | Meaning |
-|---|---|---|
-| `maxCalls` | int | Maximum calls allowed per period. |
-| `periodSeconds` | int | Rate-limit window in seconds. |
-
-Tool rate limiting. Format: @rateLimit(maxCalls=100, periodSeconds=3600).
 
 ### @relationship
 
@@ -1112,14 +1009,6 @@ Implementation: component/memql/rowauthz_enforce.go, called from parser.go. MEAS
 
 Seed scope: "global" seeds once for the cluster, "perUser" once for every user.
 
-### @scopes
-
-| On | Written as | Example |
-|---|---|---|
-| [tool](#tool) | one or more strings | `@scopes("operator")` |
-
-Authorization scopes the tool requires.
-
 ### @scrubPii
 
 | On | Written as | Example |
@@ -1229,10 +1118,8 @@ Event trigger for automations. Format: @trigger(event="graph.node.created.*.v1:n
 | On | Written as | Example |
 |---|---|---|
 | [concept](#concept) | one string | `@type("collection")` |
-| [provider](#provider) | one string | `@type("OpenAI")` |
 
-- On a concept: The concept's row kind: "object" (the default), "collection" or "reference".
-- On a provider: The provider's type, which picks the client that serves it: `OpenAI` (or `OpenAIChat`), `OpenAITTS` or `OpenAIEmbedding` for OpenAI, and `Anthropic` (or `AnthropicChat`) for Anthropic, matched without regard to case. `Fleet` and `SubscriptionApp` are accepted on a `@base` provider only: their models are named from a policy (`fleet:<model>`, `app:<id>`) rather than declared as children. Any other type leaves the provider registered but unavailable (`unsupported provider type`). Streaming is a parameter (`streaming true` in `params`), not a type, and a child that `@extends` a base takes the base's type.
+The concept's row kind: "object" (the default), "collection" or "reference".
 
 ### @unbounded
 
@@ -1241,14 +1128,6 @@ Event trigger for automations. Format: @trigger(event="graph.node.created.*.v1:n
 | [query](#query) | one string | `@unbounded("a small catalog of fixed size")` |
 
 On a list-returning query: opt out of the pagination authoring rule and the implicit 50-row runtime cap. Format: @unbounded("reason"). The reason string is REQUIRED -- it documents why this query is a legitimate full-set read (small bounded catalog, sweep job, etc.) and is enumerated by the pagination audit report. A query that paginates/sorts is already bounded and must NOT carry @unbounded; the engine clamps the realized window to MEMQL_MEMORY_ENGINE_MAX_WINDOW regardless. See [authoring-rules.md](authoring-rules.md).
-
-### @unique
-
-| On | Written as | Example |
-|---|---|---|
-| [concept field](#concept-field) | no arguments | `@unique` |
-
-Declared metadata (memql#2960): emitted as x-unique in the concept schema; nothing enforces uniqueness.
 
 ### @variant
 
@@ -1263,6 +1142,14 @@ Declared metadata (memql#2960): emitted as x-unique in the concept schema; nothi
 | `discriminator` | string | The field whose value picks the branch. |
 
 A discriminated union: @variant(discriminator="kind") on an object field, followed by one block per branch; the discriminator field's value picks the branch.
+
+### @vendor
+
+| On | Written as | Example |
+|---|---|---|
+| [provider](#provider) | one string | `@vendor("OpenAI")` |
+
+The provider's type, which picks the client that serves it: `OpenAI` (or `OpenAIChat`), `OpenAITTS` or `OpenAIEmbedding` for OpenAI, and `Anthropic` (or `AnthropicChat`) for Anthropic, matched without regard to case. `Fleet` and `SubscriptionApp` are accepted on a `@base` provider only: their models are named from a policy (`fleet:<model>`, `app:<id>`) rather than declared as children. Any other type leaves the provider registered but unavailable (`unsupported provider type`). Streaming is a parameter (`streaming true` in `params`), not a type, and a child that `@extends` a base takes the base's type.
 
 ### @version
 
@@ -1301,26 +1188,36 @@ A retired name is refused where the table says, with `annotation_retired` and a 
 |---|---|---|
 | [`@actor`](#actor) | [spec and trait](#spec-and-trait) | It is a shape-only marker since epic #2281 -- to predicate on the caller, bind an @actor shape in the signature (`spec <shape> <name>`) and read its projected key by bare name. |
 | `@async` | everywhere | Refused on automations since memql#2712: an automation already runs asynchronously off its event or schedule trigger, and nothing reads the annotation -- delete it. |
-| `@audit` | everywhere | Removed from the allow-lists in memql#989; nothing reads it -- delete the annotation. |
+| `@audit` | everywhere | Removed from the allow-lists in memql#989; nothing reads it -- delete the annotation; run `memqlmigrate --rewrite=attributes`. |
 | [`@cache`](#cache) | [concept](#concept) | A concept carries no cache setting -- a read caches, so set the TTL on the query that reads the concept (@cache(300)); a write to the concept evicts every cached read of it. |
 | `@caller` | [shape](#shape) | Use @actor (#221); the field accessor was renamed at the same time (caller.X -> actor.X). |
 | `@clientExecution` | [tool](#tool) | It dispatched the tool to the connected browser over the client-tool relay, which was removed with the cognition node (epic memql#4988). Every tool now needs a server-side @handler. |
 | `@concepts` | [shape](#shape) | Bind the concept in the signature instead: `shape <Concept> <name> { ... }`, with the concept imported by a file-top `use` line. |
+| [`@default`](#default) | [concept field](#concept-field) | Memql#5375: it is never applied on insert -- it was published as the JSON-Schema `default` keyword, which no validator applies; write `args.<field> ?? <default>` in the mutation body. It stays live on a tool / prompt / builtin field, where the body IS the schema the model reads; run `memqlmigrate --rewrite=attributes`. |
 | [`@default`](#default) | [args field](#args-field) | It is never applied; write `args.<field> ?? <default>` in the body (a concept-field @default is not a substitute -- it is never applied on insert either). |
+| `@deprecated` | everywhere | Memql#5375: it was rendered by help() and editor hover and read by nothing that changes behaviour -- delete it, or say so in the construct's @description; run `memqlmigrate --rewrite=attributes`. |
 | [`@description`](#description) | [args field](#args-field) | It was never retained (no AST slot); document the field with a `///` doc comment on the line above it (memql#3336). |
-| `@idempotent` | everywhere | Removed from the mutation allow-list in memql#989; nothing reads it -- delete the annotation. |
+| `@enabled` | everywhere | Memql#5375: constructs are enabled by default, so @enabled was an explicit no-op that read like a switch -- delete it, and use @disabled to deactivate; run `memqlmigrate --rewrite=attributes`. |
+| `@idempotent` | everywhere | Removed from the mutation allow-list in memql#989; nothing reads it -- delete the annotation; run `memqlmigrate --rewrite=attributes`. |
+| `@immutable` | everywhere | Memql#5375: declared metadata with no write guard behind it -- delete it; a field that must not change is enforced by the mutation that writes it; run `memqlmigrate --rewrite=attributes`. |
 | [`@internal`](#internal) | everywhere except [concept field](#concept-field) | Retired under the 2026.08 epoch (#2620 ruling / #2708); it only hid the construct from external discovery surfaces (tool listing, MCP promotion, the help()/listFunctions internal flag) while leaving it callable -- delete the annotation. |
 | `@kind` | [action](#action) | An action is always one primitive capability call now, and a composite of several is an automation, so there is nothing to mark; remove it. |
+| `@latestMode` | everywhere | Memql#5375: the engine derives time-dependence from `asOf latest` in the body, so the annotation restated it and could contradict it -- delete it; run `memqlmigrate --rewrite=attributes`. |
+| `@namespace` | everywhere | Memql#5375: a concept's namespace is its domain directory, or that directory's one-line namespace.pin -- the annotation could only restate one of those or silently disagree with it; delete it, and pin a deliberate divergence with a namespace.pin file (#2614); run `memqlmigrate --rewrite=attributes`. |
+| `@nocache` | everywhere | Memql#5375: write @cache(0) -- one annotation for the cache TTL, with 0 meaning never; run `memqlmigrate --rewrite=attributes`. |
 | `@permission` | everywhere | Buried (#2631 ruling close-out / #2713); the @role twin -- documented but never enforced (its one help-payload reader was dead; the load gate rejects it) -- access control lives at the actor layer (RBAC + the @public per-row-authz classification). |
+| `@rateLimit` | everywhere | Memql#5375: Tool.RateLimit was cloned and copied into a Function field nothing reads, so the declared ceiling did not exist -- delete it; the live ceilings are the provider chokepoint in ai_guard.go and the run budget in component/work; run `memqlmigrate --rewrite=attributes`. |
 | `@reliability` | [action](#action) | Reliability is runtime state the engine keeps, not something the source declares; remove it. |
-| `@retry` | everywhere | Removed from the allow-lists in memql#989; nothing reads it -- delete the annotation. |
+| `@retry` | everywhere | Removed from the allow-lists in memql#989; nothing reads it -- delete the annotation; run `memqlmigrate --rewrite=attributes`. |
 | `@role` | everywhere | Buried (#2631 ruling / #2709); it was documented but never enforced (nothing ever checked the value at runtime; the load gate rejects it) -- access control lives at the actor layer (RBAC + the @public per-row-authz classification). |
 | [`@row`](#row) | [spec and trait](#spec-and-trait) | It is a shape-only marker since epic #2281 -- to predicate on row metadata, bind a @row shape in the signature (`spec <shape> <name>`) and read its projected key by bare name. |
 | `@schedule` | [automation](#automation) | A scheduled automation is written @trigger(schedule="&lt;cron>"), the one spelling (D15, epic memql#5370); memqlmigrate --rewrite=bodies rewrites it. |
 | [`@scope`](#scope) | [concept](#concept) | Remove the annotation; every concept lives in the default partition post-#56. |
+| `@scopes` | everywhere | Memql#5375: Tool.Scopes was advertised on the gRPC tool descriptor and checked nowhere, so it read as an authorization gate while gating nothing -- delete it; use @requiresCapability for a real one; run `memqlmigrate --rewrite=attributes`. |
 | `@shape` | [spec and trait](#spec-and-trait) | A spec binds its shape or concept in the signature (epic #2281): `spec <boundName> <name> = row => <predicate>`, with boundName resolved through the file-top `use` import. |
 | [`@sideEffect`](#sideeffect) | [action](#action) | The authoritative side-effect class lives on the capability declaration the action calls, where an action cannot overstate or understate it; remove it from the action. |
-| `@timeout` | everywhere | Removed from the allow-lists in memql#989; nothing reads it -- delete the annotation. |
+| `@timeout` | everywhere | Removed from the allow-lists in memql#989; nothing reads it -- delete the annotation; run `memqlmigrate --rewrite=attributes`. |
+| `@unique` | everywhere | Memql#5375: declared metadata with no uniqueness check behind it (memql#2960), so it read as a constraint while constraining nothing -- delete it; run `memqlmigrate --rewrite=attributes`. |
 | `@useX`, for any `X` that starts with an upper-case letter | everywhere | Declare the dependency with a file-top `use <module>.{ ... }` import instead, and put a bound concept in the signature (`query <Concept> <name> { ... }`). |
 | `@visibility` | everywhere | Removed in the genesis simplification; it chose which node types load a construct, and every binary now loads everything while build tags decide which integrations are active -- delete the annotation. |
 

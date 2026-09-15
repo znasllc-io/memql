@@ -14,7 +14,7 @@ func TestSandboxCompileBundle_CandidateConceptCompiles(t *testing.T) {
 	before := len(memoryNodes.List())
 
 	rep := SandboxCompileBundle([]SandboxConstruct{
-		{Kind: "concept", Name: "sandboxWidget", Source: candidateWidgetConcept},
+		{Kind: "concept", Name: "sandboxWidget", Source: candidateWidgetConcept, Origin: "sandboxns/concepts.memql"},
 	})
 
 	if !rep.OK {
@@ -37,7 +37,6 @@ func TestSandboxCompileBundle_CandidateConceptCompiles(t *testing.T) {
 // candidateWidgetConcept is the candidate concept reused by the
 // overlay-binding tests below.
 const candidateWidgetConcept = `@version("1.0.0")
-@namespace("sandboxns")
 @description("Candidate widget concept")
 concept sandboxWidget {
   ownerUserId  string  @required
@@ -65,7 +64,7 @@ mutation sandboxWidget mutationCreateSandboxWidget {
 // overlaid onto the clone before the mutation parses + resolves.
 func TestSandboxCompileBundle_ConstructBindsCandidateConcept(t *testing.T) {
 	rep := SandboxCompileBundle([]SandboxConstruct{
-		{Kind: "concept", Name: "sandboxWidget", Source: candidateWidgetConcept},
+		{Kind: "concept", Name: "sandboxWidget", Source: candidateWidgetConcept, Origin: "sandboxns/concepts.memql"},
 		{Kind: "mutation", Name: "mutationCreateSandboxWidget", Source: candidateWidgetMutation},
 	})
 
@@ -126,10 +125,10 @@ concept sandboxNoNamespace {
 
 	rep = SandboxCompileBundle([]SandboxConstruct{
 		{
-			Kind: "concept",
-			Name: "sandboxDefaultVersion",
-			Source: `@namespace("sandboxns")
-@description("No @version: the 1.0.0 default applies")
+			Kind:   "concept",
+			Name:   "sandboxDefaultVersion",
+			Origin: "sandboxns/concepts.memql",
+			Source: `@description("No @version: the 1.0.0 default applies")
 concept sandboxDefaultVersion {
   label  string
 }`,
@@ -148,7 +147,6 @@ func TestSandboxCompileBundle_ConceptNameMismatchFails(t *testing.T) {
 			Kind: "concept",
 			Name: "claimedConcept",
 			Source: `@version("1.0.0")
-@namespace("sandboxns")
 concept actualConcept {
   label  string
 }`,
@@ -173,7 +171,6 @@ func TestSandboxCompileBundle_BrokenCandidateConceptFails(t *testing.T) {
 			Name: "sandboxBroken",
 			// Missing closing brace -> no parseable concept decl.
 			Source: `@version("1.0.0")
-@namespace("sandboxns")
 concept sandboxBroken {
   label  string`,
 		},

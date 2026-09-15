@@ -57,7 +57,7 @@ import (
 
 // condProbeSource builds a single-statement logic whose body is `expr`.
 func condProbeSource(expr string) string {
-	return fmt.Sprintf(`@enabled
+	return fmt.Sprintf(`
 @description("memql#2962 predicate-shape probe")
 logic condProbe {
   args {

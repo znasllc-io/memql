@@ -108,7 +108,6 @@ func TestCompletion_RegistryRefreshCrossFile(t *testing.T) {
 	// File A defines the concept; the save-driven rebuild picks it up.
 	fileA := filepath.Join(dir, "gadgets", "concepts.memql")
 	if err := os.WriteFile(fileA, []byte(`@version("1.0.0")
-@namespace("gadgets")
 @description("A gadget.")
 concept gadget {
   label string @required @description("Label")

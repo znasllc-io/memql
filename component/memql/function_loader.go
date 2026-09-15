@@ -517,15 +517,11 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 		FunctionKind: string(funcDef.Type),
 		BoundConcept: boundConcept,
 		Origin:       origin,
-		// Attribute values
-		Enabled:    funcDef.Enabled,
-		Deprecated: funcDef.Deprecated,
-		Version:    funcDef.Version,
-		Timeout:    funcDef.Timeout,
-		CacheTTL:   funcDef.CacheTTL,
-		Retry:      funcDef.Retry,
-		Idempotent: funcDef.Idempotent,
-		Audit:      funcDef.Audit,
+		// Attribute values. @version is gone from a FUNCTION (memql#5375):
+		// nothing read it, and help() rendered it anyway. It survives on a
+		// concept and a seed, where it is id-bearing.
+		Enabled:  funcDef.Enabled,
+		CacheTTL: funcDef.CacheTTL,
 		// @mcp promotion (epic memql#1529 Phase 4 #1534) is a flag attribute the
 		// langparser surfaces on Attributes rather than a typed FunctionDef field.
 		MCPPromoted: hasFlagAttribute(funcDef.Attributes, "mcp"),
@@ -547,10 +543,6 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 	}
 
 	// Handle rate limit
-	if funcDef.RateLimit != nil {
-		fn.RateLimitRequests = funcDef.RateLimit.Requests
-		fn.RateLimitPer = funcDef.RateLimit.Per
-	}
 
 	// Handle args assertions populated from the function's args block.
 	if funcDef.ArgsSchema != nil {
@@ -757,7 +749,15 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 				// also be asserted by an explicit `@latestMode`
 				// annotation (the author-facing contract surface).
 				if funcDef.Type == languageParser.FunctionTypeQuery {
-					fn.LatestMode = queryLatestMode(engineExpr) || hasFlagAttribute(funcDef.Attributes, "latestMode")
+					// DERIVED from the body alone (memql#5375). The
+					// `|| hasFlagAttribute(..., "latestMode")` half went
+					// with the annotation: it could force true on a query
+					// whose body no longer reads `asOf latest`, so a
+					// restatement left behind by an edit outranked the
+					// thing it was restating. The annotation is refused at
+					// load now, which is the only way the two can never
+					// disagree.
+					fn.LatestMode = queryLatestMode(engineExpr)
 				}
 			} else {
 				return nil, fmt.Errorf("function %q body is not an expression node: %T", expectedName, funcDef.Body)
@@ -776,8 +776,11 @@ func tryParseFunctionSlice(expectedName, expectedKind, content, origin string, r
 // that rewrites `<Concept>.X` references in the construct body to
 // `payload.X` before the expression parser tokenises.
 //
-// A mutation's declaration binds the signature concept the same way
-// query/shape/seed do.
+// The mutation declaration keyword is `mutation` (memql#5375). It was the
+// C1 (memql#2041) verb `mutate`, with `mutation` serving as the
+// kind-prefixed CALL keyword only; D17 collapsed the pair onto one word in
+// both positions, so this alternation and the call-site one finally agree.
+// It binds the signature concept the same way query/shape/seed do.
 var signatureConceptRe = regexp.MustCompile(
 	`(?m)^[ \t]*(?:query|mutation|shape|seed)[ \t]+([A-Za-z_][A-Za-z0-9_]*)[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`,
 )
@@ -1432,7 +1435,9 @@ func isMutationOrActionName(name string, functions map[string]*Function) bool {
 		}
 	}
 	lower := strings.ToLower(key)
-	return strings.HasPrefix(lower, "mutation") || strings.HasPrefix(lower, "mutate")
+	// `mutate` was the authored keyword until memql#5375; one prefix now
+	// covers the construct in both the declaration and the call position.
+	return strings.HasPrefix(lower, "mutation")
 }
 
 // detectFunctionCycle uses DFS to detect cycles in the function dependency graph.

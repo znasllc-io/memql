@@ -39,7 +39,7 @@ func TestOneEntryBecomesOneMetafieldsSet(t *testing.T) {
 	h.admin.reply("ShopifyMetafieldsSet", map[string]any{
 		"metafieldsSet": map[string]any{
 			"metafields": []any{map[string]any{"id": "gid://shopify/Metafield/1"}},
-			"userErrors":  []any{},
+			"userErrors": []any{},
 		},
 	})
 
@@ -227,7 +227,7 @@ func TestAnAcceptedQuoteLocksItsPrices(t *testing.T) {
 	h.admin.reply("ShopifyDraftOrderCreate", map[string]any{
 		"draftOrderCreate": map[string]any{
 			"draftOrder": map[string]any{"id": "gid://shopify/DraftOrder/5"},
-			"userErrors":  []any{},
+			"userErrors": []any{},
 		},
 	})
 	gid, err := h.conn.CreateDraftOrderFromQuote(context.Background(), h.store(t), QuoteInput{

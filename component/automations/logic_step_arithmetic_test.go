@@ -17,7 +17,7 @@ import (
 // intermediate `doubled := base * 2` statement binds the product and a later
 // return reads it, with no call dispatched (arithmetic resolves locally).
 func TestLogicRunner_IntermediateArithmeticStatement(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("intermediate arithmetic statement (#2542 GAP 2)")
 logic doubler {
   args {
@@ -48,7 +48,7 @@ logic doubler {
 // statement whose operands are caller args (`net := args.gross - args.fee`)
 // resolves them, exactly as a terminal-return arithmetic does.
 func TestLogicRunner_ArithmeticStatement_ArgsOperands(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("args operands in an arithmetic statement (#2542 GAP 2)")
 logic netAmount {
   args {
@@ -75,7 +75,7 @@ logic netAmount {
 // with terminal returns: a date builtin nested in an arithmetic statement
 // (`weeks := daysBetween(args.a, args.b) / 7`) evaluates as it does there.
 func TestLogicRunner_ArithmeticStatement_DateBuiltinOperand(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("date builtin inside an arithmetic statement (#2542 GAP 2)")
 logic weeksBetween {
   args {
@@ -105,7 +105,7 @@ logic weeksBetween {
 // division-by-zero in a statement surfaces the same clean error a terminal
 // return does, never a panic or a silent nil bind.
 func TestLogicRunner_ArithmeticStatement_DivisionByZero(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("division by zero in an arithmetic statement (#2542 GAP 2)")
 logic ratioStep {
   args {
@@ -147,7 +147,7 @@ func TestLogicRunner_CompiledArithmeticStatementIsCanonicalSource(t *testing.T) 
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, steps := compiledLogic(t, `@enabled
+			_, steps := compiledLogic(t, `
 @description("statement round-trip probe")
 logic probe {
   args {

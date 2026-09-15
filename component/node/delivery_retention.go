@@ -8,8 +8,8 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/component"
 )
 
 // OutboxRetention is the periodic retention sweep for the mesh delivery

@@ -439,7 +439,7 @@ func catalogCarriesSourceOnlyWithoutAFile(t *testing.T) {
 func TestConstructCatalogPromotedRunnableCarriesItsArgs(t *testing.T) {
 	e := &MemQLEngine{functions: newFunctionRegistry()}
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", sessionConceptSrc+"\n\n"+sessionMutationSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", sessionConceptSrc+"\n\n"+sessionMutationSrc, "authoring/concepts.memql"); err != nil {
 		t.Fatalf("author session bundle: %v", err)
 	}
 	c, ok := reg.Lookup("owner-1", "mutation", "mutationCreateMcpWidget")

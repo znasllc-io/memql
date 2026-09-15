@@ -43,7 +43,7 @@ func TestAuthoredScheduler_GlobalKillSwitchHaltsAll(t *testing.T) {
 	}
 	defer s.Stop()
 
-	src := `@enabled
+	src := `
 @trigger(event="node.created", concept="v1:identity:user")
 automation onUser {
   run := logic sandboxNoopLogic(event: event)
@@ -96,7 +96,7 @@ func TestAuthoredScheduler_SetGlobalGateLive(t *testing.T) {
 	s := newAuthoredSchedulerForTest(t, bus, rec.run)
 	defer s.Stop()
 
-	src := `@enabled
+	src := `
 @trigger(event="node.created", concept="v1:identity:user")
 automation onUser {
   run := logic sandboxNoopLogic(event: event)

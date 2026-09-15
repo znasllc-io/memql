@@ -19,8 +19,8 @@ const (
 func repoShapedFS() fstest.MapFS {
 	return fstest.MapFS{
 		"dsl/test.memql":              &fstest.MapFile{Data: []byte("// scratch\n")},
-		"dsl/calendar/concepts.memql": &fstest.MapFile{Data: []byte("@version(\"1.0.0\")\n@namespace(\"calendar\")\nconcept calendarEvent {\n  id  string  @required\n}")},
-		"dsl/agents/concepts.memql":   &fstest.MapFile{Data: []byte("@version(\"1.0.0\")\n@namespace(\"agents\")\nconcept agent {\n  id  string  @required\n}")},
+		"dsl/calendar/concepts.memql": &fstest.MapFile{Data: []byte("@version(\"1.0.0\")\nconcept calendarEvent {\n  id  string  @required\n}")},
+		"dsl/agents/concepts.memql":   &fstest.MapFile{Data: []byte("@version(\"1.0.0\")\nconcept agent {\n  id  string  @required\n}")},
 		"component/memql/engine.go":   &fstest.MapFile{Data: []byte("package memql\n")},
 		"docs/readme.md":              &fstest.MapFile{Data: []byte("# docs\n")},
 	}
@@ -143,7 +143,9 @@ func TestWorkspaceGraph_DeclarationSitePathIsRootRelative(t *testing.T) {
 	if sites[0].File != "dsl/calendar/concepts.memql" {
 		t.Errorf("File = %q, want \"dsl/calendar/concepts.memql\" (relative to the workspace root, not the DSL root)", sites[0].File)
 	}
-	if sites[0].Line != 3 {
-		t.Errorf("Line = %d, want 3", sites[0].Line)
+	// Line 2, not 3: the fixture carried an @namespace line above the concept
+	// until epic memql#5375 retired the annotation.
+	if sites[0].Line != 2 {
+		t.Errorf("Line = %d, want 2", sites[0].Line)
 	}
 }

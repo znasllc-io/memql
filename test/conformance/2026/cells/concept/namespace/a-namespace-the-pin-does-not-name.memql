@@ -1,7 +1,0 @@
-/// A support ticket raised by a customer, under a namespace neither the directory nor its pin names.
-@namespace("helpdesk")
-concept ticket {
-  ownerUserId  string
-  title        string
-  status       string
-}

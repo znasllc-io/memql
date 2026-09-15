@@ -43,7 +43,7 @@ import (
 
 // liveAutomation is a well-formed automation used as the control in every
 // fixture below: it must survive whatever the block comment around it does.
-const liveAutomation = `@enabled
+const liveAutomation = `
 @description("control")
 @trigger(event="node.created", concept="v1:cluster:node")
 automation blockCommentControl {
@@ -173,7 +173,7 @@ automation commentedNextLineBrace
 // aware, so it counted the `}` in `/* } */`, closed the slice early, and
 // handed the compiler a truncated automation -- a refused boot since #2830.
 func TestBraceInsideBlockCommentDoesNotTruncateSlice(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("brace inside a block comment in the body")
 @trigger(event="node.created", concept="v1:cluster:node")
 automation braceInBlockComment {
@@ -196,7 +196,7 @@ automation braceInBlockComment {
 // step argument would blank the rest of the automation -- trading the reported
 // bug for a worse one.
 func TestBlockCommentMarkerInsideStringIsNotAComment(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("a string carrying comment markers")
 @trigger(event="node.created", concept="v1:cluster:node")
 automation commentMarkerInString {
@@ -222,7 +222,6 @@ automation commentMarkerInString {
 // opening a nested comment -- would silently disable a live automation.
 func TestBlockCommentDoesNotNest(t *testing.T) {
 	src := `/* outer /* inner */
-@enabled
 @description("live again after the first close")
 @trigger(event="node.created", concept="v1:cluster:node")
 automation afterFirstClose {
@@ -415,7 +414,7 @@ func TestBlockCommentAboveAutomationDoesNotDisturbTheLoad(t *testing.T) {
 		{"contains an annotation", "/*\n@public\n*/"},
 		{"contains a retired annotation", "/*\n@useConcept(node)\n*/"},
 		{"has two blank lines", "/* para one\n\n\npara two\n*/"},
-		{"is a parked copy of the automation", "/*\n@enabled\n@trigger(event=\"node.created\", concept=\"v1:cluster:node\")\nautomation parkedCopy {\n  s := logic x(v: 1)\n}\n*/"},
+		{"is a parked copy of the automation", "/*\n@trigger(event=\"node.created\", concept=\"v1:cluster:node\")\nautomation parkedCopy {\n  s := logic x(v: 1)\n}\n*/"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := tc.comment + "\n" + liveAutomation
@@ -443,14 +442,12 @@ func TestBlockCommentAboveAutomationDoesNotDisturbTheLoad(t *testing.T) {
 // annotation check since memql#5359, which must keep reading the live one.
 func TestAnnotationGateStillSeesTheLiveAutomation(t *testing.T) {
 	src := `/*
-@enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation parkedOne {
   persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")
 }
 */
 @public
-@enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation gatedAutomation {
   persist := mutation createSpawnEvent(nodeId: "a", nodeType: "b", action: "stopped", reason: "r")

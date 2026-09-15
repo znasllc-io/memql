@@ -65,13 +65,23 @@ func TestConceptFieldSpellingsTheReadersDroppedAreRefused(t *testing.T) {
 		`@minLength(value=5)`, `@maxLength(value=5)`, `@minimum(value=1)`, `@maximum(value=9)`,
 		`@minLength("5")`, `@maximum("9")`,
 		`@description(value="x")`, `@pattern(value="^a")`,
-		`@default(open)`, `@default(value="x")`,
 	} {
 		src := "concept probe {\n  count int " + ann + "\n}\n"
 		_, err := buildConceptFromSource(t, src)
 		var ref *annotations.Refusal
 		if err == nil || !errors.As(err, &ref) || ref.Code != annotations.CodeForm {
 			t.Errorf("%s on a concept field: want an annotation_form refusal, got: %v", ann, err)
+		}
+	}
+	// @default is refused a rung EARLIER since epic memql#5375 retired it on a
+	// concept field: the name never reaches the form check, so the refusal is
+	// annotation_retired whatever shape it was written in. Sharper, not weaker.
+	for _, ann := range []string{`@default(open)`, `@default(value="x")`, `@default("open")`} {
+		src := "concept probe {\n  count int " + ann + "\n}\n"
+		_, err := buildConceptFromSource(t, src)
+		var ref *annotations.Refusal
+		if err == nil || !errors.As(err, &ref) || ref.Code != annotations.CodeRetired {
+			t.Errorf("%s on a concept field: want an annotation_retired refusal, got: %v", ann, err)
 		}
 	}
 }

@@ -7,7 +7,7 @@ import "testing"
 // auth + params sub-blocks. env("VAR") in auth lands as "${VAR}".
 func TestParseProviderDecl_GoldenPath_OpenAIChild(t *testing.T) {
 	source := `@description("OpenAI GPT-5 Mini for fast chat completions")
-@type("OpenAI")
+@vendor("OpenAI")
 @model("gpt-5-mini")
 @modality("text")
 provider chat5Mini {
@@ -30,8 +30,8 @@ provider chat5Mini {
 	if got.Name != "chat5Mini" {
 		t.Errorf("Name = %q, want chat5Mini", got.Name)
 	}
-	if got.Type != "OpenAI" {
-		t.Errorf("Type = %q, want OpenAI", got.Type)
+	if got.Vendor != "OpenAI" {
+		t.Errorf("Vendor = %q, want OpenAI", got.Vendor)
 	}
 	if got.Model != "gpt-5-mini" {
 		t.Errorf("Model = %q, want gpt-5-mini", got.Model)
@@ -71,7 +71,7 @@ provider chat5Mini {
 // tts child extends from via @extends("openai").
 func TestParseProviderDecl_BaseProvider(t *testing.T) {
 	source := `@base
-@type("OpenAI")
+@vendor("OpenAI")
 provider openai {
   auth {
     apiKey  env("MEMQL_AI_OPENAI_PROJECT_ID")
@@ -85,8 +85,8 @@ provider openai {
 	if !got.IsBase {
 		t.Error("IsBase = false, want true")
 	}
-	if got.Type != "OpenAI" {
-		t.Errorf("Type = %q, want OpenAI", got.Type)
+	if got.Vendor != "OpenAI" {
+		t.Errorf("Vendor = %q, want OpenAI", got.Vendor)
 	}
 	if got.Model != "" {
 		t.Errorf("Model = %q, want empty (base providers have no model)", got.Model)
@@ -123,7 +123,7 @@ provider chat4oMini {
 // TestParseProviderDecl_AuthStringLiteral locks support for
 // quoted-string auth values (rare; mostly fixtures / tests).
 func TestParseProviderDecl_AuthStringLiteral(t *testing.T) {
-	source := `@type("OpenAI")
+	source := `@vendor("OpenAI")
 @model("gpt-test")
 provider testProvider {
   auth {
@@ -147,7 +147,7 @@ provider testProvider {
 func TestParseProviderDecl_Disabled(t *testing.T) {
 	source := `@disabled
 @base
-@type("Acme")
+@vendor("Acme")
 provider acme {
   auth {
     apiKey  env("MEMQL_SI_ACME_API_KEY")
@@ -169,8 +169,8 @@ provider acme {
 // TestParseProviderDecl_Enabled locks @enabled as an explicit-on
 // no-op: it parses cleanly and leaves Disabled == false.
 func TestParseProviderDecl_Enabled(t *testing.T) {
-	source := `@enabled
-@type("OpenAI")
+	source := `
+@vendor("OpenAI")
 @model("gpt-5-mini")
 provider chat5Mini {
   auth {
@@ -190,7 +190,7 @@ provider chat5Mini {
 // TestParseProviderDecl_RejectsUnknownSubBlock locks the body
 // grammar: only `auth` and `params` are accepted.
 func TestParseProviderDecl_RejectsUnknownSubBlock(t *testing.T) {
-	source := `@type("OpenAI")
+	source := `@vendor("OpenAI")
 @model("gpt-x")
 provider bogusProvider {
   bogusBlock {

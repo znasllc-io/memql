@@ -245,10 +245,41 @@ func AssembleConceptIdFromDeclInDir(decl *ConceptDecl, dir, pinned string) (stri
 		version = SemverVersion{Major: 1, Minor: 0, Patch: 0}
 	}
 	if !hasNamespace {
-		namespace = dir
-	} else if namespace != dir && !strings.HasPrefix(namespace, dir+":") && namespace != pinned {
-		return "", fmt.Errorf("concept %q: @namespace(%q) does not match its domain directory %q (nor extend it as %q, nor match a namespace.pin): a moved file silently changes canonical ids -- move the file back, fix the annotation, or pin the deliberate divergence with a one-line %s/namespace.pin file (#2614)",
-			decl.Name, namespace, dir, dir+":...", dir)
+		// The PIN when the directory has one, else the directory itself.
+		//
+		// The pin used to be consulted only to VALIDATE an explicit
+		// @namespace, and the absent case fell straight to `dir`. That was
+		// sound while the annotation existed, and became the whole
+		// mechanism when memql#5375 retired it: dsl/shopify/generated/ is a
+		// NESTED directory, so `dir` is "shopify/generated" -- which is not
+		// a legal namespace at all -- and dsl/deployment/ pins "cluster", so
+		// falling to `dir` would have moved every id it declares from
+		// v1:cluster:* to v1:deployment:*.
+		//
+		// So the pin is now the derivation rather than a cross-check, which
+		// is what #2614 described it as: the one-line escape hatch for a
+		// deliberate, id-PRESERVING divergence between where a file lives
+		// and the namespace its concepts assemble under.
+		if pinned != "" {
+			namespace = pinned
+		} else {
+			namespace = dir
+		}
+	} else {
+		// @namespace is RETIRED (epic memql#5375), so a PRESENT one is a
+		// refusal whatever it says -- and the refusal has to be the
+		// retirement rather than the #2614 moved-file guard.
+		//
+		// The guard ran here first and compared the annotation against the
+		// directory, so an author who moved a file was told to "fix the
+		// annotation" -- advice pointing at something that no longer exists,
+		// and a second refusal waiting behind the first. The guard's own
+		// purpose is served differently now: it reconciled TWO sources of
+		// truth for a namespace, and there is one, so a moved file's ids
+		// follow the move by construction and a domain that must keep its
+		// ids pins them.
+		return "", fmt.Errorf("concept %q: @namespace(%q) is retired -- a concept's namespace is its domain directory (%q here), or that directory's one-line namespace.pin. Delete the annotation; pin a deliberate id-preserving divergence with a %s/namespace.pin file (#2614). Run `memqlmigrate --rewrite=attributes`",
+			decl.Name, namespace, dir, dir)
 	}
 	if err := ValidateAssemblyInputs(version, namespace, decl.Name); err != nil {
 		return "", fmt.Errorf("concept %q: %w", decl.Name, err)

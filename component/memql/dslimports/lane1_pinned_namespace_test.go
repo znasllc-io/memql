@@ -66,7 +66,6 @@ func pinnedNamespaceWithRealDirTree() fstest.MapFS {
 	return fstest.MapFS{
 		"deploy/namespace.pin": file("cluster\n"),
 		"deploy/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("Declared under deploy/, namespaced to cluster.")
 concept widget {
   label  string  @required @description("Label.")
@@ -74,20 +73,17 @@ concept widget {
 		// The pin's directory exists and declares something ELSE. This is what
 		// makes lane 1 reject rather than skip.
 		"cluster/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("The pin target exists but declares no widget.")
 concept gadget {
   label  string  @required @description("Label.")
 }`),
 		"other/concepts.memql": file(`@version("1.0.0")
-@namespace("other")
 @description("A second widget, so the bare name is ambiguous without the import.")
 concept widget {
   name  string  @required @description("Name.")
 }`),
 		"deploy/queries.memql": file(`use cluster.concepts.{ widget }
 
-@enabled
 @description("Binds widget by its PINNED namespace.")
 query widget deployWidgets {
   args {
@@ -147,7 +143,6 @@ func TestLane1_PinnedNamespaceStillRejectsAGenuinelyMissingSymbol(t *testing.T) 
 	root := pinnedNamespaceWithRealDirTree()
 	root["deploy/queries.memql"] = file(`use cluster.concepts.{ widget, sprocket }
 
-@enabled
 @description("Imports one real name and one that exists nowhere.")
 query widget deployWidgets {
   args {
@@ -203,7 +198,6 @@ func TestLane1_UnpinnedTreeVerdictIsUnchanged(t *testing.T) {
 	root := pinnedNamespaceWithRealDirTree()
 	delete(root, "deploy/namespace.pin")
 	root["deploy/concepts.memql"] = file(`@version("1.0.0")
-@namespace("deploy")
 @description("Unpinned: the id follows the directory.")
 concept widget {
   label  string  @required @description("Label.")

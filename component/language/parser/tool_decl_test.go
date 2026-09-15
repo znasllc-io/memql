@@ -11,7 +11,7 @@ import (
 // query="...") + @executionTime + a small typed-field body.
 // Mirrors dsl/memql/tools.memql::searchUsers.
 func TestParseToolDecl_GoldenPath_QueryHandler(t *testing.T) {
-	source := `@enabled
+	source := `
 @handler(type="query", query="concept==v1:memql:backend:user")
 @executionTime("fast")
 @description("Search for users")
@@ -130,7 +130,13 @@ tool createSomething {
 
 // TestParseToolDecl_RateLimit locks
 // @rateLimit(maxCalls=N, periodSeconds=M) parsing.
-func TestParseToolDecl_RateLimit(t *testing.T) {
+// TestParseToolDecl_RateLimitIsRetired: @rateLimit was parsed into typed
+// ToolDecl fields, cloned onto the runtime Tool, copied into a Function field
+// nothing reads, and ENFORCED NOWHERE -- so a tool declaring a ceiling had
+// none. That is worse than no annotation: the declaration reads as a limit.
+// Retired in epic memql#5375; the live ceilings are the provider chokepoint in
+// ai_guard.go and the run budget in component/work.
+func TestParseToolDecl_RateLimitIsRetired(t *testing.T) {
 	source := `@handler(type="function", name="rateLimitedTool")
 @rateLimit(maxCalls=10, periodSeconds=60)
 @description("Rate-limited tool")
@@ -138,15 +144,15 @@ tool rateLimitedTool {
   q  string  @required
 }`
 
-	got, err := ParseToolDecl(source)
-	if err != nil {
-		t.Fatalf("ParseToolDecl: %v", err)
+	_, err := ParseToolDecl(source)
+	if err == nil {
+		t.Fatal("@rateLimit must be refused on a tool")
 	}
-	if got.RateLimitMaxCalls != 10 {
-		t.Errorf("RateLimitMaxCalls = %d, want 10", got.RateLimitMaxCalls)
+	if !strings.Contains(err.Error(), "retired") {
+		t.Errorf("the refusal should say retired, got: %v", err)
 	}
-	if got.RateLimitPeriod != 60 {
-		t.Errorf("RateLimitPeriod = %d, want 60", got.RateLimitPeriod)
+	if !strings.Contains(err.Error(), "memqlmigrate --rewrite=attributes") {
+		t.Errorf("the refusal should name the rewrite, got: %v", err)
 	}
 }
 
@@ -315,28 +321,37 @@ tool restrictedTool {
 // string list landing on ToolDecl.Scopes in order. Mirrors the
 // dispatcher's superset check (caller scopes must contain all tool
 // scopes).
-func TestParseToolDecl_Scopes(t *testing.T) {
-	source := `@scopes("operator", "navigate")
+// TestParseToolDecl_ScopesIsRetired: @scopes was advertised on the gRPC tool
+// descriptor and CHECKED NOWHERE, so it read as an authorization gate while
+// gating nothing -- the same shape of defect as @rateLimit above, on the axis
+// where it matters more. Retired in epic memql#5375; @requiresCapability is
+// the gate that is enforced.
+func TestParseToolDecl_ScopesIsRetired(t *testing.T) {
+	source := `@handler(type="function", name="operatorTool")
+@scopes("operator", "navigate")
 @description("Operator tool")
 tool operatorTool {
   arg  string  @required
 }`
 
-	got, err := ParseToolDecl(source)
-	if err != nil {
-		t.Fatalf("ParseToolDecl: %v", err)
+	_, err := ParseToolDecl(source)
+	if err == nil {
+		t.Fatal("@scopes must be refused on a tool")
 	}
-	want := []string{"operator", "navigate"}
-	if !reflect.DeepEqual(got.Scopes, want) {
-		t.Errorf("Scopes = %v, want %v", got.Scopes, want)
+	if !strings.Contains(err.Error(), "requiresCapability") {
+		t.Errorf("the refusal should name @requiresCapability as the real gate, got: %v", err)
 	}
 }
 
-// TestParseToolDecl_RoleAndScopeAnnotations locks the realistic authoring
-// shape: a gated tool carries both.
-func TestParseToolDecl_RoleAndScopeAnnotations(t *testing.T) {
+// TestParseToolDecl_RoleAnnotation locks the realistic authoring shape of a
+// gated tool.
+//
+// It asserted a role AND a scope until epic memql#5375, and the two parted
+// company: @allowedRoles is enforced on every path, @scopes was advertised on
+// the gRPC descriptor and checked nowhere. Keeping them in one test was
+// measuring one real gate and one that only looked like one.
+func TestParseToolDecl_RoleAnnotation(t *testing.T) {
 	source := `@allowedRoles("assistant", "specialist")
-@scopes("operator")
 @description("Operator UI: click a target element")
 tool uiClick {
   selector  string  @required
@@ -349,7 +364,7 @@ tool uiClick {
 	if !reflect.DeepEqual(got.AllowedRoles, []string{"assistant", "specialist"}) {
 		t.Errorf("AllowedRoles = %v, want [assistant specialist]", got.AllowedRoles)
 	}
-	if !reflect.DeepEqual(got.Scopes, []string{"operator"}) {
-		t.Errorf("Scopes = %v, want [operator]", got.Scopes)
+	if len(got.Scopes) != 0 {
+		t.Errorf("Scopes = %v, want empty -- @scopes is retired", got.Scopes)
 	}
 }

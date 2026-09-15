@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -56,8 +57,10 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 
 	for _, attr := range decl.Attributes {
 		switch attr.Name {
-		case "enabled":
-			// Accepted no-op: enabled is the default (lifecycle ruling, #2608).
+		// @enabled was an accepted no-op here (lifecycle ruling) until
+		// memql#5375 retired it. It falls through to the unknown-annotation
+		// arm, which consults the retirement ledger first and names
+		// @disabled as what an author actually wants.
 		case "disabled":
 			enabled = false
 		case "sdk":
@@ -140,6 +143,17 @@ func builtinDeclToFunction(decl *languageParser.BuiltinDecl, origin string) (*Fu
 	if len(decl.Fields) > 0 {
 		contract.Properties = make(map[string]string, len(decl.Fields))
 		for _, field := range decl.Fields {
+			// BuiltinField.Attributes was "tolerated, not yet acted on"
+			// until memql#5375: @required was read off the typed field and
+			// every other annotation was dropped without a word, so a
+			// @description on a builtin field vanished from the schema both
+			// SDKs generate -- the same annotation that is load-bearing one
+			// construct over. D16 gives this surface the allow-list args
+			// fields have.
+			// One registry check (#5359), on the BuiltinField receiver.
+			if ref := annotations.CheckAll(annotations.BuiltinField, languageParser.AnnotationUses(field.Attributes)); ref != nil {
+				return nil, fmt.Errorf("%s: builtin %q field %q: %w", origin, decl.Name, field.Name, ref)
+			}
 			contract.Properties[field.Name] = field.Type
 			if field.Required {
 				contract.Required = append(contract.Required, field.Name)

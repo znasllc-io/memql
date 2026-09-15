@@ -34,14 +34,12 @@ func TestSigilAndEnumTypeSchemaEquivalence(t *testing.T) {
 	// builder rejects it ("unknown property annotation @enum"), so on
 	// concept fields the enum TYPE was always the only spelling. The
 	// migration surface here is @required -> sigil alone.
-	longForm := build(`@namespace("probe")
-concept widget {
+	longForm := build(`concept widget {
   label string @required
   status enum("open", "closed") @required
   note string
 }`)
-	shortForm := build(`@namespace("probe")
-concept widget {
+	shortForm := build(`concept widget {
   label string!
   status enum("open", "closed")!
   note string

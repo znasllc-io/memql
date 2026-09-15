@@ -34,11 +34,11 @@ import (
 // coordinator to triage (they are NOT fixed in this story per the S7 charter).
 //
 // This package (parser) cannot import component/language/compiler
-// (import cycle), so the rewriter-family kinds (query / mutate / logic /
+// (import cycle), so the rewriter-family kinds (query / mutation / logic /
 // automation) are exercised via NormaliseAll (which lives here) rather than
 // ParseFileSource.
 
-// Rewriter-family kinds (query / mutate / logic / automation) reach the parser
+// Rewriter-family kinds (query / mutation / logic / automation) reach the parser
 // only after NormaliseAll expands their struct form. Structural errors (missing
 // concept, a forbidden body{} block) surface in NormaliseAll; annotation / token
 // errors (a malformed @trigger) surface in the subsequent parse. The full
@@ -86,9 +86,9 @@ func TestNegative_MalformedDeclBody(t *testing.T) {
 			func(s string) error { _, e := ParseProviderDecl(s); return e }},
 		{"policy", "@primary(\"x\")\npolicy p {\n", // unterminated brace
 			func(s string) error { _, e := ParsePolicyDecl(s); return e }},
-		{"spec", "@enabled\nspec activeRowTrait s = row => row.status ==== \"x\" &&&& true\n",
+		{"spec", "spec activeRowTrait s = row => row.status ==== \"x\" &&&& true\n",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
-		{"trait", "@enabled\ntrait t = row => row.active ==== true\n",
+		{"trait", "trait t = row => row.active ==== true\n",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
 		{"seed", "seed agent sd {\n  name: @@@ broken !!!\n}\n",
 			func(s string) error { _, e := ParseSeedDecl(s); return e }},
@@ -128,7 +128,7 @@ func TestNegative_BodyRule(t *testing.T) {
 		// Direct decl-parser site (spec). Edition 2026 has no braced spec, so
 		// a body{} block is refused as the retired braced form, at its `{`.
 		// memqlmigrate:keep -- the braced body is the case.
-		src := "@enabled\nspec activeRowTrait s {\n  body { return active == true }\n}\n"
+		src := "spec activeRowTrait s {\n  body { return active == true }\n}\n"
 		_, err := ParseSpecDecl(src)
 		wantRetiredAt(t, err, ruleSpecReturnBody, src, "{\n  body", 1)
 	})
@@ -326,7 +326,7 @@ func TestNegative_WordLogicalOperators(t *testing.T) {
 		assertParseErr(t, "`or` infix", err)
 	})
 	t.Run("or-in-spec-body", func(t *testing.T) {
-		_, err := ParseSpecDecl("@enabled\nspec activeRowTrait s = row => row.a == 1 or row.b == 2\n")
+		_, err := ParseSpecDecl("spec activeRowTrait s = row => row.a == 1 or row.b == 2\n")
 		assertParseErr(t, "`or` in spec body", err)
 	})
 }
@@ -346,10 +346,10 @@ func TestNegative_ErrorsCarryPosition(t *testing.T) {
 			_, e := NewParser(toks).Parse()
 			return e
 		},
-		"typo-top-level-keyword": func() error { _, e := ParseFile("@enabled\nconept foo { }"); return e },
+		"typo-top-level-keyword": func() error { _, e := ParseFile("conept foo { }"); return e },
 		"spec-body-block": func() error {
 			// memqlmigrate:keep -- the braced body is the case.
-			_, e := ParseSpecDecl("@enabled\nspec activeRowTrait s {\n  body { return active == true }\n}\n")
+			_, e := ParseSpecDecl("spec activeRowTrait s {\n  body { return active == true }\n}\n")
 			return e
 		},
 	}
@@ -384,13 +384,24 @@ func TestRetiredOperators_ParserAcceptsToTreeScanGate(t *testing.T) {
 	// what rejects them across the live .memql tree.
 	acceptedByParser := []string{
 		`tags has "x"`, // `has` -> enforced by test/dslconformance/no_retired_operators_test.go
-		`a == 1 ; b == 2`,
+		// `,` as OR stays accepted: still live grammar, and its codemod is
+		// `--rewrite=expressions`, which epic memql#5363 owns.
 		`a == 1 , b == 2`,
 	}
 	for _, src := range acceptedByParser {
 		if _, err := ParseExpression(src); err != nil {
 			t.Errorf("LAYER PIN: parser rejects %q now (err=%v).\n  If a story intentionally added parser-level rejection, move this case to an active negative test and update test/dslconformance/no_retired_operators_test.go's role note.", src, err)
 		}
+	}
+
+	// `;` as AND MOVED DOWN A LAYER, which is exactly what this pin exists to
+	// force: epic memql#5375 added the parser-level rejection the comment
+	// above anticipated, so the case is active rather than accepted -- and it
+	// names the replacement, which the tree-scan gate never did.
+	if _, err := ParseExpression(`a == 1 ; b == 2`); err == nil {
+		t.Error("`;` as AND must be refused at the parser level (epic memql#5375)")
+	} else if !strings.Contains(err.Error(), "`&&`") {
+		t.Errorf("the `;` refusal must name `&&` as the replacement, got: %v", err)
 	}
 }
 
@@ -416,9 +427,9 @@ func TestHOLE_UnknownAnnotationSilentlyAccepted(t *testing.T) {
 			func(s string) error { _, e := ParseBuiltinDecl(s); return e }},
 		{"prompt", "@bogusAnno\n@templateFile(\"x.tmpl\")\nprompt pr {\n  a string\n}\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParsePromptDecl(s); return e }},
-		{"spec", "@bogusAnno\n@enabled\nspec someShape sp {\n  return active == true\n}\n", "unknown annotation @bogusAnno",
+		{"spec", "@bogusAnno\nspec someShape sp {\n  return active == true\n}\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
-		{"trait", "@bogusAnno\n@enabled\ntrait tr = row => row.active == true\n", "unknown annotation @bogusAnno",
+		{"trait", "@bogusAnno\ntrait tr = row => row.active == true\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParseSpecDecl(s); return e }},
 		{"policy", "@bogusAnno\n@primary(\"x\")\npolicy p { }\n", "unknown annotation @bogusAnno",
 			func(s string) error { _, e := ParsePolicyDecl(s); return e }},

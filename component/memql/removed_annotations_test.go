@@ -45,20 +45,23 @@ func TestRemovedAnnotationsRejected(t *testing.T) {
 			if code == "" {
 				t.Fatalf("expected @%s on %s to be refused by the registry, got: %v", tc.annotation, tc.receiver.Phrase(), err)
 			}
-			// @role (#2709) and @permission (#2713) graduated from the
-			// generic unknown-annotation error to the pointed BURY
-			// message, and the #989 removals (and @async, refused on
-			// automations since #2712) to a retirement naming that history
-			// (memql#5360) -- the rejection this test locks in is
-			// preserved, sharper.
-			retired := map[string]string{
-				"role": "#2709", "permission": "#2713",
-				"timeout": "memql#989", "retry": "memql#989", "audit": "memql#989", "idempotent": "memql#989",
-				"async": "memql#2712",
-			}
-			if ticket := retired[tc.annotation]; ticket != "" {
-				if code != annotations.CodeRetired || !strings.Contains(err.Error(), ticket) {
-					t.Fatalf("expected @%s retired with its history (%s), got: %v", tc.annotation, ticket, err)
+			// @role (#2709) and @permission (#2713) graduated from the generic
+			// unknown-annotation error to the pointed BURY message, the #989
+			// removals (and @async, refused on automations since #2712) to a
+			// retirement naming that history (memql#5360), and epic memql#5375
+			// retired @deprecated / @latestMode / @enabled / @rateLimit /
+			// @scopes / @schedule and their siblings. The rejection this test
+			// locks in is preserved either way -- sharper, not weaker.
+			//
+			// The branch asks the registry's TABLES rather than a literal list,
+			// so the next retirement needs no edit here: whatever the registry
+			// says is retired must refuse with CodeRetired and carry its hint.
+			if hint, isRetired := annotations.RetiredHint(tc.receiver, tc.annotation); isRetired {
+				if code != annotations.CodeRetired {
+					t.Fatalf("expected @%s on %s to be refused as retired, got %s: %v", tc.annotation, tc.receiver.Phrase(), code, err)
+				}
+				if !strings.Contains(err.Error(), hint) {
+					t.Fatalf("expected @%s to refuse with its registry hint (%q), got: %v", tc.annotation, hint, err)
 				}
 				return
 			}

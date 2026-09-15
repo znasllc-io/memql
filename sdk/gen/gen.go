@@ -61,7 +61,8 @@ var (
 	// Anchored at column 0 to avoid matching `logic X { ... }` nested
 	// inside automation step bodies -- those are call-site references,
 	// not top-level declarations.
-	// The declaration keyword is the kind label itself (`mutation`, D13).
+	// The declaration keyword is the kind label itself (`mutation`, D13;
+	// epic memql#5375 retired the old `mutate` spelling).
 	constructHeader = regexp.MustCompile(
 		`(?m)^(query|mutation|logic|builtin)[ \t]+(?:([A-Za-z_][A-Za-z0-9_]*)[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`,
 	)

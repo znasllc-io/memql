@@ -80,10 +80,10 @@ type ResourceEdge struct {
 // Resolution is the surface chosen for a single call, with the world group it
 // belongs to (calls sharing a group resolve to the same surface, decision A).
 type Resolution struct {
-	CallIndex int
+	CallIndex  int
 	Capability string
-	Surface   Surface
-	GroupID   int
+	Surface    Surface
+	GroupID    int
 }
 
 // Plan is the full resolution for an action's calls plus any forced

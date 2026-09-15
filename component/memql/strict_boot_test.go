@@ -79,7 +79,7 @@ func TestStrictBoot_FixtureWithBadConstruct(t *testing.T) {
 	// it trips ONLY the strict-boot gate, not the dependency-tree or CQS
 	// validators that run earlier.
 	fixture := fstest.MapFS{
-		"specs.memql": {Data: []byte("@enabled\n@description(\"bad\")\nspec activeRowTrait fixtureBadSpec = row => row.status ==== \"x\" &&&& true\n")},
+		"specs.memql": {Data: []byte("@description(\"bad\")\nspec activeRowTrait fixtureBadSpec = row => row.status ==== \"x\" &&&& true\n")},
 	}
 	// The fixture declares its language line, so the bad spec is its ONE problem.
 	memqldsl.RegisterTree(domain, withLanguageLine(fixture))

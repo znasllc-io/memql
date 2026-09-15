@@ -41,7 +41,7 @@ func TestResolveEnclosingConstruct(t *testing.T) {
 		},
 		{
 			name: "concept body", wantKeyword: "concept",
-			src: "@namespace(\"probe\")\nconcept widget {\n  ",
+			src: "concept widget {\n  ",
 		},
 		{
 			name: "shape body", wantKeyword: "shape",

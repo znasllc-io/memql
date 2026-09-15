@@ -29,18 +29,16 @@ import (
 func sameDomainAmbiguousTree() fstest.MapFS {
 	return fstest.MapFS{
 		"alpha/concepts.memql": file(`@version("1.0.0")
-@namespace("alpha")
 @description("Alpha's widget.")
 concept widget {
   name  string  @required @description("Name.")
 }`),
 		"beta/concepts.memql": file(`@version("1.0.0")
-@namespace("beta")
 @description("Beta's widget -- same short name, different domain.")
 concept widget {
   label  string  @required @description("Label.")
 }`),
-		"alpha/queries.memql": file(`@enabled
+		"alpha/queries.memql": file(`
 @description("Binds alpha's own widget with no import -- ambient under #2617.")
 query widget alphaWidgets {
   args {
@@ -68,7 +66,7 @@ func TestLane2_SameDomainBindingNeedsNoImport(t *testing.T) {
 func TestLane2_ForeignAmbiguityStillReported(t *testing.T) {
 	root := sameDomainAmbiguousTree()
 	// A third domain binds `widget` without declaring one of its own.
-	root["gamma/queries.memql"] = file(`@enabled
+	root["gamma/queries.memql"] = file(`
 @description("Binds an ambiguous foreign name with no import -- genuinely unresolvable.")
 query widget gammaWidgets {
   args {
@@ -104,7 +102,6 @@ query widget gammaWidgets {
 func TestLane2_DuplicateInOwnDomainStillReported(t *testing.T) {
 	root := sameDomainAmbiguousTree()
 	root["alpha/more.memql"] = file(`@version("1.0.0")
-@namespace("alpha")
 @description("A SECOND widget in alpha -- ambiguous within the domain itself.")
 concept widget {
   other  string  @required @description("Other.")

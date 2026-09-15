@@ -124,9 +124,13 @@ concept widget {
 }
 
 func TestPositionalCacheTTL(t *testing.T) {
+	// One spelling (epic memql#5375). The keyword form @cache(ttl="300") is
+	// retired: a single-argument annotation has no ambiguity for a keyword to
+	// resolve, so `ttl=` only gave the same value a second name -- and a
+	// reader had to know both to grep for either.
 	for name, src := range map[string]string{
 		"positional": "@cache(300)",
-		"keyword":    "@cache(ttl=\"300\")",
+		"zero":       "@cache(0)",
 	} {
 		normalised, err := NormaliseQuerySource(src + "\nquery widget listWidgets {\n  filter row => row.kind == args.kind\n}")
 		if err != nil {
@@ -140,8 +144,12 @@ func TestPositionalCacheTTL(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s: not a FunctionDef: %T", name, file.Definitions[0])
 		}
-		if fd.CacheTTL != "300" {
-			t.Errorf("%s: CacheTTL = %q, want 300", name, fd.CacheTTL)
+		want := "300"
+		if name == "zero" {
+			want = "0"
+		}
+		if fd.CacheTTL != want {
+			t.Errorf("%s: CacheTTL = %q, want %s", name, fd.CacheTTL, want)
 		}
 	}
 	if !strings.Contains("guard", "guard") {

@@ -146,7 +146,6 @@ var placementIndex = func() map[Receiver]map[string]Placement {
 func lifecycle(r Receiver, description string) []Placement {
 	return []Placement{
 		{Receiver: r, Name: "description", Forms: FormString, Example: `@description("` + description + `")`},
-		{Receiver: r, Name: "enabled", Forms: FormFlag, Example: "@enabled"},
 		{Receiver: r, Name: "disabled", Forms: FormFlag, Example: "@disabled", Doc: docDisabled},
 	}
 }
@@ -173,10 +172,6 @@ var (
 		{Name: "query", Type: "string", Doc: "MemQL query or mutation call (with type=\"query\")."},
 		{Name: "url", Type: "string", Doc: "Webhook URL (with type=\"webhook\")."},
 		{Name: "method", Type: "string", Doc: "HTTP method for a webhook handler, e.g. \"POST\"."},
-	}
-	rateLimitKeys = []ArgSpec{
-		{Name: "maxCalls", Type: "int", Doc: "Maximum calls allowed per period."},
-		{Name: "periodSeconds", Type: "int", Doc: "Rate-limit window in seconds."},
 	}
 	cacheKeys = []ArgSpec{
 		{Name: "ttl", Type: "string", Doc: "Cache TTL in whole seconds. Positional preferred (#2618): @cache(300); keyword ttl=\"300\" keeps parsing."},
@@ -240,9 +235,7 @@ var placementTable = concat(
 	[]Placement{
 		{Receiver: Query, Name: "actor", Forms: FormFlag, Example: "@actor", Doc: docActorOnFunction},
 		{Receiver: Query, Name: "cache", Forms: FormNumber | FormKeywords, Keys: cacheKeys, Example: "@cache(300)"},
-		{Receiver: Query, Name: "latestMode", Forms: FormFlag, Example: "@latestMode"},
 		{Receiver: Query, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
-		{Receiver: Query, Name: "nocache", Forms: FormFlag, Example: "@nocache"},
 		{Receiver: Query, Name: "public", Forms: FormFlag, Example: "@public"},
 		{Receiver: Query, Name: "requiresCapability", Forms: FormString | FormStrings, Example: `@requiresCapability("read", "principal")`},
 		{Receiver: Query, Name: "requiresRank", Forms: FormString, Example: `@requiresRank("developer")`},
@@ -305,9 +298,7 @@ var placementTable = concat(
 		{Receiver: Tool, Name: "executionTime", Forms: FormString, Example: `@executionTime("fast")`},
 		{Receiver: Tool, Name: "handler", Forms: FormKeywords, Keys: handlerKeys, Example: `@handler(type="function", name="createTodo")`},
 		{Receiver: Tool, Name: "mcp", Forms: FormFlag, Example: "@mcp"},
-		{Receiver: Tool, Name: "rateLimit", Forms: FormKeywords, Keys: rateLimitKeys, Example: `@rateLimit(maxCalls=10, periodSeconds=60)`},
 		{Receiver: Tool, Name: "requiresConfirmation", Forms: FormFlag, Example: "@requiresConfirmation"},
-		{Receiver: Tool, Name: "scopes", Forms: FormString | FormStrings, Example: `@scopes("operator")`},
 	},
 
 	// ---- Builtin --------------------------------------------------------
@@ -336,7 +327,7 @@ var placementTable = concat(
 		{Receiver: Provider, Name: "extends", Forms: FormString, Example: `@extends("openai")`},
 		{Receiver: Provider, Name: "modality", Forms: FormString, Example: `@modality("embedding")`},
 		{Receiver: Provider, Name: "model", Forms: FormString, Example: `@model("gpt-5.4-mini")`},
-		{Receiver: Provider, Name: "type", Forms: FormString, Example: `@type("OpenAI")`, Doc: docProviderType},
+		{Receiver: Provider, Name: "vendor", Forms: FormString, Example: `@vendor("OpenAI")`, Doc: docProviderVendor},
 	},
 
 	// ---- Shape ----------------------------------------------------------
@@ -368,7 +359,6 @@ var placementTable = concat(
 	// ---- Seed -----------------------------------------------------------
 	lifecycle(Seed, "Knowledge baseline for every professional role."),
 	[]Placement{
-		{Receiver: Seed, Name: "namespace", Forms: FormString, Example: `@namespace("agents")`, Doc: "Accepted, and read by nothing yet: the seeded row's concept is resolved from the seed's signature (`seed <Concept> <name>`, through the file's use imports), never from this annotation (memql#5426)."},
 		{Receiver: Seed, Name: "scope", Forms: FormString, Example: `@scope("perUser")`, Doc: "Seed scope: \"global\" seeds once for the cluster, \"perUser\" once for every user."},
 		{Receiver: Seed, Name: "templateFile", Forms: FormString, Example: `@templateFile("templates/assistant.tmpl")`, Doc: "A template file whose rendered text is the seeded row's content."},
 		{Receiver: Seed, Name: "version", Forms: FormString, Example: `@version("1.0.0")`, Doc: "Version tag for the seed."},
@@ -380,7 +370,6 @@ var placementTable = concat(
 		{Receiver: Concept, Name: "description", Forms: FormString, Example: `@description("A support ticket raised by a customer.")`},
 		{Receiver: Concept, Name: "displayCard", Forms: FormKeywords, Keys: displayCardKeys, Example: `@displayCard(primary="title", secondary="status")`},
 		{Receiver: Concept, Name: "mirroredTo", Forms: FormString | FormStrings, Example: `@mirroredTo("shopify")`},
-		{Receiver: Concept, Name: "namespace", Forms: FormString, Example: `@namespace("support")`},
 		{Receiver: Concept, Name: "origin", Forms: FormString, Example: `@origin("memql")`},
 		{Receiver: Concept, Name: "rowAuthz", Forms: FormKeywords, Keys: rowAuthzKeys, Example: `@rowAuthz(owner="ownerUserId", clusterOwner)`},
 		{Receiver: Concept, Name: "type", Forms: FormString, Example: `@type("collection")`, Doc: "The concept's row kind: \"object\" (the default), \"collection\" or \"reference\"."},
@@ -394,9 +383,7 @@ var placementTable = concat(
 
 	// ---- ConceptField ---------------------------------------------------
 	[]Placement{
-		{Receiver: ConceptField, Name: "default", Forms: FormString | FormNumber | FormBool, Example: `@default("open")`, Doc: docDefaultConceptField},
 		{Receiver: ConceptField, Name: "description", Forms: FormString, Example: `@description("The ticket's one-line title.")`, Doc: "The field's description, emitted into the concept schema."},
-		{Receiver: ConceptField, Name: "immutable", Forms: FormFlag, Example: "@immutable"},
 		{Receiver: ConceptField, Name: "internal", Forms: FormFlag, Example: "@internal"},
 		{Receiver: ConceptField, Name: "maxLength", Forms: FormNumber, Example: "@maxLength(120)"},
 		{Receiver: ConceptField, Name: "maximum", Forms: FormNumber, Example: "@maximum(100)"},
@@ -408,7 +395,6 @@ var placementTable = concat(
 		{Receiver: ConceptField, Name: "required", Forms: FormFlag, Example: "@required"},
 		{Receiver: ConceptField, Name: "secret", Forms: FormFlag, Example: "@secret", Doc: docSecretField},
 		{Receiver: ConceptField, Name: "serverSet", Forms: FormFlag, Example: "@serverSet"},
-		{Receiver: ConceptField, Name: "unique", Forms: FormFlag, Example: "@unique"},
 		{Receiver: ConceptField, Name: "variant", Forms: FormKeywords, Keys: variantKeys, Example: `@variant(discriminator="kind")`},
 	},
 
@@ -442,6 +428,12 @@ var placementTable = concat(
 	// ---- BuiltinField ---------------------------------------------------
 	[]Placement{
 		{Receiver: BuiltinField, Name: "description", Forms: FormString, Example: `@description("The campaign to send.")`, Doc: "The field's description, read into the generated SDKs' docs."},
+		// epic memql#5375 (D16): a builtin field's body IS the input schema,
+		// and every annotation but @required used to be dropped without a
+		// word -- so a declared enum reached no schema and constrained
+		// nothing. @default is deliberately NOT here: an args field does not
+		// carry one either (it is retired there, never applied on insert).
+		{Receiver: BuiltinField, Name: "enum", Forms: FormString | FormStrings, Example: `@enum("patch", "minor")`},
 		{Receiver: BuiltinField, Name: "required", Forms: FormFlag, Example: "@required"},
 	},
 )
@@ -460,7 +452,6 @@ func concat(groups ...[]Placement) []Placement {
 // TestEveryPlacementHasADoc).
 var Docs = map[string]string{
 	// Lifecycle / shared.
-	"enabled":            "Accepted explicit no-op: definitions are enabled by default. Use @disabled to deactivate.",
 	"disabled":           "Disable this definition.",
 	"description":        "Human-readable description of this definition. PREFER the /// doc-comment form (#2601): a /// block immediately above the declaration IS the description and wins over this annotation; @description remains the valid compatibility fallback -- the tree gate rejects the redundant long form (including a bare @description shadowed by a /// block). Aim for ~500 characters (editorial target).",
 	"eventField":         "On an event-triggered logic: declare the allowed top-level event payload fields (e.g. @eventField(\"partitionId\", \"siParticipantId\")). Opt-in field-level validation -- every event.payload.<field> reference in the body is checked against this set at load time, rejecting typos / fields the (possibly synthetic, handler-assembled) triggering event cannot carry (memql#1743). Bare names or payload.-prefixed paths both normalize to the head segment.",
@@ -485,7 +476,6 @@ var Docs = map[string]string{
 	// Pagination opt-out (epic 5, memql#1965).
 	"unbounded": "On a list-returning query: opt out of the pagination authoring rule and the implicit 50-row runtime cap. Format: @unbounded(\"reason\"). The reason string is REQUIRED -- it documents why this query is a legitimate full-set read (small bounded catalog, sweep job, etc.) and is enumerated by the pagination audit report. A query that paginates/sorts is already bounded and must NOT carry @unbounded; the engine clamps the realized window to MEMQL_MEMORY_ENGINE_MAX_WINDOW regardless. See docs/public/language/authoring-rules.md.",
 	// Temporal-access visibility (core-builtins ADR §2.3, memql#2305).
-	"latestMode": "On a query: marks the query as time-dependent because it reads `asOf latest` (the live tip of the append-only stream), so its result is clock-dependent / not reproducible. The engine AUTO-DERIVES this from an `asOf latest` clause in the body, so the annotation is an explicit, reader-facing restatement of that contract -- not a switch. A query with `asOf <explicit timestamp>` is deterministic and is NOT time-dependent.",
 	// MCP promotion (epic memql#1529 Phase 4 #1534).
 	"mcp": "Expose this construct on the MCP connector surface. On a query/mutation/automation it promotes the construct into its own first-class MCP tool (otherwise it stays reachable via the generic run_query / run_mutation / run_automation dispatchers). On a tool it opts the tool into the curated connector allowlist: once ANY tool carries @mcp, tools/list reflects only @mcp tools (otherwise -- zero tagged -- the full tool surface is reflected, so the annotation is inert until the curated set is tagged).",
 	// Tool.
@@ -493,9 +483,7 @@ var Docs = map[string]string{
 	"executionTime":        "Expected execution time hint: \"fast\", \"medium\", or \"slow\".",
 	"destructive":          "Mark a tool as destructive (mutates/deletes); the tool loop gates it behind a confirmation.",
 	"requiresConfirmation": "Require explicit user confirmation before the tool executes.",
-	"rateLimit":            "Tool rate limiting. Format: @rateLimit(maxCalls=100, periodSeconds=3600).",
-	"allowedRoles":         "Restrict the tool to a set of agent roles.",
-	"scopes":               "Authorization scopes the tool requires.",
+	"allowedRoles":         "Restrict the tool to a set of agent roles. Enforced on every path: tool_types.go, component/grpc/server.go and tool_execution.go. It gates the AGENT role (assistant / specialist), which is a different axis from @requiresRank (actor rank) and @requiresCapability (verb over a resource) -- neither can express it.",
 	// Builtin.
 	"executor": "Go executor name for builtin functions (integration.X.Y).",
 	"args":     "Parse-time argument contract for builtin functions.",
@@ -528,13 +516,12 @@ var Docs = map[string]string{
 	"exclude":       "On a rule: remove one concrete entry from the chain's resolution, e.g. @exclude(\"fleet:qwen3.5:7b\"). Repeatable.",
 	"locked":        "On a rule: evaluate before every unlocked rule regardless of precedence. Accepted only in the embedded tree -- the loader refuses it elsewhere.",
 	// Concept.
+	"vendor":      "The AI vendor whose client serves this provider. Renamed from @type in epic memql#5375 -- one spelling per meaning, and a concept's @type (the row kind) is a different annotation.",
 	"version":     "Version tag for a concept or a seed: a semver string, @version(\"1.0.0\"). Metadata only -- canonical ids are not versioned by it (#2613).",
-	"namespace":   "Concept namespace. DEFAULTS to the containing dsl/<domain>/ directory (#2614) -- write it only for a colon-scoped sub-namespace (\"cognition:client:tool\") or a pinned divergence (namespace.pin). An explicit value must equal the directory, extend it as <dir>:..., or match the domain pin; any other mismatch is a load error (the moved-file guard: file location is id-bearing, so moving a .memql file between domains changes canonical ids).",
 	"scope":       "On a seed: \"global\" seeds once for the cluster, \"perUser\" once for every user. (On a concept @scope is retired -- every concept lives in the default partition, #56.)",
 	"cache":       "Override the result-cache TTL for the query. Preferred form (#2618): @cache(300) -- the single ttl arg makes position unambiguous. The keyword form @cache(ttl=\"300\") keeps parsing. Pure reads cache BY DEFAULT (a 60s backstop) without this annotation; @cache sets a different TTL, longer or shorter. @cache(ttl=\"0\") is the explicit \"never cache\" opt-out (or use @nocache). The engine keys the cache on the plan signature (query/sort/limit/depth/shape + the keyset cursor) and evicts on any write to the read concept via the cache.invalidate.* broadcast channel -- cross-node eviction needs no per-concept routing rule.",
-	"nocache":     "Opt this query OUT of caching entirely (force \"never cache\"). Clearer alias for @cache(ttl=\"0\"); use it for reads that must always be live (auth, monotonic counters, presence). Pure reads cache by default (5.6), so @nocache is the escape for the rare read where even brief staleness is wrong.",
-	"displayCard": "Rendering hints for concept-agnostic clients (memql#160): the field shown as a row's title (primary=, required) and the fields for the secondary, tertiary and status slots. Each must be a displayable field the concept declares, checked once the property set is known.",
-	"composable":  "The Materializer's mark (epic memql#4977, D2): this concept's rows are worth composing a file FROM. Bare, it takes the defaults; as= names the row kind, fields= lists the fields to compose from and list= names the query that lists the rows.",
+	"displayCard": "Rendering hints for concept-agnostic clients (memql#160): the field shown as a row's title (primary=, required) and the fields for the secondary, tertiary and status slots. Each must be a displayable field the concept declares, checked once the property set is known. Read by clients/os (src/apps/concepts/displayCard.ts, consumed by RowsPanel.tsx); test/dslconformance's displaycard_inventory_test.go requires every concept to declare or decline one.",
+	"composable":  "The Materializer's mark (epic memql#4977, D2): this concept's rows are worth composing a file FROM. Bare, it takes the defaults; as= names the row kind, fields= lists the fields to compose from and list= names the query that lists the rows. Read by clients/os (src/apps/materializer/useCompose.ts) through integration.compose.composableConcepts.",
 	// Two independent axes: `type` is what the ENGINE DOES with the edge (a
 	// closed set), `as` is what the edge MEANS (open, form-validated only).
 	// The target is a BARE concept name resolved through a file-top `use`
@@ -555,8 +542,6 @@ var Docs = map[string]string{
 	"maxLength":    "The most characters a string value may carry.",
 	"minimum":      "The INCLUSIVE lower bound on a numeric value.",
 	"maximum":      "The INCLUSIVE upper bound on a numeric value.",
-	"unique":       "Declared metadata (memql#2960): emitted as x-unique in the concept schema; nothing enforces uniqueness.",
-	"immutable":    "Declared metadata (memql#2960): emitted as x-immutable in the concept schema; nothing refuses a later write to the field.",
 	"secret":       "The field holds a secret: emitted as x-secret, and every validation surface that quotes a rejected value redacts it (memql#3036). Not a secrecy guarantee -- see Concept.SecretFields for the limits.",
 	"pii":          "The field is personally identifying: emitted as x-pii, and the hard-delete scrub (@scrubPii, memql#1711) zeroes every such field generically.",
 	"serverSet":    "The field is stamped server-side (createdAt, createdBy, status, ...): never accepted from a mutation's caller args, but projected like any other field. Emitted as x-serverSet (memql#2035).",

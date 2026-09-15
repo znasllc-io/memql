@@ -114,7 +114,7 @@ func TestAuthoredScheduler_EventTrigger_FiresUnderAuthorEnvelope(t *testing.T) {
 	defer s.Stop()
 
 	const owner = "v1:identity:user:alice"
-	src := `@enabled
+	src := `
 @trigger(event="node.created", concept="v1:identity:user")
 @description("Authored: react to user creation")
 automation aliceOnUserCreate {
@@ -179,7 +179,7 @@ func TestAuthoredScheduler_EventTrigger_HonoursItsFilter(t *testing.T) {
 			defer s.Stop()
 
 			const owner = "v1:identity:user:alice"
-			src := "@enabled\n" +
+			src := "" +
 				`@trigger(event="node.created", concept="v1:identity:user")` + "\n" +
 				c.filter + "\n" +
 				"automation aliceOnAcmeUser {\n" +
@@ -223,7 +223,7 @@ func TestAuthoredScheduler_OwnerScopedIsolation(t *testing.T) {
 	s := newAuthoredSchedulerForTest(t, bus, rec.run)
 	defer s.Stop()
 
-	src := `@enabled
+	src := `
 @trigger(event="node.created", concept="v1:identity:user")
 automation onUser {
   run := logic sandboxNoopLogic(event: event)
@@ -270,7 +270,7 @@ func TestAuthoredScheduler_ScheduledTrigger(t *testing.T) {
 	defer s.Stop()
 
 	// Every second.
-	src := `@enabled
+	src := `
 @trigger(schedule="* * * * * *")
 automation everySecondSweep {
   run := logic sandboxNoopLogic(event: event)

@@ -25,7 +25,6 @@
 
 use referencepack.builtins.{ referencePackComposeGreeting }
 
-@enabled
 @trigger(event="node.created", concept="v1:notes:note")
 @description("On creation of a core note, compose a greeting for the note owner via the pack's integration capability. Demonstrates a pack automation hooking a core service event.")
 automation referencePackGreetOnNoteCreate {

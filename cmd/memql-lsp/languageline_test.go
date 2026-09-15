@@ -27,7 +27,6 @@ import (
 // gadgetConcept is a domain's only file: a concept that loads clean, so the
 // domain can be refused for nothing but its language line.
 const gadgetConcept = `@version("1.0.0")
-@namespace("gadgets")
 @description("A gadget.")
 concept gadget {
   label string @required @description("Label")
@@ -36,7 +35,7 @@ concept gadget {
 
 // probeTrait is a construct that loads clean in any domain, for fixtures that
 // only resolve language lines.
-const probeTrait = "@enabled\ntrait languageLineProbe = row => row.active == true\n"
+const probeTrait = "trait languageLineProbe = row => row.active == true\n"
 
 // vscodeInitialize is the part of VS Code's initialize request this server
 // reads: it applies versioned document changes, and it creates files.

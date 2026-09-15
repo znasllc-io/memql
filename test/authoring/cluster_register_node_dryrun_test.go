@@ -67,7 +67,7 @@ import (
 // Since #2235 registerNode is no longer a pass-through logic: the createNode +
 // createSpawnEvent writes are direct mutation steps on the automation, so the
 // binding hygiene these tests guard is now verified on the real authored shape.
-const registerNodeAutomation = `@enabled
+const registerNodeAutomation = `
 @trigger(event="system.startup")
 @description("Register this node in the database on startup")
 automation registerNode {

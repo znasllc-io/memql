@@ -39,7 +39,18 @@ use identity.concepts.{ user }
 //
 //   @description("text")        Human-readable description.
 //   @version("MAJOR.MINOR.PATCH") Strict semver. Major flows into ID prefix.
-//   @namespace("foo[:bar:baz]")  Colon-separated lowercase identifiers.
+//   @namespace(...)             RETIRED (epic memql#5375). A concept's
+//                               namespace is its domain DIRECTORY, or that
+//                               directory's one-line namespace.pin -- the
+//                               annotation could only restate one of those
+//                               or silently disagree with it, and a
+//                               disagreement is the moved-file guard firing
+//                               rather than a feature. Pin a deliberate
+//                               id-preserving divergence with a
+//                               namespace.pin file (#2614); dsl/deployment
+//                               pins "cluster" and dsl/shopify/generated
+//                               pins "shopify". Refuses at load naming
+//                               `memqlmigrate --rewrite=attributes`.
 //   @type("object"|"collection"|"reference")  Default: object.
 //   @rowAuthz(<tier>)           Who may see this concept's rows -- see below.
 //
@@ -241,7 +252,6 @@ use identity.concepts.{ user }
 // genuine non-defaults. Everything else is optional. @description is
 // conventional but not required.
 
-@namespace("reference")
 @description("Smallest legal concept declaration -- one required string field.")
 concept minimal {
   name string! @description("Display name.")
@@ -263,14 +273,12 @@ concept minimal {
 //   - Absent @version defaults to 1.0.0 (#2613): the shipping baseline
 //     needs no annotation. Annotate only genuine non-defaults.
 
-@namespace("reference")
 @description("No @version annotation: the 1.0.0 default applies. ID prefix is v1:.")
 concept versionedV1 {
   field string!
 }
 
 @version("2.5.7")        // post-breaking-change, minor + patch reflect evolution
-@namespace("reference")
 @description("Example bumping past major version 2. ID prefix becomes v2:.")
 concept versionedV2 {
   field string!
@@ -288,13 +296,11 @@ concept versionedV2 {
 //     mirrors it.
 //   - Every segment must start with a lowercase letter.
 
-@namespace("worker")
 @description("Single-segment namespace.")
 concept singleSegmentNs {
   field string!
 }
 
-@namespace("worker:call:trace")
 @description("Multi-segment namespace. Assembles to v1:worker:call:trace:nested.")
 concept nestedNs {
   field string!
@@ -359,14 +365,12 @@ concept nestedNs {
 // existing rows; an unnecessary reference concept retired later means
 // migrating every product-side row that pointed at it.
 
-@namespace("reference")
 @type("object")
 @description("Default record-shaped concept.")
 concept objectExample {
   field string!
 }
 
-@namespace("reference")
 @type("collection")
 @description("Collection concept -- requires a @relationship(type=\"contains\", ...).")
 concept collectionExample {
@@ -377,7 +381,6 @@ concept collectionExample {
   memberIds []string
 }
 
-@namespace("reference")
 @type("reference")
 @description("Reference concept -- requires a @relationship(type=\"alias\"|\"equals\", ...).")
 concept referenceExample {
@@ -410,16 +413,15 @@ concept referenceExample {
 //   []datetime enforces RFC3339 per entry, and [][]string keeps its inner
 //   type (memql#2951).
 
-@namespace("reference")
 @description("Every supported field type, one of each.")
 concept fieldTypes {
   textField        string                      @description("UTF-8 text.")
-  flagField        bool       @default("false") @description("Boolean.")
-  countField       int        @default("0")     @description("Integer.")
-  ratioField       float      @default("0.0")   @description("Floating-point.")
+  flagField        bool @description("Boolean.")
+  countField       int     @description("Integer.")
+  ratioField       float   @description("Floating-point.")
   whenField        datetime                     @description("RFC3339 timestamp.")
   arrayField       []string                     @description("Array of strings.")
-  statusField      enum("active", "archived", "deleted") @default("active")
+  statusField      enum("active", "archived", "deleted")
   anyField         any                          @description("Untyped JSON.")
 }
 
@@ -613,15 +615,15 @@ concept fieldTypes {
 //                       in the body, and emits no field metadata.)
 //
 // DECLARED METADATA -- parsed and emitted, acted on by NOTHING (memql#2960):
-//   @unique             Emits `x-unique`. There is no uniqueness check
+//             Emits `x-unique`. There is no uniqueness check
 //                       anywhere in the engine or the database; two rows may
 //                       carry the same value and nothing objects.
-//   @immutable          Emits `x-immutable`. Nothing prevents an update. The
+//          Emits `x-immutable`. Nothing prevents an update. The
 //                       immutability that does exist in the tree is bespoke
 //                       per construct (validateRbacBaseRoleImmutable,
 //                       validateHealingBaseImmutable) and is not driven by
 //                       this annotation.
-//   @default("value")   Emits `default` into the schema and is NEVER APPLIED
+//   Emits `default` into the schema and is NEVER APPLIED
 //                       on insert -- Concept.Create validates and marshals the
 //                       payload verbatim. Fill a value with the `??`
 //                       null-coalescing operator in the mutation body instead.
@@ -631,14 +633,14 @@ concept fieldTypes {
 //                       `bool` takes exactly `true`/`false`, `int` a base-10
 //                       integer, `float` a number, `datetime` an RFC3339
 //                       timestamp or "" for unset, and `string`/`enum` take the
-//                       literal verbatim -- never coerced, so `@default("0")` on
+//                       literal verbatim -- never coerced, so `` on
 //                       a string field is the STRING "0". `object`, `array`,
 //                       `map` and `any` keep an untyped lowering, because the
 //                       declaration does not narrow the literal to one reading.
 //
 //                       Until memql#3248 the lowering guessed from the
 //                       literal's shape with no datetime branch at all, so
-//                       `whenField datetime @default("true")` emitted the bool
+//                       `whenField datetime` emitted the bool
 //                       true as the default of a field declared
 //                       format: date-time, in silence. Refusal matters even
 //                       though nothing is applied on insert: the emitted
@@ -668,7 +670,7 @@ concept fieldTypes {
 //                       topology, which is strictly worse than the silent
 //                       no-op it would replace.
 //                       (2) NESTED OBJECT LEAVES. A @default inside an object
-//                       block (`preferences { theme string @default("auto") }`)
+//                       block (`preferences { theme string }`)
 //                       is out of scope, because no write form can stamp a
 //                       single leaf -- a mutation writes the parent object
 //                       wholesale. Their @default is schema documentation that
@@ -721,23 +723,22 @@ concept fieldTypes {
 //     and TestDefaultIsCoalescedOrStamped makes an unstamped one fail at
 //     authoring time instead of never. See the @default entry above for the
 //     gate's two carve-outs.
-//   - @unique / @immutable  DECIDED, and the decision is no. memql#3037 was
+//   - /  DECIDED, and the decision is no. memql#3037 was
 //     closed not-planned: uniqueness over an append-only hypertable means
 //     "unique among current rows", which is an epic with a migration story,
-//     and @immutable's cost is defining which read-merge-write rewrites are
+//     and's cost is defining which read-merge-write rewrites are
 //     legitimate. Neither has a forcing case. Treat both as permanent declared
 //     metadata; reopen only with a concrete failure that one would have caught.
 //
 // Unknown @-annotations on a field are rejected at load time with
 //   `unknown property annotation @<name> on field "<field>"`.
 
-@namespace("reference")
 @description("Every field-level annotation in use.")
 concept fieldAnnotations {
   // String constraints
   slug         string! @pattern("^[a-z][a-z0-9-]{0,49}$") @description("URL slug.")
   shortText    string @minLength(1) @maxLength(280) @description("Tweet-shaped string.")
-  uniqueKey    string! @unique @description("Intended to be unique. NOT enforced -- @unique is declared metadata (memql#2960).")
+  uniqueKey    string! @description("Intended to be unique. NOT enforced -- is declared metadata (memql#2960).")
 
   // Numeric constraints
   ratingScore  int    @minimum(1) @maximum(5) @description("1-5 rating scale.")
@@ -746,12 +747,12 @@ concept fieldAnnotations {
   // Defaults. NONE of these is ever filled in for you -- @default is declared
   // metadata (memql#2960). A row inserted without `status` has no `status`.
   // Fill it in the mutation body with `??` instead.
-  status       enum("draft", "published") @default("draft") @description("Declared default only. NOT applied on insert -- use `?? \"draft\"` in the mutation (memql#2960).")
-  createdYear  int    @default("2026") @description("Declared default only. NOT applied on insert -- nothing backfills this (memql#2960).")
-  isPinned     bool   @default("false") @description("Declared default only. NOT applied on insert (memql#2960).")
+  status       enum("draft", "published") @description("Declared default only. NOT applied on insert -- use `?? \"draft\"` in the mutation (memql#2960).")
+  createdYear  int @description("Declared default only. NOT applied on insert -- nothing backfills this (memql#2960).")
+  isPinned     bool @description("Declared default only. NOT applied on insert (memql#2960).")
 
   // Immutability + secrecy
-  externalId   string! @immutable @description("Foreign-system id, intended never to change. NOT enforced -- @immutable is declared metadata (memql#2960).")
+  externalId   string! @description("Foreign-system id, intended never to change. NOT enforced -- is declared metadata (memql#2960).")
   apiKey       string @secret @description("Sensitive. The function-args validator prints <redacted> for a rejected value. No other surface redacts it -- not query results, not the automation args binder, not the tool-args validator, and never its length (memql#3036, memql#3117).")
 
   // Server-owned fields. @internal is server-only in BOTH directions;
@@ -805,7 +806,6 @@ concept fieldAnnotations {
 //   being enforced. If the field really is an arbitrary object, drop the
 //   annotation rather than leaving it branch-less.
 
-@namespace("reference")
 @description("Discriminated-union example: the `body` field's shape depends on `kind`.")
 concept variantExample {
   kind  enum("text", "image", "embed")!
@@ -813,7 +813,7 @@ concept variantExample {
   body  object!  @variant(discriminator="kind") {
     text {
       content   string!
-      wordCount int    @default("0")
+      wordCount int
     }
     image {
       url       string!
@@ -857,16 +857,15 @@ concept variantExample {
 //   silently become. Put the annotation on the line(s) BEFORE the property it
 //   applies to.
 
-@namespace("reference")
 @description("A flat concept with a nested settings sub-object.")
 concept nestedExample {
   name   string!
 
   // Inline nested object: the body declares its own fields.
   settings {
-    autoTranscribe  bool   @default("true")
-    maxAttendees    int    @default("5") @minimum(1) @maximum(50)
-    theme           enum("light", "dark", "auto") @default("auto")
+    autoTranscribe  bool
+    maxAttendees    int @minimum(1) @maximum(50)
+    theme           enum("light", "dark", "auto")
   }
 }
 
@@ -944,7 +943,6 @@ concept nestedExample {
 //   object block (`field="lineage.originatingPlanId"`). The engine walks the
 //   path on both the write and the filter side.
 
-@namespace("reference")
 @description("A concept with two relationship decorators.")
 concept relationshipExample {
   // Parent: this row hangs off a participant. `participant` resolves through
@@ -1007,7 +1005,6 @@ concept relationshipExample {
 // @scope annotation is a load-time error. Declare these concepts exactly
 // like any other; nothing in the body changes.
 
-@namespace("cluster")
 @description("Example of an infrastructure-metadata concept that every node loads.")
 concept globalInfraExample {
   hostname  string!
@@ -1057,7 +1054,6 @@ concept globalInfraExample {
 //
 // See docs/public/concepts/data-origins.md.
 
-@namespace("shopify")
 @description("A MIRROR: Shopify owns this data; MemQL holds a faithful read-only copy.")
 @origin("shopify")
 concept mirrorExample {
@@ -1065,7 +1061,6 @@ concept mirrorExample {
   availableForSale  bool!
 }
 
-@namespace("wholesale")
 @description("An ORIGIN: MemQL owns this data and pushes every change out to Shopify.")
 @origin("memql")
 @mirroredTo("shopify")
@@ -1076,7 +1071,6 @@ concept originExample {
 
 // A NATIVE concept needs no declaration at all -- native is the default,
 // and it is what all but a handful of concepts are.
-@namespace("planner")
 @description("NATIVE: MemQL owns this data and nobody else holds a copy.")
 concept nativeExample {
   goal  string!

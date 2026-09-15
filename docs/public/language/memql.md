@@ -1207,7 +1207,7 @@ Base providers (vendor-level auth + type) use the same form:
 
 ```memql
 @base
-@type("Anthropic")
+@vendor("Anthropic")
 provider anthropic {
   auth {
     federationRuleId   env("MEMQL_AI_ANTHROPIC_FEDERATION_RULE_ID")
@@ -1586,7 +1586,6 @@ query run latestRunForGoal {
 Time-travel is a **query-only** clause (alongside `filter` / `shape` / `sort` / `paginate`); it is rejected in logic / automation / spec bodies, which never time-travel directly. Two forms:
 
 ```memql
-@latestMode    // surfaced on the contract: this query is time-dependent
 query node liveNodes {
   asOf latest
   filter  row => row.type == "node"
@@ -1599,7 +1598,7 @@ query node nodesAt {        // asOf <ts> -> deterministic, no marker
 }
 ```
 
-- `asOf latest` reads current (clock-dependent) state. Mark the query `@latestMode` so consumers see on its contract that the result is time-dependent.
+- `asOf latest` reads current (clock-dependent) state. The engine DERIVES time-dependence from the `asOf latest` clause itself, so the query needs no marker -- `@latestMode` restated it (and could contradict it) and was retired in epic memql#5375.
 - `asOf <explicit timestamp>` reads immutable historical state — deterministic, so it needs no marker.
 - **A caller-chosen instant is spelled `args.<name> ?? latest`** (memql#2992). A declared query can offer one; the fallback is required, so the bare `asOf args.at` is rejected at parse with a message naming the fix (memql#3028). See the caller-instant example above. *This bullet used to say the timestamp had to be a literal and that `args.X` was rejected outright — true before #2992, and stale since; it quoted an error string the parser no longer emits.*
 

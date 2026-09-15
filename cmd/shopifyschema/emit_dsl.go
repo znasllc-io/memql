@@ -58,10 +58,13 @@ func EmitConceptFile(version string, p *TypePlan) string {
 
 	// ---- the concept -------------------------------------------------
 	b.WriteString(conceptDoc(p))
-	b.WriteString("@namespace(\"shopify\")\n")
 	b.WriteString("@origin(\"shopify\")\n")
 	b.WriteString("@rowAuthz(clusterOwner)\n")
 	fmt.Fprintf(&b, "@displayCard(primary=\"gid\", secondary=%q, status=\"deleted\")\n", displaySecondary(p))
+	// No @namespace line (memql#5375): the annotation is retired, and
+	// dsl/shopify/generated/namespace.pin already carries "shopify" -- which
+	// is what the assembler now reads. Emitting one would put 65 refusals
+	// back into the tree on the next regeneration.
 	fmt.Fprintf(&b, "concept %s {\n", p.Concept)
 	b.WriteString(mirrorColumns(p))
 	for _, f := range p.Fields {

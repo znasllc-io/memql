@@ -21,7 +21,6 @@ import (
 // is what a product bundle mounted at MEMQL_DSL_PATH would get at boot.
 
 const lowerInitConcepts = `@version("1.0.0")
-@namespace("lowerinit")
 @description("A ticket the lowering boot tests read.")
 concept ticket {
   status    string!   @description("Workflow state.")

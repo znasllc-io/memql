@@ -23,9 +23,9 @@ func TestUnaryOperatorsCompile(t *testing.T) {
 	for _, tc := range []struct {
 		name, internal, want string
 	}{
-		{"== nil in the internal query form", `concept==v1:test;payload.field==nil`, `concept=="v1:test";payload.field==nil`},
-		{"!= nil in the internal query form", `concept==v1:test;payload.field!=nil`, `concept=="v1:test";payload.field!=nil`},
-		{"several != nil in the internal query form", `concept==v1:test;payload.field1!=nil;payload.field2!=nil`, `concept=="v1:test";payload.field1!=nil;payload.field2!=nil`},
+		{"== nil in the internal query form", `concept==v1:test && payload.field==nil`, `concept=="v1:test"&&payload.field==nil`},
+		{"!= nil in the internal query form", `concept==v1:test && payload.field!=nil`, `concept=="v1:test"&&payload.field!=nil`},
+		{"several != nil in the internal query form", `concept==v1:test && payload.field1!=nil && payload.field2!=nil`, `concept=="v1:test"&&payload.field1!=nil&&payload.field2!=nil`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			expr, err := parser.ParseExpression(tc.internal)
@@ -57,7 +57,6 @@ query test testMissing {
 
 	t.Run("!= nil in an automation condition", func(t *testing.T) {
 		result, err := CompileSource(`
-@enabled
 @trigger(schedule="0 */15 * * * *")
 automation testAutomation {
   flagged := query openFlags()
@@ -96,7 +95,7 @@ automation testAutomation {
 // TestUnaryOperatorWithOtherConditions tests that unary operators serialise
 // correctly beside other comparison operators in one internal-form query.
 func TestUnaryOperatorWithOtherConditions(t *testing.T) {
-	expr, err := parser.ParseExpression(`concept==v1:test;payload.status=="active";payload.optionalField!=nil;payload.count>5`)
+	expr, err := parser.ParseExpression(`concept==v1:test && payload.status=="active" && payload.optionalField!=nil && payload.count>5`)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

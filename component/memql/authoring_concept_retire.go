@@ -488,7 +488,7 @@ func (e *MemQLEngine) applyPersistedConceptRetirements(ctx context.Context, stor
 			if row.Kind != "concept" || isRetiredConstructStatus(row.Status) {
 				continue
 			}
-			concept, cerr := compileAuthoredConcept(SandboxConstruct{Name: row.Name, Kind: row.Kind, Source: row.Source})
+			concept, cerr := compileAuthoredConcept(SandboxConstruct{Name: row.Name, Kind: row.Kind, Source: row.Source, Origin: row.Origin})
 			if cerr != nil || concept == nil || strings.TrimSpace(concept.Name) == "" {
 				continue
 			}

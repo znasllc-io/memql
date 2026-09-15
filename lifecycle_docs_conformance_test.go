@@ -10,9 +10,14 @@ import (
 )
 
 // TestLifecycleDocsMatchRuling is the enforcement gate for the lifecycle
-// ruling's documentation (#2609): absent = enabled, @enabled = accepted
-// no-op, @disabled = the only off-switch, with real gates on every kind
-// (#2604-#2608). The patterns target the drift SHAPE, not a list of known
+// ruling's documentation (#2609): absent = enabled, @disabled = the only
+// off-switch, with real gates on every kind (#2604-#2608).
+//
+// The ruling used to have a third clause -- "@enabled = accepted no-op" --
+// and epic memql#5375 retired the annotation, because a no-op that reads
+// like a switch is worse for a reader than no annotation at all. The
+// @enabled patterns below STAY: a doc claiming @enabled is required is
+// still a claim worth policing, and it is now wrong twice over. The patterns target the drift SHAPE, not a list of known
 // sites -- four review rounds proved that literal phrase lists get fitted
 // to the sites already found and miss the next paraphrase.
 //

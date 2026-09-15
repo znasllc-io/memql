@@ -558,16 +558,13 @@ func functionHelpPayload(fn *Function) map[string]any {
 		"kind":        fn.FunctionKind,
 		"enabled":     fn.Enabled,
 	}
-	// Add optional fields if present
-	if fn.Version != "" {
-		payload["version"] = fn.Version
-	}
-	if fn.Deprecated != "" {
-		payload["deprecated"] = fn.Deprecated
-	}
-	if fn.Timeout != "" {
-		payload["timeout"] = fn.Timeout
-	}
+	// Add optional fields if present.
+	//
+	// version / deprecated / timeout / idempotent / audit were rendered
+	// here until memql#5375. help() is the surface an agent reads to decide
+	// how to call a construct, and every one of those keys described a
+	// field no allow-list could populate -- so the render was advertising
+	// behaviour the engine did not have. cacheTTL stays: @cache(N) is live.
 	if fn.CacheTTL != "" {
 		payload["cacheTTL"] = fn.CacheTTL
 	}
@@ -598,12 +595,6 @@ func functionHelpPayload(fn *Function) map[string]any {
 	}
 	if excerpt := strings.TrimSpace(functionSchemaReferenceExcerpt()); excerpt != "" {
 		payload["schemaReferenceExcerpt"] = excerpt
-	}
-	if fn.Idempotent {
-		payload["idempotent"] = true
-	}
-	if fn.Audit {
-		payload["audit"] = true
 	}
 	return payload
 }

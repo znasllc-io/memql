@@ -39,7 +39,7 @@ func parseLogicForTest(t *testing.T, src, name string) (*languageParser.Function
 }
 
 func TestValidateLogicEventFields_AcceptsDeclared(t *testing.T) {
-	src := `@enabled
+	src := `
 @eventField("partitionId", "siParticipantId")
 logic logicOk {
   args { event object @required }
@@ -52,7 +52,7 @@ logic logicOk {
 }
 
 func TestValidateLogicEventFields_RejectsUnknown(t *testing.T) {
-	src := `@enabled
+	src := `
 @eventField("partitionId")
 logic logicBad {
   args { event object @required }
@@ -70,7 +70,7 @@ logic logicBad {
 
 func TestValidateLogicEventFields_OptOutWhenNoAnnotation(t *testing.T) {
 	// No @eventField -> not field-validated, even with novel payload refs.
-	src := `@enabled
+	src := `
 logic logicUnannotated {
   args { event object @required }
   return builtin noop(a: args.event.payload.anythingGoes)
@@ -84,7 +84,7 @@ logic logicUnannotated {
 func TestValidateLogicEventFields_NestedAndComments(t *testing.T) {
 	// `event.payload.node.type` validates the head `node`; a commented-out ref
 	// to an undeclared field must NOT trip the check.
-	src := `@enabled
+	src := `
 @eventField("node")
 logic logicNested {
   args { event object @required }
@@ -99,7 +99,7 @@ logic logicNested {
 
 func TestValidateLogicEventFields_PayloadPrefixedDeclaration(t *testing.T) {
 	// `@eventField("payload.partitionId")` normalizes to head `partitionId`.
-	src := `@enabled
+	src := `
 @eventField("payload.partitionId")
 logic logicPrefixed {
   args { event object @required }

@@ -11,10 +11,10 @@ func TestBindChildArgs(t *testing.T) {
 	input := map[string]any{"dir": "/work/proj", "module": "memql"}
 	// argTemplate: child key -> composite param name (string) or literal.
 	tmpl := map[string]any{
-		"path":  "dir",        // binds to input["dir"]
-		"name":  "module",     // binds to input["module"]
-		"mode":  "0644",       // not a key in input -> literal
-		"depth": float64(2),   // non-string -> literal
+		"path":  "dir",      // binds to input["dir"]
+		"name":  "module",   // binds to input["module"]
+		"mode":  "0644",     // not a key in input -> literal
+		"depth": float64(2), // non-string -> literal
 	}
 	got := bindChildArgs(tmpl, input)
 	want := map[string]any{

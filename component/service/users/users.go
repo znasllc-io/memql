@@ -88,7 +88,7 @@ func (s *userMemoryNodeService) GetUserByEmail(ctx context.Context, email string
 	}
 
 	// Query using MemQL to get the most recent version (time-series model)
-	query := fmt.Sprintf(`concept==v1:memql:backend:user;payload.email=="%s"`, strings.TrimSpace(email))
+	query := fmt.Sprintf(`concept==v1:memql:backend:user&&payload.email=="%s"`, strings.TrimSpace(email))
 
 	result, err := s.memoryEngine.Execute(ctx, query)
 	if err != nil {
@@ -110,7 +110,7 @@ func (s *userMemoryNodeService) GetUserById(ctx context.Context, userId string) 
 	}
 
 	// Query using MemQL to get the most recent version (time-series model)
-	query := fmt.Sprintf(`concept==v1:memql:backend:user;id=="%s"`, strings.TrimSpace(userId))
+	query := fmt.Sprintf(`concept==v1:memql:backend:user&&id=="%s"`, strings.TrimSpace(userId))
 
 	result, err := s.memoryEngine.Execute(ctx, query)
 	if err != nil {

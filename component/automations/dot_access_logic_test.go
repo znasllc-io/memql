@@ -15,8 +15,7 @@ import (
 
 // pluckLogic is a two-statement logic: a query, then a return over it.
 func pluckLogic(returnExpr string) string {
-	return `@enabled
-@description("pluck a scalar field off a query's rows (#2542 item 4)")
+	return `@description("pluck a scalar field off a query's rows (#2542 item 4)")
 logic logicPluckStepField {
   args {
     id string @required
@@ -91,8 +90,7 @@ func TestLogicRunner_DotAccessAfterChain(t *testing.T) {
 // args.rows.first().createdAt` resolves against the caller's args. Only the
 // query may reach the registry.
 func TestLogicRunner_ArgsRootedDotAccess(t *testing.T) {
-	src := `@enabled
-@description("pluck a scalar field off a caller-arg collection (#2542 item 4)")
+	src := `@description("pluck a scalar field off a caller-arg collection (#2542 item 4)")
 logic logicPluckArgField {
   args {
     id string @required

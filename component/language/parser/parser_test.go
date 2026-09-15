@@ -9,7 +9,10 @@ import (
 )
 
 func TestLexer_SimpleQuery(t *testing.T) {
-	input := `concept==v1:crm:lead;payload.active==true`
+	// `&&` between the terms, `;` trailing. Epic memql#5375 retired `;` as
+	// the AND CONNECTIVE, not as a token: the lexer still emits it and a
+	// trailing one is tolerated, which is what this lexer test measures.
+	input := `concept==v1:crm:lead&&payload.active==true;`
 
 	lexer := NewLexer(input)
 	tokens, err := lexer.Tokenize()
@@ -42,6 +45,10 @@ func TestLexer_SimpleQuery(t *testing.T) {
 	if !foundConceptName {
 		t.Error("Expected to find 'v1:crm:lead' token")
 	}
+	// `;` is still a TOKEN -- the lexer emits it and a TRAILING one is
+	// tolerated. What epic memql#5375 retired is its use as the AND
+	// connective, which parseLogicalAnd refuses, so the fixture writes `&&`
+	// between the two terms and keeps a trailing `;` for this assertion.
 	if !foundSemicolon {
 		t.Error("Expected to find ';' token")
 	}
@@ -51,7 +58,11 @@ func TestLexer_SimpleQuery(t *testing.T) {
 }
 
 func TestLexer_ConditionalFilter(t *testing.T) {
-	input := `concept==v1:user;?.payload.role==args.role`
+	// `?.` is refused at the PARSE level (epic memql#5375) and still LEXES,
+	// which is the layer this test is about -- the refusal in
+	// expression_entry.go recognises the token in order to name `??` as the
+	// replacement, so the token has to keep existing.
+	input := `concept==v1:user&&owner?.role==args.role`
 
 	lexer := NewLexer(input)
 	tokens, err := lexer.Tokenize()
@@ -168,7 +179,8 @@ func TestLexer_TypeReceivers(t *testing.T) {
 }
 
 func TestLexer_Attributes(t *testing.T) {
-	input := `@enabled
+	input := `
+@disabled
 @description("Test function")
 @trigger(event="test.event")`
 
@@ -179,7 +191,9 @@ func TestLexer_Attributes(t *testing.T) {
 	}
 
 	// Expected token pattern: @ identifier ( string/args )
-	// @enabled -> @ enabled
+	// @disabled -> @ disabled (was @enabled until epic memql#5375 retired it;
+	// this test is about the LEXER's @-identifier tokenisation, so any live
+	// annotation serves)
 	// @description("Test function") -> @ description ( string )
 	// @trigger(event="test.event") -> @ trigger ( identifier = string )
 
@@ -191,12 +205,12 @@ func TestLexer_Attributes(t *testing.T) {
 		t.Errorf("Expected '@', got %q", tokens[0].Literal)
 	}
 
-	// Second token should be identifier "enabled"
+	// Second token should be identifier "disabled"
 	if tokens[1].Type != TokenIdentifier {
 		t.Errorf("Token 1: expected TokenIdentifier, got %v (%q)", tokens[1].Type, tokens[1].Literal)
 	}
-	if tokens[1].Literal != "enabled" {
-		t.Errorf("Expected 'enabled', got %q", tokens[1].Literal)
+	if tokens[1].Literal != "disabled" {
+		t.Errorf("Expected 'disabled', got %q", tokens[1].Literal)
 	}
 }
 
@@ -286,7 +300,7 @@ func TestParser_SimpleQuery(t *testing.T) {
 }
 
 func TestParser_LogicalAnd(t *testing.T) {
-	input := `concept==v1:test;payload.active==true`
+	input := `concept==v1:test&&payload.active==true`
 
 	lexer := NewLexer(input)
 	tokens, err := lexer.Tokenize()
@@ -887,7 +901,6 @@ func TestParser_NestedTernary(t *testing.T) {
 
 func TestParser_GoStyleQuery(t *testing.T) {
 	input := `
-@enabled
 @description("Returns active users")
 func (Query) activeUsers(args any) (any, error) {
   return concept==v1:user && (row => row.active == true), nil
@@ -1040,10 +1053,9 @@ func TestParser_ErrorFunctionEmpty(t *testing.T) {
 
 func TestParser_SpecDefinition(t *testing.T) {
 	input := `
-@enabled
 @description("Node includes both email and phone number fields.")
 func (Spec) hasUserContact() bool {
-  return payload.email!=nil;payload.phoneNumber!=nil
+  return payload.email!=nil&&payload.phoneNumber!=nil
 }`
 
 	lexer := NewLexer(input)
@@ -1102,7 +1114,6 @@ func (Spec) hasUserContact() bool {
 
 func TestParser_SpecWithOrCondition(t *testing.T) {
 	input := `
-@enabled
 @description("Node has at least one contact method")
 func (Spec) hasContactMethod() bool {
   return payload.email!=nil,payload.phone!=nil
@@ -1147,7 +1158,6 @@ func (Spec) hasContactMethod() bool {
 
 func TestParser_SpecWithRelationship(t *testing.T) {
 	input := `
-@enabled
 @description("Node's parent has status active")
 func (Spec) hasActiveParent() bool {
   return parentOf(payload.status=="active")
@@ -1195,14 +1205,13 @@ func (Spec) hasActiveParent() bool {
 // 2. ConditionalFilterExpr.ArgPath is correctly extracted from the comparison value
 func TestParser_ConditionalFilterWithArgsFieldName(t *testing.T) {
 	input := `
-@enabled
 args {
   partitionId  string
   status   string
 }
 func (Query) spaceParticipants(args any) (any, error) {
-  return concept==v1:cognition:participant;
-  ?.payload.partitionId==args.partitionId;
+  return concept==v1:cognition:participant &&
+  ?.payload.partitionId==args.partitionId &&
   ?.payload.status==args.status, nil
 }
 `
@@ -1302,7 +1311,6 @@ func collectConditionalFilters(expr ExpressionNode, filters *[]*ConditionalFilte
 
 func TestParser_MutationBody_PreservesIdTemplate_ArgAccessor(t *testing.T) {
 	input := `
-@enabled
 func (Mutation) createThing(args any) error {
   return insert("v1:thing",
     id=args.partitionId,
@@ -1344,7 +1352,6 @@ func (Mutation) createThing(args any) error {
 
 func TestParser_MutationBody_PreservesIdTemplate_Concat(t *testing.T) {
 	input := `
-@enabled
 func (Mutation) createThing(args any) error {
   return insert("v1:thing",
     id="thing-" + hash(args.partitionId + ":" + args.userId),
@@ -1386,7 +1393,6 @@ func (Mutation) createThing(args any) error {
 
 func TestParser_MutationBody_PreservesCreatedAtTemplate_ArgAccessor(t *testing.T) {
 	input := `
-@enabled
 func (Mutation) createThing(args any) error {
   return insert("v1:thing",
     createdAt=args.createdAt,
@@ -1438,7 +1444,6 @@ func TestParser_MutationBody_KindInsertVsUpdate(t *testing.T) {
 		{
 			name: "insert keyword stamps Kind=insert",
 			input: `
-@enabled
 func (Mutation) createThing(args any) error {
   return insert("v1:thing", id=args.id, payload={ name: args.name })
 }`,
@@ -1447,7 +1452,6 @@ func (Mutation) createThing(args any) error {
 		{
 			name: "update keyword stamps Kind=update",
 			input: `
-@enabled
 func (Mutation) editThing(args any) error {
   return update("v1:thing", id=args.id, payload={ status: args.status })
 }`,

@@ -25,7 +25,9 @@ func (c *recordingConn) Prepare(string) (driver.Stmt, error) {
 
 func (c *recordingConn) Close() error { return nil }
 
-func (c *recordingConn) Begin() (driver.Tx, error) { return c.BeginTx(context.Background(), driver.TxOptions{}) }
+func (c *recordingConn) Begin() (driver.Tx, error) {
+	return c.BeginTx(context.Background(), driver.TxOptions{})
+}
 
 func (c *recordingConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error) {
 	c.events = append(c.events, "BEGIN")

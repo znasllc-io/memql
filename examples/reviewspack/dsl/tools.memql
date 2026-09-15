@@ -1,4 +1,3 @@
-@enabled
 @handler(type="function", name="reviewsExportReview")
 @executionTime("fast")
 @description("Export a storefront review as files, including image bytes.")

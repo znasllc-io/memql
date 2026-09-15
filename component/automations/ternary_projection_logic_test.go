@@ -33,8 +33,7 @@ func runProjectionLogic(t *testing.T, src, fn string, args map[string]any) (any,
 // --- Item 2: a ternary over a collection chain (terminal return) ---
 
 func TestLogicBody_TernaryOverChain_TerminalReturn(t *testing.T) {
-	src := `@enabled
-@description("ternary over a collection-chain aggregate (#2542 item 2)")
+	src := `@description("ternary over a collection-chain aggregate (#2542 item 2)")
 logic ternaryReturn {
   args {
     members []object @required
@@ -61,8 +60,7 @@ logic ternaryReturn {
 // The else branch is selected (and is itself a chain) when the predicate is
 // false.
 func TestLogicBody_TernaryOverChain_ElseBranch(t *testing.T) {
-	src := `@enabled
-@description("ternary else-branch chain")
+	src := `@description("ternary else-branch chain")
 logic ternaryElse {
   args {
     members []object @required
@@ -84,8 +82,7 @@ logic ternaryElse {
 // --- Item 2: a ternary as a statement's value ---
 
 func TestLogicBody_TernaryOverChain_StepValue(t *testing.T) {
-	src := `@enabled
-@description("ternary as a statement value over a chain (#2542 item 2)")
+	src := `@description("ternary as a statement value over a chain (#2542 item 2)")
 logic ternaryStep {
   args {
     members []object @required
@@ -110,8 +107,7 @@ logic ternaryStep {
 
 // A ternary whose predicate is a comparison over a bound scalar.
 func TestLogicBody_TernaryScalarComparisonPredicate(t *testing.T) {
-	src := `@enabled
-@description("ternary with a scalar-comparison predicate")
+	src := `@description("ternary with a scalar-comparison predicate")
 logic ternaryScalar {
   args {
     revenue int @required
@@ -133,8 +129,7 @@ logic ternaryScalar {
 // ternary whose predicate is a comparison over a collection-chain aggregate.
 // Resolves locally -- no call.
 func TestLogicBody_TernaryComparisonOverChain_TerminalReturn(t *testing.T) {
-	src := `@enabled
-@description("ternary over a comparison of a collection-chain aggregate (#2542 item 2)")
+	src := `@description("ternary over a comparison of a collection-chain aggregate (#2542 item 2)")
 logic ternaryChainCmp {
   args {
     members []object @required
@@ -169,8 +164,7 @@ logic ternaryChainCmp {
 // The comparison-over-chain ternary also works as a statement's value (bound by
 // an intermediate `:=` statement, then returned).
 func TestLogicBody_TernaryComparisonOverChain_StepValue(t *testing.T) {
-	src := `@enabled
-@description("ternary comparison-over-chain as a statement value (#2542 item 2)")
+	src := `@description("ternary comparison-over-chain as a statement value (#2542 item 2)")
 logic ternaryChainCmpStep {
   args {
     members []object @required
@@ -230,8 +224,7 @@ func TestTernaryComparisonOverChain(t *testing.T) {
 // --- Lambda-carrying chain in TERMINAL RETURN (serializer gap) ---
 
 func TestLogicBody_LambdaChainTerminalReturn(t *testing.T) {
-	src := `@enabled
-@description("lambda-carrying chain in terminal return (serializer gap)")
+	src := `@description("lambda-carrying chain in terminal return (serializer gap)")
 logic lambdaReturn {
   args {
     members []object @required
@@ -258,8 +251,7 @@ logic lambdaReturn {
 // --- Item 3: arithmetic in a groupBy-projection object-literal value ---
 
 func TestLogicBody_GroupByProjection_MethodCallValue(t *testing.T) {
-	src := `@enabled
-@description("groupBy projection with a method-call value (#2542 item 3)")
+	src := `@description("groupBy projection with a method-call value (#2542 item 3)")
 logic projCount {
   args {
     scans []object @required
@@ -300,8 +292,7 @@ logic projCount {
 // therefore an argument here, and the arithmetic in the projection value is
 // what is under test.
 func TestLogicBody_GroupByProjection_ArithmeticRatioPercent(t *testing.T) {
-	src := `@enabled
-@description("per-group share percent in a projection (#2542 item 3)")
+	src := `@description("per-group share percent in a projection (#2542 item 3)")
 logic accuracy {
   args {
     scans []object @required
@@ -338,8 +329,7 @@ logic accuracy {
 // division silently collapses to INTEGER division, yielding 0 instead of 0.75
 // -- the memqllint-green/runtime-wrong class #2542 eliminates.
 func TestLogicBody_GroupByProjection_FloatRatio(t *testing.T) {
-	src := `@enabled
-@description("per-group fractional ratio via a float operand (#2542 item 3)")
+	src := `@description("per-group fractional ratio via a float operand (#2542 item 3)")
 logic accuracyRatio {
   args {
     scans []object @required
@@ -376,8 +366,7 @@ logic accuracyRatio {
 // Division by zero in a projection value surfaces cleanly through the full
 // logic path (never a panic).
 func TestLogicBody_GroupByProjection_DivisionByZero(t *testing.T) {
-	src := `@enabled
-@description("projection division by zero")
+	src := `@description("projection division by zero")
 logic ratioZero {
   args {
     scans []object @required

@@ -73,7 +73,7 @@ func TestShapeTemplateSignature_Deterministic(t *testing.T) {
 }
 
 func BenchmarkCacheKey_Old(b *testing.B) {
-	query := "concept==v1:user;payload.active==true"
+	query := "concept==v1:user&&payload.active==true"
 	for i := 0; i < b.N; i++ {
 		hash := sha256.Sum256([]byte(query + "|ts=latest|limit=100|offset=0|depth=3|sort=createdAt:desc|select=none|shape=graph-bundle"))
 		_ = hex.EncodeToString(hash[:])
@@ -84,7 +84,7 @@ func BenchmarkCacheKey_New(b *testing.B) {
 	engine := id.New()
 	for i := 0; i < b.N; i++ {
 		_ = engine.MustFromMap(map[string]any{
-			"query":     "concept==v1:user;payload.active==true",
+			"query":     "concept==v1:user&&payload.active==true",
 			"timestamp": "latest",
 			"limit":     100,
 			"offset":    0,

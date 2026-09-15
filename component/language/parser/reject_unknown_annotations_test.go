@@ -8,7 +8,7 @@ import (
 // TestParseToolDecl_RejectsUnknownAnnotation locks in #990: the tool
 // parser no longer silently swallows unknown annotations.
 func TestParseToolDecl_RejectsUnknownAnnotation(t *testing.T) {
-	source := `@enabled
+	source := `
 @handler(type="function", name="recentChat")
 @requires("recent-chat")
 @description("a tool with a stale annotation")
@@ -26,15 +26,19 @@ tool recentChat {
 }
 
 // TestParseToolDecl_KeepsLiveAnnotations guards against over-rejection:
-// @destructive / @requiresConfirmation / @rateLimit are a live tool
-// feature (the tool loop gates destructive/confirmation tools) and must
-// still parse.
+// @destructive / @requiresConfirmation are a live tool feature (the tool loop
+// gates destructive/confirmation tools) and must still parse.
+//
+// @rateLimit was in this list and is RETIRED (epic memql#5375). It is the
+// difference this test now records: the two that stay are read by the tool
+// loop, and the one that went was cloned onto the runtime Tool, copied into a
+// Function field nothing reads, and enforced nowhere -- so the same test was
+// guarding two live features and one that only looked like one.
 func TestParseToolDecl_KeepsLiveAnnotations(t *testing.T) {
-	source := `@enabled
+	source := `
 @handler(type="function", name="dangerTool")
 @destructive
 @requiresConfirmation
-@rateLimit(maxCalls=10, periodSeconds=60)
 @description("a destructive tool")
 tool dangerTool {
   target  string  @required
@@ -50,14 +54,14 @@ tool dangerTool {
 	if !got.RequiresConfirmation {
 		t.Errorf("RequiresConfirmation = false, want true")
 	}
-	if got.RateLimitMaxCalls != 10 || got.RateLimitPeriod != 60 {
-		t.Errorf("rateLimit = (%d, %d), want (10, 60)", got.RateLimitMaxCalls, got.RateLimitPeriod)
+	if got.RateLimitMaxCalls != 0 || got.RateLimitPeriod != 0 {
+		t.Errorf("rateLimit = (%d, %d), want (0, 0) -- @rateLimit is retired", got.RateLimitMaxCalls, got.RateLimitPeriod)
 	}
 }
 
 // TestParseProviderDecl_RejectsUnknownAnnotation locks in #990 for providers.
 func TestParseProviderDecl_RejectsUnknownAnnotation(t *testing.T) {
-	source := `@type("OpenAI")
+	source := `@vendor("OpenAI")
 @model("gpt-5.4-mini")
 @bogusProviderAnno
 @description("provider with a bogus annotation")

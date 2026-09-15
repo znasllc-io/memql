@@ -19,7 +19,6 @@ import (
 const lambdaSlicesSource = `use crm.concepts.{ lead }
 
 /// Matches open leads.
-@enabled
 spec lead isOpen = row => row.status == "open"
 
 /// A body broken across lines stays one declaration.
@@ -53,7 +52,7 @@ func TestExtractKeywordSlices_FindsEditionTwentySixSpecsAndTraits(t *testing.T) 
 		require.NoError(t, err, "slice %q must parse on its own:\n%s", s.Name, s.Source)
 		require.Equal(t, s.Name, decl.Name)
 	}
-	require.Contains(t, specs[0].Source, "/// Matches open leads.\n@enabled\nspec lead isOpen", "the preamble travels with the slice")
+	require.Contains(t, specs[0].Source, "/// Matches open leads.\nspec lead isOpen", "the preamble travels with the slice")
 	require.Contains(t, specs[1].Source, `&& row.tags.any(t => t == "hot")`, "a continuation line belongs to the body above it")
 	require.NotContains(t, specs[1].Source, "trait", "the body ends before the next declaration")
 	require.Contains(t, specs[3].Source, `row.note == "spec lead x = row"`)

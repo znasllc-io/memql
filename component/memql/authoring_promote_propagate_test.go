@@ -124,7 +124,7 @@ func TestAuthoringPromotePropagation_CrossNode(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	bStore := &crossNodeRehydrateStore{row: AuthoringConstructRow{
-		OwnerUserId: "owner-1", Kind: "spec", Name: "mcpSessSpec", Source: sessionSpecSrc,
+		OwnerUserId: "owner-1", Kind: "spec", Name: "mcpSessSpec", Source: sessionSpecSrc, Origin: "trainingns/concepts.memql",
 	}}
 	// THE propagation under test: B subscribes to the authoring-promote broadcast.
 	engB.startAuthoringPromoteSubscriberWithStore(ctx, bStore)
@@ -135,7 +135,7 @@ func TestAuthoringPromotePropagation_CrossNode(t *testing.T) {
 	}
 
 	// Promote on engine A (fake persist store, real bus broadcast).
-	res, err := engA.promoteBundleDurableWithStore(ctx, &fakePromoteStore{}, "owner-1", sessionSpecSrc, "", false)
+	res, err := engA.promoteBundleDurableWithStore(ctx, &fakePromoteStore{}, "owner-1", sessionSpecSrc, "trainingns/concepts.memql", false)
 	if err != nil {
 		t.Fatalf("promote on engine A: %v", err)
 	}

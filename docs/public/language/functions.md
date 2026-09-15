@@ -724,7 +724,7 @@ Base providers carry vendor-level auth and type; children inherit via
 
 ```memql
 @base
-@type("Anthropic")
+@vendor("Anthropic")
 provider anthropic {
   auth {
     federationRuleId   env("MEMQL_AI_ANTHROPIC_FEDERATION_RULE_ID")

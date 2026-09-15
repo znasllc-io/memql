@@ -28,7 +28,6 @@ import (
 const braceLessFixture = `use agents.concepts.{ agent }
 
 /// Assistants only.
-@enabled
 spec agent isAssistant = row => row.role == "assistant"
                          && row.kind != "system"   // not the system agent
 

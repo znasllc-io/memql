@@ -61,7 +61,6 @@ func TestExtractImports_BuiltinFile(t *testing.T) {
 		"./contracts"
 	)
 
-@enabled
 @executor("integration.email.sendEmail")
 builtin emailSend {
   to       string  @required

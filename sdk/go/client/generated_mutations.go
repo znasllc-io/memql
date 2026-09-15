@@ -2477,6 +2477,7 @@ type CreateAuthoringConstructArgs struct {
 	Name            string
 	TargetNamespace string
 	Source          string
+	Origin          string
 	GrammarVersion  string
 }
 
@@ -2516,6 +2517,13 @@ func CreateAuthoringConstructBuild(args CreateAuthoringConstructArgs) string {
 	}
 	b.WriteString("source: ")
 	b.WriteString(quoteMemQL(args.Source))
+	if args.Origin != "" {
+		if b.Len() > 34 {
+			b.WriteString(", ")
+		}
+		b.WriteString("origin: ")
+		b.WriteString(quoteMemQL(args.Origin))
+	}
 	if args.GrammarVersion != "" {
 		if b.Len() > 34 {
 			b.WriteString(", ")

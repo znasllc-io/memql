@@ -480,7 +480,7 @@ Richest real: base `google` (`dsl/providers/providers.memql:267`); derived
 
 ```
 @base
-@type("OpenAI")
+@vendor("OpenAI")
 provider openai {
   auth {
     apiKey  env("MEMQL_AI_OPENAI_API_KEY")

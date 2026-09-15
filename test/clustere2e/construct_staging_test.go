@@ -180,7 +180,7 @@ func TestStagedConstructIsOwnerScopedThenTrainsAcrossTheMesh(t *testing.T) {
 	//
 	// BEFORE anything else, so a build that accepted it would be caught here
 	// rather than by a confusing failure four steps later.
-	refused, rerr := author.StageBundle(ctx, f.conceptSrc())
+	refused, rerr := author.StageBundle(ctx, f.conceptSrc(), authoring.WithStageOrigin(f.origin()))
 	skipUnlessStageable(t, refused, rerr)
 	msg := ""
 	if rerr != nil {
@@ -196,7 +196,7 @@ func TestStagedConstructIsOwnerScopedThenTrainsAcrossTheMesh(t *testing.T) {
 	}
 
 	// --- 2. train the concept, so the staged verbs have something to bind to
-	promoted, err := author.DurablePromoteBundle(ctx, f.conceptSrc())
+	promoted, err := author.DurablePromoteBundle(ctx, f.conceptSrc(), authoring.WithPromoteOrigin(f.origin()))
 	skipUnlessOwner(t, promoted, err)
 	if err != nil {
 		t.Fatalf("promote the concept: %v", err)
@@ -207,7 +207,7 @@ func TestStagedConstructIsOwnerScopedThenTrainsAcrossTheMesh(t *testing.T) {
 	defer withdraw(ctx, t, author, f)
 
 	// --- 3. stage the verbs -------------------------------------------------
-	staged, err := author.StageBundle(ctx, stagedBundle(f))
+	staged, err := author.StageBundle(ctx, stagedBundle(f), authoring.WithStageOrigin(f.origin()))
 	if err != nil {
 		t.Fatalf("stage the verbs: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestStagedConstructIsOwnerScopedThenTrainsAcrossTheMesh(t *testing.T) {
 	// The SAME source through durablePromoteBundle: there is no train message,
 	// because training a staged construct IS a promote. The engine flips the
 	// persisted row rather than writing a second one.
-	trained, err := author.DurablePromoteBundle(ctx, stagedBundle(f))
+	trained, err := author.DurablePromoteBundle(ctx, stagedBundle(f), authoring.WithPromoteOrigin(f.origin()))
 	if err != nil {
 		t.Fatalf("train the staged constructs: %v", err)
 	}
@@ -330,7 +330,7 @@ func TestStagedConstructComesBackOwnerScopedAfterARestart(t *testing.T) {
 	if suffix == "" {
 		// PHASE ONE: seed and stop.
 		f := newTrainingFixture()
-		promoted, err := author.DurablePromoteBundle(ctx, f.conceptSrc())
+		promoted, err := author.DurablePromoteBundle(ctx, f.conceptSrc(), authoring.WithPromoteOrigin(f.origin()))
 		skipUnlessOwner(t, promoted, err)
 		if err != nil {
 			t.Fatalf("promote the concept: %v", err)
@@ -338,7 +338,7 @@ func TestStagedConstructComesBackOwnerScopedAfterARestart(t *testing.T) {
 		if !promoted.OK {
 			t.Fatalf("promote the concept refused: %s", promoted.Error)
 		}
-		staged, serr := author.StageBundle(ctx, stagedBundle(f))
+		staged, serr := author.StageBundle(ctx, stagedBundle(f), authoring.WithStageOrigin(f.origin()))
 		if serr != nil {
 			t.Fatalf("stage the verbs: %v", serr)
 		}

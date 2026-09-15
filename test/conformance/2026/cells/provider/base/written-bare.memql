@@ -1,4 +1,4 @@
 /// A vendor-level base for models on the user's own machines: a type, and no model of its own.
-@type("Fleet")
+@vendor("Fleet")
 @base
 provider bundleFleetBase { }

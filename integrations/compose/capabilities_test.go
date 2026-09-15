@@ -317,4 +317,3 @@ func packageDir(t *testing.T) string {
 	}
 	return filepath.Dir(self)
 }
-

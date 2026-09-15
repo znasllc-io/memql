@@ -64,7 +64,6 @@ func TestFleetUnavailableSanitizesWrongPodStreamLastError(t *testing.T) {
 	}
 }
 
-
 func TestFleetUnavailableRegistryMissDoesNotSayRetryConnectedNodeId(t *testing.T) {
 	e := &FleetUnavailable{
 		ModelId:   "qwen3-embedding:0.6b",

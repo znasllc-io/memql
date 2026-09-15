@@ -50,8 +50,9 @@
 //                           automation runs only when it holds.
 //   /// text                The description: a doc comment above the
 //                           declaration (@description("text") is the same).
-//   @disabled               Skip the automation at load. (@enabled is the
-//                           default, a no-op.)
+//   @disabled               Skip the automation at load. A construct is
+//                           enabled by default; @enabled was the explicit-on
+//                           no-op and is RETIRED (epic memql#5375).
 //   @template               A work-spine template: invoked by the run that
 //                           names it; it carries no @trigger.
 //   @actor                  The body reads actor.*.

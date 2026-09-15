@@ -47,14 +47,12 @@ func pinnedDomainWithSiblingsTree() fstest.MapFS {
 	return fstest.MapFS{
 		"deploy/namespace.pin": file("cluster\n"),
 		"deploy/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("Declared under deploy/, namespaced to cluster.")
 concept deployment {
   status  string  @required @description("Status.")
 }
 
 @version("1.0.0")
-@namespace("cluster")
 @description("A second concept in the same domain, bound by the sibling mutations.")
 concept deploymentNote {
   body  string  @required @description("Body.")
@@ -63,20 +61,17 @@ concept deploymentNote {
 		// is what made the pre-#2945 lane-1 reject the import rather than skip
 		// it, and it is the half the earlier fixtures did not cover.
 		"cluster/concepts.memql": file(`@version("1.0.0")
-@namespace("cluster")
 @description("The pin target exists but declares no deployment.")
 concept gadget {
   label  string  @required @description("Label.")
 }`),
 		"other/concepts.memql": file(`@version("1.0.0")
-@namespace("other")
 @description("A second deployment so the bare name is ambiguous without the import.")
 concept deployment {
   other  string  @required @description("Other.")
 }`),
 		"deploy/mutations.memql": file(`use cluster.concepts.{ deployment }
 
-@enabled
 @description("Binds the imported concept by its PINNED namespace.")
 mutation deployment createDeployment {
   args {
@@ -87,7 +82,6 @@ mutation deployment createDeployment {
   }
 }
 
-@enabled
 @description("A sibling binding the SAME concept, untouched by whoever added the import.")
 mutation deployment updateDeploymentStatus {
   args {
@@ -100,7 +94,6 @@ mutation deployment updateDeploymentStatus {
   }
 }
 
-@enabled
 @description("A second such sibling.")
 mutation deployment retireDeployment {
   args {
@@ -152,7 +145,6 @@ func TestLane3_SkipNamesTheImportAsTheCause(t *testing.T) {
 	// the external-namespace escape does not apply.
 	root["deploy/mutations.memql"] = file(`use cluster.concepts.{ deployment }
 
-@enabled
 @description("Binds a concept that is declared nowhere.")
 mutation deployment createDeployment {
   args {
@@ -163,7 +155,6 @@ mutation deployment createDeployment {
   }
 }`)
 	root["deploy/concepts.memql"] = file(`@version("1.0.0")
-@namespace("cluster")
 @description("No deployment concept anywhere now.")
 concept deploymentNote {
   body  string  @required @description("Body.")

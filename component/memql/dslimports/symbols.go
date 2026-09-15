@@ -2,6 +2,7 @@ package dslimports
 
 import (
 	"fmt"
+	"io/fs"
 	"strings"
 
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
@@ -131,7 +132,7 @@ func (t *Tree) ResolveSymbol(importingFile, ref string) (*Resolution, error) {
 		if !ok {
 			return nil, fmt.Errorf("file %q not in tree", importingFile)
 		}
-		return resolveInFile(importingFile, fileAst, parts[0])
+		return resolveInFile(t.Root, importingFile, fileAst, parts[0])
 	}
 
 	// Cross-file reference: alias.name.
@@ -159,7 +160,7 @@ func (t *Tree) ResolveSymbol(importingFile, ref string) (*Resolution, error) {
 	// segments. Deeper dots are returned as Name suffix so the
 	// caller can handle field-level access separately.
 	innerParts := strings.SplitN(name, ".", 2)
-	res, err := resolveInFile(targetFile, targetAst, innerParts[0])
+	res, err := resolveInFile(t.Root, targetFile, targetAst, innerParts[0])
 	if err != nil {
 		return nil, fmt.Errorf("file %q: %w", importingFile, err)
 	}
@@ -171,7 +172,12 @@ func (t *Tree) ResolveSymbol(importingFile, ref string) (*Resolution, error) {
 
 // resolveInFile walks a file's Definitions looking for a top-level
 // declaration named `name` and returns the typed handle.
-func resolveInFile(file string, ast *languageAst.File, name string) (*Resolution, error) {
+//
+// `root` is the tree's fs.FS, needed only to read a directory's
+// namespace.pin -- which became the namespace DERIVATION when epic
+// memql#5375 retired @namespace, so a resolver without it cannot see a
+// pinned divergence at all.
+func resolveInFile(root fs.FS, file string, ast *languageAst.File, name string) (*Resolution, error) {
 	if ast == nil {
 		return nil, fmt.Errorf("file %q has no AST (parse failed or imports-only fallback)", file)
 	}
@@ -180,21 +186,27 @@ func resolveInFile(file string, ast *languageAst.File, name string) (*Resolution
 		switch d := def.(type) {
 		case *languageAst.ConceptDecl:
 			if d.Name == name {
-				// Directory-derived namespace default (#2614): the file's
-				// first path segment is its domain. Pin enforcement lives
-				// in the unified loader; resolution here is best-effort.
+				// Directory-derived namespace (#2614): the file's first path
+				// segment is its domain, UNLESS that directory carries a
+				// namespace.pin -- which is now the derivation rather than a
+				// cross-check (epic memql#5375 retired @namespace, leaving
+				// the pin the only expression of a divergence).
+				//
+				// So the pin has to be READ here. It used to be passed as ""
+				// and a pinned divergence fell back to
+				// AssembleConceptIdFromDecl -- the explicit annotation's
+				// assembly. That fallback now returns the empty id for every
+				// input, so a pin-blind resolver would erase exactly the
+				// divergence the pin exists to express.
 				dir := file
 				if i := strings.IndexByte(dir, '/'); i > 0 {
 					dir = dir[:i]
 				}
-				id, idErr := languageAst.AssembleConceptIdFromDeclInDir(d, dir, "")
+				id, idErr := languageAst.AssembleConceptIdFromDeclInDir(d, dir, treeNamespacePin(root, dir))
 				if idErr != nil {
-					// Best-effort resolution has no pin file in hand: a
-					// pinned divergence (dsl/deployment's cluster) or a
-					// genuine mismatch falls back to the EXPLICIT
-					// annotation's assembly, exactly as before #2614 --
-					// the loud guard lives in the unified loader.
-					id, _ = languageAst.AssembleConceptIdFromDecl(d)
+					// A genuine directory mismatch. Resolution here is
+					// best-effort; the loud guard lives in the unified loader.
+					continue
 				}
 				return &Resolution{
 					Kind:      SymbolConcept,

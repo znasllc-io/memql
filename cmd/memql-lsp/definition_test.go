@@ -60,7 +60,7 @@ func TestDefinition_JumpsToDeclarationInAnotherFile(t *testing.T) {
 	if err := os.MkdirAll(domain, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	concepts := "@version(\"1.0.0\")\n@namespace(\"actions\")\nconcept candidate {\n  id  string  @required\n}\n"
+	concepts := "@version(\"1.0.0\")\nconcept candidate {\n  id  string  @required\n}\n"
 	shapes := "@row\nshape candidate candidateFull {\n  id\n}\n"
 	if err := os.WriteFile(filepath.Join(domain, "concepts.memql"), []byte(concepts), 0o644); err != nil {
 		t.Fatal(err)
@@ -95,9 +95,9 @@ func TestDefinition_JumpsToDeclarationInAnotherFile(t *testing.T) {
 	if locations[0].URI != wantURI {
 		t.Errorf("target URI = %q, want %q", locations[0].URI, wantURI)
 	}
-	// `concept candidate {` is source line 3 -> LSP line 2; the name starts at
+	// `concept candidate {` is source line 2 -> LSP line 1; the name starts at
 	// column 9 -> character 8.
-	if locations[0].Range.Start.Line != 2 || locations[0].Range.Start.Character != 8 {
-		t.Errorf("target start = %+v, want line 2 character 8", locations[0].Range.Start)
+	if locations[0].Range.Start.Line != 1 || locations[0].Range.Start.Character != 8 {
+		t.Errorf("target start = %+v, want line 1 character 8", locations[0].Range.Start)
 	}
 }

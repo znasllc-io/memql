@@ -1,0 +1,6 @@
+/// Today's date key in a timezone, for naming a daily ticket.
+@executor("integration.timeutil.dateKeyInTimezone")
+builtin dailyTicketKeyEnum {
+  timezone  string  @required  @description("An IANA timezone; the caller must name one.")
+  grain     string  @enum  @description("How coarse the key is.")
+}

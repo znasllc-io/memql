@@ -3,7 +3,6 @@
 // Go validates secret NAMES before a write. These are the portal
 // buttons: attach, store secrets, toggle sync.
 
-@enabled
 @executor("integration.shopifypack.attachShop")
 @args(profile="object")
 @description("Attach a Shopify shop. Token fields must be secret names (MEMQL_SHOPIFY_*), never token values.")
@@ -18,7 +17,6 @@ builtin shopifyPackAttachShop {
   syncEnabled            bool    @description("Initial sync toggle. Defaults true.")
 }
 
-@enabled
 @executor("integration.shopifypack.setShopSecrets")
 @args(profile="object")
 @description("Replace secret references on an attached shop. Names only; token values are refused.")
@@ -30,7 +28,6 @@ builtin shopifyPackSetShopSecrets {
   apiVersionSecret       string  @description("Optional secret name for the API version.")
 }
 
-@enabled
 @executor("integration.shopifypack.setShopSync")
 @args(profile="object")
 @description("Flip Shopify index sync on or off. Data, not a rebuild.")

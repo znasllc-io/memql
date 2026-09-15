@@ -30,7 +30,6 @@ func TestCompletion_ConceptImportIsAnAdditionalEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "gadgets", "concepts.memql"), []byte(`@version("1.0.0")
-@namespace("gadgets")
 @description("A gadget.")
 concept gadget {
   label string @required @description("Label")

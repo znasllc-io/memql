@@ -125,7 +125,7 @@ func TestLogicRunner_RefusesWithoutARegistry(t *testing.T) {
 // or relationship expression") -- the automation failed at boot. The literal
 // resolves locally, and ONLY the side-effect statement reaches the registry.
 func TestLogicRunner_SeedThenLiteralReturn(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("repro of logicSeedKnowledgeDomains shape")
 logic logicSeedKnowledgeDomains {
   args {
@@ -167,7 +167,7 @@ logic logicSeedKnowledgeDomains {
 // Neither statement reaches the step registry -- both resolve locally -- so a
 // zero-value engine + stub registry is enough.
 func TestLogicRunner_CollectionChainStatement(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("collection-chain statement probe (#2317)")
 logic logicProbe {
   args {
@@ -246,7 +246,7 @@ func (r *emptyQueryStepRegistry) Execute(_ context.Context, step *Step, _ *StepC
 // conditionals run on the empty-query first-boot path, and the literal return
 // is resolved locally (never reaching the unbounded-query guard).
 func TestLogicRunner_WelcomeCurriculumShape(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("repro of logicSeedWelcomeCurriculum shape")
 logic logicSeedWelcomeCurriculum {
   args {
@@ -301,7 +301,7 @@ logic logicSeedWelcomeCurriculum {
 // under the #2316 numeric rules). Nothing reaches the engine: the `??`
 // statements and the return all evaluate in process.
 func TestLogicRunner_TerminalReturnArithmetic(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("aov-style terminal-return arithmetic (#2542)")
 logic aov {
   args {
@@ -335,7 +335,7 @@ logic aov {
 // Division by zero must surface as a clean logic error naming the failure,
 // never a panic and never a silent nil return.
 func TestLogicRunner_TerminalReturnArithmetic_DivisionByZero(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("division by zero surfaces cleanly")
 logic ratio {
   args {
@@ -362,7 +362,7 @@ logic ratio {
 // Modulo requires whole-number operands: a fractional operand must surface
 // the operand_type refusal, not compute a bogus value.
 func TestLogicRunner_TerminalReturnArithmetic_FloatModulo(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("float modulo surfaces cleanly")
 logic remainder {
   args {
@@ -393,7 +393,7 @@ logic remainder {
 // Nothing reaches the registry: the arithmetic statement and the comparison
 // return both resolve locally.
 func TestLogicRunner_TerminalReturnComparison(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("expression-led comparison terminal return (#2542 item 5)")
 logic isProfitable {
   args {
@@ -443,7 +443,7 @@ logic isProfitable {
 // grammar (the parser's non-identifier-led left side). It must evaluate in
 // process as well, never dispatch to the registry.
 func TestLogicRunner_TerminalReturnComparison_LiteralLed(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("literal-led comparison terminal return (#2542 item 5)")
 logic hasSurplus {
   args {
@@ -476,7 +476,7 @@ logic hasSurplus {
 // minimal date surface (streak logic: "is today exactly one day after the
 // last").
 func TestLogicRunner_DateBuiltinStepValueAndReturn(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("day-delta between two datetimes (#2541)")
 logic streakDelta {
   args {
@@ -509,7 +509,7 @@ logic streakDelta {
 // A date builtin in the TERMINAL RETURN position, over a prior statement's
 // value.
 func TestLogicRunner_DateBuiltinTerminalReturn(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("addDuration in terminal return (#2541)")
 logic boundary {
   args {
@@ -537,7 +537,7 @@ logic boundary {
 // `return daysBetween(a, b) / 7` (weeks between two dates). Exercises the
 // arithmetic operand walker's date-builtin dispatch.
 func TestLogicRunner_DateBuiltinInsideArithmeticReturn(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("daysBetween inside terminal-return arithmetic (#2541/#2542)")
 logic weeksBetween {
   args {
@@ -584,7 +584,7 @@ func TestLogicRunner_CompiledReturnIsCanonicalSource(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, steps := compiledLogic(t, `@enabled
+			_, steps := compiledLogic(t, `
 @description("round-trip probe")
 logic probe {
   args {

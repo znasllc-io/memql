@@ -172,12 +172,12 @@ func TestPositionRewriteErrorLeavesOtherErrors(t *testing.T) {
 // TestLegacyProceduralFormRefusalNamesItsFunc: the load gate that refuses an
 // author's `func (Query) name(...)` names the `func` it refuses.
 func TestLegacyProceduralFormRefusalNamesItsFunc(t *testing.T) {
-	src := "/// A legacy query.\n@enabled\n  func (Query) things(ctx any) (any, error) {\n  return concept==v1:probe:thing, nil\n}\n"
+	src := "/// A legacy query.\n  func (Query) things(ctx any) (any, error) {\n  return concept==v1:probe:thing, nil\n}\n"
 	err := PositionRewriteError(src, RejectLegacyProceduralAuthorForm(src))
 	if err == nil || !strings.Contains(err.Error(), "legacy procedural form `func (Query) ...` is retired") {
 		t.Fatalf("got %v", err)
 	}
-	if !strings.HasPrefix(err.Error(), "rewrite error at line 3, column 3: ") {
-		t.Fatalf("got %q, want the refusal placed at the `func` on line 3, column 3", err.Error())
+	if !strings.HasPrefix(err.Error(), "rewrite error at line 2, column 3: ") {
+		t.Fatalf("got %q, want the refusal placed at the `func` on line 2, column 3", err.Error())
 	}
 }

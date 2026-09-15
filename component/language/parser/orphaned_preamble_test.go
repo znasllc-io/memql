@@ -79,7 +79,6 @@ builtin zzLive {
 		{
 			name: "file-level annotations above a declaration",
 			src: `@version("1.0.0")
-@namespace("ref")
 @description("d")
 concept probe {
   a string
@@ -180,8 +179,8 @@ func TestOrphanedPreamblesFindsNothingInHandWrittenShapes(t *testing.T) {
 	// cannot reach the dsl/ tree (it is imported BY the loaders, not the
 	// reverse). dsl/ itself is covered by the integrity lane's own test.
 	for _, src := range []string{
-		"// header comment\n@enabled\n@description(\"d\")\nbuiltin b {\n  a string\n}\n",
-		"/* block header */\n\n@enabled\nbuiltin b {\n  a string\n}\n",
+		"// header comment\n@description(\"d\")\nbuiltin b {\n  a string\n}\n",
+		"/* block header */\n\nbuiltin b {\n  a string\n}\n",
 	} {
 		if got := OrphanedPreambles(src); len(got) != 0 {
 			t.Errorf("reported %+v for:\n%s", got, src)
@@ -331,7 +330,6 @@ builtin zzParked { a string }
 // whitespace away from every file in dsl/.
 func TestOrphanedPreamblesReportsAFileHeaderABannerDetaches(t *testing.T) {
 	src := `@version("1.0.0")
-@namespace("probe")
 /* ---------------- concepts ---------------- */
 @description("d")
 concept thing {
@@ -342,15 +340,17 @@ concept thing {
 	if len(got) != 1 {
 		t.Fatalf("expected the detached file header to be reported once, got %d: %+v", len(got), got)
 	}
-	if !strings.Contains(got[0].Attributes, "@version") ||
-		!strings.Contains(got[0].Attributes, "@namespace") {
+	// @version alone: the header carried @namespace beside it until epic
+	// memql#5375 retired the annotation, and @version is the id-bearing
+	// attribute a file header has left.
+	if !strings.Contains(got[0].Attributes, "@version") {
 		t.Errorf("Attributes must name what the file lost, got %q", got[0].Attributes)
 	}
 
 	// The conventional blank line after a file header ends the run before the
 	// comment does, which is why dsl/ is clean today. If that ever stops being
 	// true this test says so rather than the whole corpus going red at once.
-	withBlankLine := strings.Replace(src, "@namespace(\"probe\")\n/*", "@namespace(\"probe\")\n\n/*", 1)
+	withBlankLine := strings.Replace(src, "/*", "\n/*", 1)
 	if got := OrphanedPreambles(withBlankLine); len(got) != 0 {
 		t.Errorf("a blank line after the file header must end the run, got %+v", got)
 	}

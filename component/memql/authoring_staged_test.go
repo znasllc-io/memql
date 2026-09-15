@@ -27,7 +27,6 @@ import (
 // distinctly from the promote tests' fixtures so a staged assertion can never
 // accidentally read a promoted one's row.
 const stagedSpecSrc = `
-@enabled
 @description("A staged spec")
 trait stagedOnlyTrait = row => row.active == true
 `
@@ -142,7 +141,6 @@ func TestStageBundleDurable_RefusesConceptByName(t *testing.T) {
 	store := &fakePromoteStore{}
 
 	bundle := `
-@namespace("acme")
 concept order {
   ownerUserId string!
 }
@@ -191,6 +189,7 @@ func TestStageAuthoredConstruct_RefusesATrainedNameDifferently(t *testing.T) {
 	e := &MemQLEngine{functions: newFunctionRegistry()}
 	trained := &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "query", Name: "alreadyTrained", Status: AuthoredActive,
 		Source:   `query alreadyTrained { }`,
+		Origin:   "trainingns/concepts.memql",
 		Compiled: &Function{Name: "alreadyTrained", FunctionKind: "query", Enabled: true}}
 	if err := e.PromoteAuthoredConstruct(context.Background(), trained); err != nil {
 		t.Fatalf("seed trained: %v", err)
