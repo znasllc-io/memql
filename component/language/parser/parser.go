@@ -4760,7 +4760,13 @@ func (p *Parser) parseTernary() (ExpressionNode, error) {
 
 // parseLogicalOr parses OR expressions. The Go-style `||` operator is the
 // canonical form; the legacy `,`-as-OR separator is still accepted (its
-// tree-wide retirement is #977). Both sit at the OR precedence level --
+// tree-wide retirement is memql#5439 -- #977 and #5363 are both CLOSED, and
+// #5363's PR merged without taking it). It is deliberately NOT retired
+// alongside `;`-as-AND in epic memql#5375: `;` had no live producer left,
+// while `,` still folds two filters into ONE argument at a traversal call
+// (`parentOf(concept==X, concept==Y)`), which is what suppressCommaOr below
+// exists to distinguish. Retiring it without a codemod would ship a refusal
+// whose migration does not exist. Both sit at the OR precedence level --
 // looser than `&&` (parseLogicalAnd) -- so `a && b || c` parses as
 // `(a && b) || c`, matching Go.
 func (p *Parser) parseLogicalOr() (ExpressionNode, error) {

@@ -177,7 +177,7 @@ func TestConceptFieldAnnotationsInsertTheirParen(t *testing.T) {
 		}
 	}
 	for label, want := range map[string]string{
-		"@maxLength": "@maxLength(", "@pattern": "@pattern(", "@variant": "@variant(", "@default": "@default(",
+		"@maxLength": "@maxLength(", "@pattern": "@pattern(", "@variant": "@variant(",
 		"@required": "@required", "@pii": "@pii",
 	} {
 		if got[label] != want {

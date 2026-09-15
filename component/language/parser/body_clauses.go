@@ -23,7 +23,7 @@ package parser
 // has no entry.
 var bodyClauseTable = map[string][]string{
 	"query":      {"args", "filter", "refine", "shape", "sort", "paginate", "asOf", "count"},
-	"mutate":     {"args", "insert", "update", "accept", "stamp"},
+	"mutation":   {"args", "insert", "update", "accept", "stamp"},
 	"logic":      {"args", "body"},
 	"automation": {"args", "step", "precondition"},
 	"action":     {"args"},

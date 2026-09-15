@@ -217,7 +217,7 @@ func TestConstructConceptImportSuppressedForSameDomain(t *testing.T) {
 // `query use cognition.concepts.{ space }` -- a file that does not parse.
 func TestConceptImportInsertsOnlyTheName(t *testing.T) {
 	s := New(&fakeRegistry{concepts: []string{"v1:cognition:space"}})
-	for _, src := range []string{"query ", "mutate ", "seed ", "shape "} {
+	for _, src := range []string{"query ", "mutation ", "seed ", "shape "} {
 		var found bool
 		for _, it := range s.Complete(src, 1, len(src)+1, "probe.memql") {
 			if it.Label != "use cognition.concepts.{ space }" {

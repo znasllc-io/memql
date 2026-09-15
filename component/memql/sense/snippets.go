@@ -118,7 +118,7 @@ var constructSkeletons = []struct {
 	{
 		keyword: "mutation", label: "mutation <Concept> <name> { ... }",
 		doc:  "A write construct: args plus one insert/update block using the accept/stamp form.",
-		body: "mutate ${1:Concept} ${2:name} {\n\targs {\n\t\t${3:field} string!\n\t}\n\tinsert {\n\t\taccept { ${3:field} }\n\t\t$0\n\t}\n}",
+		body: "mutation ${1:Concept} ${2:name} {\n\targs {\n\t\t${3:field} string!\n\t}\n\tinsert {\n\t\taccept { ${3:field} }\n\t\t$0\n\t}\n}",
 	},
 	{
 		keyword: "logic", label: "logic <name> { ... }",

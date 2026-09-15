@@ -432,8 +432,8 @@ var placementTable = concat(
 		// epic memql#5375 (D16): a builtin field's body IS the input schema,
 		// and every annotation but @required used to be dropped without a
 		// word -- so a declared enum reached no schema and constrained
-		// nothing. It gets what a prompt field has, for the same reason.
-		{Receiver: BuiltinField, Name: "default", Forms: FormString | FormNumber, Example: `@default("10")`, Doc: "The default the builtin's input schema declares for the field."},
+		// nothing. @default is deliberately NOT here: an args field does not
+		// carry one either (it is retired there, never applied on insert).
 		{Receiver: BuiltinField, Name: "enum", Forms: FormString | FormStrings, Example: `@enum("patch", "minor")`},
 		{Receiver: BuiltinField, Name: "required", Forms: FormFlag, Example: "@required"},
 	},

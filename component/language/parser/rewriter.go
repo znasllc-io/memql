@@ -1342,7 +1342,7 @@ func parseStructMutationBody(body string) (*structMutationBody, error) {
 	// `filter x == 1` (or any clause a mutation does not take) was dropped
 	// without a word.
 	if topStray != "" {
-		return nil, fmt.Errorf("mutation body: unexpected %q at the top level -- a mutation body takes %s", topStray, clauseSpellings("mutate"))
+		return nil, fmt.Errorf("mutation body: unexpected %q at the top level -- a mutation body takes %s", topStray, clauseSpellings("mutation"))
 	}
 
 	// Nested accept/stamp live inside the write block; scan its inner with the

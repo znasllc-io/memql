@@ -246,7 +246,7 @@ func TestV1ParseErrors(t *testing.T) {
 		{`ensureDailySpaceForUser({userId: args.id})`, []string{"object-literal call args are removed"}},
 		{`f("a": 1)`, []string{"name is not quoted"}},
 		{`query activeUsers`, []string{"argument list"}},
-		{`mutation createNode(id: "x")`, []string{"not a construct-invocation kind", "did you mean 'mutation'"}},
+		{`mutate createNode(id: "x")`, []string{"not a construct-invocation kind", "did you mean 'mutation'"}},
 		{`query a.b(x: 1)`, []string{"construct name is a simple identifier"}},
 		// Lambda parameters.
 		{`(a.b) => 1`, []string{"a lambda parameter is a simple name"}},

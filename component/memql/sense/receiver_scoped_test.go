@@ -33,7 +33,7 @@ func TestReceiverFilteredAnnotations(t *testing.T) {
 			// refused it; the old "" receiver offered it anyway), and
 			// @relationship is written inside the body, not before the
 			// declaration (memql#5359).
-			want: []string{"namespace", "version", "rowAuthz", "displayCard"}, absent: []string{"mergeFields", "trigger", "handler", "cache", "relationship"},
+			want: []string{"version", "rowAuthz", "displayCard"}, absent: []string{"mergeFields", "trigger", "handler", "cache", "relationship"},
 		},
 		{
 			name: "tool preamble", src: "@\ntool probeTool {\n}\n", line: 1, col: 2,

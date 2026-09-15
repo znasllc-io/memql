@@ -103,15 +103,15 @@ func TestTrailingSemicolonIsStillTolerated(t *testing.T) {
 // correct -- the failure would read as a parser defect rather than as this
 // line.
 func TestLoweredQueryUsesAndAnd(t *testing.T) {
-	src := "@description(\"probe\")\nquery account q {\n  filter  active==true\n  shape   accountFull\n}\n"
+	src := "@description(\"probe\")\nquery account q {\n  filter  row => row.active == true\n  shape   accountFull\n}\n"
 	out, err := NormaliseAll(src)
 	if err != nil {
 		t.Fatalf("NormaliseAll: %v", err)
 	}
-	if strings.Contains(out, ";active==true") {
+	if strings.Contains(out, ";") {
 		t.Errorf("the lowering still glues the concept term with `;`, which the parser now refuses:\n%s", out)
 	}
-	if !strings.Contains(out, "&&active==true") {
+	if !strings.Contains(out, "&&") {
 		t.Errorf("the lowering should glue the concept term with `&&`:\n%s", out)
 	}
 }

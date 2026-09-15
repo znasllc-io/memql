@@ -147,7 +147,7 @@ func (Prompt) foo(args any) {}
 // annotation (it was a #2610 soft-deprecation hint while it still loaded); a
 // stripped construct and prose mentions still do not fire.
 func TestRedundantEnabledRule(t *testing.T) {
-	withAnnotation := "@description(\"probe\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n"
+	withAnnotation := "@enabled\n@description(\"probe\")\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n"
 	diags := redundantEnabledRule(withAnnotation)
 	if len(diags) != 1 {
 		t.Fatalf("want 1 diagnostic on a construct-attached @enabled, got %d", len(diags))
@@ -158,7 +158,7 @@ func TestRedundantEnabledRule(t *testing.T) {
 	if diags[0].Range.Start.Line != 1 {
 		t.Errorf("hint anchored at line %d, want 1", diags[0].Range.Start.Line)
 	}
-	indented := "\tquery Space probeQuery {\n  filter { payload.active == true }\n}\n"
+	indented := "\t@enabled\nquery Space probeQuery {\n  filter { payload.active == true }\n}\n"
 	ind := redundantEnabledRule(indented)
 	if len(ind) != 1 || ind[0].Range.Start.Column != 2 {
 		t.Fatalf("indented @enabled must anchor on the token (col 2), got %+v", ind)

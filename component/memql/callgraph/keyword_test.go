@@ -94,12 +94,12 @@ func TestMutationKeywordIsMutation(t *testing.T) {
 // keyword moved.
 func TestRetiredMutationSpellingSplitsToNothing(t *testing.T) {
 	retired := `use cluster.concepts.{ node }
-mutation node twoWrites {
+mutate node twoWrites {
   args { id string @required }
   insert { id: args.id }
   update { id: args.id, health: "up" }
 }`
-	if got := splitConstructs("mutation", retired); len(got) != 0 {
+	if got := splitConstructs("mutate", retired); len(got) != 0 {
 		t.Fatalf("retired `mutate` spelling must split to nothing; got %d constructs", len(got))
 	}
 	if fs := CheckFile("dsl/cluster/mutations.memql", retired, nil); len(fs) != 0 {

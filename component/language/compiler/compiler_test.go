@@ -32,7 +32,7 @@ query user activeUsers {
 	}
 	// The internal form carries the filter lambda as its canonical source,
 	// parenthesised as the rewriter joins it, and reads back.
-	if want := `concept=="user";(row => row.active == true)`; fn.Query != want {
+	if want := `concept=="user"&&(row => row.active == true)`; fn.Query != want {
 		t.Errorf("compiled query = %q, want %q", fn.Query, want)
 	}
 	if _, err := parser.ParseExpression(fn.Query); err != nil {
@@ -80,7 +80,7 @@ mutation thing createThing {
 
 func TestCompileSource_Automation(t *testing.T) {
 	source := `
-@schedule("*/30 * * * *")
+@trigger(schedule="*/30 * * * *")
 automation leadProcessor {
   step fetchLeads {
     query activeLeads(limit: 10)

@@ -45,9 +45,9 @@ func parseViaMethod(t *testing.T, src string) (Node, error) {
 func TestReject_UnknownInvocationKind_MutateVsMutation(t *testing.T) {
 	// The audit's exact probe: `mutate` (declaration verb) used where the
 	// invocation noun `mutation` belongs.
-	_, err := ParseExpression(`mutation createNode(id:"x")`)
+	_, err := ParseExpression(`mutate createNode(id:"x")`)
 	if err == nil {
-		t.Fatal("expected an error for `mutation createNode(...)`, got nil (the call was silently dropped)")
+		t.Fatal("expected an error for `mutate createNode(...)`, got nil (the call was silently dropped)")
 	}
 	msg := err.Error()
 	for _, want := range []string{
@@ -65,9 +65,9 @@ func TestReject_UnknownInvocationKind_MutateVsMutation(t *testing.T) {
 func TestReject_UnknownInvocationKind_NotSilentlyDropped(t *testing.T) {
 	// Via the Parser.Parse() METHOD -- historically this returned
 	// SpecReferenceExpr{Name:"mutate"} with err=nil and dropped `createNode(...)`.
-	node, err := parseViaMethod(t, `mutation createNode(id:"x")`)
+	node, err := parseViaMethod(t, `mutate createNode(id:"x")`)
 	if err == nil {
-		t.Fatalf("Parse() method silently accepted `mutation createNode(...)`, returned %#v", node)
+		t.Fatalf("Parse() method silently accepted `mutate createNode(...)`, returned %#v", node)
 	}
 	if _, ok := err.(*ParseError); !ok {
 		t.Errorf("want *ParseError, got %T: %v", err, err)
@@ -80,7 +80,7 @@ func TestReject_UnknownInvocationKind_InLogicBody(t *testing.T) {
 	// body's `return <expr>` carries the malformed call.
 	src := `logic doThing {
   body {
-    return mutation createNode(id: "x")
+    return mutate createNode(id: "x")
   }
 }`
 	rewritten, err := NormaliseAll(src)
@@ -89,7 +89,7 @@ func TestReject_UnknownInvocationKind_InLogicBody(t *testing.T) {
 	}
 	_, err = parseViaMethod(t, rewritten)
 	if err == nil {
-		t.Fatal("expected the logic body to reject `mutation createNode(...)`, got nil")
+		t.Fatal("expected the logic body to reject `mutate createNode(...)`, got nil")
 	}
 	if !strings.Contains(err.Error(), "did you mean 'mutation'?") {
 		t.Errorf("logic-body error should carry the mutation hint; got: %v", err)
@@ -210,7 +210,7 @@ func TestParseDefinition_UnknownKeyword_SuggestsNearest(t *testing.T) {
 	}{
 		{"@description(\"x\")\nquer participant qFoo { }", "did you mean query?"},
 		{"use cognition.concepts.{ space }\n\nshaep space s { row.id }", "did you mean shape?"},
-		{"mutaton space createSpace { }", "did you mean mutate?"},
+		{"mutaton space createSpace { }", "did you mean mutation?"},
 	}
 	for _, tc := range cases {
 		_, err := ParseFile(tc.src)

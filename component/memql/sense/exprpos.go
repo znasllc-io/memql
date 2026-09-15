@@ -198,7 +198,7 @@ func bodyPosition(lines []string, line int, before, cur string, scan textScan, e
 			return exprPos{position: tiers.PositionStepArgument, nested: nestedLambdaParams(strings.TrimLeft(cur, " \t"))}
 		}
 
-	case "mutate":
+	case "mutation":
 		switch last {
 		case "insert", "update", "stamp":
 			if mutationValueKey.MatchString(cur) {

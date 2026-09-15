@@ -23,7 +23,7 @@ import (
 
 // snippetStubRegistry answers the registry questions with one concept from a
 // domain other than the probe file's -- the case that makes the concept slot
-// of query / mutate / seed / shape offer to import it -- and nothing else:
+// of query / mutation / seed / shape offer to import it -- and nothing else:
 // the other snippets come from the DSL spec and the parser.
 type snippetStubRegistry struct{}
 
@@ -71,10 +71,10 @@ func fillSnippet(text, cursor string) string {
 // conceptSlots is, per concept-binding construct, the text before its concept
 // slot and the rest of a construct that lowers once a concept fills the slot.
 var conceptSlots = map[string][2]string{
-	"query":  {"query ", " probe {\n  filter row => row.id != \"\"\n}\n"},
-	"mutate": {"mutate ", " probe {\n  insert {\n    id: \"x\"\n  }\n}\n"},
-	"seed":   {"seed ", " probe {\n  name: \"x\"\n}\n"},
-	"shape":  {"shape ", " probe {\n  row.id\n}\n"},
+	"query":    {"query ", " probe {\n  filter row => row.id != \"\"\n}\n"},
+	"mutation": {"mutation ", " probe {\n  insert {\n    id: \"x\"\n  }\n}\n"},
+	"seed":     {"seed ", " probe {\n  name: \"x\"\n}\n"},
+	"shape":    {"shape ", " probe {\n  row.id\n}\n"},
 }
 
 // lowerAuthored runs src down the path an authored file takes: the
@@ -108,7 +108,7 @@ var snippetBodies = map[string]struct {
 	"query": {"query thing probe {\n  ", map[string][2]string{
 		"args": {"query thing probe {\n  %s\n  filter row => row.id == args.x\n}", "x string"},
 	}},
-	"mutate": {"mutation thing probe {\n  ", map[string][2]string{
+	"mutation": {"mutation thing probe {\n  ", map[string][2]string{
 		"args":   {"mutation thing probe {\n  %s\n  update {\n    id: args.x\n  }\n}", "x string"},
 		"insert": {"mutation thing probe {\n  %s\n}", `id: "x"`},
 		"update": {"mutation thing probe {\n  %s\n}", `id: "x"`},
@@ -138,7 +138,7 @@ var snippetBodies = map[string]struct {
 
 // skeletonCursor is what an author writes at a construct skeleton's cursor.
 var skeletonCursor = map[string]string{
-	"query": "", "mutate": "", "logic": "return 1", "automation": "", "concept": "",
+	"query": "", "mutation": "", "logic": "return 1", "automation": "", "concept": "",
 	"spec": "", "trait": "",
 }
 

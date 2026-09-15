@@ -166,7 +166,7 @@ func TestBodyBlocksCarryTheFactsTheHandListGotWrong(t *testing.T) {
 		}
 	}
 	for _, clause := range []string{"accept", "stamp"} {
-		if !has("mutate", clause) {
+		if !has("mutation", clause) {
 			t.Errorf("mutation BodyBlocks lack %q", clause)
 		}
 	}
@@ -236,15 +236,15 @@ func TestFieldAnnotationsFollowTheFieldLists(t *testing.T) {
 	}
 	for kw, name := range map[string]string{
 		"concept": "pii", "tool": "autoInjected", "prompt": "default",
-		"query": "maxLength", "mutate": "required", "logic": "enum", "automation": "pattern",
+		"query": "maxLength", "mutation": "required", "logic": "enum", "automation": "pattern",
 		"action": "minimum", "capability": "maximum",
 	} {
 		if !carries(kw, name) {
 			t.Errorf("%s fields take @%s, but FieldAnnotations lacks it", kw, name)
 		}
 	}
-	if got := strings.Join(spec.ConstructByKeyword("builtin").FieldAnnotations, ","); got != "description,required" {
-		t.Errorf("builtin FieldAnnotations = [%s], want [description,required]", got)
+	if got := strings.Join(spec.ConstructByKeyword("builtin").FieldAnnotations, ","); got != "description,enum,required" {
+		t.Errorf("builtin FieldAnnotations = [%s], want [description,enum,required]", got)
 	}
 	for _, kw := range []string{"shape", "spec", "trait", "policy", "rule", "seed", "provider", "use"} {
 		if c := spec.ConstructByKeyword(kw); c != nil && len(c.FieldAnnotations) != 0 {

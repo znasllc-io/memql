@@ -30,8 +30,8 @@ func TestLineMap_IdentityWhenUnchanged(t *testing.T) {
 //	4 }                       5 }                    (preserved)
 //	                          6 (trailing)           (preserved)
 func TestLineMap_PreservedExact_SynthesizedWithin(t *testing.T) {
-	authored := "query node q {\n  filter row => row.x == 1\n}\n"
-	rewritten := "func (Query) q {\n  args stuff\n  more synth\n}\n"
+	authored := "@description(\"d\")\nquery node q {\n  filter row => row.x == 1\n}\n"
+	rewritten := "@description(\"d\")\nfunc (Query) q {\n  args stuff\n  more synth\n}\n"
 
 	lm := newLineMap(authored, rewritten)
 
