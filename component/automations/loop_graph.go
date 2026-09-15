@@ -61,6 +61,7 @@ type GraphAutomation struct {
 	Template                                bool
 	Stratum                                 int
 	Writes, Publishes, Opaque               []string
+	BeforeWrite                             *BeforeWriteConfig
 	Loop                                    *LoopConfig
 	Mode                                    *ModeConfig
 	Cycle                                   int // index into Cycles, -1 when none
@@ -574,10 +575,14 @@ func publishProduction(p graphPublish, via []string) production {
 
 // node is one automation as the graph reports it, and its calls counted.
 func (b *graphBuilder) node(i int, a *Automation, cov *GraphCoverage) GraphAutomation {
-	n := GraphAutomation{Name: a.Name, Origin: a.Origin, Schedule: a.Schedule, Template: a.Template, Loop: a.Loop, Mode: a.Mode, Cycle: -1}
+	n := GraphAutomation{Name: a.Name, Origin: a.Origin, Schedule: a.Schedule, Template: a.Template, Loop: a.Loop, Mode: a.Mode, BeforeWrite: a.BeforeWrite, Cycle: -1}
 	if a.Trigger != nil {
 		n.Trigger = a.Trigger.Event
 		n.Filter = a.Trigger.Filter
+	}
+	if a.BeforeWrite != nil {
+		n.Trigger = "before." + a.BeforeWrite.On + "." + a.BeforeWrite.Concept
+		n.Filter = a.BeforeWrite.Filter
 	}
 	var writes, publishes, opaque, callNames []string
 	seen := map[int]bool{}

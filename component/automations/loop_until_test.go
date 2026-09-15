@@ -118,3 +118,17 @@ func TestNegateComparison(t *testing.T) {
 		}
 	}
 }
+
+func TestUntilRenameCannotCaptureOuterRow(t *testing.T) {
+	until, err := languageParser.ParseV1Lambda(`x => x.items.some(row => row.id == x.id)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filter, err := languageParser.ParseV1Lambda(`row => !row.items.some(row => row.id == row.id)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if untilInFilter(filter, until) {
+		t.Fatal("captured outer row falsely proved convergence")
+	}
+}

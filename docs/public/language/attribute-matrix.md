@@ -1253,6 +1253,7 @@ On an automation: this is a work-spine TEMPLATE, invoked by a v1:work:run that n
 
 | Key | Type | Meaning |
 |---|---|---|
+| `before` | string | Adjust the incoming row before create, update, or write; requires concept. |
 | `event` | string | Event pattern, e.g. "node.created" (with concept=) or a raw topic such as "system.startup". |
 | `concept` | string | Concept id the triggering event targets; required by the structured node.* event kinds. |
 | `schedule` | string | Cron schedule with a leading seconds field, e.g. "0 0 * * * *". |

@@ -28,21 +28,15 @@ automation a {
   args {
     id any
   }
-  step advance {
-    mutation advanceThing(id: id, s: "open")
-  }
+  advance := mutation advanceThing(id: args.id, s: "open")
 }`,
 		`@trigger(schedule="0 */5 * * * *")
 automation b {
-  step create {
-    mutation createThing()
-  }
+  create := mutation createThing()
 }`,
 		`@trigger(event="node.created", concept="v1:t:other")
 automation c {
-  step send {
-    builtin sendThing()
-  }
+  send := builtin sendThing()
 }`)
 	return BuildLoopGraph(as, fakeSource{thingReg()}, 0)
 }
@@ -151,18 +145,15 @@ func TestLoopGraphRows_ASourceAndAStandAlone(t *testing.T) {
 }
 
 // A cycle no @loop covers is on the row too, marked not permitted: the check
-// is report-only until the tree's cycles are fixed, so such a graph loads, and
-// the page must say which cycles would be refused rather than draw them as if
-// they were permitted.
+// can be bypassed by operator break-glass, so the page must distinguish an
+// uncovered cycle from an explicitly permitted one.
 func TestLoopGraphRows_AnUncoveredCycleIsMarkedNotPermitted(t *testing.T) {
 	as := graphAutomations(t, `@trigger(event="node.created", concept="v1:t:thing")
 automation a {
   args {
     id any
   }
-  step advance {
-    mutation advanceThing(id: id, s: "open")
-  }
+  advance := mutation advanceThing(id: args.id, s: "open")
 }`)
 	a := rowNamed(t, LoopGraphRows(BuildLoopGraph(as, fakeSource{thingReg()}, 0)), "a")
 	cycle, _ := a["cycle"].(map[string]any)
@@ -180,9 +171,7 @@ automation a {
 func TestLoopGraphRows_TheFileNotTheLoadersOrigin(t *testing.T) {
 	as := graphAutomations(t, `@trigger(schedule="0 0 2 * * *")
 automation nightly {
-  step send {
-    builtin sendThing()
-  }
+  send := builtin sendThing()
 }`)
 	as[0].Origin = "unified:forge/automations.memql:nightly"
 	row := rowNamed(t, LoopGraphRows(BuildLoopGraph(as, fakeSource{thingReg()}, 0)), "nightly")
@@ -213,9 +202,7 @@ func registeredScheduler(t *testing.T, as ...*Automation) *Scheduler {
 func TestAutomationGraphRows_RefusedBeforeTheSchedulerRegistered(t *testing.T) {
 	s := registeredScheduler(t, graphAutomations(t, `@trigger(schedule="0 0 2 * * *")
 automation nightly {
-  step send {
-    builtin sendThing()
-  }
+  send := builtin sendThing()
 }`)...)
 	s.readyCh = make(chan struct{})
 	rows, err := s.AutomationGraphRows()
@@ -246,15 +233,11 @@ func TestAutomationGraphRows_BuiltOncePerRegisteredSet(t *testing.T) {
 	as := graphAutomations(t,
 		`@trigger(schedule="0 0 2 * * *")
 automation nightly {
-  step send {
-    builtin sendThing()
-  }
+  send := builtin sendThing()
 }`,
 		`@trigger(event="node.created", concept="v1:t:other")
 automation onOther {
-  step send {
-    builtin sendThing()
-  }
+  send := builtin sendThing()
 }`)
 	s := registeredScheduler(t, as...)
 

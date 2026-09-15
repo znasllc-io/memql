@@ -54,6 +54,7 @@ func wantLoopRefusal(t *testing.T, err error, code string, fragments ...string) 
 // TestLoopLoadsOntoTheAutomation: a converging self-cycle compiles with its
 // @loop on Automation.Loop, the until parsed once.
 func TestLoopLoadsOntoTheAutomation(t *testing.T) {
+	t.Setenv(maxChainDepthEnv, "16")
 	a, err := compileLoopProbe(t, eventHead+`
 @filter(row => row.status != "done")
 @loop(maxDepth=4, until=row => row.status == "done")`)
@@ -82,6 +83,7 @@ func TestLoopLoadsOntoTheAutomation(t *testing.T) {
 
 // TestLoopRefusals: each @loop refusal, from source, with its code.
 func TestLoopRefusals(t *testing.T) {
+	t.Setenv(maxChainDepthEnv, "16")
 	t.Run("loop_until_not_in_filter: a filter that does not exclude the converged row", func(t *testing.T) {
 		_, err := compileLoopProbe(t, eventHead+`
 @filter(row => row.status == "open")
@@ -248,6 +250,7 @@ func TestModeRefusals(t *testing.T) {
 // mode to the same rules the load does. A refused one stays unprepared, so
 // every run refuses rather than the first.
 func TestLoopAndModeOnAnAutomationBuiltInGo(t *testing.T) {
+	t.Setenv(maxChainDepthEnv, "16")
 	build := func(loop *LoopConfig, mode *ModeConfig) *Automation {
 		return &Automation{
 			Name:    "goBuiltLoop",

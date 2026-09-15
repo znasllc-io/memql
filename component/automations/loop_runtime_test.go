@@ -370,3 +370,21 @@ func TestAnAdoptedRecoveryKeepsItsChain(t *testing.T) {
 		t.Fatalf("the adopted run ran under %+v, want %+v", probe.causes[0], want)
 	}
 }
+
+func TestSandboxDepthRefusalDoesNotCountProductionStop(t *testing.T) {
+	a := &Automation{Name: "sandbox-depth-metric"}
+	r := &LoopRefusal{Reason: metrics.LoopStopDepth, Automation: a.Name, Depth: 17, Cap: 16, Cause: chainOf("sandbox", repeatName(a.Name, 17)...)}
+	before := metrics.AutomationLoopsStoppedValue(a.Name, r.Reason)
+	e := &Executor{sandboxRun: true}
+	if _, err := e.stopLoop(context.Background(), a, NewExecution(a.Name, "test"), nil, events.Cause{}, r, false); err == nil {
+		t.Fatal("missing depth refusal")
+	}
+	if got := metrics.AutomationLoopsStoppedValue(a.Name, r.Reason); got != before {
+		t.Fatalf("preview counted a production stop: %v -> %v", before, got)
+	}
+	e.sandboxRun = false
+	_, _ = e.stopLoop(context.Background(), a, NewExecution(a.Name, "test"), nil, events.Cause{}, r, false)
+	if got := metrics.AutomationLoopsStoppedValue(a.Name, r.Reason); got != before+1 {
+		t.Fatalf("live negative control did not increment: %v", got)
+	}
+}

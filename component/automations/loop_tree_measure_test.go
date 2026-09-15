@@ -10,10 +10,9 @@ package automations
 // (component/memql/lint_parity.go): the concepts load, the engine's Init
 // builds the function registry, and the automation loader walks the tree
 // with it. Every problem and the check's coverage are printed; run it with
-// -v. The check is report-only until the tree's cycles are fixed, so this
-// test fails only when the measurement goes blind -- a walk that loads no
-// automations, or a registry that resolves no call, would read as a tree
-// with no cycles.
+// -v. The test refuses uncovered cycles and also fails when the measurement
+// goes blind: a walk that loads no automations or resolves no calls cannot
+// establish that the tree is safe.
 
 import (
 	"io"

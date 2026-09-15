@@ -35,6 +35,9 @@ func untilInFilter(filter, until *ast.LambdaExpr) bool {
 	if filter == nil || until == nil || len(filter.Params) != 1 || len(until.Params) != 1 {
 		return false
 	}
+	if renameWouldCapture(until.Body, until.Params[0], filter.Params[0]) {
+		return false
+	}
 	p := renameParam(until.Body, until.Params[0], filter.Params[0])
 	want := map[string]bool{}
 	for _, n := range untilNegations(p) {
@@ -180,4 +183,41 @@ func renameParam(n ast.ExpressionNode, from, to string) ast.ExpressionNode {
 	// A literal, nil, or a node outside the edition-2026 set: nothing in it
 	// names the parameter.
 	return n
+}
+
+// A nested parameter must not capture the outer row name during comparison.
+// Conservatively refuse an ambiguous rename; retaining an edge is safer than
+// proving convergence with two different predicates.
+func renameWouldCapture(n ast.ExpressionNode, from, to string) bool {
+	if from == to {
+		return false
+	}
+	capture := false
+	ast.WalkV1(n, func(e ast.ExpressionNode) bool {
+		lam, ok := e.(*ast.LambdaExpr)
+		if !ok {
+			return true
+		}
+		for _, p := range lam.Params {
+			if p == from {
+				return false
+			}
+		}
+		binds := false
+		for _, p := range lam.Params {
+			if p == to {
+				binds = true
+			}
+		}
+		if binds {
+			ast.WalkV1(lam.Body, func(child ast.ExpressionNode) bool {
+				if id, ok := child.(*ast.IdentExpr); ok && id.Name == from {
+					capture = true
+				}
+				return true
+			})
+		}
+		return !capture
+	})
+	return capture
 }

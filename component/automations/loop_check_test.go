@@ -1,7 +1,7 @@
 package automations
 
 // loop_check_test.go -- where the static loop graph runs (memql#5381, D-J):
-// the loader's check after its walk (report-only for now), StaticGraph, and
+// the loader's check after its walk (strict cycle enforcement), StaticGraph, and
 // the authored scheduler's check at activation.
 
 import (

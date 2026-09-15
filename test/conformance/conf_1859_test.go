@@ -48,6 +48,7 @@ func forgeAuditShortIdCheck() check {
 }
 
 func runForgeAuditShortId(t *testing.T, e *Env) {
+	installForgeBeforeWrite(t, e)
 	suffix := uniqueSuffix("1859")
 
 	// --- A. routeRequest (node.created -> 'routed', automation/canonical path) ---
@@ -70,7 +71,9 @@ func runForgeAuditShortId(t *testing.T, e *Env) {
 	// whose payload IS the request row carrying the CANONICAL id. routeRequest's
 	// recordRequestEvent therefore receives the canonical id -- which the
 	// shortId() normalization must reduce back to the short form on write.
-	fireForgeAutomation(t, e, "routeRequest", "node.created", events.KindNodeCreated, cloneStringMap(before))
+	payload := cloneStringMap(before)
+	payload["firstVersion"] = true
+	fireForgeAutomation(t, e, "recordRouted", "node.created", events.KindNodeCreated, payload)
 
 	// THE #1859 acceptance: the 'routed' audit event is found by the SHORT id.
 	// Pre-fix this is empty (the event is keyed under the canonical id).

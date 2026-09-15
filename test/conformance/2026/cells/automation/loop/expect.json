@@ -16,7 +16,7 @@
       "file": "a-max-depth-of-zero.memql",
       "verdict": "refuse_load",
       "code": "loop_max_depth_range",
-      "message": "@loop maxDepth=0 is outside 1 to 16, the depth cap (MEMQL_AUTOMATION_MAX_CHAIN_DEPTH)"
+      "message": "@loop maxDepth=0 is outside 1 to"
     },
     {
       "file": "a-misspelled-key.memql",

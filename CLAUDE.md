@@ -1640,6 +1640,8 @@ v1:cluster:node:bff-local
 
 ### Automations
 
+- Automation cycles require a disproving trigger filter or `@loop`; `@mode` controls concurrent runs per process. Prefer before-write bodies for triggering-row adjustments. The default chain depth cap is 16; see [loop protection](docs/public/language/memql.md#loop-protection).
+
 Event-driven workflows. The `@trigger` annotation keys off an event name plus
 the target concept, using keyword args, and the automation's `args { }` block
 is the contract the triggering row's payload is bound into:

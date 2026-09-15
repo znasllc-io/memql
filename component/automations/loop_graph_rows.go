@@ -84,6 +84,10 @@ func LoopGraphRows(g *LoopGraph) []map[string]any {
 				}
 			}
 		}
+		if a.BeforeWrite != nil {
+			row["triggerKind"] = "before." + a.BeforeWrite.On
+			row["triggerConcept"] = a.BeforeWrite.Concept
+		}
 		if a.Schedule != "" {
 			row["schedule"] = a.Schedule
 		}
@@ -146,8 +150,8 @@ func edgeRows(edges []GraphEdge) []map[string]any {
 
 // cycleRow is one strongly connected component that holds a cycle. `permitted`
 // is said outright rather than left to be inferred from an empty permittedBy:
-// the check is report-only until the tree's own cycles are fixed, so a refused
-// cycle does load, and the page must be able to say which is which.
+// operator break-glass can load a refused cycle, and the page must distinguish
+// it from an explicitly bounded cycle.
 func cycleRow(c GraphCycle) map[string]any {
 	members := append([]string(nil), c.Members...)
 	sort.Strings(members)

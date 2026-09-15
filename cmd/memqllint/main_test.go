@@ -1054,3 +1054,16 @@ func TestRun_StatementRefusalNamesTheAuthorsLineAndColumn(t *testing.T) {
 		t.Logf("output:\n%s", out)
 	}
 }
+
+func TestRun_UncoveredAutomationCycleRefusesDirectory(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"demo/automations.memql": `@trigger(event="demo.loop")
+automation loopProbe {
+  publish "demo.loop" { value: 1 }
+}`,
+	})
+	code, out := captureRun(t, []string{"--json", root})
+	if code != 1 || !strings.Contains(out, "[loop_cycle]") {
+		t.Fatalf("want loop_cycle refusal, code=%d output=%s", code, out)
+	}
+}

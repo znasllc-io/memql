@@ -228,7 +228,9 @@ func (e *Executor) stopLoop(ctx context.Context, automation *Automation, exec *A
 			"chain", chainText(r.PriorRuns()),
 		)
 	}
-	metrics.AutomationLoopStopped(automation.Name, r.Reason)
+	if !e.sandboxRun {
+		metrics.AutomationLoopStopped(automation.Name, r.Reason)
+	}
 
 	exec.Status = "failed"
 	exec.Error = r.Error()
