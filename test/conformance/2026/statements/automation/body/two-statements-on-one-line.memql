@@ -1,0 +1,4 @@
+@trigger(schedule="0 0 * * * *")
+automation twoOnALine {
+  x := 1 y := 2
+}

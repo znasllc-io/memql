@@ -188,7 +188,7 @@ func TestRealTreeSecretRedactionEndToEnd(t *testing.T) {
 	registry := newMemoryRegistry(map[string]*memoryNodes.Concept{conceptID: real})
 
 	src := `use platform.concepts.{ globalSecret }
-mutate globalSecret storeGlobalSecret {
+mutation globalSecret storeGlobalSecret {
 	args {
 		encryptedValue  string  @required  @pattern("^[A-Za-z0-9+/=]+$")
 		name            string  @required  @pattern("^[A-Z_]+$")

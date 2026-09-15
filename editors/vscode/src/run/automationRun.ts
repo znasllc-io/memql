@@ -3,7 +3,7 @@
 // Shorter than B2's orchestrator (run/orchestrator.ts) by exactly the part
 // that does not apply: there is no bundle, no Gate-1 validation and no
 // session-define, because AN AUTOMATION IS NOT SESSION-DEFINABLE. Session
-// define covers the plain construct family (query / mutate / logic / spec /
+// define covers the plain construct family (query / mutation / logic / spec /
 // trait); an automation is registered against a bus subscription when the DSL
 // tree loads, so it is dispatched by subscription rather than resolved by name
 // at call time. Injecting the buffer would change nothing about what runs.

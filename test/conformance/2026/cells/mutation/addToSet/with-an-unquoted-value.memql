@@ -1,6 +1,6 @@
 /// Add labels to a ticket; a label it already carries is not added twice.
 @addToSet(labels)
-mutate ticket labelTicketAddToSet {
+mutation ticket labelTicketAddToSet {
   args {
     ticketId  string!
     labels    []string!

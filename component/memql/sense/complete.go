@@ -16,6 +16,13 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 	ctx := analyzeCursorContext(source, line, col)
 	ctx.FilePath = filePath
 
+	// Where a statement starts, or follows a statement on its line, the
+	// statement language decides what may be written (epic memql#5370) --
+	// even in a logic body, whose every other place is an expression.
+	if items, ok := s.completeAtStatement(ctx, source, line, col); ok {
+		return items
+	}
+
 	// An expression position (memql#5365) offers what the tier manifest admits
 	// there, and nothing it refuses.
 	if items, ok := s.completeAtExpression(ctx, source, line, col); ok {
@@ -39,6 +46,12 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 	case ContextReceiver:
 		items = s.completeReceiver(ctx.Prefix)
 	case ContextFuncBody:
+		// In a body written in statements (epic memql#5370), what the
+		// statement completer and the expression positions left is a value.
+		if _, ok := statementBodySite(source, line, cursorLine(source, line, col), ctx.Enclosing, ctx.Prefix); ok {
+			items = s.statementExpressionItems(ctx, source, line, col)
+			break
+		}
 		items = s.completeFuncBody(ctx.Prefix, ctx.Enclosing, source)
 		// G2 (memql#2364): inside an automation body that declares an
 		// `args { }` block, offer the declared field names -- they resolve
@@ -81,11 +94,10 @@ func (s *Service) completeTopLevel(prefix string) []CompletionItem {
 	})
 
 	// Top-level construct keywords, projected from the DSL spec: concept,
-	// query, mutate, logic, automation, action, capability, spec, trait, shape,
-	// tool, prompt, provider, builtin, policy, seed, use. This replaces the
-	// stale hand-coded `func / use / concept` set -- so typing `mut` now offers
-	// `mutate` (the declaration keyword; `mutation` is invocation-only), etc.
-	// (#2122 / #2123).
+	// query, mutation, logic, automation, action, capability, spec, trait,
+	// shape, tool, prompt, provider, builtin, policy, seed, use. This replaces
+	// the stale hand-coded `func / use / concept` set -- so typing `mut` now
+	// offers `mutation`, etc. (#2122 / #2123).
 	items = append(items, specConstructItems(prefix)...)
 	// Construct skeletons (#2629): full declarations with tabstops,
 	// sorted below the bare keywords so they offer without displacing.
@@ -836,7 +848,7 @@ func argsFieldItems(fields []string, types map[string]string, prefix, doc string
 
 // enclosingConstructHeader matches the header of a construct that declares an
 // args block.
-const enclosingConstructHeader = `^\s*(?:automation|query|mutate|logic)\s+[A-Za-z_]`
+const enclosingConstructHeader = `^\s*(?:automation|query|mutation|logic)\s+[A-Za-z_]`
 
 // automationArgsFieldCompletions keeps the G2 bare-name behavior:
 // inside an AUTOMATION body the declared args fields resolve bare, so
@@ -1080,7 +1092,7 @@ func bodyBlocksForConstruct(enc EnclosingConstruct) []string {
 // construct's verbs.
 func invocationKeywordsForConstruct(enc EnclosingConstruct) []string {
 	switch enc.Keyword {
-	case "mutate":
+	case "mutation":
 		return []string{"insert", "update"}
 	case "logic", "automation", "action":
 		return []string{"query", "mutation", "logic"}

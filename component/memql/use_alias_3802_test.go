@@ -38,7 +38,7 @@ func TestAliasedImportLetsOneFileMeanBoth(t *testing.T) {
 
 	const aliased = `use tools.concepts.{ widget as toolsWidget }
 
-mutate toolsWidget probeForeign {
+mutation toolsWidget probeForeign {
   args {
     widgetId string @required
   }
@@ -61,7 +61,7 @@ mutate toolsWidget probeForeign {
 	// structurally rather than by adding a check somewhere.
 	const bare = `use tools.concepts.{ widget as toolsWidget }
 
-mutate widget probeLocal {
+mutation widget probeLocal {
   args {
     widgetId string @required
   }
@@ -91,7 +91,7 @@ func TestUnaliasedCapturingImportIsRefused(t *testing.T) {
 
 	const src = `use tools.concepts.{ widget }
 
-mutate widget probeWrite {
+mutation widget probeWrite {
   args {
     widgetId string @required
   }
@@ -129,7 +129,7 @@ func TestUnaliasedImportOfANonCollidingNameStillWorks(t *testing.T) {
 
 	const src = `use tools.concepts.{ widget }
 
-mutate widget probeWrite {
+mutation widget probeWrite {
   args {
     widgetId string @required
   }

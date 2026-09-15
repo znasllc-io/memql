@@ -63,7 +63,7 @@ func RewriteAcceptStamp(src []byte) ([]byte, error) {
 		case TokenBraceClose:
 			depth--
 		case TokenIdentifier:
-			if depth != 0 || tok.Literal != "mutate" {
+			if depth != 0 || tok.Literal != "mutation" {
 				continue
 			}
 			openIdx, closeIdx := constructBraceSpan(tokens, i)
@@ -136,8 +136,8 @@ var (
 	stampKeyRe      = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)[ \t]*:`)
 )
 
-// acceptStampEditForMutation inspects one `mutate` construct's tokens
-// (mtoks[0] is the mutate keyword; braceIdx indexes its opening brace
+// acceptStampEditForMutation inspects one `mutation` construct's tokens
+// (mtoks[0] is the mutation keyword; braceIdx indexes its opening brace
 // within mtoks) and returns the write-block inner replacement if the
 // block is eligible.
 func acceptStampEditForMutation(runes []rune, mtoks []Token, braceIdx, bodyStart, bodyEnd int) (acceptStampEdit, bool) {

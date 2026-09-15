@@ -150,6 +150,11 @@ capability->surface resolver** are deferred to Story 8.
 
 ## Decision 5 -- `body { }` is the procedural marker
 
+> Superseded by epic memql#5370 (edition 2026 statement bodies): the
+> `body { }` wrapper is retired on `logic` as well, so no construct has one. A
+> logic's and an automation's statements follow their `args { }` block
+> directly, and `step` blocks are retired with it.
+
 `body { }` wraps imperative, multi-statement content. It is **mandatory on
 `logic`** (always, even one-liners) and **used by nothing else**. Its presence
 therefore *means* "procedural code here" -- a real, enforced signal.

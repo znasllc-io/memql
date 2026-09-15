@@ -46,12 +46,14 @@ type Postcondition struct {
 func (p Postcondition) Declared() bool { return p.Kind != "" }
 
 // DerivePostcondition returns the free postcondition for a step, when
-// there is one. ok=false means the template must declare one -- it is
-// not an error here, because whether that is fatal depends on the step's
-// KIND, which is RequirePostcondition's question.
-func DerivePostcondition(stepType, target string, reg Registry) (Postcondition, bool) {
+// there is one. callKind is the kind of the construct the step's statement
+// calls (`x := mutation writeThing(...)` is "mutation"), empty for a
+// statement that calls none. ok=false means the template must declare one --
+// it is not an error here, because whether that is fatal depends on the
+// step's KIND, which is RequirePostcondition's question.
+func DerivePostcondition(callKind, target string, reg Registry) (Postcondition, bool) {
 	t, known := reg[target]
-	switch stepType {
+	switch callKind {
 	case "mutation":
 		concept := ""
 		if known {
@@ -63,7 +65,7 @@ func DerivePostcondition(stepType, target string, reg Registry) (Postcondition, 
 		// The row exists, with the fields the mutation wrote. The engine
 		// already knows both halves, so this needs nothing from the author.
 		return Postcondition{Kind: PostconditionCheck, Ref: "rowWritten:" + concept}, true
-	case "query", "shape":
+	case "query":
 		if !known {
 			return Postcondition{}, false
 		}

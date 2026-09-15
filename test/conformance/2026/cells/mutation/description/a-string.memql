@@ -1,5 +1,5 @@
 @description("Retitle one ticket.")
-mutate ticket retitleTicketDescription {
+mutation ticket retitleTicketDescription {
   args {
     ticketId  string!
     title     string!

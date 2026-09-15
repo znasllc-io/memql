@@ -27,7 +27,7 @@
 //
 // An action is reduced to an `args { ... }` block plus a SINGLE
 // `capability <verb>(...)` call (construct-invocation ADR Decision 3). There is
-// NO `body { }` and no `return` -- the body IS the one capability call. The
+// no statements and no `return` -- the body IS the one capability call. The
 // bare verb resolves through the file-top `use capabilities.<path>.{ verb }`
 // import to a full dotted capability name.
 //
@@ -37,10 +37,10 @@
 //   args { <name> <type> [@required] ... }
 //                          The action's input schema (same grammar as every
 //                          other construct's args block). @description on an
-//                          args FIELD is parsed and discarded (#2615) -- do
-//                          not write it; per-field docs arrive with /// doc
-//                          comments (#2601). The declaration-level
-//                          @description above is the load-bearing one.
+//                          args FIELD is refused at load (memql#3336): a
+//                          field is described by a /// doc comment above it.
+//                          The declaration-level @description above is the
+//                          load-bearing one.
 //   capability <verb>(<key>: <value>, ...)
 //                          The single external capability. Each value is a
 //                          LITERAL or an `args.<x>` reference -- never a call
@@ -114,21 +114,27 @@ action tagReleaseExample {
 }
 
 // =============================================================================
-//   3. Calling an action -- the automation step (ADR Decision 1+2)
+//   3. Calling an action -- an automation statement (ADR Decision 1+2)
 // =============================================================================
 //
-// An action is invoked from an automation step in the kind-prefixed invocation
-// form `action <name>(<colon-args>)`. The action resolves by NAME (no
-// `@version` suffix). Step args bind to the action's `args`:
+// An action is called from an automation as a statement, in the kind-prefixed
+// form `action <name>(<named args>)`, optionally closed with
+// `on surface("<name>")`. The action resolves by NAME (no `@version` suffix),
+// and the call's arguments bind to the action's `args`. Only an automation
+// calls an action; a logic that does is refused (body_call_not_in_logic).
 //
 //   use deployment.actions.{ cloneRepoAtVersion }
 //
-//   automation deployEngine @trigger(event="deploy.requested.staging") {
-//     step clone {
-//       action cloneRepoAtVersion(workdir: "/work/memql", ref: event.payload.ref)
+//   @trigger(event="deploy.requested")
+//   automation deployEngine {
+//     args {
+//       ref string!
 //     }
-//     // ... next step is a mutation that records the result (decide->act->persist)
+//     clone := action cloneRepoAtVersion(workdir: "/work/memql", ref: args.ref)
+//     // ... a mutation statement records the result (decide -> act -> persist)
 //   }
+//
+// The statement's value, `clone` above, is the result its capability produced.
 //
 // An identical input replays token-free: binding the same args renders the
 // same capability arguments, the capability runs on the default surface, and
@@ -148,7 +154,8 @@ action tagReleaseExample {
 //   $params.X      the string-template form is retired.
 //   capability "<verb>"   the stringly form is retired -- write `capability
 //                         <verb>(...)` and import the verb.
-//   body { }       an action has no procedural body (ADR Decision 5).
+//   body { }       an action has no procedural body (ADR Decision 5); nor
+//                  does it take statements.
 //
 // =============================================================================
 //   5. NON-COMPLIANT examples (rejected by the I7 call-graph validator)

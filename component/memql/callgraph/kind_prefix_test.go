@@ -7,6 +7,11 @@ import "testing"
 // an invocation kind (query / mutation / logic / action / builtin / automation)
 // MUST carry its kind keyword at the call site (`<kind> name(...)`). A bare
 // `name(...)` is a `missing-kind-prefix` finding.
+//
+// memqlmigrate:keep-file -- the bare calls are the cases. In a statement body
+// (epic memql#5370) a bare construct call is a parse refusal instead
+// (body_call_kind_missing); these fixtures stay in the retired body grammar,
+// where this rule is the one that sees it.
 
 const kindPrefixUseHeader = `use cluster.queries.{ existingCluster }
 use cluster.mutations.{ createNode }

@@ -6,55 +6,48 @@ import (
 	"strings"
 )
 
-// body_rule.go enforces Decision 5 of the construct-invocation ADR
-// (docs/internal/design/construct-invocation-syntax-adr.md): `body { }` is
-// the procedural marker. It is MANDATORY on `logic` (always, even one-liners)
-// and FORBIDDEN on every other construct -- its presence therefore *means*
-// "procedural code here." A `logic` without `body { }` and any non-`logic`
-// construct *with* `body { }` are both rejected here in the parser (mirrored
-// by the authoring-sandbox cross-reference pass + the whole-tree CI gate via
-// component/memql/callgraph).
-//
-// The logic-mandatory-body half lives in the struct-form rewriter (emitLogic
-// in rewriter.go), which is where the `body { }` wrapper is recognised and
-// inlined. The forbidden-elsewhere half is enforced per non-logic construct:
-//   - query / mutation -> rejectNonLogicBodyBlock (called from emitQuery /
+// body_rule.go enforces the body rule: no MemQL construct has a `body { }`
+// block. Decision 5 of the construct-invocation ADR
+// (docs/internal/design/construct-invocation-syntax-adr.md) made `body { }`
+// the procedural marker, mandatory on `logic`; epic memql#5370 retired it
+// there too, so a logic's and an automation's statements follow their args
+// block directly. The rule is enforced per construct (mirrored by the
+// authoring-sandbox cross-reference pass via component/memql/callgraph):
+//   - logic / automation -> the statement parser refuses the wrapper by name
+//     (body_block_retired, v1_body.go);
+//   - query / mutation   -> rejectNonLogicBodyBlock (called from emitQuery /
 //     emitMutation on the construct's source text);
-//   - spec / trait     -> a token guard in parseSpecDecl;
-//   - automation       -> a token guard in parseGoStyleAutomationBody;
-//   - action           -> parseActionDecl's closed key set already rejects it;
-//   - capability       -> parseCapabilityDecl already rejects it explicitly.
+//   - spec / trait       -> a token guard in parseSpecDecl;
+//   - action             -> parseActionDecl's closed key set already rejects it;
+//   - capability         -> parseCapabilityDecl already rejects it explicitly.
 
 // bodyRuleBlockHeader matches a `body { ... }` block opener at statement
 // position (start of source or after a newline, optional leading whitespace).
 // It deliberately requires the `{` so a declarative field merely *named* body
-// (e.g. a concept field `body string`) is never mistaken for the procedural
-// marker.
+// (e.g. a concept field `body string`) is never mistaken for the block.
 var bodyRuleBlockHeader = regexp.MustCompile(`(^|[\n\r])[ \t]*body[ \t]*\{`)
 
 // bodyRuleHint returns the construct's correct authoring form, pointing an
 // author who wrongly added a `body { }` block at what they should write
-// instead (ADR Decision 5 reference table).
+// instead.
 func bodyRuleHint(kind string) string {
 	switch kind {
 	case "spec", "trait":
-		return "a spec/trait body is a bare `return <expr>`"
+		return "a spec or trait is one lambda, `= row => <predicate>`"
 	case "query", "mutation":
 		return "a query/mutation body is declarative clauses (filter / shape / sort / insert / update)"
 	case "action":
 		return "an action body is the single `capability <name>(...)` call"
-	case "automation":
-		return "an automation body is `step ...` blocks"
 	default:
-		return "remove the `body { }` block (it is reserved for `logic`)"
+		return "a logic's and an automation's statements follow their args block directly"
 	}
 }
 
-// bodyRuleForbiddenMessage is the canonical "non-logic construct carries a
-// body { }" rejection text, shared by every enforcement site so the message
-// is identical regardless of which parser path catches the violation.
+// bodyRuleForbiddenMessage is the canonical "construct carries a body { }"
+// rejection text, shared by every enforcement site so the message is
+// identical regardless of which parser path catches the violation.
 func bodyRuleForbiddenMessage(kind, name string) string {
-	return fmt.Sprintf("%s %q must not declare a `body { }` block -- `body { }` is the procedural marker reserved for `logic` (mandatory on logic, forbidden on every other construct; ADR Decision 5); %s", kind, name, bodyRuleHint(kind))
+	return fmt.Sprintf("%s %q must not declare a `body { }` block -- no MemQL construct has one; %s", kind, name, bodyRuleHint(kind))
 }
 
 // rejectNonLogicBodyBlock returns the body-rule violation error when a

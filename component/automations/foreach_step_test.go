@@ -7,22 +7,18 @@ import (
 
 // memql#2246 -- the `forEach` step in the struct-form automation grammar.
 //
-// These tests lock the full chain: authored struct form -> rewriter ->
-// procedural parser -> compiler -> Automation.Steps[].ForEach IR
-// (ForEachStepConfig{Source, As, Do}), which the ForEachExecutor already
-// runs once per item. This is the author-surface that unblocks moving the
-// per-row sweep logics (#2235) into automation steps.
+// These tests lock the full chain: an authored `for` statement -> the
+// statement parser -> the statement compiler -> Automation.Steps[].ForEach IR
+// (ForEachStepConfig{Source, As, Do}), which the ForEachExecutor runs once
+// per item. This is the author-surface that moved the per-row sweep logics
+// (#2235) into automation steps.
 
 const forEachAuthoredSrc = `@description("Prune stale nodes one row at a time.")
 @trigger(event="system.startup")
 automation pruneStaleNodes {
-  step decide {
-    automation findStaleNodes { }
-  }
-  step prune {
-    forEach node in decide.result {
-      automation retireNode { id: node.id }
-    }
+  decide := automation findStaleNodes()
+  for node in decide {
+    automation retireNode(id: node.id)
   }
 }`
 
@@ -42,20 +38,20 @@ func TestCompileSource_ForEachStep(t *testing.T) {
 	if loop.ForEach == nil {
 		t.Fatal("forEach step must carry the ForEach config")
 	}
-	// The collection expression survives, the iteration variable is the
-	// canonical `item`, and the loop carries exactly one Do child.
-	if loop.ForEach.Source != "decide.result" {
+	// The collection expression survives, the iteration variable is its
+	// author's, and the loop carries exactly one Do child.
+	if loop.ForEach.Source != "decide" {
 		t.Errorf("forEach source mismatch, got %q", loop.ForEach.Source)
 	}
-	if loop.ForEach.As != "item" {
-		t.Errorf("forEach iteration var must be canonicalised to `item`, got %q", loop.ForEach.As)
+	if loop.ForEach.As != "node" {
+		t.Errorf("the loop variable must keep its author's name, `node`, got %q", loop.ForEach.As)
 	}
 	if len(loop.ForEach.Do) != 1 {
 		t.Fatalf("want 1 Do child, got %d", len(loop.ForEach.Do))
 	}
 	do := loop.ForEach.Do[0]
-	if do.ID != "prune_do1" {
-		t.Errorf("Do child must keep its synthesized name, got %q", do.ID)
+	if do.ID != "retireNode" {
+		t.Errorf("an unnamed call's id is its callee, got %q", do.ID)
 	}
 	if do.Type != StepTypeAutomation || do.Automation == nil || do.Automation.Name != "retireNode" {
 		t.Errorf("Do child must dispatch the inner call, got type=%s automation=%+v", do.Type, do.Automation)
@@ -63,32 +59,9 @@ func TestCompileSource_ForEachStep(t *testing.T) {
 }
 
 func TestCompileSource_ForEachStep_Diagnostics(t *testing.T) {
-	cases := []struct {
-		name    string
-		body    string
-		wantErr string
-	}{
-		{
-			name:    "missing in keyword",
-			body:    `forEach node decide.result { automation y { } }`,
-			wantErr: "expected `in`",
-		},
-		{
-			name:    "empty body",
-			body:    `forEach node in decide.result { }`,
-			wantErr: "the loop body is empty",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			src := "@description(\"bad\")\nautomation bad {\n  step s {\n    " + tc.body + "\n  }\n}"
-			_, err := newTestLoader().CompileSource(src, "test:foreach-bad")
-			if err == nil {
-				t.Fatalf("expected error containing %q, got nil", tc.wantErr)
-			}
-			if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("error %q does not contain %q", err.Error(), tc.wantErr)
-			}
-		})
+	src := "@description(\"bad\")\n@trigger(event=\"system.startup\")\nautomation bad {\n  decide := automation findStaleNodes()\n  for node decide {\n    automation retireNode(id: node.id)\n  }\n}"
+	_, err := newTestLoader().CompileSource(src, "test:foreach-bad")
+	if err == nil || !strings.Contains(err.Error(), "expected `in` after the loop variable") {
+		t.Fatalf("a `for` without `in` must be refused naming it, got %v", err)
 	}
 }

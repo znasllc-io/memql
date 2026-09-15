@@ -1,6 +1,6 @@
 /// Attach files to a ticket, keeping the ones already attached.
 @appendFields(attachmentIds)
-mutate ticket attachToTicketAppendFields {
+mutation ticket attachToTicketAppendFields {
   args {
     ticketId       string!
     attachmentIds  []string!

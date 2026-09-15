@@ -1,0 +1,21 @@
+// The declaration keyword is mutation; a commented-out example stays as written:
+//   mutate note oldExample {
+/// Create a note.
+@description("kept")
+mutation note createDemoNote {
+  args {
+    title string!
+  }
+  insert {
+    title: args.title
+  }
+}
+
+  mutation note indentedDemoNote {
+  args {
+    title string!
+  }
+  insert {
+    title: args.title
+  }
+}

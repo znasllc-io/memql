@@ -1,0 +1,19 @@
+/// An alert the on-error cell reads.
+concept alert {
+  open  bool
+  note  string
+}
+
+query alert openAlerts {
+  filter row => row.open == true
+}
+
+mutation alert notifyOwner {
+  args {
+    note  string  @required
+  }
+  insert {
+    open: false
+    note: args.note
+  }
+}

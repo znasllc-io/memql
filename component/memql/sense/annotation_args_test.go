@@ -26,12 +26,15 @@ func TestCompleteAnnotationArgs_DerivedFromRegistry(t *testing.T) {
 	s := New(nil)
 
 	trigger := labelSet(s.completeAnnotationArgs(CursorContext{AnnotationName: "trigger"}))
-	// partition is currently-required and common in the real DSL (#56 phase 8),
-	// so it must be offered alongside event/schedule/concept.
-	for _, want := range []string{"event", "schedule", "concept", "partition"} {
+	for _, want := range []string{"event", "schedule", "concept"} {
 		if !trigger[want] {
 			t.Errorf("trigger args missing %q (want registry-derived)", want)
 		}
+	}
+	// partition= is retired from @trigger (the parser refuses it,
+	// trigger_partition_retired), so completion must not offer it.
+	if trigger["partition"] {
+		t.Error("trigger args offer the retired partition key")
 	}
 
 	rl := labelSet(s.completeAnnotationArgs(CursorContext{AnnotationName: "rateLimit"}))
@@ -84,7 +87,7 @@ func TestTokenize_ColorsUseAndInKeywords(t *testing.T) {
 // (constructKeywords) rather than hand-listed, and excludes the unnamed `use`
 // import.
 func TestConstructHeaderRe_DerivedFromDslspec(t *testing.T) {
-	for _, decl := range []string{"query Foo q {", "mutate Foo m {", "concept foo {", "shape Foo s {"} {
+	for _, decl := range []string{"query Foo q {", "mutation Foo m {", "concept foo {", "shape Foo s {"} {
 		if !constructHeaderRe.MatchString(decl) {
 			t.Errorf("constructHeaderRe should match %q", decl)
 		}

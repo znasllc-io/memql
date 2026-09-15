@@ -224,7 +224,8 @@
     {
       "file": "no-condition.memql",
       "verdict": "refuse_parse",
-      "message": "conditional step: missing condition between `if` and `{`"
+      "code": "body_missing_expression",
+      "message": "missing condition between `if` and `{`: write `if <condition> { ... }`"
     }
   ]
 }

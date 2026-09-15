@@ -39,15 +39,9 @@ func TestCrossLane_CommentInAnOuterHeaderDoesNotRefuseTheLoad(t *testing.T) {
 		},
 		{
 			name: "mutation",
-			ctl:  "mutate space createSpace {\n  args {\n    id string @required\n  }\n  insert { id: args.id }\n}",
-			with: "mutate space /*c*/ createSpace {\n  args {\n    id string @required\n  }\n  insert { id: args.id }\n}",
+			ctl:  "mutation space createSpace {\n  args {\n    id string @required\n  }\n  insert { id: args.id }\n}",
+			with: "mutation space /*c*/ createSpace {\n  args {\n    id string @required\n  }\n  insert { id: args.id }\n}",
 			fn:   NormaliseMutationSource,
-		},
-		{
-			name: "logic",
-			ctl:  "logic doFoo {\n  args {\n    x string @required\n  }\n  body {\n    return args.x\n  }\n}",
-			with: "logic /*c*/ doFoo {\n  args {\n    x string @required\n  }\n  body {\n    return args.x\n  }\n}",
-			fn:   NormaliseLogicSource,
 		},
 	} {
 		t.Run(lane.name, func(t *testing.T) {
@@ -82,13 +76,8 @@ func TestCrossLane_CommentInAnArgsHeaderDoesNotDropTheArgsBlock(t *testing.T) {
 	}{
 		{
 			name: "mutation",
-			ctl:  "mutate space createSpace {\n  args {\n    id string @required\n  }\n  insert { id: args.id }\n}",
+			ctl:  "mutation space createSpace {\n  args {\n    id string @required\n  }\n  insert { id: args.id }\n}",
 			fn:   NormaliseMutationSource,
-		},
-		{
-			name: "logic",
-			ctl:  "logic doFoo {\n  args {\n    x string @required\n  }\n  body {\n    return args.x\n  }\n}",
-			fn:   NormaliseLogicSource,
 		},
 	} {
 		for _, pos := range []struct{ name, header string }{

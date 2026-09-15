@@ -1,0 +1,28 @@
+// Bare calls take the kind their name resolved to at run time: a builtin, a
+// mutation, and a builtin that a @template automation of the same name wraps.
+
+@trigger(schedule="0 30 3 * * *")
+automation demoBareCalls {
+  step fold {
+    routingEvidenceFold { }
+  }
+  step train {
+    trainSpecialist (
+      domainId: "d1",
+      mode: "initial"
+    )
+  }
+  step decide {
+    logic accessRequestExpirySweep ( event: event )
+  }
+  step apply {
+    forEach item in decide.result {
+      expireAccessRequest {
+        requestId: item.id
+      }
+    }
+  }
+  step legacyVerb {
+    mutate expireAccessRequest { requestId: "r1" }
+  }
+}

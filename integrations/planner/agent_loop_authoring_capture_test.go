@@ -27,6 +27,12 @@ func (f *fakeCaptureEngine) CompileBundle(constructs []memql.SandboxConstruct) m
 	return f.sandbox.CompileBundle(constructs)
 }
 
+// ToolCallee answers as the engine does for the tools the capture tests
+// record (transcriptCallees).
+func (f *fakeCaptureEngine) ToolCallee(tool string) (kind, callee string, ok bool) {
+	return transcriptCallees(tool)
+}
+
 func (f *fakeCaptureEngine) CatalogNearMatches(_ context.Context, _ string, _ int) ([]memql.CatalogNearMatch, error) {
 	return nil, nil
 }

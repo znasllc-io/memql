@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "file": "if.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "if-on-a-call.memql",
+      "verdict": "refuse_parse",
+      "code": "body_call_in_expression",
+      "message": "a construct call is a statement of its own: bind it, `<n> := query things(...)`, and read <n> here"
+    }
+  ]
+}

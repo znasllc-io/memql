@@ -1,0 +1,21 @@
+logic halveForWait {
+  args {
+    n any
+  }
+  return args.n / 2
+}
+
+logic halvesUntilOne {
+  args {
+    n any
+  }
+  parallel {
+    branch left {
+      logic halveForWait(n: args.n)
+    }
+    branch right {
+      logic halveForWait(n: args.n)
+    }
+  } wait any
+  return args.n
+}

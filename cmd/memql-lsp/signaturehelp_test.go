@@ -75,7 +75,7 @@ func TestSignatureHelpHandler_Builtin(t *testing.T) {
 func TestSignatureHelpHandler_NoneOutsideCall(t *testing.T) {
 	s := newTestServerWithSense(t, sense.New(nil))
 	const uri = "file:///t.memql"
-	s.docs.open(uri, "logic x {\n  body {\n    return 1\n  }\n}")
+	s.docs.open(uri, "logic x {\n  return 1\n}")
 	sh, err := s.signatureHelp(noopCtx(), &protocol.SignatureHelpParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			TextDocument: protocol.TextDocumentIdentifier{URI: uri},

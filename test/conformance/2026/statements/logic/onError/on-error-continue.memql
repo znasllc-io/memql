@@ -1,0 +1,4 @@
+logic alertsOrNone {
+  x := query staleAlerts() on error continue
+  return x ?? "none"
+}

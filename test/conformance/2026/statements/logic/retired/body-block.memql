@@ -1,0 +1,5 @@
+logic bodyBlock {
+  body {
+    return 1
+  }
+}

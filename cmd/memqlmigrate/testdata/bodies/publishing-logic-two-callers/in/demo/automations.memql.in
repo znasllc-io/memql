@@ -1,0 +1,8 @@
+automation demoTerse @trigger(schedule="0 0 * * * *") => logic demoPublisher
+
+@trigger(event="demo.other")
+automation demoOther {
+  step call {
+    logic demoPublisher ( event: event )
+  }
+}

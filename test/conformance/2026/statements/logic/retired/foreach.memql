@@ -1,0 +1,9 @@
+logic forEachStatement {
+  args {
+    items any
+  }
+  forEach item in args.items {
+    return item
+  }
+  return 0
+}

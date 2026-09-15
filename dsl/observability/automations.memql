@@ -9,7 +9,5 @@
 /// MEMQL_LOGS_RETENTION_DAYS (default 30).
 @trigger(schedule="0 20 3 * * *")
 automation logsRetentionSweep {
-  step sweep {
-    builtin logsSweep ()
-  }
+  sweep := builtin logsSweep()
 }

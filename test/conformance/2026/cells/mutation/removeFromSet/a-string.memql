@@ -1,6 +1,6 @@
 /// Remove labels from a ticket; removing one it does not carry changes nothing.
 @removeFromSet("labels")
-mutate ticket unlabelTicketRemoveFromSet {
+mutation ticket unlabelTicketRemoveFromSet {
   args {
     ticketId  string!
     labels    []string!

@@ -92,7 +92,7 @@ func TestDispatchDB_SchedulerJournalDoesNotStartACompetingExecution(t *testing.T
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
-	auto := &automations.Automation{Name: "schedulerJournalProbe", Trusted: true, Steps: []*automations.Step{{ID: "effect", Type: automations.StepTypeQuery, Query: &automations.QueryStepConfig{Query: "probe"}}}}
+	auto := &automations.Automation{Name: "schedulerJournalProbe", Trusted: true, Steps: []*automations.Step{{ID: "effect", Type: automations.StepTypeFunction, Function: &automations.FunctionStepConfig{Name: "probe", Kind: "query"}}}}
 	go func() {
 		_, err := exec.ExecuteWithEvent(ctx, auto, "event:system.startup", &events.Event{Topic: "system.startup", Payload: map[string]any{"node": map[string]any{"type": "bff"}}})
 		done <- err

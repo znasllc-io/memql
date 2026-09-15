@@ -85,7 +85,8 @@ type AutomationRunner interface {
 	// RunInlineAutomation compiles ad-hoc automation .memql SOURCE submitted at
 	// call time and runs its action chain directly through the Phase-4 manual
 	// Executor path, NEVER persisting -- the run is isolated so writes land in an
-	// ephemeral sandbox partition and webhooks are recorded-and-blocked. Tier-3
+	// ephemeral sandbox partition and other side effects are recorded, never
+	// run. Tier-3
 	// (inline); gated server-side to the inline tier + owner/developer before this
 	// is reached. (#1558)
 	RunInlineAutomation(ctx context.Context, owner, source string, input map[string]any) (map[string]any, error)
@@ -264,7 +265,7 @@ func listMCPTools(eng Engine, role string, tier Tier, appSessionId string) []map
 		})
 		out = append(out, map[string]any{
 			"name":        toolRunInlineAutomation,
-			"description": "Compile ad-hoc automation .memql source submitted at call time and run its action chain directly, NEVER persisting (isolated: writes land in an ephemeral sandbox partition, webhooks are recorded-and-blocked). Requires the inline tier + owner/developer role.",
+			"description": "Compile ad-hoc automation .memql source submitted at call time and run its action chain directly, NEVER persisting (isolated: writes land in an ephemeral sandbox partition; a publish, an action or a sub-automation is recorded, never run). Requires the inline tier + owner/developer role.",
 			"inputSchema": map[string]any{
 				"type": "object",
 				"properties": map[string]any{

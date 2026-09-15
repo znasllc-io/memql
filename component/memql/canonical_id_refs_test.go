@@ -26,7 +26,7 @@ func TestResolveCanonicalIdConceptRefs_Typed(t *testing.T) {
 	src := `use cognition.concepts.{ space }
 use identity.concepts.{ user }
 
-mutate participant joinSpace {
+mutation participant joinSpace {
   insert {
     id: "participant-" + hash(canonicalId(args.partitionId, "space") + ":" + canonicalId(args.userId, "user"))
     partitionId: canonicalId(args.partitionId, "space")
@@ -66,7 +66,7 @@ func TestResolveCanonicalIdConceptRefs_StringFormUntouched(t *testing.T) {
 // type check stands.
 func TestResolveCanonicalIdConceptRefs_Unimported(t *testing.T) {
 	src := `use cognition.concepts.{ space }
-mutate x y { insert { id: canonicalId(args.id, "widget") } }`
+mutation x y { insert { id: canonicalId(args.id, "widget") } }`
 	_, err := cidResolver(t).ResolveCanonicalIdConceptRefs(src)
 	if err == nil {
 		t.Fatalf("expected an error for the unimported concept %q", "widget")

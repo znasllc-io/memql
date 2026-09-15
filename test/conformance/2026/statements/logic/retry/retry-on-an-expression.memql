@@ -1,0 +1,4 @@
+logic retryExpression {
+  x := 1 retry(2)
+  return x
+}

@@ -30,7 +30,7 @@ concept c1Widget {
 const authMutationSrc = `use c1grpc.concepts.{ c1Widget }
 
 @description("Create a C1 grpc widget")
-mutate c1Widget mutationCreateC1Widget {
+mutation c1Widget mutationCreateC1Widget {
   args {
     widgetId  string  @required
   }

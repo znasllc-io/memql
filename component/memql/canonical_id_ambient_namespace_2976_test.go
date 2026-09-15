@@ -123,7 +123,7 @@ func TestCanonicalId_AmbientAndSameDomainGateAgree(t *testing.T) {
 	//    only consistent BECAUSE ambient works. If the rewrite ever stopped
 	//    stripping it the two rules would have drifted apart again, in the
 	//    other direction.
-	src := []byte("use zdeploy.concepts.{ widget }\n\nmutate widget doThing {\n  insert {\n    id: args.x\n  }\n}\n")
+	src := []byte("use zdeploy.concepts.{ widget }\n\nmutation widget doThing {\n  insert {\n    id: args.x\n  }\n}\n")
 	rewritten, err := languageParser.RewriteSameDomainUse(domain, src)
 	if err != nil {
 		t.Fatalf("RewriteSameDomainUse: %v", err)

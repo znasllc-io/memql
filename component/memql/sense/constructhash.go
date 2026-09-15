@@ -34,12 +34,11 @@ package sense
 // state a concept or a shape has exactly as much as a query has it, and the
 // editor decorates all of them.
 type ConstructHash struct {
-	// Kind is the authored construct keyword -- query / mutate / concept /
-	// shape / spec / tool / ... -- as written in the file. The engine catalog
-	// reports `mutation` for what is authored `mutate`, so a client comparing
-	// the two translates through memql.ConstructKindForKeyword rather than
-	// special-casing that one name: the same function also answers whether the
-	// catalog carries the kind AT ALL, which `action` and `capability` do not,
+	// Kind is the authored construct keyword -- query / mutation / concept /
+	// shape / spec / tool / ... -- as written in the file. A client comparing
+	// it with the engine catalog joins through memql.ConstructKindForKeyword:
+	// the same function also answers whether the catalog carries the kind AT
+	// ALL, which `action` and `capability` do not,
 	// and their absence from a catalog is not evidence of anything (memql#3759).
 	Kind string
 	// Name is the construct's declared name.

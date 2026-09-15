@@ -45,7 +45,7 @@
 /// privilege. Partition-agnostic: the engine stamps every v1:rbac:role insert into the _system slot
 /// regardless of the envelope, exactly like createAgentRole / createCapability.
 @serverOnly
-mutate role createRole {
+mutation role createRole {
   args {
     roleId       string
     slug         string!
@@ -96,7 +96,7 @@ mutate role createRole {
 /// engine stamps every v1:rbac:capability insert into the _system slot regardless of the envelope,
 /// exactly like createAgentRole / createSkill.
 @serverOnly
-mutate capability createCapability {
+mutation capability createCapability {
   args {
     capabilityId  string
     roleSlug      string!
@@ -131,7 +131,7 @@ mutate capability createCapability {
 /// being granted, outranks the subject, and is not the subject -- is relational, which is Go, which
 /// is the guarded `grantSet` path. A client reaching this directly would skip all four.
 @serverOnly
-mutate grant writeGrant {
+mutation grant writeGrant {
   args {
     /// The derived row id: auth.GrantRowID(subjectKind, subjectId, verb, resourceType).
     grantId       string!
@@ -161,7 +161,7 @@ mutate grant writeGrant {
 /// The guarded path is `grantRevoke`, which checks the writer's authority in Go and stamps
 /// internal origin.
 @serverOnly
-mutate grant deactivateGrant {
+mutation grant deactivateGrant {
   args {
     grantId  string!
   }

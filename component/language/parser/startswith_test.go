@@ -252,10 +252,6 @@ func walkExpressions(file *File, visit func(ExpressionNode)) {
 	walkBody = func(body Node) {
 		switch b := body.(type) {
 		case nil:
-		case *ReturnStmt:
-			for _, r := range b.Results {
-				walk(r)
-			}
 		case *QueryStmt:
 			walk(b.Expression)
 		case ExpressionNode:

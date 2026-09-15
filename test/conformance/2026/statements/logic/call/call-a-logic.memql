@@ -1,0 +1,14 @@
+logic halve {
+  args {
+    n any
+  }
+  return args.n / 2
+}
+
+logic callsALogic {
+  args {
+    n any
+  }
+  h := logic halve(n: args.n)
+  return h + 1
+}

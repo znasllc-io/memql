@@ -32,7 +32,7 @@ import (
 )
 
 // annotationGateSigRe finds a construct's signature line.
-var annotationGateSigRe = regexp.MustCompile(`(?m)^(?:query|mutate|logic)\s+\w+\s+%s\s*\{`)
+var annotationGateSigRe = regexp.MustCompile(`(?m)^(?:query|mutation|logic)\s+\w+\s+%s\s*\{`)
 
 // carriesAnnotationGate reports whether the named construct in `src` declares
 // `@requiresRank` or `@requiresCapability`.

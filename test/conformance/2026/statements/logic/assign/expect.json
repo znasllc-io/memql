@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "assign.memql",
+      "verdict": "evaluate",
+      "call": "sizeOf",
+      "args": {
+        "n": 6
+      },
+      "expect": "large"
+    },
+    {
+      "file": "call-inside-an-expression.memql",
+      "verdict": "refuse_parse",
+      "code": "body_call_in_expression",
+      "message": "a construct call is a statement of its own: bind it, `<n> := query countThings(...)`, and read <n> here"
+    }
+  ]
+}

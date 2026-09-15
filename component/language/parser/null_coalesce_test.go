@@ -277,7 +277,10 @@ func TestNullCoalesce_ExpressionArgIdentifierRHS(t *testing.T) {
 // own headline example must parse: `st := args.stage ?? ""`.
 func TestNullCoalesce_LogicAssignmentRHS(t *testing.T) {
 	src := `
-func (Logic) probeAssign(_ any) {
+logic probeAssign {
+  args {
+    stage string
+  }
   st := args.stage ?? ""
   return st
 }

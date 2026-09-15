@@ -21,15 +21,15 @@ test("required -- a read never prompts", () => {
 
 test("required -- a mutation against a LOCAL cluster never prompts", () => {
   const gate = new WriteConfirmationGate();
-  assert.equal(gate.required("mutate", true, "local", "createSpace"), false);
+  assert.equal(gate.required("mutation", true, "local", "createSpace"), false);
 });
 
 test("required -- a mutation against a non-local cluster prompts ONCE", () => {
   const gate = new WriteConfirmationGate();
-  assert.equal(gate.required("mutate", false, "staging", "createSpace"), true);
+  assert.equal(gate.required("mutation", false, "staging", "createSpace"), true);
   gate.acknowledge("staging", "createSpace");
   assert.equal(
-    gate.required("mutate", false, "staging", "createSpace"),
+    gate.required("mutation", false, "staging", "createSpace"),
     false,
     "a second run of the same mutation on the same cluster must not re-prompt",
   );
@@ -38,13 +38,13 @@ test("required -- a mutation against a non-local cluster prompts ONCE", () => {
 test("required -- acknowledging one mutation does not pre-authorise another", () => {
   const gate = new WriteConfirmationGate();
   gate.acknowledge("staging", "createSpace");
-  assert.equal(gate.required("mutate", false, "staging", "deleteSpace"), true);
+  assert.equal(gate.required("mutation", false, "staging", "deleteSpace"), true);
 });
 
 test("required -- acknowledging on one cluster does not carry to another", () => {
   const gate = new WriteConfirmationGate();
   gate.acknowledge("staging", "createSpace");
-  assert.equal(gate.required("mutate", false, "prod", "createSpace"), true);
+  assert.equal(gate.required("mutation", false, "prod", "createSpace"), true);
 });
 
 test("required -- an ABSENT local flag means not local", () => {
@@ -52,7 +52,7 @@ test("required -- an ABSENT local flag means not local", () => {
   // Defaulting those to "local" would silently disable the confirmation on
   // exactly the clusters -- staging, production -- it exists for.
   const gate = new WriteConfirmationGate();
-  assert.equal(gate.required("mutate", false, "unmarked", "createSpace"), true);
+  assert.equal(gate.required("mutation", false, "unmarked", "createSpace"), true);
 });
 
 test("acknowledgement keys cannot collide across a separator", () => {
@@ -61,7 +61,7 @@ test("acknowledgement keys cannot collide across a separator", () => {
   // authorise a differently-named one.
   const gate = new WriteConfirmationGate();
   gate.acknowledge("a:b", "c");
-  assert.equal(gate.required("mutate", false, "a", "b:c"), true);
+  assert.equal(gate.required("mutation", false, "a", "b:c"), true);
 });
 
 test("reset -- clears acknowledgements when the cluster registry changes", () => {
@@ -71,7 +71,7 @@ test("reset -- clears acknowledgements when the cluster registry changes", () =>
   const gate = new WriteConfirmationGate();
   gate.acknowledge("staging", "createSpace");
   gate.reset();
-  assert.equal(gate.required("mutate", false, "staging", "createSpace"), true);
+  assert.equal(gate.required("mutation", false, "staging", "createSpace"), true);
 });
 
 test("writeConfirmationMessage -- names both the cluster and the construct", () => {
@@ -81,7 +81,7 @@ test("writeConfirmationMessage -- names both the cluster and the construct", () 
     clusterName: "staging",
     clusterLabel: "MemQL Staging",
     constructName: "createSpace",
-    constructKind: "mutate",
+    constructKind: "mutation",
   });
   assert.match(message, /createSpace/);
   assert.match(message, /MemQL Staging/);

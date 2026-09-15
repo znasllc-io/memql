@@ -25,18 +25,16 @@
 // Refs: #3752 #3747
 
 /**
- * The keyword a kind is AUTHORED under, which is not always the kind the
- * catalog reports.
- *
- * Only `mutation` differs -- it is authored `mutate` -- and the engine keeps
- * the same table for slicing source (`constructKeyword` in
- * component/memql/construct_catalog.go). Written out rather than derived so
- * the one difference is visible.
+ * The keyword a kind is AUTHORED under. Every kind is authored under its own
+ * name -- a mutation is declared `mutation` (D13, epic memql#5370) -- and the
+ * engine keeps the same table for slicing source (`constructKeyword` in
+ * component/memql/construct_catalog.go). Written out so a kind the engine
+ * does not slice has no entry.
  */
 const KEYWORD_BY_KIND: Readonly<Record<string, string>> = {
   concept: "concept",
   query: "query",
-  mutation: "mutate",
+  mutation: "mutation",
   logic: "logic",
   tool: "tool",
   automation: "automation",
@@ -54,7 +52,7 @@ const KEYWORD_BY_KIND: Readonly<Record<string, string>> = {
  * The zero-based line of `<keyword> [<boundConcept>] <name>`, or -1.
  *
  * The optional middle identifier is the signature binding that
- * query / mutate / shape / spec / seed carry (`query participant
+ * query / mutation / shape / spec / seed carry (`query participant
  * spaceParticipants`), so both the two- and three-identifier forms are
  * matched. A concept's catalog name is its canonical id
  * (`v1:cognition:space`) while its declaration carries the bare name, so the

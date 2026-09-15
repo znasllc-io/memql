@@ -350,7 +350,7 @@ func requiresRankFloor(t *testing.T, dsl, construct string) string {
 	t.Helper()
 	// The annotation sits ABOVE the construct's signature, so the search is
 	// anchored on the signature and walks back over the annotation block.
-	idx := regexp.MustCompile(`(?m)^(?:query|mutate|logic)\s+\w+\s+` + regexp.QuoteMeta(construct) + `\s*\{`).FindStringIndex(dsl)
+	idx := regexp.MustCompile(`(?m)^(?:query|mutation|logic)\s+\w+\s+` + regexp.QuoteMeta(construct) + `\s*\{`).FindStringIndex(dsl)
 	if idx == nil {
 		t.Fatalf("no construct named %q in the DSL file -- if it was renamed, update "+
 			"appFloorMirrors", construct)

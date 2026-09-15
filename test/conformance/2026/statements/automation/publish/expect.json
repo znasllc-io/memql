@@ -1,0 +1,14 @@
+{
+  "cases": [
+    {
+      "file": "publish.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "publish-with-retry.memql",
+      "verdict": "refuse_parse",
+      "code": "body_retry_placement",
+      "message": "`retry(n)` applies to a construct call statement"
+    }
+  ]
+}

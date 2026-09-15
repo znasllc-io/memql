@@ -13,7 +13,7 @@
 /// only ever create their own notes. title and tags are optional; body is required. updatedAt is
 /// stamped to now.
 @actor
-mutate note createNote {
+mutation note createNote {
   args {
     noteId  string!
     title   string
@@ -35,7 +35,7 @@ mutate note createNote {
 /// is re-stamped to now. The caller threads the full merged payload built from the current row plus
 /// the changed fields.
 @actor
-mutate note updateNote {
+mutation note updateNote {
   args {
     noteId   string!
     payload  object!

@@ -6,7 +6,7 @@
 
 /// Attach a shop. Secret args are names, not token values.
 @actor
-mutate shop attachShop {
+mutation shop attachShop {
   args {
     shopId                  string!
     storeDomain             string!
@@ -28,7 +28,7 @@ mutate shop attachShop {
 
 /// Replace secret references on an attached shop. Names only.
 @actor
-mutate shop setShopSecrets {
+mutation shop setShopSecrets {
   args {
     shopId                  string!
     storefrontTokenSecret   string!
@@ -47,7 +47,7 @@ mutate shop setShopSecrets {
 
 /// Flip sync on or off. Data, not source -- no rebuild.
 @actor
-mutate shop setShopSync {
+mutation shop setShopSync {
   args {
     shopId       string!
     syncEnabled  bool!

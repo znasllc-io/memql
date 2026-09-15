@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "parallel.memql",
+      "verdict": "evaluate",
+      "call": "halvesInParallel",
+      "args": {
+        "n": 4
+      },
+      "expect": 4
+    },
+    {
+      "file": "return-in-a-parallel-branch.memql",
+      "verdict": "refuse_load",
+      "code": "body_return_in_parallel",
+      "message": "a parallel branch cannot return: bind a name and return after the parallel"
+    }
+  ]
+}

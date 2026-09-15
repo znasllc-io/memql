@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {
+      "file": "each-kind.memql",
+      "verdict": "load_ok",
+      "note": "a query, a logic and a mutation, each called by its kind; the values they return are names"
+    },
+    {
+      "file": "no-kind.memql",
+      "verdict": "refuse_parse",
+      "code": "body_call_kind_missing",
+      "message": "`recordThing(...)` names no construct kind: write `query`, `mutation`, `logic`, `builtin`, `automation` or `action` before it"
+    },
+    {
+      "file": "argument-pun.memql",
+      "verdict": "refuse_parse",
+      "code": "body_positional_argument",
+      "message": "`logic handle(event)` passes event without a name: write `event: <value>`; the bare-argument pun is retired"
+    }
+  ]
+}

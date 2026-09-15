@@ -46,9 +46,7 @@ func TestAuthoredScheduler_GlobalKillSwitchHaltsAll(t *testing.T) {
 	src := `@enabled
 @trigger(event="node.created", concept="v1:identity:user")
 automation onUser {
-  step run {
-    logic sandboxNoopLogic { event: event }
-  }
+  run := logic sandboxNoopLogic(event: event)
 }`
 	// Two different owners' automations, both active.
 	if err := s.Activate(authoredAutomationConstruct("user-a", "onUser", src)); err != nil {
@@ -101,9 +99,7 @@ func TestAuthoredScheduler_SetGlobalGateLive(t *testing.T) {
 	src := `@enabled
 @trigger(event="node.created", concept="v1:identity:user")
 automation onUser {
-  step run {
-    logic sandboxNoopLogic { event: event }
-  }
+  run := logic sandboxNoopLogic(event: event)
 }`
 	if err := s.Activate(authoredAutomationConstruct("user-a", "onUser", src)); err != nil {
 		t.Fatalf("activate: %v", err)

@@ -115,6 +115,11 @@ When a trigger fires for an automation with an `args { }` block:
 
 ## Decision 3 -- bare-field resolution and shadowing
 
+> Superseded by epic memql#5370: an argument is read `args.x` only, and a bare
+> name is a statement's name, a loop variable, a lambda parameter or a reserved
+> root. `steps` and step-result references are retired; a statement's value is
+> read by its name.
+
 Inside an automation body, a bare identifier resolves in this order:
 
 1. **Reserved engine names** -- `now`, `actor`, `partition`, `config`,
@@ -146,6 +151,9 @@ sites. Explicit `args.X` remains valid everywhere as the disambiguating form.
   phase 8; origin routing is not an authoring concern).
 
 ## Decision 5 -- named-arg punning
+
+> Superseded by epic memql#5370: the pun is retired. Every argument is written
+> `name: <expr>`.
 
 Under the construct-invocation ADR, call args are named-only; a bare identifier
 in argument position is currently a parse error. That grammatical space becomes

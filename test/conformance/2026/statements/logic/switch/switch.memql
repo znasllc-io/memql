@@ -1,0 +1,17 @@
+logic requestStatus {
+  args {
+    role any
+  }
+  switch args.role ?? "" {
+    case "owner" {
+      status := "queued"
+    }
+    case "admin", "writer" {
+      status := "needs_approval"
+    }
+    default {
+      status := "needs_validation"
+    }
+  }
+  return status
+}

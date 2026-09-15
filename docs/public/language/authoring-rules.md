@@ -36,12 +36,12 @@ exactly one `update` block. Two writes in one mutation is a
 parse-time error.
 
 Right -- one bare insert. The target concept comes from the
-`mutate <Concept> <name>` signature; restating it is retired.
+`mutation <Concept> <name>` signature; restating it is retired.
 
 ```memql
 use library.concepts.{ folder }
 
-mutate folder createFolder {
+mutation folder createFolder {
   args { name string @required }
   insert {
     name: args.name
@@ -55,7 +55,7 @@ mutate folder createFolder {
 Wrong -- two writes in one body. The parser rejects it.
 
 ```memql retired
-mutate folder createFolderAndGrantOwner {
+mutation folder createFolderAndGrantOwner {
   args { name string @required }
   insert { ... }                  // ERROR -- only one write allowed
   insert { ... }
@@ -74,50 +74,61 @@ an event-triggered automation that fires on the first row's
 creation. The two writes happen sequentially; ordering is explicit;
 the user sees one product action even though two rows land.
 
-The canonical worked example is **workspace creation**:
+The canonical worked example is **the Library index**: a to-do is one
+row, and the Library row that indexes it is a second, written by the
+automation that fires when the first lands:
 
 ```memql
-use platform.concepts.{ partition }
-use identity.mutations.{ grantPartitionAccess }
+use todos.concepts.{ todo }
 
-// 1. The product calls this mutation. (`@default` is not valid on
-//    an args field -- apply defaults in the body via `??`.)
-mutate partition createPartition {
+// 1. The product calls this mutation: one row, the to-do.
+/// Create a to-do for the caller.
+@actor
+mutation todo createTodo {
   args {
-    name      string  @required
-    type      string
+    todoId                  string!
+    title                   string!
+    dueAt                   datetime
+    priority                enum("low", "medium", "high")
+    sourceResponsibilityId  string
   }
   insert {
-    name: args.name
-    partitionType: args.type ?? "standard"
-    status: "active"
-    createdAt: now
-    createdBy: actor.userId
+    accept { title, dueAt, priority, sourceResponsibilityId }
+    stamp {
+      id: args.todoId
+      ownerUserId: actor.userId
+      done: false
+    }
   }
 }
 
-// 2. An automation fires on the row landing and grants the
-//    creating user owner access. Every call names its kind
-//    (`logic`, `mutation`) and passes named arguments.
-@trigger(event="node.created", concept="v1:platform:partition", partition="*")
-/// Grant the partition creator owner access on first landing.
-automation autoBootstrapWorkspaceOwnerAccess {
-  step grant {
-    logic grantOwnerOnPartitionCreate(event: event)
+// 2. An automation fires on the row landing and writes the second row.
+//    The trigger payload is bound into its args block; every call names
+//    its kind and passes named arguments.
+/// On to-do creation, promote it into the Library Records lens.
+@trigger(event="node.created", concept="v1:todos:todo")
+automation indexTodoOnCreate {
+  args {
+    id any
+    ownerUserId any
+    title any
   }
-}
 
-logic grantOwnerOnPartitionCreate {
-  args { event object @required }
-  body {
-    return mutation grantPartitionAccess(userId: args.event.payload.createdBy, partitionId: args.event.payload.id, role: "owner")
-  }
+  persist := mutation createArtifact(
+    sourceConceptRef: args.id,
+    ownerUserId:      args.ownerUserId,
+    lens:             "record",
+    kind:             "todo",
+    source:           "agent_generated",
+    title:            args.title ?? "Untitled to-do",
+    live:             false
+  )
 }
 ```
 
-The product calls `createPartition` once. The automation
-takes care of the second write. The user gets one product action;
-the engine gets two atomic rows with clean audit trails.
+The product calls `createTodo` once. The automation takes care of the
+second write. The user gets one product action; the engine gets two
+atomic rows with clean audit trails.
 
 **Cross-references**: see `dsl/library/automations.memql` and
 `dsl/identity/automations.memql` for live examples of this pattern.
@@ -141,15 +152,13 @@ frequently hit traps:
 **Rule.** `sort()`, `paginate()`, `asOf()`, `select()`, `withDepth()`,
 `count()`, and `shape()` are query-level *directives*. They wrap an entire
 expression at the **outermost** layer of a query string and only work
-when called by the top-level query parser. The **function loader**
-(which validates `.memql` function definitions at engine init) treats
-every bare call name in a function body -- e.g. a `logic` body -- as a
-reference to another registered function, and since `sort` /
-`paginate` / etc. aren't registered functions, the engine init fails
-with:
+when called by the top-level query parser. In a `logic` or `automation`
+body, a bare call inside an expression must be a catalog function or a
+spec or trait predicate. `sort` / `paginate` / etc. are neither, so the
+load refuses the body:
 
 ```
-function "<name>" references unknown function "sort"
+logic listFoldersSorted: `sort(...)` is not a function or a predicate known here, so the expression fails when it runs: call a catalog function or a spec or trait the corpus declares [body_call_unknown]
 ```
 
 If you put a directive inside a function body, the entire engine
@@ -161,12 +170,10 @@ refuses to start. The primary node crashes. Agent / planner / workbench
 ```memql retired
 use library.queries.{ activeFolderIds }
 
-// `sort` is not a registered function -- engine init fails.
+// `sort` is a directive, not a function: the load refuses the body.
 logic listFoldersSorted {
-  args { event object @required }
-  body {
-    return sort(activeFolderIds({}), "name", "asc")
-  }
+  folders := query activeFolderIds()
+  return sort(folders, "name", "asc")
 }
 ```
 
@@ -266,12 +273,12 @@ body the call also names the construct's kind:
 
 ```memql fragment
 rows := query folderArtifacts(folderId: "folder-123", kind: "document")
-created := mutation createPartition(name: "test", partitionType: "standard")
+created := mutation createFolder(folderId: "folder-123", name: "Inbox")
 ```
 
 This section used to document a bare-vs-quoted distinction between two
-spellings of an object-literal call (`createPartition({name: "test"})`
-vs `createPartition({"name": "test"})`). That premise is gone: an
+spellings of an object-literal call (`createFolder({name: "Inbox"})`
+vs `createFolder({"name": "Inbox"})`). That premise is gone: an
 argument list is not an object literal, so there is no key to quote.
 Each key is a bare name, matched by name against the callee's declared
 args. A quoted key is a parse error, not an alternate spelling:
@@ -279,7 +286,7 @@ args. A quoted key is a parse error, not an alternate spelling:
 ```memql retired
 // Refused: object-literal call args are retired; this parses as
 // neither a named-arg call nor a valid expression.
-createPartition({"name": "test", "partitionType": "standard"})
+createFolder({"folderId": "folder-123", "name": "Inbox"})
 ```
 
 **The argument pun is retired.** A bare name in argument position,
@@ -287,10 +294,9 @@ createPartition({"name": "test", "partitionType": "standard"})
 `logic composeTitle(folderId: folderId)` (G3, memql#2365), is retired
 with the other step-reference shorthands (D12 of the
 [language freeze record](../../superpowers/specs/2026-09-13-dsl-v1-language-freeze-program-design.md)).
-Write the name twice: `logic composeTitle(folderId: folderId)`. The
-parser still reads the pun so that files written before the edition
-load while the tree migrates, and refuses it once the statement grammar
-flips; do not write new code against it.
+Name the argument and write its value: `logic composeTitle(folderId: args.folderId)`.
+The parser refuses the pun (`body_positional_argument`), and
+`memqlmigrate --rewrite=bodies` rewrites it.
 
 The public RPC (`ExecuteQuery`), the CLI/SDK call builders, the
 function-definition parser, and the automation-DSL parser all use the
@@ -554,7 +560,7 @@ the storage id as:
 ```
 
 Where:
-- `concept` = the concept bound by the `mutate <Concept> <name>`
+- `concept` = the concept bound by the `mutation <Concept> <name>`
   signature
 - `id-segment` = the trimmed value of the `id:` field
 
@@ -580,7 +586,7 @@ by a read the writer hopes was fresh.
 
 ```memql fragment
 @actor
-mutate desktop saveMyDesktop {
+mutation desktop saveMyDesktop {
   args {
     revision  int!
     document  object!
@@ -638,11 +644,10 @@ all concepts; empty `actions` means all actions. The SDKs wrap this as
 `SubscriptionManager.subscribeGraph(handler, { concept, actions })`
 (TS) / `SubscribeGraph(ctx, GraphSubscribeOptions{...})` (Go).
 
-`@trigger(event=..., concept=..., partition="*")` in
-`dsl/*/automations.memql` still carries the `partition="*"` kwarg as a
-separate #56 phase-8 vestige on the DSL trigger surface -- unrelated to
-the client subscription wire, and tracked by its own caveat where this
-doc discusses `@trigger`.
+The DSL trigger surface matches: an automation's
+`@trigger(event="node.created", concept="v1:notes:note")` names the
+concept and no partition, and a `partition=` kwarg on `@trigger` is
+refused at parse (`trigger_partition_retired`).
 
 Full detail: [events.md](../concepts/events.md#subscribing-to-events).
 
@@ -692,10 +697,9 @@ ceilings).
 ## 11b. A conditional value is `p ? a : b`, not `if` at expression position
 
 **Rule.** A value that depends on a condition is written `p ? a : b`:
-in a mutation value, a step argument, a logic statement. `if` guards a
-statement -- `if condition { ... }`, or `x := if condition { call }` in a
-logic body -- and is not an expression, so it cannot stand where a
-value goes.
+in a mutation value, a call's argument, a statement. `if` guards
+statements -- `if condition { ... }` -- and is not an expression, so it
+cannot stand where a value goes.
 
 ```memql fragment
 role: existingOwners.empty() ? "owner" : "reader"
@@ -740,8 +744,8 @@ query instead, where it is a plan constant
 ## 11c. One expression grammar in every position (#2542)
 
 **Rule.** Every place an expression is written reads the same grammar: a
-`return`, a `name := ...` statement, an `if` or `forEach ... where`
-condition, a lambda body, a map value, a mutation value, a step
+`return`, a `name := ...` statement, an `if` or `for ... if`
+condition, a lambda body, a map value, a mutation value, a call's
 argument, a filter, a spec body. What differs between positions is where
 the expression runs and what it may call, and
 [memql.md](memql.md#where-each-expression-runs) prints that table from
@@ -767,8 +771,10 @@ What still differs by position:
   that do not read the row
   ([21d](#21d-a-subexpression-that-does-not-read-the-row-is-a-plan-constant)).
 - **Construct calls.** `query`, `mutation`, `logic` and `builtin` calls
-  are legal in a logic body and in a step argument, the two positions
-  where the call is itself the statement a run journals. A condition, a
+  are legal only as a statement of their own in a logic or automation
+  body -- the whole right-hand side of `:=`, the whole value of
+  `return`, or a line by itself -- because each call is a step a run
+  journals. A condition, a
   mutation value, a trigger filter, a prompt input and a `refine` clause
   may not call a construct (`construct_call_not_allowed`), and a filter
   or spec body never may.
@@ -848,51 +854,49 @@ instead of silently stripping the field.
 
 ---
 
-## 13. Step references are validated + topologically sorted at compile time
+## 13. Statements run in the order written; a name is read after it is bound
 
-**Rule.** A step's condition or arg referencing another step's result
-(`foo.first().payload.x`, `foo.empty()`, etc.) is
-validated at compile time. The compiler:
-
-- collects every step ID into a symbol table;
-- extracts step references from both condition strings AND function-call
-  arguments (query strings, mutation payloads, nested expressions);
-- rejects unknown references (catches typos);
-- **topologically sorts** steps by their dependency graph so every step
-  executes after all its dependencies, regardless of source order.
-
-**Forward references are now supported.** Steps can be declared in any
-order -- the compiler reorders them automatically. Cycles produce a
-clear compile-time error.
-
-Example of a typo that surfaces at compile time:
+**Rule.** A body's statements run in the order they are written. Nothing
+is reordered by dependency, so a name can only be read after the
+statement that binds it. The load refuses a name read before its
+statement, naming both lines, and a name bound nowhere, which catches a
+typo:
 
 ```memql fragment
-checkUser := query userById(userId: args.event.payload.userId)
-
-result := if cehckUser.empty() {   // typo: cehckUser -> checkUser
-  mutation createUser(userId: args.event.payload.userId)
+logic bootstrapUser {
+  args {
+    userId string
+  }
+  checkUser := query userById(userId: args.userId)
+  if cehckUser.empty() {   // typo: cehckUser -> checkUser
+    mutation createUser(userId: args.userId)
+  }
+  return checkUser.count()
 }
 ```
 
-The compiler emits:
-
 ```
-automation "bootstrapUser": step "result" references unknown step "cehckUser" -- check for a typo, or add the step
+logic bootstrapUser, line 6:6: `cehckUser` is not a statement name, a loop variable or a root here [body_unknown_name]
 ```
-
-Example of a cycle (would deadlock at runtime):
 
 ```memql fragment
-a := if b.empty() { query foo() }
-b := if a.empty() { query bar() }
+logic readsAhead {
+  total := subtotal + 1
+  subtotal := 2
+  return total
+}
 ```
 
-The compiler emits:
+```
+logic readsAhead, line 2:12: `total` reads `subtotal`, which is bound on line 3, after it: move line 3 above line 2 [body_forward_reference]
+```
 
-```
-automation "test": dependency cycle among steps [a b]
-```
+**Why.** Before edition 2026 the compiler sorted steps by the dotted
+references it could see, and ran co-released steps in map order. A step
+that read a later step's name by another spelling ran first and read
+nothing, and the order a reader saw was not the order that ran.
+`memqlmigrate --rewrite=bodies` writes each migrated body in the order
+the old engine ran it, and comments every statement it moved.
 
 ---
 
@@ -910,15 +914,17 @@ carries an individual construct's name.
 
 ```
 dsl/library/queries.memql       query folder activeFolders { ... }
-dsl/library/mutations.memql     mutate folder createFolder { ... }
+dsl/library/mutations.memql     mutation folder createFolder { ... }
 dsl/deployment/specs.memql      spec actorEnvelope requiresOwner = actor => ...
 dsl/common/traits.memql         trait isActiveRecord = row => ...
 dsl/library/logic.memql         logic indexArtifact { ... }
 ```
 
-Note the declaration keyword on the mutation line: it is `mutate`.
-`mutation` is the *invocation* verb used inside a logic body, and the
-parser's own tests call that pair "the canonical footgun distance".
+The declaration keyword and the call kind are one word, `mutation`
+(D13 of the language freeze record): `mutation folder createFolder { ... }`
+declares it and `mutation createFolder(...)` calls it. The old declaration
+keyword `mutate` is refused at parse, and `memqlmigrate --rewrite=bodies`
+rewrites it.
 
 **Why it bites you.** Callers (the product frontend, automations, Go
 integration code) name constructs as a string, so a name is a wire
@@ -939,15 +945,15 @@ if any `naming.*` warning is emitted. References resolve structurally:
 the dependency-tree validator (C3/#2043) fails a reference that does not
 exist at load time.
 
-An automation step calls a logic construct by the name the file-top
-import gives it, with the kind prefix and a named argument:
-`step decide { logic indexArtifact(event: event) }` resolves through
+An automation calls a logic construct by the name the file-top import
+gives it, with its kind and a named argument:
+`decide := logic indexArtifact(event: event)` resolves through
 `use library.logic.{ indexArtifact }`. The pun `logic indexArtifact ( event )`
 is retired ([#2](#2-function-call-arguments-are-named-not-an-object-literal)).
 
 Automations are event-triggered, not called by name, so they use
 verb-first names with no prefix (`indexFileOnCreate`,
-`archiveFileOnArtifactArchive`, `releaseWorkspaceOnPlanTerminal`).
+`archiveFileOnArtifactArchive`, `releaseWorkspaceOnRunTerminal`).
 Builtins, tools, prompts, providers, and shapes are out of scope for
 this rule and use their own conventions (shapes are conventionally
 `<concept><Projection>`, e.g. `artifactFull`, `folderCard`).
@@ -1031,8 +1037,8 @@ and equivalent. Under the hood the struct-form rewriter translates
 `args.X` to the engine-internal `ctx.X` and the expansion lives in
 the mutation-template parser
 (`component/memql/mutation_templates.go`). The bare mirror belongs to
-the write block alone: a map literal in a step argument has no
-shorthand key (see [#17](#17-automation-step-arguments-named-with-no-shorthand-keys)).
+the write block alone: a map literal in a call's argument has no
+shorthand key (see [#17](#17-automation-arguments-named-with-no-shorthand-keys)).
 Authors never write `ctx.X` -- it is not part of the author surface.
 
 ---
@@ -1100,40 +1106,48 @@ shorthand: `name` projects as `name`, exactly like
 
 ---
 
-## 17. Automation step arguments: named, with no shorthand keys
+## 17. Automation arguments: named, with no shorthand keys
 
 **Rule.** An automation declares a typed `args { }` contract, and the
-trigger binds the event payload into it before any step runs; a payload
-that violates the contract refuses the run rather than binding part of
-it (G1, `component/automations/args_binding.go`). A step reads a
-declared arg as `args.<field>`, reads an earlier step's result as
-`steps.<name>.result`, and passes every argument by name:
+trigger binds the event payload into it before any statement runs; a
+payload that violates the contract refuses the run rather than binding
+part of it (G1, `component/automations/args_binding.go`). A statement
+reads a declared arg as `args.<field>`, reads an earlier statement's
+value by its name, and passes every argument by name:
 
 ```memql
+@trigger(event="node.created", concept="v1:knowledge:document")
 automation indexNewDocument {
   args {
     folderId     string @required
     documentRef  string @required
   }
-  step decide {
-    logic composeTitle(folderId: args.folderId)
-  }
-  step index {
-    mutation createArtifact(
-      folderId:         args.folderId,
-      sourceConceptRef: args.documentRef,
-      title:            steps.decide.result
-    )
-  }
+  title := logic composeTitle(folderId: args.folderId)
+  mutation createArtifact(
+    folderId:         args.folderId,
+    sourceConceptRef: args.documentRef,
+    title:            title
+  )
 }
 ```
 
-Three spellings are gone:
+These spellings are gone:
 
 - **`event.<field>` reads** in an automation body are refused at load
   (G5, memql#2367): declare the field in `args { }` and read
   `args.<field>`. To hand the whole event to a logic, pass it:
   `logic record(event: event)`.
+- **Step-result reads.** `steps.decide.result` and `decide.result` read
+  a step's record; a statement's name is its value, so write `decide`.
+  `steps.<id>` is refused at parse.
+- **The step bodies' accessors.** `step("decide")`, `input()`, `item()`
+  and `index()` are refused at parse (`body_accessor_retired`): a
+  statement's name is its value, an argument is `args.<name>`, and a loop
+  names its element, `for x in s`, and has no index.
+- **A bare argument.** `folderId` for `args.folderId` (G2, memql#2364)
+  is refused (`body_unknown_name`, whose hint says `args.folderId`): an
+  argument reads the same way in every position, and a bare name is a
+  statement's or a loop's.
 - **The argument pun**, `logic composeTitle(folderId)`, is retired
   ([#2](#2-function-call-arguments-are-named-not-an-object-literal)):
   write `folderId: args.folderId`.
@@ -1144,12 +1158,7 @@ Three spellings are gone:
   edition-2026 parser refuses it (`a map key is one name, got
   registerNode.result.node.id: nest a map for a path`), and a bare
   `{ folderId }` likewise (`a map entry is written key: value`). Write
-  `{ nodeId: registerNode.result.node.id }`.
-
-A declared arg also resolves bare inside an automation body
-(`folderId` for `args.folderId`, G2 memql#2364). Write `args.folderId`:
-it reads the same in every position, and a bare name that is also a
-step or loop name is the shadowing the loader has to refuse.
+  `{ nodeId: registerNode.node.id }`.
 
 ---
 
@@ -1179,7 +1188,7 @@ Where each parser stands:
 
 | Where the literal is | A quoted key |
 |---|---|
-| A map literal in an edition-2026 expression: a mutation value such as `metadata: { ... }`, a step argument, a logic statement | refused: `map keys are unquoted names (authoring rule 18)` (`parseV1Map` in `component/language/parser/v1_expr.go`) |
+| A map literal in an edition-2026 expression: a mutation value such as `metadata: { ... }`, a call's argument, a statement | refused: `map keys are unquoted names (authoring rule 18)` (`parseV1Map` in `component/language/parser/v1_expr.go`) |
 | The write block itself, `insert { ... }` / `update { ... }` | still accepted by the mutation parser (`component/memql/mutation_templates.go::parseObjectKey`); do not write one |
 
 In an edition-2026 map literal a key is one name: a hyphenated key is an
@@ -1592,10 +1601,10 @@ went with the cognition tree.
 **Rule.** A construct declares its inputs in one of two places:
 
 - **Query, mutation, logic, automation**: an `args { ... }` block inside
-  the construct body (ahead of `body { ... }` in a logic). An
-  automation's args are bound from the triggering event's payload at
-  fire time and validated against the block; a violation refuses the
-  run (rule [#17](#17-automation-step-arguments-named-with-no-shorthand-keys)).
+  the construct body (ahead of the statements in a logic or an
+  automation). An automation's args are bound from the triggering
+  event's payload at fire time and validated against the block; a
+  violation refuses the run (rule [#17](#17-automation-arguments-named-with-no-shorthand-keys)).
 - **Builtin, tool, prompt**: the body's fields directly -- the body is
   the schema, with no `args` wrapper.
 
@@ -1620,10 +1629,11 @@ mistaken for the other. How a bare name resolves is rule
 
 **Reserved names.** `now`, `actor`, `partition`, `config` and `trace`
 are reserved: an args field named one of them is refused at load, and
-so is a call-site argument of that name (memql#3626). `event` is also
-reserved for automation args (G2, memql#2364). `trace` is reserved
-without being readable: nothing binds it, so a `trace.` read is
-`unknown_name`.
+so is a call-site argument of that name (memql#3626). `event` is
+reserved too: in an automation it is the trigger root, and no statement
+or loop variable may take any reserved name (`body_reserved_name`). `trace` is reserved
+without being readable: nothing binds it, so reading it is refused
+(`body_unknown_name`).
 
 **An arg description is a `///` doc comment, never `@description`**
 (memql#3336). The `///` block on the line(s) immediately above an
@@ -1660,7 +1670,7 @@ use library.concepts.{ artifact, folder }
 use common.traits.{ isActiveRecord }
 
 /// Insert a Library artifact
-mutate artifact recordArtifact {
+mutation artifact recordArtifact {
   args {
     folderId  string  @required
     title     string  @required
@@ -1709,7 +1719,7 @@ func (Spec) example(ctx any) bool {
 }
 
 // args.X is the only way to reach caller-passed fields.
-mutate folder example {
+mutation folder example {
   args { x string @required }
   insert {
     field: ctx.x   // ctx is not in scope inside struct-form bodies
@@ -1719,9 +1729,10 @@ mutate folder example {
 
 **The procedural form is internal.** The struct-form rewriter emits a
 `func (Receiver) NAME(ctx any) (any, error) { return <expr>, nil }`
-shape for the engine's parser, and authors never write it; `ctx` is not
-part of the author surface. A logic body is `body { ...; return <expr> }`
-and returns its value directly, with no `ctx.output = ...`.
+shape for a query and a mutation, for the engine's parser, and authors
+never write it; `ctx` is not part of the author surface. A logic's statements follow its `args { }`
+block and end with `return <expr>`, which returns the value directly,
+with no `ctx.output = ...`.
 
 ---
 
@@ -1808,9 +1819,10 @@ The lines are the edition-2026 spellings of `campaigns` and
 **How a bare name resolves**, in order:
 
 1. a lambda parameter in scope, innermost first;
-2. a reserved root: `args`, `actor`, `now`, `config`, `event`, and in
-   an automation `steps`, `item`, `index` and `input`;
-3. a local or step name bound in the same body (`rows := query ...`);
+2. a reserved root: `args`, `actor`, `now`, `config`, `partition`, and
+   in an automation `event`;
+3. a statement name or a loop variable bound earlier in the same body
+   (`rows := query ...`);
 4. when called, a catalog function ([functions.md](functions.md#catalog))
    and then a spec or trait -- the catalog is consulted first, so a
    predicate cannot shadow a function by taking its name
@@ -2008,7 +2020,7 @@ grammar:
 - `TestNoRetiredBindingForms` (#988, `test/dslconformance/no_named_writes_test.go`):
   named writes (`insert <concept> {` / `update <concept> {`) are
   rejected — the write target comes from the
-  `mutate <Concept> <name>` signature, the block is bare
+  `mutation <Concept> <name>` signature, the block is bare
   `insert {` / `update {`. A canonical concept id passed to
   `canonicalId` (`canonicalId(x, "v1:ns:name")`) and a hand-built
   `"v1:ns:concept:"` prefix are rejected — name the imported concept,
@@ -2298,7 +2310,7 @@ suite, epic #2351 / memql#2383):
   entry points, body-rule + signature-arity violations, unknown
   annotations, invocation-site errors, trailing tokens, word logical
   operators). This package cannot import `component/language/compiler`
-  (import cycle), so rewriter-family kinds (query / mutate / logic /
+  (import cycle), so the struct-form kinds (query / mutation / logic /
   automation) are exercised via `NormaliseAll` + `ParseFile`.
 - `component/memql/negative_load_test.go` -- load / lint-level and
   slicer-level rejections driven through `dslimports.Load` (the same
@@ -2404,8 +2416,9 @@ naming it), diagnosable (a rejection with a hint), and mechanically fixable
 `now`, `actor`, `partition`, `config`, and `trace` are reserved
 top-level identifiers; an `args { }` field of the same name is refused at
 parse time (rename it -- e.g. `asOf` for a caller-passed evaluation
-instant). `event` is additionally reserved for automation args
-by the load-time shadow check (G2, memql#2364).
+instant). `event` is reserved too: in an automation it is the trigger
+root, and no statement or loop variable may take a reserved name
+(`body_reserved_name`).
 
 ---
 
@@ -3137,7 +3150,7 @@ against a real Postgres, db-gated).
 
 ## 33. `@requiresRank` and `@requiresCapability` (epic memql#4832 / memql#5166)
 
-A construct states who may CALL it. Two annotations, on a `query`, a `mutate` or
+A construct states who may CALL it. Two annotations, on a `query`, a `mutation` or
 a `logic`, and they answer different questions:
 
 ```memql fragment

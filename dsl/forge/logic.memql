@@ -4,11 +4,11 @@
 //
 // This namespace carries exactly TWO logic functions -- the pure request-
 // pipeline decision tables below (P1, #2368). Everything else remains a pure
-// single-writer mutation or an event-bound automation step (#2235, #2240):
+// single-writer mutation or an event-bound automation statement (#2235, #2240):
 //
 //   - routeRequest / recordTransition history: the original role-based router
 //     and per-transition audit recorder were impure logics (graph writes
-//     inline, ADR section 2.1) and were retired to event-bound mutation steps
+//     inline, ADR section 2.1) and were retired to event-bound mutation statements
 //     in #2235 -- at a time when a decide->persist read of a logic's object
 //     result resolved to nil (the Bundle-wrap bug). That bug class is FIXED
 //     (#2271 read side, #2274/PR#2280 object-literal returns), so P1 (#2368)
@@ -39,12 +39,10 @@ logic requestRouteStatus {
   args {
     submitterRole any
   }
-  body {
-    role := args.submitterRole ?? ""
-    isPrivileged := role == "admin" ? true : role == "writer" ? true : false
-    status := role == "owner" ? "queued" : isPrivileged == true ? "needs_approval" : "needs_validation"
-    return status
-  }
+  role := args.submitterRole ?? ""
+  isPrivileged := role == "admin" ? true : role == "writer" ? true : false
+  status := role == "owner" ? "queued" : isPrivileged == true ? "needs_approval" : "needs_validation"
+  return status
 }
 
 /// PURE audit-vocabulary decision table for a v1:forge:request status transition: new status -> the
@@ -57,12 +55,10 @@ logic transitionEventKind {
     status any
     oldStatus any
   }
-  body {
-    st := args.status ?? ""
-    old := args.oldStatus ?? ""
-    lateKind := st == "changes_requested" ? "changes_requested" : st == "rejected" ? "rejected" : ""
-    mappedKind := st == "needs_approval" ? "validated" : st == "queued" ? "approved" : lateKind
-    kind := old == st ? "" : mappedKind
-    return kind
-  }
+  st := args.status ?? ""
+  old := args.oldStatus ?? ""
+  lateKind := st == "changes_requested" ? "changes_requested" : st == "rejected" ? "rejected" : ""
+  mappedKind := st == "needs_approval" ? "validated" : st == "queued" ? "approved" : lateKind
+  kind := old == st ? "" : mappedKind
+  return kind
 }

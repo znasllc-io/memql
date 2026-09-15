@@ -8,6 +8,10 @@ import (
 	"github.com/znasllc-io/memql/integrations/planner"
 )
 
+// The transcript capture writes a recorded tool call as a statement only
+// through this seam; without it every call is a comment line.
+var _ planner.ToolCallSpeller = (*CognitionEngineAdapter)(nil)
+
 // setupPlannerIntegration creates and registers the planner
 // integration on a planner-tagged binary. The integration owns
 // Plan / Task lifecycle: subscribes to graph.node.updated events

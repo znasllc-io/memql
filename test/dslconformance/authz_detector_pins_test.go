@@ -48,7 +48,7 @@ func TestConstructHeaderMatchesTheLanguage(t *testing.T) {
 	// Every kind that declares rows must be reached. A zero here means the
 	// classifier is walking a subset of the tree and its clean result covers
 	// only that subset -- exactly the #2799 failure.
-	for _, kind := range []string{"query", "mutate", "seed"} {
+	for _, kind := range []string{"query", "mutation", "seed"} {
 		if kinds[kind] == 0 {
 			t.Errorf("constructHeaderRe matched no %q declarations; the classifier cannot see them, so its result does not cover them", kind)
 		}
@@ -57,13 +57,13 @@ func TestConstructHeaderMatchesTheLanguage(t *testing.T) {
 	// And the retired keyword must stay gone. If `mutation` ever comes back as
 	// a construct keyword, this regex needs updating rather than silently
 	// missing every one of them again.
-	retired := regexp.MustCompile(`(?m)^[ \t]*mutation[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
+	retired := regexp.MustCompile(`(?m)^[ \t]*mutate[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
 	for _, p := range paths {
 		f, _ := tree.Open(p)
 		raw, _ := io.ReadAll(f)
 		f.Close()
 		if retired.Match(raw) {
-			t.Errorf("%s declares a construct with the retired `mutation` keyword (memql#2041 renamed it to `mutate`); constructHeaderRe would miss it", p)
+			t.Errorf("%s declares a construct with the retired `mutate` keyword (edition 2026 declares `mutation`, D13); constructHeaderRe would miss it", p)
 		}
 	}
 }

@@ -10,11 +10,9 @@
 //
 // Three fields carry rules a consumer will get wrong by guessing.
 //
-//   `runnable` IS THE ANSWER. `kind` is the kind, not the authored keyword: a
-//     mutation is authored `mutate` and reported here as "mutation". So
-//     testing `RUNNABLE_KINDS.includes(kind)` fails on every mutation. The
-//     engine derives `runnable` from the same five-kind set the extension
-//     fixed; read it.
+//   `runnable` IS THE ANSWER. The engine derives it from the same five-kind
+//     set the extension fixed (query, mutation, logic, tool, automation);
+//     read it rather than testing `kind` against a list of your own.
 //
 //   `origin` IS SERVER-DERIVED. core (the embedded tree) | bundle (a
 //     runtime-mounted product domain, what MEMQL_DSL_PATH registers) |

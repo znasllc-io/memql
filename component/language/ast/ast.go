@@ -324,8 +324,8 @@ func (*FunctionCallExpr) expressionNode() {}
 // collection being operated on (a dotted-path arg/spec reference or a prior
 // MethodCallExpr in a chain); Method is the collection operator name
 // (where/select/count/...); Args are the parsed call arguments, each of which
-// may be a LambdaExpr. These nodes are only valid in logic bodies and
-// automation forEach; specs and query filters reject them at load.
+// may be a LambdaExpr. These nodes are only valid in a logic's or an
+// automation's statements; specs and query filters reject them at load.
 type MethodCallExpr struct {
 	Receiver ExpressionNode
 	Method   string
@@ -426,32 +426,6 @@ type VarRefExpr struct {
 
 func (*VarRefExpr) node()           {}
 func (*VarRefExpr) expressionNode() {}
-
-// StepRefExpr references a previous step's result: step("id")
-type StepRefExpr struct {
-	StepId string
-}
-
-func (*StepRefExpr) node()           {}
-func (*StepRefExpr) expressionNode() {}
-
-// InputRefExpr references the automation input: input()
-type InputRefExpr struct{}
-
-func (*InputRefExpr) node()           {}
-func (*InputRefExpr) expressionNode() {}
-
-// ItemRefExpr references the current forEach item: item()
-type ItemRefExpr struct{}
-
-func (*ItemRefExpr) node()           {}
-func (*ItemRefExpr) expressionNode() {}
-
-// IndexRefExpr references the current forEach index: index()
-type IndexRefExpr struct{}
-
-func (*IndexRefExpr) node()           {}
-func (*IndexRefExpr) expressionNode() {}
 
 // EventRefExpr references the trigger event: event()
 type EventRefExpr struct{}
@@ -1012,7 +986,10 @@ const (
 	// Auditing
 	AttrAudit = "audit"
 
-	// Triggers (automation only)
+	// Triggers (automation only). AttrSchedule is the retired `@schedule`
+	// spelling, named so the statement parser can refuse it
+	// (trigger_schedule_synonym_retired): @trigger(schedule=...) is the one
+	// spelling.
 	AttrTrigger  = "trigger"
 	AttrFilter   = "filter"
 	AttrSchedule = "schedule"
@@ -1049,104 +1026,8 @@ const (
 )
 
 // ----------------------------------------------------------------------------
-// Go-like Statement Nodes (NEW - for Go-style syntax)
+// Expression Nodes read by the runtime string evaluator
 // ----------------------------------------------------------------------------
-
-// AssignStmt represents a := assignment: name := expr or name, err := expr
-type AssignStmt struct {
-	Names []string       // Variable names (e.g., ["result"] or ["result", "err"])
-	Value ExpressionNode // The expression being assigned
-}
-
-func (*AssignStmt) node()          {}
-func (*AssignStmt) statementNode() {}
-
-// ForRangeStmt represents a for-range loop: for item := range collection { ... }
-type ForRangeStmt struct {
-	Index      string         // Index variable (optional, e.g., "i")
-	Value      string         // Value variable (e.g., "item")
-	Collection ExpressionNode // Collection to iterate over
-	Filter     ExpressionNode // Optional filter condition (for item := range x if cond)
-	Body       []Node         // Statements in the loop body
-}
-
-func (*ForRangeStmt) node()          {}
-func (*ForRangeStmt) statementNode() {}
-
-// SwitchStmt represents a Go-style switch statement
-type SwitchStmt struct {
-	Expr    ExpressionNode // Expression being switched on
-	Cases   []*CaseClause  // Case clauses
-	Default []Node         // Default clause body (nil if no default)
-}
-
-func (*SwitchStmt) node()          {}
-func (*SwitchStmt) statementNode() {}
-
-// CaseClause represents a single case in a switch statement
-type CaseClause struct {
-	Values []ExpressionNode // Case values (can be multiple: case "a", "b":)
-	Body   []Node           // Statements to execute
-}
-
-func (*CaseClause) node() {}
-
-// IfStmt represents a Go-style if statement: if cond { } else { }
-type IfStmt struct {
-	Init      StatementNode  // Optional init statement: if x, err := foo(); err != nil
-	Condition ExpressionNode // Condition to evaluate
-	Then      []Node         // Body if condition is true
-	Else      []Node         // Body if condition is false (can contain another IfStmt)
-
-	// ThenSteps and ElseSteps hold the body parsed as automation step
-	// definitions (the canonical shape for Logic-body if statements).
-	// Populated by parseIfStatement when the body contains
-	// assignments / for-range / nested if statements rather than the
-	// legacy continue/break/return-only shape. ifStatementToSteps
-	// reads these to flatten the if into a list of conditional steps.
-	ThenSteps []StepDef
-	ElseSteps []StepDef
-	// ElseIf holds a nested `else if` chain. If non-nil, ElseSteps
-	// is unused -- the nested if's steps carry the negated parent
-	// condition layered on top of their own.
-	ElseIf *IfStmt
-}
-
-func (*IfStmt) node()          {}
-func (*IfStmt) statementNode() {}
-
-// ContinueStmt represents a continue statement in a loop
-type ContinueStmt struct {
-	Label string // Optional label for labeled continue
-}
-
-func (*ContinueStmt) node()          {}
-func (*ContinueStmt) statementNode() {}
-
-// BreakStmt represents a break statement in a loop or switch
-type BreakStmt struct {
-	Label string // Optional label for labeled break
-}
-
-func (*BreakStmt) node()          {}
-func (*BreakStmt) statementNode() {}
-
-// ReturnStmt represents a return statement: return expr or return expr, err
-type ReturnStmt struct {
-	Results []ExpressionNode // Return values (typically [value, error] or [value])
-}
-
-func (*ReturnStmt) node()          {}
-func (*ReturnStmt) statementNode() {}
-
-// RetryExpr wraps an expression with retry logic: retry(3) expr
-type RetryExpr struct {
-	Count  int            // Number of retry attempts
-	Target ExpressionNode // Expression to retry
-}
-
-func (*RetryExpr) node()           {}
-func (*RetryExpr) expressionNode() {}
 
 // DotAccessExpr represents dot notation access: event.payload.subject
 type DotAccessExpr struct {
@@ -1259,7 +1140,8 @@ type FunctionArg struct {
 // Automation Definition Nodes
 // ----------------------------------------------------------------------------
 
-// AutomationDef represents an automation definition.
+// AutomationDef is a logic's or an automation's definition: an automation's
+// trigger, the annotations and the statement body.
 type AutomationDef struct {
 	// DocComment carries the joined /// doc-comment block attached
 	// immediately above this declaration (memql#2633, capture-only;
@@ -1268,12 +1150,12 @@ type AutomationDef struct {
 	Attributes  []*Attribute // @name Python-style attributes
 	Name        string
 	Description string
-	Schedule    string // cron expression (from @schedule)
+	Schedule    string // cron expression, from @trigger(schedule=...)
 	Trigger     *TriggerDef
-	Input       ExpressionNode
-	Steps       []StepDef
-	OnComplete  *StepDef
-	OnError     *StepDef
+
+	// Body is the statement body (body.go), which the statement parser reads
+	// for a logic and an automation alike (epic memql#5370).
+	Body *Body
 
 	// Parsed attribute values. @deprecated / @version / @timeout / @retry /
 	// @audit / @async / @rateLimit were folded here but never read by the
@@ -1288,9 +1170,9 @@ func (*AutomationDef) node() {}
 type TriggerDef struct {
 	Event  string
 	Filter string
-	// FilterLambda is the edition-2026 trigger filter, `@filter(row => ...)`
-	// (memql#5364): `row` is the triggering row. Filter then holds its
-	// canonical source (ast.FormatExpr). Nil for today's raw-text filter.
+	// FilterLambda is the trigger filter, `@filter(row => ...)`
+	// (memql#5364): `row` is the triggering row. Filter holds its canonical
+	// source (ast.FormatExpr). Nil when the automation has no filter.
 	FilterLambda *LambdaExpr
 }
 
@@ -1344,105 +1226,6 @@ type ArgsField struct {
 	AdditionalProperties *bool
 	// Items defines array item schema.
 	Items *ArgsField
-}
-
-// StepDef represents a step in an automation.
-type StepDef struct {
-	ID         string
-	Name       string
-	Type       StepType
-	Condition  string // "if condition" after step type
-	RetryCount int    // from retry(n) wrapper
-	OnError    string // error handling strategy (e.g., "continue", "fail")
-	Config     any    // Step-type-specific configuration
-
-	// ConditionExpr is Condition parsed; Condition holds its canonical
-	// source. Nil when the step has no condition.
-	ConditionExpr ExpressionNode
-
-	// Line is the author's line the step is written on: its name, or the
-	// keyword of a statement that is a step. Zero for a step no source
-	// produced. The compiler names it when it refuses a step (two steps
-	// with one id, memql#5367).
-	Line int
-}
-
-// StepType identifies the kind of step.
-type StepType string
-
-const (
-	StepTypeQuery      StepType = "query"
-	StepTypeMutation   StepType = "mutation"
-	StepTypeForEach    StepType = "forEach"
-	StepTypeParallel   StepType = "parallel"
-	StepTypeSwitch     StepType = "switch"
-	StepTypeFunction   StepType = "function"
-	StepTypeAutomation StepType = "automation"
-	StepTypeAction     StepType = "action"
-)
-
-// QueryStepConfig configures a query step.
-type QueryStepConfig struct {
-	Query ExpressionNode
-}
-
-// MutationStepConfig configures a mutation step.
-type MutationStepConfig struct {
-	Mutation *MutationStmt
-}
-
-// FunctionStepConfig configures a named function invocation step.
-type FunctionStepConfig struct {
-	Name string
-	Args map[string]any
-}
-
-// ActionStepConfig configures an action-library replay step (#1758, epic
-// #1734): `action { ref: "act_x@3", args: {...}, surface: "..." }`. Ref is a
-// pinned-by-default action reference (id@version); Surface is an optional
-// explicit surface binding the resolver honors first.
-type ActionStepConfig struct {
-	Ref     string
-	Args    map[string]any
-	Surface string
-}
-
-// ForEachStepConfig configures iteration over a collection.
-type ForEachStepConfig struct {
-	Source      string
-	Filter      string
-	As          string // Value variable (e.g., "item" in "for item := range")
-	Index       string // Index variable (optional, e.g., "i" in "for i, item := range")
-	Concurrency int
-	Do          []StepDef
-
-	// SourceExpr and FilterExpr are Source and Filter parsed; the string
-	// fields hold their canonical source. FilterExpr is nil with no filter.
-	SourceExpr ExpressionNode
-	FilterExpr ExpressionNode
-}
-
-// ParallelStepConfig configures concurrent step execution.
-type ParallelStepConfig struct {
-	Branches []StepDef
-	Wait     string
-	FailFast bool
-}
-
-// SwitchStepConfig configures conditional branching.
-type SwitchStepConfig struct {
-	Expression string
-	Cases      map[string]*SwitchCase
-	Default    *SwitchCase
-
-	// ExpressionExpr is Expression parsed; Expression holds its canonical
-	// source.
-	ExpressionExpr ExpressionNode
-}
-
-// SwitchCase defines what to execute for a switch case.
-type SwitchCase struct {
-	Steps []StepDef
 }
 
 // ----------------------------------------------------------------------------

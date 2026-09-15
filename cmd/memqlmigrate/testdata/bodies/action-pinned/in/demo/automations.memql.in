@@ -1,0 +1,6 @@
+@trigger(event="demo.pinned")
+automation demoPinnedAction {
+  step clone {
+    action("cloneRepoAtVersion@1") { args { ref: "main" } }
+  }
+}

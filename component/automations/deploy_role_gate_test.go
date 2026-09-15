@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/language/compiler"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -21,21 +23,22 @@ import (
 // coalesce-argument resolver, which gated on a hardcoded root list omitting
 // `actor` -- so the gate's own spelling was the one shape nothing tested.
 //
-// These run the SHIPPED gate bodies verbatim through RunLogic with a real
-// AccessContext, because that is the only level at which the bug is visible.
+// These run the SHIPPED gate bodies verbatim through RunLogicBody, compiled as
+// the function loader compiles them, with a real AccessContext, because that
+// is the only level at which the bug is visible.
 // A gate that denies everyone is not a safe failure: the deploy-forward and
 // rollback paths it guards become unreachable, and anyone debugging that
 // reasonably concludes the role plumbing is broken rather than the resolver.
 
 func runShippedGate(t *testing.T, name, body string, role auth.Role) any {
 	t.Helper()
-	src := "@actor\n@description(\"shipped gate under test\")\nlogic " + name + " {\n  body {\n" + body + "\n  }\n}\n"
-	parsed := parseLogicBody(t, src)
-	r := NewLogicRunner(&memql.MemQLEngine{}, &bundleStepRegistry{}, nil)
+	src := "@actor\n@description(\"shipped gate under test\")\nlogic " + name + " {\n" + body + "\n}\n"
+	_, steps := compiledLogic(t, src)
+	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
 	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "u1", Role: role})
-	out, err := r.RunLogic(ctx, name, parsed, map[string]any{})
+	out, err := r.RunLogicBody(ctx, name, steps, map[string]any{})
 	if err != nil {
-		t.Fatalf("%s(role=%s): RunLogic: %v", name, role, err)
+		t.Fatalf("%s(role=%s): RunLogicBody: %v", name, role, err)
 	}
 	return out
 }
@@ -94,12 +97,12 @@ func TestDeploymentRollbackAllowed_ResolvesActorRole(t *testing.T) {
 // distinguishes them -- and rules out the #2380 hazard shape, where an
 // unresolved path becomes a non-empty and therefore truthy string.
 func TestDeployGates_NoActorDeniesWithEmptyRole(t *testing.T) {
-	src := "@actor\n@description(\"no-actor probe\")\nlogic noActorProbe {\n  body {\n    role := actor.role ?? \"\"\n    return role\n  }\n}\n"
-	parsed := parseLogicBody(t, src)
-	r := NewLogicRunner(&memql.MemQLEngine{}, &bundleStepRegistry{}, nil)
-	out, err := r.RunLogic(context.Background(), "noActorProbe", parsed, map[string]any{})
+	src := "@actor\n@description(\"no-actor probe\")\nlogic noActorProbe {\n  role := actor.role ?? \"\"\n  return role\n}\n"
+	_, steps := compiledLogic(t, src)
+	r := NewLogicRunner(&memql.MemQLEngine{}, &recordingStepRegistry{}, nil)
+	out, err := r.RunLogicBody(context.Background(), "noActorProbe", steps, map[string]any{})
 	if err != nil {
-		t.Fatalf("RunLogic: %v", err)
+		t.Fatalf("RunLogicBody: %v", err)
 	}
 	if out != "" {
 		t.Errorf("role with no actor = %#v, want \"\"; anything non-empty is truthy and fails OPEN in a gate", out)
@@ -111,43 +114,40 @@ func TestDeployGates_NoActorDeniesWithEmptyRole(t *testing.T) {
 	}
 }
 
-// A step does NOT shadow an ambient root: in edition 2026 a name that is a
-// reserved root reads the root, never a step (args_resolution_v1.go; an
-// automation naming a step after one is refused at load). `actor` is the one
-// root security gates are written against, so it is the worst name for a
-// step to capture. The string evaluator once let a step named `actor` hijack
-// the root at some sites and not others -- `actor.first().id` returned the
-// leftover accessor text "().id", a TRUTHY string.
-//
-// Here the read of `actor` is the actor envelope: `actor.first()` is not the
-// step's rows, so `??` takes its fallback, and nothing read as a truthy
-// string along the way.
+// A statement does NOT shadow an ambient root. `actor` is the one root
+// security gates are written against, so it is the worst name for a
+// statement to capture. The string evaluator once let a step named `actor`
+// hijack the root at some sites and not others -- `actor.first().id` returned
+// the leftover accessor text "().id", a TRUTHY string. A statement body
+// cannot get there: a statement named after a reserved root is refused at
+// load (body_reserved_name), so every `actor` a body reads is the actor.
 func TestLogicStepDoesNotShadowAmbientRoot(t *testing.T) {
-	src := `@description("step named after an ambient root")
+	src := `@description("statement named after an ambient root")
 logic stepShadowsActor {
   args {
     id string @required
   }
-  body {
-    actor := queryThing( id: args.id )
-    picked := actor.first().id ?? "FALLBACK"
-    return picked
-  }
+  actor := query queryThing(id: args.id)
+  picked := actor.first().id ?? "FALLBACK"
+  return picked
 }
 `
-	parsed := parseLogicBody(t, src)
-	reg := &bundleStepRegistry{nodes: []any{
-		map[string]any{"id": "r1"},
-		map[string]any{"id": "r2"},
-	}}
-	r := NewLogicRunner(&memql.MemQLEngine{}, reg, nil)
-	ctx := auth.ContextWithAccess(context.Background(), &auth.AccessContext{UserId: "u1", Role: auth.RoleOwner})
-	out, err := r.RunLogic(ctx, "stepShadowsActor", parsed, map[string]any{"id": "x"})
+	norm, err := languageParser.NormaliseAll(src)
 	if err != nil {
-		t.Fatalf("RunLogic: %v", err)
+		t.Fatal(err)
 	}
-	if out != "FALLBACK" {
-		t.Errorf("`actor.first().id ?? \"FALLBACK\"` = %#v, want the fallback: `actor` reads the actor root, never the step named after it", out)
+	file, err := languageParser.ParseFile(norm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := file.Definitions[0].(*languageParser.FunctionDef)
+	_, problems := compiler.CompileBody("logic", fn.Name, []string{"id"}, fn.Body.(*languageParser.AutomationDef).Body)
+	var reserved bool
+	for _, p := range problems {
+		reserved = reserved || p.Code == "body_reserved_name"
+	}
+	if !reserved {
+		t.Fatalf("a statement named `actor` must be refused at load (body_reserved_name), got %v", problems)
 	}
 }
 

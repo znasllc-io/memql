@@ -71,8 +71,8 @@ func TestWorkTemplateDBResolvesAndRunsOnAnotherEngine(t *testing.T) {
 	ctx := auth.ContextWithUserActor(context.Background(), owner)
 	name := "runTemplate" + strings.ReplaceAll(id.NewShortId(), "-", "")
 	logic := name + "Answer"
-	source := fmt.Sprintf("@template\nautomation %s { step answer { logic %s {} } }", name, logic)
-	logicSource := fmt.Sprintf("logic %s { body { return 42 } }", logic)
+	source := fmt.Sprintf("@template\nautomation %s {\n  answer := logic %s()\n}", name, logic)
+	logicSource := fmt.Sprintf("logic %s {\n  return 42\n}", logic)
 	templateMutation(t, writer, ctx, "createAuthoringBundle", map[string]any{"bundleId": bundle, "title": "Execution test", "sourceRunId": run})
 	templateMutation(t, writer, ctx, "createAuthoringConstruct", map[string]any{"constructId": construct, "bundleId": bundle, "kind": "automation", "name": name, "targetNamespace": "work", "source": source})
 	templateMutation(t, writer, ctx, "createAuthoringConstruct", map[string]any{"constructId": id.NewShortId(), "bundleId": bundle, "kind": "logic", "name": logic, "targetNamespace": "work", "source": logicSource})

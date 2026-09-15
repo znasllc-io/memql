@@ -150,7 +150,7 @@ test("serializeRunConfigFile -- argument keys are sorted so re-saving produces n
 test("serialize -> parse round-trips", () => {
   const file = upsertRunConfig(
     upsertRunConfig(emptyRunConfigFile(), config()),
-    config({ name: "two", kind: "mutate", construct: "createSpace", args: { name: "Ops" } }),
+    config({ name: "two", kind: "mutation", construct: "createSpace", args: { name: "Ops" } }),
   );
   const result = parseRunConfigFile(serializeRunConfigFile(file));
   assert.ok(result.ok);

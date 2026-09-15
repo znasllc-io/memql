@@ -8,7 +8,7 @@ import (
 )
 
 func TestValidateRunJournal_RefusesAChangedAutomation(t *testing.T) {
-	auto := &Automation{Name: "demo", Steps: []*Step{{ID: "a", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}}}}
+	auto := &Automation{Name: "demo", Steps: []*Step{{ID: "a", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}}}}
 	j := &RunJournal{RunId: "run-1", AutomationName: "demo", TemplateFingerprint: "stale", FailedStep: "a"}
 	if err := ValidateRunJournal(j, auto, id.New()); !errors.Is(err, ErrAutomationChanged) {
 		t.Fatalf("err = %v, want ErrAutomationChanged", err)
@@ -92,13 +92,16 @@ func TestRunJournalFromRows_StripsTheCanonicalPrefix(t *testing.T) {
 }
 
 func TestResumeRetryableRule(t *testing.T) {
-	if !IsStepRetryable(StepTypeQuery) || IsStepRetryable(StepTypeMutation) || IsStepRetryable(StepTypeWebhook) {
-		t.Fatal("read-only steps retry freely; mutation and webhook need AllowSideEffects")
+	call := func(kind string) *Step {
+		return &Step{ID: "s", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "f", Kind: kind}}
 	}
-	if IsStepRetryable(StepTypeEvent) || IsStepRetryable(StepTypeAction) {
-		t.Fatal("event and action steps have external effects too")
+	if !stepRetryable(call("query")) || stepRetryable(call("mutation")) {
+		t.Fatal("a query call retries freely; a mutation call needs AllowSideEffects")
 	}
-	if !IsStepRetryable(StepTypeFunction) || !IsStepRetryable(StepTypeForEach) {
-		t.Fatal("function, forEach and the other composers are re-run")
+	if stepRetryable(&Step{ID: "s", Type: StepTypeEvent}) || stepRetryable(&Step{ID: "s", Type: StepTypeAction}) {
+		t.Fatal("a publish and an action have external effects too")
+	}
+	if !stepRetryable(call("logic")) || !stepRetryable(call("builtin")) || !stepRetryable(&Step{ID: "s", Type: StepTypeForEach}) {
+		t.Fatal("a logic or builtin call, a for and the other composers are re-run")
 	}
 }

@@ -1,5 +1,5 @@
 /// Retitle a ticket; a blank title falls back to a placeholder.
-mutate ticket retitleOrPlaceholder {
+mutation ticket retitleOrPlaceholder {
   args {
     ticketId  string!
     title     string

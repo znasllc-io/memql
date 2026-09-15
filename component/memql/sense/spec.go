@@ -46,7 +46,7 @@ func specBuiltinFunctions() map[string]BuiltinDef {
 }
 
 // specConstructItems returns one completion item per author-facing top-level
-// construct keyword (concept / query / mutate / logic / automation / action /
+// construct keyword (concept / query / mutation / logic / automation / action /
 // capability / spec / trait / shape / tool / prompt / provider / builtin /
 // policy / seed / use),
 // filtered by prefix. This is the spec-driven replacement for the stale
@@ -71,7 +71,7 @@ func specConstructItems(prefix string) []CompletionItem {
 }
 
 // specConceptSignatureKeywords returns the set of construct keywords whose
-// signature binds a concept right after the keyword (`mutate <Concept>
+// signature binds a concept right after the keyword (`mutation <Concept>
 // <name>`, `query ...`, `seed ...`, `shape ...`). Derived from the spec's
 // ConceptInSignature flag so it can never drift from the grammar -- the #2124
 // drift test pins the spec to the parser/rewriter. Used by context.go to
@@ -104,7 +104,7 @@ func specNextRule(context string) *dslspec.NextRule {
 // afterShapeKeyword). Returns "" for keywords with no such rule.
 func specConstructConceptContextLabel(keyword string) string {
 	switch keyword {
-	case "mutate":
+	case "mutation":
 		return "afterMutationKeyword"
 	case "query":
 		return "afterQueryKeyword"
@@ -155,7 +155,7 @@ func specKeywordNames() []string {
 }
 
 // constructKeywords is the set of author-facing top-level construct keywords
-// (concept / query / mutate / logic / automation / action / capability / spec /
+// (concept / query / mutation / logic / automation / action / capability / spec /
 // trait / shape / tool / prompt / provider / builtin / policy / seed / use),
 // sourced from the DSL spec. The Sense tokenizer colors these as `keyword`
 // semantic tokens: the LOWERCASE construct keywords lex as plain identifiers in
@@ -178,9 +178,8 @@ func specConstructKeywordSet() map[string]bool {
 // invocationKindKeywords is the kind-prefixed INVOCATION set (`mutation
 // createDeployment(...)` in an automation step; `query x(...)` in a logic
 // body), sourced directly from the parser's authoritative set so the two
-// surfaces cannot drift (E6, memql#2392). Mostly overlaps the declaration
-// keywords -- the net-new spelling is `mutation`, whose declaration keyword
-// is `mutate` -- but sourcing the whole set keeps future kinds colored
+// surfaces cannot drift (E6, memql#2392). It overlaps the declaration
+// keywords, but sourcing the whole set keeps future kinds colored
 // automatically.
 var invocationKindKeywords = invocationKindKeywordSet()
 

@@ -4,7 +4,7 @@ use shopify.overlay.concepts.{ store, complianceJob }
 /// arguments are REFERENCES to globalSecret rows rather than the tokens
 /// themselves -- a mutation that took a token would put it in the call
 /// string, which is rendered into logs on a parse error.
-mutate store createStore {
+mutation store createStore {
   args {
     storeId             string!
     domain              string!
@@ -41,7 +41,7 @@ mutate store createStore {
 /// Change a store's configuration. Read-merge: an argument left out keeps
 /// its stored value, so rotating one secret reference does not require
 /// re-supplying the other two.
-mutate store updateStore {
+mutation store updateStore {
   args {
     storeId             string!
     name                string
@@ -66,7 +66,7 @@ mutate store updateStore {
 /// Move a store through its lifecycle. Separate from updateStore because
 /// status is the switch ingestion reads: pausing a store is an operational
 /// act, not a configuration edit, and it wants its own audit line.
-mutate store setStoreStatus {
+mutation store setStoreStatus {
   args {
     storeId  string!
     status   string!
@@ -80,7 +80,7 @@ mutate store setStoreStatus {
 /// Record what the connector last observed about a store. Health is a
 /// single object so the connector can publish a shape the portal renders
 /// without a schema change every time a new counter is worth showing.
-mutate store recordStoreHealth {
+mutation store recordStoreHealth {
   args {
     storeId                 string!
     health                  object!
@@ -96,7 +96,7 @@ mutate store recordStoreHealth {
 
 /// Stamp the shop/redact purge. The row stays: it is the audit record that
 /// a purge happened, and the domain must not be re-registered silently.
-mutate store markStoreRedacted {
+mutation store markStoreRedacted {
   args {
     storeId     string!
     redactedAt  datetime!
@@ -119,7 +119,7 @@ mutate store markStoreRedacted {
 /// runner has already moved.
 @serverOnly
 @createOnly("status", "outcome", "lastError")
-mutate complianceJob queueComplianceJob {
+mutation complianceJob queueComplianceJob {
   args {
     jobId        string!
     storeId      string!
@@ -152,7 +152,7 @@ mutate complianceJob queueComplianceJob {
 /// to a STORE and to a legal obligation, not to a person. `done` is a claim
 /// that the obligation was met, and only the code that met it can make it.
 @serverOnly
-mutate complianceJob recordComplianceJob {
+mutation complianceJob recordComplianceJob {
   args {
     jobId      string!
     status     string!

@@ -1,0 +1,6 @@
+@trigger(schedule="0 0 * * * *")
+automation conditionalAssign {
+  x := if now != "" {
+    builtin clock()
+  }
+}

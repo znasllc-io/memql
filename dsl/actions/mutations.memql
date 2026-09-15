@@ -69,7 +69,7 @@
 /// served capabilities + availability + failover priority. ownerUserId stamped from actor.userId
 /// (owned tier). #1737.
 @actor
-mutate surface registerSurface {
+mutation surface registerSurface {
   args {
     surfaceId    string
     slug         string!
@@ -99,7 +99,7 @@ mutate surface registerSurface {
 // preserved. #1737.
 /// Set a v1:actions:surface availability flag (the resolver's failover signal) and refresh its
 /// lastSeen heartbeat. #1737.
-mutate surface setSurfaceAvailability {
+mutation surface setSurfaceAvailability {
   args {
     surfaceId  string!
     available  boolean!
@@ -140,7 +140,7 @@ mutate surface setSurfaceAvailability {
 // handed in. update read-merges so the captured calls + ownerUserId persist.
 /// Bump a v1:actions:action monotonic version on edit (Phase 5 #1740; value computed engine-side).
 /// Pins stay on the prior version until the verified upgrade migration moves them.
-mutate action bumpActionVersion {
+mutation action bumpActionVersion {
   args {
     actionId  string!
     version   int!

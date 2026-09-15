@@ -40,4 +40,7 @@
 /// provenance on no match), decays + prunes stale unreinforced beliefs, then advances the watermark
 /// so the next run is incremental (cost bounded by the new-episode delta, not total history).
 /// Schedule offset past the other nightly crons to avoid DB-window contention.
-automation consolidateMemory @trigger(schedule="0 45 2 * * *") => logic consolidateMemory
+@trigger(schedule="0 45 2 * * *")
+automation consolidateMemory {
+  logic consolidateMemory(event: event)
+}

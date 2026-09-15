@@ -1,6 +1,6 @@
 /// Assign a ticket to the caller.
 @actor(true)
-mutate ticket takeTicketActor {
+mutation ticket takeTicketActor {
   args {
     ticketId  string!
   }

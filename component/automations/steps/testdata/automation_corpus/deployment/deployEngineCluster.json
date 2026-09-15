@@ -1,0 +1,477 @@
+{
+  "automation": "deployment/automations.memql deployEngineCluster",
+  "runs": {
+    "event agent | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "deploymentId": "s-deploymentId",
+            "digests": {},
+            "dryRun": true,
+            "engineNodeTypes": [
+              "a"
+            ],
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "previousDeploymentId": "s-previousDeploymentId",
+            "provider": "docker-local",
+            "recordType": "contact",
+            "ref": "s-ref",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "triggeredBy": "s-triggeredBy",
+            "version": "s-version",
+            "workdir": "s-workdir"
+          },
+          "topic": "deploy.requested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "deploymentId": "s-deploymentId",
+              "previousDeploymentId": "s-previousDeploymentId",
+              "provider": "docker-local",
+              "status": "in_progress",
+              "triggeredBy": "s-triggeredBy",
+              "version": "s-version"
+            },
+            "kind": "mutation",
+            "name": "createDeployment"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "ref": "s-ref",
+              "workdir": "s-workdir"
+            },
+            "kind": "action",
+            "name": "cloneRepoAtVersion"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "nodeType": "a",
+              "version": "s-version",
+              "workdir": "s-workdir"
+            },
+            "kind": "action",
+            "name": "buildEngineImage"
+          },
+          {
+            "args": {
+              "cluster": "memql",
+              "dryRun": true,
+              "nodeType": "a",
+              "version": "s-version"
+            },
+            "kind": "action",
+            "name": "importImageToK3d"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "provider": "docker-local",
+              "workdir": "s-workdir"
+            },
+            "kind": "action",
+            "name": "runDeployGate"
+          },
+          {
+            "args": {
+              "deploymentId": "s-deploymentId",
+              "status": "succeeded"
+            },
+            "kind": "mutation",
+            "name": "updateDeploymentStatus"
+          },
+          {
+            "args": {
+              "deploymentId": "s-deploymentId",
+              "dryRun": true,
+              "status": "succeeded"
+            },
+            "kind": "action",
+            "name": "notifyDeploy"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event agent | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "deploymentId": "s-deploymentId",
+            "digests": {},
+            "dryRun": true,
+            "engineNodeTypes": [
+              "a"
+            ],
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "previousDeploymentId": "s-previousDeploymentId",
+            "provider": "docker-local",
+            "recordType": "contact",
+            "ref": "s-ref",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "triggeredBy": "s-triggeredBy",
+            "version": "s-version",
+            "workdir": "s-workdir"
+          },
+          "topic": "deploy.requested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "deploymentId": "s-deploymentId",
+              "previousDeploymentId": "s-previousDeploymentId",
+              "provider": "docker-local",
+              "status": "in_progress",
+              "triggeredBy": "s-triggeredBy",
+              "version": "s-version"
+            },
+            "kind": "mutation",
+            "name": "createDeployment"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "ref": "s-ref",
+              "workdir": "s-workdir"
+            },
+            "kind": "action",
+            "name": "cloneRepoAtVersion"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "nodeType": "a",
+              "version": "s-version",
+              "workdir": "s-workdir"
+            },
+            "kind": "action",
+            "name": "buildEngineImage"
+          },
+          {
+            "args": {
+              "cluster": "memql",
+              "dryRun": true,
+              "nodeType": "a",
+              "version": "s-version"
+            },
+            "kind": "action",
+            "name": "importImageToK3d"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "provider": "docker-local",
+              "workdir": "s-workdir"
+            },
+            "kind": "action",
+            "name": "runDeployGate"
+          },
+          {
+            "args": {
+              "deploymentId": "s-deploymentId",
+              "status": "succeeded"
+            },
+            "kind": "mutation",
+            "name": "updateDeploymentStatus"
+          },
+          {
+            "args": {
+              "deploymentId": "s-deploymentId",
+              "dryRun": true,
+              "status": "succeeded"
+            },
+            "kind": "action",
+            "name": "notifyDeploy"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "deploymentId": "s-deploymentId",
+            "digests": {},
+            "dryRun": true,
+            "engineNodeTypes": [
+              "a"
+            ],
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "previousDeploymentId": "s-previousDeploymentId",
+            "provider": "docker-local",
+            "recordType": "contact",
+            "ref": "s-ref",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "triggeredBy": "s-triggeredBy",
+            "version": "s-version",
+            "workdir": "s-workdir"
+          },
+          "topic": "deploy.requested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "deploymentId": "s-deploymentId",
+              "previousDeploymentId": "s-previousDeploymentId",
+              "provider": "docker-local",
+              "status": "in_progress",
+              "triggeredBy": "s-triggeredBy",
+              "version": "s-version"
+            },
+            "kind": "mutation",
+            "name": "createDeployment"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "ref": "s-ref",
+              "workdir": "s-workdir"
+            },
+            "kind": "action",
+            "name": "cloneRepoAtVersion"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "nodeType": "a",
+              "version": "s-version",
+              "workdir": "s-workdir"
+            },
+            "kind": "action",
+            "name": "buildEngineImage"
+          },
+          {
+            "args": {
+              "cluster": "memql",
+              "dryRun": true,
+              "nodeType": "a",
+              "version": "s-version"
+            },
+            "kind": "action",
+            "name": "importImageToK3d"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "provider": "docker-local",
+              "workdir": "s-workdir"
+            },
+            "kind": "action",
+            "name": "runDeployGate"
+          },
+          {
+            "args": {
+              "deploymentId": "s-deploymentId",
+              "status": "succeeded"
+            },
+            "kind": "mutation",
+            "name": "updateDeploymentStatus"
+          },
+          {
+            "args": {
+              "deploymentId": "s-deploymentId",
+              "dryRun": true,
+              "status": "succeeded"
+            },
+            "kind": "action",
+            "name": "notifyDeploy"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "deploymentId": "s-deploymentId",
+            "digests": {},
+            "dryRun": true,
+            "engineNodeTypes": [
+              "a"
+            ],
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "previousDeploymentId": "s-previousDeploymentId",
+            "provider": "docker-local",
+            "recordType": "contact",
+            "ref": "s-ref",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "triggeredBy": "s-triggeredBy",
+            "version": "s-version",
+            "workdir": "s-workdir"
+          },
+          "topic": "deploy.requested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "deploymentId": "s-deploymentId",
+              "previousDeploymentId": "s-previousDeploymentId",
+              "provider": "docker-local",
+              "status": "in_progress",
+              "triggeredBy": "s-triggeredBy",
+              "version": "s-version"
+            },
+            "kind": "mutation",
+            "name": "createDeployment"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "ref": "s-ref",
+              "workdir": "s-workdir"
+            },
+            "kind": "action",
+            "name": "cloneRepoAtVersion"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "nodeType": "a",
+              "version": "s-version",
+              "workdir": "s-workdir"
+            },
+            "kind": "action",
+            "name": "buildEngineImage"
+          },
+          {
+            "args": {
+              "cluster": "memql",
+              "dryRun": true,
+              "nodeType": "a",
+              "version": "s-version"
+            },
+            "kind": "action",
+            "name": "importImageToK3d"
+          },
+          {
+            "args": {
+              "dryRun": true,
+              "provider": "docker-local",
+              "workdir": "s-workdir"
+            },
+            "kind": "action",
+            "name": "runDeployGate"
+          },
+          {
+            "args": {
+              "deploymentId": "s-deploymentId",
+              "status": "succeeded"
+            },
+            "kind": "mutation",
+            "name": "updateDeploymentStatus"
+          },
+          {
+            "args": {
+              "deploymentId": "s-deploymentId",
+              "dryRun": true,
+              "status": "succeeded"
+            },
+            "kind": "action",
+            "name": "notifyDeploy"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

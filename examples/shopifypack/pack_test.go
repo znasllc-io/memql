@@ -123,7 +123,7 @@ func TestPackDoesNotOwnCheckout(t *testing.T) {
 			return readErr
 		}
 		src := string(raw)
-		if strings.Contains(src, "mutate checkout") || strings.Contains(src, "concept checkout") {
+		if strings.Contains(src, "mutation checkout") || strings.Contains(src, "concept checkout") {
 			t.Errorf("%s must not declare a checkout concept or mutation", path)
 		}
 		return nil

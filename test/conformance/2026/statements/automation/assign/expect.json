@@ -1,0 +1,15 @@
+{
+  "cases": [
+    {
+      "file": "assign.memql",
+      "verdict": "load_ok",
+      "note": "a name bound to a call and one bound to an expression, read by the statements after them"
+    },
+    {
+      "file": "call-inside-an-expression.memql",
+      "verdict": "refuse_parse",
+      "code": "body_call_in_expression",
+      "message": "a construct call is a statement of its own: bind it, `<n> := query countThings(...)`, and read <n> here"
+    }
+  ]
+}

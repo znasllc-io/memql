@@ -33,7 +33,7 @@ var standaloneRetiredRe = regexp.MustCompile(`^\s*@(internal|role|permission)(\s
 // constructKeywordAfterInternal matches the construct-declaration keywords a
 // retired construct-level annotation could annotate.
 var constructKeywordAfterInternal = regexp.MustCompile(
-	`^\s*(query|mutation|mutate|logic|automation|builtin|tool|shape|spec|trait|prompt|provider|policy|capability|action|concept|seed)\b`)
+	`^\s*(query|mutation|logic|automation|builtin|tool|shape|spec|trait|prompt|provider|policy|capability|action|concept|seed)\b`)
 
 // TestNoRetiredConstructAnnotations is the #2708 corpus lock-in, the
 // TestNoClockCallForms shape: the load gate already rejects construct-level

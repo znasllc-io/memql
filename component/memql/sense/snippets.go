@@ -116,19 +116,19 @@ var constructSkeletons = []struct {
 		body: "/// ${1:What the predicate matches.}\ntrait ${2:name} = row => row.${3:field} == ${4:true}$0",
 	},
 	{
-		keyword: "mutate", label: "mutate <Concept> <name> { ... }",
+		keyword: "mutation", label: "mutation <Concept> <name> { ... }",
 		doc:  "A write construct: args plus one insert/update block using the accept/stamp form.",
-		body: "mutate ${1:Concept} ${2:name} {\n\targs {\n\t\t${3:field} string!\n\t}\n\tinsert {\n\t\taccept { ${3:field} }\n\t\t$0\n\t}\n}",
+		body: "mutation ${1:Concept} ${2:name} {\n\targs {\n\t\t${3:field} string!\n\t}\n\tinsert {\n\t\taccept { ${3:field} }\n\t\t$0\n\t}\n}",
 	},
 	{
 		keyword: "logic", label: "logic <name> { ... }",
-		doc:  "A callable behavioral construct: args plus a body of named steps ending in return.",
-		body: "logic ${1:name} {\n\targs {\n\t\t${2:field} string!\n\t}\n\tbody {\n\t\t$0\n\t}\n}",
+		doc:  "A callable behavioral construct: args, then its statements, ending in return.",
+		body: "logic ${1:name} {\n\targs {\n\t\t${2:field} string!\n\t}\n\t$0\n}",
 	},
 	{
-		keyword: "automation", label: "automation <name> @trigger(...) => logic <name>",
-		doc:  "The terse single-step automation form (#2619): make one logic reactive.",
-		body: "automation ${1:name} @trigger(event=\"${2:topic}\") => logic ${3:logicName}$0",
+		keyword: "automation", label: "automation <name> { ... }",
+		doc:  "A reactive construct: its trigger, then its statements.",
+		body: "@trigger(event=\"${1:topic}\")\nautomation ${2:name} {\n\tlogic ${3:logicName}(event: event)$0\n}",
 	},
 	{
 		keyword: "concept", label: "concept <name> { ... }",

@@ -189,15 +189,15 @@ func (i *Integration) resolve(ctx context.Context, refs []SourceRef) ([]Resolved
 }
 
 // ensureQueryPrefix lets a caller pass either `query foo(...)` or
-// `foo(...)`. THE PREFIX IS ADDED, NEVER THE VERB CHANGED: a `mutate`
-// arriving here is passed through as written and refused by the engine
-// as a construct the caller may not reach, rather than being silently
-// rewritten into a read that succeeds. A source that quietly became a
-// different statement is the one failure this helper must not have.
+// `foo(...)`. THE PREFIX IS ADDED, NEVER THE VERB CHANGED: anything that does
+// not open with a read's verb gets `query ` in front, so a `mutation` call
+// arriving here is refused as the query it is not, rather than run. A source
+// that quietly became a different statement is the one failure this helper
+// must not have.
 func ensureQueryPrefix(s string) string {
 	trimmed := strings.TrimSpace(s)
 	lower := strings.ToLower(trimmed)
-	for _, verb := range []string{"query ", "mutate ", "logic ", "shape "} {
+	for _, verb := range []string{"query ", "logic ", "shape "} {
 		if strings.HasPrefix(lower, verb) {
 			return trimmed
 		}

@@ -4161,7 +4161,7 @@ type CreateIdentityProviderArgs struct {
 	IssuerUrl          string
 	ClientIdPrefix     string
 	RedirectUrl        string
-	// Both already computed by app/cluster.go's parseIdentityProviderInfo and dropped on the floor by the automation step, which forwarded four fields out of six (memql#4766).
+	// Both already computed by app/cluster.go's parseIdentityProviderInfo and dropped on the floor by the automation's call, which forwarded four fields out of six (memql#4766).
 	AcceptedAudiences []string
 	JwksUrl           string
 	ClusterId         string

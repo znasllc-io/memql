@@ -114,8 +114,8 @@ func ReachesPrompt(name string, reg Registry) (bool, []string) {
 }
 
 // DeriveKind answers the kind for one step. stepType is the automation
-// step type; target is the construct it calls, empty for the structural
-// types that call nothing by name.
+// step type a statement compiles to; target is the construct it calls,
+// empty for the statements that call nothing by name.
 func DeriveKind(stepType, target string, reg Registry) (Kind, error) {
 	switch stepType {
 	case "approval", "feedback", "wait":
@@ -138,8 +138,7 @@ func DeriveKind(stepType, target string, reg Registry) (Kind, error) {
 		}
 	}
 	switch stepType {
-	case "query", "mutation", "shape", "function", "action", "forEach", "parallel", "switch",
-		"webhook", "event", "detectLeadSignal", "emitConceptCard":
+	case "function", "action", "forEach", "parallel", "block", "event", "expression", "return":
 		return KindDeterministic, nil
 	}
 	return KindUnset, fmt.Errorf("work: unknown step type %q", stepType)

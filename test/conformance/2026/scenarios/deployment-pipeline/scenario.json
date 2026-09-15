@@ -1,0 +1,57 @@
+{
+  "description": "The deployment pipeline: deployEngineCluster sequences clone, build, place, gate and finish on the capability scripts its actions dispatch, and records the deployment's lifecycle. deploy.requested has no emitter today (see dsl/deployment/automations.memql), so the scenario publishes it; the automation's args block is the event's contract.",
+  "scenarios": [
+    {
+      "name": "docker-local-deploy-succeeds",
+      "description": "A docker-local deploy builds and imports each node type into k3d, places nothing, passes the gate, and records the deployment in progress and then succeeded. Its dry run intercepts the gate too, so the gate reads no verdict and the run takes the failure path: nine intercepted calls, and no row.",
+      "fire": [
+        { "automation": "deployEngineCluster", "event": { "topic": "deploy.requested", "payload": {
+          "deploymentId": { "$id": "dep" }, "provider": "docker-local", "engineNodeTypes": ["bff", "agent"],
+          "ref": "main", "version": "1.2.3", "workdir": "/tmp/scenario-deploy", "triggeredBy": "scenario", "dryRun": true } } }
+      ],
+      "actions": { "shell.script:deploy.gate": { "passed": true } },
+      "expect": {
+        "rows": [
+          { "concept": "v1:cluster:deployment", "id": { "$id": "dep" }, "payload": { "provider": "docker-local", "version": "1.2.3" },
+            "history": [ { "status": "in_progress" }, { "status": "succeeded" } ] }
+        ],
+        "actions": [
+          "shell.script:deploy.cloneRepo",
+          "shell.script:deploy.buildImage", "shell.script:deploy.buildImage",
+          "shell.script:k3d.importImage", "shell.script:k3d.importImage",
+          "shell.script:deploy.gate",
+          "shell.script:deploy.notify"
+        ]
+      },
+      "dryRun": { "fire": 0, "writes": 9 },
+      "resume": { "fire": 0, "failAt": 5 }
+    },
+    {
+      "name": "azure-deploy-fails-its-gate-and-rolls-back",
+      "description": "An azure deploy builds each node type, pins the overlay's digests and syncs, fails the gate, records the deployment failed, and reverts the overlay to the previous deployment.",
+      "fire": [
+        { "automation": "deployEngineCluster", "event": { "topic": "deploy.requested", "payload": {
+          "deploymentId": { "$id": "dep" }, "provider": "azure", "engineNodeTypes": ["bff", "agent"],
+          "ref": "main", "version": "1.2.4", "workdir": "/tmp/scenario-deploy", "overlayPath": "deploy/k8s/overlays/cloud",
+          "digests": { "bff": "sha256:1", "agent": "sha256:2" }, "previousDeploymentId": "dep-previous",
+          "triggeredBy": "scenario", "dryRun": true } } }
+      ],
+      "actions": { "shell.script:deploy.gate": { "passed": false } },
+      "expect": {
+        "rows": [
+          { "concept": "v1:cluster:deployment", "id": { "$id": "dep" }, "payload": { "provider": "azure", "previousDeploymentId": "dep-previous" },
+            "history": [ { "status": "in_progress" }, { "status": "failed" } ] }
+        ],
+        "actions": [
+          "shell.script:deploy.cloneRepo",
+          "shell.script:deploy.buildImage", "shell.script:deploy.buildImage",
+          "shell.script:overlay.pinDigests", "shell.script:argocd.sync",
+          "shell.script:deploy.gate",
+          "shell.script:deploy.notify",
+          "shell.script:overlay.revert"
+        ]
+      },
+      "resume": { "fire": 0, "failAt": 7 }
+    }
+  ]
+}

@@ -1,0 +1,381 @@
+{
+  "automation": "deployment/automations.memql bringUpInstance",
+  "runs": {
+    "event agent | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "acmeEmail": "s-acmeEmail",
+            "agentId": "agent-1",
+            "clusterName": "s-clusterName",
+            "createdBySubject": "subject-0",
+            "dryRun": true,
+            "esoClientId": "s-esoClientId",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "location": "s-location",
+            "namespace": "s-namespace",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "registryName": "s-registryName",
+            "repoProject": "s-repoProject",
+            "repoRoot": "s-repoRoot",
+            "repoTokenFile": "s-repoTokenFile",
+            "repoTransport": "s-repoTransport",
+            "repoUrl": "s-repoUrl",
+            "resourceGroup": "s-resourceGroup",
+            "revision": "s-revision",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId",
+            "tenantId": "s-tenantId"
+          },
+          "topic": "instance.bringUpRequested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "instanceId": "s-instanceId",
+              "keyVaultName": "s-keyVaultName",
+              "location": "s-location",
+              "registryName": "s-registryName",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "automation",
+            "name": "provisionInstance"
+          },
+          {
+            "args": {
+              "acmeEmail": "s-acmeEmail",
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "esoClientId": "s-esoClientId",
+              "instanceId": "s-instanceId",
+              "keyVaultName": "s-keyVaultName",
+              "namespace": "s-namespace",
+              "overlayPath": "s-overlayPath",
+              "repoProject": "s-repoProject",
+              "repoRoot": "s-repoRoot",
+              "repoTokenFile": "s-repoTokenFile",
+              "repoTransport": "s-repoTransport",
+              "repoUrl": "s-repoUrl",
+              "resourceGroup": "s-resourceGroup",
+              "revision": "s-revision",
+              "subscriptionId": "s-subscriptionId",
+              "tenantId": "s-tenantId"
+            },
+            "kind": "automation",
+            "name": "installInstance"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event agent | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "acmeEmail": "s-acmeEmail",
+            "agentId": "agent-1",
+            "clusterName": "s-clusterName",
+            "createdBySubject": "subject-0",
+            "dryRun": true,
+            "esoClientId": "s-esoClientId",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "location": "s-location",
+            "namespace": "s-namespace",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "registryName": "s-registryName",
+            "repoProject": "s-repoProject",
+            "repoRoot": "s-repoRoot",
+            "repoTokenFile": "s-repoTokenFile",
+            "repoTransport": "s-repoTransport",
+            "repoUrl": "s-repoUrl",
+            "resourceGroup": "s-resourceGroup",
+            "revision": "s-revision",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId",
+            "tenantId": "s-tenantId"
+          },
+          "topic": "instance.bringUpRequested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "instanceId": "s-instanceId",
+              "keyVaultName": "s-keyVaultName",
+              "location": "s-location",
+              "registryName": "s-registryName",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "automation",
+            "name": "provisionInstance"
+          },
+          {
+            "args": {
+              "acmeEmail": "s-acmeEmail",
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "esoClientId": "s-esoClientId",
+              "instanceId": "s-instanceId",
+              "keyVaultName": "s-keyVaultName",
+              "namespace": "s-namespace",
+              "overlayPath": "s-overlayPath",
+              "repoProject": "s-repoProject",
+              "repoRoot": "s-repoRoot",
+              "repoTokenFile": "s-repoTokenFile",
+              "repoTransport": "s-repoTransport",
+              "repoUrl": "s-repoUrl",
+              "resourceGroup": "s-resourceGroup",
+              "revision": "s-revision",
+              "subscriptionId": "s-subscriptionId",
+              "tenantId": "s-tenantId"
+            },
+            "kind": "automation",
+            "name": "installInstance"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "acmeEmail": "s-acmeEmail",
+            "agentId": "agent-1",
+            "clusterName": "s-clusterName",
+            "createdBySubject": "subject-0",
+            "dryRun": true,
+            "esoClientId": "s-esoClientId",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "location": "s-location",
+            "namespace": "s-namespace",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "registryName": "s-registryName",
+            "repoProject": "s-repoProject",
+            "repoRoot": "s-repoRoot",
+            "repoTokenFile": "s-repoTokenFile",
+            "repoTransport": "s-repoTransport",
+            "repoUrl": "s-repoUrl",
+            "resourceGroup": "s-resourceGroup",
+            "revision": "s-revision",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId",
+            "tenantId": "s-tenantId"
+          },
+          "topic": "instance.bringUpRequested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "instanceId": "s-instanceId",
+              "keyVaultName": "s-keyVaultName",
+              "location": "s-location",
+              "registryName": "s-registryName",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "automation",
+            "name": "provisionInstance"
+          },
+          {
+            "args": {
+              "acmeEmail": "s-acmeEmail",
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "esoClientId": "s-esoClientId",
+              "instanceId": "s-instanceId",
+              "keyVaultName": "s-keyVaultName",
+              "namespace": "s-namespace",
+              "overlayPath": "s-overlayPath",
+              "repoProject": "s-repoProject",
+              "repoRoot": "s-repoRoot",
+              "repoTokenFile": "s-repoTokenFile",
+              "repoTransport": "s-repoTransport",
+              "repoUrl": "s-repoUrl",
+              "resourceGroup": "s-resourceGroup",
+              "revision": "s-revision",
+              "subscriptionId": "s-subscriptionId",
+              "tenantId": "s-tenantId"
+            },
+            "kind": "automation",
+            "name": "installInstance"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "acmeEmail": "s-acmeEmail",
+            "agentId": "agent-1",
+            "clusterName": "s-clusterName",
+            "createdBySubject": "subject-0",
+            "dryRun": true,
+            "esoClientId": "s-esoClientId",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "location": "s-location",
+            "namespace": "s-namespace",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "overlayPath": "s-overlayPath",
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "registryName": "s-registryName",
+            "repoProject": "s-repoProject",
+            "repoRoot": "s-repoRoot",
+            "repoTokenFile": "s-repoTokenFile",
+            "repoTransport": "s-repoTransport",
+            "repoUrl": "s-repoUrl",
+            "resourceGroup": "s-resourceGroup",
+            "revision": "s-revision",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId",
+            "tenantId": "s-tenantId"
+          },
+          "topic": "instance.bringUpRequested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "instanceId": "s-instanceId",
+              "keyVaultName": "s-keyVaultName",
+              "location": "s-location",
+              "registryName": "s-registryName",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "automation",
+            "name": "provisionInstance"
+          },
+          {
+            "args": {
+              "acmeEmail": "s-acmeEmail",
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "esoClientId": "s-esoClientId",
+              "instanceId": "s-instanceId",
+              "keyVaultName": "s-keyVaultName",
+              "namespace": "s-namespace",
+              "overlayPath": "s-overlayPath",
+              "repoProject": "s-repoProject",
+              "repoRoot": "s-repoRoot",
+              "repoTokenFile": "s-repoTokenFile",
+              "repoTransport": "s-repoTransport",
+              "repoUrl": "s-repoUrl",
+              "resourceGroup": "s-resourceGroup",
+              "revision": "s-revision",
+              "subscriptionId": "s-subscriptionId",
+              "tenantId": "s-tenantId"
+            },
+            "kind": "automation",
+            "name": "installInstance"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

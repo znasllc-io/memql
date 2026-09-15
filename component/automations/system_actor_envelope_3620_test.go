@@ -16,7 +16,7 @@ import (
 // as the EMPTY STRING.
 //
 // That is not theoretical here. dsl/forge's routeRequest and recordTransition
-// both persist through `mutate requestEvent recordRequestEvent`, whose insert
+// both persist through `mutation requestEvent recordRequestEvent`, whose insert
 // stamps `actorUserId: actor.userId` on a REQUIRED field carrying
 // `@relationship(target=user)`. Every routed request and every status
 // transition therefore wrote an audit row naming nobody, and nothing noticed:

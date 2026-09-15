@@ -25,19 +25,19 @@ import (
 //
 // "Make the walk step over comment lines" was tried twice in #2866 and reverted
 // twice: stepping over a comment pulls the COMMENT BODY into the emitted slice,
-// and compileMemQL runs raw-text gates over slice text. On ordinary, valid,
-// memqllint-clean input that loads fine today, that turns a silent drop into a
-// BOOT REFUSAL -- a comment mentioning `$steps.`, or containing an
-// `@`-annotation, or a commented-out `mutation(...)` call. Worse, a
+// and compileMemQL scans slice text (the G5 event-read scan, the precondition
+// extraction). On ordinary, valid, memqllint-clean input, that turns a silent
+// drop into a BOOT REFUSAL -- a comment mentioning `event.payload.x`, or
+// containing an `@`-annotation, or a commented-out precondition. Worse, a
 // commented-out copy of an automation above the live one (exactly what an
 // author writes when parking a version) silently DISABLED the #2712 annotation
 // gate while it was a text scan (it cut its header scan at the first
 // `automation ... {` -- which landed on the commented-out header). The gate is
 // the parser's annotation check since memql#5359.
 //
-// So the fix is not "skip comments in the walk". It is "every gate that scans
-// raw construct text must scan a COMMENT-BLANKED view", which is the same
-// defect class as #1074 / #2868 / #2896. These tests pin BOTH halves: the
+// So the fix is not "skip comments in the walk". It is "every scan of raw
+// construct text must scan a COMMENT-BLANKED view", which is the same defect
+// class as #1074 / #2868 / #2896. These tests pin BOTH halves: the
 // annotations survive, AND ordinary comment content cannot trip a gate.
 
 // sliceFor extracts the named automation's slice from source.
@@ -57,9 +57,7 @@ func sliceFor(t *testing.T, source, name string) string {
 }
 
 const bodyStub = `{
-  step s {
-    logic someLogic ( event: event )
-  }
+  s := logic someLogic(event: event)
 }`
 
 // TestSlicePreambleKeepsAnnotationsAboveABlockComment is the headline case.
@@ -151,18 +149,14 @@ automation second ` + bodyStub
 
 // TestOrdinaryCommentContentDoesNotRefuseBoot pins the half that made the two
 // naive attempts worse than the bug. Each of these is valid, memqllint-clean
-// input that loads today; pulling the comment into the slice made
-// compileMemQL's raw-text gates refuse the whole boot.
+// input; pulling the comment into the slice made compileMemQL's raw-text
+// scans refuse the whole boot.
 func TestOrdinaryCommentContentDoesNotRefuseBoot(t *testing.T) {
 	l := &Loader{}
 	for _, tc := range []struct{ name, comment string }{
-		{"mentions $steps", `/* the old form used $steps.foo */`},
 		{"contains an annotation", "/*\n@public\n*/"},
 		{"contains a retired annotation", "/*\n@useConcept(node)\n*/"},
-		{"contains a direct mutation call", "/*\n x := mutation(concept: \"v1:cluster:node\")\n*/"},
-		{"contains an inline step block", "/*\n step s { query: \"x\" }\n*/"},
-		{"line comment mentions $steps", `// the old form used $steps.foo`},
-		// The G5 retirement gate (#2367) is a FIFTH raw-text scan --
+		// The G5 retirement gate (#2367) is a raw-text scan --
 		// scrubSourceForPayloadScan blanked string literals and `//` comments
 		// but had no `/*` arm, so this note refused the whole tree and the
 		// diagnostic blamed the automation for a read that exists only in a
@@ -178,7 +172,7 @@ automation ok ` + bodyStub
 
 			if _, err := l.compileMemQL(src, "test:"+tc.name); err != nil {
 				t.Errorf("an ordinary COMMENT refused the boot: %v\n\nsource:\n%s\n\n"+
-					"compileMemQL's raw-text gates scan slice text, so comment content trips "+
+					"compileMemQL's raw-text scans read slice text, so comment content trips "+
 					"them. They must scan a comment-blanked view -- otherwise fixing the "+
 					"dropped-annotation bug just trades a silent drop for a boot refusal on "+
 					"ordinary comments (memql#2872).", err, src)
@@ -188,21 +182,19 @@ automation ok ` + bodyStub
 }
 
 // TestGatesStillFireOnRealCode is the direction that keeps the fix honest: the
-// gates must still refuse the constructs they exist to refuse when the text is
-// REAL and not inside a comment.
+// gates must still refuse what they exist to refuse when the text is REAL and
+// not inside a comment.
 func TestGatesStillFireOnRealCode(t *testing.T) {
 	l := &Loader{}
 	for _, tc := range []struct{ name, src, wantErr string }{
 		{
-			name: "real $steps reference",
+			name: "real retired event read",
 			src: `@enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation bad {
-  step s {
-    logic someLogic ( event: $steps.other.result )
-  }
+  s := logic someLogic(status: event.payload.status)
 }`,
-			wantErr: "$steps.",
+			wantErr: "reads are retired",
 		},
 		{
 			name: "real unknown annotation",
@@ -249,9 +241,7 @@ func TestCommentedOutHeaderDoesNotShadowTheAnnotationGate(t *testing.T) {
 @enabled
 @trigger(event="node.created", concept="v1:cluster:node")
 automation parkedOldVersion {
-  step s {
-    logic someLogic ( event: event )
-  }
+  s := logic someLogic(event: event)
 }
 */
 @enabled
@@ -383,9 +373,7 @@ automation live {
     literal: MEMQL_ENV
     description: "Only drive the staging deploy spine in staging."
   }
-  step s {
-    logic someLogic ( event: event )
-  }
+  s := logic someLogic(event: event)
 }`
 	l := &Loader{}
 	auto, err := l.compileMemQL(src, "test:real-precondition")
@@ -440,37 +428,6 @@ automation y ` + bodyStub,
 	}
 }
 
-// TestRegexGatesStillFireOnRealCode covers the two REGEX gates.
-// TestGatesStillFireOnRealCode only reached the `$steps.` substring gate and
-// the annotation gate, so blanking could have neutered these two unnoticed.
-func TestRegexGatesStillFireOnRealCode(t *testing.T) {
-	l := &Loader{}
-	for _, tc := range []struct{ name, body, wantErr string }{
-		{
-			name:    "direct mutation call",
-			body:    `  step s {` + "\n" + `    x := mutation(concept: "v1:cluster:node")` + "\n" + `  }`,
-			wantErr: "direct query() and mutation() calls",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			// With a comment present, so the blanked path is the one exercised.
-			src := `/* an ordinary note */
-@enabled
-@trigger(event="node.created", concept="v1:cluster:node")
-automation bad {
-` + tc.body + `
-}`
-			_, err := l.compileMemQL(src, "test:"+tc.name)
-			if err == nil {
-				t.Fatalf("the regex gate did not fire on REAL code:\n%s", src)
-			}
-			if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Errorf("wrong refusal: %v (want %q)", err, tc.wantErr)
-			}
-		})
-	}
-}
-
 // TestCommentedOutPreconditionFieldDoesNotWin covers the other half of the
 // precondition scan.
 //
@@ -491,9 +448,7 @@ automation live {
     description: "parked"
     */
   }
-  step s {
-    logic someLogic ( event: event )
-  }
+  s := logic someLogic(event: event)
 }`
 	l := &Loader{}
 	auto, err := l.compileMemQL(src, "test:precondition-field-shadow")

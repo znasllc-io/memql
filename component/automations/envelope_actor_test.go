@@ -34,7 +34,7 @@ func TestBuildEventEnvelope_ActorPresent(t *testing.T) {
 }
 
 // An event with NO stamped actor must not grow an empty actor map -- that
-// would defeat exists(event.actor) guards.
+// would defeat `event.actor != nil` guards.
 func TestBuildEventEnvelope_ActorAbsentStaysAbsent(t *testing.T) {
 	ev := actorEvent("")
 	env := buildEventEnvelope(&ev, "", "")

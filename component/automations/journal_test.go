@@ -104,11 +104,14 @@ func TestStepKindFor_DerivesDeterministicExceptFunction(t *testing.T) {
 		typ  StepType
 		want string
 	}{
-		{StepTypeQuery, "deterministic"},
-		{StepTypeMutation, "deterministic"},
+		{StepTypeEvent, "deterministic"},
 		{StepTypeAction, "deterministic"},
+		{StepTypeForEach, "deterministic"},
 		{StepTypeParallel, "deterministic"},
+		{StepTypeBlock, "deterministic"},
 		{StepTypeAutomation, "deterministic"},
+		{StepTypeExpression, "deterministic"},
+		{StepTypeReturn, "deterministic"},
 		{StepTypeFunction, ""},
 	} {
 		if got := stepKindFor(&Step{Type: tc.typ}); got != tc.want {
@@ -158,7 +161,7 @@ func TestJournal_RunAndStepLifecycle(t *testing.T) {
 	rec := &recordingJournalExecutor{}
 	j := newWorkJournal(rec, nil)
 	j.nodeId = "node-a"
-	auto := &Automation{Name: "demo", Steps: []*Step{{ID: "one", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}}}}
+	auto := &Automation{Name: "demo", Steps: []*Step{{ID: "one", Type: StepTypeAction, Action: &ActionStepConfig{Ref: "probe"}}}}
 	exec := NewExecution("demo", "test")
 	exec.ID = "run-1"
 	exec.StartedAt = time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
@@ -181,7 +184,7 @@ func TestJournal_RunAndStepLifecycle(t *testing.T) {
 		t.Error("open must record the automation definition fingerprint, or resume cannot refuse a changed automation")
 	}
 	name, args = argsOf(t, rec.calls[1])
-	if name != "createWorkStep" || args["stepId"] != "run-1-one" || args["key"] != "one" || args["status"] != "running" || args["kind"] != "deterministic" || args["stepType"] != "query" {
+	if name != "createWorkStep" || args["stepId"] != "run-1-one" || args["key"] != "one" || args["status"] != "running" || args["kind"] != "deterministic" || args["stepType"] != "action" {
 		t.Errorf("running: %s %v", name, args)
 	}
 	if _, present := args["input"]; present {
@@ -212,7 +215,7 @@ func TestJournal_RunAndStepLifecycle(t *testing.T) {
 func TestJournal_FailedStepAndFailedRun(t *testing.T) {
 	rec := &recordingJournalExecutor{}
 	j := newWorkJournal(rec, nil)
-	auto := &Automation{Name: "demo", Steps: []*Step{{ID: "one", Type: StepTypeMutation, Mutation: &MutationStepConfig{Concept: "v1:x:y"}}}}
+	auto := &Automation{Name: "demo", Steps: []*Step{{ID: "one", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "writeY", Kind: "mutation"}}}}
 	exec := NewExecution("demo", "test")
 	exec.ID = "run-2"
 	j.stepRunning(context.Background(), exec, auto.Steps[0], 0, 1)
@@ -256,8 +259,8 @@ func TestExecutor_JournalsEveryStepBoundary(t *testing.T) {
 	e := NewExecutor(ExecutorOptions{StepRegistry: journalProbeRegistry{}})
 	e.journal = newWorkJournal(rec, nil)
 	auto := &Automation{Name: "demo", Steps: []*Step{
-		{ID: "a", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}},
-		{ID: "b", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}, Condition: "false"},
+		{ID: "a", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}},
+		{ID: "b", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}, Condition: "false"},
 	}}
 	exec, err := e.Execute(context.Background(), auto, "test")
 	if err != nil {
@@ -305,7 +308,7 @@ func TestExecutor_JournalCarriesTheChainHeadOnFailure(t *testing.T) {
 	e := NewExecutor(ExecutorOptions{StepRegistry: failingRegistry{}, ChainTrackingEnabled: true})
 	e.journal = newWorkJournal(rec, nil)
 	auto := &Automation{Name: "demo", Steps: []*Step{
-		{ID: "a", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}, OnError: ErrorStrategyStop},
+		{ID: "a", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}, OnError: ErrorStrategyStop},
 	}}
 	exec, _ := e.Execute(context.Background(), auto, "test")
 	if exec.Status != "failed" {
@@ -338,10 +341,11 @@ func (failingRegistry) Execute(_ context.Context, step *Step, _ *StepContext) (*
 //  1. THE OBJECT-LITERAL WRAPPER IS REJECTED. `name({...})` was removed in
 //     #2335 and the parser refuses it outright, so the first version of this
 //     journal never wrote a single row.
-//  2. A NIL VALUE MUST BE DROPPED, not rendered. exec.Input is nil whenever
-//     an automation declares no `input:` block, and `input: null` fails the
-//     concept's `object` type -- so every step row landed and no run row ever
-//     did, which reads as "resume is broken" rather than "the writer is".
+//  2. A NIL VALUE MUST BE DROPPED, not rendered. exec.Input is nil on an
+//     automation's run (only a logic called directly records one), and
+//     `input: null` fails the concept's `object` type -- so every step row
+//     landed and no run row ever did, which reads as "resume is broken"
+//     rather than "the writer is".
 func TestJournalArgs_RendersNamedArgsAndDropsNils(t *testing.T) {
 	got, err := journalArgs("createWorkRun", map[string]any{
 		"runId":                 "r1",
@@ -377,8 +381,8 @@ func TestJournalArgs_RendersNamedArgsAndDropsNils(t *testing.T) {
 
 	// A TYPED nil inside an `any` is not `== nil` -- the interface carries a
 	// type -- but it still marshals to `null`, so the drop has to be decided
-	// on the rendered bytes. exec.Input is an `any` and is exactly this shape
-	// when a query result comes back empty.
+	// on the rendered bytes. exec.Input is an `any` and can carry exactly this
+	// shape.
 	var typedNil map[string]any
 	if got, err := journalArgs("x", map[string]any{"input": typedNil, "runId": "r"}); err != nil || got != `x(runId: "r")` {
 		t.Fatalf("typed-nil arg = %q, %v; want x(runId: \"r\") -- a typed nil marshals to null and refuses the row", got, err)
@@ -531,7 +535,7 @@ func TestJournal_CanonicalRunIDKeepsStableStepIDs(t *testing.T) {
 			j := newWorkJournal(rec, nil)
 			exec := NewExecution("demo", "test")
 			exec.ID = runID
-			step := &Step{ID: "layer0.sales", Type: StepTypeQuery, Query: &QueryStepConfig{Query: "q"}}
+			step := &Step{ID: "layer0.sales", Type: StepTypeFunction, Function: &FunctionStepConfig{Name: "q", Kind: "query"}}
 			j.stepRunning(context.Background(), exec, step, 0, 1)
 			j.stepFinished(context.Background(), exec, step, &StepResult{StepId: step.ID, Status: "completed", Result: "done", CompletedAt: time.Now()}, "")
 			j.stepSkipped(context.Background(), exec, step, 0)

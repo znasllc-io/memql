@@ -20,9 +20,7 @@
 /// subscribers.
 @trigger(schedule="0 15 3 * * *")
 automation reconcileShopifySubscriptions {
-  step ensure {
-    builtin shopifyEnsureSubscriptions ()
-  }
+  ensure := builtin shopifyEnsureSubscriptions()
 }
 
 /// Run the queued privacy jobs whose hold has elapsed, hourly.
@@ -32,7 +30,5 @@ automation reconcileShopifySubscriptions {
 /// and running on receipt would override a merchant's own grace period.
 @trigger(schedule="0 5 * * * *")
 automation runShopifyComplianceJobs {
-  step run {
-    builtin shopifyRunComplianceJobs ()
-  }
+  run := builtin shopifyRunComplianceJobs()
 }

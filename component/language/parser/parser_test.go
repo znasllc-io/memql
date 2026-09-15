@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/znasllc-io/memql/component/language/annotations"
@@ -88,92 +89,6 @@ concept==v1:test
 	// Comments should be skipped
 	if tokens[0].Type != TokenIdentifier || tokens[0].Literal != "concept" {
 		t.Errorf("Expected first token to be 'concept', got %v", tokens[0])
-	}
-}
-
-func TestParser_ForRange_EnforcesItemVarName(t *testing.T) {
-	input := `
-@enabled
-func (Automation) testAuto(_ any) {
-  q := query { concept==v1:test }
-  for agent := range q.result {
-    _ := query { concept==v1:test }
-  }
-  return q
-}`
-
-	lexer := NewLexer(input)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Lexer error: %v", err)
-	}
-
-	p := NewParser(tokens)
-	_, err = p.Parse()
-	if err == nil {
-		t.Fatalf("expected parse error for non-item loop variable")
-	}
-}
-
-func TestParser_ForRange_GeneratesUniqueForEachStepIds(t *testing.T) {
-	input := `
-@enabled
-func (Automation) testAuto(_ any) {
-  q := query { concept==v1:test }
-  for item := range q.result {
-    _ := query { concept==v1:test }
-  }
-  for item := range q.result {
-    _ := query { concept==v1:test }
-  }
-  return q
-}`
-
-	lexer := NewLexer(input)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Lexer error: %v", err)
-	}
-
-	p := NewParser(tokens)
-	node, err := p.Parse()
-	if err != nil {
-		t.Fatalf("Parse error: %v", err)
-	}
-
-	file, ok := node.(*File)
-	if !ok {
-		t.Fatalf("expected *File, got %T", node)
-	}
-
-	var auto *AutomationDef
-	for _, def := range file.Definitions {
-		fn, ok := def.(*FunctionDef)
-		if !ok {
-			continue
-		}
-		a, ok := fn.Body.(*AutomationDef)
-		if ok {
-			auto = a
-			break
-		}
-	}
-	if auto == nil {
-		t.Fatalf("expected to find AutomationDef")
-	}
-
-	seen := map[string]bool{}
-	for _, step := range auto.Steps {
-		if step.Type != StepTypeForEach {
-			continue
-		}
-		if seen[step.ID] {
-			t.Fatalf("duplicate forEach step id: %q", step.ID)
-		}
-		seen[step.ID] = true
-	}
-	if len(seen) != 2 {
-		t.Fatalf("expected 2 forEach steps, got %d", len(seen))
 	}
 }
 
@@ -448,157 +363,6 @@ func TestParser_RegularFunctionCall(t *testing.T) {
 	}
 }
 
-func TestParser_AutomationStep_FunctionCall(t *testing.T) {
-	input := `
-@enabled
-func (Automation) testAuto(_ any) {
-  checkUser := userById(userId: event.payload.userId)
-  return checkUser
-}`
-
-	lexer := NewLexer(input)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("lexer error: %v", err)
-	}
-
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("parser error: %v", err)
-	}
-
-	file, ok := ast.(*File)
-	if !ok {
-		t.Fatalf("expected *File, got %T", ast)
-	}
-	if len(file.Definitions) != 1 {
-		t.Fatalf("expected 1 definition, got %d", len(file.Definitions))
-	}
-
-	fn, ok := file.Definitions[0].(*FunctionDef)
-	if !ok {
-		t.Fatalf("expected *FunctionDef, got %T", file.Definitions[0])
-	}
-	auto, ok := fn.Body.(*AutomationDef)
-	if !ok {
-		t.Fatalf("expected *AutomationDef body, got %T", fn.Body)
-	}
-	if len(auto.Steps) < 1 {
-		t.Fatalf("expected at least 1 step")
-	}
-
-	step := auto.Steps[0]
-	if step.Type != StepTypeFunction {
-		t.Fatalf("expected function step, got %s", step.Type)
-	}
-	cfg, ok := step.Config.(*FunctionStepConfig)
-	if !ok {
-		t.Fatalf("expected *FunctionStepConfig, got %T", step.Config)
-	}
-	if cfg.Name != "userById" {
-		t.Fatalf("expected function name userById, got %q", cfg.Name)
-	}
-	if _, ok := cfg.Args["userId"]; !ok {
-		t.Fatalf("expected userId arg to be present")
-	}
-}
-
-func TestParser_AutomationStep_ConditionalFunctionCall(t *testing.T) {
-	input := `
-@enabled
-func (Automation) testAuto(_ any) {
-  createSession := if checkExisting.first().id == nil {
-    mutationCreateSession(partitionId: event.payload.partitionId, participantId: event.payload.id)
-  }
-  return createSession
-}`
-
-	lexer := NewLexer(input)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("lexer error: %v", err)
-	}
-
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("parser error: %v", err)
-	}
-
-	file := ast.(*File)
-	fn := file.Definitions[0].(*FunctionDef)
-	auto := fn.Body.(*AutomationDef)
-	step := auto.Steps[0]
-
-	if step.Type != StepTypeFunction {
-		t.Fatalf("expected function step, got %s", step.Type)
-	}
-	if step.Condition == "" {
-		t.Fatalf("expected conditional function step")
-	}
-	cfg, ok := step.Config.(*FunctionStepConfig)
-	if !ok {
-		t.Fatalf("expected *FunctionStepConfig, got %T", step.Config)
-	}
-	if cfg.Name != "mutationCreateSession" {
-		t.Fatalf("expected function name mutationCreateSession, got %q", cfg.Name)
-	}
-}
-
-func TestParser_AutomationDefinition(t *testing.T) {
-	input := `
-@enabled
-func (Automation) testAutomation(_ any) {
-	step1 := query {
-		concept==v1:test
-	}
-	return step1
-}`
-
-	lexer := NewLexer(input)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Lexer error: %v", err)
-	}
-
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parser error: %v", err)
-	}
-
-	file, ok := ast.(*File)
-	if !ok {
-		t.Fatalf("Expected File, got %T", ast)
-	}
-
-	if len(file.Definitions) != 1 {
-		t.Fatalf("Expected 1 definition, got %d", len(file.Definitions))
-	}
-
-	funcDef, ok := file.Definitions[0].(*FunctionDef)
-	if !ok {
-		t.Fatalf("Expected FunctionDef, got %T", file.Definitions[0])
-	}
-
-	if funcDef.Name != "testAutomation" {
-		t.Errorf("Expected name 'testAutomation', got %q", funcDef.Name)
-	}
-
-	// Check receiver type instead of deprecated funcDef.Type
-	if funcDef.Receiver == nil {
-		t.Fatal("Expected receiver to be set")
-	}
-	if funcDef.Receiver.Type != ReceiverAutomation {
-		t.Errorf("Expected receiver type Automation, got %v", funcDef.Receiver.Type)
-	}
-
-	if len(funcDef.Args) != 1 {
-		t.Errorf("Expected 1 arg, got %d", len(funcDef.Args))
-	}
-}
-
 func TestParser_QueryFunction(t *testing.T) {
 	input := `
 func (Query) activeUsers(args any) (any, error) {
@@ -710,31 +474,6 @@ func TestParser_VarAccessor(t *testing.T) {
 	}
 }
 
-func TestParser_StepAccessor(t *testing.T) {
-	input := `step("checkUser")`
-
-	lexer := NewLexer(input)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Lexer error: %v", err)
-	}
-
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parser error: %v", err)
-	}
-
-	stepRef, ok := ast.(*StepRefExpr)
-	if !ok {
-		t.Fatalf("Expected StepRefExpr, got %T", ast)
-	}
-
-	if stepRef.StepId != "checkUser" {
-		t.Errorf("Expected step ID 'checkUser', got %q", stepRef.StepId)
-	}
-}
-
 func TestParser_ArgAccessor(t *testing.T) {
 	input := `args.authorizerId`
 
@@ -802,7 +541,7 @@ func TestParser_ConcatFunction(t *testing.T) {
 }
 
 func TestParser_CoalesceFunction(t *testing.T) {
-	input := `coalesce(step("create"), step("existing"))`
+	input := `coalesce(args.create, args.existing)`
 
 	lexer := NewLexer(input)
 	tokens, err := lexer.Tokenize()
@@ -874,8 +613,8 @@ func TestParser_FirstLastFunctions(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{`first(step("users"))`, "first"},
-		{`last(step("users"))`, "last"},
+		{`first(args.users)`, "first"},
+		{`last(args.users)`, "last"},
 	}
 
 	for _, tt := range tests {
@@ -945,9 +684,6 @@ func TestParser_NoArgAccessors(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{`input()`, "input"},
-		{`item()`, "item"},
-		{`index()`, "index"},
 		{`event()`, "event"},
 		{`error()`, "error"},
 	}
@@ -967,18 +703,6 @@ func TestParser_NoArgAccessors(t *testing.T) {
 			}
 
 			switch tt.expected {
-			case "input":
-				if _, ok := ast.(*InputRefExpr); !ok {
-					t.Fatalf("Expected InputRefExpr, got %T", ast)
-				}
-			case "item":
-				if _, ok := ast.(*ItemRefExpr); !ok {
-					t.Fatalf("Expected ItemRefExpr, got %T", ast)
-				}
-			case "index":
-				if _, ok := ast.(*IndexRefExpr); !ok {
-					t.Fatalf("Expected IndexRefExpr, got %T", ast)
-				}
 			case "event":
 				if _, ok := ast.(*EventRefExpr); !ok {
 					t.Fatalf("Expected EventRefExpr, got %T", ast)
@@ -992,8 +716,27 @@ func TestParser_NoArgAccessors(t *testing.T) {
 	}
 }
 
+// The step-block bodies' accessors are refused by name, each naming what
+// replaced it (epic memql#5370).
+func TestParser_RetiredBodyAccessors(t *testing.T) {
+	for input, want := range map[string]string{
+		`step("checkUser")`: "`step()` is retired in edition 2026: a statement's name is its value",
+		`input()`:           "`input()` is retired in edition 2026: an automation declares its arguments",
+		`item()`:            "`item()` is retired in edition 2026: a loop names its element",
+		`index()`:           "`index()` is retired in edition 2026: a loop names its element",
+	} {
+		tokens, err := NewLexer(input).Tokenize()
+		if err != nil {
+			t.Fatalf("%s: lexer error: %v", input, err)
+		}
+		if _, err := NewParser(tokens).Parse(); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: want the refusal %q, got %v", input, want, err)
+		}
+	}
+}
+
 func TestParser_FieldAccessor(t *testing.T) {
-	input := `field(item(), "name")`
+	input := `field(args.row, "name")`
 
 	lexer := NewLexer(input)
 	tokens, err := lexer.Tokenize()
@@ -1016,9 +759,8 @@ func TestParser_FieldAccessor(t *testing.T) {
 		t.Errorf("Expected key 'name', got %q", fieldRef.Key)
 	}
 
-	_, ok = fieldRef.Object.(*ItemRefExpr)
-	if !ok {
-		t.Errorf("Expected object to be ItemRefExpr, got %T", fieldRef.Object)
+	if fieldRef.Object == nil {
+		t.Error("Expected the field accessor's object to be parsed")
 	}
 }
 
@@ -1147,181 +889,6 @@ func TestParser_NestedTernary(t *testing.T) {
 // Tests for Automation with Steps
 // ----------------------------------------------------------------------------
 
-func TestParser_AutomationWithMutationStep(t *testing.T) {
-	input := `
-func (Automation) bootstrap(ctx any) {
-	checkUser := query {
-		concept==v1:user
-	}
-
-	createUser := mutation if checkUser.metadata.itemCount == 0 {
-		insert("v1:user", id="user-" + ctx.userId)
-	}
-
-	return createUser
-}`
-
-	lexer := NewLexer(input)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Lexer error: %v", err)
-	}
-
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parser error: %v", err)
-	}
-
-	file, ok := ast.(*File)
-	if !ok {
-		t.Fatalf("Expected File, got %T", ast)
-	}
-
-	funcDef, ok := file.Definitions[0].(*FunctionDef)
-	if !ok {
-		t.Fatalf("Expected FunctionDef, got %T", file.Definitions[0])
-	}
-
-	// Verify receiver type
-	if funcDef.Receiver == nil {
-		t.Fatal("Expected receiver to be set")
-	}
-	if funcDef.Receiver.Type != ReceiverAutomation {
-		t.Errorf("Expected receiver type Automation, got %v", funcDef.Receiver.Type)
-	}
-
-	// Verify function has one argument
-	if len(funcDef.Args) != 1 {
-		t.Fatalf("Expected 1 arg, got %d", len(funcDef.Args))
-	}
-	if funcDef.Args[0].Name != "ctx" {
-		t.Errorf("Expected arg name 'ctx', got %q", funcDef.Args[0].Name)
-	}
-
-	// The body structure is an internal implementation detail.
-	// Just verify the parser succeeded without errors.
-	if funcDef.Body == nil {
-		t.Error("Expected function body to be set")
-	}
-}
-
-func TestParser_AttributeSimple(t *testing.T) {
-	input := `
-@enabled
-func (Automation) myAutomation(_ any) {
-  checkUser := query {
-    concept==v1:user
-  }
-  return checkUser
-}
-`
-	lexer := NewLexer(input)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Lexer error: %v", err)
-	}
-
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parser error: %v", err)
-	}
-
-	file, ok := ast.(*File)
-	if !ok {
-		t.Fatalf("Expected File, got %T", ast)
-	}
-
-	funcDef, ok := file.Definitions[0].(*FunctionDef)
-	if !ok {
-		t.Fatalf("Expected FunctionDef, got %T", file.Definitions[0])
-	}
-
-	// Should have receiver
-	if funcDef.Receiver == nil {
-		t.Fatal("Expected receiver to be set")
-	}
-	if funcDef.Receiver.Type != ReceiverAutomation {
-		t.Errorf("Expected receiver type Automation, got %v", funcDef.Receiver.Type)
-	}
-
-	// Should have attributes
-	if len(funcDef.Attributes) != 1 {
-		t.Fatalf("Expected 1 attribute, got %d", len(funcDef.Attributes))
-	}
-	if funcDef.Attributes[0].Name != "enabled" {
-		t.Errorf("Expected attribute name 'enabled', got %q", funcDef.Attributes[0].Name)
-	}
-
-	// Should be enabled
-	if !funcDef.Enabled {
-		t.Error("Expected function to be enabled due to @enabled attribute")
-	}
-}
-
-func TestParser_AttributeWithArgs(t *testing.T) {
-	input := `
-@enabled
-@trigger(event="session.opened")
-@description("Auto-provision user")
-func (Automation) bootstrapUser(_ any) {
-  checkUser := query {
-    concept==v1:user
-  }
-  return checkUser
-}
-`
-	lexer := NewLexer(input)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Lexer error: %v", err)
-	}
-
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parser error: %v", err)
-	}
-
-	file, ok := ast.(*File)
-	if !ok {
-		t.Fatalf("Expected File, got %T", ast)
-	}
-
-	funcDef, ok := file.Definitions[0].(*FunctionDef)
-	if !ok {
-		t.Fatalf("Expected FunctionDef, got %T", file.Definitions[0])
-	}
-
-	// Should have 3 attributes
-	if len(funcDef.Attributes) != 3 {
-		t.Fatalf("Expected 3 attributes, got %d", len(funcDef.Attributes))
-	}
-
-	// Check enabled
-	if !funcDef.Enabled {
-		t.Error("Expected function to be enabled")
-	}
-
-	// Check trigger (on automation body)
-	automation, ok := funcDef.Body.(*AutomationDef)
-	if !ok {
-		t.Fatalf("Expected AutomationDef body, got %T", funcDef.Body)
-	}
-	if automation.Trigger == nil {
-		t.Fatal("Expected trigger to be set")
-	}
-	if automation.Trigger.Event != "session.opened" {
-		t.Errorf("Expected trigger event 'session.opened', got %q", automation.Trigger.Event)
-	}
-
-	// Check description
-	if funcDef.Description != "Auto-provision user" {
-		t.Errorf("Expected description 'Auto-provision user', got %q", funcDef.Description)
-	}
-}
-
 func TestParser_GoStyleQuery(t *testing.T) {
 	input := `
 @enabled
@@ -1374,125 +941,6 @@ func (Query) activeUsers(args any) (any, error) {
 	// Should have strict query returns.
 	if len(funcDef.Returns) != 2 {
 		t.Fatalf("Expected 2 returns, got %d", len(funcDef.Returns))
-	}
-}
-
-func TestParser_GoStyleSchedule(t *testing.T) {
-	input := `
-@enabled
-@schedule(cron="*/30 * * * *")
-func (Automation) scheduledTask(_ any) {
-  doWork := query {
-    concept==v1:task
-  }
-  return doWork
-}
-`
-	lexer := NewLexer(input)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Lexer error: %v", err)
-	}
-
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parser error: %v", err)
-	}
-
-	file, ok := ast.(*File)
-	if !ok {
-		t.Fatalf("Expected File, got %T", ast)
-	}
-
-	funcDef, ok := file.Definitions[0].(*FunctionDef)
-	if !ok {
-		t.Fatalf("Expected FunctionDef, got %T", file.Definitions[0])
-	}
-
-	automation, ok := funcDef.Body.(*AutomationDef)
-	if !ok {
-		t.Fatalf("Expected AutomationDef body, got %T", funcDef.Body)
-	}
-
-	if automation.Schedule != "*/30 * * * *" {
-		t.Errorf("Expected schedule '*/30 * * * *', got %q", automation.Schedule)
-	}
-}
-
-func TestParser_GoStyleDefaultEnabled(t *testing.T) {
-	// Without any annotation, a function is enabled by default. @disabled
-	// is the explicit opt-out.
-	input := `
-func (Automation) myAutomation(_ any) {
-  step1 := query {
-    concept==v1:user
-  }
-  return step1
-}
-`
-	lexer := NewLexer(input)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Lexer error: %v", err)
-	}
-
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parser error: %v", err)
-	}
-
-	file, ok := ast.(*File)
-	if !ok {
-		t.Fatalf("Expected File, got %T", ast)
-	}
-
-	funcDef, ok := file.Definitions[0].(*FunctionDef)
-	if !ok {
-		t.Fatalf("Expected FunctionDef, got %T", file.Definitions[0])
-	}
-
-	if !funcDef.Enabled {
-		t.Error("Expected function to be enabled by default (no @disabled attribute)")
-	}
-}
-
-func TestParser_GoStyleDisabledAttribute(t *testing.T) {
-	// @disabled is the explicit opt-out from the default-enabled behaviour.
-	input := `
-@disabled
-func (Automation) myAutomation(_ any) {
-  step1 := query {
-    concept==v1:user
-  }
-  return step1
-}
-`
-	lexer := NewLexer(input)
-	tokens, err := lexer.Tokenize()
-	if err != nil {
-		t.Fatalf("Lexer error: %v", err)
-	}
-
-	parser := NewParser(tokens)
-	ast, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parser error: %v", err)
-	}
-
-	file, ok := ast.(*File)
-	if !ok {
-		t.Fatalf("Expected File, got %T", ast)
-	}
-
-	funcDef, ok := file.Definitions[0].(*FunctionDef)
-	if !ok {
-		t.Fatalf("Expected FunctionDef, got %T", file.Definitions[0])
-	}
-
-	if funcDef.Enabled {
-		t.Error("Expected function to be disabled by @disabled attribute")
 	}
 }
 

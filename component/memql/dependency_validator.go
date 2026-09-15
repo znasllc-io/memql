@@ -70,7 +70,7 @@ type depRef struct {
 var (
 	depShapeRowRe    = regexp.MustCompile(`^\s*shape\s+([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*\{`)
 	depShapeActorRe  = regexp.MustCompile(`^\s*shape\s+([A-Za-z_]\w*)\s*\{`)
-	depConsumerRe    = regexp.MustCompile(`^\s*(query|mutate)\s+([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*\{`)
+	depConsumerRe    = regexp.MustCompile(`^\s*(query|mutation)\s+([A-Za-z_]\w*)\s+([A-Za-z_]\w*)\s*\{`)
 	depShapeClauseRe = regexp.MustCompile(`^\s*shape\s+([A-Za-z_][\w.]*)\s*$`)
 	depIncludeRe     = regexp.MustCompile(`^\s*include\s+([A-Za-z_][\w.]*)\s*$`)
 )

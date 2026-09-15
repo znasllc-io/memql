@@ -56,7 +56,7 @@ func specConstructKeywords() map[string]bool {
 // union of the live parser surfaces:
 //
 //   - parser.StructFormKeywords -- the struct-form rewriter's recognised
-//     constructs (query / mutate / logic / automation), derived from
+//     constructs (query / mutation / logic / automation), derived from
 //     the rewriter's own structFormSteps chain.
 //   - parser.TopLevelDeclKeywords -- the parser's top-level dispatch
 //     keywords (concept / shape / provider / builtin / tool / prompt /
@@ -152,10 +152,10 @@ func TestBodyBlocksCarryTheFactsTheHandListGotWrong(t *testing.T) {
 		}
 		return false
 	}
-	if has("automation", "body") {
-		t.Error("an automation has no body block -- its body is step blocks (emitAutomation refuses `body { }`)")
+	if has("automation", "body") || has("automation", "step") {
+		t.Error("an automation's statements follow its args block: it has no body or step block (both retired: body_block_retired, body_step_retired)")
 	}
-	for _, clause := range []string{"args", "step", "precondition"} {
+	for _, clause := range []string{"args", "precondition"} {
 		if !has("automation", clause) {
 			t.Errorf("automation BodyBlocks lack %q", clause)
 		}
@@ -166,8 +166,8 @@ func TestBodyBlocksCarryTheFactsTheHandListGotWrong(t *testing.T) {
 		}
 	}
 	for _, clause := range []string{"accept", "stamp"} {
-		if !has("mutate", clause) {
-			t.Errorf("mutate BodyBlocks lack %q", clause)
+		if !has("mutation", clause) {
+			t.Errorf("mutation BodyBlocks lack %q", clause)
 		}
 	}
 }
@@ -236,7 +236,7 @@ func TestFieldAnnotationsFollowTheFieldLists(t *testing.T) {
 	}
 	for kw, name := range map[string]string{
 		"concept": "pii", "tool": "autoInjected", "prompt": "default",
-		"query": "maxLength", "mutate": "required", "logic": "enum", "automation": "pattern",
+		"query": "maxLength", "mutation": "required", "logic": "enum", "automation": "pattern",
 		"action": "minimum", "capability": "maximum",
 	} {
 		if !carries(kw, name) {
@@ -499,7 +499,7 @@ func TestConstructDocsRejectRetiredForms(t *testing.T) {
 		{"$params", "action's retired $params.X string interpolation (memql#2322)"},
 		{`action("`, `retired versioned action invocation action("name@1") -- an action is invoked 'action <name>(args...)' now (memql#2322/#2328)`},
 		{"func (", "retired procedural receiver-function form -- the struct form is the only author surface"},
-		{"mutation <", "`mutation` is the invocation-step prefix; the declaration keyword is `mutate` (rewriter.go mutationStructHeader, memql#2041)"},
+		{"mutate <", "the declaration keyword `mutate` is retired in edition 2026: a mutation is declared `mutation <Concept> <name>` (D13, epic memql#5370)"},
 	}
 	for _, c := range Build().Constructs {
 		hay := c.Doc + "\x00" + strings.Join(c.BodyBlocks, "\x00")
@@ -525,13 +525,13 @@ func TestConstructDocsRejectRetiredForms(t *testing.T) {
 		t.Error("DRIFT: dslspec is missing the `action` construct")
 	}
 
-	// The write-function declaration keyword is `mutate`, not the retired
-	// `mutation` noun (which is the invocation-step prefix only, memql#2041).
-	if Build().ConstructByKeyword("mutation") != nil {
-		t.Error("DRIFT: dslspec still lists a `mutation` construct -- the declaration keyword is `mutate` (memql#2041); `mutation` is the invocation-step prefix only")
+	// The write function is declared and called with the one word `mutation`
+	// (D13, epic memql#5370); the verb `mutate` is retired.
+	if Build().ConstructByKeyword("mutate") != nil {
+		t.Error("DRIFT: dslspec still lists a `mutate` construct -- the declaration keyword is `mutation` (D13, epic memql#5370)")
 	}
-	if Build().ConstructByKeyword("mutate") == nil {
-		t.Error("DRIFT: dslspec is missing the `mutate` construct (the write-function declaration keyword)")
+	if Build().ConstructByKeyword("mutation") == nil {
+		t.Error("DRIFT: dslspec is missing the `mutation` construct (the write-function declaration keyword)")
 	}
 }
 
@@ -833,18 +833,12 @@ func TestParserRecognisedCallablesAreAllClassified(t *testing.T) {
 	}
 }
 
-// TestBuiltinAccessorsAreParserAccessors asserts every parser accessor (plus the
-// documented `index` exception) is modelled in dslspec -- as a
-// CategoryBuiltinAccessor entry, or as the catalog function it also is (var and
-// error: a v1 expression calls them as functions) -- and that dslspec's
-// accessors are all parser accessors. `index` is special-cased in
-// parseFunctionCall (the no-arg form is the loop accessor, index(arr,i) reads an
-// array element) so it is NOT in callableParsers / CallableAccessors, but Sense
-// still offers it as a call -- hence the explicit exception.
+// TestBuiltinAccessorsAreParserAccessors asserts every parser accessor is
+// modelled in dslspec -- as a CategoryBuiltinAccessor entry, or as the catalog
+// function it also is (var and error: a v1 expression calls them as
+// functions) -- and that dslspec's accessors are all parser accessors.
 func TestBuiltinAccessorsAreParserAccessors(t *testing.T) {
-	const indexException = "index"
-
-	parserAcc := map[string]bool{indexException: true}
+	parserAcc := map[string]bool{}
 	for _, n := range parser.CallableAccessors {
 		parserAcc[n] = true
 	}
@@ -859,7 +853,7 @@ func TestBuiltinAccessorsAreParserAccessors(t *testing.T) {
 
 	for n := range parserAcc {
 		if !specAcc[n] && !catalog[n] {
-			t.Errorf("DRIFT: parser recognises accessor %q (or the index exception) but dslspec models it "+
+			t.Errorf("DRIFT: parser recognises accessor %q but dslspec models it "+
 				"neither as a CategoryBuiltinAccessor entry nor as a catalog function -- add it in "+
 				"component/language/dslspec/builtins.go", n)
 		}
@@ -872,8 +866,8 @@ func TestBuiltinAccessorsAreParserAccessors(t *testing.T) {
 	for n := range specAcc {
 		if !parserAcc[n] {
 			t.Errorf("DRIFT: dslspec.Builtins marks %q CategoryBuiltinAccessor but the parser does not "+
-				"recognise it as an accessor (not in parser.CallableAccessors, and not the index "+
-				"exception) -- re-check the category or wire callable.go", n)
+				"recognise it as an accessor (not in parser.CallableAccessors) -- re-check the "+
+				"category or wire callable.go", n)
 		}
 	}
 }

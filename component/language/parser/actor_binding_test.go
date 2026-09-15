@@ -66,7 +66,7 @@ seed platform bootstrapVars {
 		{
 			name: "mutation stamp gains the annotation",
 			in: `@description("Create.")
-mutate todo createTodo {
+mutation todo createTodo {
   insert {
     accept { title }
     stamp {
@@ -76,7 +76,7 @@ mutate todo createTodo {
 }`,
 			want: `@description("Create.")
 @actor
-mutate todo createTodo {
+mutation todo createTodo {
   insert {
     accept { title }
     stamp {

@@ -1,6 +1,4 @@
 /// The caller, read without declaring it.
 logic ticketAssigneeUndeclared {
-  body {
-    return actor.userId
-  }
+  return actor.userId
 }

@@ -158,7 +158,6 @@ func TestDryRunWritesNoWorkJournal(t *testing.T) {
 			Kind:    "manual",
 			Payload: map[string]any{"node": map[string]any{"id": callerChosenSentinel}},
 		},
-		Mode: memql.DryRunModeIsolated,
 	})
 	if err != nil {
 		t.Fatalf("runBundleDryRun: %v", err)

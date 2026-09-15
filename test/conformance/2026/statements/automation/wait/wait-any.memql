@@ -1,0 +1,11 @@
+@trigger(schedule="0 0 * * * *")
+automation waitClause {
+  parallel {
+    branch first {
+      logic probeRegion(n: 1)
+    }
+    branch second {
+      logic probeRegion(n: 2)
+    }
+  } wait any
+}

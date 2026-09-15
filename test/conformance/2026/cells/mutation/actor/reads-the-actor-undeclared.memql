@@ -1,5 +1,5 @@
 /// Assign a ticket to the caller, reading the actor without declaring it.
-mutate ticket takeTicketActorUndeclared {
+mutation ticket takeTicketActorUndeclared {
   args {
     ticketId  string!
   }

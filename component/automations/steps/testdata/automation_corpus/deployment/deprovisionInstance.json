@@ -1,0 +1,257 @@
+{
+  "automation": "deployment/automations.memql deprovisionInstance",
+  "runs": {
+    "event agent | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "backupStorageAccount": "s-backupStorageAccount",
+            "clusterName": "s-clusterName",
+            "confirm": "s-confirm",
+            "createdBySubject": "subject-0",
+            "deleteStores": true,
+            "dryRun": true,
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "purgeKeyVault": true,
+            "recordType": "contact",
+            "resourceGroup": "s-resourceGroup",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId"
+          },
+          "topic": "instance.deprovisionRequested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "backupStorageAccount": "s-backupStorageAccount",
+              "clusterName": "s-clusterName",
+              "confirm": "s-confirm",
+              "deleteStores": true,
+              "dryRun": true,
+              "keyVaultName": "s-keyVaultName",
+              "purgeKeyVault": true,
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "deprovisionAzureInfrastructure"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event agent | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "backupStorageAccount": "s-backupStorageAccount",
+            "clusterName": "s-clusterName",
+            "confirm": "s-confirm",
+            "createdBySubject": "subject-0",
+            "deleteStores": true,
+            "dryRun": true,
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "purgeKeyVault": true,
+            "recordType": "contact",
+            "resourceGroup": "s-resourceGroup",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId"
+          },
+          "topic": "instance.deprovisionRequested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "backupStorageAccount": "s-backupStorageAccount",
+              "clusterName": "s-clusterName",
+              "confirm": "s-confirm",
+              "deleteStores": true,
+              "dryRun": true,
+              "keyVaultName": "s-keyVaultName",
+              "purgeKeyVault": true,
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "deprovisionAzureInfrastructure"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "backupStorageAccount": "s-backupStorageAccount",
+            "clusterName": "s-clusterName",
+            "confirm": "s-confirm",
+            "createdBySubject": "subject-0",
+            "deleteStores": true,
+            "dryRun": true,
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "purgeKeyVault": true,
+            "recordType": "contact",
+            "resourceGroup": "s-resourceGroup",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId"
+          },
+          "topic": "instance.deprovisionRequested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "backupStorageAccount": "s-backupStorageAccount",
+              "clusterName": "s-clusterName",
+              "confirm": "s-confirm",
+              "deleteStores": true,
+              "dryRun": true,
+              "keyVaultName": "s-keyVaultName",
+              "purgeKeyVault": true,
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "deprovisionAzureInfrastructure"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "backupStorageAccount": "s-backupStorageAccount",
+            "clusterName": "s-clusterName",
+            "confirm": "s-confirm",
+            "createdBySubject": "subject-0",
+            "deleteStores": true,
+            "dryRun": true,
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "purgeKeyVault": true,
+            "recordType": "contact",
+            "resourceGroup": "s-resourceGroup",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId"
+          },
+          "topic": "instance.deprovisionRequested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "backupStorageAccount": "s-backupStorageAccount",
+              "clusterName": "s-clusterName",
+              "confirm": "s-confirm",
+              "deleteStores": true,
+              "dryRun": true,
+              "keyVaultName": "s-keyVaultName",
+              "purgeKeyVault": true,
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "deprovisionAzureInfrastructure"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

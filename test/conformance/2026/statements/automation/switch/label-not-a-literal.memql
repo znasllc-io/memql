@@ -1,0 +1,8 @@
+@trigger(schedule="0 0 * * * *")
+automation labelNotLiteral {
+  switch now {
+    case args.when {
+      builtin one()
+    }
+  }
+}

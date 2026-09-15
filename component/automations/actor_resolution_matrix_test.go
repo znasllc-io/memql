@@ -31,8 +31,8 @@ func evalActorValue(t *testing.T, e *Evaluator, src string) any {
 	return got
 }
 
-// actorPositions enumerates the positions of a run: a value expression (a
-// query step's expression, a return), a `??` operand, and a value leaf of a
+// actorPositions enumerates the positions of a run: a value expression (an
+// expression statement, a return), a `??` operand, and a value leaf of a
 // step's argument map. A condition and a ternary predicate are asserted
 // below, since they answer something other than the field's value.
 //

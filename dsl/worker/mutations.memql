@@ -13,7 +13,7 @@ use identity.concepts.{ user }
 /// through nothing else. Both Go writers already resolve the owner before calling -- they need it
 /// to route the dispatch at all -- and now stamp it as the actor rather than passing it as data.
 @actor
-mutate invocation createWorkerInvocation {
+mutation invocation createWorkerInvocation {
   args {
     invocationId   string!
     workerId       string!
@@ -90,7 +90,7 @@ mutate invocation createWorkerInvocation {
 /// identity row -- the same borrowed-authority shape createAuthActivity uses, and for the same
 /// reason: the service knows whose credential it is before the actor envelope does.
 @actor
-mutate registration createWorkerRegistration {
+mutation registration createWorkerRegistration {
   args {
     registrationId       string!
     identityId           string!
@@ -177,7 +177,7 @@ mutate registration createWorkerRegistration {
 // identity row without minting a duplicate registration.
 
 /// Refresh registration-authoritative fields on worker reconnect.
-mutate registration refreshWorkerRegistration {
+mutation registration refreshWorkerRegistration {
   args {
     registrationId       string!
     /// When set, rebinds the registration to a new worker_token identity
@@ -268,7 +268,7 @@ mutate registration refreshWorkerRegistration {
 // out-of-band so any in-flight calls fail with worker_disconnected.
 
 /// Revoke a worker registration.
-mutate registration revokeWorker {
+mutation registration revokeWorker {
   args {
     registrationId  string!
     revokedAt       string!
@@ -298,7 +298,7 @@ mutate registration revokeWorker {
 // passes the WORKER_INVOCATION_RETENTION_DAYS window.
 
 /// Soft-delete a worker invocation row past retention.
-mutate invocation softDeleteWorkerInvocation {
+mutation invocation softDeleteWorkerInvocation {
   args {
     invocationId  string!
   }
@@ -334,7 +334,7 @@ mutate invocation softDeleteWorkerInvocation {
 /// Set the CALLER's User.preferences.computerUseEnabled.
 @actor
 @mergeFields("preferences")
-mutate user toggleComputerUseEnabled {
+mutation user toggleComputerUseEnabled {
   args {
     enabled  bool!
   }
@@ -367,7 +367,7 @@ mutate user toggleComputerUseEnabled {
 // turn this body into a splat and that gate fails.
 /// Set computerUseScope on an agent authorization row. Self-service: the engine refuses the write
 /// when the target row's userId is not the caller's (the concept's declared owner tier).
-mutate agentAuthorization updateAgentAuthScope {
+mutation agentAuthorization updateAgentAuthScope {
   args {
     authorizationId   string!
     computerUseScope  string!
@@ -400,7 +400,7 @@ mutate agentAuthorization updateAgentAuthScope {
 // beat retries (memql#1340).
 
 /// Bump lastSeenAt + lastConnectedFromIP on a worker registration.
-mutate registration updateWorkerLastSeen {
+mutation registration updateWorkerLastSeen {
   args {
     registrationId       string!
     lastSeenAt           string!
@@ -463,7 +463,7 @@ mutate registration updateWorkerLastSeen {
 /// every context descends from a worker's own inbound stream, so the concept's owner tier is the
 /// gate -- the store stamps auth.ContextWithUserActor for the registration's owner and the write
 /// guard refuses any other actor.
-mutate registration updateWorkerHardware {
+mutation registration updateWorkerHardware {
   args {
     registrationId       string!
     /// The full inventory as component/worker/hardware.go renders it.
@@ -503,7 +503,7 @@ mutate registration updateWorkerHardware {
 /// the store stamps auth.ContextWithUserActor for the registration's owner, and the write guard
 /// refuses any other actor. The residue is that a signed-in person could clear the field on their
 /// OWN machine, which the next heartbeat re-stamps within one interval.
-mutate registration clearWorkerConnectedNode {
+mutation registration clearWorkerConnectedNode {
   args {
     registrationId  string!
   }
@@ -531,7 +531,7 @@ mutate registration clearWorkerConnectedNode {
 
 /// Rename one of the caller's machines. Writes displayName; `name` stays the cockpit's hostname,
 /// which the next reconnect re-stamps.
-mutate registration renameWorker {
+mutation registration renameWorker {
   args {
     registrationId  string!
     displayName     string!  @maxLength(120)
@@ -545,7 +545,7 @@ mutate registration renameWorker {
 /// Replace the operator-set labels on one of the caller's machines. The whole map is replaced, not
 /// merged: the Fleet page edits the set as a set, and a merge would make removing a label
 /// impossible through this surface.
-mutate registration setWorkerOperatorLabels {
+mutation registration setWorkerOperatorLabels {
   args {
     registrationId  string!
     operatorLabels  object!
@@ -562,7 +562,7 @@ mutate registration setWorkerOperatorLabels {
 /// entry to the server-only inventory to buy nothing beyond it. The residue is that a person
 /// could stamp their OWN machine's lastSelectedAt and thereby nudge their own roundRobin
 /// rotation, which is a preference they already control from the Fleet page.
-mutate registration touchWorkerSelected {
+mutation registration touchWorkerSelected {
   args {
     registrationId  string!
   }
@@ -597,7 +597,7 @@ mutate registration touchWorkerSelected {
 /// Create the caller's routing policy. Run once, for a user who has none; edits go through
 /// updateRoutingPolicy.
 @actor
-mutate routingPolicy createRoutingPolicy {
+mutation routingPolicy createRoutingPolicy {
   args {
     policyId       string!
     strategy       enum("firstFit", "roundRobin", "leastLoaded", "labelMatch")!
@@ -623,7 +623,7 @@ mutate routingPolicy createRoutingPolicy {
 
 /// Edit the caller's routing policy in place. The concept's owner tier is what scopes this to a
 /// row the caller owns; the body cannot write ownerUserId, so the read-merge keeps it.
-mutate routingPolicy updateRoutingPolicy {
+mutation routingPolicy updateRoutingPolicy {
   args {
     policyId       string!
     strategy       enum("firstFit", "roundRobin", "leastLoaded", "labelMatch")!
@@ -648,7 +648,7 @@ mutate routingPolicy updateRoutingPolicy {
 
 /// Take a routing policy out of the active set. The row is kept -- an invocation's
 /// routing.policyId names it.
-mutate routingPolicy deactivateRoutingPolicy {
+mutation routingPolicy deactivateRoutingPolicy {
   args {
     policyId  string!
   }
@@ -677,7 +677,7 @@ mutate routingPolicy deactivateRoutingPolicy {
 // nothing downstream could tell which was current.
 
 /// Re-stamp a worker's reported app inventory and its derived routing labels.
-mutate registration updateWorkerApps {
+mutation registration updateWorkerApps {
   args {
     registrationId       string!
     /// The full reported inventory: {id, version, signedIn, subscription, allowed}.
@@ -728,7 +728,7 @@ mutate registration updateWorkerApps {
 /// server may write it.
 @actor
 @serverOnly
-mutate appSession createAppSession {
+mutation appSession createAppSession {
   args {
     sessionId      string!
     workerId       string!
@@ -807,7 +807,7 @@ mutate appSession createAppSession {
 /// self-scoping admits precisely the write that must not happen. The engine appends from chunks it
 /// received on the stream; nothing else may.
 @serverOnly
-mutate appSession appendAppSessionTranscript {
+mutation appSession appendAppSessionTranscript {
   args {
     sessionId      string!
     transcript     string
@@ -847,7 +847,7 @@ mutate appSession appendAppSessionTranscript {
 /// owner, so self-scoping admits exactly the write the gate exists to refuse. The engine writes it
 /// from what the app reported over the session stream.
 @serverOnly
-mutate appSession endAppSession {
+mutation appSession endAppSession {
   args {
     sessionId      string!
     status         enum("ended", "failed", "cancelled")!
@@ -913,7 +913,7 @@ mutate appSession endAppSession {
 
 @actor
 /// Record the structured answer an app submitted over MCP for its own session.
-mutate appSession submitAppSessionResult {
+mutation appSession submitAppSessionResult {
   args {
     sessionId  string!
     result     object!
@@ -937,7 +937,7 @@ mutate appSession submitAppSessionResult {
 
 @actor
 /// Create or update the caller's app-delegation policy.
-mutate delegationPolicy setDelegationPolicy {
+mutation delegationPolicy setDelegationPolicy {
   args {
     policyId       string!
     preferSubscriptionApps  bool
@@ -981,7 +981,7 @@ mutate delegationPolicy setDelegationPolicy {
 /// only the server knows is which replica currently holds the machine.
 @actor
 @serverOnly
-mutate modelPull createModelPull {
+mutation modelPull createModelPull {
   args {
     pullId        string!
     workerId      string!
@@ -1031,7 +1031,7 @@ mutate modelPull createModelPull {
 /// a bar that jumped backwards from a bug into the next blob starting.
 @actor
 @serverOnly
-mutate modelPull recordModelPullProgress {
+mutation modelPull recordModelPullProgress {
   args {
     pullId          string!
     statusLine      string
@@ -1065,7 +1065,7 @@ mutate modelPull recordModelPullProgress {
 /// treats as settled, so a caller who could write it could close a pull that is still running.
 @actor
 @serverOnly
-mutate modelPull finishModelPull {
+mutation modelPull finishModelPull {
   args {
     pullId        string!
     status        enum("succeeded", "failed", "cancelled")!
@@ -1105,7 +1105,7 @@ mutate modelPull finishModelPull {
 /// chose. Only the server knows which replica holds the stream.
 @actor
 @serverOnly
-mutate modelProbe createModelProbe {
+mutation modelProbe createModelProbe {
   args {
     probeId       string!
     workerId      string!
@@ -1142,7 +1142,7 @@ mutate modelProbe createModelProbe {
 /// got.
 @actor
 @serverOnly
-mutate modelProbe recordModelProbeProgress {
+mutation modelProbe recordModelProbeProgress {
   args {
     probeId         string!
     completedCases  int!
@@ -1169,7 +1169,7 @@ mutate modelProbe recordModelProbeProgress {
 /// be whatever measurement id they named.
 @actor
 @serverOnly
-mutate modelProbe finishModelProbe {
+mutation modelProbe finishModelProbe {
   args {
     probeId        string!
     status         string!
@@ -1207,7 +1207,7 @@ mutate modelProbe finishModelProbe {
 /// machine's own policy.yaml and is not writable here; both must say cluster before the machine
 /// serves anybody else.
 @actor
-mutate registration setWorkerSharing {
+mutation registration setWorkerSharing {
   args {
     registrationId  string!
     /// owner or cluster. Anything else is read as owner by every reader, so the

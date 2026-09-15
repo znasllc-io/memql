@@ -4,9 +4,9 @@ package steps
 // dry-run sandbox's forwarded-logic-call arg resolver (memql#1727).
 //
 // The regression: an authored wrapper forwards the triggering event as
-// `logic autoJoinAI ( event: event )`. The pre-#1727 sandbox resolved that
+// `logic autoJoinAI(event: event)`. The pre-#1727 sandbox resolved that
 // through the mutation-style evaluator, which treated bare `event` as a
-// literal string -- so RunLogic received args["event"] = "event" and every
+// literal string -- so the logic received args["event"] = "event" and every
 // nested `args.event.payload.X` navigated into a string. stepCallArgs must
 // resolve the argument to the seeded envelope, exactly like the live
 // FunctionExecutor.
@@ -28,7 +28,7 @@ func TestStepCallArgs_BindsTheEventEnvelope(t *testing.T) {
 	evaluator := automations.NewEvaluator()
 	evaluator.SetCustom("event", envelope)
 
-	reg := newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test", "", "")
+	reg := newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test")
 	stepCtx := &automations.StepContext{Evaluator: evaluator}
 
 	// The compiled shape of `logic autoJoinAI ( event: event )`: a named
@@ -62,7 +62,7 @@ func TestStepCallArgs_BindsTheEventEnvelope(t *testing.T) {
 // TestStepCallArgs_EmptyArgs returns an empty map (no panic) when the call
 // carries no args -- the cron/no-arg logic shape.
 func TestStepCallArgs_EmptyArgs(t *testing.T) {
-	reg := newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test", "", "")
+	reg := newSandboxStepRegistry(NewRegistry(), nil, "sandbox:dryrun:test")
 	stepCtx := &automations.StepContext{Evaluator: automations.NewEvaluator()}
 
 	step := &automations.Step{ID: "probe", Type: automations.StepTypeFunction, Function: &automations.FunctionStepConfig{Name: "serviceVersionProbe"}}

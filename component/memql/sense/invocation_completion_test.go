@@ -17,7 +17,7 @@ func invocationRegistry() *stubRegistry {
 }
 
 func TestInvocation_QueryVerbOffersOnlyQueries(t *testing.T) {
-	got := completeAtEnd(New(invocationRegistry()), "logic doThing {\n  body {\n    query ")
+	got := completeAtEnd(New(invocationRegistry()), "logic doThing {\n  query ")
 	if !got["listOrders"] {
 		t.Errorf("query verb should offer the query listOrders, got %v", got)
 	}
@@ -41,14 +41,14 @@ func TestInvocation_LogicVerbOffersOnlyLogic(t *testing.T) {
 }
 
 func TestInvocation_MutationVerbOffersOnlyMutations(t *testing.T) {
-	got := completeAtEnd(New(invocationRegistry()), "logic doThing {\n  body {\n    mutation ")
+	got := completeAtEnd(New(invocationRegistry()), "logic doThing {\n  mutation ")
 	if !got["writeThing"] || got["listOrders"] || got["dayRollup"] {
 		t.Errorf("mutation verb should offer only writeThing, got %v", got)
 	}
 }
 
 func TestInvocation_PrefixFilter(t *testing.T) {
-	got := completeAtEnd(New(invocationRegistry()), "logic doThing {\n  body {\n    query list")
+	got := completeAtEnd(New(invocationRegistry()), "logic doThing {\n  query list")
 	if !got["listOrders"] {
 		t.Errorf("`query list` should offer listOrders, got %v", got)
 	}
@@ -72,7 +72,7 @@ func TestInvocation_ConceptBodySuppressed(t *testing.T) {
 }
 
 func TestInvocation_MutateWriteBlockSuppressed(t *testing.T) {
-	// mutate is not behavioral; an insert/accept key named `query` is a write
+	// mutation is not behavioral; an insert/accept key named `query` is a write
 	// field, not an invocation.
 	rp := &stubRegistry{
 		functions: map[string]*FunctionInfo{
@@ -81,15 +81,15 @@ func TestInvocation_MutateWriteBlockSuppressed(t *testing.T) {
 		},
 		concepts: map[string]*ConceptInfo{"v1:orders:order": {Name: "v1:orders:order"}},
 	}
-	if firedInvocation(completeAtEnd(New(rp), "mutate order place {\n  insert {\n    query ")) {
-		t.Error("invocation fired in a mutate insert block")
+	if firedInvocation(completeAtEnd(New(rp), "mutation order place {\n  insert {\n    query ")) {
+		t.Error("invocation fired in a mutation insert block")
 	}
 }
 
 func TestInvocation_CallArgsParenSuppressed(t *testing.T) {
 	// Inside call-arg parens `foo(query ` the token is an argument, not an
 	// invocation verb -- func-call-args completion must own it.
-	if firedInvocation(completeAtEnd(New(invocationRegistry()), "logic doThing {\n  body {\n    foo(query ")) {
+	if firedInvocation(completeAtEnd(New(invocationRegistry()), "logic doThing {\n  foo(query ")) {
 		t.Error("invocation fired inside call-arg parens")
 	}
 }

@@ -219,7 +219,7 @@ func readDslFile(t *testing.T, rel string) string {
 // carriesAnnotationGate so the two cannot disagree about where a head starts.
 func headBefore(t *testing.T, src, name, file string) string {
 	t.Helper()
-	sig := regexp.MustCompile(`(?m)^(?:query|mutate|logic)\s+\w+\s+` + regexp.QuoteMeta(name) + `\s*\{`)
+	sig := regexp.MustCompile(`(?m)^(?:query|mutation|logic)\s+\w+\s+` + regexp.QuoteMeta(name) + `\s*\{`)
 	loc := sig.FindStringIndex(src)
 	if loc == nil {
 		t.Fatalf("no construct named %q in %s -- if it was renamed, update the migration table; "+

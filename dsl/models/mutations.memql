@@ -22,7 +22,7 @@
 /// modelProfileRemove for their operator entries. The materializer supplies internal origin and
 /// the system actor; the curated-row write guard independently refuses non-system changes.
 @serverOnly
-mutate modelProfile createModelProfile {
+mutation modelProfile createModelProfile {
   args {
     modelProfileId   string!
     modelId          string!
@@ -67,7 +67,7 @@ mutate modelProfile createModelProfile {
 /// cluster owner alone.
 @createOnly("modelId", "category", "runtime", "family", "params", "quant", "sizeBytes", "memoryNeedBytes", "contextWindow", "flags", "dimensions", "license", "source", "recommendedFor", "minMachineClass", "offeredOn", "notes")
 @requiresRank("developer")
-mutate modelProfile modelProfileAdd {
+mutation modelProfile modelProfileAdd {
   args {
     profileId        string!
     modelId          string!  @maxLength(200)
@@ -109,7 +109,7 @@ mutate modelProfile modelProfileAdd {
 /// correct, and is undone at the next pod restart with nothing to explain it. A refusal that names
 /// the reason is the only honest answer; the way to retire a curated entry is a release.
 @requiresRank("developer")
-mutate modelProfile modelProfileRemove {
+mutation modelProfile modelProfileRemove {
   args {
     profileId  string!
   }

@@ -6,7 +6,7 @@ concept ticket {
 }
 
 /// Raise a ticket with a title and an owner.
-mutate ticket raiseTicketActor {
+mutation ticket raiseTicketActor {
   args {
     title        string!
     ownerUserId  string!

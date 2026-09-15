@@ -1,0 +1,4 @@
+@schedule(cron="0 0 * * * *")
+automation withSchedule {
+  builtin one()
+}

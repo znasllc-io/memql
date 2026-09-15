@@ -44,8 +44,17 @@ Gate-1 diagnostics (the exact error per construct):
   (`now`, `actor.userId`). No `@default` on an args field.
 - A construct call names its kind and its arguments: `query name(k: v)`,
   never `query name({ ... })` or a bare argument `query name(k)`.
-- Mutations: exactly one `insert` OR `update` block. Owner-stamped
-  writes + owner-filtered reads for per-row authz.
+- Mutations: `mutation <Concept> <name>`, with exactly one `insert` OR
+  `update` block. Owner-stamped writes + owner-filtered reads for per-row
+  authz.
+- A logic or an automation body is statements, one per line, run in the
+  order written: `x := <kind> name(k: v)`, `if` / `else`, `for x in xs`,
+  `switch`, `parallel`, `publish` (automations only), `return`. A retired
+  body form is refused with its replacement in the diagnostic: a `step`
+  block is `x := <call>`, a `body { }` wrapper goes (its statements stay),
+  `steps.x.result` is `x`, `forEach x in s where f` is `for x in s if f`,
+  and `partition=` on `@trigger` is deleted. A name is read only after the
+  statement that binds it.
 
 # Specs
 

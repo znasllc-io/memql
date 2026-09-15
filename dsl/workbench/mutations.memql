@@ -23,7 +23,7 @@
 /// forgeable to any useful end: naming another replica would send the picker somewhere the
 /// directory is not, which reads as a node loss and re-provisions.
 @actor
-mutate workspace provisionWorkspace {
+mutation workspace provisionWorkspace {
   args {
     workspaceId  string!
     runId        string!
@@ -47,7 +47,7 @@ mutate workspace provisionWorkspace {
 
 /// Bump lastUsedAt on a workbench workspace after a successful dispatch. Cheap; called per
 /// successful workbenchHost call.
-mutate workspace touchWorkspace {
+mutation workspace touchWorkspace {
   args {
     workspaceId  string!
   }
@@ -60,7 +60,7 @@ mutate workspace touchWorkspace {
 /// Mark a workbench workspace as released. Called from releaseWorkspaceOnPlanTerminal when the
 /// parent Plan reaches a terminal status. The actual on-disk teardown is the workbench
 /// integration's responsibility -- this mutation only flips the lifecycle bit.
-mutate workspace releaseWorkspace {
+mutation workspace releaseWorkspace {
   args {
     workspaceId  string!
     reason       enum("plan_terminal", "explicit", "ttl_expired", "node_lost")!

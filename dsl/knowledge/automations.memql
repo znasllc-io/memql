@@ -44,15 +44,12 @@
 // The refresh CADENCE stays in Go. This file used to hold a nightly 02:30
 // automation firing logicRefreshDueKnowledgeDomains, which returned a
 // candidate COUNT and did nothing else; memql#644 replaced it with an
-// in-process poller. The reason is unchanged by this epic: the elapsed-time
-// check is arithmetic on datetime fields, which the MemQL grammar has no form
-// for. So the poller keeps deciding WHEN, and what it opens is now a goal
-// naming trainSpecialist above rather than a Plan.
+// in-process poller. The poller keeps deciding WHEN, and what it opens is now
+// a goal naming trainSpecialist above rather than a Plan.
 //
 // The other lifecycle duties an older header promised -- auto-archive of
 // zero-citation domains, supersession rollup -- are still unbuilt. They land
-// here if they land as automations at all, and the date-arithmetic split above
-// is the thing to weigh first.
+// here if they land as automations at all.
 
 /// Train one knowledge domain's corpus. Opened as a goal by the specialist-training gate and by the
 /// refresh cadence; mode='refresh' supersedes stale chunks rather than only adding.
@@ -69,12 +66,10 @@ automation trainSpecialist {
     mode          string
   }
 
-  step train {
-    trainSpecialist (
-      domainId: args.domainId,
-      specialistId: args.specialistId ?? "",
-      topic: args.topic ?? "",
-      mode: args.mode ?? "initial"
-    )
-  }
+  train := builtin trainSpecialist(
+    domainId: args.domainId,
+    specialistId: args.specialistId ?? "",
+    topic: args.topic ?? "",
+    mode: args.mode ?? "initial"
+  )
 }

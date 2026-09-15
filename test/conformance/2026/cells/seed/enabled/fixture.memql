@@ -4,7 +4,7 @@ concept cannedReply {
 }
 
 /// The mutation the seed materializer writes this concept's rows through: create<Concept>.
-mutate cannedReply createCannedReply {
+mutation cannedReply createCannedReply {
   args {
     cannedReplyId  string!
     text           string!

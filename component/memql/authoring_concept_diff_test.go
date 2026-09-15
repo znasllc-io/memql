@@ -808,7 +808,7 @@ query order ordersBySku%s {
 
 @actor
 @description("Create an order")
-mutate order createOrder%s {
+mutation order createOrder%s {
   args {
     orderId  string  @required
     sku      string  @required
@@ -917,7 +917,7 @@ concept ticket {
 
 @actor
 @description("Create a ticket")
-mutate ticket createTicket%s {
+mutation ticket createTicket%s {
   args {
     ticketId  string  @required
     status    string  @required

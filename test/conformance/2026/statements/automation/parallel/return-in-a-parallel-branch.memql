@@ -1,0 +1,8 @@
+@trigger(schedule="0 0 * * * *")
+automation returnInBranch {
+  parallel {
+    branch one {
+      return 1
+    }
+  }
+}

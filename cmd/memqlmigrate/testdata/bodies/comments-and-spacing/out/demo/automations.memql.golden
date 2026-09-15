@@ -1,0 +1,19 @@
+// Comments above, between, inside and after steps stay where they were.
+
+/// Doc comment.
+@trigger(event="demo.comments")
+automation demoComments {
+  // Above the args.
+  args {
+    id any // the id
+  }
+
+  // Above the first step.
+  // Inside the step, above its call.
+  first := mutation expireAccessRequest(requestId: args.id) // trailing on the call
+  // Inside the step, after its call.
+
+  // Between steps, after a blank line.
+  second := builtin routingEvidenceFold()
+  // After the last step.
+}

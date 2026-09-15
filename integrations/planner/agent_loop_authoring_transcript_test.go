@@ -32,32 +32,82 @@ func observationRow(id, tool string, seq int, isError bool, args map[string]any)
 	return map[string]any{"id": id, "kind": "tool_result", "data": data}
 }
 
-// TestRenderTranscriptAutomation_VerbatimCalls: the render emits one step per
-// recorded call, in order, invoking the tool with its exact args.
+// transcriptCallees stands in for the engine's ToolCallee: two tools whose
+// function handlers call builtins, and one (a query handler) with no call.
+func transcriptCallees(tool string) (kind, callee string, ok bool) {
+	switch tool {
+	case "produceArtifact":
+		return "builtin", "produceArtifact", true
+	case "workbenchHost":
+		return "builtin", "workbenchDispatchHost", true
+	}
+	return "", "", false
+}
+
+// TestRenderTranscriptAutomation_VerbatimCalls: the render emits one statement
+// per recorded call, in order, making the call the tool's handler made with the
+// tool's exact args.
 func TestRenderTranscriptAutomation_VerbatimCalls(t *testing.T) {
 	calls := []toolCall{
 		{Name: "produceArtifact", Args: `{"goal":"A markdown file titled X"}`, Seq: 0},
 		{Name: "workbenchHost", Args: `{"args":{"path":"x.md","content":"# X"}}`, Seq: 1},
 	}
-	src := renderTranscriptAutomation("reproduceR1", "Make a list", calls)
+	src, everyCallWritten := renderTranscriptAutomation("reproduceR1", "Make a list", calls, transcriptCallees)
 
 	if !strings.Contains(src, "automation reproduceR1 {") {
 		t.Fatalf("missing automation header:\n%s", src)
 	}
-	// Story 9 (#2335): rendered in the named-args invocation form
-	// `name(k: v, ...)`, not the legacy object-literal wrapper. Nested object
-	// VALUES keep their JSON braces (keys sorted by json.Marshal).
-	if !strings.Contains(src, `produceArtifact(goal: "A markdown file titled X")`) {
-		t.Errorf("first call not rendered as named args:\n%s", src)
+	// Named args `name(k: v, ...)`, each value a MemQL literal: a nested
+	// object's keys are unquoted names, in key order.
+	if !strings.Contains(src, `  call0 := builtin produceArtifact(goal: "A markdown file titled X")`+"\n") {
+		t.Errorf("first call not rendered as its handler's call:\n%s", src)
 	}
-	if !strings.Contains(src, `workbenchHost(args: {"content":"# X","path":"x.md"})`) {
-		t.Errorf("second call not rendered as named args:\n%s", src)
+	if !strings.Contains(src, `  call1 := builtin workbenchDispatchHost(args: {content: "# X", path: "x.md"})`+"\n") {
+		t.Errorf("second call not rendered as its handler's call:\n%s", src)
 	}
-	if strings.Index(src, "step call0") > strings.Index(src, "step call1") {
-		t.Errorf("steps out of order:\n%s", src)
+	if strings.Index(src, "call0 :=") > strings.Index(src, "call1 :=") {
+		t.Errorf("calls out of order:\n%s", src)
 	}
 	if !strings.Contains(src, "@description(") {
 		t.Errorf("missing description:\n%s", src)
+	}
+	if !everyCallWritten {
+		t.Error("every call has a handler call, so every call was written")
+	}
+	report := memql.SandboxCompileBundle([]memql.SandboxConstruct{{Kind: "automation", Name: "reproduceR1", Source: src}})
+	requireAutomationsActuallyCompiled(t, report)
+	if !report.OK {
+		t.Fatalf("the transcript does not compile: %s\n%s", firstFailureHeadline(report), src)
+	}
+}
+
+// TestRenderTranscriptAutomation_CallWithNoStatement: a tool whose handler
+// makes no one construct call is recorded as a comment line naming the tool
+// and its args, and the transcript says not every call was written -- which
+// is what keeps it from reading as re-runnable when the rest compiles.
+func TestRenderTranscriptAutomation_CallWithNoStatement(t *testing.T) {
+	calls := []toolCall{
+		{Name: "produceArtifact", Args: `{"goal":"g"}`, Seq: 0},
+		{Name: "listTodos", Args: `{"done":false}`, Seq: 1},
+		// A key that is not a name has no MemQL spelling: the call is
+		// recorded with its JSON.
+		{Name: "produceArtifact", Args: `{"headers":{"Content-Type":"text/plain"}}`, Seq: 2},
+	}
+	src, everyCallWritten := renderTranscriptAutomation("reproduceR2", "", calls, transcriptCallees)
+	if everyCallWritten {
+		t.Fatalf("a query-handler call has no statement, so not every call was written:\n%s", src)
+	}
+	if !strings.Contains(src, "  call0 := builtin produceArtifact(goal: \"g\")\n") {
+		t.Errorf("the written call must stay a statement:\n%s", src)
+	}
+	if !strings.Contains(src, "  // call1: tool listTodos(done: false) -- no statement writes this call\n") {
+		t.Errorf("the unwritten call must be recorded as a comment naming it:\n%s", src)
+	}
+	if !strings.Contains(src, `  // call2: tool produceArtifact({"headers":{"Content-Type":"text/plain"}})`) {
+		t.Errorf("an argument with no MemQL spelling must be recorded as its JSON:\n%s", src)
+	}
+	if _, written := renderTranscriptAutomation("reproduceR3", "", calls, nil); written {
+		t.Error("an engine with no ToolCallee writes no call")
 	}
 }
 
@@ -225,20 +275,25 @@ func TestRunCaptureTranscript_NoCallsSkips(t *testing.T) {
 
 // TestRunCaptureTranscript_Gate1ReRunnable: when the Gate-1 sandbox is linked,
 // the transcript runs the rendered automation through real compile+bind and
-// records the verdict -- reRunnable:true on a clean compile, false otherwise --
-// while still storing the transcript as a validated RECORD either way. (#1195)
+// records the verdict -- reRunnable:true on a clean compile that wrote every
+// call, false otherwise -- while still storing the transcript as a validated
+// RECORD either way. (#1195)
 func TestRunCaptureTranscript_Gate1ReRunnable(t *testing.T) {
 	cases := []struct {
 		name      string
+		tool      string
 		report    memql.SandboxReport
 		wantReRun string
 	}{
-		{"compiles", memql.SandboxReport{OK: true}, `"reRunnable":true`},
-		{"doesNotCompile", memql.SandboxReport{OK: false}, `"reRunnable":false`},
+		{"compiles", "workbenchHost", memql.SandboxReport{OK: true}, `"reRunnable":true`},
+		{"doesNotCompile", "workbenchHost", memql.SandboxReport{OK: false}, `"reRunnable":false`},
+		// A call no statement writes is a comment line, so the automation
+		// can compile and still not reproduce the run.
+		{"callNotWritten", "listTodos", memql.SandboxReport{OK: true}, `"reRunnable":false`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			obs := []any{observationRow("o1", "workbenchHost", 0, false, map[string]any{"args": map[string]any{"path": "x.md", "content": "# X"}})}
+			obs := []any{observationRow("o1", tc.tool, 0, false, map[string]any{"args": map[string]any{"path": "x.md", "content": "# X"}})}
 			fe := &fakeEngine{
 				execResponder: func(query string) (any, error) {
 					switch {

@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "file": "else-if.memql",
+      "verdict": "evaluate",
+      "call": "sizeBand",
+      "args": {
+        "n": 7
+      },
+      "expect": "medium"
+    },
+    {
+      "file": "else-on-its-own-line.memql",
+      "verdict": "refuse_parse",
+      "code": "body_else_placement",
+      "message": "`else` follows the closing brace on the same line: `} else {`"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+/// Every hour, open a ticket to review the queue -- the cron missing its seconds field.
+@trigger(schedule="0 * * * *")
+automation hourlyReviewFiveFields {
+  raise := mutation raiseTicketTrigger(title: "Review the queue")
+}

@@ -34,7 +34,7 @@ query participant queryActiveParticipantsForSpace {
 
 func TestFmtRewriterParity_MutationStructForm(t *testing.T) {
 	source := `@description("Create a cognition space.")
-mutate space mutationCreateSpace {
+mutation space mutationCreateSpace {
   args {
     partitionId  string  @required
     name     string  @required

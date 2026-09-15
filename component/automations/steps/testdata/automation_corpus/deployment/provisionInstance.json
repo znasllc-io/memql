@@ -1,0 +1,241 @@
+{
+  "automation": "deployment/automations.memql provisionInstance",
+  "runs": {
+    "event agent | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "clusterName": "s-clusterName",
+            "createdBySubject": "subject-0",
+            "dryRun": true,
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "location": "s-location",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "registryName": "s-registryName",
+            "resourceGroup": "s-resourceGroup",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId"
+          },
+          "topic": "instance.provisionRequested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "keyVaultName": "s-keyVaultName",
+              "location": "s-location",
+              "registryName": "s-registryName",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "provisionAzureInfrastructure"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event agent | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "clusterName": "s-clusterName",
+            "createdBySubject": "subject-0",
+            "dryRun": true,
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "location": "s-location",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "registryName": "s-registryName",
+            "resourceGroup": "s-resourceGroup",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId"
+          },
+          "topic": "instance.provisionRequested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "keyVaultName": "s-keyVaultName",
+              "location": "s-location",
+              "registryName": "s-registryName",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "provisionAzureInfrastructure"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "clusterName": "s-clusterName",
+            "createdBySubject": "subject-0",
+            "dryRun": true,
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "location": "s-location",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "registryName": "s-registryName",
+            "resourceGroup": "s-resourceGroup",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId"
+          },
+          "topic": "instance.provisionRequested"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "keyVaultName": "s-keyVaultName",
+              "location": "s-location",
+              "registryName": "s-registryName",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "provisionAzureInfrastructure"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "agent-1",
+            "clusterName": "s-clusterName",
+            "createdBySubject": "subject-0",
+            "dryRun": true,
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "instanceId": "s-instanceId",
+            "keyVaultName": "s-keyVaultName",
+            "location": "s-location",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "registryName": "s-registryName",
+            "resourceGroup": "s-resourceGroup",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "subscriptionId": "s-subscriptionId"
+          },
+          "topic": "instance.provisionRequested"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "clusterName": "s-clusterName",
+              "dryRun": true,
+              "keyVaultName": "s-keyVaultName",
+              "location": "s-location",
+              "registryName": "s-registryName",
+              "resourceGroup": "s-resourceGroup",
+              "subscriptionId": "s-subscriptionId"
+            },
+            "kind": "action",
+            "name": "provisionAzureInfrastructure"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

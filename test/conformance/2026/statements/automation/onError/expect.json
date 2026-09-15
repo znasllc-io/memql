@@ -1,0 +1,20 @@
+{
+  "cases": [
+    {
+      "file": "on-error-continue.memql",
+      "verdict": "load_ok"
+    },
+    {
+      "file": "on-error-on-an-if.memql",
+      "verdict": "refuse_parse",
+      "code": "body_on_error_placement",
+      "message": "`on error continue` applies to a call, a `for` or a `parallel` statement"
+    },
+    {
+      "file": "on-error-stop.memql",
+      "verdict": "refuse_parse",
+      "code": "body_default_clause",
+      "message": "`on error stop` is the default: delete it"
+    }
+  ]
+}

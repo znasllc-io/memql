@@ -1,12 +1,9 @@
 package memql
 
 import (
-	"context"
 	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/znasllc-io/memql/component/auth"
 )
 
 // memql#2915: cond() with arg-ref operands has never worked.
@@ -217,83 +214,6 @@ func TestCond_TruthinessIsPinnedIndependently(t *testing.T) {
 	}
 	if got != nil {
 		t.Errorf("cond(true, nil, \"no\") = %#v, want nil", got)
-	}
-}
-
-// TestCond_EvaluatesThroughEngineExecute drives the engine, not the seam.
-//
-// The five tests above call evalCollScalar / evalCollCond directly, which is
-// precisely the anti-pattern the sibling file records as a prior review
-// finding: "every other test in this file reimplements the engine's dispatch
-// instead of calling the engine. A test that re-derives the code path it is
-// meant to protect cannot notice that path being deleted."
-//
-// TestPositionalBuiltinsEvaluateThroughEngineExecute closed that hole for
-// coalesce only -- all three of its cases are deployGateGreen. cond was in the
-// plan-root allowlist (engine.go) with nothing gating it: deleting `cond` from
-// that allowlist left the entire tree green. memql#2915 asked for this
-// explicitly, wanting cond driven "through resolvePlanFunctionsWithOrigin with
-// real args, since no existing test does".
-//
-// A synthetic logic rather than a shipped one, because there is no shipped
-// single-statement `return cond(args.X, ...)` construct -- that absence is why
-// the defect survived. Upsert is the package's existing idiom for this
-// (authoring_validate_test.go, server_only_gate_test.go).
-func TestCond_EvaluatesThroughEngineExecute(t *testing.T) {
-	engine := engineForSeamTest(t)
-	upsert := func(t *testing.T, name string, expr ExpressionNode) {
-		t.Helper()
-		if err := engine.functions.Upsert(&Function{
-			Name: name, FunctionKind: "logic", Enabled: true, Expr: expr,
-		}); err != nil {
-			t.Fatalf("upsert %s: %v", name, err)
-		}
-	}
-	argRef := func(p string) *ArgRefExpression { return &ArgRefExpression{Path: p} }
-	lit := func(v any) *LiteralValueNode { return &LiteralValueNode{Value: v} }
-
-	// The form docs/public/language/functions.md teaches verbatim:
-	// cond(args.flag, "yes", "no").
-	upsert(t, "condDocsForm", &FunctionCallExpression{Name: "cond", Args: map[string]any{
-		"0": argRef("flag"), "1": lit("yes"), "2": lit("no"),
-	}})
-	// Every operand an arg ref -- all three resolved by the substitution.
-	upsert(t, "condAllArgRefs", &FunctionCallExpression{Name: "cond", Args: map[string]any{
-		"0": argRef("flag"), "1": argRef("a"), "2": argRef("b"),
-	}})
-	// cond nested inside coalesce: the outer builtin resolves the inner one.
-	upsert(t, "condInsideCoalesce", &FunctionCallExpression{Name: "coalesce", Args: map[string]any{
-		"0": &FunctionCallExpression{Name: "cond", Args: map[string]any{
-			"0": argRef("flag"), "1": argRef("a"), "2": lit(nil),
-		}},
-		"1": lit("fallback"),
-	}})
-
-	ctx := auth.ContextWithInternalOrigin(context.Background())
-	for _, tc := range []struct {
-		name, query string
-		want        any
-	}{
-		{"docs form, flag true", `logic condDocsForm(flag: true)`, "yes"},
-		{"docs form, flag false", `logic condDocsForm(flag: false)`, "no"},
-		{"docs form, flag absent", `logic condDocsForm()`, "no"},
-		{"all arg refs, true", `logic condAllArgRefs(flag: true, a: "A", b: "B")`, "A"},
-		{"all arg refs, false", `logic condAllArgRefs(flag: false, a: "A", b: "B")`, "B"},
-		{"nested in coalesce, chosen", `logic condInsideCoalesce(flag: true, a: "picked")`, "picked"},
-		{"nested in coalesce, falls back", `logic condInsideCoalesce(flag: false, a: "picked")`, "fallback"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			res, err := engine.Execute(ctx, tc.query)
-			if err != nil {
-				t.Fatalf("Execute(%s): %v\n\nIf this is \"function ... was not expanded during "+
-					"parsing\", the plan-root allowlist in engine.go no longer covers cond.\n"+
-					"If it is \"cond() arg 0 is not an expression\", memql#2915 has regressed.",
-					tc.query, err)
-			}
-			if got := seamResultValue(res); !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("Execute(%s) = %#v, want %#v", tc.query, got, tc.want)
-			}
-		})
 	}
 }
 

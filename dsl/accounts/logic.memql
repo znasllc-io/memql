@@ -28,8 +28,6 @@ logic selfAccountAbsent {
   args {
     event object!
   }
-  body {
   existing := query existingSelfAccount()
   return existing.empty() && args.event.payload.node.type == "bff"
-  }
 }

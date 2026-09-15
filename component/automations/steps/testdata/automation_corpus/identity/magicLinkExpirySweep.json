@@ -1,0 +1,61 @@
+{
+  "automation": "identity/automations.memql magicLinkExpirySweep",
+  "runs": {
+    "no event | 0 rows": {
+      "input": {
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredMagicLinkRequests"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "no event | 2 rows": {
+      "input": {
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "asOf": "<ts>"
+            },
+            "kind": "query",
+            "name": "expiredMagicLinkRequests"
+          },
+          {
+            "args": {
+              "consumedFromIP": "system:expiry",
+              "requestId": "v1:probe:row:expiredMagicLinkRequests-1"
+            },
+            "kind": "mutation",
+            "name": "consumeMagicLinkRequest"
+          },
+          {
+            "args": {
+              "consumedFromIP": "system:expiry",
+              "requestId": "v1:probe:row:expiredMagicLinkRequests-2"
+            },
+            "kind": "mutation",
+            "name": "consumeMagicLinkRequest"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

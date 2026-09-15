@@ -38,10 +38,10 @@ package memql
 //     KEEPS, being the description the catalog serves. Fixed by giving both
 //     sides one implementation of "where does a declaration's text begin"
 //     (parser.PreambleStartOf).
-//   - 10 automations are authored in the terse single-line form, which has no
-//     brace for the engine's header regexp to find, so the engine's source
-//     index held no entry and stamped an EMPTY hash while the language server
-//     computed a real one. Fixed in buildConstructSourceIndex.
+//   - 10 automations were authored in the terse single-line form (retired
+//     since, epic memql#5370), which had no brace for the engine's header
+//     regexp to find, so the engine's source index held no entry and stamped
+//     an EMPTY hash while the language server computed a real one.
 
 import (
 	"fmt"

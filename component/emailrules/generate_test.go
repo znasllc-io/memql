@@ -155,7 +155,7 @@ func TestGeneratedSourceNamesTheRuleAndTheLane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateAutomation: %v", err)
 	}
-	for _, want := range []string{r.ID, "operational", "emailRuleFire", "event: event", "nodeId: id"} {
+	for _, want := range []string{r.ID, "operational", "builtin emailRuleFire(", "event: event", "nodeId: args.id"} {
 		if !strings.Contains(src, want) {
 			t.Errorf("generated source does not mention %q:\n%s", want, src)
 		}

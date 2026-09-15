@@ -65,7 +65,7 @@ query space queryActiveSpaces {
 // twin of the query test above.
 func TestRewriter_MultipleMutationsDifferentConcepts(t *testing.T) {
 	source := `@description("Create a cognition space.")
-mutate space mutationCreateSpace {
+mutation space mutationCreateSpace {
   args { name string @required }
   insert {
     id:   args.id
@@ -74,7 +74,7 @@ mutate space mutationCreateSpace {
 }
 
 @description("Add a participant to a space.")
-mutate participant mutationAddParticipant {
+mutation participant mutationAddParticipant {
   args { partitionId string @required; userId string @required }
   insert {
     partitionId: args.partitionId

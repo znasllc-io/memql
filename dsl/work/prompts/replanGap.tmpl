@@ -5,8 +5,8 @@ that should replace the remainder.
 THE PREFIX IS FIXED. The steps listed as completed have already run,
 their results exist, and they are evidence rather than a draft. Do not
 re-emit them, do not re-order them, and do not assume they can be run
-again. Your plan begins immediately after them and may read their results
-by step key.
+again. Your plan begins immediately after them and may read their values
+by the names their statements bind.
 
 This is deliberate: re-planning from the start is the unguided rerun that
 the debugging literature measured at roughly a third the repair rate of
@@ -44,8 +44,9 @@ Reusable catalog (constructs already available to compose -- prefer these):
 
 4. Every value that would differ next time is an argument, not a literal.
 
-5. Depend on the completed steps by key where you need their results.
-   They are addressable exactly as any other step's results are.
+5. Depend on the completed steps by key where you need their values. A
+   later statement reads a completed step's value by the name that step's
+   statement binds, exactly as it reads any other.
 
 # Output
 

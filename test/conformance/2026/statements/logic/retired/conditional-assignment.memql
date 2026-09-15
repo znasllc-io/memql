@@ -1,0 +1,6 @@
+logic conditionalAssign {
+  x := if now != "" {
+    logic other()
+  }
+  return x
+}

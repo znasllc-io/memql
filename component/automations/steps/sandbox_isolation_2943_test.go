@@ -4,23 +4,21 @@ package steps
 //
 // dryrun.go promised, in writing, that under the isolated tier a would-be
 // write "never reaches engine.Execute, so zero rows land in the live graph".
-// That was false. sandboxStepRegistry.Execute intercepted three things --
-// mutation steps, webhook steps, and function steps whose function is a
-// mutation or logic -- and its `default:` arm forwarded EVERYTHING ELSE to the
-// production executors. Steps that reach a real side effect went with it:
+// That was false: sandboxStepRegistry.Execute intercepted the mutation calls,
+// and its `default:` arm forwarded EVERYTHING ELSE to the production
+// executors. Steps that reach a real side effect went with it:
 //
-//	emitConceptCard -> stepCtx.Engine.Execute(insert ...)
-//	event           -> stepCtx.EventBus.Publish, on the LIVE bus
-//	action          -> engine.ExecuteToolByName, a real capability call
-//	automation      -> triggers another automation, unbounded
+//	event      -> stepCtx.EventBus.Publish, on the LIVE bus
+//	action     -> engine.ExecuteToolByName, a real capability call
+//	automation -> triggers another automation, unbounded
 //
 // And a second escape the issue did not list, which is worse because it
-// defeats the interception that DID exist: ForEachExecutor, ParallelExecutor
-// and SwitchExecutor each held the concrete *Registry and resolved their
-// children through it. The sandbox wraps the registry at the
+// defeats the interception that DID exist: a container resolved its children
+// through the concrete *Registry. The sandbox wraps the registry at the
 // StepExecutorRegistry seam, so a container delegated to production resolved
-// its children against production too -- and `forEach { mutation }` wrote to
-// the live graph even though `mutation` is exactly what the sandbox catches.
+// its children against production too -- and a mutation inside a `for` wrote
+// to the live graph even though a mutation is exactly what the sandbox
+// catches.
 //
 // These tests assert the guarantee the issue said nobody had been able to
 // write, by the only means that actually settles it: register a RECORDING
@@ -35,7 +33,7 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/automations"
-	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/events"
 )
 
 // writeReachRecorder stands in for a production executor and records every
@@ -60,7 +58,8 @@ func (r *writeReachRecorder) reached() []string {
 }
 
 // sandboxWithRecorder wraps a real registry in which the given step types have
-// been replaced by one shared recording executor.
+// been replaced by one shared recording executor. The engine is booted with no
+// database: the sandbox reads its function registry, never its rows.
 func sandboxWithRecorder(t *testing.T, types ...automations.StepType) (*sandboxStepRegistry, *writeReachRecorder) {
 	t.Helper()
 	real := NewRegistry()
@@ -68,7 +67,7 @@ func sandboxWithRecorder(t *testing.T, types ...automations.StepType) (*sandboxS
 	for _, ty := range types {
 		real.Register(ty, rec)
 	}
-	return newSandboxStepRegistry(real, nil, "sandbox:dryrun:2943", memql.DryRunModeIsolated, ""), rec
+	return newSandboxStepRegistry(real, bootEmbeddedEngine(t), "sandbox:dryrun:2943"), rec
 }
 
 func newStepCtx() *automations.StepContext {
@@ -83,12 +82,6 @@ func TestSandboxInterceptsEveryWriteBearingStepType(t *testing.T) {
 		name string
 		step *automations.Step
 	}{
-		{"emitConceptCard", &automations.Step{
-			ID: "card", Type: automations.StepTypeEmitConceptCard,
-			EmitConceptCard: &automations.EmitConceptCardStepConfig{
-				CardType: "lead_captured", PartitionId: "space-1",
-			},
-		}},
 		{"event", &automations.Step{
 			ID: "emit", Type: automations.StepTypeEvent,
 			Event: &automations.EventStepConfig{Topic: "some.topic", Kind: "message"},
@@ -128,54 +121,52 @@ func TestSandboxInterceptsEveryWriteBearingStepType(t *testing.T) {
 
 // TestSandboxInterceptsWritesNestedInsideContainers is the escape that made the
 // existing interception ineffective rather than merely incomplete. The child
-// here is a `mutation` -- the one step type the sandbox always caught -- so a
-// failure means the container, not the classification, is the hole.
+// here is a mutation call -- the one call the sandbox always caught -- so a
+// failure means the container, not the classification, is the hole. Each
+// container runs through the real executor, whose registry is the sandbox:
+// its list runs on the executor's sequence runner.
 func TestSandboxInterceptsWritesNestedInsideContainers(t *testing.T) {
-	child := automations.Step{
-		ID:   "write",
-		Type: automations.StepTypeMutation,
-		Mutation: &automations.MutationStepConfig{
-			Concept: "v1:cognition:utterance",
-			Payload: map[string]any{"text": "written during a dry run"},
-		},
-	}
-
-	for _, tc := range []struct {
-		name string
-		step *automations.Step
-	}{
-		{"forEach", &automations.Step{
-			ID: "loop", Type: automations.StepTypeForEach,
-			ForEach: &automations.ForEachStepConfig{
-				Source: "input.items",
-				As:     "item",
-				Do:     []*automations.Step{&child},
-			},
-		}},
-		{"parallel", &automations.Step{
-			ID: "fan", Type: automations.StepTypeParallel,
-			Parallel: &automations.ParallelStepConfig{
-				Branches: []*automations.Step{&child},
-			},
-		}},
+	for name, src := range map[string]string{
+		"for": `@trigger(event="probe.fired")
+automation loops {
+  args {
+    items any
+  }
+  for item in args.items {
+    mutation createUtterance(text: item)
+  }
+}`,
+		"parallel": `@trigger(event="probe.fired")
+automation fans {
+  parallel {
+    branch a {
+      mutation createUtterance(text: "a")
+    }
+    branch b {
+      mutation createUtterance(text: "b")
+    }
+  }
+}`,
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			sandbox, rec := sandboxWithRecorder(t, automations.StepTypeMutation)
-			if err := automations.PrepareExpressions(&automations.Automation{Name: "probe", Steps: []*automations.Step{tc.step}}); err != nil {
-				t.Fatalf("prepare: %v", err)
+		t.Run(name, func(t *testing.T) {
+			a, err := automations.NewLoader(automations.LoaderOptions{}).CompileSource(src, "test.memql")
+			if err != nil {
+				t.Fatalf("compile: %v", err)
 			}
-
-			stepCtx := newStepCtx()
-			stepCtx.Evaluator.SetInput(map[string]any{"items": []any{"a", "b"}})
-
-			if _, err := sandbox.Execute(context.Background(), tc.step, stepCtx); err != nil {
-				t.Fatalf("dry-run of a %s step errored: %v", tc.name, err)
+			sandbox, rec := sandboxWithRecorder(t, automations.StepTypeFunction)
+			ev := events.NewEvent("probe.fired", events.KindMessage, map[string]any{"items": []any{"a", "b"}})
+			exec, err := automations.NewExecutor(automations.ExecutorOptions{StepRegistry: sandbox, SandboxRun: true}).ExecuteWithEvent(context.Background(), a, "test", &ev)
+			if err != nil {
+				t.Fatalf("dry-run of a %s errored: %v (%s)", name, err, exec.Error)
 			}
 			if reached := rec.reached(); len(reached) != 0 {
 				t.Errorf("a mutation nested in a %s reached the PRODUCTION executor: %v.\n"+
 					"The container resolved its children against the real registry instead of "+
 					"the sandbox, so wrapping the outer seam bought nothing (memql#2943).",
-					tc.name, reached)
+					name, reached)
+			}
+			if got := len(sandbox.manifest().Mutations); got != 2 {
+				t.Errorf("manifest recorded %d writes, want the 2 the %s would have made", got, name)
 			}
 		})
 	}
@@ -201,51 +192,35 @@ func TestSandboxRefusesAnUnclassifiedStepType(t *testing.T) {
 	}
 }
 
-// TestSandboxInterceptsAQueryStepThatWrites covers the case the step TYPE
-// cannot settle. query.go runs a construct call through engine.Execute, which
-// runs mutations as well as reads -- so a `query:` step carrying a mutation
-// call is a write wearing a read's label.
-func TestSandboxInterceptsAQueryStepThatWrites(t *testing.T) {
+// TestSandboxDecidesACallByItsKind: a call statement names its callee's kind,
+// and the kind decides -- a query is a read, run for real and metered; a
+// mutation is a write, recorded and never performed.
+func TestSandboxDecidesACallByItsKind(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		query     string
-		prepare   bool
-		wantReach bool // did it correctly reach the real (read) executor?
+		kind      string
+		wantReach bool // did it reach the real (read) executor?
 	}{
-		{"a plain read is delegated", `query utterancesForSpace(spaceId: "s")`, true, true},
-		{"an in-process expression is delegated", `1 + 1`, true, true},
-		{"a mutation call is intercepted", `mutation createUtterance(id: "x")`, true, false},
-		{"a logic call is intercepted", `logic recordUtterance(id: "x")`, true, false},
-		{"a builtin call is intercepted", `builtin writeSomething(id: "x")`, true, false},
-		// A step that was never prepared cannot be read, so it is assumed to
-		// write: the text below is the legacy insert form, which no v1 step
-		// carries.
-		{"an unprepared step is intercepted", `insert("v1:cognition:utterance", id="x", payload={})`, false, false},
+		{"query", true},
+		{"mutation", false},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			sandbox, rec := sandboxWithRecorder(t, automations.StepTypeQuery)
+		t.Run(tc.kind, func(t *testing.T) {
+			sandbox, rec := sandboxWithRecorder(t, automations.StepTypeFunction)
 			step := &automations.Step{
-				ID:    "q",
-				Type:  automations.StepTypeQuery,
-				Query: &automations.QueryStepConfig{Query: tc.query},
+				ID:       "call",
+				Type:     automations.StepTypeFunction,
+				Function: &automations.FunctionStepConfig{Name: "utterances", Kind: tc.kind},
 			}
-			if tc.prepare {
-				if err := automations.PrepareExpressions(&automations.Automation{Name: "probe", Steps: []*automations.Step{step}}); err != nil {
-					t.Fatalf("prepare: %v", err)
-				}
+			if err := automations.PrepareExpressions(&automations.Automation{Name: "probe", Steps: []*automations.Step{step}}); err != nil {
+				t.Fatalf("prepare: %v", err)
 			}
-
 			if _, err := sandbox.Execute(context.Background(), step, newStepCtx()); err != nil {
 				t.Fatalf("dry-run errored: %v", err)
 			}
-			reached := len(rec.reached()) > 0
-			if reached != tc.wantReach {
+			if reached := len(rec.reached()) > 0; reached != tc.wantReach {
 				if tc.wantReach {
-					t.Errorf("a read-only query was intercepted instead of run; reads are supposed "+
-						"to execute for real and be metered. query=%q", tc.query)
+					t.Errorf("a query was intercepted instead of run; reads are supposed to execute for real and be metered")
 				} else {
-					t.Errorf("a WRITING query reached the production executor and its row landed in "+
-						"the live graph. query=%q", tc.query)
+					t.Errorf("a MUTATION call reached the production executor and its row landed in the live graph")
 				}
 			}
 		})

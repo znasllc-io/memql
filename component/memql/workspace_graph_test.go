@@ -113,7 +113,7 @@ concept item {
 }`)},
 		"demo/mutations.memql": &fstest.MapFile{Data: []byte(`use demo.concepts.{ item }
 
-mutate ghostConcept touchGhost {
+mutation ghostConcept touchGhost {
   args { id  string!  }
   update {
     id: args.id
@@ -206,17 +206,17 @@ concept item {
 	body := " setThing {\n  args {\n    id  string!\n  }\n  update {\n    id: args.id\n  }\n}\n"
 
 	// Bound to a nonexistent concept, buffer imports demo-only (provable): flagged.
-	if got := sigErrs("use demo.concepts.{ item }\n\nmutate full" + body); got != 1 {
+	if got := sigErrs("use demo.concepts.{ item }\n\nmutation full" + body); got != 1 {
 		t.Errorf("nonexistent signature concept: got %d unknown-signature-concept, want 1", got)
 	}
 	// Bound to the real, imported concept: silent.
-	if got := sigErrs("use demo.concepts.{ item }\n\nmutate item" + body); got != 0 {
+	if got := sigErrs("use demo.concepts.{ item }\n\nmutation item" + body); got != 0 {
 		t.Errorf("valid signature concept flagged: got %d", got)
 	}
 	// Bound to a real ENGINE concept WITHOUT an import: the global registry
 	// (embedded core) resolves it by trailing segment, so boot binds it and sense
 	// must stay silent -- the adversarial-review blocker.
-	if got := sigErrs("use demo.concepts.{ item }\n\nmutate user" + body); got != 0 {
+	if got := sigErrs("use demo.concepts.{ item }\n\nmutation user" + body); got != 0 {
 		t.Errorf("unimported engine concept (registry-resolvable) flagged: got %d", got)
 	}
 }
@@ -263,8 +263,8 @@ func TestBuildOfflineSense_InvocationKindFilteredEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildOfflineSense over embedded tree: %v", err)
 	}
-	src := "logic probe {\n  body {\n    query "
-	items := svc.Complete(src, 3, len("    query ")+1, "x/logic.memql")
+	src := "logic probe {\n  query "
+	items := svc.Complete(src, 2, len("  query ")+1, "x/logic.memql")
 	if len(items) == 0 {
 		t.Fatal("`query ` in a logic body offered nothing; expected the engine's query functions")
 	}

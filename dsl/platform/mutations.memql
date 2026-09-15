@@ -20,7 +20,7 @@
 /// Persist an instance-wide (global) encrypted secret row in v1:platform:globalSecret. The
 /// encryptedValue and fingerprint are produced by the backend secret helper; this mutation only
 /// stores them.
-mutate globalSecret setGlobalSecret {
+mutation globalSecret setGlobalSecret {
   args {
     id              string!
     name            string!
@@ -49,7 +49,7 @@ mutate globalSecret setGlobalSecret {
 // `make variable-set SCOPE=global` to populate instance defaults.
 
 /// Persist an instance-wide (global) plaintext variable row in v1:platform:globalVariable.
-mutate globalVariable setGlobalVariable {
+mutation globalVariable setGlobalVariable {
   args {
     id           string!
     name         string!
@@ -82,7 +82,7 @@ mutate globalVariable setGlobalVariable {
 /// Persist a partition-scoped encrypted secret row in v1:platform:partitionSecret. The
 /// encryptedValue and fingerprint are produced by the backend secret helper; this mutation only
 /// stores them.
-mutate partitionSecret setPartitionSecret {
+mutation partitionSecret setPartitionSecret {
   args {
     id              string!
     name            string!
@@ -112,7 +112,7 @@ mutate partitionSecret setPartitionSecret {
 // and by automations that write per-tenant config.
 
 /// Persist a partition-scoped plaintext variable row in v1:platform:partitionVariable.
-mutate partitionVariable setPartitionVariable {
+mutation partitionVariable setPartitionVariable {
   args {
     id           string!
     name         string!
@@ -132,7 +132,7 @@ mutate partitionVariable setPartitionVariable {
 /// First sighting creates the row; repeat sightings (same (kind, capability)) call
 /// bumpMissingCapabilitySighting instead so the row stays unique-by-capability and sightingCount
 /// climbs. Status defaults to 'open'.
-mutate missingCapability logMissingCapability {
+mutation missingCapability logMissingCapability {
   args {
     missingId       string!
     kind            string!
@@ -165,7 +165,7 @@ mutate missingCapability logMissingCapability {
 /// Per Q7 missing-capability surface: a repeat sighting of an already-logged gap. Increments
 /// sightingCount and refreshes lastSeenAt. The Planner Agent calls this when it encounters a known
 /// gap; aggregated counts feed the platform-roadmap prioritization view.
-mutate missingCapability bumpMissingCapabilitySighting {
+mutation missingCapability bumpMissingCapabilitySighting {
   args {
     missingId       string!
     sightingCount   int!
@@ -182,7 +182,7 @@ mutate missingCapability bumpMissingCapabilitySighting {
 /// Operator-driven status transition on a missingCapability row. Used by the platform team's
 /// backlog tooling to mark a gap as in_progress, resolved (with a note on what shipped), or
 /// wontfix.
-mutate missingCapability updateMissingCapabilityStatus {
+mutation missingCapability updateMissingCapabilityStatus {
   args {
     missingId   string!
     status      string!
@@ -227,7 +227,7 @@ mutate missingCapability updateMissingCapabilityStatus {
 /// Idempotent by requestId: a re-stage onto an existing row preserves the worker-owned
 /// status/attempts (@createOnly, fylo#63) rather than resetting delivery state.
 @createOnly("status", "attempts")
-mutate outboundRequest stageOutboundRequest {
+mutation outboundRequest stageOutboundRequest {
   args {
     requestId    string!
     medium       string!
@@ -260,7 +260,7 @@ mutate outboundRequest stageOutboundRequest {
 /// Stamp a delivery-state transition on a v1:platform:outboundRequest row (memql#2521). Called by
 /// the engine outbound worker (sending/sent/retrying/failed + attempt metadata); operators may set
 /// status='pending' to requeue a failed row.
-mutate outboundRequest updateOutboundRequestStatus {
+mutation outboundRequest updateOutboundRequestStatus {
   args {
     requestId      string!
     status         string!
@@ -311,7 +311,7 @@ mutate outboundRequest updateOutboundRequestStatus {
 /// row. Idempotent by requestId: a redelivery preserves the product-owned handling state
 /// (@createOnly) instead of replaying it.
 @createOnly("status", "processedAt", "lastError")
-mutate inboundRequest stageInboundRequest {
+mutation inboundRequest stageInboundRequest {
   args {
     requestId          string!
     source             string!
@@ -345,7 +345,7 @@ mutate inboundRequest stageInboundRequest {
 /// Stamp a handling transition on a v1:platform:inboundRequest row (memql#2957). Called by the
 /// product automation draining the row (processing/processed/failed); the engine receiver only ever
 /// writes the initial 'received'.
-mutate inboundRequest updateInboundRequestStatus {
+mutation inboundRequest updateInboundRequestStatus {
   args {
     requestId    string!
     status       string!
@@ -403,7 +403,7 @@ mutate inboundRequest updateInboundRequestStatus {
 /// cluster-owner exemption for a custom hostname -- is the same Go guard, for the same reason the
 /// systemOwned-delete refusal is: none of it is expressible here, and a UI-only check is not a check.
 @actor
-mutate site createSite {
+mutation site createSite {
   args {
     siteId       string!
     hostname     string!  @maxLength(253) @pattern("^[a-z0-9][a-z0-9.-]*[a-z0-9]$")
@@ -445,7 +445,7 @@ mutate site createSite {
 /// the separate, explicit escape in rowAuthzWriteEscape. So a user publishes to their own site, an
 /// operator publishes to any, and a cross-user write is refused before the merge -- which is why the
 /// guard reads the PRIOR row rather than the merged payload.
-mutate site updateSiteBundle {
+mutation site updateSiteBundle {
   args {
     siteId     string!
     bundleRef  string!
@@ -464,7 +464,7 @@ mutate site updateSiteBundle {
 /// Owner-or-cluster-owner, enforced by guardRowAuthzWrite against v1:platform:site's composite tier
 /// rather than by anything here -- see updateSiteBundle's note for why the split is where it is.
 @requiresCapability("execute", "app:deployables/publish")
-mutate site updateSiteStatus {
+mutation site updateSiteStatus {
   args {
     siteId  string!
     status  enum("draft", "live", "disabled")!
@@ -496,7 +496,7 @@ mutate site updateSiteStatus {
 /// row and admits its owner with the cluster-owner path as the separate escape. Nothing about the
 /// account is consulted: tying a site to a client changes who the work is FOR and never who may
 /// read or write it.
-mutate site updateSiteAccount {
+mutation site updateSiteAccount {
   args {
     siteId     string!
     accountId  string
@@ -526,7 +526,7 @@ mutate site updateSiteAccount {
 /// AUTHORIZATION is the concept's composite tier plus guardRowAuthzWrite, as on updateSiteBundle:
 /// the row's owner, or a cluster owner through the explicit escape. A systemOwned row is refused for
 /// both, because the seed re-writes it at every boot.
-mutate site updateSiteSettings {
+mutation site updateSiteSettings {
   args {
     siteId    string!
     settings  object!
@@ -547,7 +547,7 @@ mutate site updateSiteSettings {
 /// the cluster-owner path is rowAuthzWriteEscape's explicit escape -- so one user cannot delete
 /// another's deployable, and an operator can delete any non-systemOwned one.
 @requiresCapability("execute", "app:deployables/retire")
-mutate site deleteSite {
+mutation site deleteSite {
   args {
     siteId  string!
   }
@@ -567,7 +567,7 @@ mutate site deleteSite {
 /// v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip
 /// audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next
 /// boot, never what a running node has loaded.
-mutate packState setPackEnabled {
+mutation packState setPackEnabled {
   args {
     id          string!
     packDomain  string!
@@ -624,7 +624,7 @@ mutate packState setPackEnabled {
 /// rather than supplied, and only the Go frame that minted it knows that; a client-reachable create
 /// taking a caller's token is a verification primitive that verifies nothing, however well scoped.
 @serverOnly
-mutate customDomain createCustomDomain {
+mutation customDomain createCustomDomain {
   args {
     domainId   string!
     siteId     string!
@@ -651,7 +651,7 @@ mutate customDomain createCustomDomain {
 /// point -- an operator removing a binding because it is being abused should not have to wait for
 /// kubectl.
 @requiresCapability("execute", "app:deployables/domains")
-mutate customDomain removeCustomDomain {
+mutation customDomain removeCustomDomain {
   args {
     domainId  string!
   }
@@ -677,7 +677,7 @@ mutate customDomain removeCustomDomain {
 /// these become typed SDK methods whose only use is to tell the Domains panel something about the
 /// cluster's DNS that nobody checked.
 @serverOnly
-mutate customDomain recordCustomDomainCheck {
+mutation customDomain recordCustomDomainCheck {
   args {
     domainId       string!
     failureReason  string!
@@ -708,7 +708,7 @@ mutate customDomain recordCustomDomainCheck {
 /// these become typed SDK methods whose only use is to tell the Domains panel something about the
 /// cluster's DNS that nobody checked.
 @serverOnly
-mutate customDomain markCustomDomainVerified {
+mutation customDomain markCustomDomainVerified {
   args {
     domainId       string!
     verifiedAt     datetime!
@@ -745,7 +745,7 @@ mutate customDomain markCustomDomainVerified {
 /// these become typed SDK methods whose only use is to tell the Domains panel something about the
 /// cluster's DNS that nobody checked.
 @serverOnly
-mutate customDomain recordCustomDomainIssuanceFailure {
+mutation customDomain recordCustomDomainIssuanceFailure {
   args {
     domainId       string!
     failureReason  string!
@@ -777,7 +777,7 @@ mutate customDomain recordCustomDomainIssuanceFailure {
 /// these become typed SDK methods whose only use is to tell the Domains panel something about the
 /// cluster's DNS that nobody checked.
 @serverOnly
-mutate customDomain recordCustomDomainIssuingProgress {
+mutation customDomain recordCustomDomainIssuingProgress {
   args {
     domainId       string!
     note           string
@@ -801,7 +801,7 @@ mutate customDomain recordCustomDomainIssuingProgress {
 /// these become typed SDK methods whose only use is to tell the Domains panel something about the
 /// cluster's DNS that nobody checked.
 @serverOnly
-mutate customDomain markCustomDomainLive {
+mutation customDomain markCustomDomainLive {
   args {
     domainId       string!
     issuedAt       datetime!
@@ -828,7 +828,7 @@ mutate customDomain markCustomDomainLive {
 /// these become typed SDK methods whose only use is to tell the Domains panel something about the
 /// cluster's DNS that nobody checked.
 @serverOnly
-mutate customDomain markCustomDomainRemoved {
+mutation customDomain markCustomDomainRemoved {
   args {
     domainId       string!
     removedAt      datetime!
@@ -869,7 +869,7 @@ mutate customDomain markCustomDomainRemoved {
 /// account, knows that. A client-reachable create scoped perfectly to its caller would still open a
 /// door for a name nobody proved they own.
 @serverOnly
-mutate accountFrontDoor createAccountFrontDoor {
+mutation accountFrontDoor createAccountFrontDoor {
   args {
     doorId        string!
     accountId     string!
@@ -897,7 +897,7 @@ mutate accountFrontDoor createAccountFrontDoor {
 /// caller can be scoped into being a resolver. A client-reachable version would let the observation
 /// be asserted rather than made, which is the one thing the whole walk rests on.
 @serverOnly
-mutate accountFrontDoor recordAccountFrontDoorCheck {
+mutation accountFrontDoor recordAccountFrontDoorCheck {
   args {
     doorId         string!
     status         enum("pending_dns", "verifying", "issuing", "removing")!
@@ -924,7 +924,7 @@ mutate accountFrontDoor recordAccountFrontDoorCheck {
 /// that their own name points here, and the ACME order that follows would then be attempted on
 /// their say-so against a rate limit the whole cluster shares.
 @serverOnly
-mutate accountFrontDoor markAccountFrontDoorVerified {
+mutation accountFrontDoor markAccountFrontDoorVerified {
   args {
     doorId         string!
     hostChecks     object!
@@ -949,7 +949,7 @@ mutate accountFrontDoor markAccountFrontDoorVerified {
 /// read out of the cluster by the frame that just applied the objects. There is no caller who could
 /// supply it truthfully, so a scoped write would only make it forgeable.
 @serverOnly
-mutate accountFrontDoor recordAccountFrontDoorIssuingProgress {
+mutation accountFrontDoor recordAccountFrontDoorIssuingProgress {
   args {
     doorId         string!
     failureDetail  string
@@ -972,7 +972,7 @@ mutate accountFrontDoor recordAccountFrontDoorIssuingProgress {
 /// records what the capability envelope came back with. A caller-scoped version would let a person
 /// write no_acme_issuer onto a door that is issuing perfectly well, and the sweep would believe it.
 @serverOnly
-mutate accountFrontDoor recordAccountFrontDoorIssuanceFailure {
+mutation accountFrontDoor recordAccountFrontDoorIssuanceFailure {
   args {
     doorId         string!
     failureReason  string!
@@ -996,7 +996,7 @@ mutate accountFrontDoor recordAccountFrontDoorIssuanceFailure {
 /// their own door live and take traffic on a certificate that does not exist -- the browser's
 /// error, their client's employees, our name on it.
 @serverOnly
-mutate accountFrontDoor markAccountFrontDoorLive {
+mutation accountFrontDoor markAccountFrontDoorLive {
   args {
     doorId         string!
     issuedAt       datetime!
@@ -1025,7 +1025,7 @@ mutate accountFrontDoor markAccountFrontDoorLive {
 /// operator who wants a door taken down changes the account's reservation, which is the act they
 /// already have; this write is the consequence, not the control.
 @serverOnly
-mutate accountFrontDoor requestAccountFrontDoorRemoval {
+mutation accountFrontDoor requestAccountFrontDoorRemoval {
   args {
     doorId         string!
     failureReason  string
@@ -1053,7 +1053,7 @@ mutate accountFrontDoor requestAccountFrontDoorRemoval {
 /// stopped claiming back into service. Design D9 says removal is the only transition out of `live`;
 /// without this mutation that transition was reversible.
 @serverOnly
-mutate accountFrontDoor recordAccountFrontDoorRemovalFailure {
+mutation accountFrontDoor recordAccountFrontDoorRemovalFailure {
   args {
     doorId         string!
     failureReason  string!
@@ -1079,7 +1079,7 @@ mutate accountFrontDoor recordAccountFrontDoorRemovalFailure {
 /// unlucky lookup would take a client's front door down for a DNS blip. The sweep demotes through
 /// recordAccountFrontDoorCheck once driftFailures reaches its bound.
 @serverOnly
-mutate accountFrontDoor recordAccountFrontDoorDrift {
+mutation accountFrontDoor recordAccountFrontDoorDrift {
   args {
     doorId         string!
     hostChecks     object!
@@ -1104,7 +1104,7 @@ mutate accountFrontDoor recordAccountFrontDoorDrift {
 /// removed while its Ingresses are still serving -- the row and the cluster disagreeing, with the
 /// row being the one anybody reads.
 @serverOnly
-mutate accountFrontDoor markAccountFrontDoorRemoved {
+mutation accountFrontDoor markAccountFrontDoorRemoved {
   args {
     doorId         string!
     removedAt      datetime!
@@ -1141,7 +1141,7 @@ mutate accountFrontDoor markAccountFrontDoorRemoved {
 /// crashes still counts against the ceiling -- a worker that dies mid-delivery must not give the
 /// entry infinite lives. actor.userId scoping does not apply: the caller is the drain worker.
 @serverOnly
-mutate outboxEntry markOutboxDelivering {
+mutation outboxEntry markOutboxDelivering {
   args {
     entryId   string!
     attempts  int!
@@ -1157,7 +1157,7 @@ mutate outboxEntry markOutboxDelivering {
 /// recognising the idempotency key on a redelivery counts as success. actor.userId scoping does
 /// not apply: the caller is the drain worker.
 @serverOnly
-mutate outboxEntry markOutboxDelivered {
+mutation outboxEntry markOutboxDelivered {
   args {
     entryId      string!
     deliveredAt  datetime!
@@ -1174,7 +1174,7 @@ mutate outboxEntry markOutboxDelivered {
 /// set and the worker skips it until nextAttemptAt. actor.userId scoping does not apply: the caller
 /// is the drain worker.
 @serverOnly
-mutate outboxEntry markOutboxFailed {
+mutation outboxEntry markOutboxFailed {
   args {
     entryId        string!
     nextAttemptAt  datetime!
@@ -1192,7 +1192,7 @@ mutate outboxEntry markOutboxFailed {
 /// worker never picks a dead entry up again, which is the whole difference between dead and failed.
 /// actor.userId scoping does not apply: the caller is the drain worker.
 @serverOnly
-mutate outboxEntry markOutboxDead {
+mutation outboxEntry markOutboxDead {
   args {
     entryId    string!
     lastError  string
@@ -1209,7 +1209,7 @@ mutate outboxEntry markOutboxDead {
 /// again on the first hiccup. actor.userId scoping does not apply -- the row is the deployment's,
 /// and the operator gate is the concept's clusterOwner tier plus the adminops caller.
 @serverOnly
-mutate outboxEntry retryOutboxEntry {
+mutation outboxEntry retryOutboxEntry {
   args {
     entryId  string!
   }
@@ -1226,7 +1226,7 @@ mutate outboxEntry retryOutboxEntry {
 /// row is audit history and the queue read filters on status. actor.userId scoping does not apply
 /// for the same reason retryOutboxEntry's does not.
 @serverOnly
-mutate outboxEntry discardOutboxEntry {
+mutation outboxEntry discardOutboxEntry {
   args {
     entryId  string!
     reason   string
@@ -1242,7 +1242,7 @@ mutate outboxEntry discardOutboxEntry {
 /// append onto the same timeline every time. actor.userId scoping does not apply: the writer is the
 /// sync runtime, acting for no user.
 @serverOnly
-mutate syncState upsertSyncState {
+mutation syncState upsertSyncState {
   args {
     stateId          string!
     conceptId        string!
@@ -1283,7 +1283,7 @@ mutate syncState upsertSyncState {
 /// matters is the concept's clusterOwner tier plus the owner/admin check at the operator surface
 /// that calls this; the annotation keeps the write off the wire entirely.
 @serverOnly
-mutate syncState setSyncPaused {
+mutation syncState setSyncPaused {
   args {
     stateId  string!
     paused   bool!
@@ -1333,7 +1333,7 @@ mutate syncState setSyncPaused {
 /// cluster's own account unless a client was picked; absent, the package is untied and its owner's.
 @actor
 @requiresCapability("execute", "app:deployables/sources")
-mutate package createPackage {
+mutation package createPackage {
   args {
     packageId     string!
     name          string!  @maxLength(120)
@@ -1362,7 +1362,7 @@ mutate package createPackage {
 /// is this write. Minimal arguments deliberately -- update{} has been a read-merge since memql#1628,
 /// so re-supplying every discriminator is dead weight that an undeclared-argument DISCARD hides.
 @requiresCapability("execute", "app:deployables/sources")
-mutate package updatePackageSource {
+mutation package updatePackageSource {
   args {
     packageId     string!
     repoRef       string   @maxLength(200)
@@ -1395,7 +1395,7 @@ mutate package updatePackageSource {
 /// this and enablePackageDeployables inverses.
 @addToSet("disabledDeployables")
 @requiresCapability("execute", "app:deployables/retire")
-mutate package disablePackageDeployables {
+mutation package disablePackageDeployables {
   args {
     packageId       string!
     deployableNames []string!
@@ -1414,7 +1414,7 @@ mutate package disablePackageDeployables {
 /// succeed and a retry is safe.
 @removeFromSet("disabledDeployables")
 @requiresCapability("execute", "app:deployables/retire")
-mutate package enablePackageDeployables {
+mutation package enablePackageDeployables {
   args {
     packageId       string!
     deployableNames []string!
@@ -1432,7 +1432,7 @@ mutate package enablePackageDeployables {
 /// is no @serverOnly counterpart and no engine writer -- the switch is only ever a person's
 /// decision, which is what makes an auto-run's provenance honest.
 @requiresCapability("execute", "app:deployables/sources")
-mutate package setPackageAutoDeploy {
+mutation package setPackageAutoDeploy {
   args {
     packageId   string!
     autoDeploy  boolean!
@@ -1461,7 +1461,7 @@ mutate package setPackageAutoDeploy {
 /// name and without the active-deployables check -- because both of those are conditions on the
 /// package's state, not on who is asking.
 @serverOnly
-mutate package setPackageStatus {
+mutation package setPackageStatus {
   args {
     packageId  string!
     status     enum("active", "archived")!
@@ -1482,7 +1482,7 @@ mutate package setPackageStatus {
 /// node the pipeline advanced on, where there is no person in scope at all: actor.userId is empty
 /// there, so the scoped form would refuse the only legitimate caller it has.
 @serverOnly
-mutate package recordPackageDeployedVersion {
+mutation package recordPackageDeployedVersion {
   args {
     packageId        string!
     deployedVersion  string!
@@ -1503,7 +1503,7 @@ mutate package recordPackageDeployedVersion {
 /// own package to something the manifest does not say -- which the very next deploy would overwrite.
 /// Scoping bounds whose row is touched; the problem is that the value has one true source.
 @serverOnly
-mutate package recordPackageName {
+mutation package recordPackageName {
   args {
     packageId  string!
     name       string!
@@ -1531,7 +1531,7 @@ mutate package recordPackageName {
 /// what the source contains -- an app removed upstream must LEAVE this list, and a merge would
 /// keep it forever.
 @serverOnly
-mutate package recordPackageDeployables {
+mutation package recordPackageDeployables {
   args {
     packageId  string!
     declares   []object!
@@ -1553,7 +1553,7 @@ mutate package recordPackageDeployables {
 /// while still permitting the thing worth preventing -- a person asserting that their own package
 /// has an upstream update it does not have, which is a claim about a row they already own.
 @serverOnly
-mutate package recordPackageUpstreamVersion {
+mutation package recordPackageUpstreamVersion {
   args {
     packageId           string!
     latestKnownVersion  string!
@@ -1588,7 +1588,7 @@ mutate package recordPackageUpstreamVersion {
 /// package anyway. Hence @serverOnly as well as the stamp.
 @serverOnly
 @actor
-mutate packageDeployment openPackageDeployment {
+mutation packageDeployment openPackageDeployment {
   args {
     deploymentId   string!
     packageId      string!
@@ -1635,7 +1635,7 @@ mutate packageDeployment openPackageDeployment {
 /// heartbeats from a goroutine after the request that started it has returned, so a self-scoped
 /// filter would refuse the only path that legitimately calls it.
 @serverOnly
-mutate packageDeployment heartbeatPackageDeployment {
+mutation packageDeployment heartbeatPackageDeployment {
   args {
     deploymentId  string!
     heartbeatAt   datetime!
@@ -1665,7 +1665,7 @@ mutate packageDeployment heartbeatPackageDeployment {
 /// abandoned, and @serverOnly is what forbids that, while the maintenance actor's cluster-owner
 /// tier is what admits the sweep to the rows.
 @serverOnly
-mutate packageDeployment abandonPackageDeployment {
+mutation packageDeployment abandonPackageDeployment {
   args {
     deploymentId  string!
     stoppedAt     string
@@ -1692,7 +1692,7 @@ mutate packageDeployment abandonPackageDeployment {
 /// standing is the one that matters -- a caller driving their own deployment through `publishing`
 /// without any of the work having happened.
 @serverOnly
-mutate packageDeployment advancePackageDeployment {
+mutation packageDeployment advancePackageDeployment {
   args {
     deploymentId  string!
     status        enum("analyzing", "awaiting_confirm", "building", "staging_dsl", "rolling", "publishing")!
@@ -1719,7 +1719,7 @@ mutate packageDeployment advancePackageDeployment {
 /// run whose stage it never checked. An actor.userId filter would also refuse the legitimate
 /// caller outright on the common path -- the pipeline reads this flag under no person at all.
 @serverOnly
-mutate packageDeployment requestPackageDeploymentCancel {
+mutation packageDeployment requestPackageDeploymentCancel {
   args {
     deploymentId  string!
   }
@@ -1749,7 +1749,7 @@ mutate packageDeployment requestPackageDeploymentCancel {
 /// refusal notice and a rail at an app the run has nothing to do with. The write is the pipeline's
 /// conclusion, not a preference, and there is no person in scope at the moment it is made.
 @serverOnly
-mutate packageDeployment recordPackageDeploymentScope {
+mutation packageDeployment recordPackageDeploymentScope {
   args {
     deploymentId  string!
     scopedTo      []string!
@@ -1774,7 +1774,7 @@ mutate packageDeployment recordPackageDeploymentScope {
 /// sitting in blob storage (memql#4955).
 @serverOnly
 @noUnset("snapshotArtifactId")
-mutate packageDeployment recordPackageDeploymentReport {
+mutation packageDeployment recordPackageDeploymentReport {
   args {
     deploymentId        string!
     report              object!
@@ -1800,7 +1800,7 @@ mutate packageDeployment recordPackageDeploymentReport {
 /// person in scope, and the assertion being made -- "this succeeded" -- is exactly the one a caller
 /// scoped to their own rows would still be free to make falsely about their own deploy.
 @serverOnly
-mutate packageDeployment closePackageDeployment {
+mutation packageDeployment closePackageDeployment {
   args {
     deploymentId  string!
     status        enum("succeeded", "refused", "failed", "abandoned", "cancelled")!
@@ -1829,7 +1829,7 @@ mutate packageDeployment closePackageDeployment {
 /// deployable at it and have the next deploy of that package publish into a site the package's
 /// owner never chose. The site is the caller's; the consequence is not.
 @serverOnly
-mutate site recordSitePackageOrigin {
+mutation site recordSitePackageOrigin {
   args {
     siteId                 string!
     packageId              string!
@@ -1855,7 +1855,7 @@ mutate site recordSitePackageOrigin {
 /// site, so scoping admits the very call being refused. What is being withheld is not reach across
 /// users -- it is the ability to skip the confirmation and the disable-first rule.
 @serverOnly
-mutate site setSiteStatus {
+mutation site setSiteStatus {
   args {
     siteId  string!
     status  enum("draft", "live", "disabled", "archived")!
@@ -1886,7 +1886,7 @@ mutate site setSiteStatus {
 /// own actor -- which is what makes the owner stamp the person who asked, and refuses an empty one.
 @serverOnly
 @actor
-mutate sourceCredential createSourceCredential {
+mutation sourceCredential createSourceCredential {
   args {
     credentialId    string!
     host            string!
@@ -1909,7 +1909,7 @@ mutate sourceCredential createSourceCredential {
 /// row and admits its owner (or a cluster owner, through the explicit escape), so a caller cannot
 /// revoke a credential they do not hold. The row stays -- it is the audit history of what fetched
 /// under it -- and every source fetching under it refuses at its next fetch until it is switched.
-mutate sourceCredential revokeSourceCredential {
+mutation sourceCredential revokeSourceCredential {
   args {
     credentialId  string!
   }
@@ -1928,7 +1928,7 @@ mutate sourceCredential revokeSourceCredential {
 /// equally wrong and equally unscoped away. And the poll runs on a schedule with nobody attached, so
 /// a self-scoped filter would refuse the one path that legitimately calls it.
 @serverOnly
-mutate sourceCredential touchSourceCredential {
+mutation sourceCredential touchSourceCredential {
   args {
     credentialId  string!
     lastUsedAt    datetime!
@@ -1971,7 +1971,7 @@ mutate sourceCredential touchSourceCredential {
 /// under MEMQL_MASTER_KEY, a key that exists on nodes and must never exist on a laptop.
 @serverOnly
 @actor
-mutate sourceCredential createGithubAppGrant {
+mutation sourceCredential createGithubAppGrant {
   args {
     credentialId     string!
     host             string!
@@ -2010,7 +2010,7 @@ mutate sourceCredential createGithubAppGrant {
 /// choosing onto its own grant -- a row that reads as connected and unseals to whatever the client
 /// picked. The seal is the authorization, and only a node holds the key.
 @serverOnly
-mutate sourceCredential updateGithubAppGrant {
+mutation sourceCredential updateGithubAppGrant {
   args {
     credentialId     string!
     encryptedValue   string!
@@ -2041,7 +2041,7 @@ mutate sourceCredential updateGithubAppGrant {
 /// equally wrong and equally unscoped away. The poll also runs on a schedule with nobody attached,
 /// so a self-scoped filter would refuse the one path that most needs to refresh.
 @serverOnly
-mutate sourceCredential refreshGithubAppGrantToken {
+mutation sourceCredential refreshGithubAppGrantToken {
   args {
     credentialId    string!
     encryptedValue  string!
@@ -2070,7 +2070,7 @@ mutate sourceCredential refreshGithubAppGrantToken {
 /// already runs under the owner's actor, so the row is scoped; what @serverOnly withholds is a wire
 /// on which that claim could be composed.
 @serverOnly
-mutate sourceCredential recordGithubAppInstallations {
+mutation sourceCredential recordGithubAppInstallations {
   args {
     credentialId     string!
     installationIds  []string
@@ -2093,7 +2093,7 @@ mutate sourceCredential recordGithubAppInstallations {
 /// about any user. A caller-reachable write would let any signed-in caller claim any node's
 /// configuration state, however the args were scoped.
 @serverOnly
-mutate moduleReadiness recordModuleReadiness {
+mutation moduleReadiness recordModuleReadiness {
   args {
     rowId       string!
     module      string!
@@ -2147,7 +2147,7 @@ mutate moduleReadiness recordModuleReadiness {
 /// Readable and writable are separate questions and this is the answer to the second one.
 @serverOnly
 @createOnly("providerRef", "dimensions", "previousRef", "reembedRunId")
-mutate embedderBinding recordEmbedderBindingPlan {
+mutation embedderBinding recordEmbedderBindingPlan {
   args {
     bindingId     string!
     providerRef   string!
@@ -2174,7 +2174,7 @@ mutate embedderBinding recordEmbedderBindingPlan {
 /// space, ranked confidently, with no error anywhere. The guard is that only the builtin that ran
 /// steps one to three can call this.
 @serverOnly
-mutate embedderBinding activateEmbedderBinding {
+mutation embedderBinding activateEmbedderBinding {
   args {
     bindingId    string!
     activatedAt  datetime!
@@ -2214,7 +2214,7 @@ mutate embedderBinding activateEmbedderBinding {
 /// write here directly.
 @actor
 @serverOnly
-mutate modelMeasurement recordModelMeasurement {
+mutation modelMeasurement recordModelMeasurement {
   args {
     measurementId        string!
     machineId            string!
@@ -2256,7 +2256,7 @@ mutate modelMeasurement recordModelMeasurement {
 /// which would leave the fold unable to write its own output.
 @actor
 @serverOnly
-mutate modelEvidence recordModelEvidence {
+mutation modelEvidence recordModelEvidence {
   args {
     evidenceId          string!
     modelId             string!
@@ -2297,7 +2297,7 @@ mutate modelEvidence recordModelEvidence {
 /// mirrors the outcome so the next fold can read it without re-reading every approval.
 @actor
 @serverOnly
-mutate modelEvidence recordEvidenceDecision {
+mutation modelEvidence recordEvidenceDecision {
   args {
     evidenceId  string!
     proposal    string!

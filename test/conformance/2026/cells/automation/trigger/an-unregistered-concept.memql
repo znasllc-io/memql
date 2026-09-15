@@ -1,7 +1,5 @@
 /// When a node joins the cluster, open a ticket -- the concept id misspelled.
-@trigger(event="node.created", concept="v1:cluster:nodes", partition="*")
+@trigger(event="node.created", concept="v1:cluster:nodes")
 automation welcomeNodeMisspelled {
-  step raise {
-    mutation raiseTicketTrigger (title: "A node joined the cluster")
-  }
+  raise := mutation raiseTicketTrigger(title: "A node joined the cluster")
 }

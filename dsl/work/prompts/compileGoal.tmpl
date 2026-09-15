@@ -27,7 +27,7 @@ Reusable catalog (constructs already available to compose -- prefer these):
 2. EVERY VARIABLE IS AN ARGUMENT. A path, a customer name, a date, a
    machine label, an account id -- anything that would differ on the next
    run of the same shape of goal -- goes in the automation's `args` block
-   and is referenced as `args.<name>`. A literal in a step body is a
+   and is referenced as `args.<name>`. A literal in a statement is a
    template that works exactly once. The input keys above are the
    arguments the caller already supplies; add others only when the goal
    genuinely names a value that will vary.
@@ -49,8 +49,9 @@ Reusable catalog (constructs already available to compose -- prefer these):
    stopped working would keep reporting success.
 
 6. Order by data, not by narration. A step depends on another only when
-   it reads its result. Steps that do not depend on each other belong in
-   a `parallel` block.
+   it reads that step's value by name, and statements run in the order
+   they are written, so each comes after the ones it reads. Steps that do
+   not depend on each other belong in the branches of a `parallel` block.
 
 7. Ground every name. Reference real concepts, fields, shapes and specs.
    Do not invent them. When unsure of an exact spelling, prefer a step

@@ -34,19 +34,16 @@ logic ratioGate {
     a int @required
     b int @required
   }
-  body {
-    return args.a - args.b > 0
-  }
+  return args.a - args.b > 0
 }`
 	fn, err := tryParseNewFunctionSyntax("ratioGate", "logic", src, "test.memql", arithTrapRegistry())
 	require.NoError(t, err)
-	pc, ok := fn.Expr.(*PlanConstExpression)
-	require.Truef(t, ok, "fn.Expr = %T, want the returned expression as a *PlanConstExpression", fn.Expr)
+	ret := statementReturnExpr(t, fn)
 	for _, tc := range []struct {
 		a, b int64
 		want bool
 	}{{5, 3, true}, {3, 5, false}, {3, 3, false}} {
-		got, err := EvalExpr(context.Background(), pc.Expr, MapScope{"args": map[string]any{"a": tc.a, "b": tc.b}}, EvalOptions{})
+		got, err := EvalExpr(context.Background(), ret, MapScope{"args": map[string]any{"a": tc.a, "b": tc.b}}, EvalOptions{})
 		require.NoError(t, err)
 		require.Equalf(t, tc.want, got, "a=%d b=%d: `args.a - args.b > 0` is `(args.a - args.b) > 0`", tc.a, tc.b)
 	}
@@ -61,14 +58,12 @@ logic ratioStepGate {
     a int @required
     b int @required
   }
-  body {
-    flag := args.a - args.b > 0
-    return flag
-  }
+  flag := args.a - args.b > 0
+  return flag
 }`
 	fn, err := tryParseNewFunctionSyntax("ratioStepGate", "logic", src, "test.memql", arithTrapRegistry())
 	require.NoError(t, err)
-	require.NotNil(t, fn.LogicSteps, "a body with a statement before its return runs on the LogicRunner")
+	require.NotNil(t, fn.LogicBody, "the body loads as statements")
 }
 
 // The PARENTHESIZED form is the working idiom (an expression-led
@@ -80,9 +75,7 @@ logic ratioGateOK {
     a int @required
     b int @required
   }
-  body {
-    return (args.a - args.b) > 0
-  }
+  return (args.a - args.b) > 0
 }`
 	_, err := tryParseNewFunctionSyntax("ratioGateOK", "logic", src, "test.memql", arithTrapRegistry())
 	require.NoError(t, err)
@@ -97,9 +90,7 @@ logic ratioValue {
     a int @required
     b int @required
   }
-  body {
-    return args.a / args.b
-  }
+  return args.a / args.b
 }`
 	_, err := tryParseNewFunctionSyntax("ratioValue", "logic", src, "test.memql", arithTrapRegistry())
 	require.NoError(t, err)

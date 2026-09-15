@@ -29,8 +29,8 @@ func TestDeriveKind_DeterministicUnlessItReachesAPrompt(t *testing.T) {
 		target   string
 		want     Kind
 	}{
-		{"query", "listRows", KindDeterministic},
-		{"mutation", "writeRow", KindDeterministic},
+		{"function", "listRows", KindDeterministic},
+		{"function", "writeRow", KindDeterministic},
 		{"function", "plainLogic", KindDeterministic},
 		{"function", "thinkingLogic", KindReasoning},
 		{"function", "deepLogic", KindReasoning},
@@ -38,7 +38,9 @@ func TestDeriveKind_DeterministicUnlessItReachesAPrompt(t *testing.T) {
 		{"function", "askBuiltin", KindReasoning},
 		{"parallel", "", KindDeterministic},
 		{"forEach", "", KindDeterministic},
-		{"switch", "", KindDeterministic},
+		{"block", "", KindDeterministic},
+		{"expression", "", KindDeterministic},
+		{"return", "", KindDeterministic},
 	} {
 		got, err := DeriveKind(tc.stepType, tc.target, r)
 		if err != nil {
@@ -66,6 +68,16 @@ func TestDeriveKind_SpecIsADecisionAndHumanFormsPark(t *testing.T) {
 	}
 	if k, _ := DeriveKind("automation", "", r); k != KindSubrun {
 		t.Errorf("a sub-automation call opens a child run, got %q", k)
+	}
+}
+
+// A step type no statement compiles to is refused rather than guessed at:
+// the step blocks' types went with the step blocks (epic memql#5370).
+func TestDeriveKind_RetiredStepTypesAreUnknown(t *testing.T) {
+	for _, st := range []string{"query", "mutation", "shape", "webhook", "switch", "emitConceptCard"} {
+		if _, err := DeriveKind(st, "", reg()); err == nil {
+			t.Errorf("step type %q is retired; DeriveKind must refuse it", st)
+		}
 	}
 }
 

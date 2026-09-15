@@ -1,0 +1,217 @@
+{
+  "automation": "library/automations.memql indexCalendarEventOnCreate",
+  "runs": {
+    "event agent | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "ownerUserId": "s-ownerUserId",
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "title": "s-title"
+          },
+          "topic": "graph.node.created.v1:calendar:calendarEvent"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "kind": "calendar_event",
+              "lens": "record",
+              "live": false,
+              "ownerUserId": "s-ownerUserId",
+              "source": "agent_generated",
+              "sourceConceptRef": "v1:probe:thing:1",
+              "title": "s-title"
+            },
+            "kind": "mutation",
+            "name": "createArtifact"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event agent | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "ownerUserId": "s-ownerUserId",
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "title": "s-title"
+          },
+          "topic": "graph.node.created.v1:calendar:calendarEvent"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "kind": "calendar_event",
+              "lens": "record",
+              "live": false,
+              "ownerUserId": "s-ownerUserId",
+              "source": "agent_generated",
+              "sourceConceptRef": "v1:probe:thing:1",
+              "title": "s-title"
+            },
+            "kind": "mutation",
+            "name": "createArtifact"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "ownerUserId": "s-ownerUserId",
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "title": "s-title"
+          },
+          "topic": "graph.node.created.v1:calendar:calendarEvent"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "kind": "calendar_event",
+              "lens": "record",
+              "live": false,
+              "ownerUserId": "s-ownerUserId",
+              "source": "agent_generated",
+              "sourceConceptRef": "v1:probe:thing:1",
+              "title": "s-title"
+            },
+            "kind": "mutation",
+            "name": "createArtifact"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "node_created",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "ownerUserId": "s-ownerUserId",
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded",
+            "title": "s-title"
+          },
+          "topic": "graph.node.created.v1:calendar:calendarEvent"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "kind": "calendar_event",
+              "lens": "record",
+              "live": false,
+              "ownerUserId": "s-ownerUserId",
+              "source": "agent_generated",
+              "sourceConceptRef": "v1:probe:thing:1",
+              "title": "s-title"
+            },
+            "kind": "mutation",
+            "name": "createArtifact"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

@@ -20,30 +20,11 @@ type RuntimeContext struct {
 	// Args contains function arguments (for ctx.name resolution).
 	Args map[string]any
 
-	// Steps contains results from previous automation steps (for step("id") resolution).
-	Steps map[string]*StepResult
-
-	// Input is the automation input result (for input() resolution).
-	Input any
-
-	// Item is the current forEach item (for item() resolution).
-	Item any
-
-	// Index is the current forEach index (for index() resolution).
-	Index int
-
 	// Event is the trigger event (for event() resolution).
 	Event map[string]any
 
 	// Error is the current error message (for error() resolution).
 	Error string
-}
-
-// StepResult represents the result of an automation step.
-type StepResult struct {
-	Result   any
-	Metadata map[string]any
-	Status   string
 }
 
 // RuntimeEvaluator evaluates accessor expressions at runtime.
@@ -119,58 +100,6 @@ func (e *RuntimeEvaluator) EvaluateSystemSecret(ctx context.Context, name string
 		return "", fmt.Errorf("no engine context available")
 	}
 	return e.ctx.Engine.ResolveSystemSecret(ctx, name)
-}
-
-// EvaluateStep resolves a step("id") expression.
-func (e *RuntimeEvaluator) EvaluateStep(stepId string) (any, error) {
-	if e.ctx == nil || e.ctx.Steps == nil {
-		return nil, fmt.Errorf("no step context available")
-	}
-
-	result, exists := e.ctx.Steps[stepId]
-	if !exists {
-		return nil, fmt.Errorf("step %q not found", stepId)
-	}
-
-	return result.Result, nil
-}
-
-// EvaluateStepMetadata resolves step("id").metadata access.
-func (e *RuntimeEvaluator) EvaluateStepMetadata(stepId string) (map[string]any, error) {
-	if e.ctx == nil || e.ctx.Steps == nil {
-		return nil, fmt.Errorf("no step context available")
-	}
-
-	result, exists := e.ctx.Steps[stepId]
-	if !exists {
-		return nil, fmt.Errorf("step %q not found", stepId)
-	}
-
-	return result.Metadata, nil
-}
-
-// EvaluateInput resolves an input() expression.
-func (e *RuntimeEvaluator) EvaluateInput() any {
-	if e.ctx == nil {
-		return nil
-	}
-	return e.ctx.Input
-}
-
-// EvaluateItem resolves an item() expression.
-func (e *RuntimeEvaluator) EvaluateItem() any {
-	if e.ctx == nil {
-		return nil
-	}
-	return e.ctx.Item
-}
-
-// EvaluateIndex resolves an index() expression.
-func (e *RuntimeEvaluator) EvaluateIndex() int {
-	if e.ctx == nil {
-		return 0
-	}
-	return e.ctx.Index
 }
 
 // EvaluateEvent resolves an event() expression.

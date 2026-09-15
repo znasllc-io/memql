@@ -1,8 +1,8 @@
 package planner
 
 // agent_loop_sectionable.go -- generated PARALLEL plan-automations for
-// SECTIONABLE deliverables (memql#1394, riding the #1368 parallel-step
-// grammar and the #954/#1160 authoring-capture pipeline).
+// SECTIONABLE deliverables (memql#1394, riding the #1368 `parallel`
+// statement and the #954/#1160 authoring-capture pipeline).
 //
 // Owner direction (2026-06-12, follow-up to #1393): the planner should be
 // SMART about big deliverables end-to-end. The cheap goalComplexityTriage
@@ -18,12 +18,13 @@ package planner
 //     the complexity class, a `sectionable` flag + a `sections` list (one entry
 //     per independent unit of work) + an `assembly` intent.
 //   - Go DETERMINISTICALLY synthesizes the plan-automation: layer-0 is a
-//     `parallel { wait:"all" failFast:true branches: [...] }` block with one
-//     per-section production step (each its own bounded agent turn writing to
-//     the per-plan workspace), followed by an assemble+verify step gated on the
-//     layer succeeding. This reuses synthesizePhasedHeadline (#1368): N
-//     independent phases (the sections) collapse into one parallel layer, and a
-//     final phase that dependsOn all of them becomes the gated assemble step.
+//     `parallel` statement with one branch per section, each calling that
+//     section's production sub-automation (its own bounded agent turn writing
+//     to the per-plan workspace), followed by the assemble+verify call, which
+//     runs only once every branch finished. This reuses
+//     synthesizePhasedHeadline (#1368): N independent phases (the sections)
+//     collapse into one parallel layer, and a final phase that dependsOn all
+//     of them becomes the assemble call after it.
 //   - The bundle (per-section + assemble sub-automations + the parallel
 //     headline) compiles through the SAME Gate-1 sandbox the authoring pipeline
 //     uses, then is persisted via the authoring-bundle pipeline as the
@@ -242,7 +243,7 @@ func parseSectionableDecision(resp any) sectionableDecision {
 //   - one assemble sub-automation that concatenates + verifies + registers the
 //     Library output, dependsOn every section, and
 //   - the headline that fans the sections out in a single layer-0 `parallel`
-//     block and gates the assemble step on that layer succeeding -- via
+//     statement and calls the assemble sub-automation after it -- via
 //     synthesizePhasedHeadline (#1368).
 //
 // headline is the generated automation's name (derived from the Plan), goal is
@@ -297,32 +298,32 @@ func synthesizeSectionableBundle(headline, goal string, dec sectionableDecision)
 }
 
 // sectionProductionAutomation builds one per-section production sub-automation:
-// a single step that invokes the owning agent to produce this section into the
-// per-plan workspace. The step body uses a logic that calls the `agent` builtin
-// (async-invoke), so the section turn runs as an ordinary bounded agent turn.
-// Deterministic + Gate-1-compilable: the body is a fixed shape parameterized by
-// the section's instruction.
+// a single statement that invokes the owning agent to produce this section into
+// the per-plan workspace. The statement calls a logic that calls the `agent`
+// builtin (async-invoke), so the section turn runs as an ordinary bounded
+// agent turn. Deterministic + Gate-1-compilable: the body is a fixed shape
+// parameterized by the section's instruction.
 func sectionProductionAutomation(name, label, instruction string) memql.SandboxConstruct {
 	logicName := name + "Produce"
 	desc := fmt.Sprintf("Produce section %q: %s", strings.TrimSpace(label), truncate(strings.TrimSpace(instruction), 160))
 	var b strings.Builder
 	fmt.Fprintf(&b, "@description(%q)\n", desc)
 	fmt.Fprintf(&b, "automation %s {\n", name)
-	fmt.Fprintf(&b, "  step produce {\n    logic %s { }\n  }\n", logicName)
+	fmt.Fprintf(&b, "  logic %s()\n", logicName)
 	b.WriteString("}\n")
 	return memql.SandboxConstruct{Kind: "automation", Name: name, Source: b.String()}
 }
 
-// assembleAutomation builds the final assemble+verify sub-automation: one step
-// that invokes the owning agent to concatenate the sections, verify
-// completeness, and register the Library output. Gated downstream by the
-// headline on the parallel layer succeeding.
+// assembleAutomation builds the final assemble+verify sub-automation: one
+// statement that invokes the owning agent to concatenate the sections, verify
+// completeness, and register the Library output. The headline calls it after
+// the parallel layer, so it runs only once every section finished.
 func assembleAutomation(name, assembly string) memql.SandboxConstruct {
 	logicName := name + "Run"
 	var b strings.Builder
 	fmt.Fprintf(&b, "@description(%q)\n", truncate(assembly, 200))
 	fmt.Fprintf(&b, "automation %s {\n", name)
-	fmt.Fprintf(&b, "  step assemble {\n    logic %s { }\n  }\n", logicName)
+	fmt.Fprintf(&b, "  logic %s()\n", logicName)
 	b.WriteString("}\n")
 	return memql.SandboxConstruct{Kind: "automation", Name: name, Source: b.String()}
 }
@@ -332,7 +333,7 @@ func assembleAutomation(name, assembly string) memql.SandboxConstruct {
 // one <assemble>Run). They're emitted as part of the bundle so Gate-1 compiles
 // the whole closure. Each logic body is a minimal, deterministic shape -- the
 // REAL per-section agent turn is dispatched by the execution layer; the logic
-// is the DSL handle the automation step binds to.
+// is the DSL handle the automation's statement calls.
 func sectionableLogicConstructs(bundle authoringBundle) []memql.SandboxConstruct {
 	out := make([]memql.SandboxConstruct, 0, len(bundle.Constructs))
 	for _, c := range bundle.Constructs {
@@ -349,14 +350,14 @@ func sectionableLogicConstructs(bundle authoringBundle) []memql.SandboxConstruct
 		out = append(out, memql.SandboxConstruct{
 			Kind:   "logic",
 			Name:   logicName,
-			Source: fmt.Sprintf("logic %s {\n  body { return now }\n}\n", logicName),
+			Source: fmt.Sprintf("logic %s {\n  return now\n}\n", logicName),
 		})
 	}
 	return out
 }
 
 // withSectionableLogic returns the bundle with its logic closure appended, so
-// the generated automations have a compilable step body. Kept separate from
+// the generated automations' calls resolve. Kept separate from
 // synthesizeSectionableBundle so the headline-shape assertions in tests can
 // inspect the automations without the logic noise.
 func withSectionableLogic(bundle authoringBundle) authoringBundle {

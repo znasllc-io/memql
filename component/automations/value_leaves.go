@@ -6,14 +6,12 @@ package automations
 // A compiled automation encodes every value position with one rule
 // (compiler.EncodeValueLeaf): a literal is plain JSON, an expression is
 // `{"$expr": "<canonical v1 source>"}`. That covers the args and payload maps
-// and also the string-typed fields that hold a value: an event's `topic`, a
-// webhook's `url` and header values, a mutation's `id` / `parent` /
-// `aliasOf`, and a concept card's `cardType` / `partitionId` / `conceptRef`.
-// Those fields are Go strings, which JSON cannot decode an object (or a
-// number) into, so each config type below decodes through
-// unmarshalWithLeaves: a field whose JSON value is not a string is lifted into
-// the config's unexported `leaves`, where PrepareExpressions reads it, and a
-// field that is a string decodes into the Go field: a string literal.
+// and also a string-typed field that holds a value: an event's `topic`. It is
+// a Go string, which JSON cannot decode an object (or a number) into, so the
+// config decodes through unmarshalWithLeaves: a field whose JSON value is not
+// a string is lifted into the config's unexported `leaves`, where
+// PrepareExpressions reads it, and a field that is a string decodes into the
+// Go field: a string literal.
 //
 // Marshalling writes the lifted leaves back, so a config round-trips to the
 // JSON it was compiled as.
@@ -145,64 +143,5 @@ func (c *EventStepConfig) UnmarshalJSON(data []byte) error {
 // MarshalJSON writes the config with its lifted leaves.
 func (c EventStepConfig) MarshalJSON() ([]byte, error) {
 	type plain EventStepConfig
-	return marshalWithLeaves(plain(c), c.leaves)
-}
-
-// UnmarshalJSON decodes the config, lifting a non-string `url` or header.
-func (c *WebhookStepConfig) UnmarshalJSON(data []byte) error {
-	type plain WebhookStepConfig
-	var p plain
-	leaves, err := unmarshalWithLeaves(data, &p, []string{"url"}, []string{"headers"})
-	if err != nil {
-		return err
-	}
-	*c = WebhookStepConfig(p)
-	c.leaves = leaves
-	return nil
-}
-
-// MarshalJSON writes the config with its lifted leaves.
-func (c WebhookStepConfig) MarshalJSON() ([]byte, error) {
-	type plain WebhookStepConfig
-	return marshalWithLeaves(plain(c), c.leaves)
-}
-
-// UnmarshalJSON decodes the config, lifting a non-string `id`, `parent` or
-// `aliasOf`.
-func (c *MutationStepConfig) UnmarshalJSON(data []byte) error {
-	type plain MutationStepConfig
-	var p plain
-	leaves, err := unmarshalWithLeaves(data, &p, []string{"id", "parent", "aliasOf"}, nil)
-	if err != nil {
-		return err
-	}
-	*c = MutationStepConfig(p)
-	c.leaves = leaves
-	return nil
-}
-
-// MarshalJSON writes the config with its lifted leaves.
-func (c MutationStepConfig) MarshalJSON() ([]byte, error) {
-	type plain MutationStepConfig
-	return marshalWithLeaves(plain(c), c.leaves)
-}
-
-// UnmarshalJSON decodes the config, lifting a non-string `cardType`,
-// `partitionId` or `conceptRef`.
-func (c *EmitConceptCardStepConfig) UnmarshalJSON(data []byte) error {
-	type plain EmitConceptCardStepConfig
-	var p plain
-	leaves, err := unmarshalWithLeaves(data, &p, []string{"cardType", "partitionId", "conceptRef"}, nil)
-	if err != nil {
-		return err
-	}
-	*c = EmitConceptCardStepConfig(p)
-	c.leaves = leaves
-	return nil
-}
-
-// MarshalJSON writes the config with its lifted leaves.
-func (c EmitConceptCardStepConfig) MarshalJSON() ([]byte, error) {
-	type plain EmitConceptCardStepConfig
 	return marshalWithLeaves(plain(c), c.leaves)
 }

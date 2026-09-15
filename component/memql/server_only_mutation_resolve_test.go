@@ -40,7 +40,7 @@ import (
 // REAL authored mutation, at the real dispatch point, and that it discriminates
 // rather than refusing everything.
 //
-// Failing-first: remove @serverOnly from `mutate user updateUser` in
+// Failing-first: remove @serverOnly from `mutation user updateUser` in
 // dsl/identity/mutations.memql and the client-origin case stops being refused.
 func TestServerOnlyMutationRefusesClientOrigin(t *testing.T) {
 	fns, _ := loadRealTree(t)

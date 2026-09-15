@@ -25,16 +25,17 @@ package app
 // caller-scope filter. Origin is the only gate, so an unchecked argument is an
 // unchecked query.
 //
-// The live chain, all of it in the tree today:
+// The chain, as the tree held it when the issue was filed:
 //
 //	run_automation(name: "killSwitchSuspendsRunningPlans",
 //	               input: {node: {id: "<any user id>"}})
-//	  -> LoadByName          -> Trusted = true          -> OriginInternal
-//	  -> step decide         -> logic killSwitchSuspendsRunningPlans
-//	                         -> query runningPlansForUser(userId: args.event.node.id)
-//	                            (@serverOnly, no caller scoping, BY DESIGN)
-//	  -> step apply          -> forEach -> updatePlanStatus{planId: item.id,
-//	                            status: "awaitingFeedback"}
+//	  -> LoadByName -> Trusted = true -> OriginInternal
+//	  -> decide := logic killSwitchSuspendsRunningPlans(event: event)
+//	       -> query runningPlansForUser(userId: args.event.node.id)
+//	          (@serverOnly, no caller scoping, BY DESIGN)
+//	  -> for item in decide {
+//	       mutation updatePlanStatus(planId: item.id, status: "awaitingFeedback")
+//	     }
 //
 // So it is not only a read leak: updatePlanStatus stamps `id: args.planId` with
 // no owner predicate, so naming another user's id suspends THAT user's running

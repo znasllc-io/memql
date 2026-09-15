@@ -3,6 +3,8 @@ package planner
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/automations"
@@ -70,7 +72,11 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 	// Runtime variables keep fork overrides in the work instruction while
 	// the validated semantic output choices remain in the stored template.
 	const inputHeading = "\n\nGoal input (JSON):\n"
-	x := workDraftExpressions()
+	inputNames, err := workDraftInputNames(req.Input)
+	if err != nil {
+		return authoringBundle{}, err
+	}
+	x := workDraftExpressions(inputNames, sections)
 	delivery := func(statement, draft string) string {
 		instruction := x.join(langparser.QuoteString(statement+inputHeading), x.goalInput)
 		if nativeFile {
@@ -93,47 +99,100 @@ func synthesizeWorkReasoningBundle(req CompileRequest, agentId string, dec secti
 		b.WriteString("use agents.builtins.{ runAgentTurn }\n")
 	}
 	fmt.Fprintf(&b, "\n@template\nautomation %s {\n", headline)
-	if !fanout {
-		fmt.Fprintf(&b, "  step reason {\n    %s\n  }\n", delivery(goal, ""))
-	} else {
-		b.WriteString("  step sections {\n    parallel {\n      wait: \"all\"\n      failFast: true\n      branches: [\n")
-		for n, section := range sections {
-			prompt := "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): " + goal + "\n\nSection: " + section.Spec.Label + "\n" + section.Spec.Instruction
-			fmt.Fprintf(&b, "        step %s { builtin runAgentTurn(agentId: %s, prompt: %s) }", section.Name, langparser.QuoteString(agentId), x.join(langparser.QuoteString(prompt+inputHeading), x.goalInput))
-			if n < len(sections)-1 {
-				b.WriteString(",")
-			}
-			b.WriteString("\n")
+	if len(inputNames) > 0 {
+		b.WriteString("  args {\n")
+		for _, name := range inputNames {
+			fmt.Fprintf(&b, "    %s any\n", name)
 		}
-		b.WriteString("      ]\n    }\n  }\n")
+		b.WriteString("  }\n")
+	}
+	if x.goalInputStatement != "" {
+		fmt.Fprintf(&b, "  %s\n", x.goalInputStatement)
+	}
+	if !fanout {
+		fmt.Fprintf(&b, "  reason := %s\n", delivery(goal, ""))
+	} else {
+		// The sections run one after another, each bound to its own name:
+		// the assembly reads every section's value, and a parallel branch's
+		// names end with the branch.
+		for _, section := range sections {
+			prompt := "Produce only the independent section below and return its complete content as text. This is an intermediate drafting step: do not create or save files and do not call composition tools. Final assembly will produce the deliverable.\n\nOverall goal (context only): " + goal + "\n\nSection: " + section.Spec.Label + "\n" + section.Spec.Instruction
+			fmt.Fprintf(&b, "  %s := builtin runAgentTurn(agentId: %s, prompt: %s)\n", section.Name, langparser.QuoteString(agentId), x.join(langparser.QuoteString(prompt+inputHeading), x.goalInput))
+		}
 		assembly := goal + "\n\nAssemble the completed independent sections into the requested deliverable. Verify completeness. " + dec.Assembly
-		fmt.Fprintf(&b, "  step assemble {\n    if steps.sections.status == \"success\" {\n      %s\n    }\n  }\n", delivery(assembly, x.sectionsText))
+		fmt.Fprintf(&b, "  %s\n", x.sectionsStatement)
+		fmt.Fprintf(&b, "  assemble := %s\n", delivery(assembly, x.sections))
 	}
 	b.WriteString("}\n")
 	return authoringBundle{AutomationName: headline, Constructs: []memql.SandboxConstruct{{Kind: "automation", Name: headline, Source: b.String()}}}, nil
 }
 
-// workDraftText is the expression text a work draft's step arguments are
-// written in: the run's goal input, the completed sections, and joining text
-// onto them, in edition 2026's `+` and toString(). The prompt a step passes
-// writes a map or a list as its JSON, which is what the draft's "Goal input
-// (JSON)" heading says.
+// workDraftText is the text a work draft's call arguments are written in: the
+// run's goal input, the completed sections, and joining text onto them, with
+// `+` and toString(). The prompt a call passes writes a map as its JSON, which
+// is what the draft's "Goal input (JSON)" heading says.
 type workDraftText struct {
-	// goalInput is the run's goal input, as text.
+	// goalInputStatement binds the goal input as a map, `goalInput :=
+	// {day: args.day}`; empty when the goal takes no input.
+	goalInputStatement string
+	// goalInput is the goal input, as text.
 	goalInput string
-	// sections is the parallel section step's result, as a join operand.
+	// sectionsStatement binds every section's value, keyed by the section's
+	// name, as `sections`.
+	sectionsStatement string
+	// sections is that map, as text.
 	sections string
-	// sectionsText is that result as a standalone text argument.
-	sectionsText string
 }
 
-func workDraftExpressions() workDraftText {
-	// The goal input is the run's trigger payload (adopt.go). The draft
-	// declares no args block, so it reads it as `payload`, the envelope's key
-	// read bare -- a dotted `event.payload` is refused at load (G5).
-	// toString(), not the bare value: `+` over an absent operand is absent,
-	// and toString() reads absent as "".
-	return workDraftText{goalInput: "toString(payload)", sections: "toString(steps.sections.result)", sectionsText: "toString(steps.sections.result)"}
+// workDraftExpressions writes the goal input and the sections. The goal input
+// is the run's variables, which adopt.go binds into the draft's args block
+// (inputNames), so it is read back as a map of those args. Each map is bound
+// by a statement of its own and passed to toString() by name: a call's one
+// argument may not be a map literal. toString(), not the bare value: `+` over
+// an absent operand is absent, and toString() reads absent as "".
+func workDraftExpressions(inputNames []string, sections []sectionPlan) workDraftText {
+	x := workDraftText{goalInput: langparser.QuoteString("{}")}
+	if len(inputNames) > 0 {
+		entries := make([]string, 0, len(inputNames))
+		for _, name := range inputNames {
+			entries = append(entries, name+": args."+name)
+		}
+		x.goalInputStatement = "goalInput := {" + strings.Join(entries, ", ") + "}"
+		x.goalInput = "toString(goalInput)"
+	}
+	names := make([]string, 0, len(sections))
+	for _, section := range sections {
+		names = append(names, section.Name+": "+section.Name)
+	}
+	x.sectionsStatement = "sections := {" + strings.Join(names, ", ") + "}"
+	x.sections = "toString(sections)"
+	return x
+}
+
+// workDraftInputNames is the goal input's keys, sorted: the draft declares one
+// arg per key, which is how the run's variables reach it (adopt.go binds them
+// into the args block). A key a draft cannot declare -- not a name, or one of
+// the names every body reserves -- refuses the compile: dropping it would run
+// the goal without an input its person gave.
+func workDraftInputNames(input map[string]any) ([]string, error) {
+	names := make([]string, 0, len(input))
+	for key := range input {
+		if !workDraftArgName.MatchString(key) || workDraftReservedNames[key] {
+			return nil, fmt.Errorf("work compile: goal input key %q cannot be a template argument: an argument is a name (letters, digits and _, starting with a letter) and not one of %s", key, "args, actor, event, now, config, partition, trace")
+		}
+		names = append(names, key)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// workDraftArgName is the shape of a declarable argument name.
+var workDraftArgName = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
+
+// workDraftReservedNames are the roots every body reads by name; an args
+// field may not take one.
+var workDraftReservedNames = map[string]bool{
+	"args": true, "actor": true, "event": true, "now": true, "config": true, "partition": true, "trace": true,
 }
 
 // join is text operands joined in order.

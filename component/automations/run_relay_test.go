@@ -402,8 +402,8 @@ func TestStepObserverFiresFromRealExecutor(t *testing.T) {
 		`@description("Two trivial steps.")
 @trigger(event="system.startup")
 automation traced {
-  step first  { automation subOne { } }
-  step second { automation subTwo { } }
+  first := automation subOne()
+  second := automation subTwo()
 }`, "test:step-observer")
 	if err != nil {
 		t.Fatalf("compile: %v", err)
@@ -434,7 +434,7 @@ func TestExecutorUnaffectedWithoutObserver(t *testing.T) {
 		`@description("One trivial step.")
 @trigger(event="system.startup")
 automation untraced {
-  step only { automation sub { } }
+  only := automation sub()
 }`, "test:no-observer")
 	if err != nil {
 		t.Fatalf("compile: %v", err)

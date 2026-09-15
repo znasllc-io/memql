@@ -5,7 +5,5 @@ automation tfNoteClosedGoal {
   args {
     id  string
   }
-  step note {
-    mutation tfNoteGoal(goalId: args.id, note: "changed")
-  }
+  note := mutation tfNoteGoal(goalId: args.id, note: "changed")
 }

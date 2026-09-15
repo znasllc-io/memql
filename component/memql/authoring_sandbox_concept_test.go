@@ -49,7 +49,7 @@ concept sandboxWidget {
 const candidateWidgetMutation = `use sandboxns.concepts.{ sandboxWidget }
 
 @description("Create a widget")
-mutate sandboxWidget mutationCreateSandboxWidget {
+mutation sandboxWidget mutationCreateSandboxWidget {
   args {
     widgetId  string  @required
   }

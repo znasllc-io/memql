@@ -56,9 +56,7 @@ func filteredAutomation(concept, filter string) string {
 	return `@trigger(event="node.created", concept="` + concept + `")
 @filter(` + filter + `)
 automation onRow {
-  step run {
-    logic noteRow(x: 1)
-  }
+  run := logic noteRow(x: 1)
 }`
 }
 

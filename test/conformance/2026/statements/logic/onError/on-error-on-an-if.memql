@@ -1,0 +1,9 @@
+logic onErrorIf {
+  args {
+    n any
+  }
+  if args.n > 1 {
+    x := 1
+  } on error continue
+  return x ?? 0
+}

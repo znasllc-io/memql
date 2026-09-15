@@ -1,0 +1,11 @@
+// logic.memql -- safety namespace.
+
+use platform.queries.{ userDefaults }
+
+/// The defaults a person sees, which stays a logic: it publishes nothing.
+logic defaultsFor {
+  args {
+    userId string!
+  }
+  return query userDefaults(userId: args.userId)
+}

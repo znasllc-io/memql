@@ -1,0 +1,30 @@
+@trigger(event="demo.parallel")
+automation demoParallel {
+  args {
+    id any
+  }
+
+  step fanout {
+    parallel {
+      wait: "any",
+      failFast: true,
+      branches: [
+        step left {
+          mutation expireAccessRequest ( requestId: id )
+        },
+        step right {
+          builtin routingEvidenceFold ( )
+        }
+      ]
+    }
+  }
+  step later {
+    parallel {
+      branches: [
+        step only {
+          builtin routingEvidenceFold ( )
+        }
+      ]
+    }
+  }
+}

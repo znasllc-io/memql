@@ -1,0 +1,67 @@
+{
+  "automation": "agents/automations.memql invokeAgent",
+  "runs": {
+    "invocation | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "s-agentId",
+            "prompt": "s-prompt",
+            "scopeId": "s-scopeId"
+          },
+          "topic": "automation.invocation.invokeAgent"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "agentId": "s-agentId",
+              "prompt": "s-prompt",
+              "scopeId": "s-scopeId"
+            },
+            "kind": "builtin",
+            "name": "runAgentTurn"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "invocation | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "unspecified",
+          "payload": {
+            "agentId": "s-agentId",
+            "prompt": "s-prompt",
+            "scopeId": "s-scopeId"
+          },
+          "topic": "automation.invocation.invokeAgent"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "agentId": "s-agentId",
+              "prompt": "s-prompt",
+              "scopeId": "s-scopeId"
+            },
+            "kind": "builtin",
+            "name": "runAgentTurn"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

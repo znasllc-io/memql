@@ -78,7 +78,7 @@ concept deployment {
 
 @enabled
 @description("Binds the imported concept by its PINNED namespace.")
-mutate deployment createDeployment {
+mutation deployment createDeployment {
   args {
     status  string  @required
   }
@@ -89,7 +89,7 @@ mutate deployment createDeployment {
 
 @enabled
 @description("A sibling binding the SAME concept, untouched by whoever added the import.")
-mutate deployment updateDeploymentStatus {
+mutation deployment updateDeploymentStatus {
   args {
     deploymentId  string  @required
     status        string  @required
@@ -102,7 +102,7 @@ mutate deployment updateDeploymentStatus {
 
 @enabled
 @description("A second such sibling.")
-mutate deployment retireDeployment {
+mutation deployment retireDeployment {
   args {
     deploymentId  string  @required
     status        string  @required
@@ -154,7 +154,7 @@ func TestLane3_SkipNamesTheImportAsTheCause(t *testing.T) {
 
 @enabled
 @description("Binds a concept that is declared nowhere.")
-mutate deployment createDeployment {
+mutation deployment createDeployment {
   args {
     status  string  @required
   }

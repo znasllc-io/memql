@@ -93,17 +93,10 @@ func visitFunctionBody(node parser.Node, known map[string]struct{}, calls map[st
 		return
 	}
 
+	// A logic's and an automation's calls are not walked: neither kind can
+	// violate the rule (violatesCQS), and a construct call in one is a
+	// statement the compiler's scope check holds.
 	switch n := node.(type) {
-	case *parser.AutomationDef:
-		for _, step := range n.Steps {
-			visitStep(&step, known, calls)
-		}
-		if n.OnComplete != nil {
-			visitStep(n.OnComplete, known, calls)
-		}
-		if n.OnError != nil {
-			visitStep(n.OnError, known, calls)
-		}
 	case *parser.QueryStmt:
 		visitExpression(n.Expression, known, calls)
 	case *parser.MutationStmt:
@@ -111,41 +104,6 @@ func visitFunctionBody(node parser.Node, known map[string]struct{}, calls map[st
 		// expression calls inside templates are not represented in AST today.
 	case parser.ExpressionNode:
 		visitExpression(n, known, calls)
-	}
-}
-
-func visitStep(step *parser.StepDef, known map[string]struct{}, calls map[string]struct{}) {
-	if step == nil {
-		return
-	}
-	if cfg, ok := step.Config.(*parser.FunctionStepConfig); ok && cfg.Name != "" {
-		if _, exists := known[cfg.Name]; exists {
-			calls[cfg.Name] = struct{}{}
-		}
-	}
-
-	switch cfg := step.Config.(type) {
-	case *parser.QueryStepConfig:
-		visitExpression(cfg.Query, known, calls)
-	case *parser.ForEachStepConfig:
-		for _, nested := range cfg.Do {
-			visitStep(&nested, known, calls)
-		}
-	case *parser.ParallelStepConfig:
-		for _, nested := range cfg.Branches {
-			visitStep(&nested, known, calls)
-		}
-	case *parser.SwitchStepConfig:
-		for _, sc := range cfg.Cases {
-			for _, nested := range sc.Steps {
-				visitStep(&nested, known, calls)
-			}
-		}
-		if cfg.Default != nil {
-			for _, nested := range cfg.Default.Steps {
-				visitStep(&nested, known, calls)
-			}
-		}
 	}
 }
 

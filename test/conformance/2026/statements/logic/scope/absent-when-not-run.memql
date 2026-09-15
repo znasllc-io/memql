@@ -1,0 +1,9 @@
+logic absentWhenNotRun {
+  args {
+    n any
+  }
+  if args.n > 5 {
+    big := true
+  }
+  return big ?? false
+}

@@ -1,5 +1,5 @@
 /// Write a note about a goal.
-mutate goalNote acNoteGoal {
+mutation goalNote acNoteGoal {
   args {
     goalId  string  @required
     note    string
@@ -18,9 +18,7 @@ automation acNoteClosedGoal {
     id      string
     status  string
   }
-  step note {
-    if args.status == "closed" {
-      mutation acNoteGoal(goalId: args.id, note: "closed")
-    }
+  if args.status == "closed" {
+    note := mutation acNoteGoal(goalId: args.id, note: "closed")
   }
 }

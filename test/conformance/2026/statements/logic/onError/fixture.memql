@@ -1,0 +1,8 @@
+/// An alert the on-error logic cell reads.
+concept staleAlert {
+  open  bool
+}
+
+query staleAlert staleAlerts {
+  filter row => row.open == true
+}

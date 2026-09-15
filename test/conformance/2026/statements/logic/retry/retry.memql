@@ -1,0 +1,14 @@
+logic halveForRetry {
+  args {
+    n any
+  }
+  return args.n / 2
+}
+
+logic halvedWithRetry {
+  args {
+    n any
+  }
+  h := logic halveForRetry(n: args.n) retry(2)
+  return h
+}

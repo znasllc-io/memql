@@ -1,0 +1,21 @@
+@trigger(event="demo.parallel")
+automation demoParallel {
+  args {
+    id any
+  }
+
+  parallel {
+    branch left {
+      mutation expireAccessRequest(requestId: args.id)
+    }
+    branch right {
+      builtin routingEvidenceFold()
+    }
+  } wait any
+  // memqlmigrate: the parallel's failFast: false has no statement spelling; a failed branch now stops the others (memql#5373)
+  parallel {
+    branch only {
+      builtin routingEvidenceFold()
+    }
+  }
+}

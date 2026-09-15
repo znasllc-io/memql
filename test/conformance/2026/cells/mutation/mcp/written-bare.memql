@@ -1,6 +1,6 @@
 /// Retitle one ticket, exposed as its own MCP tool.
 @mcp
-mutate ticket retitleTicketMcp {
+mutation ticket retitleTicketMcp {
   args {
     ticketId  string!
     title     string!

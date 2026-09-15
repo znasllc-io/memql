@@ -1,9 +1,13 @@
 package fleet
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/language/ast"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // The scheduled sweeps (epic memql#3852, task memql#3856).
@@ -13,35 +17,40 @@ import (
 // A sweep's candidate query is deliberately UNWINDOWED. `runningInstances`
 // returns every running instance in the fleet, because a filter cannot call
 // `addDuration` and the bracket therefore has to be applied per row, in the
-// automation's `forEach ... where` clause.
+// automation's `for ... if` filter.
 //
-// Which means the `where` is the only thing between a sweep and the whole
+// Which means the filter is the only thing between a sweep and the whole
 // fleet. Drop it from `teardownAfterGrace` -- in a refactor, in a merge
 // resolution, while "simplifying" -- and the next 04:00 UTC run tears down
 // every suspended tenant we have, having taken a final backup of each and
 // reported complete success. There is no error, no partial state, and no
 // second chance: the Applications are gone and the finalizer has cascaded.
 //
-// A `where` clause is a small thing to lose and an unrecoverable thing to have
-// lost, so it gets a gate.
+// A filter is a small thing to lose and an unrecoverable thing to have lost,
+// so it gets a gate.
 
 var (
-	sweepAutomation = regexp.MustCompile(`(?m)^automation\s+(\w+)\s*\{`)
-	scheduleTrigger = regexp.MustCompile(`@trigger\(schedule=`)
-	forEachClause   = regexp.MustCompile(`forEach\s+\w+\s+in\s+[\w.]+\s*(where\b)?`)
+	fleetConstructHeader = regexp.MustCompile(`^(automation|logic)\s+(\w+)\s*\{`)
+	scheduleTrigger      = regexp.MustCompile(`@trigger\(schedule=`)
 )
 
-// sweepBlocks returns each automation in trial.memql with its source, including
-// the @trigger line above it.
-func sweepBlocks(t *testing.T) map[string]string {
-	t.Helper()
-	src := fleetFile(t, "trial.memql")
-	out := map[string]string{}
+// fleetConstruct is one logic or automation of a fleet file: its source, with
+// the doc and annotation lines above it, and its parsed statement body.
+type fleetConstruct struct {
+	kind, name, src string
+	body            *ast.Body
+}
 
-	lines := strings.Split(src, "\n")
+// fleetConstructs parses every logic and automation of a fleet file. The
+// gates below read the parsed body, so a statement written in a way they did
+// not anticipate is still the statement it is.
+func fleetConstructs(t *testing.T, file string) []fleetConstruct {
+	t.Helper()
+	lines := strings.Split(fleetFile(t, file), "\n")
+	var out []fleetConstruct
 	var preamble []string
 	for i := 0; i < len(lines); i++ {
-		m := sweepAutomation.FindStringSubmatch(lines[i])
+		m := fleetConstructHeader.FindStringSubmatch(lines[i])
 		if m == nil {
 			if strings.TrimSpace(lines[i]) == "" {
 				preamble = nil
@@ -50,48 +59,70 @@ func sweepBlocks(t *testing.T) map[string]string {
 			}
 			continue
 		}
-		body := append(append([]string{}, preamble...), lines[i])
+		block := append(append([]string{}, preamble...), lines[i])
 		depth := strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
 		for i+1 < len(lines) && depth > 0 {
 			i++
-			body = append(body, lines[i])
+			block = append(block, lines[i])
 			depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
 		}
-		out[m[1]] = strings.Join(body, "\n")
 		preamble = nil
+		src := strings.Join(block, "\n")
+		pf, err := languageParser.ParseFile(src)
+		if err != nil {
+			t.Fatalf("%s: %s %s does not parse: %v", file, m[1], m[2], err)
+		}
+		var body *ast.Body
+		for _, d := range pf.Definitions {
+			if fn, ok := d.(*ast.FunctionDef); ok && fn.Name == m[2] {
+				if auto, ok := fn.Body.(*ast.AutomationDef); ok {
+					body = auto.Body
+				}
+			}
+		}
+		if body == nil {
+			t.Fatalf("%s: %s %s did not parse to a statement body", file, m[1], m[2])
+		}
+		out = append(out, fleetConstruct{kind: m[1], name: m[2], src: src, body: body})
 	}
 	return out
 }
 
 // TestEverySweepNarrowsItsCandidates.
 //
-// Every `forEach` over a sweep's candidate set must carry a `where`. The
-// candidate queries return everything in a status by design, so a bare `forEach`
+// Every `for` over a sweep's candidate set must carry an `if` filter. The
+// candidate queries return everything in a status by design, so a bare `for`
 // acts on the entire fleet -- and the sweep that would do the most damage is
 // also the one whose action cannot be undone.
 func TestEverySweepNarrowsItsCandidates(t *testing.T) {
-	blocks := sweepBlocks(t)
-	if len(blocks) == 0 {
+	constructs := fleetConstructs(t, "trial.memql")
+	if len(constructs) == 0 {
 		t.Fatal("parsed no automations from trial.memql -- either the file moved or this parse stopped matching, and either way this gate is watching nothing")
 	}
 
 	var checked int
-	for name, body := range blocks {
-		if !scheduleTrigger.MatchString(body) {
+	for _, c := range constructs {
+		if c.kind != "automation" || !scheduleTrigger.MatchString(c.src) {
 			continue
 		}
 		checked++
 
-		loops := forEachClause.FindAllStringSubmatch(body, -1)
+		var loops []*ast.ForStatement
+		ast.WalkBody(c.body.Statements, func(s ast.BodyStatement) bool {
+			if f, ok := s.(*ast.ForStatement); ok {
+				loops = append(loops, f)
+			}
+			return true
+		})
 		if len(loops) == 0 {
-			t.Errorf("scheduled automation %s has no forEach; a sweep that acts on nothing is a sweep that silently does not run", name)
+			t.Errorf("scheduled automation %s has no `for`; a sweep that acts on nothing is a sweep that silently does not run", c.name)
 			continue
 		}
 		for _, loop := range loops {
-			if loop[1] == "" {
-				t.Errorf("scheduled automation %s has a forEach with NO `where` clause:\n    %s\n"+
+			if loop.Filter == nil {
+				t.Errorf("scheduled automation %s has a `for %s in ...` with NO `if` filter.\n"+
 					"Its candidate query is unwindowed by design -- it returns every row in a status -- so this loop acts on the whole fleet. For teardownAfterGrace that is every suspended tenant destroyed, with a successful-looking run and nothing to recover from.",
-					name, strings.TrimSpace(loop[0]))
+					c.name, loop.Var)
 			}
 		}
 	}
@@ -114,31 +145,44 @@ func TestEverySweepNarrowsItsCandidates(t *testing.T) {
 func TestTheDestructiveSweepIsTheOnlyTeardownPath(t *testing.T) {
 	const teardown = "requestInstanceTeardown"
 
-	callers := map[string]int{}
-	for _, file := range []string{"automations.memql", "trial.memql", "billing.memql"} {
-		src := fleetFile(t, file)
-		// Count call sites, not the import line and not the doc comments.
-		for line := range strings.SplitSeq(src, "\n") {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "///") || strings.HasPrefix(trimmed, "use ") {
-				continue
-			}
-			if strings.HasPrefix(trimmed, teardown+" {") {
-				callers[file]++
-			}
+	// Every logic and automation of the bundle: a logic may call a mutation
+	// too, so a second path could be in any of them.
+	files, err := filepath.Glob(filepath.Join(bundleRoot(t), "fleet", "*.memql"))
+	if err != nil || len(files) == 0 {
+		t.Fatalf("no fleet .memql files (%v): this gate would watch nothing", err)
+	}
+	var callers []string // "<file> <construct>", one per call
+	for _, path := range files {
+		file := filepath.Base(path)
+		for _, c := range fleetConstructs(t, file) {
+			ast.WalkBody(c.body.Statements, func(s ast.BodyStatement) bool {
+				if call := statementCall(s); call != nil && call.Kind == "mutation" && call.Name == teardown {
+					callers = append(callers, file+" "+c.name)
+				}
+				return true
+			})
 		}
 	}
 
-	total := 0
-	for _, n := range callers {
-		total += n
-	}
 	switch {
-	case total == 0:
+	case len(callers) == 0:
 		t.Fatalf("%s is called from nowhere -- the grace-expiry sweep does not destroy anything, so a torn-down tenant is one we keep paying for", teardown)
-	case total > 1:
-		t.Errorf("%s is called from %d places (%v). It must have exactly one caller: the grace-expiry sweep. What protects a customer's data here is a SEQUENCE -- pause, fourteen days, teardown -- and a second caller removes the fourteen days without removing anything that looks like a safeguard.", teardown, total, callers)
-	case callers["trial.memql"] != 1:
-		t.Errorf("%s's single caller is not in trial.memql (found %v); the only path to it is the grace-expiry sweep", teardown, callers)
+	case len(callers) > 1:
+		t.Errorf("%s is called from %d places (%v). It must have exactly one caller: the grace-expiry sweep. What protects a customer's data here is a SEQUENCE -- pause, fourteen days, teardown -- and a second caller removes the fourteen days without removing anything that looks like a safeguard.", teardown, len(callers), callers)
+	case callers[0] != "trial.memql teardownAfterGrace":
+		t.Errorf("%s's single caller is %s; the only path to it is the grace-expiry sweep, trial.memql teardownAfterGrace", teardown, callers[0])
 	}
+}
+
+// statementCall is the construct call a statement makes itself, or nil.
+func statementCall(s ast.BodyStatement) *ast.ConstructCall {
+	switch st := s.(type) {
+	case *ast.CallStatement:
+		return st.Call
+	case *ast.AssignStatement:
+		return st.Call
+	case *ast.ReturnStatement:
+		return st.Call
+	}
+	return nil
 }

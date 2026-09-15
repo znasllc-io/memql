@@ -160,7 +160,7 @@ var functionReceivers = map[ReceiverType]struct {
 	keyword  string
 }{
 	ReceiverQuery:      {annotations.Query, "query"},
-	ReceiverMutation:   {annotations.Mutation, "mutate"},
+	ReceiverMutation:   {annotations.Mutation, "mutation"},
 	ReceiverLogic:      {annotations.Logic, "logic"},
 	ReceiverAutomation: {annotations.Automation, "automation"},
 	ReceiverSpec:       {annotations.Spec, "spec"},

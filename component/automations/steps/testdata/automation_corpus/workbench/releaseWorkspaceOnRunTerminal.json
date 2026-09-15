@@ -1,0 +1,245 @@
+{
+  "automation": "workbench/automations.memql releaseWorkspaceOnRunTerminal",
+  "runs": {
+    "event agent | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "node_updated",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "graph.node.updated.v1:work:run"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "runId": "v1:probe:thing:1"
+            },
+            "kind": "query",
+            "name": "workspaceForRun"
+          },
+          {
+            "args": {
+              "runId": "v1:probe:thing:1"
+            },
+            "kind": "builtin",
+            "name": "workbenchTeardownDirectory"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event agent | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "node_updated",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "agent"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "graph.node.updated.v1:work:run"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "runId": "v1:probe:thing:1"
+            },
+            "kind": "query",
+            "name": "workspaceForRun"
+          },
+          {
+            "args": {
+              "reason": "run_terminal",
+              "workspaceId": "v1:probe:row:workspaceForRun-1"
+            },
+            "kind": "mutation",
+            "name": "releaseWorkspace"
+          },
+          {
+            "args": {
+              "reason": "run_terminal",
+              "workspaceId": "v1:probe:row:workspaceForRun-2"
+            },
+            "kind": "mutation",
+            "name": "releaseWorkspace"
+          },
+          {
+            "args": {
+              "runId": "v1:probe:thing:1"
+            },
+            "kind": "builtin",
+            "name": "workbenchTeardownDirectory"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 0 rows": {
+      "input": {
+        "event": {
+          "kind": "node_updated",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "graph.node.updated.v1:work:run"
+        },
+        "rows": 0
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "runId": "v1:probe:thing:1"
+            },
+            "kind": "query",
+            "name": "workspaceForRun"
+          },
+          {
+            "args": {
+              "runId": "v1:probe:thing:1"
+            },
+            "kind": "builtin",
+            "name": "workbenchTeardownDirectory"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    },
+    "event bff | 2 rows": {
+      "input": {
+        "event": {
+          "kind": "node_updated",
+          "payload": {
+            "agentId": "agent-1",
+            "createdBySubject": "subject-0",
+            "id": "v1:probe:thing:1",
+            "identityId": "identity-1",
+            "identitySubject": "subject-1",
+            "identityType": "passkey",
+            "naturalKeyField": "email",
+            "naturalKeyValue": "someone@example.test",
+            "node": {
+              "id": "v1:cluster:node:n1",
+              "type": "bff"
+            },
+            "partitionId": "space-1",
+            "recordType": "contact",
+            "roleCeiling": "user",
+            "scopes": [
+              "read"
+            ],
+            "status": "succeeded"
+          },
+          "topic": "graph.node.updated.v1:work:run"
+        },
+        "rows": 2
+      },
+      "outcome": {
+        "calls": [
+          {
+            "args": {
+              "runId": "v1:probe:thing:1"
+            },
+            "kind": "query",
+            "name": "workspaceForRun"
+          },
+          {
+            "args": {
+              "reason": "run_terminal",
+              "workspaceId": "v1:probe:row:workspaceForRun-1"
+            },
+            "kind": "mutation",
+            "name": "releaseWorkspace"
+          },
+          {
+            "args": {
+              "reason": "run_terminal",
+              "workspaceId": "v1:probe:row:workspaceForRun-2"
+            },
+            "kind": "mutation",
+            "name": "releaseWorkspace"
+          },
+          {
+            "args": {
+              "runId": "v1:probe:thing:1"
+            },
+            "kind": "builtin",
+            "name": "workbenchTeardownDirectory"
+          }
+        ],
+        "result": {
+          "output": null,
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

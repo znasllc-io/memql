@@ -18,19 +18,17 @@
 // are in component/auth/maintenance_actor.go, which is compiled in rather
 // than annotated so a mounted product bundle cannot grant itself one.
 
-/// The arguments are spelled here rather than defaulted in the handler: a scheduled step that
-/// calls a builtin with no arguments is refused at load (memql#4927), and spelling them makes the
-/// schedule's choice readable beside the schedule. 60s is twice the 30s heartbeat window, so a run
-/// is abandoned only after two missed beats.
+/// The arguments are spelled here rather than defaulted in the handler: an empty call to a builtin
+/// that declares fields is refused at load (memql#4927), and spelling them makes the schedule's
+/// choice readable beside the schedule. 60s is twice the 30s heartbeat window, so a run is abandoned
+/// only after two missed beats.
 /// Every two minutes: resume runs whose timer wait is due, and re-claim runs whose node died
 /// mid-flight. A timer wait carries resumeAt and no process is held open for it; an abandoned run
 /// is one whose heartbeat stopped, and it is resumed elsewhere FROM THE JOURNAL rather than
 /// restarted, so completed steps are served and never re-run.
 @trigger(schedule="0 */2 * * * *")
 automation sweepWaitingWorkRuns {
-  step sweep {
-    builtin workSweepWaiting ( olderThanSeconds: 60 )
-  }
+  sweep := builtin workSweepWaiting(olderThanSeconds: 60)
 }
 
 /// Nightly 03:40 UTC: archive then delete journal rows past their retention window. The run's
@@ -38,7 +36,5 @@ automation sweepWaitingWorkRuns {
 /// no archive means no delete -- the log store's rule, reused.
 @trigger(schedule="0 40 3 * * *")
 automation workJournalRetentionSweep {
-  step sweep {
-    builtin workRetentionSweep ( dryRun: false )
-  }
+  sweep := builtin workRetentionSweep(dryRun: false)
 }

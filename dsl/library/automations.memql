@@ -2,32 +2,24 @@
 //
 // Event-driven population of the Library index. Each backing-row creation
 // event folds into a v1:library:artifact index row. The createArtifact write
-// lives directly in the automation's mutation step, binding its args from the
-// trigger event payload (which IS the created row), with `??` on the
-// optional fields. #2235: this replaces the former promotion-logic indirection
-// (each index* logic did the write inline -- an ADR §2.1 logic-purity
-// violation). Mirrors the cluster registerNode/deregisterNode form: the logic
-// is gone; the write is an event-bound mutation step.
+// is the automation's own `mutation` statement, reading its args from the
+// trigger payload (which IS the created row), with `??` on the optional
+// fields. #2235: this replaces the former promotion-logic indirection (each
+// index* logic did the write inline -- an ADR §2.1 logic-purity violation).
+// Mirrors the cluster registerNode/deregisterNode form.
 //
-// Authoring note (#2235): inside a step a mutation is the bare `<mutation>{ ... }`
-// call (brace body, NOT `mutate <name>` and NOT `name({...})`); a multi-segment
-// path like event.payload.summary is nil when absent, and passing nil for a
-// string field trips the v1:library:artifact "expected string, got null"
-// rejection (the #1626 failure), so the optional fields coalesce to "".
+// A payload field that is absent reads nil, and passing nil for a string field
+// trips the v1:library:artifact "expected string, got null" rejection (the
+// #1626 failure), so the optional fields coalesce to "".
 //
-// sourceConceptRef binds event.payload.id DIRECTLY. The earlier
-// `canonicalId(event.payload.id, <concept>)` form resolved to nil in a
-// top-level step arg (the concept-ref builtin does not evaluate there), so
-// createArtifact failed with "required argument sourceConceptRef is missing" --
-// silently breaking Library promotion (proven on a seeded DB; forward-fixes
-// #2265's canonicalId-in-step bug). canonicalId is unnecessary anyway: a
-// node.created event's payload.id IS the stored canonical concept id
-// (e.g. v1:library:memory:mem-...), so the direct bind yields the identical ref.
+// sourceConceptRef binds args.id, the created row's id, DIRECTLY: a
+// node.created event's payload id IS the stored canonical concept id
+// (e.g. v1:library:memory:mem-...), so no canonicalId() wrapping is needed.
 // The #2235 library-index-promotion conformance dimension guards all five paths.
 
 /// On generated-output creation, promote the new v1:library:generatedOutput into the Library as an
 /// artifact index row (lens=artifact, kind=generated_output). #2235.
-@trigger(event="node.created", concept="v1:library:generatedOutput", partition="*")
+@trigger(event="node.created", concept="v1:library:generatedOutput")
 automation indexGeneratedOutputOnCreate {
   args {
     format any
@@ -44,30 +36,28 @@ automation indexGeneratedOutputOnCreate {
     title any
   }
 
-  step persist {
-    mutation createArtifact (
-      sourceConceptRef:     id,
-      ownerUserId:          ownerUserId,
-      lens:                 "artifact",
-      kind:                 "generated_output",
-      source,
-      title:                title,
-      summary:              summary ?? "",
-      format,
-      mimeType:             mimeType ?? "",
-      live:                 false,
-      partitionId:          partitionId ?? "",
-      agentId:              producedByAgentId ?? "",
-      producedByPlanId:     producedByPlanId ?? "",
-      producedByWorkerId:   producedByWorkerId ?? "",
-      producedByWorkerName: producedByWorkerName ?? ""
-    )
-  }
+  persist := mutation createArtifact(
+    sourceConceptRef:     args.id,
+    ownerUserId:          args.ownerUserId,
+    lens:                 "artifact",
+    kind:                 "generated_output",
+    source:               args.source,
+    title:                args.title,
+    summary:              args.summary ?? "",
+    format:               args.format,
+    mimeType:             args.mimeType ?? "",
+    live:                 false,
+    partitionId:          args.partitionId ?? "",
+    agentId:              args.producedByAgentId ?? "",
+    producedByPlanId:     args.producedByPlanId ?? "",
+    producedByWorkerId:   args.producedByWorkerId ?? "",
+    producedByWorkerName: args.producedByWorkerName ?? ""
+  )
 }
 
 /// On note creation, promote it into the Library Records lens (lens=record, kind=note,
 /// source=agent_generated). #2235.
-@trigger(event="node.created", concept="v1:notes:note", partition="*")
+@trigger(event="node.created", concept="v1:notes:note")
 automation indexNoteOnCreate {
   args {
     body any
@@ -76,23 +66,21 @@ automation indexNoteOnCreate {
     title any
   }
 
-  step persist {
-    mutation createArtifact (
-      sourceConceptRef: id,
-      ownerUserId:      ownerUserId,
-      lens:             "record",
-      kind:             "note",
-      source:           "agent_generated",
-      title:            title ?? "Untitled note",
-      summary:          body ?? "",
-      live:             false
-    )
-  }
+  persist := mutation createArtifact(
+    sourceConceptRef: args.id,
+    ownerUserId:      args.ownerUserId,
+    lens:             "record",
+    kind:             "note",
+    source:           "agent_generated",
+    title:            args.title ?? "Untitled note",
+    summary:          args.body ?? "",
+    live:             false
+  )
 }
 
 /// On to-do creation, promote it into the Library Records lens (lens=record, kind=todo,
 /// source=agent_generated). #2235.
-@trigger(event="node.created", concept="v1:todos:todo", partition="*")
+@trigger(event="node.created", concept="v1:todos:todo")
 automation indexTodoOnCreate {
   args {
     id any
@@ -100,22 +88,20 @@ automation indexTodoOnCreate {
     title any
   }
 
-  step persist {
-    mutation createArtifact (
-      sourceConceptRef: id,
-      ownerUserId:      ownerUserId,
-      lens:             "record",
-      kind:             "todo",
-      source:           "agent_generated",
-      title:            title ?? "Untitled to-do",
-      live:             false
-    )
-  }
+  persist := mutation createArtifact(
+    sourceConceptRef: args.id,
+    ownerUserId:      args.ownerUserId,
+    lens:             "record",
+    kind:             "todo",
+    source:           "agent_generated",
+    title:            args.title ?? "Untitled to-do",
+    live:             false
+  )
 }
 
 /// On calendar-event creation, promote it into the Library Records lens (lens=record,
 /// kind=calendar_event, source=agent_generated). #2235.
-@trigger(event="node.created", concept="v1:calendar:calendarEvent", partition="*")
+@trigger(event="node.created", concept="v1:calendar:calendarEvent")
 automation indexCalendarEventOnCreate {
   args {
     id any
@@ -123,22 +109,20 @@ automation indexCalendarEventOnCreate {
     title any
   }
 
-  step persist {
-    mutation createArtifact (
-      sourceConceptRef: id,
-      ownerUserId:      ownerUserId,
-      lens:             "record",
-      kind:             "calendar_event",
-      source:           "agent_generated",
-      title:            title ?? "Untitled event",
-      live:             false
-    )
-  }
+  persist := mutation createArtifact(
+    sourceConceptRef: args.id,
+    ownerUserId:      args.ownerUserId,
+    lens:             "record",
+    kind:             "calendar_event",
+    source:           "agent_generated",
+    title:            args.title ?? "Untitled event",
+    live:             false
+  )
 }
 
 /// On memory creation, promote it into the Library Records lens (lens=record, kind=memory,
 /// source=agent_generated). #2235.
-@trigger(event="node.created", concept="v1:library:memory", partition="*")
+@trigger(event="node.created", concept="v1:library:memory")
 automation indexMemoryOnCreate {
   args {
     agentId any
@@ -149,20 +133,18 @@ automation indexMemoryOnCreate {
     title any
   }
 
-  step persist {
-    mutation createArtifact (
-      sourceConceptRef: id,
-      ownerUserId:      ownerUserId,
-      lens:             "record",
-      kind:             "memory",
-      source:           "agent_generated",
-      title,
-      summary:          summary ?? "",
-      agentId:          agentId ?? "",
-      partitionId:      partitionId ?? "",
-      live:             false
-    )
-  }
+  persist := mutation createArtifact(
+    sourceConceptRef: args.id,
+    ownerUserId:      args.ownerUserId,
+    lens:             "record",
+    kind:             "memory",
+    source:           "agent_generated",
+    title:            args.title,
+    summary:          args.summary ?? "",
+    agentId:          args.agentId ?? "",
+    partitionId:      args.partitionId ?? "",
+    live:             false
+  )
 }
 
 // THE @filter IS NOT A REFINEMENT, IT IS WHAT KEEPS THIS AUTOMATION FROM
@@ -189,12 +171,11 @@ automation indexMemoryOnCreate {
 // forward the way integrations/library's touchArtifact does.
 /// On file creation, promote the new v1:library:file into the Library as an artifact index row
 /// (lens=artifact, kind=file). The sixth promotion, and the shape of the five above: sourceConceptRef
-/// binds event.payload.id directly, the optional fields coalesce so no nil reaches a string field,
-/// and the derived id makes a re-run version the same row rather than add a second one. format is
-/// carried from the file row, where the writer that knew the MIME wrote it -- an automation step
-/// argument has no conditional form, so the mapping lives in Go and its answer lives on the row.
-/// memql#4340.
-@trigger(event="node.created", concept="v1:library:file", partition="*")
+/// binds args.id directly, the optional fields coalesce so no nil reaches a string field, and the
+/// derived id makes a re-run version the same row rather than add a second one. format is carried
+/// from the file row, where the writer that knew the MIME wrote it: the mapping lives in Go and its
+/// answer lives on the row. memql#4340.
+@trigger(event="node.created", concept="v1:library:file")
 @filter(row => row.status == "stored")
 automation indexFileOnCreate {
   args {
@@ -212,34 +193,32 @@ automation indexFileOnCreate {
     uploadedFromWorkerName any
   }
 
-  step persist {
-    mutation createArtifact (
-      sourceConceptRef: id,
-      producedByRunId: producedByRunId ?? "",
-      ownerUserId:      ownerUserId,
-      lens:             "artifact",
-      kind:             "file",
-      source,
-      title:            name ?? "Untitled file",
-      summary:          summary ?? "",
-      format:           format ?? "other",
-      mimeType:         mimeType ?? "",
-      live:             false,
-      archived:         archived ?? false,
-      // The initial filing travels with the promotion (memql#4781, design
-      // B2): the file row is the writer that knew the target folder, and
-      // after this write the INDEX copy is the authoritative one.
-      folderId:         folderId ?? "",
-      // Verified upload provenance generalizes the index's machine fields
-      // (design D5): uploadedFrom* on the file row was verified against the
-      // caller's own registrations at upload time, so forwarding it into
-      // producedByWorkerId/Name is forwarding a fact, not a claim. The PATH
-      // deliberately stays on the file row -- the index does not need it,
-      // and the sync epic reads the file row.
-      producedByWorkerId:   uploadedFromWorkerId ?? "",
-      producedByWorkerName: uploadedFromWorkerName ?? ""
-    )
-  }
+  persist := mutation createArtifact(
+    sourceConceptRef: args.id,
+    producedByRunId: args.producedByRunId ?? "",
+    ownerUserId:      args.ownerUserId,
+    lens:             "artifact",
+    kind:             "file",
+    source: args.source,
+    title:            args.name ?? "Untitled file",
+    summary:          args.summary ?? "",
+    format:           args.format ?? "other",
+    mimeType:         args.mimeType ?? "",
+    live:             false,
+    archived:         args.archived ?? false,
+    // The initial filing travels with the promotion (memql#4781, design
+    // B2): the file row is the writer that knew the target folder, and
+    // after this write the INDEX copy is the authoritative one.
+    folderId:         args.folderId ?? "",
+    // Verified upload provenance generalizes the index's machine fields
+    // (design D5): uploadedFrom* on the file row was verified against the
+    // caller's own registrations at upload time, so forwarding it into
+    // producedByWorkerId/Name is forwarding a fact, not a claim. The PATH
+    // deliberately stays on the file row -- the index does not need it,
+    // and the sync epic reads the file row.
+    producedByWorkerId:   args.uploadedFromWorkerId ?? "",
+    producedByWorkerName: args.uploadedFromWorkerName ?? ""
+  )
 }
 
 /// When an artifact backed by a file is archived, archive the backing v1:library:file too, so the
@@ -252,16 +231,12 @@ automation indexFileOnCreate {
 /// the other subscribes to, and both writes being idempotent does not stop the events. Archiving
 /// through the artifact is the portal's path; archiveLibraryFile is the file-level operation.
 /// Idempotent: archiving an already-archived file writes the same value. memql#4340.
-@trigger(event="node.updated", concept="v1:library:artifact", partition="*")
+@trigger(event="node.updated", concept="v1:library:artifact")
 @filter(row => row.kind == "file" && row.archived == true)
 automation archiveFileOnArtifactArchive {
   args {
     sourceConceptRef any
   }
 
-  step archiveBackingFile {
-    mutation archiveLibraryFile (
-      fileId: sourceConceptRef
-    )
-  }
+  archiveBackingFile := mutation archiveLibraryFile(fileId: args.sourceConceptRef)
 }

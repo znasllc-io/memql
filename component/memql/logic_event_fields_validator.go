@@ -35,7 +35,7 @@ import (
 //	@eventField("partitionId", "siParticipantId", "promptTemplateId", "promptData", "utteranceId", "agentId")
 //	logic generateResponse {
 //	  args { event object @required }
-//	  body { ... args.event.payload.partitionId ... }   // every payload.<field> must be declared
+//	  ... args.event.payload.partitionId ...   // every payload.<field> must be declared
 //	}
 //
 // Scope: Logic functions only. Runs on the RAW source (pre-path-translation) so
