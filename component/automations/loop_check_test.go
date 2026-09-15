@@ -153,8 +153,9 @@ func TestAutomationFile(t *testing.T) {
 }
 
 // authoredForgeScheduler is an authored scheduler whose loader carries forge's
-// constructs, judging candidates beside the shipped routeRequest -- itself a
-// cycle today, which no candidate may be refused for merely sitting beside.
+// constructs, judging candidates beside a shipped routeRequest in the shape it
+// had before its first-version filter (unfilteredRouteRequest) -- itself a
+// cycle, which no candidate may be refused for merely sitting beside.
 func authoredForgeScheduler(t *testing.T, logger *slog.Logger, withFunctions bool) *AuthoredScheduler {
 	t.Helper()
 	opts := LoaderOptions{Logger: logger}
@@ -171,7 +172,7 @@ func authoredForgeScheduler(t *testing.T, logger *slog.Logger, withFunctions boo
 		t.Fatal(err)
 	}
 	t.Cleanup(s.Stop)
-	s.shipped = []*Automation{treeAutomation(t, "forge/automations.memql", "routeRequest")}
+	s.shipped = graphAutomations(t, unfilteredRouteRequest)
 	s.shippedLoaded = true
 	return s
 }

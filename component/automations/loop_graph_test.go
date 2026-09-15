@@ -701,7 +701,26 @@ automation a {
 	}
 }
 
-// The refusal as the plan writes it, over forge's routeRequest.
+// unfilteredRouteRequest is the shape forge's routeRequest had before its
+// first-version filter (memql#5381): it fires on every write to a request and
+// advances the request it fired on, so it re-fires on its own advance. The
+// shipped automation carries the filter now, so the tests that need a shipped
+// cycle hold this copy of the old one.
+const unfilteredRouteRequest = `@trigger(event="node.created", concept="v1:forge:request")
+automation routeRequest {
+  args {
+    id any
+  }
+  step advance {
+    mutation advanceRequest(requestId: id, status: "queued")
+  }
+  step persistRouted {
+    mutation recordRequestEvent(requestId: id, kind: "routed", fromStatus: "submitted", note: "routed by submitter role")
+  }
+}`
+
+// The refusal as the plan writes it, over routeRequest as it was before its
+// first-version filter.
 func TestLoopGraph_RefusalText(t *testing.T) {
 	reg := work.Registry{
 		"requestRouteStatus": {ConstructKind: work.ConstructLogic},
@@ -710,7 +729,7 @@ func TestLoopGraph_RefusalText(t *testing.T) {
 		}},
 		"recordRequestEvent": {ConstructKind: work.ConstructMutation, Concept: "v1:forge:requestEvent", Write: &work.WriteSpec{Kind: "insert"}},
 	}
-	as := []*Automation{treeAutomation(t, "forge/automations.memql", "routeRequest")}
+	as := graphAutomations(t, unfilteredRouteRequest)
 	g := BuildLoopGraph(as, fakeSource{reg}, 0)
 	want := "automation cycle not covered by @loop: routeRequest -> routeRequest\n" +
 		"  routeRequest -> routeRequest: routeRequest writes v1:forge:request through advanceRequest (update), which publishes graph.node.created.v1:forge:request, and routeRequest triggers on it with no @filter\n" +

@@ -17,19 +17,27 @@
 // decide->persist read fixes (#2271 / #2274) and is retired; the callgraph
 // condition-vocabulary rule (P4, #2371) keeps it from coming back.
 //
-// Loop safety: routeRequest's advanceRequest is an update on the SAME
-// v1:forge:request, which fires node.updated -- consumed only by recordTransition,
-// which writes v1:forge:requestEvent (a DIFFERENT concept) and so never re-fires
-// node.updated on v1:forge:request. No cycle.
+// Loop safety (memql#5381): EVERY write publishes graph.node.created -- the store
+// is append-only -- so routeRequest's own advanceRequest, an update on the SAME
+// v1:forge:request, fires graph.node.created again as well as node.updated.
+// Without a filter routeRequest re-fired on its own advance, forever, bounded
+// only by the automation budget. The first-version filter is what stops it: an
+// update's created event carries firstVersion false, and the static loop check
+// at load (component/automations/loop_graph.go) refuses the automation without
+// it. recordTransition writes v1:forge:requestEvent, a DIFFERENT concept, so it
+// never re-fires anything on v1:forge:request.
 
 /// On submission of a v1:forge:request, route it to its next approval-pipeline state by the
 /// submitter's role (owner fast-track -> queued / developer -> needs_approval / non-developer ->
-/// needs_validation) and record a 'routed' audit event. Decide -> switch -> persist: the
-/// role->status policy lives in logic requestRouteStatus; approvedByUserId is stamped ONLY in the
-/// queued (owner fast-track) case. P1 #2368.
+/// needs_validation) and record a 'routed' audit event. Fires on the request's FIRST version only
+/// (firstVersion, declared below so the filter can read it), never on its own advance. Decide ->
+/// switch -> persist: the role->status policy lives in logic requestRouteStatus; approvedByUserId
+/// is stamped ONLY in the queued (owner fast-track) case. P1 #2368.
 @trigger(event="node.created", concept="v1:forge:request", partition="*")
+@filter(row => args.firstVersion == true)
 automation routeRequest {
   args {
+    firstVersion bool
     id any
     submitterRole any
     submitterUserId any
