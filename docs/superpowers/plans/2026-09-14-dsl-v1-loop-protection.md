@@ -727,7 +727,7 @@ func AutomationLoopsStoppedValue(automation, reason string) float64 {
 - [ ] **Step 1:** Write both tests. Run `go test github.com/znasllc-io/memql/component/automations/ -run 'RunCause|LoopBound|LoopDepth'`. Expect FAIL (undefined).
 - [ ] **Step 2:** Implement `loop_runtime.go`, the metric, `journal_loop.go`, the executor call sites, the resume and adopt restore, and `terminal.go`, plus `component/work/terminal_test.go` for the new code.
 - [ ] **Step 3:** Run the tests (PASS), then `go test github.com/znasllc-io/memql/component/automations/... github.com/znasllc-io/memql/component/work/... github.com/znasllc-io/memql/component/metrics/...` and the db-gated `./component/automations/...`.
-- [ ] **Step 4:** Register `MEMQL_AUTOMATION_MAX_CHAIN_DEPTH` in `scripts/secrets/manifest.yaml`: component `safety`, scope `node`, default `"16"`, `optional: true`, description "The deepest chain of automation runs one root cause may drive before the next run is refused as loop_depth_exceeded, recording the chain on the refused run." Then `make env-registry-sync && make env-registry-check`.
+- [ ] **Step 4:** STRUCK: Task 3 already registered `MEMQL_AUTOMATION_MAX_CHAIN_DEPTH` (the forward-drift gate required it with the first read). Do not register it again; `make env-registry-check` must still pass.
 - [ ] **Step 5:** Commit `Issue #5382: a run carries its chain; one past the cap is a loop_depth_exceeded failure naming the chain`.
 
 ---
