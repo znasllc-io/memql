@@ -18,6 +18,20 @@ schema, request and save mutations, imports, language manifest, and operational
 prerequisites. The excerpts below show the four parts worth inspecting first.
 They depend on those surrounding definitions.
 
+## Start with the core declarations
+
+The same file declares a **concept** (`researchBrief`) for typed stored data,
+and a **shape** (`researchBriefSummary`) for the returned fields. A **trait**
+(`hasDraftStatus`) is a reusable row predicate whose fields are checked where
+it is applied. A **spec** (`hasResearchAnswer`) binds its predicate to the
+`researchBrief` concept. The cached query below composes both conditions with
+the caller's ownership check and applies the shape.
+
+**Queries** read; **mutations** write. **Logic** composes calls and returns a
+value; an **automation** runs those steps from an event or schedule. The
+complete example shows each in context. See [specs and traits](specifications.md)
+and the [language reference](memql.md) for the full contracts.
+
 ## 1. Retrieve relevant passages
 
 Use the core Library builtin to search by meaning with the caller's ownership
@@ -82,9 +96,11 @@ model responses or embedding calls.
 @actor
 @cache(300)
 query researchBrief researchBriefs {
-  filter row => row.ownerUserId == actor.userId && row.status == "draft"
+  filter row => row.ownerUserId == actor.userId &&
+    hasDraftStatus(row) && hasResearchAnswer(row)
   sort "row.createdAt", "desc"
   paginate 20
+  shape researchBriefSummary
 }
 ```
 

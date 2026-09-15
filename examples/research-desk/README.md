@@ -89,6 +89,27 @@ automation can make another model call. Reusing a brief ID appends a version;
 use a fresh ID to request a new brief. Saving the draft emits an update rather
 than another create event, so this trigger does not loop on its own output.
 
+## Core constructs in this file
+
+| Construct | Its job here |
+|---|---|
+| `concept researchBrief` | Declares typed stored fields and row ownership. |
+| `shape researchBrief researchBriefSummary` | Selects the fields returned to a draft reader. |
+| `trait hasDraftStatus` | Names a reusable row condition; fields are checked against the concept where it is applied. |
+| `spec researchBrief hasResearchAnswer` | Binds the nonempty-answer condition to this concept. |
+| `query researchBrief researchBriefs` | Composes the predicates and ownership filter, then returns the chosen shape. |
+| `mutation researchBrief requestResearchBrief` | Writes the request; `saveResearchBrief` appends its outcome. |
+| `logic` | Composes calls and returns a value for another step to use. |
+| `automation prepareResearchBrief` | Starts on a create event and connects the calls into a workflow. |
+
+A trait has no fixed concept binding; a spec binds exactly one concept or
+shape. Both are side-effect-free predicates. Neither replaces the explicit
+ownership check in the query. Draft reads require a nonempty answer.
+
+[Specs and traits](../../docs/public/language/specifications.md) ·
+[Shapes](../../docs/public/language/memql.md#shapes) ·
+[Queries and mutations](../../docs/public/language/functions.md).
+
 ## What each capability does
 
 **Similarity.** `librarySimilarArtifacts` uses vector similarity over indexed

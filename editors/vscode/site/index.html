@@ -240,6 +240,101 @@
         aria-labelledby="example-title"
       >
         <div class="wrap">
+          <div class="core-language" aria-labelledby="core-title">
+            <p class="section-label">01 / Core language</p>
+            <div class="section-intro">
+              <h2 id="core-title">Define the pieces.</h2>
+              <p>
+                Concepts model data. Traits and specs name conditions. Shapes,
+                queries, and mutations define what comes out and what changes.
+              </p>
+            </div>
+            <div class="example-layout">
+              <div class="example-controls">
+                <div
+                  class="example-tabs"
+                  role="tablist"
+                  aria-label="Core language constructs"
+                  aria-orientation="vertical"
+                >
+                  <button
+                    role="tab"
+                    id="core-model"
+                    aria-controls="core-panel"
+                    aria-selected="false"
+                    tabindex="-1"
+                    data-core-example="0"
+                  >
+                    <span>Concepts &amp; shapes</span
+                    ><small>Define data and its projection</small>
+                  </button>
+                  <button
+                    role="tab"
+                    id="core-predicates"
+                    aria-controls="core-panel"
+                    aria-selected="true"
+                    data-core-example="1"
+                  >
+                    <span>Traits &amp; specs</span
+                    ><small>Reuse and bind conditions</small>
+                  </button>
+                  <button
+                    role="tab"
+                    id="core-write"
+                    aria-controls="core-panel"
+                    aria-selected="false"
+                    tabindex="-1"
+                    data-core-example="2"
+                  >
+                    <span>Queries &amp; mutations</span
+                    ><small>Separate reads from writes</small>
+                  </button>
+                </div>
+                <p class="example-note">
+                  The same research-brief domain, from its foundation up.
+                </p>
+              </div>
+              <div
+                class="example-code"
+                id="core-panel"
+                role="tabpanel"
+                tabindex="0"
+                aria-labelledby="core-predicates"
+              >
+                <div class="example-code-title">
+                  <span>brief.memql · core declarations</span>
+                </div>
+                <pre><code id="core-code">/// A reusable condition for concepts with a compatible status field.
+trait hasDraftStatus = row =&gt; row.status == "draft"
+
+/// A condition bound specifically to the researchBrief concept.
+spec researchBrief hasResearchAnswer = row =&gt; row.answer != nil &amp;&amp; row.answer != ""</code></pre>
+                <p id="core-description">
+                  A trait is an unbound row predicate; a spec binds its
+                  predicate to one concept or shape. The draft query below
+                  applies both, alongside the caller’s ownership check.
+                </p>
+              </div>
+            </div>
+            <p class="core-bridge">
+              <strong>Logic</strong> composes calls and returns a value.
+              <strong>Automation</strong> starts those steps from an event or
+              schedule. Put these building blocks to work in the example below.
+            </p>
+            <p class="showcase-links">
+              <a
+                href="https://github.com/znasllc-io/memql/blob/main/docs/public/language/specifications.md"
+                >Specs and traits reference</a
+              >
+              ·
+              <a
+                href="https://github.com/znasllc-io/memql/blob/main/docs/public/language/memql.md"
+                >Language reference</a
+              >
+              · <a href="research-guide.md">Complete example and setup</a>
+            </p>
+          </div>
+          <p class="section-label">02 / Advanced example</p>
           <div class="section-intro">
             <h2 id="example-title">
               From a question<br />to a research draft.

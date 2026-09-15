@@ -33,7 +33,9 @@ go run ./cmd/memqllint examples/research-desk
 
 `build.mjs --check` verifies asset paths, internal anchors, source/output parity,
 and the absence of inline scripts. The code tabs are extracted from marked
-regions in the complete sample rather than maintained as separate snippets. It does not check live external URLs or run
+regions in the complete sample rather than maintained as separate snippets.
+Core declarations and advanced workflow examples are separate tab groups;
+traits/specs are initially visible in the core group. It does not check live external URLs or run
 the example against a cluster.
 
 ## Browser verification

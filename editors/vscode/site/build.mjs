@@ -38,7 +38,7 @@ async function check() {
   if ((await readFile(path.join(output, "brief.memql"), "utf8")) !== example) {
     throw new Error("Download differs from canonical example; rebuild");
   }
-  const expectedData = `export const examples = ${JSON.stringify(showcasePieces(example), null, 2)};\n`;
+  const expectedData = showcaseModule(example);
   if (
     (await readFile(path.join(output, "example-data.js"), "utf8")) !==
     expectedData
@@ -139,8 +139,11 @@ async function editorThemeCSS() {
   );
 }
 
-function showcasePieces(example) {
-  return ["search", "ai", "cache", "automation"].map((name) => {
+function showcasePieces(
+  example,
+  names = ["search", "ai", "cache", "automation"],
+) {
+  return names.map((name) => {
     const start = `// showcase:${name}:start\n`;
     const end = `// showcase:${name}:end`;
     const chunk = example.split(start)[1]?.split(end)[0]?.trim();
@@ -148,6 +151,13 @@ function showcasePieces(example) {
       throw new Error(`Missing showcase region: ${name}`);
     return chunk;
   });
+}
+
+function showcaseModule(example) {
+  return (
+    `export const examples = ${JSON.stringify(showcasePieces(example), null, 2)};\n` +
+    `export const coreExamples = ${JSON.stringify(showcasePieces(example, ["model", "predicates", "write"]), null, 2)};\n`
+  );
 }
 
 async function researchGuide() {
@@ -201,10 +211,9 @@ async function build() {
     path.join(output, "research-guide.md"),
     await researchGuide(),
   );
-  const pieces = showcasePieces(example);
   await writeFile(
     path.join(output, "example-data.js"),
-    `export const examples = ${JSON.stringify(pieces, null, 2)};\n`,
+    showcaseModule(example),
   );
   await cp(
     path.join(root, "examples/research-desk/research/memql.toml"),

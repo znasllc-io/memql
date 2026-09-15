@@ -1,6 +1,7 @@
 use library.builtins.{ librarySimilarArtifacts }
 use agents.builtins.{ runAgentTurn }
 
+// showcase:model:start
 /// A requested research brief and the draft saved for its owner to review.
 @rowAuthz(owner="ownerUserId")
 @displayCard(primary="question", status="status")
@@ -13,6 +14,18 @@ concept researchBrief {
   sources     []object
 }
 
+/// Select the fields a draft reader needs.
+@row
+shape researchBrief researchBriefSummary {
+  row.id
+  question
+  status
+  answer
+  sources
+}
+// showcase:model:end
+
+// showcase:write:start
 /// Request a brief. A new ID creates the event that starts the automation.
 @actor
 mutation researchBrief requestResearchBrief {
@@ -30,6 +43,8 @@ mutation researchBrief requestResearchBrief {
     }
   }
 }
+
+// showcase:write:end
 
 /// Append the completed draft (or no-source outcome) under the same row ID.
 @actor
@@ -85,14 +100,24 @@ logic draftResearchAnswer {
 }
 // showcase:ai:end
 
+// showcase:predicates:start
+/// A reusable condition for concepts with a compatible status field.
+trait hasDraftStatus = row => row.status == "draft"
+
+/// A condition bound specifically to the researchBrief concept.
+spec researchBrief hasResearchAnswer = row => row.answer != nil && row.answer != ""
+// showcase:predicates:end
+
 // showcase:cache:start
 /// Read your saved drafts; TTL is in seconds, writes invalidate the cache.
 @actor
 @cache(300)
 query researchBrief researchBriefs {
-  filter row => row.ownerUserId == actor.userId && row.status == "draft"
+  filter row => row.ownerUserId == actor.userId &&
+    hasDraftStatus(row) && hasResearchAnswer(row)
   sort "row.createdAt", "desc"
   paginate 20
+  shape researchBriefSummary
 }
 // showcase:cache:end
 

@@ -127,10 +127,49 @@ try {
     (await context.request.get(url + "brand/mark.svg")).status(),
     200,
   );
+  assert.equal(
+    await page.locator("#core-predicates").getAttribute("aria-selected"),
+    "true",
+  );
+  for (const [index, expected] of [
+    "concept researchBrief",
+    "trait hasDraftStatus",
+    "mutation researchBrief",
+  ].entries()) {
+    await page.locator("[data-core-example]").nth(index).click();
+    assert.ok(
+      (await page.locator("#core-code").innerText()).includes(expected),
+    );
+    assert.equal(
+      await page.locator("[data-core-example][aria-selected=true]").count(),
+      1,
+    );
+    assert.equal(
+      await page.locator("#tab-search").getAttribute("aria-selected"),
+      "true",
+      "core selection leaves advanced example intact",
+    );
+  }
+  await page.locator("#core-write").focus();
+  await page.keyboard.press("Home");
+  assert.equal(
+    await page.evaluate(() => document.activeElement.id),
+    "core-model",
+  );
+  await page.keyboard.press("ArrowDown");
+  assert.equal(
+    await page.evaluate(() => document.activeElement.id),
+    "core-predicates",
+  );
+  assert.ok(
+    (await page.locator("#core-code").innerText()).includes(
+      "spec researchBrief hasResearchAnswer",
+    ),
+  );
   for (let i = 0; i < 4; i++) {
     await page.locator("[data-example]").nth(i).click();
     assert.equal(
-      await page.locator("[role=tab][aria-selected=true]").count(),
+      await page.locator("[data-example][aria-selected=true]").count(),
       1,
     );
     assert.ok(
@@ -315,6 +354,11 @@ try {
     ),
   );
   assert.equal(await plainPage.locator("a[download]").count(), 2);
+  assert.ok(
+    (await plainPage.locator("#core-code").innerText()).includes(
+      "trait hasDraftStatus",
+    ),
+  );
   assert.equal(
     await plainPage.locator(".appearance-controls").isVisible(),
     false,
@@ -366,7 +410,7 @@ try {
         "invalid and denied storage",
         "rendered text contrast",
         "CSP",
-        "tabs",
+        "core and advanced tab groups",
         "keyboard",
         "clipboard success/refusal",
         "downloads",
