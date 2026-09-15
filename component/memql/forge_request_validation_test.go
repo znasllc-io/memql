@@ -311,10 +311,7 @@ func TestForgeRoleXTransitionMatrix(t *testing.T) {
 }
 
 // emptyAsDash renders an empty status as a readable word in a failure
-// message. It lived in harness_step_validation_test.go, which the work
-// spine's epic A1 deleted with the harness step guard; this file was its
-// only other user, so it moves here rather than staying a package-level
-// helper nothing owns.
+// message for the forge request transition tests.
 func emptyAsDash(s string) string {
 	if s == "" {
 		return "none"

@@ -2,7 +2,7 @@ package memql
 
 import "time"
 
-// harness_consolidation.go holds the pure, table-testable decision
+// memory_consolidation.go holds the pure, table-testable decision
 // helpers for memory consolidation (#586) -- the episodic -> semantic
 // distillation pass driven by the consolidateMemory automation in
 // dsl/memory/automations.memql.
@@ -10,11 +10,11 @@ import "time"
 // These helpers isolate the consolidation DECISIONS that the MemQL DSL
 // cannot express (arithmetic on confidence + datetime ages, the
 // reinforce-vs-create branch, the prune cutoff) so they can be unit-
-// tested without a database -- mirroring stepTransitionAllowed in
-// harness_step_validation.go. The scheduled automation + LLM-distill
+// tested without a database, like forgeRequestTransitionAllowed in
+// forge_request_validation.go. The scheduled automation + LLM-distill
 // path is integration-covered; the math + branching that determines
 // "reinforce vs create", "how confidence moves", and "when to prune"
-// lives here and is covered by harness_consolidation_test.go.
+// lives here and is covered by memory_consolidation_test.go.
 //
 // The Go consolidation handler (registered by the agent-node init
 // path) calls these helpers and feeds their results into the harness
