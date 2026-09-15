@@ -1511,6 +1511,7 @@ export interface CreateAuthoringConstructArgs {
   name: string;
   targetNamespace: string;
   source: string;
+  origin?: string;
   grammarVersion?: string;
 }
 
@@ -1522,6 +1523,7 @@ export function buildCreateAuthoringConstruct(args: CreateAuthoringConstructArgs
   parts.push("name: " + renderMemQLValue(args.name));
   parts.push("targetNamespace: " + renderMemQLValue(args.targetNamespace));
   parts.push("source: " + renderMemQLValue(args.source));
+  if (args.origin !== undefined) parts.push("origin: " + renderMemQLValue(args.origin));
   if (args.grammarVersion !== undefined) parts.push("grammarVersion: " + renderMemQLValue(args.grammarVersion));
   return "mutation createAuthoringConstruct(" + parts.join(", ") + ")";
 }

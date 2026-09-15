@@ -145,7 +145,7 @@ func (f trainingFixture) conceptSrc() string {
 concept %s {
   ownerUserId  string  @required
   label        string
-}`, f.namespace, f.concept)
+}`, f.concept)
 }
 
 // conceptSrcAdditive adds one OPTIONAL field. Design section 7.3: additive lands.
@@ -156,7 +156,7 @@ concept %s {
   ownerUserId  string  @required
   label        string
   notes        string
-}`, f.namespace, f.concept)
+}`, f.concept)
 }
 
 // conceptSrcBreaking REMOVES a field that rows already carry. Design section
@@ -167,7 +167,7 @@ func (f trainingFixture) conceptSrcBreaking() string {
 concept %s {
   ownerUserId  string  @required
   notes        string
-}`, f.namespace, f.concept)
+}`, f.concept)
 }
 
 // mutationSrc binds the promoted concept by its SIGNATURE, which is the binding
@@ -213,6 +213,11 @@ query %s %s {
   filter  ownerUserId==actor.userId
 }`, f.namespace, f.concept, f.concept, f.query)
 }
+
+// origin is the tree-relative path the bundle is authored against. Since epic
+// memql#5375 retired @namespace, a concept's domain comes from here -- and this
+// fixture's whole point is a namespace unique per run, which conceptId asserts.
+func (f trainingFixture) origin() string { return f.namespace + "/concepts.memql" }
 
 // bundle is what a promote actually carries: the concept AND the constructs
 // bound to it. Promoting the noun alone would leave nothing able to write to it.
@@ -363,7 +368,7 @@ func TestConceptTrainingRoundTripsAcrossTheMesh(t *testing.T) {
 	}
 
 	// --- 2. promote ---------------------------------------------------------
-	res, err := promoter.DurablePromoteBundle(ctx, f.bundle())
+	res, err := promoter.DurablePromoteBundle(ctx, f.bundle(), authoring.WithPromoteOrigin(f.origin()))
 	skipUnlessOwner(t, res, err)
 	if err != nil {
 		t.Fatalf("durable promote: %v", err)
@@ -408,7 +413,7 @@ func TestConceptTrainingRoundTripsAcrossTheMesh(t *testing.T) {
 	}
 
 	// --- 5. an ADDITIVE re-promote lands ------------------------------------
-	add, err := promoter.DurablePromoteBundle(ctx, f.bundleWith(f.conceptSrcAdditive()))
+	add, err := promoter.DurablePromoteBundle(ctx, f.bundleWith(f.conceptSrcAdditive()), authoring.WithPromoteOrigin(f.origin()))
 	if err != nil {
 		t.Fatalf("additive re-promote: %v", err)
 	}
@@ -420,7 +425,7 @@ func TestConceptTrainingRoundTripsAcrossTheMesh(t *testing.T) {
 	}
 
 	// --- 6. a BREAKING re-promote is refused, naming the field --------------
-	brk, err := promoter.DurablePromoteBundle(ctx, f.bundleWith(f.conceptSrcBreaking()))
+	brk, err := promoter.DurablePromoteBundle(ctx, f.bundleWith(f.conceptSrcBreaking()), authoring.WithPromoteOrigin(f.origin()))
 	if err == nil && brk.OK {
 		t.Fatal("removing a field that rows carry was allowed without the override")
 	}
@@ -440,7 +445,7 @@ func TestConceptTrainingRoundTripsAcrossTheMesh(t *testing.T) {
 	}
 
 	// --- 7. the override lands it -------------------------------------------
-	ovr, err := promoter.DurablePromoteBundle(ctx, f.bundleWith(f.conceptSrcBreaking()), authoring.AllowBreaking())
+	ovr, err := promoter.DurablePromoteBundle(ctx, f.bundleWith(f.conceptSrcBreaking()), authoring.AllowBreaking(), authoring.WithPromoteOrigin(f.origin()))
 	if err != nil {
 		t.Fatalf("override promote: %v", err)
 	}
@@ -491,7 +496,7 @@ func TestConceptTrainingRoundTripsAcrossTheMesh(t *testing.T) {
 	// so it adds `label` back without taking `notes` away and lands with no
 	// override -- which is the point being made: un-retiring is an ordinary
 	// promote, not a privileged one.
-	un, err := promoter.DurablePromoteBundle(ctx, f.bundleWith(f.conceptSrcAdditive()))
+	un, err := promoter.DurablePromoteBundle(ctx, f.bundleWith(f.conceptSrcAdditive()), authoring.WithPromoteOrigin(f.origin()))
 	if err != nil {
 		t.Fatalf("re-promote to un-retire: %v", err)
 	}
