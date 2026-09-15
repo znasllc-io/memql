@@ -19,7 +19,6 @@ import (
 
 	"github.com/znasllc-io/memql/component/events"
 	"github.com/znasllc-io/memql/component/language/ast"
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // filterCase is one filter decided against one row.
@@ -210,14 +209,8 @@ func filterCases() []filterCase {
 	}
 }
 
-func mustLambda(t *testing.T, src string) *ast.LambdaExpr {
-	t.Helper()
-	lam, err := languageParser.ParseV1Lambda(src)
-	if err != nil {
-		t.Fatalf("parse %q: %v", src, err)
-	}
-	return lam
-}
+// mustLambda is loop_until_test.go's: the @loop and the graph streams wrote
+// the same helper, and one package holds one.
 
 func TestDecideFilter(t *testing.T) {
 	for _, tc := range filterCases() {
