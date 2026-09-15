@@ -214,6 +214,18 @@ type MemQLEngine struct {
 	// no registry for; component/automations wires itself in here at bootstrap.
 	// Nil on a binary with no scheduler, which then reports no automations.
 	automationCataloger AutomationCataloger
+	// automationGraphSource supplies the static loop graph over the
+	// automations this node's scheduler registered, for the automationGraph
+	// builtin (automation_graph_read.go, memql#5384). Wired at bootstrap via
+	// SetAutomationGraphSource; nil on a binary with no scheduler, where the
+	// builtin REFUSES rather than answering an empty graph.
+	automationGraphSource AutomationGraphSource
+	// loopStopRows reads the runs the loop protection stopped. Nil means the
+	// production read, workRunsStoppedByLoops under the engine's own cluster
+	// actor (readLoopStopRows). A seam, not a configuration knob: nothing
+	// sets it outside a test, and it exists so the capability gate and the
+	// projection can be exercised without a database.
+	loopStopRows func(context.Context) ([]map[string]any, error)
 	// authoredAudit is the sink authored-lifecycle audit events emitted from
 	// INSIDE the engine reach v1:identity:auditEvent through -- currently the
 	// breaking concept schema-change override (memql#3757). Wired at bootstrap

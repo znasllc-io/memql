@@ -48,6 +48,11 @@ type Scheduler struct {
 	// nil = ungated (every node runs crons -- the pre-#561 behaviour, and
 	// the dev/single-node default).
 	leaderGate func() bool
+
+	// graphRows is the static loop graph over the registered automations,
+	// built on the first automationGraph read and kept until the registered
+	// set changes (loop_graph_rows.go, memql#5384).
+	graphRows graphRowsCache
 }
 
 // SchedulerOptions configures the automation scheduler.

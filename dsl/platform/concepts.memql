@@ -338,6 +338,61 @@ concept dataOrigin {
   connectors  []string  @description("Every connector name this concept depends on -- its external origin plus every mirror target, sorted. Never contains \"memql\": MemQL is not a connector. This is the set the engine resolves at boot, and an unresolvable name refuses it.")
 }
 
+/// Virtual projection of one AUTOMATION as the static loop graph sees it (epic memql#5380, D-L). Never
+/// persisted -- rows are produced at query time by the `automationGraph` builtin from the automations
+/// the answering node's scheduler registered, the same shape as v1:platform:dataOrigin.
+///
+/// It is the map half of the OS's Cluster > Automations section: which automation's writes start
+/// which other automation, in what order (the strata), and where the loops are. What each automation
+/// DID is not here -- no run, no payload, no argument value -- because the question the page answers
+/// is how the cluster is wired, and v1:work:run already answers the other one.
+///
+/// PER NODE, like dataOrigin. The graph is built from the scheduler that answered, over the tree and
+/// bundle that node loaded; two nodes that loaded different bundles would answer differently, and
+/// that difference is the truth about them.
+@displayCard(primary="name", secondary="trigger", tertiary="stratum")
+concept automationNode {
+  name            string!    @description("The automation's name. Also the row id -- there is one row per registered automation and the automation is what it is about.")
+  stratum         int!       @description("Its layer in the graph read left to right: 0 is fired from outside (a person, a schedule, or a topic nothing here publishes), and N reacts to stratum N-1 at the latest. Every member of one cycle shares a stratum.")
+  trigger         string     @description("The subscription topic its @trigger folds to (graph.node.created.v1:forge:request). Absent for a scheduled automation and for a template.")
+  triggerKind     string     @description("The event kind of a graph trigger (node.created, node.updated), recovered from the topic. Absent for a raw application topic, which trigger then carries whole.")
+  triggerConcept  string     @description("The concept a graph trigger reacts to, recovered from the topic. node.created fires on every write, because every write is a new row; node.updated fires on updates only.")
+  schedule        string     @description("Its cron schedule, when it runs on one.")
+  template        bool       @description("True for a @template automation, which a goal's run names rather than an event or a schedule firing it.")
+  triggerFilter   string     @description("Its @filter's source. The graph reads it three-valued against what each write is known to set, and only a filter the write provably fails removes an edge.")
+  writes          []string   @description("Every concept it writes, directly, through logic and through the sub-automations it calls. Never null.")
+  publishes       []string   @description("Every topic it publishes. (expression) stands for an event whose topic is known only at run time. Never null.")
+  opaque          []string   @description("The calls the graph cannot see into -- builtins, actions, webhooks -- so what they write draws no edge. The run-time depth cap still stops a loop that runs through one. Never null.")
+  loop            object     @description("{maxDepth, until} from its @loop, when it carries one: the cycle it closes is permitted, stops when until holds, and runs at most maxDepth times in one causal chain.")
+  mode            object     @description("{kind, max} from its @mode, when it declares one. max is absent where the default applies.")
+  edgesOut        []object   @description("The automations it starts: [{to, concept, topic, via, decided, reason}]. via is the call path that reaches the write; decided is false when the load could not read the target's filter against the write, and reason says why in either case. Never null.")
+  cycle           object     @description("{members, permittedBy, path, permitted} when it lies on a cycle. permitted is false for a cycle no @loop covers: the load refuses one, unless the break-glass let it through.")
+  problem         string     @description("The refusal the load makes about this automation -- an uncovered cycle's representative path, each edge's reason, and the fix -- when it makes one.")
+  origin          string     @description("The file it was loaded from. Not to be confused with a CONCEPT's data origin.")
+}
+
+/// Virtual projection of one run the LOOP PROTECTION STOPPED (epic memql#5380, D-C). Never persisted
+/// as itself -- rows are produced at query time by the `automationLoopStops` builtin from the latest
+/// v1:work:run rows whose errorCode is loop_depth_exceeded, the same shape as v1:platform:dataOrigin.
+///
+/// A PROJECTION, NOT THE RUN ROW, and the difference is the point: a run row carries its input, its
+/// variables and its triggering event's payload, and none of that is here -- only the chain of
+/// automation names and run ids that led to the stop, the bound it passed, and when. It is a concept
+/// of its own rather than a v1:work:run node for a second reason: a run row is on the composite
+/// owner tier, and a system run has no owner, so a builtin reply carrying it would be filtered to
+/// nothing for every reader who is not a cluster owner. The builtin's capability is the wall.
+@displayCard(primary="automationName", secondary="reason", tertiary="finishedAt")
+concept automationLoopStop {
+  runId           string!    @description("The refused run's id. Also the row id.")
+  automationName  string!    @description("The automation that would have run and was refused: the last link of the chain, which the chain itself does not hold because the refused run never ran.")
+  finishedAt      datetime   @description("When the refusal landed.")
+  reason          string     @description("Which bound stopped it. depth: the chain passed MEMQL_AUTOMATION_MAX_CHAIN_DEPTH. loop_bound: the chain already held as many runs of this automation as its @loop's maxDepth allows. Absent for a run that failed because a sub-automation it called was refused: that run carries the code and no loop record of its own.")
+  depth           int        @description("The depth the refused run would have had. Absent, never zero, when the run carries no loop record.")
+  cap             int        @description("The bound it passed: the cluster's depth cap for depth, the @loop's maxDepth for loop_bound. Absent, never zero, when the run carries no loop record.")
+  correlationId   string     @description("The chain's correlation id, shared by every run in it.")
+  chain           []object   @description("The runs that led here, oldest first: [{automation, runId}]. Without the refused run, which never ran and is automationName.")
+}
+
 /// Virtual projection of one AI PROVIDER's auth state on THIS node (epic memql#4440). Never
 /// persisted -- rows are produced at query time by the owner-only `providerAuthStatus` builtin from
 /// the live provider registry, the same shape as v1:platform:dataOrigin and v1:router:modelCatalog.

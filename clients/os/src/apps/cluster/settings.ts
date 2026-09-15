@@ -48,11 +48,18 @@ import type { OsAppSection } from "../../system/registry";
  *
  * LOGS IS `{ min: "admin" }` because every read on the log store is (spec
  * L3). It is the one section whose floor is not this app's to choose.
+ *
+ * AUTOMATIONS IS `app:cluster/automations`, seeded on owner, developer and
+ * admin, and it is a MIRROR in the strongest sense: the two builtins it reads
+ * (`automationGraph`, `automationLoopStops`) declare
+ * `@requiresCapability("read", "app:cluster/automations")` themselves, so the
+ * engine refuses exactly the people this entry hides it from (memql#5384).
  */
 export const CLUSTER_SECTIONS: OsAppSection[] = [
   { id: "readiness", name: "Readiness" },
   { id: "modules", name: "Modules", requires: "app:cluster/modules" },
   { id: "origins", name: "Data origins", requires: "app:cluster/origins" },
+  { id: "automations", name: "Automations", requires: "app:cluster/automations" },
   { id: "agents", name: "Agents" },
   { id: "audit", name: "Audit trail", requires: "app:cluster/audit" },
   { id: "logs", name: "Logs", requires: "app:cluster/logs" },
