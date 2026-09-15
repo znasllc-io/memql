@@ -433,6 +433,110 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	if adopt != nil {
 		exec.ID = adopt.RunId
 	}
+	// Internal origin requires a trusted SOURCE and a trigger payload the
+	// caller did not supply. See ExecuteWithClientEvent for why the source
+	// alone is not enough (memql#2888).
+	exec.SourceTrusted = automation.Trusted && !callerSuppliedPayload
+	exec.CallerSuppliedPayload = callerSuppliedPayload
+
+	// The run's place in its causal chain (epic memql#5380): its parent -- the
+	// triggering event's cause, else the calling run's for a sub-automation --
+	// and its own, one deeper. The loop bound is decided here and acted on
+	// after the dedup gates below; until then the fire runs under the cause
+	// contextWithRunCause picks. See loop_runtime.go.
+	parentCause, cause := runCause(ctx, automation, exec.ID, triggeringEvent)
+	loopRefusal := loopBound(automation, cause, maxChainDepth())
+	ctx = contextWithRunCause(ctx, parentCause, cause, loopRefusal)
+
+	// Reserve the event before acquiring a mode: a redelivery must not
+	// cancel a valid in-flight restart run. Every later refusal releases it.
+	// Chain tracking initialization (when enabled)
+	var chainHead string
+	if e.chainTrackingEnabled {
+		// Initialize step order tracking
+		exec.StepOrder = make([]string, 0, len(automation.Steps))
+
+		// Build event data for fingerprinting
+		eventData := chainEventData(triggeringEvent, automation, cause.CorrelationId)
+
+		// Fingerprint input if present
+		if exec.Input != nil {
+			exec.InputFingerprint = FingerprintInput(exec.Input)
+		}
+
+		// Compute initial chain head
+		exec.InitialChainHead = ComputeInitialChainHead(
+			automationModeIdentity(automation),
+			triggeredBy,
+			eventData,
+			exec.InputFingerprint,
+		)
+		chainHead = exec.InitialChainHead
+
+		// Check for duplicate execution (only when dedup is explicitly enabled)
+		// Dedup should only be used for event-triggered automations where
+		// idempotency matters. Scheduled/manual runs should NOT use dedup.
+		// AN ADOPTED RUN IS EXEMPT FROM BOTH DEDUP GATES, and this is not an
+		// optimisation. Both key on the initial chain head, which is a hash of
+		// (automation, triggeredBy, event, input) -- so two DIFFERENT goals
+		// that compile to the same template with the same input produce the
+		// SAME key. The per-process gate would skip the second as a duplicate
+		// and the cluster guard's once-ever claim would skip every later one
+		// cluster-wide, leaving those goals' runs at `running` with no
+		// heartbeat until the abandoned sweep closed them. Two people asking
+		// for the same thing is not a double-fire. An adopted run's identity
+		// is its run id, and its claim is held by the caller (the work
+		// integration's Postgres-backed ClusterExecutionGuard, keyed on that
+		// id), which is both stronger and the right grain.
+		duplicate, echo := false, false
+		if adopt == nil && e.dedupEnabled && e.dedup != nil {
+			identity := cause.CorrelationId
+			if !parentCause.IsZero() {
+				identity = rootCorrelation(triggeringEvent)
+			}
+			duplicate, echo = e.dedup.claimOrDuplicate(automation.Name, exec.InitialChainHead, identity, exec.ID)
+			if !duplicate {
+				defer func() {
+					if exec.Status != "completed" {
+						e.dedup.release(automation.Name, exec.InitialChainHead, exec.ID)
+					}
+				}()
+			}
+		}
+		if duplicate {
+			if echo {
+				metrics.AutomationLoopStopped(automation.Name, metrics.LoopStopEcho)
+			}
+			if e.logger != nil {
+				e.logger.Info("skipping duplicate execution",
+					"component", ComponentName,
+					"automation", automation.Name,
+					"initialChainHead", exec.InitialChainHead,
+				)
+			}
+			exec.Status = "skipped"
+			exec.Error = "duplicate execution detected"
+			exec.CompletedAt = time.Now()
+			exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
+			return exec, nil
+		}
+
+	}
+
+	// A fire already refused by its chain must not cancel a healthy restart
+	// run or wait for an ancestor's concurrency slot. Claim its terminal record
+	// before journaling, just as on the ordinary event admission path.
+	if loopRefusal != nil {
+		if e.chainTrackingEnabled && adopt == nil && e.clusterGuard != nil && exec.InitialChainHead != "" && !e.clusterGuard.Claim(ctx, automation.Name, exec.InitialChainHead) {
+			exec.Status = "skipped"
+			exec.Error = "duplicate execution (cluster guard -- claimed by another replica)"
+			exec.CompletedAt = time.Now()
+			exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
+			return exec, nil
+		}
+		return e.stopLoop(ctx, automation, exec, triggeringEvent, parentCause, loopRefusal, adopt != nil)
+	}
+
 	modeCtx, releaseMode, modeErr := sharedModeGate.acquire(ctx, automation, exec.ID)
 	if modeErr != nil {
 		if refusal, ok := modeErr.(*ModeRefusal); ok {
@@ -488,12 +592,6 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	}
 	ctx = provenance.ContextWithProvenance(ctx, provenance.Automation(automation.Name, trigger))
 
-	// Internal origin requires a trusted SOURCE and a trigger payload the
-	// caller did not supply. See ExecuteWithClientEvent for why the source
-	// alone is not enough (memql#2888).
-	exec.SourceTrusted = automation.Trusted && !callerSuppliedPayload
-	exec.CallerSuppliedPayload = callerSuppliedPayload
-
 	// THE EXECUTION *IS* THE EXISTING RUN (memql#5054). Taking the id here,
 	// before anything reads exec.ID, is what makes every downstream write --
 	// the journal's step rows, its heartbeats, its terminal close -- land on
@@ -501,15 +599,6 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 	if adopt != nil {
 		exec.ID = adopt.RunId
 	}
-
-	// The run's place in its causal chain (epic memql#5380): its parent -- the
-	// triggering event's cause, else the calling run's for a sub-automation --
-	// and its own, one deeper. The loop bound is decided here and acted on
-	// after the dedup gates below; until then the fire runs under the cause
-	// contextWithRunCause picks. See loop_runtime.go.
-	parentCause, cause := runCause(ctx, automation, exec.ID, triggeringEvent)
-	loopRefusal := loopBound(automation, cause, maxChainDepth())
-	ctx = contextWithRunCause(ctx, parentCause, cause, loopRefusal)
 
 	// Global execution budget (memql#1142). The storm WARN above is a
 	// SIGNAL; this is the STOP. A process-global, cross-executor ceiling
@@ -633,77 +722,7 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 		return exec, nil
 	}
 
-	// Chain tracking initialization (when enabled)
-	var chainHead string
 	if e.chainTrackingEnabled {
-		// Initialize step order tracking
-		exec.StepOrder = make([]string, 0, len(automation.Steps))
-
-		// Build event data for fingerprinting
-		eventData := chainEventData(triggeringEvent, automation, cause.CorrelationId)
-
-		// Fingerprint input if present
-		if exec.Input != nil {
-			exec.InputFingerprint = FingerprintInput(exec.Input)
-		}
-
-		// Compute initial chain head
-		exec.InitialChainHead = ComputeInitialChainHead(
-			automation.Name,
-			triggeredBy,
-			eventData,
-			exec.InputFingerprint,
-		)
-		chainHead = exec.InitialChainHead
-
-		// Check for duplicate execution (only when dedup is explicitly enabled)
-		// Dedup should only be used for event-triggered automations where
-		// idempotency matters. Scheduled/manual runs should NOT use dedup.
-		// AN ADOPTED RUN IS EXEMPT FROM BOTH DEDUP GATES, and this is not an
-		// optimisation. Both key on the initial chain head, which is a hash of
-		// (automation, triggeredBy, event, input) -- so two DIFFERENT goals
-		// that compile to the same template with the same input produce the
-		// SAME key. The per-process gate would skip the second as a duplicate
-		// and the cluster guard's once-ever claim would skip every later one
-		// cluster-wide, leaving those goals' runs at `running` with no
-		// heartbeat until the abandoned sweep closed them. Two people asking
-		// for the same thing is not a double-fire. An adopted run's identity
-		// is its run id, and its claim is held by the caller (the work
-		// integration's Postgres-backed ClusterExecutionGuard, keyed on that
-		// id), which is both stronger and the right grain.
-		duplicate, echo := false, false
-		if adopt == nil && e.dedupEnabled && e.dedup != nil {
-			identity := cause.CorrelationId
-			if !parentCause.IsZero() {
-				identity = rootCorrelation(triggeringEvent)
-			}
-			duplicate, echo = e.dedup.claimOrDuplicate(automation.Name, exec.InitialChainHead, identity, exec.ID)
-			if !duplicate {
-				defer func() {
-					if exec.Status != "completed" {
-						e.dedup.release(automation.Name, exec.InitialChainHead, exec.ID)
-					}
-				}()
-			}
-		}
-		if duplicate {
-			if echo {
-				metrics.AutomationLoopStopped(automation.Name, metrics.LoopStopEcho)
-			}
-			if e.logger != nil {
-				e.logger.Info("skipping duplicate execution",
-					"component", ComponentName,
-					"automation", automation.Name,
-					"initialChainHead", exec.InitialChainHead,
-				)
-			}
-			exec.Status = "skipped"
-			exec.Error = "duplicate execution detected"
-			exec.CompletedAt = time.Now()
-			exec.Duration = exec.CompletedAt.Sub(exec.StartedAt)
-			return exec, nil
-		}
-
 		// Cross-replica dedup (#561): the per-process check above only covers
 		// THIS pod. When a node-type runs >=2 replicas an event can reach more
 		// than one; the cluster guard claims the (automation, chain-head) in
@@ -718,12 +737,6 @@ func (e *Executor) executeWithEvent(ctx context.Context, automation *Automation,
 				return exec, nil
 			}
 		}
-	}
-
-	// The loop bound (epic memql#5380), after the dedup gates and the cluster
-	// guard's claim so one event refused on two replicas is recorded once.
-	if loopRefusal != nil {
-		return e.stopLoop(ctx, automation, exec, triggeringEvent, parentCause, loopRefusal, adopt != nil)
 	}
 
 	// Open the run row before the first step, so every later write has a

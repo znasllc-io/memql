@@ -295,7 +295,7 @@ func TestLoopDepth_AChainOf17FiresStopsAt16(t *testing.T) {
 	// THE LIFECYCLE EVENTS CARRY THE RUN'S CAUSE (Task 2's stamping, and its
 	// negative control): each run's automation.started and automation.completed
 	// name that run as their causation at that run's depth.
-	started := h.lifecycle.waitFor(t, events.TopicAutomationStarted, 17)
+	started := h.lifecycle.waitFor(t, events.TopicAutomationStarted, 16)
 	completed := h.lifecycle.waitFor(t, events.TopicAutomationCompleted, 16)
 	for i := 0; i < 16; i++ {
 		for _, ev := range []events.Event{forExecution(t, started, execs[i].ID), forExecution(t, completed, execs[i].ID)} {
@@ -304,11 +304,12 @@ func TestLoopDepth_AChainOf17FiresStopsAt16(t *testing.T) {
 			}
 		}
 	}
-	// A refused run never ran, so nothing published on its behalf extends the
-	// chain: its started event carries its PARENT's cause, and no event on the
-	// bus names a chain longer than the cap.
-	if ev := forExecution(t, started, refused.ID); ev.Cause.Depth != 16 || ev.Cause.CausationId != execs[15].ID {
-		t.Errorf("the refused run's automation.started carries %+v, want its parent's cause (depth 16, run 16)", ev.Cause)
+	// A refused run never acquires its mode or starts. It records the
+	// terminal journal row without publishing a misleading started event.
+	for _, ev := range started {
+		if ev.Payload["executionId"] == refused.ID {
+			t.Error("depth-refused run published automation.started")
+		}
 	}
 	for _, ev := range h.lifecycle.all() {
 		if ev.Cause.Depth > 16 || len(ev.Cause.Chain) > 16 {

@@ -3,6 +3,7 @@ package automations
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -32,20 +33,43 @@ type modeGate struct {
 
 var sharedModeGate = &modeGate{}
 
+// Authored names are local to their owner; they must never cancel or block
+// another owner's same-name automation or a shipped definition.
+func automationModeIdentity(a *Automation) string {
+	if strings.HasPrefix(a.Origin, "authored:") {
+		return a.Origin + "\x00" + a.Name
+	}
+	return a.Name
+}
+
+type modeAncestryKey struct{}
+type modeAncestor struct{ identity, runID string }
+
+// This context ancestry represents synchronous callers still waiting for us.
+// Event causes alone do not: asynchronous child events may safely queue until
+// their publisher returns, so causal ancestry must not reject those fires.
+func modeRunContext(ctx context.Context, identity, runID string) context.Context {
+	prior, _ := ctx.Value(modeAncestryKey{}).([]modeAncestor)
+	chain := make([]modeAncestor, len(prior), len(prior)+1)
+	copy(chain, prior)
+	return context.WithValue(ctx, modeAncestryKey{}, append(chain, modeAncestor{identity, runID}))
+}
+
 // acquire queues before the executor semaphore, so waiters occupy no execution slot.
 func (g *modeGate) acquire(ctx context.Context, a *Automation, id string) (context.Context, func(), error) {
 	if a.Mode == nil {
 		return ctx, func() {}, nil
 	}
-	run, cancel := context.WithCancel(ctx)
+	identity := automationModeIdentity(a)
+	run, cancel := context.WithCancel(modeRunContext(ctx, identity, id))
 	g.mu.Lock()
 	if g.byName == nil {
 		g.byName = map[string]*modeState{}
 	}
-	s := g.byName[a.Name]
+	s := g.byName[identity]
 	if s == nil {
 		s = &modeState{active: map[string]context.CancelFunc{}}
-		g.byName[a.Name] = s
+		g.byName[identity] = s
 	}
 	kind, max := a.Mode.Kind, a.Mode.Max
 	if kind == "queued" && max == 0 {
@@ -62,6 +86,15 @@ func (g *modeGate) acquire(ctx context.Context, a *Automation, id string) (conte
 		refused = max > 0 && len(s.active) >= max
 	case "queued":
 		refused = len(s.active) > 0 && len(s.waiting) >= max
+		ancestors, _ := ctx.Value(modeAncestryKey{}).([]modeAncestor)
+		for _, ancestor := range ancestors {
+			if ancestor.identity == identity {
+				if _, active := s.active[ancestor.runID]; active {
+					refused = true
+					break
+				}
+			}
+		}
 	case "restart":
 		for _, stop := range s.active {
 			stop()
@@ -94,7 +127,7 @@ func (g *modeGate) acquire(ctx context.Context, a *Automation, id string) (conte
 			close(w.ready)
 		}
 		if len(s.active) == 0 && len(s.waiting) == 0 {
-			delete(g.byName, a.Name)
+			delete(g.byName, identity)
 		}
 	}
 	if kind == "queued" && len(s.active) > 0 {
