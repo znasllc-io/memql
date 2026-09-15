@@ -133,7 +133,7 @@ prompt probePrompt {
 }`,
 		"provider": doc + `
 @base
-@type("Anthropic")
+@vendor("Anthropic")
 provider probeProvider {
   auth {
     apiKey env("MEMQL_AI_ANTHROPIC_ORGANIZATION_ID")
@@ -374,7 +374,7 @@ func TestDocComment_SingleDeclEntries(t *testing.T) {
 	if decl, err := ParseToolDecl("/// Tool doc.\n@handler(type=\"function\", name=\"probeTool\")\ntool probeTool {\n  role string!\n}"); err != nil || decl.DocComment != "Tool doc." {
 		t.Errorf("ParseToolDecl: doc=%q err=%v", declDoc(decl), err)
 	}
-	if decl, err := ParseProviderDecl("/// Provider doc.\n@base\n@type(\"Anthropic\")\nprovider probeProvider {\n  auth {\n    apiKey env(\"X\")\n  }\n}"); err != nil || decl.DocComment != "Provider doc." {
+	if decl, err := ParseProviderDecl("/// Provider doc.\n@base\n@vendor(\"Anthropic\")\nprovider probeProvider {\n  auth {\n    apiKey env(\"X\")\n  }\n}"); err != nil || decl.DocComment != "Provider doc." {
 		t.Errorf("ParseProviderDecl: doc=%q err=%v", declDoc(decl), err)
 	}
 	if decl, err := ParsePolicyDecl("/// Policy doc.\n@primary(\"p\")\npolicy probePolicy {\n}"); err != nil || decl.DocComment != "Policy doc." {

@@ -438,7 +438,11 @@ func (p *Parser) parseImportBlock() ([]*ImportDecl, error) {
 // parseImportEntry parses a single `"./path" [as alias]` entry.
 func (p *Parser) parseImportEntry() (*ImportDecl, error) {
 	if !p.check(TokenString) {
-		return nil, newParseErrorf(&p.current, "expected import path string, got %q", p.current.Literal)
+		// The `import (...)` block is retired (memql#5375): `use` is the
+		// import form, and no .memql file used the block. The old message
+		// said "expected import path string", which reads as though the
+		// block were valid with different contents.
+		return nil, newParseErrorf(&p.current, "`import (...)` is retired -- declare dependencies with a file-top `use <domain>.<construct>.{ names }` import (memql#5375). %s (got %q)", annotations.AttributeRewriteHint, p.current.Literal)
 	}
 	path := p.current.Literal
 	p.advance()
@@ -2854,51 +2858,63 @@ func getAttrArgString(attr *Attribute, key string) string {
 	return ""
 }
 
-// processFunctionAttributes processes attributes for a function definition
+// processFunctionAttributes folds a function's attributes into its
+// FunctionDef.
+//
+// The six attributes this used to fold -- @deprecated, @version, @timeout,
+// @retry, @idempotent and @audit -- are deleted with their fields
+// (memql#5375). Each was parsed here, copied into the runtime Function,
+// rendered by help() and by editor hover, and refused by every allow-list:
+// the only reachable value was the zero value, and the render made a field
+// that COULD NOT be set look like one that was. @enabled and @nocache go
+// for their own reasons -- an explicit no-op, and the losing spelling of
+// @cache(0). Every refusal lives in core/baseparser's retirement ledger,
+// so each names `memqlmigrate --rewrite=attributes`.
+//
+// @version survives as a CONCEPT and SEED annotation, where it is the "v1"
+// of every canonical id; it was only ever dead on a function.
 func (p *Parser) processFunctionAttributes(d *FunctionDef, attributes []*Attribute) {
 	for _, attr := range attributes {
 		switch attr.Name {
-		case AttrEnabled:
-			d.Enabled = true
 		case AttrDisabled:
 			d.Enabled = false
-		case AttrDeprecated:
-			d.Deprecated = "deprecated"
-			if v := getAttrString(attr); v != "" {
-				d.Deprecated = v
-			}
-		case AttrVersion:
-			d.Version = getAttrString(attr)
 		case AttrDescription:
 			d.Description = getAttrString(attr)
-		case AttrTimeout:
-			d.Timeout = getAttrString(attr)
 		case AttrCache:
-			if v := getAttrArgString(attr, "ttl"); v != "" {
+			// ONE spelling (D17): the positional seconds, @cache(300),
+			// with @cache(0) meaning never. A single-argument annotation
+			// has no ambiguity for a keyword to resolve, so `ttl=` only
+			// gave the same value a second name -- and a reader had to
+			// know both spellings to grep for either.
+			if v := attrNumericString(attr); v != "" {
 				d.CacheTTL = v
-			} else if v := getAttrString(attr); v != "" {
-				d.CacheTTL = v
-			} else if v := attrNumericString(attr); v != "" {
-				// Positional numeric form (#2618): @cache(300). The
-				// registry's single ttl arg makes position unambiguous.
+			} else if v := getAttrString(attr); isAllDigits(v) {
 				d.CacheTTL = v
 			}
-		case AttrNocache:
-			// @nocache is the clearer opt-out alias for @cache(ttl="0")
-			// (5.6 / memql#1970): force "never cache", overriding default-on.
-			d.CacheTTL = "0"
-		case AttrRetry:
-			if v := getAttrArgString(attr, "count"); v != "" {
-				d.Retry, _ = strconv.Atoi(v)
-			} else if v := getAttrString(attr); v != "" {
-				d.Retry, _ = strconv.Atoi(v)
-			}
-		case AttrIdempotent:
-			d.Idempotent = true
-		case AttrAudit:
-			d.Audit = true
 		}
 	}
+}
+
+// isAllDigits reports whether s is a non-empty run of ASCII digits.
+//
+// @cache(300) reaches the attribute layer as a number or as the string
+// "300" depending on how the value was written, so both readings are
+// accepted -- but only for a plain count. Anything else is not a TTL and
+// is left for the allow-list to refuse rather than silently coerced into
+// one: the retired `@cache(ttl="300")` form arrives here as a keyword
+// argument with an EMPTY positional value, and accepting a bare
+// getAttrString would have kept it working by accident, which is the one
+// outcome that makes a retirement untestable.
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // processAutomationAttributes processes attributes for an automation. It
@@ -2907,8 +2923,6 @@ func (p *Parser) processFunctionAttributes(d *FunctionDef, attributes []*Attribu
 func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Attribute) error {
 	for _, attr := range attributes {
 		switch attr.Name {
-		case AttrEnabled:
-			d.Enabled = true
 		case AttrDisabled:
 			d.Enabled = false
 		case AttrDescription:
@@ -2916,8 +2930,15 @@ func (p *Parser) processAutomationAttributes(d *AutomationDef, attributes []*Att
 		// @deprecated / @version / @timeout / @retry / @audit / @async folded
 		// into AutomationDef fields the automation runtime never read (audited
 		// in #2712); the #2712 load gate rejects them on automations, so this
-		// fold is now dead. Deleted with those fields (#2724). They remain live
-		// on functions via processFunctionAttributes.
+		// fold is now dead. Deleted with those fields (#2724). memql#5375
+		// deleted the same six from the FUNCTION fold for the same reason,
+		// plus @enabled, an explicit no-op.
+		//
+		// @schedule(cron=...) is retired in memql#5375: @trigger(schedule=...)
+		// below is the ONE spelling, which keeps "how is this automation
+		// reached" a single annotation -- and is what lets the @template gate
+		// refuse "triggered AND called" coherently instead of having to check
+		// two annotations that mean the same thing.
 		case AttrTrigger:
 			if d.Trigger == nil {
 				d.Trigger = &TriggerDef{}
@@ -3230,7 +3251,13 @@ func (p *Parser) parseTernary() (ExpressionNode, error) {
 
 // parseLogicalOr parses OR expressions. The Go-style `||` operator is the
 // canonical form; the legacy `,`-as-OR separator is still accepted (its
-// tree-wide retirement is #977). Both sit at the OR precedence level --
+// tree-wide retirement is memql#5439 -- #977 and #5363 are both CLOSED, and
+// #5363's PR merged without taking it). It is deliberately NOT retired
+// alongside `;`-as-AND in epic memql#5375: `;` had no live producer left,
+// while `,` still folds two filters into ONE argument at a traversal call
+// (`parentOf(concept==X, concept==Y)`), which is what suppressCommaOr below
+// exists to distinguish. Retiring it without a codemod would ship a refusal
+// whose migration does not exist. Both sit at the OR precedence level --
 // looser than `&&` (parseLogicalAnd) -- so `a && b || c` parses as
 // `(a && b) || c`, matching Go.
 func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
@@ -3242,6 +3269,19 @@ func (p *Parser) parseLogicalOr() (ExpressionNode, error) {
 		return nil, nil
 	}
 
+	// `,` as OR is DEFERRED to epic memql#5363 (the expression language),
+	// not retired here, and the reason belongs beside the code.
+	//
+	// D17 lists it next to `;` as AND, and the two turned out not to be
+	// alike. `;` had no live producer left once the four machine-generated
+	// ones were fixed. `,` has one: it is how two filter expressions fold
+	// into ONE argument at a traversal call --
+	// `parentOf(concept==v1:rel:hub, concept==v1:rel:space)` -- and
+	// parseOrPipeOnly's comment below calls `(a, b)` a "still-supported OR
+	// form" in as many words. Its codemod is `--rewrite=expressions`, which
+	// memql#5363 owns along with the lambda parameter this position also
+	// changes, so retiring it here would ship a refusal whose migration does
+	// not exist yet.
 	for (!p.suppressCommaOr && p.check(TokenComma)) || p.check(TokenPipePipe) {
 		p.advance()
 		right, err := p.parseLogicalAnd()
@@ -3304,7 +3344,39 @@ func (p *Parser) parseNullCoalesce() (ExpressionNode, error) {
 	return &CoalesceExpr{Args: args}, nil
 }
 
-// parseLogicalAnd parses semicolon-separated or &&-separated (AND) expressions.
+// semicolonIsAConnective reports whether the `;` at the cursor is being used
+// as the retired AND connective rather than as a permitted TRAILING
+// semicolon.
+//
+// The distinction is the whole reason this is a function. `;` had two jobs:
+// a synonym for `&&` between two predicates, which memql#5375 retires, and a
+// tolerated statement terminator before EOF or a closing brace, which stays --
+// the internal procedural form the rewriter emits carries one. Refusing every
+// `;` reached at the AND level takes the terminator with the connective, and
+// the failure lands on the lowering rather than on anything an author wrote.
+//
+// A `;` is a connective only when something that could START a predicate
+// follows it. Runs of semicolons and a `;` before EOF or `}` are terminators.
+func (p *Parser) semicolonIsAConnective() bool {
+	if !p.check(TokenSemicolon) {
+		return false
+	}
+	for i := 1; ; i++ {
+		next := p.peekAhead(i)
+		switch next.Type {
+		case TokenSemicolon:
+			continue
+		case TokenEOF, TokenBraceClose, TokenParenClose, TokenBracketClose, TokenComma:
+			return false
+		default:
+			return true
+		}
+	}
+}
+
+// parseLogicalAnd parses &&-separated (AND) expressions. `;` as a synonym
+// for `&&` is retired (memql#5375); see semicolonIsAConnective above for why
+// a trailing semicolon is a different thing and still tolerated.
 func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
 	left, err := p.parseComparisonLevel()
 	if err != nil {
@@ -3314,7 +3386,15 @@ func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
 		return nil, nil
 	}
 
-	for p.check(TokenSemicolon) || p.check(TokenAmpAmp) {
+	// `;` as AND is retired (memql#5375, D17). It was a second spelling of
+	// `&&` in the same position, so one boolean grammar read two ways and a
+	// reader had to know both to grep for either -- and the two do not share
+	// precedence intuitions, which is how a filter comes to mean something
+	// other than it looks like.
+	if p.semicolonIsAConnective() {
+		return nil, newParseErrorf(&p.current, "`;` as AND is retired -- write `&&`. One boolean grammar, so precedence reads the same everywhere (memql#5375). %s", annotations.AttributeRewriteHint)
+	}
+	for p.check(TokenAmpAmp) {
 		p.advance()
 		right, err := p.parseComparisonLevel()
 		if err != nil {
@@ -3327,6 +3407,9 @@ func (p *Parser) parseLogicalAnd() (ExpressionNode, error) {
 			Op:    LogicalAnd,
 			Left:  left,
 			Right: right,
+		}
+		if p.semicolonIsAConnective() {
+			return nil, newParseErrorf(&p.current, "`;` as AND is retired -- write `&&`. One boolean grammar, so precedence reads the same everywhere (memql#5375). %s", annotations.AttributeRewriteHint)
 		}
 	}
 
@@ -3966,11 +4049,11 @@ func (p *Parser) parseIdentifierExpression() (ExpressionNode, error) {
 
 	// Story S3 (#2358): a bare `<ident> <ident>(` whose LEADING identifier is
 	// NOT a known invocation kind is a mistyped kind-prefixed call -- the
-	// classic case is the retired declaration verb `mutate` written where
-	// `mutation` belongs. Historically the leading word lowered to a bare
-	// SpecReferenceExpr and the entire `<ident>(...)` call was silently
-	// DROPPED (`mutate createNode(id:"x")` parsed as
-	// SpecReferenceExpr{Name:"mutate"}, err=nil). Reject it with a
+	// classic `mutate` (mutation *declaration* verb) written in *call*
+	// position where the *invocation* noun `mutation` belongs. Historically
+	// the leading word lowered to a bare SpecReferenceExpr and the entire
+	// `<ident>(...)` call was silently DROPPED (`mutate createNode(id:"x")`
+	// parsed as SpecReferenceExpr{Name:"mutate"}, err=nil). Reject it with a
 	// Levenshtein nearest-kind hint so a typo can no longer become a silent
 	// semantic change.
 	//

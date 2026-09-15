@@ -110,7 +110,7 @@ func TestExtractKeywordSlicesSkipsBlockCommentedDeclarations(t *testing.T) {
 //
 // #2866 and function_slices.go both make this split; this pins it here.
 func TestPreambleSurvivesALineComment(t *testing.T) {
-	src := "@enabled\n@description(\"live\")\n// why this exists\ntool annotated {\n  a string\n}\n"
+	src := "@description(\"live\")\n// why this exists\ntool annotated {\n  a string\n}\n"
 
 	slices := ExtractKeywordSlices(src, "tool")
 	if len(slices) != 1 {
@@ -118,7 +118,7 @@ func TestPreambleSurvivesALineComment(t *testing.T) {
 	}
 	got := slices[0].Source
 
-	for _, want := range []string{"@enabled", `@description("live")`, "// why this exists"} {
+	for _, want := range []string{`@description("live")`, "// why this exists"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("emitted slice lost %q -- the preamble walk must run on the ORIGINAL source, "+
 				"not the comment-blanked view, or annotations above a `//` line are dropped "+

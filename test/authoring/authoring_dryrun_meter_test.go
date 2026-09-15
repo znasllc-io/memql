@@ -19,7 +19,7 @@ import (
 
 // dryRunMeteredAutomation requests integration web reads. These executors have
 // no preview classification and must be refused before execution or metering.
-const dryRunMeteredAutomation = `@enabled
+const dryRunMeteredAutomation = `
 @trigger(event="node.created", concept="v1:authoring:bundle")
 @description("Sandbox: read-heavy automation")
 automation sandboxReadHeavy {

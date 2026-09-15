@@ -27,7 +27,6 @@ func TestBuiltinDeclToFunction_AcceptsSupported(t *testing.T) {
 	decl := &languageParser.BuiltinDecl{
 		Name: "cognitionScore",
 		Attributes: []*languageParser.Attribute{
-			{Name: "enabled"},
 			{Name: "description", Value: "score an utterance"},
 			{Name: "executor", Value: "integration.cognition.scoreUtterance"},
 		},
@@ -66,7 +65,6 @@ func TestPromptDeclToPromptDecl_AcceptsSupported(t *testing.T) {
 		Name:  "agentReply",
 		Level: "strong",
 		Attributes: []*languageParser.Attribute{
-			{Name: "enabled"},
 			{Name: "description", Value: "agent reply"},
 			{Name: "level", Value: "strong"},
 			{Name: "defaultProvider", Value: "chat54Mini"},

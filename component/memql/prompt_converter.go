@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/num"
 )
@@ -63,8 +64,10 @@ func promptDeclToPromptDecl(decl *languageParser.PromptDecl, origin string) (*pr
 
 	for _, attr := range decl.Attributes {
 		switch attr.Name {
-		case "enabled":
-			// Accepted no-op: enabled is the default (lifecycle ruling, #2606).
+		// @enabled was an accepted no-op here (lifecycle ruling) until
+		// memql#5375 retired it. It falls through to the unknown-annotation
+		// arm, which consults the retirement ledger first and names
+		// @disabled as what an author actually wants.
 		case "disabled":
 			out.disabled = true
 		case "description":
@@ -133,6 +136,13 @@ func promptFieldToToolField(field *languageParser.PromptField, origin string) (t
 	}
 	if tf.typeName == "" {
 		return toolField{}, fmt.Errorf("%s: prompt field %q is missing a type", origin, field.Name)
+	}
+
+	// One registry check (#5359), on the PromptField receiver. D16: a prompt
+	// field's body IS the schema handed to the model, so an annotation dropped
+	// without a word is a constraint or a description the model never sees.
+	if ref := annotations.CheckAll(annotations.PromptField, languageParser.AnnotationUses(field.Attributes)); ref != nil {
+		return toolField{}, fmt.Errorf("%s: prompt field %q: %w", origin, field.Name, ref)
 	}
 
 	for _, attr := range field.Attributes {

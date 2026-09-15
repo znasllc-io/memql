@@ -20,7 +20,6 @@ import (
 // check has to tell apart: a boolean, a datetime, an open object (keys as
 // data) and a closed block.
 const conditionCheckConcepts = `@version("1.0.0")
-@namespace("lowerinit")
 @description("A ticket the condition-check boot tests read.")
 concept ticket {
   status    string!   @description("Workflow state.")

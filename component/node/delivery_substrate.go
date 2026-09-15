@@ -196,7 +196,6 @@ const (
 	substrateChannelBuffer = 64
 )
 
-
 // Substrate is the concrete DeliverySubstrate. It owns the durable store, the
 // optional mesh fast-path hint surface, and a registry of live subscriptions.
 //
@@ -233,8 +232,8 @@ type subscription struct {
 	key        RoutingKey
 	consumerID string
 	out        chan<- Deliverable
-	dedup      *eventDedup    // per-subscription cross-path dedup (ADR 4.2)
-	wake       chan struct{}  // "pull the durable outbox now" nudge
+	dedup      *eventDedup      // per-subscription cross-path dedup (ADR 4.2)
+	wake       chan struct{}    // "pull the durable outbox now" nudge
 	hints      chan Deliverable // mesh fast-path deliverables (latency short-circuit)
 	startPos   int64            // starting durable position, resolved by Subscribe via EnsureCursor
 }

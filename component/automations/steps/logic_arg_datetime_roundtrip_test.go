@@ -90,7 +90,7 @@ func TestLogicArgDatetimeRoundTrip_FullPath(t *testing.T) {
 	// datetime field. Before the fix this logic was unreachable -- the
 	// call text crashed at re-parse; a receiving side that then USES the
 	// field proves the round-trip delivers data.
-	logicSrc := `@enabled
+	logicSrc := `
 @description("memql#2543 regression probe")
 logic logicDayRollupProbe {
   args {

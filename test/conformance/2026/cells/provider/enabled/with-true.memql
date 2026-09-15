@@ -1,5 +1,0 @@
-/// OpenAI GPT-5.4 Nano under a bundle's own name. @enabled restates the default.
-@extends("openai")
-@model("gpt-5.4-nano")
-@enabled(true)
-provider bundleNanoEnabled { }

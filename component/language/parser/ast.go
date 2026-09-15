@@ -129,9 +129,10 @@ type (
 // do not carry through simple `=` redeclaration; using var is idiomatic
 // for this compatibility shim and the values are immutable in practice).
 var (
-	AttrAudit                = ast.AttrAudit
+	// AttrAudit / AttrDeprecated / AttrIdempotent / AttrRetry / AttrTimeout
+	// were aliased here until memql#5375 retired the annotations and deleted
+	// the FunctionDef fields they populated.
 	AttrCache                = ast.AttrCache
-	AttrDeprecated           = ast.AttrDeprecated
 	AttrDescription          = ast.AttrDescription
 	AttrDestructive          = ast.AttrDestructive
 	AttrDisabled             = ast.AttrDisabled
@@ -140,7 +141,6 @@ var (
 	AttrExecutor             = ast.AttrExecutor
 	AttrFilter               = ast.AttrFilter
 	AttrHandler              = ast.AttrHandler
-	AttrIdempotent           = ast.AttrIdempotent
 	AttrLoop                 = ast.AttrLoop
 	AttrMergeFields          = ast.AttrMergeFields
 	AttrMode                 = ast.AttrMode
@@ -153,7 +153,6 @@ var (
 	AttrPublic               = ast.AttrPublic
 	AttrRateLimit            = ast.AttrRateLimit
 	AttrRequiresConfirmation = ast.AttrRequiresConfirmation
-	AttrRetry                = ast.AttrRetry
 	AttrSchedule             = ast.AttrSchedule
 	AttrScrubPii             = ast.AttrScrubPii
 	AttrUse                  = ast.AttrUse
@@ -167,7 +166,6 @@ var (
 	AttrUsePrompt            = ast.AttrUsePrompt
 	AttrUseProvider          = ast.AttrUseProvider
 	AttrUseBuiltin           = ast.AttrUseBuiltin
-	AttrTimeout              = ast.AttrTimeout
 	AttrTrigger              = ast.AttrTrigger
 	AttrVersion              = ast.AttrVersion
 	FunctionTypeAutomation   = ast.FunctionTypeAutomation

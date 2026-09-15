@@ -104,7 +104,7 @@ func TestOrPrecedenceAndParens(t *testing.T) {
 // silently failed to load because `|` did not tokenize. It must now parse
 // to an OR over the two role comparisons.
 func TestSpecWithOrLoads(t *testing.T) {
-	src := `@enabled
+	src := `
 @description("Caller must hold owner or admin role to use the Deployment Console.")
 spec actorEnvelope requiresOwnerOrAdmin = actor => actor.role == "admin" || actor.role == "owner"`
 

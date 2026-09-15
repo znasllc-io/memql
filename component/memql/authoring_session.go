@@ -295,9 +295,12 @@ func authorSessionBundle(al *authoringLowering, reg *AuthoredRuntimeRegistry, ow
 			Kind:        c.Kind,
 			Name:        c.Name,
 			Source:      c.Source,
-			Version:     version,
-			Status:      AuthoredActive,
-			Compiled:    compiled,
+			// The origin travels onto the registered construct so the
+			// durable promote/stage write can persist it (epic memql#5375).
+			Origin:   c.Origin,
+			Version:  version,
+			Status:   AuthoredActive,
+			Compiled: compiled,
 		}); err != nil {
 			return res, fmt.Errorf("authoring: register %s %q: %w", c.Kind, c.Name, err)
 		}

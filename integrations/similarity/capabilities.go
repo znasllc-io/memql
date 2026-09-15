@@ -50,7 +50,7 @@ import (
 )
 
 const (
-	defaultLimit    = 5
+	defaultLimit = 5
 )
 
 // Integration holds the state needed by the similarTo handler.

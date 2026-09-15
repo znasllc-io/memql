@@ -50,7 +50,8 @@ func TestNoRedundantEnabled(t *testing.T) {
 		}
 	}
 	if len(hits) > 0 {
-		t.Errorf("%d construct-attached @enabled annotation(s) in the tree; enabled is the default (#2604-#2608) -- delete the line(s):\n  %s",
+		t.Errorf("%d construct-attached @enabled annotation(s) in the tree. The annotation is RETIRED (epic memql#5375) and now REFUSES at load, "+
+			"so this is no longer a redundancy report -- it is a tree that will not boot. Delete the line(s), or run `memqlmigrate --rewrite=attributes`:\n  %s",
 			len(hits), strings.Join(hits, "\n  "))
 	}
 }

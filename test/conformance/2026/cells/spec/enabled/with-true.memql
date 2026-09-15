@@ -1,3 +1,0 @@
-/// Matches the tickets that are still open. @enabled restates the default.
-@enabled(true)
-spec ticket isOpenTicketEnabled = row => row.status == "open"

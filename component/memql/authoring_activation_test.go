@@ -96,7 +96,7 @@ func dryRunPassedBundle(owner string) memql.AuthoringBundleRow {
 
 func bundleConstructs(owner, bundleId string) []memql.AuthoringConstructRow {
 	return []memql.AuthoringConstructRow{
-		{Id: "c-auto", OwnerUserId: owner, BundleId: bundleId, Kind: "automation", Name: "draftRefundReply", TargetNamespace: "authored", Source: `@enabled
+		{Id: "c-auto", OwnerUserId: owner, BundleId: bundleId, Kind: "automation", Name: "draftRefundReply", TargetNamespace: "authored", Source: `
 @trigger(event="graph.node.created.*.v1:cognition:utterance")
 automation draftRefundReply {
   draft := logic draftRefundReply(event: event)

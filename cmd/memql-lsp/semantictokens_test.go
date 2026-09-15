@@ -40,7 +40,7 @@ func TestEncodeSemanticTokens_DeltaEncoding(t *testing.T) {
 func TestEncodeSemanticTokens_MultiLineDelta(t *testing.T) {
 	content := "concept a\n  field b"
 	data := encodeSemanticTokens(content, []sense.Token{
-		tok("keyword", 1, 1, 1, 8),   // concept
+		tok("keyword", 1, 1, 1, 8),    // concept
 		tok("identifier", 2, 3, 2, 8), // field (line 2, cols 3..8)
 	})
 	// Second token starts a new line: deltaLine 1, deltaChar = absolute start (2).

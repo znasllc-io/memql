@@ -1,6 +1,0 @@
-/// A support ticket.
-concept ticket {
-  title         string
-  status        string
-  ticketNumber  string  @unique
-}

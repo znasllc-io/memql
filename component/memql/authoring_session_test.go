@@ -10,7 +10,6 @@ import (
 )
 
 const sessionConceptSrc = `@version("1.0.0")
-@namespace("mcpsess")
 @description("Session test widget")
 concept mcpWidget {
   ownerUserId  string  @required
@@ -58,7 +57,7 @@ func TestSplitBundleSource(t *testing.T) {
 // owner-scoped registry, compiling the mutation to an executable *Function.
 func TestAuthorSessionBundle_ValidatesAndRegisters(t *testing.T) {
 	reg := NewAuthoredRuntimeRegistry()
-	res, err := AuthorSessionBundle(reg, "owner-1", sessionConceptSrc+"\n\n"+sessionMutationSrc, "")
+	res, err := AuthorSessionBundle(reg, "owner-1", sessionConceptSrc+"\n\n"+sessionMutationSrc, "authoring/concepts.memql")
 	if err != nil {
 		t.Fatalf("author: %v (diagnostics %+v)", err, res.Diagnostics)
 	}
@@ -94,10 +93,10 @@ func TestAuthorSessionBundle_RejectsInvalid(t *testing.T) {
 // rejects a non-increasing version, so a flat re-register would fail).
 func TestAuthorSessionBundle_RedefineBumpsVersion(t *testing.T) {
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", sessionSpecSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", sessionSpecSrc, "authoring/concepts.memql"); err != nil {
 		t.Fatalf("first author: %v", err)
 	}
-	if _, err := AuthorSessionBundle(reg, "owner-1", sessionSpecSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", sessionSpecSrc, "authoring/concepts.memql"); err != nil {
 		t.Fatalf("redefine should bump version, got: %v", err)
 	}
 	c, ok := reg.Lookup("owner-1", "spec", "mcpSessSpec")

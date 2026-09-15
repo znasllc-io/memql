@@ -110,7 +110,7 @@ func (e *MemQLEngine) grantsForSubjects(ctx context.Context, kind, subjectConcep
 	if db == nil {
 		return nil, errNoDatabaseForCatalog
 	}
-	spellings := make([]string, 0, len(ids)*3)
+	spellings := make([]string, 0, len(ids))
 	seen := map[string]struct{}{}
 	add := func(v string) {
 		v = strings.TrimSpace(v)

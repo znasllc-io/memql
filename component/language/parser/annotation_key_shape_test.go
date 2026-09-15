@@ -22,12 +22,15 @@ func TestKeywordKeyShapeIsChecked(t *testing.T) {
 		want  []string
 	}{
 		{
+			// @rateLimit(maxCalls, periodSeconds) was the original vehicle and
+			// memql#5375 retired it; @handler is the tool's other keyword
+			// annotation, so the tool receiver stays under test.
 			name: "a valued key written bare on a tool",
 			parse: func() error {
-				_, err := ParseToolDecl("@handler(type=\"function\", name=\"x\")\n@rateLimit(maxCalls, periodSeconds)\ntool probe {\n  x string\n}\n")
+				_, err := ParseToolDecl("@handler(type)\ntool probe {\n  x string\n}\n")
 				return err
 			},
-			want: []string{"maxCalls takes a value", "maxCalls=<number>", "@rateLimit(maxCalls=10, periodSeconds=60)"},
+			want: []string{"type takes a value", `type="..."`},
 		},
 		{
 			name: "a valued key written bare on a query",

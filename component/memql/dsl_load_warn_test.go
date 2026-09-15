@@ -26,7 +26,7 @@ func TestMalformedConstructWarnsAtLoad(t *testing.T) {
 	// The exact garbage-spec body called out in the epic #2351 audit, in the
 	// edition-2026 form, so what the parser refuses is the body and not the
 	// retired `{ return ... }` form around it.
-	const garbageSpec = "@enabled\n@description(\"bad\")\n" +
+	const garbageSpec = "@description(\"bad\")\n" +
 		"spec activeRowTrait specBad = row => row.status ==== \"x\" &&&& true\n"
 	// Balanced braces (so slice extraction still finds the block) but a
 	// body the shape parser rejects: numeric tokens where field paths

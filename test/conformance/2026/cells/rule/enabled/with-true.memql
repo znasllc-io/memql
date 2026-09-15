@@ -1,6 +1,0 @@
-/// Background calls resolve through the local-first chain. @enabled restates the default.
-@when(tag="background")
-@policy("localFirst")
-@precedence(12)
-@enabled(true)
-rule backgroundLocalEnabled { }

@@ -343,10 +343,16 @@ func stripStringsAndComments(line string) string {
 	return b.String()
 }
 
-// redundantEnabledRule surfaces the #2610 soft deprecation: enabled is the
-// default on every construct kind (#2604-#2608), so a construct-attached
-// @enabled is an accepted no-op. It stays legal to parse forever (legacy
-// DSL keeps loading), but the editor nudges authors to delete the line.
+// redundantEnabledRule surfaced the #2610 SOFT deprecation as a hint, on the
+// reasoning that @enabled "stays legal to parse forever (legacy DSL keeps
+// loading)". Epic memql#5375 RETIRED it, so the rule is promoted from a hint
+// to an ERROR and the wording follows: the editor now reports what the loader
+// will do rather than nudging toward a tidier spelling of something that
+// works.
+//
+// Keeping the rule rather than leaving it to the load refusal is the point of
+// having it in the editor: the author sees it while typing, at the exact
+// column, instead of on the next boot.
 func redundantEnabledRule(source string) []Diagnostic {
 	var diagnostics []Diagnostic
 	lines := strings.Split(source, "\n")
@@ -361,9 +367,9 @@ func redundantEnabledRule(source string) []Diagnostic {
 					Start: pos,
 					End:   Position{Line: pos.Line, Column: runeColumn(line, m[3])},
 				},
-				Severity: SeverityHint,
-				Message:  "`@enabled` is an accepted no-op: definitions are enabled by default (#2604-#2608). Delete the line; `@disabled` is the off-switch.",
-				Code:     "redundant-enabled",
+				Severity: SeverityError,
+				Message:  "`@enabled` is RETIRED (epic memql#5375) and refuses at load: definitions are enabled by default (#2604-#2608), so it read like a switch and flipped nothing. Delete the line; `@disabled` is the off-switch. Or run `memqlmigrate --rewrite=attributes`.",
+				Code:     "retired-enabled",
 			})
 		}
 	}

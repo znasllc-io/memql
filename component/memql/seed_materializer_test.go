@@ -315,17 +315,17 @@ func TestBuildPerUserDedupQuery_AllSeedAgentsExactStringsParse(t *testing.T) {
 		{
 			name: "assistant",
 			def:  &SeedDefinition{Name: "assistant", UseNamespace: "agents", UseConcept: "agent"},
-			want: `concept=="v1:agents:agent"; payload.ownerUserId=="` + user + `"; provenance.name=="assistant"`,
+			want: `concept=="v1:agents:agent" && payload.ownerUserId=="` + user + `" && provenance.name=="assistant"`,
 		},
 		{
 			name: "trainerAgent",
 			def:  &SeedDefinition{Name: "trainerAgent", UseNamespace: "agents", UseConcept: "agent"},
-			want: `concept=="v1:agents:agent"; payload.ownerUserId=="` + user + `"; provenance.name=="trainerAgent"`,
+			want: `concept=="v1:agents:agent" && payload.ownerUserId=="` + user + `" && provenance.name=="trainerAgent"`,
 		},
 		{
 			name: "plannerAgent",
 			def:  &SeedDefinition{Name: "plannerAgent", UseNamespace: "agents", UseConcept: "agent"},
-			want: `concept=="v1:agents:agent"; payload.ownerUserId=="` + user + `"; provenance.name=="plannerAgent"`,
+			want: `concept=="v1:agents:agent" && payload.ownerUserId=="` + user + `" && provenance.name=="plannerAgent"`,
 		},
 		{
 			// Defensive: a concept id with a colon followed by a NON-letter
@@ -334,7 +334,7 @@ func TestBuildPerUserDedupQuery_AllSeedAgentsExactStringsParse(t *testing.T) {
 			// quoted RHS keeps it intact + parseable.
 			name: "digit-leading concept segment (bare would trip the lexer)",
 			def:  &SeedDefinition{Name: "weirdSeed", UseNamespace: "agents", UseConcept: "2agent"},
-			want: `concept=="v1:agents:2agent"; payload.ownerUserId=="` + user + `"; provenance.name=="weirdSeed"`,
+			want: `concept=="v1:agents:2agent" && payload.ownerUserId=="` + user + `" && provenance.name=="weirdSeed"`,
 		},
 	}
 

@@ -1,0 +1,15 @@
+{
+  "cases": [
+    {
+      "file": "a-string-list.memql",
+      "verdict": "load_ok",
+      "note": "A builtin field's body IS the input schema, so a declared enum has to reach it. Before epic memql#5375 every annotation but @required was dropped here without a word."
+    },
+    {
+      "file": "with-no-value.memql",
+      "verdict": "refuse_parse",
+      "code": "annotation_form",
+      "message": "@enum on a builtin field takes"
+    }
+  ]
+}

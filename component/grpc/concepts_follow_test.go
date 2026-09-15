@@ -23,7 +23,6 @@ import (
 // followTestConceptSrc is a standalone trainable concept (no cross-concept
 // binding, so it compiles against the core registry Gate-1 clones).
 const followTestConceptSrc = `@version("1.0.0")
-@namespace("followns")
 @description("A concept trained into a running cluster, for the follow stream")
 concept followWidget {
   ownerUserId  string  @required
@@ -80,7 +79,7 @@ func followTestSession(t *testing.T, eng *memqlengine.MemQLEngine) (*streamSessi
 func promoteFollowConcept(t *testing.T, eng *memqlengine.MemQLEngine) {
 	t.Helper()
 	reg := memqlengine.NewAuthoredRuntimeRegistry()
-	if _, err := memqlengine.AuthorSessionBundle(reg, "v1:identity:user:follow", followTestConceptSrc, ""); err != nil {
+	if _, err := memqlengine.AuthorSessionBundle(reg, "v1:identity:user:follow", followTestConceptSrc, "followns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, ok := reg.Lookup("v1:identity:user:follow", "concept", "followWidget")
@@ -281,7 +280,6 @@ func TestConceptsFollow_GenerationIncrementsAndStaleReSnapshots(t *testing.T) {
 }
 
 const followTestConceptTwoSrc = `@version("1.0.0")
-@namespace("followns")
 @description("A second trained concept")
 concept followWidgetTwo {
   ownerUserId  string  @required
@@ -291,7 +289,7 @@ concept followWidgetTwo {
 func promoteSecondFollowConcept(t *testing.T, eng *memqlengine.MemQLEngine) {
 	t.Helper()
 	reg := memqlengine.NewAuthoredRuntimeRegistry()
-	if _, err := memqlengine.AuthorSessionBundle(reg, "v1:identity:user:follow", followTestConceptTwoSrc, ""); err != nil {
+	if _, err := memqlengine.AuthorSessionBundle(reg, "v1:identity:user:follow", followTestConceptTwoSrc, "followns/concepts.memql"); err != nil {
 		t.Fatalf("author second concept: %v", err)
 	}
 	c, ok := reg.Lookup("v1:identity:user:follow", "concept", "followWidgetTwo")

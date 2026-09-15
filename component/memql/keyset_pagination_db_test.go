@@ -72,7 +72,7 @@ func seedKeysetRow(t *testing.T, ctx context.Context, db *bun.DB, id string, cre
 // context, not the query string.
 func keysetPageQuery(owner string, pageSize int) string {
 	return fmt.Sprintf(
-		`sort(paginate(concept==%s;createdBy==%q, %d), "createdAt", "desc")`,
+		`sort(paginate(concept==%s&&createdBy==%q, %d), "createdAt", "desc")`,
 		keysetConcept, owner, pageSize)
 }
 
@@ -247,7 +247,7 @@ func TestKeysetPagination_SortMismatchRejected(t *testing.T) {
 
 	// Replay it against an ASCENDING query -> typed rejection.
 	ascQuery := fmt.Sprintf(
-		`sort(paginate(concept==%s;createdBy==%q, 3), "createdAt", "asc")`,
+		`sort(paginate(concept==%s&&createdBy==%q, 3), "createdAt", "asc")`,
 		keysetConcept, owner)
 	_, err = eng.Execute(ContextWithCursor(ctx, cursor), ascQuery)
 	require.ErrorIs(t, err, ErrCursorSortMismatch,

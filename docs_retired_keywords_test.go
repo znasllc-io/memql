@@ -287,7 +287,12 @@ func retiredDeclGateExempt(rel string) bool {
 // here at all. That is arm 2, and it is not a second table; see
 // retiredReceiverFormRef.
 var retiredDeclarationKeywords = []struct{ keyword, replacement, ref string }{
-	{"mutate", "mutation", "memql#5370"},
+	// THE DIRECTION REVERSED. memql#2041 renamed `mutation` to `mutate`;
+	// memql#5375 (D17) renamed it back, because `mutate` declared the
+	// construct while `mutation` called it, so one construct answered to two
+	// words and a reader grepping for either found part of the tree. One
+	// keyword, in both positions.
+	{"mutate", "mutation", "memql#5375"},
 }
 
 // retiredReceiverFormRef names the ruling arm 2 enforces, for the diagnostic.

@@ -1,6 +1,9 @@
 package parser
 
-import "fmt"
+import (
+	"fmt"
+	"github.com/znasllc-io/memql/component/language/annotations"
+)
 
 // ParseExpression parses a single MemQL expression from source text
 // and returns the parsed AST node. Public entry point exposed for
@@ -29,6 +32,13 @@ func ParseExpression(source string) (ExpressionNode, error) {
 		p.advance()
 	}
 	if !p.check(TokenEOF) {
+		// `?.` is retired (memql#5375, D17). It already failed here, but as
+		// "unexpected token", which names neither the form nor the fix --
+		// and `?.` is a form an author could reasonably believe in, since
+		// `??` is live one character away.
+		if p.current.Literal == "?." {
+			return nil, fmt.Errorf("`?.` is retired -- guard the nil explicitly (`owner != nil && owner.id == ...`) or coalesce with `??` (memql#5375). %s", annotations.AttributeRewriteHint)
+		}
 		return nil, fmt.Errorf("unexpected token after expression: %q", p.current.Literal)
 	}
 	return expr, nil

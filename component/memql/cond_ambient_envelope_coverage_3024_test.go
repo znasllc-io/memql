@@ -184,7 +184,6 @@ func TestCondAmbientPredicate_NegatedAbsentActorDeniesOverTheEnvelope(t *testing
 // condAmbientProbeSource builds a logic returning a conditional over `pred`.
 func condAmbientProbeSource(name, pred string) string {
 	return strings.Join([]string{
-		"@enabled",
 		"@actor",
 		"@description(\"memql#3024 ambient predicate probe\")",
 		"logic " + name + " {",

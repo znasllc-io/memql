@@ -45,14 +45,14 @@ func (s *fakePromoteStore) CreatePromoteBundle(_ context.Context, bundleId, titl
 // production: the caller stamps the author's envelope and the #954 mutation
 // reads actor.userId. Recording it here keeps the fake's rows usable by the
 // owner-filtering walks the staged transitions run.
-func (s *fakePromoteStore) CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, status string) error {
+func (s *fakePromoteStore) CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, origin, status string) error {
 	owner := ""
 	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
 		owner = ac.UserId
 	}
 	s.constructs = append(s.constructs, AuthoringConstructRow{
 		Id: constructId, OwnerUserId: owner, BundleId: bundleId, Kind: kind, Name: name,
-		TargetNamespace: targetNamespace, Source: source, Status: status,
+		TargetNamespace: targetNamespace, Source: source, Origin: origin, Status: status,
 	})
 	for i := range s.bundles {
 		if s.bundles[i].Id == bundleId {
@@ -81,7 +81,7 @@ func (s *fakePromoteStore) StageConstructConceptData(_ context.Context, construc
 // the compiled construct, so the durable-promote path has a real compiled form.
 func authorOneSpec(t *testing.T, reg *AuthoredRuntimeRegistry, owner string) *AuthoredConstruct {
 	t.Helper()
-	if _, err := AuthorSessionBundle(reg, owner, sessionSpecSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, owner, sessionSpecSrc, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author session spec: %v", err)
 	}
 	c, ok := reg.Lookup(owner, "spec", "mcpSessSpec")
@@ -137,6 +137,7 @@ func TestPromoteConstructDurable_PromotedFunctionCallableInFreshSession(t *testi
 	// session author path) durably promotes into the shared function registry.
 	c := &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "query", Name: "promotedDurableQuery", Status: AuthoredActive,
 		Source:   `query promotedDurableQuery { }`,
+		Origin:   "trainingns/concepts.memql",
 		Compiled: &Function{Name: "promotedDurableQuery", FunctionKind: "query", Enabled: true}}
 	if err := e.promoteConstructDurableWithStore(context.Background(), &fakePromoteStore{}, nil, "owner-1", c); err != nil {
 		t.Fatalf("durable promote: %v", err)

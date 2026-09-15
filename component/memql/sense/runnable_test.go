@@ -46,7 +46,6 @@ mutation space mutationCreateSpace {
   }
 }
 
-@enabled
 @description("Ensure today's daily space exists.")
 logic logicProvisionDailySpace {
   args {
@@ -55,7 +54,6 @@ logic logicProvisionDailySpace {
   return builtin ensureDailySpaceForUser(userId: args.event.payload.id)
 }
 
-@enabled
 @description("Search for users")
 @handler(type="query", query="concept==v1:memql:backend:user")
 @executionTime("fast")
@@ -78,11 +76,9 @@ automation sweepStalePlans {
   decide := logic sweepStalePlans(event: event)
 }
 
-@enabled
 @description("Matches guest participants")
 spec participant isGuestParticipant = row => row.isGuest == true
 
-@enabled
 @description("Matches records with active==true")
 trait isActiveRow = row => row.active == true
 
@@ -514,7 +510,6 @@ logic thirdLogic {
 func TestRunnableConstructs_AnnotationPreambleAttribution(t *testing.T) {
 	const src = `use cognition.concepts.{ participant }
 
-@enabled
 @description("A non-runnable spec whose annotations must stay with it")
 spec participant isGuestParticipant = row => row.isGuest == true
 
@@ -628,7 +623,6 @@ automation disabledBootstrap {
   decide := logic bootstrapSession(event: event)
 }
 
-@enabled
 @description("An explicitly-enabled logic")
 logic enabledLogic {
   args {

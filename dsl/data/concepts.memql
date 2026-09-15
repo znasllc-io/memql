@@ -25,13 +25,13 @@ concept log {
 /// full confirmation.
 @displayCard(primary="targetRecordType", secondary="revertMinRole", tertiary="requiredChecks", status="active")
 concept policy {
-  active                bool    @default("true")  @description("Soft-delete flag (append-only semantics)")
+  active                bool  @description("Soft-delete flag (append-only semantics)")
   targetRecordType      string!  @description("Record type this policy applies to (e.g., 'vehicle', 'bird')")
   partitionId               string  @description("Optional space scope. Null means global for this record type.")
-  requiredChecks        int     @default("1")  @description("Number of synthetic checks needed for draft -> checked")
-  requiredConfirmations int     @default("1")  @description("Number of human confirmations needed for checked -> confirmed")
-  checkedDataUsable     bool    @default("false")  @description("Whether checked (not yet confirmed) records are usable live")
-  revertMinRole         enum("owner", "admin", "writer", "reader")  @default("admin")  @description("Minimum role required to revert records")
+  requiredChecks        int  @description("Number of synthetic checks needed for draft -> checked")
+  requiredConfirmations int  @description("Number of human confirmations needed for checked -> confirmed")
+  checkedDataUsable     bool  @description("Whether checked (not yet confirmed) records are usable live")
+  revertMinRole         enum("owner", "admin", "writer", "reader")  @description("Minimum role required to revert records")
 
 }
 
@@ -40,8 +40,8 @@ concept policy {
 /// state and policy.
 @displayCard(primary="label", secondary="recordType", tertiary="importSource", status="validationState")
 concept record {
-  active              bool      @default("true")  @description("Soft-delete flag (append-only semantics)")
-  validationState     enum("draft", "checked", "confirmed")  @default("draft")  @description("Current lifecycle state")
+  active              bool  @description("Soft-delete flag (append-only semantics)")
+  validationState     enum("draft", "checked", "confirmed")  @description("Current lifecycle state")
   data                object!  @description("The actual data payload")
   label               string!  @description("Human-readable display label")
   recordType          string!  @description("Domain-specific record type (e.g., 'vehicle', 'bird', 'employee')")
@@ -52,8 +52,8 @@ concept record {
   naturalKeyValue     string    @description("Value of the natural key for conflict matching")
   sourceAttachmentId  string    @description("Reference to source attachment if file-based import")
   confidence          float     @description("AI confidence score (0-1)")
-  checkCount          int       @default("0")  @description("Number of synthetic checks received")
-  confirmCount        int       @default("0")  @description("Number of human confirmations received")
+  checkCount          int  @description("Number of synthetic checks received")
+  confirmCount        int  @description("Number of human confirmations received")
   lastCheckedBy       string    @description("Identity ID of last synthetic checker")
   lastCheckedAt       datetime  @description("When last checked by a synthetic identity")
   lastConfirmedBy     string    @description("Identity ID of last human confirmer")

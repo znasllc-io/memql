@@ -260,7 +260,7 @@ query board queryExampleappBoard {
 // `args { }` block), and that they classify as kind "builtin".
 func TestCollectConstructs_BuiltinSDKGating(t *testing.T) {
 	root := t.TempDir()
-	writeFixture(t, root, "builtins.memql", `@enabled
+	writeFixture(t, root, "builtins.memql", `
 @executor("integration.reporting.buildReport")
 @sdk
 @description("Build a report.")
@@ -270,7 +270,6 @@ builtin buildReport {
   columns   array
 }
 
-@enabled
 @executor("integration.auth.checkPermission")
 @description("Internal permission check -- not client-facing.")
 builtin authCheckPermission {

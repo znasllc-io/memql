@@ -89,7 +89,11 @@ func splitTopLevel(s string) []string {
 // placement makes: the example it shows an author is a use the check accepts.
 // An example the check refuses would teach the one spelling that fails.
 func TestEveryExampleIsAcceptedByItsOwnPlacement(t *testing.T) {
-	if len(Placements()) < 150 {
+	// The floor was 150 before epic memql#5375, which retired ~30 placements
+	// -- @enabled alone came off every receiver through lifecycle(), plus
+	// @latestMode, @nocache, @schedule, @rateLimit, @scopes, @namespace,
+	// @unique, @immutable and the concept field's @default.
+	if len(Placements()) < 125 {
 		t.Fatalf("only %d placements -- the registry is not describing every receiver", len(Placements()))
 	}
 	for _, p := range Placements() {
@@ -290,9 +294,12 @@ func TestMisplacedNamesSayWhereTheyBelong(t *testing.T) {
 		}
 	}
 
+	// @unique was retired in epic memql#5375 -- it was declared metadata with
+	// nothing enforcing it. It had no surviving receiver, so a name that used
+	// to be misplaced here is now refused as retired, with the migration hint.
 	ref = Check(ArgsField, Use{Name: "unique", Form: FormFlag})
-	if ref == nil || ref.Code != CodeMisplaced || !strings.Contains(ref.Message, "a concept field") {
-		t.Errorf("@unique on an args field: got %v, want misplaced naming a concept field", ref)
+	if ref == nil || ref.Code != CodeRetired || !strings.Contains(ref.Message, "memql#5375") {
+		t.Errorf("@unique on an args field: got %v, want retired naming memql#5375", ref)
 	}
 }
 
@@ -329,7 +336,7 @@ func TestMisplacedRefusalShowsAnExampleFromTheSameKindOfPlace(t *testing.T) {
 	if ref == nil || ref.Code != CodeMisplaced {
 		t.Fatalf("@default on a builtin field: got %v, want %s", ref, CodeMisplaced)
 	}
-	if !strings.Contains(ref.Message, `as in @default("open")`) {
+	if !strings.Contains(ref.Message, `as in @default("5")`) {
 		t.Errorf("a field is shown a field's example: %s", ref.Message)
 	}
 	ref = Check(Tool, Use{Name: "default", Form: FormFlag})
@@ -359,10 +366,13 @@ func TestKeyShapeIsRefused(t *testing.T) {
 		want []string
 	}{
 		{
+			// @rateLimit(maxCalls, periodSeconds) was the original vehicle and
+			// was retired in epic memql#5375. @trigger's expression-typed
+			// filter= keeps a NON-string valued key under test.
 			name: "a valued key written bare",
-			r:    Tool,
-			use:  Use{Name: "rateLimit", Form: FormKeywords, Keys: []WrittenKey{{Name: "maxCalls", Bare: true}, {Name: "periodSeconds", Bare: true}}},
-			want: []string{"@rateLimit on a tool: maxCalls takes a value", "write maxCalls=<number>", "as in @rateLimit(maxCalls=10, periodSeconds=60)"},
+			r:    Automation,
+			use:  Use{Name: "trigger", Form: FormKeywords, Keys: []WrittenKey{{Name: "filter", Bare: true}}},
+			want: []string{"@trigger on an automation: filter takes a value", "write filter=row => <predicate>"},
 		},
 		{
 			name: "a string key written bare",

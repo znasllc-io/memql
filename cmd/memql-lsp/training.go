@@ -209,9 +209,12 @@ type catalogConstruct struct {
 	// Name is the registry key: a concept's canonical id
 	// ("v1:worker:registration"), or the declared name for every other kind.
 	Name string `json:"name"`
-	// Kind is the catalog's kind. Passed through untranslated; the join with
-	// the authored keyword happens once, here, via
-	// memql.ConstructKindForKeyword.
+	// Kind is the catalog's kind. It coincided with the authored keyword for
+	// every construct except the mutation, which was spelled `mutate` and
+	// reported "mutation" until memql#5375 collapsed the pair -- so
+	// memql.ConstructKindForKeyword is an identity mapping today. Still
+	// routed through it: a caller reaching for the authored keyword should
+	// ask rather than assume the two are the same word.
 	Kind string `json:"kind"`
 	// Origin is "core" | "bundle" | "promoted", derived server-side by the
 	// engine in one place and passed through unexamined. Nothing re-derives it,
@@ -236,10 +239,11 @@ type trainingStateResult struct {
 }
 
 type trainingConstruct struct {
-	// Kind is the AUTHORED keyword, as written in the file (`mutation`), matching
-	// what `memql/runnableConstructs` reports for the same construct. The
-	// catalog's kind is an engine-side key and does not belong in a result about
-	// a document.
+	// Kind is the AUTHORED keyword, as written in the file (`mutation`),
+	// matching what `memql/runnableConstructs` reports for the same construct.
+	// The catalog's kind is an engine-side key and does not belong in a result
+	// about a document -- the two agree for every kind since memql#5375, and
+	// the distinction is kept because it is about provenance, not spelling.
 	Kind string `json:"kind"`
 	Name string `json:"name"`
 	// Concept is the signature-bound concept short name for a two-identifier

@@ -23,7 +23,6 @@ func TestDetectsUnmarkedListQuery(t *testing.T) {
 	src := `use cognition.concepts.{ widget }
 use cognition.shapes.{ widgetFull }
 
-@enabled
 @description("Brand-new unmarked list read -- no paginate, no sort, no @unbounded.")
 query widget queryAllWidgetsUnmarked {
   args {
@@ -126,7 +125,7 @@ func TestCountIsAggregate(t *testing.T) {
 // TestUnboundedMarkedListCapturesReason: an @unbounded("reason") query
 // is compliant and its reason is captured for the audit report.
 func TestUnboundedMarkedListCapturesReason(t *testing.T) {
-	src := `@enabled
+	src := `
 @unbounded("small bounded catalog -- providers never exceed a handful of rows")
 @description("All providers.")
 query provider queryAllProviders {

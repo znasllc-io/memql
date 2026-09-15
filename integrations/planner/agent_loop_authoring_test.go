@@ -47,7 +47,7 @@ func designJSON(t *testing.T, deps []designDependency) string {
 }
 
 // A real, parseable spec source the catalog key + matcher can ingest.
-const specCandidateSource = `@enabled
+const specCandidateSource = `
 @description("Matches active digest items")
 spec activeRowTrait specDigestItemActive = row => row.active == true`
 

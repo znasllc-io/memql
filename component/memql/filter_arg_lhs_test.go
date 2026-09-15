@@ -14,7 +14,6 @@ import (
 // put there.
 const probeArgLhsSrc = `use accounts.concepts.{ account }
 
-@enabled
 @description("probe")
 query account probeAccountsIncludeArchived {
   args {

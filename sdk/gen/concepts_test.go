@@ -15,19 +15,16 @@ func TestResolveConceptId_SameAndCrossNamespace(t *testing.T) {
 	// Concept definitions: one plain, one sub-namespaced.
 	writeFixture(t, root, "cognition/concepts.memql", `
 @version("1.0.0")
-@namespace("cognition")
 concept space {
   ownerUserId string @required
 }
 
 @version("1.0.0")
-@namespace("cognition")
 concept participant {
   spaceId string @required
 }
 
 @version("1.0.0")
-@namespace("cognition:turn")
 concept state {
   turnId string @required
 }
@@ -72,8 +69,14 @@ query space querySpaceCrossNs {
 	}
 
 	want := map[string]string{
-		"querySpaceLocal":   "v1:cognition:space",
-		"queryTurnState":    "v1:cognition:turn:state",
+		"querySpaceLocal": "v1:cognition:space",
+		// Was "v1:cognition:turn:state", from @namespace("cognition:turn") on
+		// this one concept. Epic memql#5375 retired the annotation, and the
+		// replacement -- a directory's namespace.pin -- is per-DIRECTORY, so a
+		// colon-scoped sub-namespace now needs its own sub-directory rather
+		// than a per-concept annotation. `state` sits in cognition/ beside
+		// `space` and `participant`, so it derives the plain domain.
+		"queryTurnState":    "v1:cognition:state",
 		"querySpaceCrossNs": "v1:cognition:space",
 	}
 	for name, wantID := range want {
@@ -133,7 +136,6 @@ func TestEmitConcepts_ShapeAndTopics(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "cognition/concepts.memql", `
 @version("1.0.0")
-@namespace("cognition")
 concept participant {
   spaceId string @required
 }
@@ -195,15 +197,12 @@ func TestEmitConcepts_DeterministicEmission(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "cognition/concepts.memql", `
 @version("1.0.0")
-@namespace("cognition")
 concept participant { spaceId string @required }
 
 @version("1.0.0")
-@namespace("cognition")
 concept space { ownerUserId string @required }
 
 @version("1.0.0")
-@namespace("agents")
 concept agent { ownerUserId string @required }
 `)
 	writeFixture(t, root, "cognition/queries.memql", `
@@ -255,7 +254,6 @@ func TestEmitOutput_NoCanonicalCallerInstructions(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "cognition/concepts.memql", `
 @version("1.0.0")
-@namespace("cognition")
 concept participant { spaceId string @required }
 `)
 	writeFixture(t, root, "cognition/queries.memql", `

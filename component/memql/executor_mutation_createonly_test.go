@@ -85,7 +85,7 @@ func TestMutationTemplate_CreateOnlyAnnotationPlumbing(t *testing.T) {
 		"v1:platform:outboundRequest": {Name: "v1:platform:outboundRequest"},
 	})
 
-	src := `@enabled
+	src := `
 @createOnly("status", "attempts")
 @description("Stage an outbound delivery, idempotent by requestId.")
 mutation outboundRequest stageOutboundRequest {
@@ -122,7 +122,7 @@ func TestMutationTemplate_CreateOnlySingleField(t *testing.T) {
 		"v1:platform:outboundRequest": {Name: "v1:platform:outboundRequest"},
 	})
 
-	src := `@enabled
+	src := `
 @createOnly("status")
 mutation outboundRequest stageOne {
   args {
@@ -149,7 +149,7 @@ func TestMutationTemplate_CreateOnlyRejectedOnUpdate(t *testing.T) {
 		"v1:platform:outboundRequest": {Name: "v1:platform:outboundRequest"},
 	})
 
-	src := `@enabled
+	src := `
 @createOnly("status")
 mutation outboundRequest updateBad {
   args {

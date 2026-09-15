@@ -1,5 +1,4 @@
 /// A support ticket: the row this cell's automation moves forward.
-@namespace("loopcell")
 concept ticket {
   status  string
 }

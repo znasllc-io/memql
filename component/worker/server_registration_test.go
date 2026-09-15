@@ -467,7 +467,6 @@ func TestEngineStoreRefreshRegistration_WireShape(t *testing.T) {
 	}
 }
 
-
 func TestUpsertRegistration_ReclaimsSameMachineByMachineId(t *testing.T) {
 	// Re-pair mints a new worker token (new identityId). Without reclaim that
 	// inserts a second registration for the same Mac -- the prod duplicate

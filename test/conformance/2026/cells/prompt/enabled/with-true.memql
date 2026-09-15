@@ -1,7 +1,0 @@
-/// Summarise a ticket in one sentence. @enabled restates the default.
-@level("fast")
-@templateFile("summariseTicket.tmpl")
-@enabled(true)
-prompt summariseTicketEnabled {
-  title  string!  @description("The ticket's title.")
-}

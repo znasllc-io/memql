@@ -2,8 +2,9 @@
   "description": "A raw-topic feedback loop, converging by filter or stopped at the global cap through an opaque publisher.",
   "domain": "looppublish",
   "files": {
-    "concepts.memql": "/// A loop scenario row.\n@namespace(\"looppublish\")\nconcept unused {\n  status string\n  n int\n}\n",
-    "memql.toml": "memql = \"1.0\"\nedition = \"2026\"\n"
+    "concepts.memql": "/// A loop scenario row.\nconcept unused {\n  status string\n  n int\n}\n",
+    "memql.toml": "memql = \"1.0\"\nedition = \"2026\"\n",
+    "namespace.pin": "looppublish\n"
   },
   "scenarios": [
     {

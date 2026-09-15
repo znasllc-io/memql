@@ -146,7 +146,7 @@ func TestConceptRegistryFollowDeltaCrossesTheMesh(t *testing.T) {
 
 	// Promote the concept on the promoter replica.
 	promoter := authoring.NewClient(conns[0].Dispatcher())
-	res, err := promoter.DurablePromoteBundle(ctx, f.conceptOnly())
+	res, err := promoter.DurablePromoteBundle(ctx, f.conceptOnly(), authoring.WithPromoteOrigin(f.origin()))
 	skipUnlessOwner(t, res, err)
 	if err != nil {
 		t.Fatalf("durable promote: %v", err)

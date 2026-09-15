@@ -136,7 +136,7 @@ func (fr *faultRunner) count(owner, name string) int {
 }
 
 func eventAutomationSrc(name string) string {
-	return `@enabled
+	return `
 @trigger(event="node.created", concept="v1:identity:user")
 automation ` + name + ` {
   run := logic sandboxNoopLogic(event: event)

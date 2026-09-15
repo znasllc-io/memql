@@ -60,6 +60,7 @@ __debug*
 # `bin/` here and it is this one.
 /bin/
 /memql
+/shopifyschema
 /memql-service
 /bridge-agent
 # Stray output of `go build ./cmd/memql-cockpit`. Canonical build target is

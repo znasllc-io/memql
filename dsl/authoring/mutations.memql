@@ -46,10 +46,11 @@ mutation construct createAuthoringConstruct {
     name             string!
     targetNamespace  string!
     source           string!
+    origin           string
     grammarVersion   string
   }
   insert {
-    accept { bundleId, kind, name, targetNamespace, source, grammarVersion }
+    accept { bundleId, kind, name, targetNamespace, source, origin, grammarVersion }
     stamp {
       id: args.constructId
       ownerUserId: actor.userId

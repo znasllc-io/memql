@@ -97,42 +97,11 @@ const docNoUnsetEmpty = "Empty means nil, a blank or whitespace-only string, or 
 	"boolean zero is a value, not an unset: `0` and `false` are written like any other value, and treating them as empty " +
 	"would make `@noUnset` unwritable for those types."
 
-// docDefaultConceptField is @default on a concept field. The lowering is
-// parseTypedDefaultValue in component/database/memory-nodes/concept_parser.go
-// (pinned by TestDefaultIsLoweredByItsDeclaredType, TestBadDefaultRefusesToLoad
-// and TestBareDefaultLiteralIsRead); the gate is test/dslconformance's
-// TestDefaultIsCoalescedOrStamped, whose scope dsl/_reference/_concept.memql
-// section 8 states.
-const docDefaultConceptField = "The default the concept schema declares for the field. Declared metadata: it is emitted into " +
-	"the schema and NEVER applied on insert -- `??` in the mutation is what fills a value (memql#2960). The emitted `default` " +
-	"is still read by the SDK, editor hover and form generators, so it has to be right.\n" +
-	"\n" +
-	"The literal is lowered against the field's declared type, and one that could never be a value of that type is refused " +
-	"at load (memql#3248):\n" +
-	"\n" +
-	"- `bool`: exactly `true` or `false`.\n" +
-	"- `int`: a base-10 integer.\n" +
-	"- `float`: a number; an integer literal is a valid float.\n" +
-	"- `datetime`: an RFC3339 timestamp, or `\"\"` for unset.\n" +
-	"- `string` and `enum`: the literal verbatim, never coerced, so `@default(\"0\")` on a string field is the string `\"0\"`.\n" +
-	"- `object`, `array`, `map` and `any`: an untyped lowering, because the declaration does not narrow the literal to one " +
-	"reading.\n" +
-	"\n" +
-	"Bare and quoted spellings are equivalent: `@default(false)` and `@default(\"false\")` both declare the bool `false`, and " +
-	"`@default(7)` declares the number 7.\n" +
-	"\n" +
-	"A default nothing stamps is caught at authoring time (memql#3038): `TestDefaultIsCoalescedOrStamped` fails when an " +
-	"optional, top-level concept field carries `@default` and no mutation bound to the concept stamps it. Only a stamped " +
-	"value counts -- `f: args.f ?? \"v\"`, a literal, or a computed expression; `accept { f }`, a bare `args.f` shorthand and a " +
-	"plain `f: args.f` all bind the field to a caller argument, so omitting the argument still writes nothing. Two things are " +
-	"outside the gate: a domain mounted at runtime through `MEMQL_DSL_PATH`, which it never scans, and a `@default` on a leaf " +
-	"inside an object block, which no write form can stamp because a mutation writes the parent object whole."
-
-// docProviderType is @type on a provider: newAIProvider in
+// docProviderVendor is @vendor on a provider (@type until epic memql#5375): newAIProvider in
 // component/memql/ai_providers.go (matched case-insensitively), whose error
 // leaves the provider registered but unavailable (unified_kinds_loader.go), and
 // the streaming parameter of epic memql#5137.
-const docProviderType = "The provider's type, which picks the client that serves it: `OpenAI` (or `OpenAIChat`), " +
+const docProviderVendor = "The provider's type, which picks the client that serves it: `OpenAI` (or `OpenAIChat`), " +
 	"`OpenAITTS` or `OpenAIEmbedding` for OpenAI, and `Anthropic` (or `AnthropicChat`) for Anthropic, matched without regard " +
 	"to case. `Fleet` and `SubscriptionApp` are accepted on a `@base` provider only: their models are named from a policy " +
 	"(`fleet:<model>`, `app:<id>`) rather than declared as children. Any other type leaves the provider registered but " +

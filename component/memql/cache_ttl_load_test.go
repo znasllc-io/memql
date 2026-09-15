@@ -26,7 +26,7 @@ func cacheLoadRegistry(t *testing.T) memoryNodes.Registry {
 func loadCachedQueryHints(t *testing.T, cacheAnnotation string) map[string]int64 {
 	t.Helper()
 	src := "use agents.concepts.{ agentRole }\n\n" +
-		"@enabled\n" +
+		"" +
 		cacheAnnotation + "\n" +
 		"query agentRole queryRolesCached {\n" +
 		"  filter  row => row.active == true\n" +
@@ -42,11 +42,15 @@ func loadCachedQueryHints(t *testing.T, cacheAnnotation string) map[string]int64
 	return hints
 }
 
+// cacheAnnotationTTL maps the annotation a fixture writes to the TTL it should
+// stamp. The keyword form `@cache(ttl="300")` is retired (epic memql#5375):
+// one value, one spelling, and a single-argument annotation has no ambiguity
+// for a keyword to resolve.
 func cacheAnnotationTTL(annotation string) string {
 	switch annotation {
-	case `@cache(ttl="300")`:
+	case `@cache(300)`:
 		return "300"
-	case `@cache(ttl="0")`:
+	case `@cache(0)`:
 		return "0"
 	default:
 		return ""
@@ -54,7 +58,7 @@ func cacheAnnotationTTL(annotation string) string {
 }
 
 func TestLoad_CacheTTLStampsHint(t *testing.T) {
-	hints := loadCachedQueryHints(t, `@cache(ttl="300")`)
+	hints := loadCachedQueryHints(t, `@cache(300)`)
 	got, ok := hints["v1:agents:agentrole"]
 	if !ok {
 		// collectCacheHints lowercases the concept key.
@@ -65,7 +69,7 @@ func TestLoad_CacheTTLStampsHint(t *testing.T) {
 }
 
 func TestLoad_CacheTTLZeroIsNeverCache(t *testing.T) {
-	hints := loadCachedQueryHints(t, `@cache(ttl="0")`)
+	hints := loadCachedQueryHints(t, `@cache(0)`)
 	// A 0 hint must be present (explicit never-cache), not absent.
 	var found bool
 	for _, v := range hints {

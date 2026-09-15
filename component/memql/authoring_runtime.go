@@ -63,13 +63,21 @@ const (
 // compiled representation -- the kind-specific runtimes (the authored
 // scheduler, an authored query/spec resolver) type-assert it.
 type AuthoredConstruct struct {
-	OwnerUserId string                  `json:"ownerUserId"`
-	Kind        string                  `json:"kind"`
-	Name        string                  `json:"name"`
-	BundleId    string                  `json:"bundleId"`
-	Version     int                     `json:"version"`
-	Source      string                  `json:"source"`
-	Status      AuthoredConstructStatus `json:"status"`
+	OwnerUserId string `json:"ownerUserId"`
+	Kind        string `json:"kind"`
+	Name        string `json:"name"`
+	BundleId    string `json:"bundleId"`
+	Version     int    `json:"version"`
+	Source      string `json:"source"`
+	// Origin is the tree-relative path the bundle was authored against, as
+	// the caller sent it. Carried here so the durable promote/stage write can
+	// PERSIST it: a promoted CONCEPT re-derives its canonical id at
+	// re-hydration, and the namespace half of that id came from the source's
+	// @namespace until epic memql#5375 retired the annotation. Empty for an
+	// untitled buffer, which the sandbox refuses rather than guessing a
+	// namespace for.
+	Origin string                  `json:"origin,omitempty"`
+	Status AuthoredConstructStatus `json:"status"`
 	// Compiled is the cached compiled form (e.g. an *automations.Automation),
 	// supplied by the kind-specific activation path. Opaque to the registry.
 	Compiled any `json:"-"`

@@ -13,8 +13,8 @@ import (
 // memql#2799: TestPerRowAuthzClassification is the tree's only gate against a
 // user-scoped read shipping without a caller check, and it had drifted out of
 // alignment with the language on TWO axes at once -- it matched the
-// `payload.`-prefixed field spelling epic #2292 retired, and the `mutation`
-// construct keyword memql#2041 renamed to `mutate`. Both drifts were silent:
+// `payload.`-prefixed field spelling epic #2292 retired, and the construct keyword
+// memql#2041 renamed (and epic memql#5375 renamed back). Both drifts were silent:
 // the gate reported 0 flagged and that read as "audited and clean".
 //
 // The lesson is not that either regex was wrong, it is that nothing noticed
@@ -54,16 +54,21 @@ func TestConstructHeaderMatchesTheLanguage(t *testing.T) {
 		}
 	}
 
-	// And the retired keyword must stay gone. If `mutation` ever comes back as
-	// a construct keyword, this regex needs updating rather than silently
-	// missing every one of them again.
+	// And the retired keyword must stay gone. THE DIRECTION REVERSED: memql#2041
+	// renamed `mutation` to `mutate`, and epic memql#5375 renamed it back,
+	// because one construct answering to two words meant a reader grepping for
+	// either found part of the tree. So the retired word is `mutate` now.
+	//
+	// The lesson at the top of this file is what kept working across both
+	// renames: nothing noticed when the language moved out from under the
+	// regexes, and this pin is what noticed the second time.
 	retired := regexp.MustCompile(`(?m)^[ \t]*mutate[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]+[A-Za-z_][A-Za-z0-9_]*[ \t]*\{`)
 	for _, p := range paths {
 		f, _ := tree.Open(p)
 		raw, _ := io.ReadAll(f)
 		f.Close()
 		if retired.Match(raw) {
-			t.Errorf("%s declares a construct with the retired `mutate` keyword (edition 2026 declares `mutation`, D13); constructHeaderRe would miss it", p)
+			t.Errorf("%s declares a construct with the retired `mutate` keyword (epic memql#5375 renamed it to `mutation`); constructHeaderRe would miss it", p)
 		}
 	}
 }

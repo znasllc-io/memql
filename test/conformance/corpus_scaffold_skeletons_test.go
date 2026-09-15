@@ -94,17 +94,15 @@ var scaffoldAnnotations = map[string]string{
 	"Prompt/templateFile":      `@templateFile("summariseTicket.tmpl")`,
 	"Provider/description":     `@description("OpenAI GPT-5.4 Nano under a bundle's own name.")`,
 	"Provider/model":           `@model("gpt-5.4-nano")`,
-	"Provider/type":            `@type("OpenAIEmbedding")`,
+	"Provider/vendor":          `@vendor("OpenAIEmbedding")`,
 	"Shape/description":        `@description("A ticket as a card: its title and status.")`,
 	"Policy/description":       `@description("The strongest local model first, then any signed-in app.")`,
 	"Rule/description":         `@description("Background calls resolve through the local-first chain.")`,
 	"Rule/when":                `@when(tag="background")`,
 	"Seed/description":         `@description("The billing category every cluster starts with.")`,
 	"Seed/templateFile":        `@templateFile("triageAssistant.tmpl")`,
-	"Seed/namespace":           `@namespace("support")`,
 	"Concept/composable":       `@composable(as="ticket", fields="title,status", list="ticketsToCompose")`,
 	"Concept/description":      `@description("A support ticket raised by a customer.")`,
-	"ConceptField/default":     `@default("normal")`,
 	"ConceptField/description": `@description("The ticket's one-line summary.")`,
 	"ConceptField/maximum":     `@maximum(100)`,
 	"ConceptField/pattern":     `@pattern("^[a-z][a-z0-9-]*$")`,
@@ -128,10 +126,7 @@ var scaffoldDocs = map[string]string{
 	"Query/actor":              "The caller's own open tickets, newest first.",
 	"Query/cache":              "The open tickets, newest first. A read is cached for five minutes.",
 	"Query/disabled":           "The open tickets, newest first. Switched off: not loaded while @disabled stays.",
-	"Query/enabled":            "The open tickets, newest first. @enabled restates the default.",
-	"Query/latestMode":         "The live tip of every open ticket, newest first: what it returns depends on when it is read.",
 	"Query/mcp":                "The open tickets, newest first, exposed as their own MCP tool.",
-	"Query/nocache":            "The open tickets, newest first, read live on every call.",
 	"Query/public":             "The open tickets, newest first. Deliberately callable with no caller check: the queue is public.",
 	"Query/requiresCapability": "The open tickets, newest first, for a caller holding read on principal.",
 	"Query/requiresRank":       "The open tickets, newest first, for developers and anyone ranked above them.",
@@ -168,7 +163,6 @@ var scaffoldDocs = map[string]string{
 	"Automation/loop":     "Move a new ticket to done. The update fires this automation again, and its filter stops it once the ticket is done.",
 	"Automation/mcp":      "When a node joins the cluster, open a ticket; also exposed as its own MCP tool.",
 	"Automation/mode":     "When a node joins the cluster, open a ticket; a fire while one runs waits its turn, and at most three wait.",
-	"Automation/schedule": "Every hour, open a ticket to review the queue.",
 	"Automation/template": "A work-spine template: opens a ticket with the title the run names.",
 	"Automation/trigger":  "When a node joins the cluster, open a ticket to welcome it.",
 
@@ -189,9 +183,7 @@ var scaffoldDocs = map[string]string{
 	"Tool/executionTime":        "Open a support ticket; it answers quickly.",
 	"Tool/handler":              "Open a support ticket for the caller.",
 	"Tool/mcp":                  "Open a support ticket, on the curated MCP connector surface.",
-	"Tool/rateLimit":            "Open a support ticket, at most ten times a minute.",
 	"Tool/requiresConfirmation": "Close a ticket; the caller confirms before it runs.",
-	"Tool/scopes":               "Open a support ticket; the caller needs the operator scope.",
 
 	"Builtin/alias":              "Today's date key in a timezone, for naming a daily ticket; also callable as ticketDayKey.",
 	"Builtin/args":               "Today's date key in a timezone, for naming a daily ticket; called with one object argument.",
@@ -214,7 +206,7 @@ var scaffoldDocs = map[string]string{
 	"Provider/extends":  "OpenAI GPT-5.4 Nano under a bundle's own name; the base supplies the vendor and the credential.",
 	"Provider/modality": "OpenAI text-embedding-3-small under a bundle's own name, for embeddings.",
 	"Provider/model":    "OpenAI GPT-5.4 Nano under a bundle's own name.",
-	"Provider/type":     "OpenAI text-embedding-3-small under a bundle's own name: the embedding client, not the chat one.",
+	"Provider/vendor":   "OpenAI text-embedding-3-small under a bundle's own name: the embedding client, not the chat one.",
 
 	"Shape/actor": "The caller as a card: who they are and their role.",
 	"Shape/row":   "A ticket as a card: its title and status.",
@@ -233,7 +225,6 @@ var scaffoldDocs = map[string]string{
 
 	"Seed/disabled":     "The maintenance banner, written and switched off: not seeded while @disabled stays.",
 	"Seed/enabled":      "The canned thank-you reply every cluster starts with. @enabled restates the default.",
-	"Seed/namespace":    "The getting-started article every cluster starts with.",
 	"Seed/scope":        "Every user's own queue of the tickets they raised, seeded once per user.",
 	"Seed/templateFile": "The triage assistant every cluster starts with; its system prompt is the template beside this file.",
 	"Seed/version":      "The urgent escalation rule every cluster starts with, at version 1.0.0.",
@@ -596,8 +587,8 @@ func scaffoldAutomation(p annotations.Placement, s, ann string) (string, string,
 		// so the trigger names it by one id whatever domain the case loads in
 		// (namespace.pin, #2614).
 		mutation := "advanceTicket" + s + "Cell"
-		fixture = "/// A support ticket: the row this cell's automation moves forward.\n@namespace(\"loopcell\")\nconcept ticket {\n  status  string\n}\n\n" +
-			"/// Move a ticket to a status.\nmutate ticket " + mutation + " {\n" + scaffoldArgs([2]string{"id", "string!"}, [2]string{"status", "string"}) +
+		fixture = "/// A support ticket: the row this cell's automation moves forward.\nconcept ticket {\n  status  string\n}\n\n" +
+			"/// Move a ticket to a status.\nmutation ticket " + mutation + " {\n" + scaffoldArgs([2]string{"id", "string!"}, [2]string{"status", "string"}) +
 			"  update {\n    id: args.id\n    status: args.status\n  }\n}\n"
 		trigger = `@trigger(event="node.created", concept="v1:loopcell:ticket")` + "\n" + `@filter(row => row.status != "done")` + "\n"
 		name = mutation

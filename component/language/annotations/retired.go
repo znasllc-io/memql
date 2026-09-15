@@ -14,6 +14,14 @@ import "sort"
 // a name retired on constructs but live on a field (@internal on a concept
 // field) is accepted there.
 
+// AttributeRewriteHint is the one sentence every epic memql#5375 retirement
+// hint ends with. A hint that explains the retirement without naming the
+// migrator leaves the author to go and find it, which is the step the
+// sentence exists to remove. Retirements that predate the epoch (@internal,
+// @role, @permission) deliberately omit it: deleting the annotation is their
+// whole migration, so the command has nothing to do for them.
+const AttributeRewriteHint = "run `memqlmigrate --rewrite=attributes`"
+
 // retiredKey names one retirement that applies to one receiver.
 type retiredKey struct {
 	receiver Receiver
@@ -30,10 +38,21 @@ var retiredEverywhere = map[string]string{
 	// The function annotations #989 took out of the allow-lists. Nothing has
 	// read any of them since; naming the history here is what turns a bare
 	// "unknown annotation" into a refusal that says what happened to it.
-	"timeout":    "removed from the allow-lists in memql#989; nothing reads it -- delete the annotation",
-	"retry":      "removed from the allow-lists in memql#989; nothing reads it -- delete the annotation",
-	"audit":      "removed from the allow-lists in memql#989; nothing reads it -- delete the annotation",
-	"idempotent": "removed from the mutation allow-list in memql#989; nothing reads it -- delete the annotation",
+	"timeout":    "removed from the allow-lists in memql#989; nothing reads it -- delete the annotation; " + AttributeRewriteHint,
+	"retry":      "removed from the allow-lists in memql#989; nothing reads it -- delete the annotation; " + AttributeRewriteHint,
+	"audit":      "removed from the allow-lists in memql#989; nothing reads it -- delete the annotation; " + AttributeRewriteHint,
+	"idempotent": "removed from the mutation allow-list in memql#989; nothing reads it -- delete the annotation; " + AttributeRewriteHint,
+	// epic memql#5375. Each was parsed, stored and read by nothing that
+	// changes behaviour, or was the losing spelling of a pair.
+	"unique":     "memql#5375: declared metadata with no uniqueness check behind it (memql#2960), so it read as a constraint while constraining nothing -- delete it; " + AttributeRewriteHint,
+	"immutable":  "memql#5375: declared metadata with no write guard behind it -- delete it; a field that must not change is enforced by the mutation that writes it; " + AttributeRewriteHint,
+	"deprecated": "memql#5375: it was rendered by help() and editor hover and read by nothing that changes behaviour -- delete it, or say so in the construct's @description; " + AttributeRewriteHint,
+	"latestMode": "memql#5375: the engine derives time-dependence from `asOf latest` in the body, so the annotation restated it and could contradict it -- delete it; " + AttributeRewriteHint,
+	"enabled":    "memql#5375: constructs are enabled by default, so @enabled was an explicit no-op that read like a switch -- delete it, and use @disabled to deactivate; " + AttributeRewriteHint,
+	"nocache":    "memql#5375: write @cache(0) -- one annotation for the cache TTL, with 0 meaning never; " + AttributeRewriteHint,
+	"rateLimit":  "memql#5375: Tool.RateLimit was cloned and copied into a Function field nothing reads, so the declared ceiling did not exist -- delete it; the live ceilings are the provider chokepoint in ai_guard.go and the run budget in component/work; " + AttributeRewriteHint,
+	"scopes":     "memql#5375: Tool.Scopes was advertised on the gRPC tool descriptor and checked nowhere, so it read as an authorization gate while gating nothing -- delete it; use @requiresCapability for a real one; " + AttributeRewriteHint,
+	"namespace":  "memql#5375: a concept's namespace is its domain directory, or that directory's one-line namespace.pin -- the annotation could only restate one of those or silently disagree with it; delete it, and pin a deliberate divergence with a namespace.pin file (#2614); " + AttributeRewriteHint,
 	"async":      "refused on automations since memql#2712: an automation already runs asynchronously off its event or schedule trigger, and nothing reads the annotation -- delete it",
 }
 
@@ -52,6 +71,7 @@ var retiredOn = map[retiredKey]string{
 	{Concept, "scope"}:         "remove the annotation; every concept lives in the default partition post-#56",
 	{Automation, "schedule"}:   "a scheduled automation is written @trigger(schedule=\"<cron>\"), the one spelling (D15, epic memql#5370); memqlmigrate --rewrite=bodies rewrites it",
 	{Concept, "cache"}:         "a concept carries no cache setting -- a read caches, so set the TTL on the query that reads the concept (@cache(300)); a write to the concept evicts every cached read of it",
+	{ConceptField, "default"}:  "memql#5375: it is never applied on insert -- it was published as the JSON-Schema `default` keyword, which no validator applies; write `args.<field> ?? <default>` in the mutation body. It stays live on a tool / prompt / builtin field, where the body IS the schema the model reads; " + AttributeRewriteHint,
 	{ArgsField, "default"}:     "it is never applied; write `args.<field> ?? <default>` in the body (a concept-field @default is not a substitute -- it is never applied on insert either)",
 	{ArgsField, "description"}: "it was never retained (no AST slot); document the field with a `///` doc comment on the line above it (memql#3336)",
 }
@@ -133,6 +153,12 @@ func retiredHint(r Receiver, name string) (string, bool) {
 	}
 	return "", false
 }
+
+// RetiredHint reports the migration hint for a retired annotation on r, and
+// whether it is retired there at all. It is the exported view of the tables
+// for callers outside this package -- the load gates read them through Check;
+// this is for a test or a tool that needs to name the hint it expects.
+func RetiredHint(r Receiver, name string) (string, bool) { return retiredHint(r, name) }
 
 // misplacedHints adds a pointed sentence to the misplaced refusal of a name
 // whose usual mistake needs more than "it is accepted on a shape" (memql#2779).

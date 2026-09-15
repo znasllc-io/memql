@@ -37,7 +37,7 @@ import (
 // given type-and-annotation text, and returns f's JSON-Schema subtree.
 func buildCompositeField(t *testing.T, decl string) (map[string]any, error) {
 	t.Helper()
-	src := "@version(\"1.0.0\")\n@namespace(\"aud\")\n@description(\"d\")\n" +
+	src := "@version(\"1.0.0\")\n@description(\"d\")\n" +
 		"concept probe {\n  label string @required @description(\"l\")\n  f " + decl + "\n}\n"
 	decls := ExtractConceptDecls(src)
 	if len(decls) == 0 {
@@ -172,13 +172,13 @@ func TestCompositeElement_TypeAloneStillBuilds(t *testing.T) {
 func TestCompositeElement_FieldMarkersAreUnaffected(t *testing.T) {
 	for _, decl := range []string{
 		`[][]string @required @description("x")`,
-		`[][]string @unique @description("x")`,
-		`[][]string @immutable @description("x")`,
+		`[][]string @description("x")`,
+		`[][]string @description("x")`,
 		`[][]string @secret @description("x")`,
 		`[][]string @pii @description("x")`,
 		`[][]string @internal @description("x")`,
 		`[][]string @serverSet @description("x")`,
-		`map[string][]int @required @immutable @description("x")`,
+		`map[string][]int @required @description("x")`,
 	} {
 		t.Run(decl, func(t *testing.T) {
 			if _, err := buildCompositeField(t, decl); err != nil {

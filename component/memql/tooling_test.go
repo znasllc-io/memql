@@ -110,7 +110,6 @@ func TestExtractLeadingCommentBlock(t *testing.T) {
 		"//",
 		"// more detail",
 		"",
-		"@enabled",
 		"func (Query) x() { concept==v1:test }",
 	}, "\n")
 	doc := extractLeadingCommentBlock(content)

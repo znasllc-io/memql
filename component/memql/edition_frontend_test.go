@@ -55,7 +55,7 @@ func editionLine(edition string) *fstest.MapFile {
 }
 
 func traitSource(keyword, name string) []byte {
-	return []byte(fmt.Sprintf("@enabled\n%s %s = row => row.active == true\n", keyword, name))
+	return []byte(fmt.Sprintf("%s %s = row => row.active == true\n", keyword, name))
 }
 
 func registerEditionDomain(t *testing.T, domain, edition string, files fstest.MapFS) {

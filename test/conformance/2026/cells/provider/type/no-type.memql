@@ -1,3 +1,0 @@
-/// A provider with no vendor: neither a type, a base, nor one it extends.
-@model("gpt-5.4-nano")
-provider bundleNanoNoType { }

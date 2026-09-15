@@ -51,7 +51,7 @@ const maxWalkPages = 200
 // enumeration repeats an id, ascending loses rows when it skips one.
 func versionedPageQuery(owner string, pageSize int, direction string) string {
 	return fmt.Sprintf(
-		`sort(paginate(concept==%s;createdBy==%q, %d), "createdAt", %q)`,
+		`sort(paginate(concept==%s&&createdBy==%q, %d), "createdAt", %q)`,
 		keysetConcept, owner, pageSize, direction)
 }
 

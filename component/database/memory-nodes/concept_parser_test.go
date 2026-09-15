@@ -10,11 +10,11 @@ func TestParseConceptMemQL_Agent(t *testing.T) {
 @description("AI agent templates.")
 concept Agent {
   name         string  @required @description("Display name.")
-  active       bool    @default("true")
+  active       bool
   status       enum("active", "archived")    @required
 
   capabilities {
-    avatar       bool  @default("false")
+    avatar       bool
     domains      array(string)
   }
 
@@ -83,8 +83,12 @@ concept Agent {
 	if activeProp["type"] != "boolean" {
 		t.Errorf("active.type = %v, want boolean", activeProp["type"])
 	}
-	if activeProp["default"] != true {
-		t.Errorf("active.default = %v, want true", activeProp["default"])
+	// `active` carried @default("true") until epic memql#5375 retired
+	// @default on a concept field: it was emitted as the JSON-Schema
+	// `default` keyword and applied by nothing, so the assertion below
+	// measured the emission of a value no insert path ever used.
+	if _, present := activeProp["default"]; present {
+		t.Errorf("active still emits a schema default, which memql#5375 retired: %v", activeProp["default"])
 	}
 
 	// Check enum property

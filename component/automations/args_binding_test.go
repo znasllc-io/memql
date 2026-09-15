@@ -16,7 +16,7 @@ import (
 // argsAutomationSource is a full-form automation declaring a typed args
 // contract. It compiles through the real loader pipeline (rewriter -> parser
 // -> compiler) so the schema round-trips onto Automation.Args.
-const argsAutomationSource = `@enabled
+const argsAutomationSource = `
 @trigger(event="deploy.requested")
 @description("deploy with a typed args contract")
 automation deployWithArgs {

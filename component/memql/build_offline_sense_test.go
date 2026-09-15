@@ -18,7 +18,6 @@ import (
 var gadgetOverlay = fstest.MapFS{
 	"gadgets/memql.toml": languageLineFile(),
 	"gadgets/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("gadgets")
 @description("A gadget for offline-sense overlay testing.")
 concept gadget {
   label  string  @required  @description("Gadget label.")
@@ -134,14 +133,12 @@ var repoShapedOverlay = fstest.MapFS{
 	"dsl/gadgets/memql.toml": languageLineFile(),
 	"dsl/widgets/memql.toml": languageLineFile(),
 	"dsl/gadgets/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("gadgets")
 @description("A gadget for offline-sense overlay testing.")
 concept gadget {
   label  string  @required  @description("Gadget label.")
 }
 `)},
 	"dsl/widgets/concepts.memql": {Data: []byte(`@version("1.0.0")
-@namespace("widgets")
 @description("A widget for offline-sense overlay testing.")
 concept widget {
   label  string  @required  @description("Widget label.")

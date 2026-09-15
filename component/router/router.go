@@ -659,7 +659,7 @@ func (r *Router) remainingNames(
 	laterEntries []string,
 	banned map[string]bool,
 ) []string {
-	out := make([]string, 0, len(rest)+len(laterEntries))
+	out := make([]string, 0, len(rest))
 	for _, c := range rest {
 		if !banned[c.Name] {
 			out = append(out, c.Name)

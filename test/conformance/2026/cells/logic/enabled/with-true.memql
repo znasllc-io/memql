@@ -1,8 +1,0 @@
-/// The headline a ticket shows: its title, or a placeholder. @enabled restates the default.
-@enabled(true)
-logic ticketHeadlineEnabled {
-  args {
-    title  string
-  }
-  return args.title ?? "(untitled)"
-}

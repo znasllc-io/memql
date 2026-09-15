@@ -132,7 +132,7 @@ func TestLogicArgIntCounterRoundTrip_TypesPreserved(t *testing.T) {
 // satisfy `r.count > 10`, so the expected single match proves the value
 // arrived as a number.
 func TestLogicArgIntCounterComparison_FullPath(t *testing.T) {
-	logicSrc := `@enabled
+	logicSrc := `
 @description("memql#2542 item 5 counter probe")
 logic logicCounterProbe {
   args {
@@ -249,7 +249,7 @@ func TestLambdaArithmeticUnderComparison_ParsesAndEvaluates(t *testing.T) {
 
 	// In-memory evaluation: a where() lambda with an arithmetic-LHS comparison
 	// keeps exactly the rows whose count exceeds 10 (count - 10 > 0).
-	logicSrc := `@enabled
+	logicSrc := `
 @description("memql#2542 item 5 residual: expression-led comparison in a lambda")
 logic logicArithCmpProbe {
   args {

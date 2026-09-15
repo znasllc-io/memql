@@ -39,6 +39,12 @@ shape construct constructFull {
   name
   targetNamespace
   source
+  // origin is what a promoted CONCEPT re-derives its canonical id from at
+  // re-hydration (epic memql#5375). A body-carrying shape projects ONLY the
+  // paths it lists, so leaving it out would make the row's origin invisible to
+  // the boot walk however faithfully it is stored -- the defect the
+  // grammarVersion and conceptRetired notes below both record.
+  origin
   // grammarVersion is stamped at create by the durable promote/stage write path
   // and read by explainStaleGrammarStamp, which turns a recompile failure into
   // the named memqlmigrate command instead of a raw parse error. It was MISSING

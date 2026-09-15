@@ -427,7 +427,10 @@ func TestEveryEntryParsesEdition2026(t *testing.T) {
 	_, err = NewParser(tokens).Parse()
 	wantRetired(t, err, "retired_cond_call")
 
-	if _, err := ParseExpression(`concept==v1:a:b; status==active`); err != nil {
+	// `&&`, not `;`: memql#5375 retired the connective in the INTERNAL query
+	// form as well as in authored DSL, which is why the change needs a client
+	// find-and-replace.
+	if _, err := ParseExpression(`concept==v1:a:b && status==active`); err != nil {
 		t.Fatalf("the internal query form must keep its grammar: %v", err)
 	}
 }

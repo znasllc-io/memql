@@ -20,7 +20,6 @@ import (
 )
 
 const authConceptSrc = `@version("1.0.0")
-@namespace("c1grpc")
 @description("C1 grpc test widget")
 concept c1Widget {
   ownerUserId  string  @required
@@ -62,7 +61,7 @@ func dispatchValidate(s *streamSession, sources string) error {
 	env := &memqlv1.MemqlClientMessage{
 		MessageId: "m1",
 		Payload: &memqlv1.MemqlClientMessage_AuthoringValidateBundle{
-			AuthoringValidateBundle: &memqlv1.AuthoringValidateBundleMsg{RequestId: "r1", Sources: sources},
+			AuthoringValidateBundle: &memqlv1.AuthoringValidateBundleMsg{RequestId: "r1", Sources: sources, Origin: "c1grpc/concepts.memql"},
 		},
 	}
 	return s.handleAuthoringValidateBundle(env, env.GetAuthoringValidateBundle())
@@ -72,7 +71,7 @@ func dispatchSessionDefine(s *streamSession, sources string) error {
 	env := &memqlv1.MemqlClientMessage{
 		MessageId: "m2",
 		Payload: &memqlv1.MemqlClientMessage_AuthoringSessionDefineBundle{
-			AuthoringSessionDefineBundle: &memqlv1.AuthoringSessionDefineBundleMsg{RequestId: "r2", Sources: sources},
+			AuthoringSessionDefineBundle: &memqlv1.AuthoringSessionDefineBundleMsg{RequestId: "r2", Sources: sources, Origin: "c1grpc/concepts.memql"},
 		},
 	}
 	return s.handleAuthoringSessionDefineBundle(env, env.GetAuthoringSessionDefineBundle())

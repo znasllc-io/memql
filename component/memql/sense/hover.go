@@ -255,9 +255,11 @@ func formatFunctionHover(fn *FunctionInfo) string {
 	if !fn.Enabled {
 		status = " [disabled]"
 	}
-	if fn.Deprecated != "" {
-		status = fmt.Sprintf(" [DEPRECATED: %s]", fn.Deprecated)
-	}
+	// The [DEPRECATED: ...] status went with @deprecated (memql#5375). It
+	// ASSIGNED over " [disabled]" rather than appending, so a construct
+	// that was both showed only the deprecation -- which nothing could set
+	// in the first place, the annotation being refused by every
+	// allow-list. Deleting it makes [disabled] reachable again.
 	sb.WriteString(fmt.Sprintf("**%s** (%s)%s\n\n%s", fn.Name, fn.Kind, status, fn.Description))
 	if fn.ArgsDoc != "" {
 		sb.WriteString(fmt.Sprintf("\n\n**Arguments:** %s", fn.ArgsDoc))

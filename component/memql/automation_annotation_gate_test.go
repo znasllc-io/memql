@@ -22,8 +22,12 @@ func TestAutomationAnnotationGate(t *testing.T) {
 	accept := []string{
 		"@trigger(event=\"x\", concept=\"v1:a:b\")\n",
 		"@filter(row => row.a == 1)\n",
-		"@enabled\n",
+		"",
 		"@description(\"d\")\n",
+		// @schedule(cron=...) was LIVE here until epic memql#5375 collapsed it
+		// into @trigger(schedule=...): one annotation declares how an
+		// automation is reached, which is what lets the @template gate refuse
+		// "triggered AND called" without checking two synonyms.
 		"@trigger(schedule=\"0 5 9 * * *\")\n", // LIVE -- must stay accepted
 	}
 	for _, p := range accept {
@@ -39,9 +43,10 @@ func TestAutomationAnnotationGate(t *testing.T) {
 	}
 
 	// Dead behavior-promises -- not on the Automation receiver. @version is
-	// live on a concept and a seed, so it is refused as misplaced; @deprecated
-	// is unknown.
-	for _, name := range []string{"deprecated", "version"} {
+	// live on a concept and a seed, so it is refused as misplaced. (@deprecated
+	// moved to the retired group below when epic memql#5375 retired it: it used
+	// to fall through to the generic unknown arm.)
+	for _, name := range []string{"version"} {
 		err := runReceiverGate(annotations.Automation, body("@"+name+"\n"))
 		if code := refusalCode(err); code != annotations.CodeUnknown && code != annotations.CodeMisplaced {
 			t.Errorf("dead @%s must be refused on an automation, got code %q: %v", name, code, err)
@@ -53,6 +58,7 @@ func TestAutomationAnnotationGate(t *testing.T) {
 	for name, ticket := range map[string]string{
 		"internal": "#2708", "role": "#2709", "permission": "#2713",
 		"retry": "memql#989", "audit": "memql#989", "timeout": "memql#989", "async": "memql#2712",
+		"deprecated": "memql#5375",
 	} {
 		err := runReceiverGate(annotations.Automation, body("@"+name+"\n"))
 		if refusalCode(err) != annotations.CodeRetired || !strings.Contains(err.Error(), ticket) {

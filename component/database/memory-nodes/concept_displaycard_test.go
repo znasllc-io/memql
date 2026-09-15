@@ -13,7 +13,7 @@ concept agent {
   name         string  @required
   role         enum("owner", "admin", "writer")
   ownerUserId  string
-  active       bool    @default("true")
+  active       bool
 }
 `)
 	c, err := ParseConceptMemQL(src, "v1/agents/agent")
@@ -130,7 +130,7 @@ func TestParseConcept_DisplayCard_RejectsObjectTypeField(t *testing.T) {
 @displayCard(primary="capabilities")
 concept agent {
   capabilities {
-    avatar  bool  @default("false")
+    avatar  bool
   }
 }
 `)

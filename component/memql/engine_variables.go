@@ -127,7 +127,7 @@ func (e *MemQLEngine) readSecret(ctx context.Context, conceptName, name string) 
 // query and returns the first row's payload field map. `kind` is used
 // only in error messages ("variable" / "secret" / "apikey").
 func (e *MemQLEngine) readNamedRowFields(ctx context.Context, conceptName, name, kind string) (map[string]*structpb.Value, error) {
-	query := fmt.Sprintf(`concept==%s;payload.name=="%s"`, conceptName, name)
+	query := fmt.Sprintf(`concept==%s&&payload.name=="%s"`, conceptName, name)
 	result, err := e.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query %s %q: %w", kind, name, err)

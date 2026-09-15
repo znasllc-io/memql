@@ -374,7 +374,6 @@ spec ghostShape danglingSpec = row => row.status == "open"`,
 // `state` where lowerinit's ticket has `status` -- so which of the two a spec
 // bound to `ticket` binds is observable from the fields it may read.
 const twinTicketConcepts = `@version("1.0.0")
-@namespace("lowertwin")
 @description("A second ticket, in another domain.")
 concept ticket {
   state  string!  @description("Workflow state.")

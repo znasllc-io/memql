@@ -84,7 +84,7 @@ func TestParseProviderConfigsSingleObject(t *testing.T) {
 func TestParseProviderMemQL_BaseProvider(t *testing.T) {
 	raw := []byte(`
 @base
-@type("OpenAI")
+@vendor("OpenAI")
 provider openai {
   auth {
     apiKey     env("TEST_KEY")
@@ -123,7 +123,7 @@ provider chat5Mini {
 func TestParseProviderMemQL_ExtendsWithTypeOverride(t *testing.T) {
 	raw := []byte(`
 @extends("openai")
-@type("OpenAIStream")
+@vendor("OpenAIStream")
 @model("gpt-5.2")
 @default
 provider stream5.2 {

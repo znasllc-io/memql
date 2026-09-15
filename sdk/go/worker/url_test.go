@@ -4,11 +4,11 @@ import "testing"
 
 func TestParseClusterURL(t *testing.T) {
 	tests := []struct {
-		name       string
-		raw        string
-		wantEnd    string
-		wantTLS    bool
-		wantErr    bool
+		name    string
+		raw     string
+		wantEnd string
+		wantTLS bool
+		wantErr bool
 	}{
 		{name: "bare host:port", raw: "memql.local:50051", wantEnd: "memql.local:50051", wantTLS: false},
 		{name: "bare host", raw: "memql.local", wantEnd: "memql.local", wantTLS: false},

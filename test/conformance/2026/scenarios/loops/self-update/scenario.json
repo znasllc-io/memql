@@ -2,9 +2,10 @@
   "description": "A row update loop: refused, converging, annotation-bound and opaque global-depth stops.",
   "domain": "loopself",
   "files": {
-    "concepts.memql": "/// A loop scenario row.\n@namespace(\"loopself\")\nconcept ticket {\n  key string\n  status string\n  n int\n}\n",
+    "concepts.memql": "/// A loop scenario row.\nconcept ticket {\n  key string\n  status string\n  n int\n}\n",
     "mutations.memql": "/// Write a scenario row.\nmutation ticket loopSelfCreate {\n  args {\n    id string!\n    status string\n    n int\n  }\n  insert {\n    id: args.id\n    key: args.id\n    status: args.status\n    n: args.n\n  }\n}\n/// Write a scenario row.\nmutation ticket loopSelfUpdate {\n  args {\n    id string!\n    status string\n    n int\n  }\n  update {\n    id: args.id\n    key: args.id\n    status: args.status\n    n: args.n\n  }\n}\n",
-    "memql.toml": "memql = \"1.0\"\nedition = \"2026\"\n"
+    "memql.toml": "memql = \"1.0\"\nedition = \"2026\"\n",
+    "namespace.pin": "loopself\n"
   },
   "scenarios": [
     {

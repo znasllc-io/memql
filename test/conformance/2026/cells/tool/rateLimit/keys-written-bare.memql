@@ -1,6 +1,0 @@
-/// Open a support ticket, with a rate limit whose keys carry no values.
-@handler(type="function", name="openTicketRateLimit")
-@rateLimit(maxCalls, periodSeconds)
-tool openSupportTicketUnlimited {
-  title  string!  @description("The ticket's one-line title.")
-}

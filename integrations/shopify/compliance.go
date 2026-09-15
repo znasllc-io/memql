@@ -120,7 +120,7 @@ func (c *Connector) enqueueComplianceJob(ctx context.Context, store Store, topic
 // mutation's lifecycle fields keeps a redelivery from resetting a status
 // the runner has already moved.
 func ComplianceJobID(storeID, topic, subject string) string {
-	return "shpcj" + string(idEngine.FromString(storeID+"\x00"+topic+"\x00"+subject))[:24]
+	return "shpcj" + string(idEngine.FromString(storeID + "\x00" + topic + "\x00" + subject))[:24]
 }
 
 // RunDueComplianceJobs runs every queued privacy job whose hold has

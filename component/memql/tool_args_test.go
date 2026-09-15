@@ -157,7 +157,6 @@ func TestApplyToolDefaults_AutoInjectedStripsEvenWhenNoDefaults(t *testing.T) {
 // the registry + tool-calling loop see them correctly.
 func TestToolParser_OperatorAnnotations(t *testing.T) {
 	src := `@allowedRoles("assistant", "specialist")
-@scopes("operator")
 @description("Operator UI: click a target element")
 tool uiClick {
   selector  string  @required @description("CSS selector or test-id")
@@ -177,8 +176,12 @@ tool uiClick {
 	if !reflect.DeepEqual(got.AllowedRoles, []string{"assistant", "specialist"}) {
 		t.Errorf("AllowedRoles = %v, want [assistant specialist]", got.AllowedRoles)
 	}
-	if !reflect.DeepEqual(got.Scopes, []string{"operator"}) {
-		t.Errorf("Scopes = %v, want [operator]", got.Scopes)
+	// @scopes is retired (epic memql#5375): it was advertised on the gRPC
+	// tool descriptor and checked nowhere, so it read as an authorization
+	// gate while gating nothing. @allowedRoles above is the gate that is
+	// actually enforced, which is why the two parted company here.
+	if len(got.Scopes) != 0 {
+		t.Errorf("Scopes = %v, want empty -- @scopes is retired", got.Scopes)
 	}
 }
 
@@ -212,7 +215,7 @@ func TestToolParser_AutoInjectedAnnotation(t *testing.T) {
 	// Parser-level smoke: a tool field with @autoInjected lands as
 	// a Tool.AutoInjectedFields entry. The integration with
 	// si_tool_loop is tested above; this just pins the parser path.
-	src := `@enabled
+	src := `
 @handler(type="function", name="myTool")
 @description("test tool")
 tool myTool {

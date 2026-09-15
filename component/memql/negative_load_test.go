@@ -49,10 +49,10 @@ func loadMemFS(name, body string) error {
 
 func TestNegativeLoad_MalformedBodyPerKind(t *testing.T) {
 	cases := []struct{ kind, file, body string }{
-		{"concept", "x/concepts.memql", "@version(\"1.0.0\")\n@namespace(\"v1:x:y\")\nconcept c {\n  name string @@@ !!! broken\n}\n"},
+		{"concept", "x/concepts.memql", "@version(\"1.0.0\")\nconcept c {\n  name string @@@ !!! broken\n}\n"},
 		{"shape", "x/shapes.memql", "@row\nshape s {\n  row.id\n  123 456 789\n}\n"},
-		{"spec", "x/specs.memql", "@enabled\nspec activeRowTrait s = row => row.status ==== \"x\" &&&& true\n"},
-		{"trait", "x/traits.memql", "@enabled\ntrait t = row => row.active ==== true\n"},
+		{"spec", "x/specs.memql", "spec activeRowTrait s = row => row.status ==== \"x\" &&&& true\n"},
+		{"trait", "x/traits.memql", "trait t = row => row.active ==== true\n"},
 		{"mutation", "x/mutations.memql", "use cognition.concepts.{ space }\nmutation space m {\n  ?? !! garbage\n}\n"},
 		{"query", "x/queries.memql", "use cognition.concepts.{ space }\nquery space q {\n  filter row => @@@ !!! broken\n  shape spaceFull\n}\n"},
 		{"logic", "x/logic.memql", "logic l {\n  args { event object @required }\n  x :=\n  return 1\n}\n"}, // a binding with no value
@@ -105,7 +105,11 @@ func TestNegativeLoad_UnbalancedBraces(t *testing.T) {
 // 2b. A typo'd top-level construct keyword surfaces a Load diagnostic carrying
 // the S3 did-you-mean hint.
 func TestNegativeLoad_TypoTopLevelKeyword(t *testing.T) {
-	err := loadMemFS("x/concepts.memql", "@enabled\nconept foo { }\n")
+	// The leading annotation is LOAD-BEARING: it puts the parser on the
+	// DECLARATION route, which is where the did-you-mean lives. Without one
+	// the source parses as a bare expression and reports a trailing token
+	// instead. It was @enabled until epic memql#5375 retired it.
+	err := loadMemFS("x/concepts.memql", "@description(\"d\")\nconept foo { }\n")
 	if err == nil {
 		t.Fatal("Load accepted a typo'd top-level keyword `conept`")
 	}
@@ -131,8 +135,8 @@ func TestNegativeLoad_ConstructNestedAtWrongDepth(t *testing.T) {
 // closure and asserts (a) only one construct registers and (b) the drop is
 // surfaced as a WARN the load-clean gate (skipLike) catches.
 func TestNegativeLoad_DuplicateNamesWarnSkip(t *testing.T) {
-	const dup = "@enabled\nspec activeRowTrait sA = row => row.active == true\n" +
-		"@enabled\nspec activeRowTrait sA = row => row.active == false\n"
+	const dup = "spec activeRowTrait sA = row => row.active == true\n" +
+		"spec activeRowTrait sA = row => row.active == false\n"
 	capture := newCaptureHandler()
 	logger := slog.New(capture)
 	files := []baseloader.RawFile{{Path: "x/specs.memql", Content: dup}}

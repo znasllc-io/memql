@@ -196,7 +196,7 @@ type engineInjectStore struct {
 // platform concept under the active partition context. A query error is
 // returned to the caller, which treats it as "present" (conservative).
 func (s *engineInjectStore) valuePresent(ctx context.Context, conceptName, name string) (bool, error) {
-	query := fmt.Sprintf(`concept==%s;payload.name=="%s"`, conceptName, name)
+	query := fmt.Sprintf(`concept==%s&&payload.name=="%s"`, conceptName, name)
 	result, err := s.engine.Execute(systemActorContext(ctx), query)
 	if err != nil {
 		return false, err

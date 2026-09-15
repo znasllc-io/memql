@@ -369,6 +369,50 @@ One spelling each: `@cache(N)` with `@cache(0)` for no cache; `@trigger(schedule
 the OS reads them, which the epic verifies first. Every retired form refuses with the
 migrator's name.
 
+**What the verification found (epic memql#5375, landed).** Section 10 asks for this
+list to be re-verified against the registry before the rewrite is written. It was,
+and FOUR of the retirements above do not survive the check -- each has a live
+reader, so each is KEPT with its reader named in its registry doc string:
+
+- **`@displayCard`** -- read by `clients/os/src/apps/concepts/displayCard.ts` and
+  rendered by `RowsPanel.tsx`. Load-bearing in the other direction too:
+  `test/dslconformance/displaycard_inventory_test.go` makes every concept declare
+  one or decline it. This is the answer the epic's verification task asked for.
+- **`@composable`** -- read by `clients/os/src/apps/materializer/useCompose.ts`
+  through `integration.compose.composableConcepts`. Retiring it empties the
+  composer's list.
+- **`@allowedRoles`** -- D17 says it "becomes `@requiresRank` and
+  `@requiresCapability`", but those gate the human actor's catalog RANK and their
+  GRANTS over a resource, while this gates which AGENT ROLE may call a tool. A
+  different axis, enforced on every path (`tool_types.go`, `grpc/server.go`,
+  `tool_execution.go`). Substituting rank for agent role would let every specialist
+  call the assistant-only tools, which `dsl/skills/seeds/foundational.memql` depends
+  on in as many words. Recorded as an open program decision rather than executed.
+- **`@default` on a field** -- retired on a CONCEPT field, where it was published as
+  the JSON-Schema `default` keyword that nothing applies. KEPT on a `tool` /
+  `prompt` / `builtin` field, where the body IS the schema handed to the model and
+  `default` is a value the model reads.
+
+`@namespace` survives the check in a third way. It IS read --
+`ast.AssembleConceptIdFromDeclInDir` applies it and it WINS over the directory --
+but every occurrence in the tree restated a `namespace.pin` or its own directory,
+so removing them moved no id. The retirement needed one change beyond the sweep:
+**the pin becomes the DERIVATION rather than a cross-check.** It was consulted only
+to validate an explicit annotation, and the absent case fell straight to the
+directory -- sound while the annotation existed, and load-bearing the moment it was
+not, since `dsl/shopify/generated` is nested (so the directory is not a legal
+namespace at all) and `dsl/deployment` pins `cluster`.
+
+`;`-as-AND needed one too: its last producer was the rewriter's own glue
+(`concept==X;filter`), machine-generated rather than authored, so retiring the
+author-facing spelling had to reach into the lowering or every query in the tree
+would refuse at load while every `.memql` file looked clean.
+
+The lesson generalises past this epic: "nothing reads it" is a claim about the
+whole repository, clients included, and four of the nine such claims here were
+wrong. Re-verify each, and record the reader beside the annotation rather than in
+a commit message.
+
 ### D18 -- The static graph, stratification, and the permitting annotation
 
 At boot the engine builds one directed graph over automations: an edge from A to B when

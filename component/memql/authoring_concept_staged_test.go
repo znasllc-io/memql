@@ -34,7 +34,7 @@ import (
 func promoteConceptForDataStaging(t *testing.T, e *MemQLEngine, opts ...PromoteDurableOption) *fakePromoteStore {
 	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", trainedWidgetSrc, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, ok := reg.Lookup("owner-1", "concept", "trainedWidget")

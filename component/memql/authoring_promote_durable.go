@@ -247,7 +247,7 @@ type promoteStore interface {
 	// Giving the staged path a store method of its own would have been a second
 	// copy of one mutation call, and the two would drift the first time either
 	// gained a field.
-	CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, status string) error
+	CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, origin, status string) error
 	// StageConstructConceptData stamps the concept-only `conceptDataStaged` flag
 	// on a v1:authoring:construct row and leaves `status` ACTIVE (epic
 	// memql#3974). A separate call rather than another CreatePromoteConstruct
@@ -322,7 +322,7 @@ func (e *MemQLEngine) promoteConstructDurableWithStore(ctx context.Context, stor
 		return fmt.Errorf("authoring: persist promote bundle: %w", err)
 	}
 	targetNamespace := promoteTargetNamespace(c)
-	if err := store.CreatePromoteConstruct(persistCtx, constructId, bundleId, c.Kind, c.Name, targetNamespace, c.Source, string(BundleActive)); err != nil {
+	if err := store.CreatePromoteConstruct(persistCtx, constructId, bundleId, c.Kind, c.Name, targetNamespace, c.Source, c.Origin, string(BundleActive)); err != nil {
 		return fmt.Errorf("authoring: persist promote construct: %w", err)
 	}
 
@@ -710,13 +710,14 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 	// what went wrong.
 	//
 	// Applied at each compile-failure site below via explainStaleGrammarStamp.
-	sc := SandboxConstruct{Name: row.Name, Kind: row.Kind, Source: row.Source}
+	sc := SandboxConstruct{Name: row.Name, Kind: row.Kind, Source: row.Source, Origin: row.Origin}
 	c := &AuthoredConstruct{
 		OwnerUserId: row.OwnerUserId,
 		Kind:        row.Kind,
 		Name:        row.Name,
 		BundleId:    row.BundleId,
 		Source:      row.Source,
+		Origin:      row.Origin,
 		Status:      AuthoredActive,
 	}
 	switch row.Kind {
@@ -914,7 +915,7 @@ func (s *enginePromoteStore) CreatePromoteBundle(ctx context.Context, bundleId, 
 	return nil
 }
 
-func (s *enginePromoteStore) CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, status string) error {
+func (s *enginePromoteStore) CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, origin, status string) error {
 	if _, err := s.engine.Execute(ctx, mutationCall("createAuthoringConstruct",
 		[2]string{"constructId", constructId},
 		[2]string{"bundleId", bundleId},
@@ -922,6 +923,10 @@ func (s *enginePromoteStore) CreatePromoteConstruct(ctx context.Context, constru
 		[2]string{"name", name},
 		[2]string{"targetNamespace", targetNamespace},
 		[2]string{"source", source},
+		// The tree-relative path the bundle was authored against (epic
+		// memql#5375): a promoted CONCEPT re-derives its canonical id at
+		// re-hydration and the namespace half comes from this path.
+		[2]string{"origin", origin},
 		// S6 (#2361): stamp the grammar epoch the source was authored
 		// under, so a future engine can tell a rotted row from a stale one.
 		[2]string{"grammarVersion", languageParser.GrammarVersion},

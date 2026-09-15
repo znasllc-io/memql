@@ -12,7 +12,6 @@
 // concept, not just an empty schema.
 
 @version("1.0.0")
-@namespace("referencepack")
 @description("A minimal greeting record contributed by the reference pack (examples/referencepack). Demonstrates that a pack's embedded .memql concept lands in the engine's concept registry alongside the core domains.")
 @displayCard(primary="message", secondary="ownerUserId", tertiary="createdAt")
 concept greeting {

@@ -54,7 +54,6 @@ func file(content string) *fstest.MapFile {
 
 // demoConcepts is a minimal concepts module used across the fixtures.
 const demoConcepts = `@version("1.0.0")
-@namespace("demo")
 @description("A demo item.")
 concept item {
   name    string  @required @description("Item name.")
@@ -100,7 +99,6 @@ func TestVerify_UseModuleMissing(t *testing.T) {
 		"demo/concepts.memql": file(demoConcepts),
 		"demo/queries.memql": file(`use demo.nonexistentfile.{ ghost }
 
-@enabled
 @description("References a module that does not exist.")
 query ghost queryGhosts {
   args {
@@ -118,7 +116,6 @@ func TestVerify_UseSymbolMissing(t *testing.T) {
 		"demo/concepts.memql": file(demoConcepts),
 		"demo/queries.memql": file(`use demo.concepts.{ item, deletedConcept }
 
-@enabled
 @description("Imports a concept that was deleted from concepts.memql. deletedConcept is referenced here so only the missing-symbol lane fires.")
 query item queryItems {
   args {
@@ -139,7 +136,6 @@ func TestVerify_ExternalNamespaceSkipped(t *testing.T) {
 		"demo/queries.memql": file(`use cognition.concepts.{ space }
 use demo.concepts.{ item }
 
-@enabled
 @description("space is engine-side; item is local. space is referenced in the description... no -- referenced here: space.")
 query item queryBySpace {
   args {
@@ -158,7 +154,6 @@ func TestVerify_VersionPrefixedUsePath(t *testing.T) {
 		"demo/concepts.memql": file(demoConcepts),
 		"demo/queries.memql": file(`use v1.demo.concepts.{ item }
 
-@enabled
 @description("Version-prefixed module path.")
 query item queryItems {
   args {
@@ -265,7 +260,6 @@ func TestVerify_ImportsOnlyTargetSkipped(t *testing.T) {
 		"demo/builtins.memql": file("// comment-only module: declarations not visible to the generic parser\n"),
 		"demo/queries.memql": file(`use demo.builtins.{ someBuiltin }
 
-@enabled
 @description("Imports from an imports-only file; someBuiltin used below.")
 query item queryItems {
   args {
@@ -292,7 +286,6 @@ func TestVerify_SignatureConceptMissing(t *testing.T) {
 		"demo/concepts.memql": file(demoConcepts),
 		"demo/queries.memql": file(`use demo.concepts.{ item }
 
-@enabled
 @description("A healthy import-first query.")
 query item queryItems {
   args {
@@ -301,7 +294,6 @@ query item queryItems {
   filter  row => row.name == args.name
 }
 
-@enabled
 @description("Binds a concept that exists nowhere in the tree.")
 query phantom queryPhantoms {
   args {
@@ -320,7 +312,7 @@ func TestVerify_ZeroImportFileNeverProvablyMissing(t *testing.T) {
 	// outside the linted root. A file with zero Form B imports therefore
 	// offers no evidence the author works in-root -- stay silent.
 	tree := loadTree(t, fstest.MapFS{
-		"myapp/mutations.memql": file(`@enabled
+		"myapp/mutations.memql": file(`
 @description("Binds an engine concept without any import; boots green when the bundle mounts alongside the engine tree.")
 mutation space productCreateSpace {
   args {
@@ -340,14 +332,12 @@ func TestVerify_BrokenSiblingSuppressesMissing(t *testing.T) {
 	// longer provable, and only the parse diagnostic should surface.
 	root := fstest.MapFS{
 		"demo/concepts.memql": file(`@version("1.0.0")
-@namespace("demo")
 @description("Broken on purpose.")
 concept thing {
   name string @required @@@ this does not parse
 }`),
 		"demo/mutations.memql": file(`use demo.mutationshelpers.{ nothing }
 
-@enabled
 @description("Valid file binding the concept declared in the broken sibling.")
 mutation thing createThing {
   args {
@@ -380,7 +370,6 @@ func TestVerify_SignatureConceptViaImportAndGlobal(t *testing.T) {
 		"demo/concepts.memql": file(demoConcepts),
 		"demo/queries.memql": file(`use demo.concepts.{ item }
 
-@enabled
 @description("Signature concept resolved through the file import.")
 query item queryItems {
   args {
@@ -388,7 +377,7 @@ query item queryItems {
   }
   filter  row => row.name == args.name
 }`),
-		"other/queries.memql": file(`@enabled
+		"other/queries.memql": file(`
 @description("Signature concept resolved through the global fallback.")
 query item queryOtherItems {
   args {
@@ -407,7 +396,6 @@ func TestVerify_SignatureConceptSkippedWithExternalImports(t *testing.T) {
 		"demo/concepts.memql": file(demoConcepts),
 		"demo/queries.memql": file(`use cognition.concepts.{ space }
 
-@enabled
 @description("space is external; the signature binds it. Referenced: space.")
 query space querySpaces {
   args {
@@ -422,7 +410,7 @@ query space querySpaces {
 func TestVerify_SignatureConceptResolvesToNonConcept(t *testing.T) {
 	tree := loadTree(t, fstest.MapFS{
 		"demo/concepts.memql": file(demoConcepts),
-		"demo/logic.memql": file(`@enabled
+		"demo/logic.memql": file(`
 @description("A logic construct sharing a name the query below binds.")
 logic widget {
   args {
@@ -432,7 +420,6 @@ logic widget {
 }`),
 		"demo/queries.memql": file(`use demo.logic.{ widget }
 
-@enabled
 @description("Signature binds an imported name that is a logic, not a concept. Referenced: widget.")
 query widget queryWidgets {
   args {
@@ -451,12 +438,11 @@ func TestVerify_NonConceptImportDoesNotShadowConcept(t *testing.T) {
 	// exists elsewhere in the tree. No finding.
 	tree := loadTree(t, fstest.MapFS{
 		"other/concepts.memql": file(`@version("1.0.0")
-@namespace("other")
 @description("The real concept.")
 concept widget {
   label string @required @description("Label.")
 }`),
-		"demo/logic.memql": file(`@enabled
+		"demo/logic.memql": file(`
 @description("Same-named logic.")
 logic widget {
   args {
@@ -466,7 +452,6 @@ logic widget {
 }`),
 		"demo/queries.memql": file(`use demo.logic.{ widget }
 
-@enabled
 @description("The signature concept resolves globally to other/concepts.memql despite the same-named logic import. Referenced: widget.")
 query widget queryWidgets {
   args {
@@ -483,7 +468,6 @@ func TestVerify_AmbiguousUnimportedConceptReported(t *testing.T) {
 	// boot-fatal (the registry match has no namespace hint), so the lane
 	// reports it. Importing the name resolves the ambiguity.
 	otherConcepts := `@version("1.0.0")
-@namespace("other")
 @description("Another item.")
 concept item {
   label string @required @description("Label.")
@@ -493,7 +477,6 @@ concept item {
 		"other/concepts.memql": file(otherConcepts),
 		"third/queries.memql": file(`use demo.concepts.{ item }
 
-@enabled
 @description("Imported: unambiguous. Referenced: item.")
 query item queryImported {
   args {
@@ -503,7 +486,6 @@ query item queryImported {
 }`),
 		"fourth/queries.memql": file(`use fourth.helpers.{ helperItemQueryDoc }
 
-@enabled
 @description("NOT imported: ambiguous across demo and other. helperItemQueryDoc referenced here.")
 query item queryUnimported {
   args {
@@ -548,11 +530,9 @@ func TestVerify_SpecBoundNameMissing(t *testing.T) {
 		// The binding is dangling on purpose. memqlmigrate:keep
 		"demo/specs.memql": file(`use demo.concepts.{ item }
 
-@enabled
 @description("A healthy concept-bound spec.")
 spec item specIsActive = row => row.status == "active"
 
-@enabled
 @description("Binds a shape/concept that exists nowhere.")
 spec ghostShape specIsGhost = row => row.status == "ghost"`),
 	})
@@ -569,7 +549,6 @@ func TestVerify_InsertFieldNotOnSchema(t *testing.T) {
 		"demo/concepts.memql": file(demoConcepts),
 		"demo/mutations.memql": file(`use demo.concepts.{ item }
 
-@enabled
 @description("Writes a field the concept does not declare.")
 mutation item createItem {
   args {
@@ -596,7 +575,6 @@ func TestVerify_InsertCleanFormsPass(t *testing.T) {
 		"demo/concepts.memql": file(demoConcepts),
 		"demo/mutations.memql": file(`use demo.concepts.{ item }
 
-@enabled
 @description("Every write form that must lint clean.")
 mutation item upsertItem {
   args {
@@ -626,7 +604,6 @@ func TestVerify_ObjectArgContributesField(t *testing.T) {
 		"demo/concepts.memql": file(demoConcepts),
 		"demo/mutations.memql": file(`use demo.concepts.{ item }
 
-@enabled
 @description("Object-typed bare arg that is NOT the payload splat.")
 mutation item configureItem {
   args {
@@ -648,7 +625,6 @@ func TestVerify_UpdateFieldNotOnSchema(t *testing.T) {
 		"demo/concepts.memql": file(demoConcepts),
 		"demo/mutations.memql": file(`use demo.concepts.{ item }
 
-@enabled
 @description("Partial update writing an undeclared field.")
 mutation item renameItem {
   args {
@@ -676,7 +652,7 @@ func TestVerify_StrandedImportAfterCallRename(t *testing.T) {
 	// are legitimately absent), but the rename strands the original import.
 	tree := loadTree(t, fstest.MapFS{
 		"demo/concepts.memql": file(demoConcepts),
-		"demo/logic.memql": file(`@enabled
+		"demo/logic.memql": file(`
 @description("Decides something about an item event.")
 logic decideThing {
   args {
@@ -686,7 +662,6 @@ logic decideThing {
 }`),
 		"demo/automations.memql": file(`use demo.logic.{ decideThing }
 
-@enabled
 @trigger(event="graph.node.created.v1:demo:item")
 @description("The step call was renamed to a nonexistent construct, stranding the file-top logic import.")
 automation onItemCreated {
@@ -712,7 +687,6 @@ concept other {
   other
 }
 
-@enabled
 @description("Only the first imported symbol is used below; the second is stranded on a continuation line.")
 query item queryItems {
   args {
@@ -757,7 +731,6 @@ func TestVerify_MissingSymbolNotDoubleReportedAsUnused(t *testing.T) {
 		"demo/concepts.memql": file(demoConcepts),
 		"demo/queries.memql": file(`use demo.concepts.{ item, deletedConcept }
 
-@enabled
 @description("deletedConcept neither exists nor is referenced.")
 query item queryItems {
   args {

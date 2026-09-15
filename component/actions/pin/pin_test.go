@@ -51,7 +51,7 @@ func TestPlanUpgrade_BumpOnlyWhereVerified(t *testing.T) {
 	bundles := []PinnedBundle{
 		{BundleID: "b1", Ref: Ref{ID: "act_x", Version: 3}, RecordedFingerprint: "fp1"}, // will verify
 		{BundleID: "b2", Ref: Ref{ID: "act_x", Version: 3}, RecordedFingerprint: "fp2"}, // will NOT verify
-		{BundleID: "b3", Ref: Ref{ID: "act_x", Floating: true}},                          // floats -> bump, no re-run
+		{BundleID: "b3", Ref: Ref{ID: "act_x", Floating: true}},                         // floats -> bump, no re-run
 	}
 	// v4 reproduces fp1 for b1 but produces a different fp for b2.
 	replay := func(b PinnedBundle) string {

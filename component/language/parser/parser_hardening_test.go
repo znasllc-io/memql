@@ -12,7 +12,7 @@ import (
 // #2351). These tests pin the three parser holes the 2026-07-03 audit found,
 // each of which previously turned a typo into SILENCE:
 //
-//  1. an unknown invocation-kind prefix (`mutate createNode(...)` -- the
+//  1. an unknown invocation-kind prefix (`mutation createNode(...)` -- the
 //     mutation *declaration* verb in *call* position) lowered the leading word
 //     to a bare SpecReferenceExpr and dropped the entire call;
 //  2. the Parser.Parse() expression fall-through had no expect-EOF, so trailing
@@ -171,7 +171,7 @@ func TestRequireEOF_TrailingSemicolonsTolerated(t *testing.T) {
 func TestParseDefinition_UnknownKeyword_IsTheConstructUnknownRefusal(t *testing.T) {
 	// A file that reaches parseDefinition (leading annotation) with a typo'd
 	// construct keyword.
-	src := "@enabled\nconept foo { }"
+	src := "conept foo { }"
 	_, err := ParseFile(src)
 	if err == nil {
 		t.Fatal("expected an error for the typo'd `conept` keyword, got nil")
@@ -205,7 +205,7 @@ func TestParseDefinition_UnknownKeyword_SuggestsNearest(t *testing.T) {
 	}{
 		{"@description(\"x\")\nquer participant qFoo { }", "did you mean query?"},
 		{"use cognition.concepts.{ space }\n\nshaep space s { row.id }", "did you mean shape?"},
-		{"@enabled\nmutaton space createSpace { }", "did you mean mutation?"},
+		{"mutaton space createSpace { }", "did you mean mutation?"},
 	}
 	for _, tc := range cases {
 		_, err := ParseFile(tc.src)
@@ -249,9 +249,9 @@ func TestLevenshtein(t *testing.T) {
 
 func TestDidYouMean_ThresholdBoundary(t *testing.T) {
 	pool := kindSuggestionCandidates()
-	// mutate -> mutation is distance 3 == threshold: suggested.
+	// mutation -> mutation is distance 3 == threshold: suggested.
 	if got := didYouMean("mutate", pool); !strings.Contains(got, "'mutation'") {
-		t.Errorf("mutate should suggest mutation; got %q", got)
+		t.Errorf("mutation should suggest mutation; got %q", got)
 	}
 	// nearestKeyword skips the exact match, so a keyword typed verbatim never
 	// suggests itself.

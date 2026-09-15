@@ -166,7 +166,7 @@ func (e *AutomationExecutor) Execute(ctx context.Context, step *automations.Step
 		runId = stepCtx.Execution.ID
 	}
 	// Build result query to retrieve the triggered automation's run record
-	resultQuery := fmt.Sprintf(`concept==v1:memql:automation:run;id==%s)`, jsonString(execResult.ID))
+	resultQuery := fmt.Sprintf(`concept==v1:memql:automation:run&&id==%s)`, jsonString(execResult.ID))
 	stepRecordQuery := RecordStepExecution(ctx, stepCtx.Engine, StepRecordData{
 		RunId:       runId,
 		StepId:      step.ID,

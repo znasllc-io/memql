@@ -198,7 +198,6 @@ func TestAsOfArg_DottedPath(t *testing.T) {
 func TestAsOfArg_EndToEndThroughAStructQuery(t *testing.T) {
 	const src = `use deployment.concepts.{ deployment }
 
-@enabled
 @description("memql#2992 end-to-end probe")
 query deployment probeDeployments {
   args {

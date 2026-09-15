@@ -73,7 +73,7 @@ See Decision D4.
 ### 2.4 The engine has no local-model support, and the platform depends on structured output
 
 `dsl/providers/providers.memql` declares exactly two base providers,
-`@type("Anthropic")` and `@type("OpenAI")`, both with hardcoded vendor
+`@vendor("Anthropic")` and `@vendor("OpenAI")`, both with hardcoded vendor
 endpoints. There is no base-URL override anywhere in the tree and zero Ollama
 references. Meanwhile the platform leans hard on structured output and tool
 calling: the `respondToUser` envelope, the conductor's single structured call,

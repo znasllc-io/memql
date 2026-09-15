@@ -63,7 +63,10 @@ func RewriteAcceptStamp(src []byte) ([]byte, error) {
 		case TokenBraceClose:
 			depth--
 		case TokenIdentifier:
-			if depth != 0 || tok.Literal != "mutation" {
+			// Both keywords: this rewrite may run over a tree that has
+			// not had --rewrite=attributes applied yet, where the
+			// construct is still spelled `mutate` (memql#5375).
+			if depth != 0 || (tok.Literal != "mutation" && tok.Literal != "mutate") {
 				continue
 			}
 			openIdx, closeIdx := constructBraceSpan(tokens, i)

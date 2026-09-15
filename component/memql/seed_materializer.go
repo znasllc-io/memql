@@ -446,7 +446,13 @@ func (m *SeedMaterializer) seedRowIsCurrent(ctx context.Context, def *SeedDefini
 	}
 	// The raw filter form the dedup lookup already uses; `concept==<rowId>`
 	// alone is a CONCEPT lookup and answers "not found in registry".
-	result, err := m.engine.Execute(systemActorContext(ctx), "concept=="+conceptId+"; row.id=="+dslStringLiteral(id))
+	//
+	// `&&`, not `;` (memql#5375). This string is PARSED. With the retired
+	// connective the lookup returns an error, seedRowIsCurrent answers false,
+	// and EVERY sweep appends a fresh version of an unchanged row -- the exact
+	// regression this function exists to prevent, and silent, because a failed
+	// freshness check is indistinguishable from a row that really did change.
+	result, err := m.engine.Execute(systemActorContext(ctx), "concept=="+conceptId+" && row.id=="+dslStringLiteral(id))
 	if err != nil || result == nil || result.Bundle == nil || len(result.Bundle.Nodes) != 1 {
 		return false
 	}
@@ -667,7 +673,11 @@ func (m *SeedMaterializer) lookupOrMintPerUserId(ctx context.Context, def *SeedD
 // canonical id via the concept registry.
 func buildPerUserDedupQuery(def *SeedDefinition, userId, conceptId string) string {
 	return fmt.Sprintf(
-		`concept==%s; payload.ownerUserId==%s; provenance.name==%s`,
+		// `&&`, not `;` (memql#5375). This string is PARSED -- the dedup
+		// lookup runs it -- so the retired connective would fail every
+		// per-user seed's dedup guard and spam the fallback WARN this
+		// function's own comment above describes (#1608).
+		`concept==%s && payload.ownerUserId==%s && provenance.name==%s`,
 		dslStringLiteral(conceptId), dslStringLiteral(userId), dslStringLiteral(def.Name),
 	)
 }

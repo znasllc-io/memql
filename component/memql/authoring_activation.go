@@ -77,6 +77,12 @@ type AuthoringConstructRow struct {
 	Name            string `json:"name"`
 	TargetNamespace string `json:"targetNamespace"`
 	Source          string `json:"source"`
+	// Origin is the tree-relative path the bundle was authored against. A
+	// promoted CONCEPT re-derives its canonical id at re-hydration, and the
+	// namespace half comes from this path's domain directory. Empty on rows
+	// written before the field existed (epic memql#5375), which re-hydration
+	// reports rather than guessing a namespace.
+	Origin string `json:"origin"`
 	// Status follows the parent bundle's lifecycle at a construct grain
 	// (draft / active / retired). The durable-demote path flips it to
 	// "retired"; the boot + cross-node re-hydration skip retired rows so a

@@ -346,6 +346,8 @@ func docsResolvePrefixed(written string, declared map[string]string) (name, orig
 	case strings.HasPrefix(written, "query"):
 		kind, rest = "query", written[len("query"):]
 	case strings.HasPrefix(written, "mutation"):
+		// The kind label and the declaration keyword are the same word
+		// since memql#5375; this arm used to map one to the other.
 		kind, rest = "mutation", written[len("mutation"):]
 	case strings.HasPrefix(written, "logic"):
 		kind, rest = "logic", written[len("logic"):]

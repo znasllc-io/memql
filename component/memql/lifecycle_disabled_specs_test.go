@@ -26,7 +26,6 @@ func TestLoadUnifiedSpecs_DisabledSpecSkipped(t *testing.T) {
 	overlay := fstest.MapFS{"specs.memql": {Data: []byte(`@disabled
 spec actorEnvelope retiredProbeSpec = actor => actor.role == "admin"
 
-@enabled
 spec actorEnvelope liveProbeSpec = actor => actor.role == "admin"
 `)}}
 	const domain = "lifecycledisabledspecs"
@@ -108,7 +107,6 @@ func TestLoadUnifiedSpecs_DisabledTraitSkipped(t *testing.T) {
 	overlay := fstest.MapFS{"traits.memql": {Data: []byte(`@disabled
 trait retiredProbeTrait = row => row.effect == "allow"
 
-@enabled
 trait liveProbeTrait = row => row.effect == "allow"
 `)}}
 	const domain = "lifecycledisabledtraits"
@@ -139,7 +137,6 @@ capability integration.probe.retiredVerb {
   }
 }
 
-@enabled
 capability integration.probe.liveVerb {
   args {
     subject string @required

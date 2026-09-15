@@ -37,9 +37,14 @@ func TestCompleteAnnotationArgs_DerivedFromRegistry(t *testing.T) {
 		t.Error("trigger args offer the retired partition key")
 	}
 
-	rl := labelSet(s.completeAnnotationArgs(CursorContext{AnnotationName: "rateLimit"}))
-	if !rl["maxCalls"] || !rl["periodSeconds"] {
-		t.Errorf("rateLimit args not derived from the registry: %v", rl)
+	// @rateLimit stood here until memql#5375 retired it (stored on the
+	// tool, cloned, advertised and enforced nowhere). @displayCard is its
+	// replacement in this test rather than a second relationship case: it
+	// is a CONCEPT-receiver annotation, so it also covers the derivation
+	// for the receiver whose vocabulary moved into the registry.
+	dc := labelSet(s.completeAnnotationArgs(CursorContext{AnnotationName: "displayCard"}))
+	if !dc["primary"] || !dc["status"] {
+		t.Errorf("displayCard args not derived from the registry: %v", dc)
 	}
 	rel := labelSet(s.completeAnnotationArgs(CursorContext{AnnotationName: "relationship"}))
 	if !rel["target"] || !rel["direction"] {

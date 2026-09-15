@@ -3,7 +3,6 @@ package memoryNodes
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"go/ast"
 	goparser "go/parser"
 	"go/token"
@@ -14,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/provenance"
 
 	"github.com/znasllc-io/memql/core/repowalk"
 )
@@ -85,14 +83,13 @@ func propertySchemas(t *testing.T, src string) map[string]map[string]any {
 }
 
 const declaredMetadataFixture = `@version("1.0.0")
-@namespace("ref")
 @description("d")
 concept probe {
   label      string  @required @description("l")
-  uniqueKey  string  @unique @description("u")
-  externalId string  @immutable @description("i")
+  uniqueKey  string @description("u")
+  externalId string @description("i")
   apiKey     string  @secret @description("s")
-  tier       string  @default("bronze") @description("t")
+  tier       string @description("t")
 }
 `
 
@@ -102,11 +99,13 @@ concept probe {
 // without a schema change.
 func TestDeclaredMetadataAnnotationsAreStillEmitted(t *testing.T) {
 	props := propertySchemas(t, declaredMetadataFixture)
+	// @secret is the ONE survivor of the original four. @unique, @immutable
+	// and @default were retired by epic memql#5375, and their keys stopped
+	// being emitted with them -- asserted in the other direction by
+	// TestRetiredFieldKeywordsAreNoLongerEmitted below, so the pair still
+	// covers both states rather than one key quietly leaving the suite.
 	for _, tc := range []struct{ field, key string }{
-		{"uniqueKey", "x-unique"},
-		{"externalId", "x-immutable"},
 		{"apiKey", "x-secret"},
-		{"tier", "default"},
 	} {
 		if _, ok := props[tc.field][tc.key]; !ok {
 			t.Errorf("%s no longer emits %q. If the annotation was retired rather than left as "+
@@ -208,9 +207,16 @@ const emitSite = "component/database/memory-nodes/concept_parser.go"
 // It stays pinned by TestSecretEnforcementIsRealAndScoped below, so this is a
 // stronger assertion replacing a weaker one rather than a key dropping out of
 // the suite.
+// After epic memql#5375 this loop is EMPTY, and that is the honest state
+// rather than a gap: x-unique and x-immutable were the two keys emitted and
+// read by nothing, and both were retired outright. The loop is kept because
+// the next marker to arrive in that state belongs here, and because deleting
+// the function would take its remedy text -- the three documents a change of
+// state has to update -- with it.
 func TestDeclaredMetadataKeysAreReadByNothing(t *testing.T) {
 	root := repoRoot(t)
-	for _, key := range []string{"x-unique", "x-immutable"} {
+	_ = root
+	for _, key := range []string{} {
 		t.Run(key, func(t *testing.T) {
 			const remedy = "\n\nIf enforcement landed, that is good news and three documents are now WRONG. " +
 				"Update all of them in the same change:\n" +
@@ -318,255 +324,102 @@ func TestTheScanSeesAStructTagReader(t *testing.T) {
 // object leaves (no write form stamps a single leaf). Nothing is applied at any
 // depth, in-repo or mounted -- that part is universal, and it is what this test
 // pins.
-func TestDefaultIsEmittedButNeverApplied(t *testing.T) {
-	props := propertySchemas(t, declaredMetadataFixture)
-	if got := props["tier"]["default"]; got != "bronze" {
-		t.Fatalf("control broken: @default must reach the schema, got %v", got)
-	}
-	// A payload omitting the defaulted field validates -- which is the whole
-	// point: the schema does not require it and does not fill it. If a future
-	// change makes the field required, or makes validation supply the value,
-	// this is where it surfaces.
-	if _, isRequired := requiredSet(t, declaredMetadataFixture)["tier"]; isRequired {
-		t.Error("a @default field became required, which is a behaviour change the reference " +
-			"does not describe")
-	}
-
-	// The write path itself, because the two assertions above are exactly the
-	// schema-inspection failure memql#2960 names ("asserting x-unique is present
-	// is what makes this look covered today"). Neither of them changes if
-	// Concept.Create starts filling defaults tomorrow, so on their own they are a
-	// false PASS on the one behaviour this test is named for.
-	assertDefaultNotAppliedOnInsert(t)
-
-	// The shape-guessing lowering, which memql#3248 demoted to a FALLBACK: it
-	// is reached only for object / array / map / any now, where the declared
-	// type does not narrow the literal to one reading. Its behaviour is
-	// unchanged and still pinned, because those types still go through it --
-	// but it is no longer what a string / bool / int / float / datetime field
-	// gets. That is parseTypedDefaultValue, covered by
-	// TestDefaultIsLoweredByItsDeclaredType below.
-	for _, tc := range []struct {
-		name string
-		want any
-	}{
-		{"true", true},
-		{"7", int64(7)},
-		{"1.5", 1.5},
-		{"2026-01-02T03:04:05Z", "2026-01-02T03:04:05Z"}, // left as a string
-	} {
-		if got := parseDefaultValue(tc.name); got != tc.want {
-			t.Errorf("parseDefaultValue(%q) = %#v, want %#v -- this is the untyped fallback for "+
-				"object/array/map/any and its behaviour is deliberately unchanged", tc.name, got, tc.want)
-		}
-	}
-}
-
-// TestDefaultIsLoweredByItsDeclaredType covers the half memql#3248 fixed: a
-// @default is lowered against the field's DECLARED type, so one that could
-// never be a value of that field is refused at load rather than emitted.
+// TestDefaultOnAConceptFieldIsRetired is what TestDefaultIsEmittedButNeverApplied
+// and its three siblings became.
 //
-// This does NOT change the settled rule that @default is never applied on
-// insert at any depth -- TestDefaultIsEmittedButNeverApplied above still pins
-// that, and the nested-leaf carve-out stands. It closes the narrower hole the
-// issue named: the emitted `default` keyword is read by the SDK, sense hover
-// and the preferences form generators, so a wrong one is wrong documentation
-// shipped to three consumers rather than an inert annotation.
-func TestDefaultIsLoweredByItsDeclaredType(t *testing.T) {
-	// ACCEPTED -- the literal matches the declaration.
-	for _, tc := range []struct {
-		typeName string
-		text     string
-		want     any
-	}{
-		{"bool", "true", true},
-		{"bool", "false", false},
-		{"int", "7", int64(7)},
-		{"int", "-1", int64(-1)},
-		{"float", "1.5", 1.5},
-		{"float", "2", float64(2)}, // an integer literal is a valid float
-		{"enum", "active", "active"},
-		{"datetime", "2026-01-02T03:04:05Z", "2026-01-02T03:04:05Z"},
-		{"datetime", "", ""}, // the unset sentinel an optional datetime accepts (memql#1629)
-
-		// The string rows are the second defect memql#3248 names. Shape
-		// guessing turned these into a bool and two numbers, so the emitted
-		// `default` carried the wrong JSON TYPE for the field it annotates. A
-		// string field's default is the string, always.
-		{"string", "0", "0"},
-		{"string", "true", "true"},
-		{"string", "1.5", "1.5"},
-	} {
-		got, err := parseTypedDefaultValue(tc.typeName, tc.text)
-		if err != nil {
-			t.Errorf("parseTypedDefaultValue(%q, %q) errored: %v -- this literal is valid for the type",
-				tc.typeName, tc.text, err)
-			continue
-		}
-		if got != tc.want {
-			t.Errorf("parseTypedDefaultValue(%q, %q) = %#v (%T), want %#v (%T)",
-				tc.typeName, tc.text, got, got, tc.want, tc.want)
-		}
-	}
-
-	// REFUSED -- the literal could not be a value of the declared type. The
-	// datetime rows are the headline: before memql#3248 every one of them was
-	// accepted, and `whenField datetime @default("true")` emitted the BOOL true
-	// as the default of a field whose schema says format: date-time.
-	for _, tc := range []struct {
-		typeName string
-		text     string
-	}{
-		{"datetime", "true"},
-		{"datetime", "7"},
-		{"datetime", "1.5"},
-		{"datetime", "not-a-timestamp"},
-		{"datetime", "2026-01-02"}, // a bare date is not RFC3339
-		{"bool", "yes"},
-		{"bool", "1"},
-		{"bool", "True"}, // the grammar's spelling is exactly `true`
-		{"int", "1.5"},
-		{"int", "abc"},
-		{"int", "true"},
-		{"float", "abc"},
-		{"float", "true"},
-	} {
-		got, err := parseTypedDefaultValue(tc.typeName, tc.text)
-		if err == nil {
-			t.Errorf("parseTypedDefaultValue(%q, %q) = %#v, want an error -- a %s field cannot "+
-				"have that default, and accepting it emits a `default` of the wrong type into "+
-				"the schema the SDK and sense hover read", tc.typeName, tc.text, got, tc.typeName)
-		}
-	}
-
-	// Types with no single correct reading keep the untyped fallback. Refusing
-	// what cannot be judged would reject valid declarations to catch nothing.
-	for _, typeName := range []string{"object", "array", "map", "any", "somethingUnrecognised"} {
-		if _, err := parseTypedDefaultValue(typeName, "whatever"); err != nil {
-			t.Errorf("parseTypedDefaultValue(%q, ...) errored: %v -- these types must fall back "+
-				"to the untyped lowering, not be refused", typeName, err)
-		}
-	}
+// The memql#2960 tripwire at the top of this file said: "When enforcement
+// lands for any of them, the second half fails and names the documents that
+// have to change in the same commit." Epic memql#5375 fired it in the OTHER
+// direction -- not enforcement, retirement. @default on a concept field was
+// emitted as the JSON-Schema `default` keyword that no validator applies and
+// no insert path consults, and the careful type-directed lowering behind it
+// (parseTypedDefaultValue, memql#3248) served only that keyword, so both are
+// deleted with the annotation.
+//
+// @unique and @immutable went the same way. @secret is the one survivor, and
+// it survives because it is genuinely ENFORCED -- see
+// TestSecretEnforcementIsRealAndScoped below, which is why the set was worth
+// separating rather than retiring whole.
+func TestDefaultOnAConceptFieldIsRetired(t *testing.T) {
+	src := `@version("1.0.0")
+@description("d")
+concept probe {
+  label  string  @required @description("l")
+  tier   string  @default("bronze") @description("t")
 }
-
-// buildConceptErr is buildFixtureConcept's counterpart for sources that are
-// SUPPOSED to fail: it returns the build error instead of failing the test, so
-// a refusal can be asserted rather than merely survived.
-func buildConceptErr(t *testing.T, src string) error {
-	t.Helper()
+`
 	file, err := parser.ParseFile(src)
 	if err != nil {
-		return err
+		t.Fatalf("fixture did not parse -- the retirement is a LOAD refusal, not a parse one: %v", err)
 	}
+	var built bool
 	for _, def := range file.Definitions {
 		decl, ok := def.(*parser.ConceptDecl)
 		if !ok {
 			continue
 		}
+		built = true
 		_, err := BuildConceptFromDecl(decl, "v1:ref:probe")
-		return err
-	}
-	t.Fatal("fixture declared no concept, so it measures nothing")
-	return nil
-}
-
-// TestBadDefaultRefusesToLoad drives the REAL load path, because
-// TestDefaultIsLoweredByItsDeclaredType calls the lowering helper directly and
-// would keep passing if the call site were reverted to the shape-guessing one.
-// A unit test on a helper nothing calls proves nothing (memql#3248).
-func TestBadDefaultRefusesToLoad(t *testing.T) {
-	const tmpl = `@version("1.0.0")
-@namespace("ref")
-@description("d")
-concept probe {
-  probeField %s @default(%q) @description("p")
-}
-`
-
-	// The exact case the issue named. Before memql#3248 this built without
-	// complaint and emitted `default: true` on a field declared
-	// format: date-time.
-	for _, tc := range []struct{ typeName, text string }{
-		{"datetime", "true"},
-		{"datetime", "7"},
-		{"datetime", "nonsense"},
-		{"bool", "yes"},
-		{"int", "1.5"},
-		{"float", "abc"},
-	} {
-		src := fmt.Sprintf(tmpl, tc.typeName, tc.text)
-		if err := buildConceptErr(t, src); err == nil {
-			t.Errorf("`probeField %s @default(%q)` built successfully, want a refusal -- the "+
-				"emitted schema would carry a default that field can never hold",
-				tc.typeName, tc.text)
+		if err == nil {
+			t.Fatal("@default on a concept field should be refused at build")
+		}
+		if !strings.Contains(err.Error(), "retired") {
+			t.Errorf("the refusal should say retired, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "memqlmigrate --rewrite=attributes") {
+			t.Errorf("the refusal should name the rewrite, got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "??") {
+			t.Errorf("the refusal should name `??` as the mechanism that fills a value, got: %v", err)
 		}
 	}
+	if !built {
+		t.Fatal("fixture declared no concept, so it measures nothing")
+	}
+}
 
-	// Positive control. If this stops building, the check above is refusing
-	// valid declarations and the failures are meaningless.
-	for _, tc := range []struct{ typeName, text string }{
-		{"datetime", "2026-01-02T03:04:05Z"},
-		{"datetime", ""},
-		{"bool", "true"},
-		{"int", "7"},
-		{"float", "1.5"},
-		{"string", "0"},
-	} {
-		src := fmt.Sprintf(tmpl, tc.typeName, tc.text)
-		if err := buildConceptErr(t, src); err != nil {
-			t.Errorf("`probeField %s @default(%q)` failed to build: %v -- this declaration is valid",
-				tc.typeName, tc.text, err)
+// TestUniqueAndImmutableAreRetired covers the other two of the four. Each was
+// declared metadata with nothing behind it -- no uniqueness check (memql#2960)
+// and no write guard -- and each was EMITTED as an x- keyword, which is the
+// part that made it worse than silence: the schema told the storage layer
+// about a constraint no storage layer honoured.
+func TestUniqueAndImmutableAreRetired(t *testing.T) {
+	for _, field := range []string{"email string @unique", "createdBy string @immutable"} {
+		src := "@version(\"1.0.0\")\n@description(\"d\")\nconcept probe {\n  label string @required\n  " + field + "\n}\n"
+		file, err := parser.ParseFile(src)
+		if err != nil {
+			t.Fatalf("%s: fixture did not parse: %v", field, err)
+		}
+		for _, def := range file.Definitions {
+			decl, ok := def.(*parser.ConceptDecl)
+			if !ok {
+				continue
+			}
+			if _, err := BuildConceptFromDecl(decl, "v1:ref:probe"); err == nil {
+				t.Errorf("%s should be refused at build", field)
+			} else if !strings.Contains(err.Error(), "memqlmigrate --rewrite=attributes") {
+				t.Errorf("%s: the refusal should name the rewrite, got: %v", field, err)
+			}
 		}
 	}
 }
 
-// TestBareDefaultLiteralIsRead covers the defect the type-directed lowering
-// EXPOSED rather than caused (memql#3248).
-//
-// A bare argument is not stored where a quoted one is. The parser has no value
-// to bind an unquoted token to, so it records the token as an Args KEY:
-//
-//	@default(false)     Value=<nil>    Args=map["false":true]
-//	@default("false")   Value="false"  Args=map[]
-//
-// attrString only type-asserts Value to string, so it reported "" for the bare
-// spelling. `isGroupGA bool @default(false)` in dsl/cognition/concepts.memql --
-// the live spelling -- therefore emitted `"default": ""` on a field declared
-// `"type": "boolean"`, and had done since the line was written.
-//
-// The two spellings mean the same thing and must not diverge. This pins that,
-// because nothing else did: the old lowering accepted "" for every type, so the
-// bug produced no error to notice.
-func TestBareDefaultLiteralIsRead(t *testing.T) {
-	const src = `@version("1.0.0")
-@namespace("ref")
-@description("d")
-concept probe {
-  bareBool    bool  @default(false)    @description("b")
-  quotedBool  bool  @default("false")  @description("q")
-  bareInt     int   @default(7)        @description("i")
-}
-`
-	props := propertySchemas(t, src)
-
-	for _, field := range []string{"bareBool", "quotedBool"} {
-		got, ok := props[field]["default"]
-		if !ok {
-			t.Errorf("%s emitted no default at all", field)
-			continue
-		}
-		if got != false {
-			t.Errorf("%s default = %#v (%T), want the BOOL false. An empty string here is the "+
-				"pre-memql#3248 bug: a bare argument read as \"\" and emitted on a boolean field",
-				field, got, got)
+// TestRetiredFieldKeywordsAreNoLongerEmitted is the schema half. The x- keys
+// and the `default` key have to STOP being written, or a reader of a generated
+// schema still sees a constraint the engine refuses to accept a declaration
+// for -- the inverse of the memql#2960 defect and just as misleading.
+func TestRetiredFieldKeywordsAreNoLongerEmitted(t *testing.T) {
+	props := propertySchemas(t, declaredMetadataFixture)
+	for _, key := range []string{"default", "x-unique", "x-immutable"} {
+		for field, schema := range props {
+			if _, present := schema[key]; present {
+				t.Errorf("field %q still emits %q, which memql#5375 retired", field, key)
+			}
 		}
 	}
-
-	// The bare spelling is not bool-specific -- any unquoted token takes the
-	// same path, so a bare int must lower as an int rather than as "".
-	if got := props["bareInt"]["default"]; got != float64(7) && got != int64(7) {
-		t.Errorf("bareInt default = %#v (%T), want 7 -- a bare numeric argument reads through the "+
-			"same Args-key path as a bare bool", got, got)
+	// The control: x-secret must still be emitted, because @secret is enforced.
+	if _, present := props["apiKey"]["x-secret"]; !present {
+		t.Error("control broken: x-secret must still be emitted -- @secret is the one survivor of the four, and it is enforced")
 	}
 }
 
@@ -582,49 +435,6 @@ func (s *capturingStore) InsertMemoryNode(_ context.Context, node *MemoryNode) e
 
 func (s *capturingStore) QueryMemoryNodes(_ context.Context, _ QueryParams) ([]MemoryNode, error) {
 	return nil, nil
-}
-
-// assertDefaultNotAppliedOnInsert drives the real write path and asserts the
-// defaulted field is absent from the stored payload.
-//
-// This is the assertion the reference sentence actually rests on -- "@default
-// ... is NEVER APPLIED on insert -- Concept.Create validates and marshals the
-// payload verbatim" -- and the one CLAUDE.md's "?? is the only mechanism that
-// fills a value" depends on. Patch Concept.Create to copy schema defaults into
-// the payload and this fails; without it, that patch is invisible.
-func assertDefaultNotAppliedOnInsert(t *testing.T) {
-	t.Helper()
-
-	c := buildFixtureConcept(t, declaredMetadataFixture)
-	store := &capturingStore{}
-	ctx := provenance.ContextWithProvenance(
-		context.Background(),
-		provenance.Provenance{Kind: provenance.KindDirect, Name: "declared-metadata-test"},
-	)
-
-	// `tier` carries @default("bronze") and is deliberately omitted.
-	if _, err := c.Create(ctx, store, CreateParams{
-		Actor:   "tester",
-		ID:      "probe1",
-		Payload: map[string]any{"label": "x"},
-	}); err != nil {
-		t.Fatalf("control broken: insert omitting the defaulted field must succeed, got %v", err)
-	}
-	if store.written == nil {
-		t.Fatal("control broken: nothing was written, so this measures nothing")
-	}
-
-	var stored map[string]any
-	if err := json.Unmarshal(store.written.Payload, &stored); err != nil {
-		t.Fatalf("unmarshal stored payload: %v", err)
-	}
-	if got, present := stored["tier"]; present {
-		t.Errorf("@default WAS applied on insert: stored payload carries tier=%v.\n\n"+
-			"That is enforcement, and it makes two documents WRONG. Update both in the same change:\n"+
-			"  - dsl/_reference/_concept.memql section 8 (move @default out of DECLARED METADATA, "+
-			"and fix the @description on its three worked examples -- those strings ship in the schema)\n"+
-			"  - CLAUDE.md, which states that `??` is the only mechanism that fills a value", got)
-	}
 }
 
 func requiredSet(t *testing.T, src string) map[string]struct{} {

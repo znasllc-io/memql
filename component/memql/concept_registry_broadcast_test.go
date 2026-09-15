@@ -276,7 +276,7 @@ func TestConceptRegistryDelta_PropagatesCrossNode(t *testing.T) {
 	// path (authoring_promote_propagate.go), driven by a store that serves the
 	// promoted concept's row for whatever bundle id the broadcast carries.
 	bStore := &crossNodeRehydrateStore{row: AuthoringConstructRow{
-		OwnerUserId: "owner-1", Kind: "concept", Name: "trainedWidget", Source: trainedWidgetSrc,
+		OwnerUserId: "owner-1", Kind: "concept", Name: "trainedWidget", Source: trainedWidgetSrc, Origin: "trainingns/concepts.memql",
 	}}
 	engB.startAuthoringPromoteSubscriberWithStore(ctx, bStore)
 
@@ -302,7 +302,7 @@ func TestConceptRegistryDelta_PropagatesCrossNode(t *testing.T) {
 func mustAuthorConcept(t *testing.T, owner, source, name string) *AuthoredConstruct {
 	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, owner, source, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, owner, source, "trainingns/concepts.memql"); err != nil {
 		t.Fatalf("author concept %q: %v", name, err)
 	}
 	c, ok := reg.Lookup(owner, "concept", name)

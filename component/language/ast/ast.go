@@ -849,12 +849,14 @@ const (
 	//	maintained and may be re-enabled at any time. @enabled is the
 	//	explicit-on form -- the default, kept for symmetry.
 	//
-	// "Deprecated / abandoned" is a separate axis carried by
-	// @deprecated (AttrDeprecated), not @disabled.
-	AttrEnabled    = "enabled"
-	AttrDisabled   = "disabled"
-	AttrDeprecated = "deprecated"
-	AttrVersion    = "version"
+	// @enabled was the explicit-on form and is RETIRED (memql#5375): it
+	// was a no-op that read like a switch. AttrEnabled survives as the
+	// parse-time NAME, because the declarative decl parsers match on it to
+	// refuse it with the ledger's hint. @deprecated is retired with it --
+	// the "deprecated / abandoned" axis it carried was read by nothing.
+	AttrEnabled  = "enabled"
+	AttrDisabled = "disabled"
+	AttrVersion  = "version"
 
 	// Documentation
 	AttrDescription = "description"
@@ -862,19 +864,13 @@ const (
 	// Access control
 	AttrPublic = "public"
 
-	// Performance
-	AttrTimeout = "timeout"
-	AttrCache   = "cache"
-	// AttrNocache is the clearer opt-out alias for @cache(ttl="0") on a
-	// query (epic 5, issue 5.6 / memql#1970). It forces "never cache",
-	// overriding the default-on caching for pure reads. Equivalent to
-	// @cache(ttl="0"); the parser maps it to CacheTTL="0".
+	// Performance. @cache(N) is the one spelling, with @cache(0) for never;
+	// @nocache and @cache(ttl=) are retired (memql#5375). AttrNocache and
+	// AttrRateLimit survive as parse-time NAMES so the decl parsers can
+	// refuse them by name with the ledger's hint.
+	AttrCache     = "cache"
 	AttrNocache   = "nocache"
 	AttrRateLimit = "rateLimit"
-
-	// Reliability
-	AttrRetry      = "retry"
-	AttrIdempotent = "idempotent"
 
 	// Mutation-specific attributes.
 	//
@@ -977,13 +973,10 @@ const (
 	// with no prior row is unaffected either way.
 	AttrNoUnset = "noUnset"
 
-	// Auditing
-	AttrAudit = "audit"
-
 	// Triggers (automation only). AttrSchedule is the retired `@schedule`
-	// spelling, named so the statement parser can refuse it
-	// (trigger_schedule_synonym_retired): @trigger(schedule=...) is the one
-	// spelling.
+	// spelling, kept as a parse-time name so the statement parser can
+	// refuse it (trigger_schedule_synonym_retired): @trigger(schedule=...)
+	// is the one spelling (memql#5375).
 	AttrTrigger  = "trigger"
 	AttrFilter   = "filter"
 	AttrSchedule = "schedule"
@@ -1088,15 +1081,16 @@ type FunctionDef struct {
 	Returns     []string // Return type names, e.g., ["any", "error"]
 
 	// Parsed directive values
-	Enabled    bool   // from //memql:enabled
-	Deprecated string // from //memql:deprecated (empty = not deprecated)
-	Version    string // from //memql:version
-	Timeout    string // from //memql:timeout
-	CacheTTL   string // from //memql:cache (queries only)
-	RateLimit  *RateLimitConfig
-	Retry      int  // from //memql:retry
-	Idempotent bool // from //memql:idempotent (mutations only)
-	Audit      bool // from //memql:audit
+	Enabled  bool   // false only via @disabled; constructs are on by default
+	CacheTTL string // from @cache(N) on a query; "0" means never cache
+
+	// @deprecated / @version / @timeout / @retry / @idempotent / @audit and
+	// RateLimit were fields here until memql#5375. Every allow-list refused
+	// the annotations that populated them, so the only reachable value was
+	// the zero value -- and help() plus editor hover rendered them anyway,
+	// which made a field that could not be set look like one that was.
+	// Retired in core/baseparser's ledger; do not re-add a field here
+	// before an allow-list can populate it.
 
 	// ArgsSchema is the function's input schema, populated from the
 	// file-top `args { ... }` block.
@@ -1822,7 +1816,7 @@ type RelationshipDecl struct {
 //	                                  canonical semantics; @disabled on a
 //	                                  @base propagates to its @extends children
 //	@base                             vendor-level metadata (no @model)
-//	@type("OpenAI") / @model("...")   provider type + concrete model
+//	@vendor("OpenAI") / @model("...")   provider type + concrete model
 //	@modality("text"|"tts"|"stt")     defaults to text
 //	@default                          first @default wins the runtime default
 //	@extends("parent") @description   inheritance + docs
@@ -1830,7 +1824,7 @@ type RelationshipDecl struct {
 // Authoring shape:
 //
 //	@description("OpenAI GPT-5 Mini")
-//	@type("OpenAI")
+//	@vendor("OpenAI")
 //	@model("gpt-5-mini")
 //	@modality("text")
 //	provider chat5Mini {
@@ -1846,7 +1840,7 @@ type RelationshipDecl struct {
 // Base providers (vendor-level metadata, no @model) carry @base:
 //
 //	@base
-//	@type("OpenAI")
+//	@vendor("OpenAI")
 //	provider openai {
 //	  auth { apiKey env("MEMQL_AI_OPENAI_PROJECT_ID") }
 //	}
@@ -1865,12 +1859,17 @@ type ProviderDecl struct {
 	DocComment  string
 	Name        string
 	Description string
-	Type        string // "OpenAI" / "Anthropic" / "OpenAIStream" / etc.
-	Model       string // empty for @base providers
-	Modality    string // "text" (default) / "tts" / "stt"
-	IsDefault   bool   // @default flag
-	IsBase      bool   // @base flag
-	Extends     string // @extends("parentName") -- parent provider name
+	// Vendor is @vendor("OpenAI") / @vendor("Anthropic"). Renamed off
+	// `Type` with the annotation in memql#5375: a concept's @type is its
+	// row kind, so the shared spelling made neither name mean one thing.
+	// The RUNTIME ProviderConfig.Type keeps its name -- it is not
+	// author-facing, and it already reaches the wire as "vendor".
+	Vendor    string
+	Model     string // empty for @base providers
+	Modality  string // "text" (default) / "tts" / "stt"
+	IsDefault bool   // @default flag
+	IsBase    bool   // @base flag
+	Extends   string // @extends("parentName") -- parent provider name
 	// Disabled is the @disabled lifecycle flag (engine-side). A
 	// disabled provider is skipped at load -- not registered, no auth
 	// resolution attempted -- and a disabled @base disables every

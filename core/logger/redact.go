@@ -26,9 +26,9 @@ var secretNamePattern = regexp.MustCompile(`(?i)(pass|token|secret|key|auth|cred
 //
 //   - authorization / bearer / cookie / set-cookie -- HTTP credential headers
 //   - prompt / completion / payload / body         -- AI / wire content that
-//                                                     can contain sensitive
-//                                                     text the caller shouldn't
-//                                                     leak via a debug log.
+//     can contain sensitive
+//     text the caller shouldn't
+//     leak via a debug log.
 var explicitDenylist = map[string]struct{}{
 	"authorization": {},
 	"bearer":        {},

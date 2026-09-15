@@ -211,7 +211,6 @@ func dotAccessLoadRegistry() memoryNodes.Registry {
 // it -- so the refusal names the fix: bind the call first and read the name.
 func TestLogicDotAccess_CallResultObjectRejectedAtLoad(t *testing.T) {
 	src := strings.Join([]string{
-		"@enabled",
 		"@description(\"call-result field access must fail at load\")",
 		"logic logicCallResultPluck {",
 		"  args {",
@@ -239,7 +238,6 @@ func TestLogicDotAccess_CallResultObjectRejectedAtLoad(t *testing.T) {
 // plucks the field the body names.
 func TestLogicDotAccessLoads(t *testing.T) {
 	src := strings.Join([]string{
-		"@enabled",
 		"@description(\"pluck the newest row's createdAt\")",
 		"logic logicNewestCreatedAt {",
 		"  args {",
@@ -264,7 +262,6 @@ func TestLogicDotAccessLoads(t *testing.T) {
 // is the query step binding q, then the return reading it.
 func TestLogicDotAccessLoads_MultiStep(t *testing.T) {
 	src := strings.Join([]string{
-		"@enabled",
 		"@description(\"pluck a field off a step result\")",
 		"logic logicPluckStepField {",
 		"  args {",

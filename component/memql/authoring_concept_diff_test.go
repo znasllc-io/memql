@@ -48,7 +48,6 @@ import (
 // v2 differs from it in exactly ONE way, so a classification can only be
 // explained by the change it is named for.
 const diffWidgetV1 = `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -66,7 +65,7 @@ const diffWidgetId = "v1:diffns:diffWidget"
 func compileConceptForDiff(t *testing.T, source string) *memoryNodes.Concept {
 	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", source, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", source, "diffns/concepts.memql"); err != nil {
 		t.Fatalf("author concept fixture: %v", err)
 	}
 	c, ok := reg.Lookup("owner-1", "concept", "diffWidget")
@@ -123,7 +122,6 @@ func TestClassifyConceptSchemaChange_AdditiveLands(t *testing.T) {
 		{
 			name: "a new optional field",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -137,7 +135,6 @@ concept diffWidget {
 		{
 			name: "a new @relationship",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -152,7 +149,6 @@ concept diffWidget {
 		{
 			name: "an edited @description",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget with a better sentence about it")
 concept diffWidget {
   ownerUserId  string  @required
@@ -165,7 +161,6 @@ concept diffWidget {
 		{
 			name: "a widened @enum",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -205,7 +200,6 @@ func TestClassifyConceptSchemaChange_BreakingIsRefused(t *testing.T) {
 		{
 			name: "a removed field",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -218,7 +212,6 @@ concept diffWidget {
 		{
 			name: "a changed field type",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -232,7 +225,6 @@ concept diffWidget {
 		{
 			name: "a new required field",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -247,7 +239,6 @@ concept diffWidget {
 		{
 			name: "an existing optional field made required",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -261,7 +252,6 @@ concept diffWidget {
 		{
 			name: "a narrowed @enum",
 			candidate: `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -313,13 +303,11 @@ func TestClassifyConceptSchemaChange_IdenticalSchemaIsNoChange(t *testing.T) {
 // type half is a lie, because the author changed no type. One change, not two.
 func TestClassifyConceptSchemaChange_OptionalDatetimeMadeRequiredIsOneChange(t *testing.T) {
 	prior := `@version("1.0.0")
-@namespace("diffns")
 concept diffWidget {
   ownerUserId  string  @required
   expiresAt    datetime
 }`
 	candidate := `@version("1.0.0")
-@namespace("diffns")
 concept diffWidget {
   ownerUserId  string  @required
   expiresAt    datetime  @required
@@ -340,7 +328,6 @@ concept diffWidget {
 // top-level one and removing it is as breaking.
 func TestClassifyConceptSchemaChange_NestedFieldRemovalIsBreaking(t *testing.T) {
 	prior := `@version("1.0.0")
-@namespace("diffns")
 concept diffWidget {
   ownerUserId  string  @required
   preferences {
@@ -349,7 +336,6 @@ concept diffWidget {
   }
 }`
 	candidate := `@version("1.0.0")
-@namespace("diffns")
 concept diffWidget {
   ownerUserId  string  @required
   preferences {
@@ -433,7 +419,7 @@ func TestRowClause_NeverInventsAZeroItDidNotMeasure(t *testing.T) {
 func promoteDiffConcept(t *testing.T, e *MemQLEngine, source string, gate *conceptPromoteGate) (*fakePromoteStore, error) {
 	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", source, ""); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", source, "diffns/concepts.memql"); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, ok := reg.Lookup("owner-1", "concept", "diffWidget")
@@ -445,7 +431,6 @@ func promoteDiffConcept(t *testing.T, e *MemQLEngine, source string, gate *conce
 }
 
 const diffWidgetV2FieldRemoved = `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -534,7 +519,6 @@ func TestPromoteConcept_AdditiveChangeLandsAndIsReported(t *testing.T) {
 	}
 
 	widened := `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -653,7 +637,6 @@ func TestPromoteConcept_AdditiveChangeIsNotAudited(t *testing.T) {
 		t.Fatalf("first promote: %v", err)
 	}
 	additive := `@version("1.0.0")
-@namespace("diffns")
 @description("A widget whose schema is about to change")
 concept diffWidget {
   ownerUserId  string  @required
@@ -688,6 +671,10 @@ func TestPromoteConcept_ReplayDoesNotReclassify(t *testing.T) {
 	row := AuthoringConstructRow{
 		Id: "c1", BundleId: "b1", OwnerUserId: "owner-1",
 		Kind: "concept", Name: "diffWidget", Source: diffWidgetV2FieldRemoved, Status: "active",
+		// The replay reads the namespace off the row's origin (epic
+		// memql#5375); a row with none cannot place its concept at all,
+		// which is the state persisted rows predating the field are in.
+		Origin: "diffns/concepts.memql",
 	}
 	if err := e.recompileAndPromoteRow(context.Background(), row); err != nil {
 		t.Fatalf("a REPLAY of a breaking change was refused: %v\n\n"+
@@ -749,9 +736,9 @@ func conceptDiffDBEngine(t *testing.T) (*MemQLEngine, context.Context) {
 // folded in. A bare "N of M constructs did not compile" says only THAT a fixture
 // was rejected, never why, which is the difference between a five-second fix and
 // a bisect.
-func promoteOrFail(t *testing.T, eng *MemQLEngine, ctx context.Context, source string) {
+func promoteOrFail(t *testing.T, eng *MemQLEngine, ctx context.Context, source, origin string) {
 	t.Helper()
-	res, err := eng.PromoteBundleDurable(ctx, "owner-1", source, "", false)
+	res, err := eng.PromoteBundleDurable(ctx, "owner-1", source, origin, false)
 	if err == nil {
 		return
 	}
@@ -785,13 +772,12 @@ func TestPromoteConcept_RefusalReportsRealRowsAndRealConstructs(t *testing.T) {
 	conceptId := "v1:" + ns + ":order"
 
 	v1 := fmt.Sprintf(`@version("1.0.0")
-@namespace("%s")
 @description("An order")
 concept order {
   ownerUserId  string  @required
   sku          string
   status       enum("draft", "placed", "shipped")
-}`, ns)
+}`)
 
 	querySrc := fmt.Sprintf(`use %s.concepts.{ order }
 
@@ -821,8 +807,8 @@ mutation order createOrder%s {
   }
 }`, ns, ns)
 
-	promoteOrFail(t, eng, ctx, v1)
-	promoteOrFail(t, eng, ctx, querySrc+"\n\n"+mutationSrc)
+	promoteOrFail(t, eng, ctx, v1, ns+"/concepts.memql")
+	promoteOrFail(t, eng, ctx, querySrc+"\n\n"+mutationSrc, ns+"/concepts.memql")
 
 	// Write a number the test chose, so "real count" means this number.
 	const rows = 7
@@ -844,14 +830,13 @@ mutation order createOrder%s {
 	}
 
 	v2 := fmt.Sprintf(`@version("1.0.0")
-@namespace("%s")
 @description("An order")
 concept order {
   ownerUserId  string  @required
   status       enum("draft", "placed", "shipped")
-}`, ns)
+}`)
 
-	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, "", false)
+	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, ns+"/concepts.memql", false)
 	if err == nil {
 		t.Fatal("re-promoting with `sku` removed was allowed against a table that holds rows carrying it")
 	}
@@ -877,7 +862,7 @@ concept order {
 	}
 
 	// The override is the same call with the flag, and it must actually land.
-	overridden, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, "", true)
+	overridden, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, ns+"/concepts.memql", true)
 	if err != nil {
 		t.Fatalf("allow_breaking must land the change: %v", err)
 	}
@@ -907,12 +892,11 @@ func TestConceptRowCount_NarrowedEnumCountsOnlyTheValuesThatStoppedBeingLegal(t 
 	conceptId := "v1:" + ns + ":ticket"
 
 	v1 := fmt.Sprintf(`@version("1.0.0")
-@namespace("%s")
 @description("A ticket")
 concept ticket {
   ownerUserId  string  @required
   status       enum("open", "closed", "archived")
-}`, ns)
+}`)
 	mutationSrc := fmt.Sprintf(`use %s.concepts.{ ticket }
 
 @actor
@@ -929,8 +913,8 @@ mutation ticket createTicket%s {
   }
 }`, ns, ns)
 
-	promoteOrFail(t, eng, ctx, v1)
-	promoteOrFail(t, eng, ctx, mutationSrc)
+	promoteOrFail(t, eng, ctx, v1, ns+"/concepts.memql")
+	promoteOrFail(t, eng, ctx, mutationSrc, ns+"/concepts.memql")
 
 	// Five rows, of which exactly two hold the value that is about to become
 	// illegal. A count of 5 would be "every row"; a count of 2 is the answer.
@@ -943,14 +927,13 @@ mutation ticket createTicket%s {
 	}
 
 	v2 := fmt.Sprintf(`@version("1.0.0")
-@namespace("%s")
 @description("A ticket")
 concept ticket {
   ownerUserId  string  @required
   status       enum("open", "closed")
-}`, ns)
+}`)
 
-	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, "", false)
+	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, ns+"/concepts.memql", false)
 	if err == nil {
 		t.Fatal("narrowing an enum away from a value rows still hold was allowed")
 	}
